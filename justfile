@@ -1345,6 +1345,14 @@ submodules-update:
 gen-env:
     uv run python scripts/generate_env_example.py
 
+# Generate published Docker Compose (docker-compose.syntropic137.yaml) from base + selfhost
+gen-compose:
+    uv run python scripts/generate_published_compose.py
+
+# Check published compose is up to date (CI mode — fails if stale)
+check-compose:
+    uv run python scripts/generate_published_compose.py --check
+
 # Generate llms.txt from API docs
 generate-llms-txt:
     uv run python scripts/generate_llms_txt.py

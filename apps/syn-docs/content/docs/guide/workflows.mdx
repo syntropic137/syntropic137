@@ -1,0 +1,157 @@
+---
+title: Workflow Packages
+description: Install, create, and distribute pre-built workflow packages.
+---
+
+Workflow packages are the standard format for distributing pre-built workflows in Syntropic137.
+After running `npx syntropic137 setup`, installing a workflow package is the fastest way to start
+doing useful work with the platform.
+
+## Quick Start
+
+```bash
+# Install the starter research workflow
+syn workflow install ./workflows/examples/research-package/
+
+# Run it
+syn workflow run research-package-v1 --task "Investigate event sourcing patterns for our platform"
+
+# See what's installed
+syn workflow installed
+```
+
+## Installing Packages
+
+Workflow packages can be installed from local directories or git repositories:
+
+```bash
+# Local directory
+syn workflow install ./my-package/
+
+# GitHub repository
+syn workflow install https://github.com/org/workflow-library
+syn workflow install org/workflow-library              # Shorthand
+syn workflow install org/workflow-library --ref v2.0   # Specific version
+
+# Validate before installing
+syn workflow install ./my-package/ --dry-run
+```
+
+The install command resolves all prompt files and shared phases, then creates each
+workflow via the API. Installed packages are tracked locally in
+`~/.syntropic137/workflows/installed.json`.
+
+## Package Formats
+
+### Single Workflow
+
+The simplest format — one workflow with its phase prompts:
+
+```
+my-workflow/
+├── workflow.yaml       # Workflow definition
+├── phases/
+│   ├── discover.md     # Phase 1 prompt
+│   └── synthesize.md   # Phase 2 prompt
+└── README.md
+```
+
+### Multi-Workflow Plugin
+
+Bundle multiple workflows with a shared phase library:
+
+```
+my-plugin/
+├── syntropic137.yaml   # Plugin manifest
+├── workflows/
+│   ├── research/
+│   │   ├── workflow.yaml
+│   │   └── phases/*.md
+│   └── pr-review/
+│       ├── workflow.yaml
+│       └── phases/*.md
+├── phase-library/      # Shared phases
+│   └── summarize.md
+└── README.md
+```
+
+Shared phases are referenced with the `shared://` prefix:
+
+```yaml
+phases:
+  - id: summarize
+    prompt_file: shared://summarize  # → phase-library/summarize.md
+```
+
+Content is resolved at install time — no runtime dependency on the library.
+
+## Creating Packages
+
+### Scaffold from Template
+
+```bash
+# Single workflow
+syn workflow init ./my-workflow --name "My Workflow" --type research --phases 3
+
+# Multi-workflow plugin
+syn workflow init ./my-plugin --name "My Plugin" --multi
+```
+
+### Phase Prompt Files
+
+Phase prompts use optional YAML frontmatter followed by the prompt body:
+
+```markdown
+---
+model: sonnet
+argument-hint: "[topic]"
+allowed-tools: Read,Glob,Grep,Bash
+max-tokens: 4096
+timeout-seconds: 300
+---
+
+You are a research assistant investigating: $ARGUMENTS
+
+Use {{discovery}} to reference output from a previous phase.
+```
+
+Frontmatter provides defaults; `workflow.yaml` values always take precedence.
+
+### Plugin Manifest
+
+Multi-workflow plugins use `syntropic137.yaml` for metadata:
+
+```yaml
+manifest_version: 1
+name: my-plugin
+version: "1.0.0"
+description: "Research and review workflows"
+author: my-org
+license: MIT
+```
+
+## Validating Packages
+
+```bash
+# Validate a package directory
+syn workflow validate ./my-package/
+
+# Validate a single YAML file
+syn workflow validate ./workflow.yaml
+```
+
+Validation checks the YAML schema, verifies that all referenced `.md` files exist,
+and resolves `shared://` references.
+
+## Example Packages
+
+The repository includes reference implementations:
+
+- **`workflows/examples/research-package/`** — Single workflow with discovery + synthesis phases
+- **`workflows/examples/starter-plugin/`** — Multi-workflow plugin with shared summarize phase
+
+## Learn More
+
+- [Full package format specification](/docs/workflow-packages.md) — manifest schema, shared phases, Claude Code alignment
+- [CLI Reference](/docs/cli) — all `syn workflow` commands
+- [API Reference](/docs/api/workflows) — workflow creation endpoints

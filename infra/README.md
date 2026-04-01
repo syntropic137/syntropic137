@@ -58,6 +58,19 @@ docker-compose.yaml              # Base: images, env, health checks, dependencie
     + docker-compose.cloudflare.yaml  # Optional: adds cloudflared, removes port exposure
 ```
 
+### Published Compose Generation
+
+`docker-compose.syntropic137.yaml` is the standalone compose file shipped to self-hosters. It is **auto-generated** from the base + selfhost overlays via `scripts/generate_published_compose.py`:
+
+```bash
+just gen-compose     # Regenerate from base + selfhost
+just check-compose   # CI: fail if published file is stale
+```
+
+The generation script merges the two source files and applies publish-specific transforms (build → GHCR image refs, secret paths, selfhost defaults). CI runs `check-compose` in the architectural fitness job to prevent drift.
+
+> **Rule:** Never edit `docker-compose.syntropic137.yaml` directly. Modify the source files (`docker-compose.yaml` or `docker-compose.selfhost.yaml`), then run `just gen-compose`.
+
 ---
 
 ## 2. Prerequisites
@@ -538,6 +551,8 @@ All recipes are run from the repository root using `just`.
 | `just infra-status` | Show container status |
 | `just infra-build` | Build all Docker images without starting |
 | `just infra-build-image <name>` | Build a specific image |
+| `just gen-compose` | Regenerate published compose from base + selfhost overlays |
+| `just check-compose` | Verify published compose is up to date (CI mode) |
 
 ### Secrets
 

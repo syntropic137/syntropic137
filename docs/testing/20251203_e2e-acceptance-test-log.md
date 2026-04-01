@@ -61,7 +61,7 @@ Node Version: v22.17.1
 - **Result:** ✅ PASS
 - **Evidence:**
 ```
-syn-postgres   Up 25 hours (healthy)    0.0.0.0:5432->5432/tcp
+syn-db   Up 25 hours (healthy)    0.0.0.0:5432->5432/tcp
 ```
 
 #### F1.2: Event Store Container Running ✅
@@ -75,7 +75,7 @@ syn-event-store   Up 6 hours (unhealthy)   0.0.0.0:50051->50051/tcp
 - **Note:** Docker reports "unhealthy" but logs show server is processing events correctly.
 
 #### F1.3: PostgreSQL Connection ✅
-- **Command:** `docker exec syn-postgres pg_isready`
+- **Command:** `docker exec syn-db pg_isready`
 - **Expected:** Can connect to syn database
 - **Result:** ✅ PASS
 - **Evidence:**
@@ -84,7 +84,7 @@ localhost:5432 - accepting connections
 ```
 
 #### F1.4: Database Query ✅
-- **Command:** `docker exec syn-postgres psql -U syn -d syn -c "SELECT COUNT(*) FROM events;"`
+- **Command:** `docker exec syn-db psql -U syn -d syn -c "SELECT COUNT(*) FROM events;"`
 - **Expected:** Returns event count
 - **Result:** ✅ PASS
 - **Evidence:**

@@ -1,0 +1,25 @@
+id: starter-pr-review-v1
+name: Starter PR Review
+description: "Automated PR review with shared summary"
+type: review
+classification: simple
+
+inputs:
+  - name: task
+    description: "PR number or URL to review"
+    required: true
+
+phases:
+  - id: review
+    name: Code Review
+    order: 1
+    execution_type: sequential
+    prompt_file: phases/review.md
+    output_artifacts: [review_comments]
+
+  - id: summarize
+    name: Summarize
+    order: 2
+    execution_type: sequential
+    prompt_file: shared://summarize
+    output_artifacts: [summary]

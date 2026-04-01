@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Feature Requests
+    url: https://syntropic137.canny.io/feature-requests
+    about: Request a new feature on our feedback board
+  - name: Questions & Discussions
+    url: https://github.com/syntropic137/syntropic137/discussions
+    about: Ask questions and discuss ideas with the community
