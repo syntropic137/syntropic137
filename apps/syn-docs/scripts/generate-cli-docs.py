@@ -23,12 +23,12 @@ The script can also be wired into the docs build via package.json:
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import types
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def _create_stub_module(name: str) -> types.ModuleType:
     if "pydantic" in name:
 
         class StubBaseModel:
-            model_config: dict[str, object] = {}
+            model_config: ClassVar[dict[str, object]] = {}
 
             def __init_subclass__(cls, **kwargs: object) -> None:
                 pass
@@ -88,8 +88,8 @@ def _create_stub_module(name: str) -> types.ModuleType:
                     setattr(self, k, v)
 
         mod.BaseModel = StubBaseModel  # type: ignore[attr-defined]
-        mod.ConfigDict = lambda **kw: {}  # type: ignore[attr-defined]
-        mod.Field = lambda *a, **kw: None  # type: ignore[attr-defined]
+        mod.ConfigDict = lambda **_kw: {}  # type: ignore[attr-defined]
+        mod.Field = lambda *_a, **_kw: None  # type: ignore[attr-defined]
 
     return mod
 
@@ -100,7 +100,7 @@ class _StubFinder:
     def __init__(self, stub_prefixes: list[str]) -> None:
         self._prefixes = sorted(stub_prefixes, key=len, reverse=True)
 
-    def find_module(self, fullname: str, path: object = None) -> _StubFinder | None:
+    def find_module(self, fullname: str, _path: object = None) -> _StubFinder | None:
         for prefix in self._prefixes:
             if fullname == prefix or fullname.startswith(prefix + "."):
                 return self
