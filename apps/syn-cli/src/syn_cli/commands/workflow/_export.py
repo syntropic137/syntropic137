@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
 import typer
@@ -54,9 +54,19 @@ def export_workflow(
         print_error(f"Output directory is not empty: {out_dir}")
         raise typer.Exit(1)
 
-    # Write files to disk
+    # Write files to disk — validate each path stays within out_dir
     for rel_path, content in sorted(files.items()):
-        file_path = out_dir / rel_path
+        # Reject absolute paths and directory traversal segments
+        posix_path = PurePosixPath(rel_path)
+        if posix_path.is_absolute() or ".." in posix_path.parts:
+            print_error(f"Unsafe file path in export manifest: {rel_path}")
+            raise typer.Exit(1)
+
+        file_path = (out_dir / rel_path).resolve()
+        if not file_path.is_relative_to(out_dir):
+            print_error(f"Path escapes output directory: {rel_path}")
+            raise typer.Exit(1)
+
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
 
@@ -85,10 +95,8 @@ def _print_export_summary(
     console.print(tree)
 
     print_success(f"Exported to {out_dir}")
-    if fmt == "package":
-        console.print(f"\nTo install: [cyan]syn workflow install {out_dir}[/cyan]")
-    else:
-        console.print(f"\nTo install: [cyan]syn workflow install {out_dir}[/cyan]")
+    console.print(f"\nTo install: [cyan]syn workflow install {out_dir}[/cyan]")
+    if fmt == "plugin":
         console.print(f"Plugin command: [cyan]/syn-{name.lower().replace(' ', '-')}[/cyan]")
 
 

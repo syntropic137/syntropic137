@@ -209,6 +209,29 @@ class TestExportWorkflow:
         assert "Export Complete" in result.stdout
         assert "Deep Research" in result.stdout
 
+    def test_export_rejects_path_traversal(self, tmp_path: Path) -> None:
+        out_dir = tmp_path / "traversal"
+        malicious_response: dict = {
+            "format": "package",
+            "workflow_id": "evil",
+            "workflow_name": "Evil",
+            "files": {
+                "../../../etc/evil.txt": "pwned",
+                "workflow.yaml": "id: evil\n",
+            },
+        }
+        resp = _mock_response(200, malicious_response)
+        client = _mock_client(resp)
+
+        with patch(_HELPERS_CLIENT, return_value=client):
+            result = runner.invoke(
+                app,
+                ["workflow", "export", "evil", "--output", str(out_dir)],
+            )
+
+        assert result.exit_code == 1
+        assert "Unsafe file path" in result.stdout
+
     def test_export_api_404(self, tmp_path: Path) -> None:
         out_dir = tmp_path / "notfound"
         resp = _mock_response(404, {"detail": "Workflow not-found not found"})

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
@@ -237,12 +238,12 @@ async def export_workflow(
 
     detail = result.value
     files: dict[str, str] = {}
-    slug = detail.name.lower().replace(" ", "-")
+    slug = _sanitize_slug(detail.name)
 
     if fmt == "plugin":
         _build_plugin_files(detail, slug, files)
     else:
-        _build_package_files(detail, slug, files)
+        _build_package_files(detail, files)
 
     return Ok(
         ExportManifestResponse(
@@ -252,6 +253,41 @@ async def export_workflow(
             files=files,
         )
     )
+
+
+# -- Export helpers -----------------------------------------------------------
+
+_SAFE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+# Characters that require quoting in YAML scalar values.
+_YAML_SPECIAL_RE = re.compile(r"[:{}\[\],&*?|>!%#@`\"\'\n]")
+
+
+def _sanitize_slug(name: str) -> str:
+    """Convert a workflow name to a safe slug for file paths."""
+    slug = name.lower().replace(" ", "-")
+    slug = re.sub(r"[^a-z0-9._-]", "", slug)
+    slug = slug.strip(".-")
+    if not slug or not _SAFE_SLUG_RE.match(slug):
+        slug = "workflow"
+    return slug
+
+
+def _validate_phase_id(phase_id: str) -> str:
+    """Validate a phase ID is safe for use in file paths."""
+    if not _SAFE_ID_RE.match(phase_id):
+        msg = f"Phase ID contains unsafe characters: {phase_id!r}"
+        raise ValueError(msg)
+    return phase_id
+
+
+def _yaml_quote(value: str) -> str:
+    """Quote a YAML string value if it contains special characters."""
+    if _YAML_SPECIAL_RE.search(value):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return value
 
 
 # -- Export file builders -----------------------------------------------------
@@ -287,27 +323,28 @@ def _yaml_input_lines(detail: WorkflowDetail) -> list[str]:
         return []
     lines: list[str] = ["", "inputs:"]
     for decl in detail.input_declarations:
-        lines.append(f"  - name: {decl.name}")
+        lines.append(f"  - name: {_yaml_quote(decl.name)}")
         if decl.description:
-            lines.append(f'    description: "{decl.description}"')
+            lines.append(f"    description: {_yaml_quote(decl.description)}")
         lines.append(f"    required: {str(decl.required).lower()}")
-        if decl.default:
-            lines.append(f'    default: "{decl.default}"')
+        if decl.default is not None:
+            lines.append(f"    default: {_yaml_quote(decl.default)}")
     return lines
 
 
 def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     """Build the phase entry lines for a single phase in workflow.yaml."""
+    pid = _validate_phase_id(phase.phase_id)
     lines = [
-        f"  - id: {phase.phase_id}",
-        f"    name: {phase.name}",
+        f"  - id: {pid}",
+        f"    name: {_yaml_quote(phase.name)}",
         f"    order: {phase.order}",
         "    execution_type: sequential",
     ]
     if phase.description:
-        lines.append(f'    description: "{phase.description}"')
-    lines.append(f"    prompt_file: phases/{phase.phase_id}.md")
-    lines.append(f"    output_artifacts: [{phase.phase_id}_output]")
+        lines.append(f"    description: {_yaml_quote(phase.description)}")
+    lines.append(f"    prompt_file: phases/{pid}.md")
+    lines.append(f"    output_artifacts: [{pid}_output]")
     return lines
 
 
@@ -320,8 +357,8 @@ def _build_workflow_yaml(detail: WorkflowDetail) -> str:
     """
     lines: list[str] = [
         f"id: {detail.id}",
-        f"name: {detail.name}",
-        f'description: "{detail.description or ""}"',
+        f"name: {_yaml_quote(detail.name)}",
+        f"description: {_yaml_quote(detail.description or '')}",
         f"type: {detail.workflow_type}",
         f"classification: {detail.classification}",
         *_yaml_input_lines(detail),
@@ -333,7 +370,7 @@ def _build_workflow_yaml(detail: WorkflowDetail) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _build_readme(detail: WorkflowDetail, slug: str) -> str:
+def _build_readme(detail: WorkflowDetail) -> str:
     """Build README.md for an exported package."""
     phase_list = "\n".join(
         f"- **Phase {p.order}:** {p.name}" for p in sorted(detail.phases, key=lambda p: p.order)
@@ -343,7 +380,7 @@ def _build_readme(detail: WorkflowDetail, slug: str) -> str:
         f"{detail.description or ''}\n\n"
         f"## Usage\n\n"
         f"```bash\n"
-        f"syn workflow install ./{slug}/\n"
+        f"syn workflow install .\n"
         f'syn workflow run {detail.id} --task "Your task here"\n'
         f"```\n\n"
         f"## Phases\n\n"
@@ -357,7 +394,7 @@ def _build_manifest_yaml(detail: WorkflowDetail, slug: str) -> str:
         f"manifest_version: 1\n"
         f"name: {slug}\n"
         f'version: "0.1.0"\n'
-        f'description: "{detail.description or detail.name}"\n'
+        f"description: {_yaml_quote(detail.description or detail.name)}\n"
     )
 
 
@@ -379,15 +416,15 @@ def _build_cc_command(detail: WorkflowDetail, slug: str) -> str:
 
 def _build_package_files(
     detail: WorkflowDetail,
-    slug: str,
     files: dict[str, str],
 ) -> None:
     """Populate ``files`` dict with package format structure."""
     files["workflow.yaml"] = _build_workflow_yaml(detail)
-    files["README.md"] = _build_readme(detail, slug)
+    files["README.md"] = _build_readme(detail)
 
     for phase in detail.phases:
-        files[f"phases/{phase.phase_id}.md"] = _build_phase_md(phase)
+        pid = _validate_phase_id(phase.phase_id)
+        files[f"phases/{pid}.md"] = _build_phase_md(phase)
 
 
 def _build_plugin_files(
@@ -397,14 +434,15 @@ def _build_plugin_files(
 ) -> None:
     """Populate ``files`` dict with plugin format structure."""
     files["syntropic137.yaml"] = _build_manifest_yaml(detail, slug)
-    files["README.md"] = _build_readme(detail, slug)
+    files["README.md"] = _build_readme(detail)
     files[f"commands/syn-{slug}.md"] = _build_cc_command(detail, slug)
 
     wf_prefix = f"workflows/{slug}"
     files[f"{wf_prefix}/workflow.yaml"] = _build_workflow_yaml(detail)
 
     for phase in detail.phases:
-        files[f"{wf_prefix}/phases/{phase.phase_id}.md"] = _build_phase_md(phase)
+        pid = _validate_phase_id(phase.phase_id)
+        files[f"{wf_prefix}/phases/{pid}.md"] = _build_phase_md(phase)
 
 
 # -- HTTP Endpoints -----------------------------------------------------------
