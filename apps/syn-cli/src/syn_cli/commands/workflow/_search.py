@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich.panel import Panel
@@ -15,6 +15,9 @@ from syn_cli.commands._marketplace_client import (
 )
 from syn_cli.commands.workflow._crud import app
 
+if TYPE_CHECKING:
+    from syn_cli.commands._marketplace_models import MarketplacePluginEntry
+
 
 def _print_no_results(query: str, category: str | None, tag: str | None) -> None:
     """Print empty results message with contextual help."""
@@ -26,11 +29,9 @@ def _print_no_results(query: str, category: str | None, tag: str | None) -> None
 
 
 def _print_search_results(
-    results: list[tuple[str, object]],
+    results: list[tuple[str, MarketplacePluginEntry]],
 ) -> None:
     """Print search results as a table."""
-    from syn_cli.commands._marketplace_models import MarketplacePluginEntry
-
     table = Table(title="Available Workflows")
     table.add_column("Name", style="bold")
     table.add_column("Version")
@@ -39,7 +40,6 @@ def _print_search_results(
     table.add_column("Registry", style="dim")
 
     for reg_name, plugin in results:
-        assert isinstance(plugin, MarketplacePluginEntry)
         table.add_row(
             plugin.name,
             plugin.version,
