@@ -3,6 +3,8 @@ title: Workflow Packages
 description: Install, create, and distribute pre-built workflow packages.
 ---
 
+import { Files, Folder, File } from 'fumadocs-ui/components/files';
+
 Workflow packages are the standard format for distributing pre-built workflows in Syntropic137.
 After running `npx syntropic137 setup`, installing a workflow package is the fastest way to start
 doing useful work with the platform.
@@ -160,32 +162,39 @@ syn workflow export <workflow-id> --format plugin --output ./my-plugin/
 
 Produces a directory that can be re-installed with `syn workflow install`:
 
-```
-my-package/
-├── workflow.yaml       # Orchestration metadata with prompt_file references
-├── phases/
-│   ├── discovery.md    # Phase prompt with YAML frontmatter
-│   └── synthesis.md
-└── README.md           # Auto-generated usage docs
-```
+<Files>
+  <Folder name="my-package" defaultOpen>
+    <File name="workflow.yaml" />
+    <Folder name="phases" defaultOpen>
+      <File name="discovery.md" />
+      <File name="synthesis.md" />
+    </Folder>
+    <File name="README.md" />
+  </Folder>
+</Files>
 
 ### Plugin Format
 
 Produces a full Claude Code plugin with a manifest, command wrapper, and workflow:
 
-```
-my-plugin/
-├── syntropic137-plugin.json            # Plugin manifest
-├── commands/
-│   └── syn-deep-research.md           # Auto-generated CC command
-├── workflows/
-│   └── deep-research/
-│       ├── workflow.yaml
-│       └── phases/
-│           ├── discovery.md
-│           └── synthesis.md
-└── README.md
-```
+<Files>
+  <Folder name="my-plugin" defaultOpen>
+    <File name="syntropic137-plugin.json" />
+    <Folder name="commands" defaultOpen>
+      <File name="syn-deep-research.md" />
+    </Folder>
+    <Folder name="workflows" defaultOpen>
+      <Folder name="deep-research" defaultOpen>
+        <File name="workflow.yaml" />
+        <Folder name="phases" defaultOpen>
+          <File name="discovery.md" />
+          <File name="synthesis.md" />
+        </Folder>
+      </Folder>
+    </Folder>
+    <File name="README.md" />
+  </Folder>
+</Files>
 
 The generated CC command wrapper calls `syn workflow run` so the exported workflow
 is directly usable as a slash command in Claude Code.
@@ -306,26 +315,40 @@ root and organize plugins in subdirectories:
 
 #### Step 1: Create the Repository Structure
 
-```
-my-marketplace/
-├── marketplace.json          # Required: marketplace index
-├── plugins/
-│   ├── research-toolkit/     # Each plugin is a standard package
-│   │   ├── syntropic137-plugin.json
-│   │   ├── workflows/
-│   │   │   ├── deep-research/
-│   │   │   │   ├── workflow.yaml
-│   │   │   │   └── phases/*.md
-│   │   │   └── quick-scan/
-│   │   │       ├── workflow.yaml
-│   │   │       └── phases/*.md
-│   │   └── phase-library/
-│   │       └── summarize.md
-│   └── pr-automation/
-│       ├── workflow.yaml
-│       └── phases/*.md
-└── README.md
-```
+<Files>
+  <Folder name="my-marketplace" defaultOpen>
+    <File name="marketplace.json" />
+    <Folder name="plugins" defaultOpen>
+      <Folder name="research-toolkit" defaultOpen>
+        <File name="syntropic137-plugin.json" />
+        <Folder name="workflows" defaultOpen>
+          <Folder name="deep-research">
+            <File name="workflow.yaml" />
+            <Folder name="phases">
+              <File name="*.md" />
+            </Folder>
+          </Folder>
+          <Folder name="quick-scan">
+            <File name="workflow.yaml" />
+            <Folder name="phases">
+              <File name="*.md" />
+            </Folder>
+          </Folder>
+        </Folder>
+        <Folder name="phase-library">
+          <File name="summarize.md" />
+        </Folder>
+      </Folder>
+      <Folder name="pr-automation">
+        <File name="workflow.yaml" />
+        <Folder name="phases">
+          <File name="*.md" />
+        </Folder>
+      </Folder>
+    </Folder>
+    <File name="README.md" />
+  </Folder>
+</Files>
 
 #### Step 2: Write `marketplace.json`
 

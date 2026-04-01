@@ -1,46 +1,180 @@
 ---
-title: Syntropic137 Plugins
-description: Distributable workflow bundles — install pre-built agent workflows from GitHub repositories.
+title: Plugin Ecosystem
+description: Discover, install, and share agent workflows — built on Claude Code conventions.
 ---
 
-Syntropic137 plugins are packages of pre-built workflows that can be installed from GitHub repositories and shared across teams.
+import { Files, Folder, File } from 'fumadocs-ui/components/files';
 
-<Callout type="idea">
-The plugin ecosystem is under active development. You can create and install workflow packages today using `syn workflow install` — see [Workflow Packages](/docs/guide/workflows). The features below describe the full plugin vision.
-</Callout>
-
-## Vision
-
-The goal is a `gh`-style plugin ecosystem where you can:
+Syntropic137 plugins are distributable bundles of agent workflows. Install pre-built
+plugins from GitHub-hosted marketplaces, or create your own and share them with the
+community.
 
 ```bash
-# Install a plugin from GitHub
-syn plugin install org/security-review-workflows
+# Register a marketplace
+syn marketplace add syntropic137/workflow-library
 
-# List installed plugins
-syn plugin list
+# Search for plugins
+syn workflow search "research"
 
-# Run a workflow from an installed plugin
-syn workflow run security-review/threat-model --repo org/my-app
+# Install by name
+syn workflow install research-toolkit
+
+# Run it
+syn workflow run deep-research --task "Analyze our authentication architecture"
 ```
 
-Plugins bundle workflows, prompt libraries, trigger configurations, and documentation into a single installable package.
+## Built on Claude Code Conventions
 
-## What's Available Today
+The plugin system follows Claude Code's standards so workflows feel native to agents
+that already use Claude Code.
 
-**Workflow packages** are the foundation of the plugin system and work today:
+### Phase Prompts = Claude Code Commands
 
-- **Single workflow packages** — one workflow with its phase prompts
-- **Multi-workflow plugins** — bundle multiple workflows with shared phase libraries and a `syntropic137.yaml` manifest
-- **Install from local or Git** — `syn workflow install ./my-package/` or `syn workflow install org/repo`
+Every phase prompt is a `.md` file with the same format as a Claude Code custom command —
+optional YAML frontmatter for configuration, followed by the prompt body:
 
-See [Workflow Packages](/docs/guide/workflows) for the full guide on creating and distributing workflows.
+```markdown
+---
+model: sonnet
+argument-hint: "[topic]"
+allowed-tools: Read,Glob,Grep,Bash
+max-tokens: 4096
+timeout-seconds: 300
+---
 
-## Tracking
+You are a research assistant investigating: $ARGUMENTS
 
-Follow the plugin ecosystem development:
+Use {{discovery}} to reference output from a previous phase.
+```
 
-- [Plugin spec and manifest format](https://github.com/syntropic137/syntropic137/issues/243)
-- [Plugin registry — install/list/run](https://github.com/syntropic137/syntropic137/issues/244)
-- [Plugin loader — org/system/repo scoped](https://github.com/syntropic137/syntropic137/issues/271)
-- [Workflow marketplace and discovery](https://github.com/syntropic137/syntropic137/issues/401)
+| Frontmatter Key | Description |
+|-----------------|-------------|
+| `model` | Claude model (`sonnet`, `opus`, `haiku`) |
+| `argument-hint` | Shown to users when prompted for input |
+| `allowed-tools` | Comma-separated list of permitted tools |
+| `max-tokens` | Maximum output tokens for the phase |
+| `timeout-seconds` | Phase execution timeout |
+
+### Export as Claude Code Plugin
+
+Any Syntropic137 workflow can be exported as a Claude Code plugin, creating a slash
+command that wraps `syn workflow run`:
+
+```bash
+syn workflow export deep-research --format plugin --output ./my-plugin/
+```
+
+This generates a directory you can drop into any Claude Code project:
+
+<Files>
+  <Folder name="my-plugin" defaultOpen>
+    <File name="syntropic137-plugin.json" />
+    <Folder name="commands" defaultOpen>
+      <File name="syn-deep-research.md" />
+    </Folder>
+    <Folder name="workflows" defaultOpen>
+      <Folder name="deep-research" defaultOpen>
+        <File name="workflow.yaml" />
+        <Folder name="phases">
+          <File name="discovery.md" />
+          <File name="synthesis.md" />
+        </Folder>
+      </Folder>
+    </Folder>
+    <File name="README.md" />
+  </Folder>
+</Files>
+
+The generated `commands/syn-deep-research.md` is a Claude Code slash command that calls
+`syn workflow run`, so the workflow becomes `/syn-deep-research` in any Claude Code session.
+
+### Alignment with Claude Code
+
+| Concept | Claude Code | Syntropic137 |
+|---------|-------------|--------------|
+| Command format | `.md` with YAML frontmatter | Same — phase prompts use identical format |
+| Distribution | `marketplace.json` | Same schema and conventions |
+| Package manifest | `plugin.json` | `syntropic137-plugin.json` |
+| Install command | Plugin install | `syn workflow install <name>` |
+| Discovery | Marketplace search | `syn workflow search` / `syn workflow info` |
+| Content types | Skills, agents, hooks, MCP | Workflows, phases, phase libraries |
+
+## Marketplace
+
+The marketplace is a decentralized network of GitHub repositories that serve as plugin
+registries. Any GitHub repo with a `marketplace.json` at the root can be a marketplace.
+
+### How It Works
+
+1. **Register** a marketplace: `syn marketplace add org/repo`
+2. **Search** across all registries: `syn workflow search "code review"`
+3. **Install** by name: `syn workflow install pr-review` — the CLI resolves the name
+   from registered marketplaces, clones the repo, and installs the workflows
+4. **Update** when new versions are available: `syn workflow update pr-review`
+5. **Uninstall** when you're done: `syn workflow uninstall pr-review`
+
+### Registry Management
+
+```bash
+syn marketplace add syntropic137/workflow-library     # Register
+syn marketplace add myorg/internal --name my-company  # Custom name
+syn marketplace list                                  # List registries
+syn marketplace refresh                               # Force cache refresh
+syn marketplace remove my-company                     # Remove
+```
+
+Marketplace indexes are cached locally for 4 hours. The CLI refreshes automatically
+when the cache expires, or you can force it with `syn marketplace refresh`.
+
+### Discovery
+
+```bash
+# Search by keyword (matches name, description, category, tags)
+syn workflow search "research"
+
+# Filter by category or tag
+syn workflow search --category research
+syn workflow search --tag multi-phase
+
+# Get full details on a specific plugin
+syn workflow info research-toolkit
+```
+
+### Install, Update, Uninstall
+
+```bash
+# Install from marketplace by name
+syn workflow install research-toolkit
+
+# Check for updates
+syn workflow update research-toolkit --dry-run
+
+# Update to latest
+syn workflow update research-toolkit
+
+# Uninstall (removes workflows from platform)
+syn workflow uninstall research-toolkit
+
+# Uninstall but keep workflows running
+syn workflow uninstall research-toolkit --keep-workflows
+```
+
+Updates compare the remote git commit SHA against the installed SHA — if they match,
+the package is already up to date.
+
+## Creating Plugins
+
+Plugins follow a standard package format. See [Workflow Packages](/docs/guide/workflows)
+for the full guide on:
+
+- [Package formats](/docs/guide/workflows#package-formats) — single workflow vs. multi-workflow plugin
+- [Scaffolding](/docs/guide/workflows#scaffold-from-template) — `syn workflow init` to bootstrap a new plugin
+- [Plugin manifests](/docs/guide/workflows#plugin-manifest) — `syntropic137-plugin.json` metadata
+- [Creating a marketplace](/docs/guide/workflows#creating-a-marketplace-repository) — host your own registry
+- [Private marketplaces](/docs/guide/workflows#private-marketplaces) — use private GitHub repos
+
+## Learn More
+
+- [Workflow Packages](/docs/guide/workflows) — detailed package creation, distribution, and marketplace setup
+- [CLI Reference](/docs/cli) — all `syn workflow` and `syn marketplace` commands
+- [Claude Code Plugin](/docs/guide/claude-code-plugin) — the Syntropic137 plugin for Claude Code (slash commands and domain skills)
