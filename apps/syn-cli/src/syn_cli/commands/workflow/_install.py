@@ -35,6 +35,54 @@ from syn_cli.commands.workflow._crud import app
 # ---------------------------------------------------------------------------
 
 
+def _is_bare_name(source: str) -> bool:
+    """Check if source looks like a bare plugin name (not a path or URL)."""
+    return (
+        "/" not in source
+        and not source.startswith((".", "http", "git@", "ssh://"))
+        and not Path(source).exists()
+    )
+
+
+def _try_marketplace_resolution(
+    source: str,
+    ref: str,
+) -> tuple[Path, PluginManifest | None, list[ResolvedWorkflow], Path | None, str | None, str | None] | None:
+    """Attempt to resolve a bare name from registered marketplaces.
+
+    Returns:
+        (package_path, manifest, workflows, tmpdir, marketplace_source, git_sha)
+        or None if not found.
+    """
+    from syn_cli.commands._marketplace_client import (
+        get_git_head_sha,
+        resolve_plugin_by_name,
+    )
+
+    result = resolve_plugin_by_name(source)
+    if result is None:
+        return None
+
+    reg_name, entry, plugin = result
+    effective_ref = ref if ref != "main" else entry.ref
+    url = f"https://github.com/{entry.repo}.git"
+
+    console.print(
+        f"Found [bold]{plugin.name}[/bold] in marketplace [cyan]{reg_name}[/cyan]"
+    )
+    console.print(f"Cloning [cyan]{entry.repo}[/cyan]@{effective_ref}...")
+
+    tmpdir, _, _ = resolve_from_git(url, ref=effective_ref)
+
+    # Resolve from the plugin's subdirectory within the repo
+    subdir = tmpdir / plugin.source.lstrip("./")
+    manifest, workflows = resolve_package(subdir)
+
+    git_sha = get_git_head_sha(entry.repo, effective_ref)
+
+    return (subdir, manifest, workflows, tmpdir, reg_name, git_sha)
+
+
 def _resolve_source(
     source: str, ref: str
 ) -> tuple[Path, PluginManifest | None, list[ResolvedWorkflow], Path | None]:
@@ -112,14 +160,34 @@ def _print_package_preview(
 
 @app.command("install")
 def install_workflow(
-    source: Annotated[str, typer.Argument(help="Local path, GitHub URL, or org/repo shorthand")],
+    source: Annotated[
+        str,
+        typer.Argument(help="Plugin name, local path, GitHub URL, or org/repo shorthand"),
+    ],
     ref: Annotated[str, typer.Option("--ref", help="Git branch/tag to clone")] = "main",
     dry_run: Annotated[
         bool, typer.Option("--dry-run", "-n", help="Validate without installing")
     ] = False,
 ) -> None:
-    """Install workflow(s) from a package directory or git repository."""
-    package_path, manifest, workflows, tmpdir = _resolve_source(source, ref)
+    """Install workflow(s) from a package, git repository, or marketplace."""
+    # Attempt marketplace resolution to capture metadata
+    marketplace_source: str | None = None
+    git_sha: str | None = None
+
+    if _is_bare_name(source):
+        try:
+            mkt_result = _try_marketplace_resolution(source, ref)
+        except (FileNotFoundError, ValueError, RuntimeError) as e:
+            print_error(str(e))
+            raise typer.Exit(1) from None
+
+        if mkt_result is not None:
+            package_path, manifest, workflows, tmpdir, marketplace_source, git_sha = mkt_result
+        else:
+            # Not in marketplace — fall through to standard resolution
+            package_path, manifest, workflows, tmpdir = _resolve_source(source, ref)
+    else:
+        package_path, manifest, workflows, tmpdir = _resolve_source(source, ref)
 
     try:
         if not workflows:
@@ -150,6 +218,8 @@ def install_workflow(
             source_ref=ref,
             fmt=fmt,
             workflows=installed_refs,
+            marketplace_source=marketplace_source,
+            git_sha=git_sha,
         )
 
         print_success(f"\nInstalled {len(installed_refs)} workflow(s) from {source}")

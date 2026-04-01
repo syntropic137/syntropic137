@@ -399,14 +399,17 @@ def _build_readme(detail: WorkflowDetail) -> str:
     )
 
 
-def _build_manifest_yaml(detail: WorkflowDetail, slug: str) -> str:
-    """Build syntropic137.yaml manifest."""
-    return (
-        f"manifest_version: 1\n"
-        f"name: {slug}\n"
-        f'version: "0.1.0"\n'
-        f"description: {_yaml_quote(detail.description or detail.name)}\n"
-    )
+def _build_manifest_json(detail: WorkflowDetail, slug: str) -> str:
+    """Build syntropic137-plugin.json manifest."""
+    import json
+
+    manifest = {
+        "manifest_version": 1,
+        "name": slug,
+        "version": "0.1.0",
+        "description": detail.description or detail.name,
+    }
+    return json.dumps(manifest, indent=2) + "\n"
 
 
 def _build_cc_command(detail: WorkflowDetail, slug: str) -> str:
@@ -444,7 +447,7 @@ def _build_plugin_files(
     files: dict[str, str],
 ) -> None:
     """Populate ``files`` dict with plugin format structure."""
-    files["syntropic137.yaml"] = _build_manifest_yaml(detail, slug)
+    files["syntropic137-plugin.json"] = _build_manifest_json(detail, slug)
     files["README.md"] = _build_readme(detail)
     files[f"commands/syn-{slug}.md"] = _build_cc_command(detail, slug)
 

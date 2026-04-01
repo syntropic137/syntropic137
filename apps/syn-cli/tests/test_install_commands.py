@@ -158,7 +158,7 @@ class TestInitPackage:
         )
         assert result.exit_code == 0
         assert "multi-workflow plugin" in result.stdout
-        assert (pkg_dir / "syntropic137.yaml").exists()
+        assert (pkg_dir / "syntropic137-plugin.json").exists()
         assert (pkg_dir / "phase-library").is_dir()
 
     def test_init_nonempty_dir_fails(self, tmp_path: Path) -> None:

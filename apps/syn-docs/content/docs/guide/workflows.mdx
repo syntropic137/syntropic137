@@ -62,7 +62,7 @@ Bundle multiple workflows with a shared phase library:
 
 ```
 my-plugin/
-├── syntropic137.yaml   # Plugin manifest
+├── syntropic137-plugin.json  # Plugin manifest
 ├── workflows/
 │   ├── research/
 │   │   ├── workflow.yaml
@@ -119,15 +119,17 @@ Frontmatter provides defaults; `workflow.yaml` values always take precedence.
 
 ### Plugin Manifest
 
-Multi-workflow plugins use `syntropic137.yaml` for metadata:
+Multi-workflow plugins use `syntropic137-plugin.json` for metadata:
 
-```yaml
-manifest_version: 1
-name: my-plugin
-version: "1.0.0"
-description: "Research and review workflows"
-author: my-org
-license: MIT
+```json
+{
+  "manifest_version": 1,
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "Research and review workflows",
+  "author": "my-org",
+  "license": "MIT"
+}
 ```
 
 ## Exporting Workflows
@@ -162,7 +164,7 @@ Produces a full Claude Code plugin with a manifest, command wrapper, and workflo
 
 ```
 my-plugin/
-├── syntropic137.yaml                  # Plugin manifest
+├── syntropic137-plugin.json            # Plugin manifest
 ├── commands/
 │   └── syn-deep-research.md           # Auto-generated CC command
 ├── workflows/
@@ -205,6 +207,90 @@ The repository includes reference implementations:
 
 - **`workflows/examples/research-package/`** — Single workflow with discovery + synthesis phases
 - **`workflows/examples/starter-plugin/`** — Multi-workflow plugin with shared summarize phase
+
+## Marketplace
+
+The marketplace lets you discover, install, and share workflow plugins from
+GitHub-hosted registries.
+
+### Register a Marketplace
+
+```bash
+# Add the official Syntropic137 marketplace
+syn marketplace add syntropic137/workflow-library
+
+# Add a company-internal marketplace
+syn marketplace add myorg/internal-workflows --name my-company
+
+# List registered marketplaces
+syn marketplace list
+
+# Refresh cached indexes
+syn marketplace refresh
+```
+
+### Discover Workflows
+
+```bash
+# Search across all registered marketplaces
+syn workflow search "research"
+syn workflow search --category research
+syn workflow search --tag multi-phase
+
+# Show details of a specific plugin
+syn workflow info research-toolkit
+```
+
+### Install from Marketplace
+
+```bash
+# Install by plugin name (resolved from registered marketplaces)
+syn workflow install research-toolkit
+
+# Still works: install from local paths and git URLs
+syn workflow install ./my-package/
+syn workflow install org/repo
+```
+
+### Update and Uninstall
+
+```bash
+# Update a package to the latest version
+syn workflow update research-toolkit
+
+# Check for updates without applying
+syn workflow update research-toolkit --dry-run
+
+# Uninstall (removes workflows from the platform)
+syn workflow uninstall research-toolkit
+
+# Uninstall but keep workflows running
+syn workflow uninstall research-toolkit --keep-workflows
+```
+
+### Marketplace Repository Layout
+
+A marketplace repository has a `marketplace.json` index at the root with
+plugins organized in subdirectories:
+
+```
+marketplace-repo/
+├── marketplace.json
+├── plugins/
+│   ├── research-toolkit/
+│   │   ├── syntropic137-plugin.json
+│   │   ├── workflows/
+│   │   │   ├── deep-research/
+│   │   │   │   ├── workflow.yaml
+│   │   │   │   └── phases/*.md
+│   │   │   └── quick-scan/
+│   │   └── phase-library/
+│   └── pr-automation/
+│       ├── syntropic137-plugin.json
+│       ├── workflows/...
+│       └── phase-library/...
+└── README.md
+```
 
 ## Learn More
 
