@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated
 
 import typer
@@ -48,14 +48,25 @@ def _try_marketplace_resolution(
     source: str,
     ref: str,
 ) -> (
-    tuple[Path, PluginManifest | None, list[ResolvedWorkflow], Path | None, str | None, str | None]
+    tuple[
+        Path,
+        PluginManifest | None,
+        list[ResolvedWorkflow],
+        Path | None,
+        str | None,
+        str | None,
+        str,
+    ]
     | None
 ):
     """Attempt to resolve a bare name from registered marketplaces.
 
     Returns:
-        (package_path, manifest, workflows, tmpdir, marketplace_source, git_sha)
+        (package_path, manifest, workflows, tmpdir, marketplace_source, git_sha, effective_ref)
         or None if not found.
+
+    Raises:
+        ValueError: If the plugin source path is unsafe (path traversal).
     """
     from syn_cli.commands._marketplace_client import (
         get_git_head_sha,
@@ -70,18 +81,29 @@ def _try_marketplace_resolution(
     effective_ref = ref if ref != "main" else entry.ref
     url = f"https://github.com/{entry.repo}.git"
 
+    # Validate plugin source path before cloning
+    source_path = PurePosixPath(plugin.source)
+    if source_path.is_absolute() or ".." in source_path.parts:
+        msg = f"Unsafe plugin source path in marketplace: {plugin.source}"
+        raise ValueError(msg)
+
     console.print(f"Found [bold]{plugin.name}[/bold] in marketplace [cyan]{reg_name}[/cyan]")
     console.print(f"Cloning [cyan]{entry.repo}[/cyan]@{effective_ref}...")
 
     tmpdir, _, _ = resolve_from_git(url, ref=effective_ref)
 
     # Resolve from the plugin's subdirectory within the repo
-    subdir = tmpdir / plugin.source.lstrip("./")
+    subdir = (tmpdir / plugin.source.lstrip("./")).resolve()
+    if not subdir.is_relative_to(tmpdir):
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        msg = f"Plugin source path escapes repository: {plugin.source}"
+        raise ValueError(msg)
+
     manifest, workflows = resolve_package(subdir)
 
     git_sha = get_git_head_sha(entry.repo, effective_ref)
 
-    return (subdir, manifest, workflows, tmpdir, reg_name, git_sha)
+    return (subdir, manifest, workflows, tmpdir, reg_name, git_sha, effective_ref)
 
 
 def _resolve_source(
@@ -162,9 +184,13 @@ def _print_package_preview(
 def _resolve_install_source(
     source: str, ref: str
 ) -> tuple[
-    Path, PluginManifest | None, list[ResolvedWorkflow], Path | None, str | None, str | None
+    Path, PluginManifest | None, list[ResolvedWorkflow], Path | None, str | None, str | None, str
 ]:
-    """Resolve install source — marketplace first for bare names, then standard."""
+    """Resolve install source — marketplace first for bare names, then standard.
+
+    Returns:
+        (package_path, manifest, workflows, tmpdir, marketplace_source, git_sha, effective_ref)
+    """
     if _is_bare_name(source):
         try:
             mkt_result = _try_marketplace_resolution(source, ref)
@@ -176,7 +202,7 @@ def _resolve_install_source(
             return mkt_result
 
     package_path, manifest, workflows, tmpdir = _resolve_source(source, ref)
-    return (package_path, manifest, workflows, tmpdir, None, None)
+    return (package_path, manifest, workflows, tmpdir, None, None, ref)
 
 
 @app.command("install")
@@ -191,7 +217,7 @@ def install_workflow(
     ] = False,
 ) -> None:
     """Install workflow(s) from a package, git repository, or marketplace."""
-    package_path, manifest, workflows, tmpdir, marketplace_source, git_sha = (
+    package_path, manifest, workflows, tmpdir, marketplace_source, git_sha, effective_ref = (
         _resolve_install_source(source, ref)
     )
 
@@ -221,7 +247,7 @@ def install_workflow(
             package_name=pkg_name,
             package_version=pkg_version,
             source=source,
-            source_ref=ref,
+            source_ref=effective_ref,
             fmt=fmt,
             workflows=installed_refs,
             marketplace_source=marketplace_source,

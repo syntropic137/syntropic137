@@ -8,6 +8,7 @@ functions for searching across registered marketplaces.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +31,25 @@ _SYN_DIR = Path.home() / ".syntropic137"
 _REGISTRIES_PATH = _SYN_DIR / "registries.json"
 _CACHE_DIR = _SYN_DIR / "marketplace" / "cache"
 _CACHE_TTL = timedelta(hours=4)
+
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def validate_registry_name(name: str) -> str:
+    """Validate a registry name is safe for use as a filename.
+
+    Raises:
+        ValueError: If the name contains path separators, traversal, or
+            other unsafe characters.
+    """
+    if not _SAFE_NAME_RE.match(name) or ".." in name:
+        msg = (
+            f"Invalid registry name '{name}': "
+            "must start with alphanumeric character and contain only "
+            "letters, digits, hyphens, underscores, and dots"
+        )
+        raise ValueError(msg)
+    return name
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +82,7 @@ def save_registries(config: RegistryConfig) -> None:
 
 def load_cached_index(registry_name: str) -> CachedMarketplace | None:
     """Load a cached marketplace index by registry name."""
+    validate_registry_name(registry_name)
     cache_path = _CACHE_DIR / f"{registry_name}.json"
     if not cache_path.exists():
         return None
@@ -75,6 +96,7 @@ def load_cached_index(registry_name: str) -> CachedMarketplace | None:
 
 def save_cached_index(registry_name: str, cached: CachedMarketplace) -> None:
     """Persist a cached marketplace index to disk."""
+    validate_registry_name(registry_name)
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = _CACHE_DIR / f"{registry_name}.json"
     cache_path.write_text(
@@ -85,7 +107,12 @@ def save_cached_index(registry_name: str, cached: CachedMarketplace) -> None:
 
 def is_cache_stale(cached: CachedMarketplace) -> bool:
     """Check whether a cached index has exceeded the TTL."""
-    fetched = datetime.fromisoformat(cached.fetched_at)
+    try:
+        fetched = datetime.fromisoformat(cached.fetched_at)
+    except (TypeError, ValueError):
+        return True
+    if fetched.tzinfo is None:
+        fetched = fetched.replace(tzinfo=UTC)
     return datetime.now(tz=UTC) - fetched > _CACHE_TTL
 
 

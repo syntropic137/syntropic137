@@ -86,7 +86,7 @@ def _resolve_update_source(
     effective_ref: str,
     record: InstallationRecord,
 ) -> tuple[
-    Path, PluginManifest | None, list[ResolvedWorkflow], Path | None, str | None, str | None
+    Path, PluginManifest | None, list[ResolvedWorkflow], Path | None, str | None, str | None, str
 ]:
     """Resolve the updated package source, returning all fields needed for install."""
     if _is_bare_name(source) and record.marketplace_source:
@@ -102,7 +102,7 @@ def _resolve_update_source(
         raise typer.Exit(1)
 
     package_path, manifest, workflows, tmpdir = _resolve_source(source, effective_ref)
-    return (package_path, manifest, workflows, tmpdir, None, None)
+    return (package_path, manifest, workflows, tmpdir, None, None, effective_ref)
 
 
 def _perform_update(
@@ -192,15 +192,15 @@ def update_workflow(
 
     import shutil
 
-    package_path, manifest, workflows, tmpdir, marketplace_source, git_sha = _resolve_update_source(
-        source, effective_ref, record
+    package_path, manifest, workflows, tmpdir, marketplace_source, git_sha, resolved_ref = (
+        _resolve_update_source(source, effective_ref, record)
     )
 
     try:
         _perform_update(
             name,
             source,
-            effective_ref,
+            resolved_ref,
             record,
             package_path,
             manifest,

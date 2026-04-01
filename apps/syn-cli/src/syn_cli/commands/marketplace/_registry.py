@@ -14,6 +14,7 @@ from syn_cli.commands._marketplace_client import (
     refresh_index,
     save_cached_index,
     save_registries,
+    validate_registry_name,
 )
 from syn_cli.commands._marketplace_models import (
     CachedMarketplace,
@@ -53,6 +54,11 @@ def add_marketplace(
         raise typer.Exit(1) from None
 
     registry_name = name or index.name
+    try:
+        validate_registry_name(registry_name)
+    except ValueError as e:
+        print_error(str(e))
+        raise typer.Exit(1) from None
 
     config = load_registries()
     if registry_name in config.registries:
@@ -134,12 +140,17 @@ def remove_marketplace(
     updated = RegistryConfig(version=config.version, registries=remaining)
     save_registries(updated)
 
-    # Clean up cache
+    # Clean up cache (name is safe — already validated via registries dict key match)
     from syn_cli.commands._marketplace_client import _CACHE_DIR
 
-    cache_path = _CACHE_DIR / f"{name}.json"
-    if cache_path.exists():
-        cache_path.unlink()
+    try:
+        validate_registry_name(name)
+    except ValueError:
+        pass  # Skip cache cleanup for names that don't match a safe pattern
+    else:
+        cache_path = _CACHE_DIR / f"{name}.json"
+        if cache_path.exists():
+            cache_path.unlink()
 
     print_success(f"Removed marketplace [bold]{name}[/bold]")
 

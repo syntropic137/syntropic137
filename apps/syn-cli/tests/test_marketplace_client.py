@@ -120,8 +120,9 @@ class TestCacheIO:
 
 
 class TestFetchMarketplaceJson:
-    @patch("syn_cli.commands._marketplace_client.subprocess")
-    def test_successful_fetch(self, mock_subprocess: MagicMock, tmp_path: Path) -> None:
+    def test_successful_fetch(self, tmp_path: Path) -> None:
+        from pathlib import Path as _Path
+
         from syn_cli.commands._marketplace_client import fetch_marketplace_json
 
         marketplace_data = {
@@ -130,26 +131,32 @@ class TestFetchMarketplaceJson:
             "plugins": [{"name": "p1", "source": "./p1"}],
         }
 
-        def fake_run(cmd: list[str], **_kwargs: object) -> MagicMock:
-            # The last arg of git clone is the destination
-            dest = cmd[-1]
-            (tmp_path / "marketplace.json").write_text(json.dumps(marketplace_data))
-            # Simulate clone by writing to dest
-            import shutil
+        clone_dir = tmp_path / "clone"
 
-            shutil.copytree(str(tmp_path), dest, dirs_exist_ok=True)
+        def fake_run(cmd: list[str], **_kwargs: object) -> MagicMock:
+            dest = _Path(cmd[-1])
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "marketplace.json").write_text(json.dumps(marketplace_data))
             result = MagicMock()
             result.returncode = 0
             return result
 
-        mock_subprocess.run.side_effect = fake_run
-
-        with patch(
-            "syn_cli.commands._marketplace_client.tempfile.mkdtemp",
-            return_value=str(tmp_path / "clone"),
+        with (
+            patch(
+                "syn_cli.commands._marketplace_client.subprocess.run",
+                side_effect=fake_run,
+            ),
+            patch(
+                "syn_cli.commands._marketplace_client.tempfile.mkdtemp",
+                return_value=str(clone_dir),
+            ),
+            patch("syn_cli.commands._marketplace_client.shutil.rmtree"),
         ):
-            # Need a more nuanced mock for this test
-            pass
+            index = fetch_marketplace_json("org/repo")
+
+        assert index.name == "test-marketplace"
+        assert len(index.plugins) == 1
+        assert index.plugins[0].name == "p1"
 
     @patch("syn_cli.commands._marketplace_client.subprocess")
     def test_clone_failure(self, mock_subprocess: MagicMock) -> None:
@@ -292,3 +299,90 @@ class TestGetGitHeadSha:
         mock_subprocess.run.return_value = result
 
         assert get_git_head_sha("org/nonexistent") is None
+
+
+class TestValidateRegistryName:
+    def test_valid_names(self) -> None:
+        from syn_cli.commands._marketplace_client import validate_registry_name
+
+        assert validate_registry_name("official") == "official"
+        assert validate_registry_name("my-marketplace") == "my-marketplace"
+        assert validate_registry_name("org_internal") == "org_internal"
+        assert validate_registry_name("v2.0") == "v2.0"
+        assert validate_registry_name("syntropic137-official") == "syntropic137-official"
+
+    def test_rejects_path_traversal(self) -> None:
+        from syn_cli.commands._marketplace_client import validate_registry_name
+
+        with pytest.raises(ValueError, match="Invalid registry name"):
+            validate_registry_name("../evil")
+
+    def test_rejects_slash(self) -> None:
+        from syn_cli.commands._marketplace_client import validate_registry_name
+
+        with pytest.raises(ValueError, match="Invalid registry name"):
+            validate_registry_name("evil/path")
+
+    def test_rejects_empty(self) -> None:
+        from syn_cli.commands._marketplace_client import validate_registry_name
+
+        with pytest.raises(ValueError, match="Invalid registry name"):
+            validate_registry_name("")
+
+    def test_rejects_dot_dot(self) -> None:
+        from syn_cli.commands._marketplace_client import validate_registry_name
+
+        with pytest.raises(ValueError, match="Invalid registry name"):
+            validate_registry_name("a..b")
+
+
+class TestPluginSourcePathValidation:
+    """Test that _try_marketplace_resolution rejects unsafe plugin.source paths."""
+
+    @patch("syn_cli.commands._marketplace_client.resolve_plugin_by_name")
+    def test_rejects_traversal(self, mock_resolve: MagicMock) -> None:
+        from syn_cli.commands.workflow._install import _try_marketplace_resolution
+
+        mock_resolve.return_value = (
+            "official",
+            RegistryEntry(repo="org/repo", added_at="2026-01-01T00:00:00+00:00"),
+            MarketplacePluginEntry(name="evil", source="../../etc/passwd"),
+        )
+
+        with pytest.raises(ValueError, match="Unsafe plugin source path"):
+            _try_marketplace_resolution("evil", "main")
+
+    @patch("syn_cli.commands._marketplace_client.resolve_plugin_by_name")
+    def test_rejects_absolute_path(self, mock_resolve: MagicMock) -> None:
+        from syn_cli.commands.workflow._install import _try_marketplace_resolution
+
+        mock_resolve.return_value = (
+            "official",
+            RegistryEntry(repo="org/repo", added_at="2026-01-01T00:00:00+00:00"),
+            MarketplacePluginEntry(name="evil", source="/etc/passwd"),
+        )
+
+        with pytest.raises(ValueError, match="Unsafe plugin source path"):
+            _try_marketplace_resolution("evil", "main")
+
+
+class TestCacheStalenessEdgeCases:
+    def test_naive_timestamp_treated_as_utc(self) -> None:
+        from syn_cli.commands._marketplace_client import is_cache_stale
+
+        # Naive timestamp (no timezone) — should not crash, treated as UTC
+        naive_utc = datetime.now(tz=UTC).replace(tzinfo=None)
+        cached = CachedMarketplace(
+            fetched_at=naive_utc.isoformat(),
+            index=_make_index(),
+        )
+        assert not is_cache_stale(cached)
+
+    def test_invalid_timestamp_treated_as_stale(self) -> None:
+        from syn_cli.commands._marketplace_client import is_cache_stale
+
+        cached = CachedMarketplace(
+            fetched_at="not-a-date",
+            index=_make_index(),
+        )
+        assert is_cache_stale(cached)
