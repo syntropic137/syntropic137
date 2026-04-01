@@ -26,6 +26,16 @@ export function GET(request: NextRequest) {
     );
   }
 
+  lines.push('');
+  lines.push('## Markdown Endpoints');
+  lines.push('');
+  lines.push('Each page is available as raw MDX at its `.md` URL (for agents and LLMs):');
+  lines.push('');
+
+  for (const page of source.getPages()) {
+    lines.push(`- [${page.data.title}](${origin}${page.url}.md)`);
+  }
+
   return new Response(lines.join('\n'), {
     headers: { 'Content-Type': 'text/plain; charset=utf-8' },
   });

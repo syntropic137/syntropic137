@@ -1,0 +1,46 @@
+---
+title: Syntropic137 Plugins
+description: Distributable workflow bundles — install pre-built agent workflows from GitHub repositories.
+---
+
+Syntropic137 plugins are packages of pre-built workflows that can be installed from GitHub repositories and shared across teams.
+
+<Callout type="idea">
+The plugin ecosystem is under active development. You can create and install workflow packages today using `syn workflow install` — see [Workflow Packages](/docs/guide/workflows). The features below describe the full plugin vision.
+</Callout>
+
+## Vision
+
+The goal is a `gh`-style plugin ecosystem where you can:
+
+```bash
+# Install a plugin from GitHub
+syn plugin install org/security-review-workflows
+
+# List installed plugins
+syn plugin list
+
+# Run a workflow from an installed plugin
+syn workflow run security-review/threat-model --repo org/my-app
+```
+
+Plugins bundle workflows, prompt libraries, trigger configurations, and documentation into a single installable package.
+
+## What's Available Today
+
+**Workflow packages** are the foundation of the plugin system and work today:
+
+- **Single workflow packages** — one workflow with its phase prompts
+- **Multi-workflow plugins** — bundle multiple workflows with shared phase libraries and a `syntropic137.yaml` manifest
+- **Install from local or Git** — `syn workflow install ./my-package/` or `syn workflow install org/repo`
+
+See [Workflow Packages](/docs/guide/workflows) for the full guide on creating and distributing workflows.
+
+## Tracking
+
+Follow the plugin ecosystem development:
+
+- [Plugin spec and manifest format](https://github.com/syntropic137/syntropic137/issues/243)
+- [Plugin registry — install/list/run](https://github.com/syntropic137/syntropic137/issues/244)
+- [Plugin loader — org/system/repo scoped](https://github.com/syntropic137/syntropic137/issues/271)
+- [Workflow marketplace and discovery](https://github.com/syntropic137/syntropic137/issues/401)

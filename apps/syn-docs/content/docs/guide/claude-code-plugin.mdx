@@ -1,0 +1,68 @@
+---
+title: Claude Code Plugin
+description: Monitor and manage Syntropic137 from inside Claude Code with slash commands and domain skills.
+---
+
+The Syntropic137 Claude Code plugin adds slash commands and domain knowledge to Claude Code, letting you manage the platform without leaving your editor.
+
+<Callout type="info">
+The plugin is optional. Syntropic137 works independently — the CLI and API are always available. The plugin adds convenience for Claude Code users.
+</Callout>
+
+## Installation
+
+If you have Claude Code installed:
+
+```bash
+claude plugin install syntropic137
+```
+
+Or install it through the setup CLI:
+
+```bash
+npx @syntropic137/setup plugin
+```
+
+The setup wizard also offers to install the plugin automatically if it detects the `claude` CLI.
+
+## Slash Commands
+
+The plugin provides 7 commands for quick platform interaction:
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `/syn-setup` | Open the setup wizard | `/syn-setup` |
+| `/syn-status` | Platform health — containers, API, recent activity | `/syn-status` |
+| `/syn-health` | Deep API diagnostics | `/syn-health` |
+| `/syn-costs` | Cost tracking and breakdown | `/syn-costs summary` |
+| `/syn-sessions` | Session listing and details | `/syn-sessions list` |
+| `/syn-metrics` | Aggregated metrics across executions | `/syn-metrics --workflow <id>` |
+| `/syn-observe` | Debug a specific agent session | `/syn-observe <session-id> tools` |
+
+Commands resolve the API URL automatically — from `SYN_API_URL` env var, your `~/.syntropic137/.env` config, or the default `http://localhost:8137`.
+
+## Domain Skills
+
+The plugin includes 7 domain skills that Claude loads contextually based on your questions:
+
+| Skill | Activates When You Ask About |
+|-------|------------------------------|
+| **workflow-management** | Creating workflows, YAML schema, prompt files, `$ARGUMENTS` substitution |
+| **execution-control** | Running workflows, monitoring progress, pause/resume/cancel, debugging failures |
+| **observability** | Sessions, tool timelines, token metrics, cost breakdowns, two-lane architecture |
+| **organization** | Org/System/Repo hierarchy, cost rollup, contribution tracking |
+| **github-automation** | GitHub App setup, webhook triggers, safety limits, input mapping |
+| **setup** | `npx @syntropic137/setup`, Docker stack, secrets, troubleshooting |
+| **platform-ops** | Service map, workspace lifecycle, token injection, QA commands |
+
+Skills are not invoked directly — Claude uses them automatically when your question matches their domain. For example, asking "create a workflow that reviews PRs" activates both **workflow-management** and **github-automation** skills.
+
+## Session Start Hook
+
+The plugin runs a health check every time Claude Code starts a new session. It pings your Syntropic137 API and silently confirms it's reachable. If the platform is down, you'll see a notification suggesting `/syn-setup` or `/syn-status`.
+
+## Updating
+
+```bash
+claude plugin update syntropic137
+```

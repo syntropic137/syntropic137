@@ -3,10 +3,17 @@
   "root": true,
   "pages": [
     "getting-started",
+    "core-concepts",
     "workflows",
-    "architecture",
-    "configuration",
+    "claude-code-plugin",
+    "github-integration",
     "event-ingestion",
-    "self-hosting"
+    "tunnels",
+    "secrets",
+    "setup-cli",
+    "self-hosting",
+    "configuration",
+    "architecture",
+    "plugins"
   ]
 }

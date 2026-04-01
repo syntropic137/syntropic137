@@ -12,16 +12,10 @@ Syntropic137 runs as a set of Docker services connected through a shared network
 ## Quick Start with Docker Compose
 
 ```bash
-# Clone the repository
-git clone https://github.com/syntropic137/syntropic137.git
-cd syntropic137
-
-# Run the setup wizard
-just onboard
-
-# Start the selfhost stack
-just selfhost-up
+npx @syntropic137/setup init
 ```
+
+The setup wizard handles everything — Docker validation, secret generation, API key configuration, image pulls, and starting the stack. See [Getting Started](/docs/guide/getting-started) for the full walkthrough.
 
 The dashboard will be available at `http://localhost:8137`.
 
@@ -84,22 +78,14 @@ For **1,000+ concurrent agents** with auto-scaling:
 - HPA with 70% CPU target, 3–20 replicas
 - PersistentVolume for artifact storage
 
-## Cloudflare Tunnel (Optional)
+## Tunnels (Optional)
 
-For secure external access without port forwarding:
+For secure external access and GitHub Actions webhook delivery, set up a tunnel. Syntropic137 includes built-in Cloudflare Tunnel support via a Docker Compose profile.
 
-```bash
-# Install cloudflared
-brew install cloudflare/cloudflare/cloudflared
+See the [Tunnels guide](/docs/guide/tunnels) for setup instructions.
 
-# Authenticate
-cloudflared tunnel login
+## Secrets
 
-# Create tunnel
-cloudflared tunnel create syn137
+All secrets are stored as `chmod 600` files and mounted via Docker's tmpfs-backed secrets mechanism — never in environment variables or image layers.
 
-# Route traffic
-cloudflared tunnel route dns syn137 syn137.yourdomain.com
-```
-
-Add `cloudflared` to your Docker Compose to run it as a service.
+See [Secrets Management](/docs/guide/secrets) for details on how secrets work and optional 1Password integration.

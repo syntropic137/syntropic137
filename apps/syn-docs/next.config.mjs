@@ -15,6 +15,14 @@ const config = {
         source: '/docs.txt',
         destination: '/api/docs-txt/index',
       },
+      {
+        source: '/docs/:path*.md',
+        destination: '/api/docs-txt/:path*',
+      },
+      {
+        source: '/docs.md',
+        destination: '/api/docs-txt/index',
+      },
     ];
   },
 };

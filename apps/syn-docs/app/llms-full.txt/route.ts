@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { collectMdxFiles } from '@/lib/mdx-files';
-import { stripFrontmatter, stripJSX, parseFrontmatter } from '@/lib/mdx-text';
+import { stripFrontmatter, parseFrontmatter } from '@/lib/mdx-text';
 
 export const revalidate = false;
 
@@ -13,7 +13,7 @@ function sectionSortKey(relPath: string): number {
 
 function renderFileSection(content: string, relPath: string): string[] {
   const fm = parseFrontmatter(content);
-  const body = stripJSX(stripFrontmatter(content));
+  const body = stripFrontmatter(content);
   if (!body) return [];
 
   const lines: string[] = [`## ${fm.title || relPath}`];
