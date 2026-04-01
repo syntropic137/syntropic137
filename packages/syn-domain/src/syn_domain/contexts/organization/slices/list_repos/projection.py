@@ -44,6 +44,7 @@ def _repo_to_dict(repo: RepoSummary) -> dict[str, Any]:
         "is_private": repo.is_private,
         "created_by": repo.created_by,
         "created_at": repo.created_at.isoformat() if repo.created_at else None,
+        "is_deregistered": repo.is_deregistered,
     }
 
 
@@ -61,6 +62,7 @@ def _repo_from_dict(data: dict[str, Any]) -> RepoSummary:
         is_private=data.get("is_private", False),
         created_by=data.get("created_by", ""),
         created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None,
+        is_deregistered=data.get("is_deregistered", False),
     )
 
 
@@ -140,6 +142,7 @@ class RepoProjection:
         system_id: str | None = None,
         provider: str | None = None,
         unassigned: bool = False,
+        include_deregistered: bool = False,
     ) -> list[RepoSummary]:
         records = await self._store.get_all(PROJECTION_NAME)
         repos = [_repo_from_dict(r) for r in records]
@@ -147,6 +150,7 @@ class RepoProjection:
             r
             for r in repos
             if self._matches_filters(r, organization_id, system_id, provider, unassigned)
+            and (include_deregistered or not r.is_deregistered)
         ]
 
     async def clear_all_data(self) -> None:
@@ -208,6 +212,37 @@ class RepoProjection:
         data["system_id"] = ""
         await self._store.save(PROJECTION_NAME, repo_id, data)
         logger.info(f"Projected RepoUnassignedFromSystem: {repo_id}")
+
+    async def on_repo_updated(self, event: dict[str, Any]) -> None:
+        """Handle RepoUpdated event dict from manager dispatch."""
+        repo_id = str(event.get("repo_id", ""))
+        if not repo_id:
+            return
+        data = await self._store.get(PROJECTION_NAME, repo_id)
+        if data is None:
+            logger.warning(f"RepoUpdated for unknown repo: {repo_id}")
+            return
+        if event.get("default_branch") is not None:
+            data["default_branch"] = str(event["default_branch"])
+        if event.get("is_private") is not None:
+            data["is_private"] = bool(event["is_private"])
+        if event.get("installation_id") is not None:
+            data["installation_id"] = str(event["installation_id"])
+        await self._store.save(PROJECTION_NAME, repo_id, data)
+        logger.info(f"Projected RepoUpdated: {repo_id}")
+
+    async def on_repo_deregistered(self, event: dict[str, Any]) -> None:
+        """Handle RepoDeregistered event dict from manager dispatch."""
+        repo_id = str(event.get("repo_id", ""))
+        if not repo_id:
+            return
+        data = await self._store.get(PROJECTION_NAME, repo_id)
+        if data is None:
+            logger.warning(f"RepoDeregistered for unknown repo: {repo_id}")
+            return
+        data["is_deregistered"] = True
+        await self._store.save(PROJECTION_NAME, repo_id, data)
+        logger.info(f"Projected RepoDeregistered: {repo_id}")
 
 
 _projection: RepoProjection | None = None

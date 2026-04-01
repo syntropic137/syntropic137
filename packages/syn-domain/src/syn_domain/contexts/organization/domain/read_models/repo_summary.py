@@ -40,3 +40,4 @@ class RepoSummary:
     is_private: bool = False
     created_by: str = ""
     created_at: datetime | None = None
+    is_deregistered: bool = False

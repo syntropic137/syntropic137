@@ -14,8 +14,14 @@ if TYPE_CHECKING:
     from syn_domain.contexts.organization.domain.commands.AssignRepoToSystemCommand import (
         AssignRepoToSystemCommand,
     )
+    from syn_domain.contexts.organization.domain.commands.DeregisterRepoCommand import (
+        DeregisterRepoCommand,
+    )
     from syn_domain.contexts.organization.domain.commands.UnassignRepoFromSystemCommand import (
         UnassignRepoFromSystemCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.UpdateRepoCommand import (
+        UpdateRepoCommand,
     )
 
 logger = logging.getLogger(__name__)
@@ -51,4 +57,30 @@ class ManageRepoHandler:
             return HandlerResult(success=False, error=str(e))
         await self._repository.save(aggregate)
         logger.info(f"Unassigned repo {command.repo_id} from system")
+        return HandlerResult(success=True)
+
+    async def update(self, command: UpdateRepoCommand) -> HandlerResult | None:
+        aggregate = await self._repository.get_by_id(command.repo_id)
+        if aggregate is None:
+            logger.warning(f"Repo not found: {command.repo_id}")
+            return None
+        try:
+            aggregate.update(command)
+        except ValueError as e:
+            return HandlerResult(success=False, error=str(e))
+        await self._repository.save(aggregate)
+        logger.info(f"Updated repo {command.repo_id}")
+        return HandlerResult(success=True)
+
+    async def deregister(self, command: DeregisterRepoCommand) -> HandlerResult | None:
+        aggregate = await self._repository.get_by_id(command.repo_id)
+        if aggregate is None:
+            logger.warning(f"Repo not found: {command.repo_id}")
+            return None
+        try:
+            aggregate.deregister(command)
+        except ValueError as e:
+            return HandlerResult(success=False, error=str(e))
+        await self._repository.save(aggregate)
+        logger.info(f"Deregistered repo {command.repo_id}")
         return HandlerResult(success=True)
