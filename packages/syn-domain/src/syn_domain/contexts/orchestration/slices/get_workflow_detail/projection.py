@@ -56,7 +56,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 4  # Bumped: ISS-402 WorkflowPhaseUpdated event handler
+    VERSION = 5  # Bumped: ISS-400 add execution_type, max_tokens, artifact types to phase detail
 
     def __init__(self, store: Any):
         """Initialize with a projection store."""
@@ -95,6 +95,10 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
+                execution_type=p.get("execution_type", "sequential"),
+                max_tokens=p.get(PhaseFields.MAX_TOKENS),
+                input_artifact_types=tuple(p.get("input_artifact_types", [])),
+                output_artifact_types=tuple(p.get("output_artifact_types", [])),
             )
             for i, p in enumerate(phases_data)
         ]

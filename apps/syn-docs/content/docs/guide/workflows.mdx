@@ -130,6 +130,62 @@ author: my-org
 license: MIT
 ```
 
+## Exporting Workflows
+
+Export a running workflow from Syntropic137 as a distributable package. Exported
+packages can be re-imported on another instance or shared as a Claude Code plugin.
+
+```bash
+# Export as a package (workflow.yaml + phase .md files)
+syn workflow export <workflow-id> --output ./my-package/
+
+# Export as a Claude Code plugin
+syn workflow export <workflow-id> --format plugin --output ./my-plugin/
+```
+
+### Package Format (default)
+
+Produces a directory that can be re-installed with `syn workflow install`:
+
+```
+my-package/
+├── workflow.yaml       # Orchestration metadata with prompt_file references
+├── phases/
+│   ├── discovery.md    # Phase prompt with YAML frontmatter
+│   └── synthesis.md
+└── README.md           # Auto-generated usage docs
+```
+
+### Plugin Format
+
+Produces a full Claude Code plugin with a manifest, command wrapper, and workflow:
+
+```
+my-plugin/
+├── syntropic137.yaml                  # Plugin manifest
+├── commands/
+│   └── syn-deep-research.md           # Auto-generated CC command
+├── workflows/
+│   └── deep-research/
+│       ├── workflow.yaml
+│       └── phases/
+│           ├── discovery.md
+│           └── synthesis.md
+└── README.md
+```
+
+The generated CC command wrapper calls `syn workflow run` so the exported workflow
+is directly usable as a slash command in Claude Code.
+
+### Round-Trip Guarantee
+
+Exported packages are always re-importable:
+
+```bash
+syn workflow export my-workflow-v1 --output ./exported/
+syn workflow install ./exported/   # produces an equivalent workflow
+```
+
 ## Validating Packages
 
 ```bash

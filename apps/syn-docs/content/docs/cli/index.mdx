@@ -47,6 +47,19 @@ syn workflow init ./my-workflow --name "My Workflow" --type research --phases 3
 syn workflow init ./my-plugin --name "My Plugin" --multi
 ```
 
+#### Export Workflows
+
+```bash
+# Export as a package (workflow.yaml + phase .md files)
+syn workflow export <workflow-id> --output ./my-package/
+
+# Export as a Claude Code plugin (includes manifest + CC command wrapper)
+syn workflow export <workflow-id> --format plugin --output ./my-plugin/
+
+# Default format is 'package', default output is current directory
+syn workflow export <workflow-id>
+```
+
 #### CRUD & Execution
 
 ```bash

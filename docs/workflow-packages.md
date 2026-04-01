@@ -148,6 +148,16 @@ syn workflow init ./my-workflow --name "My Workflow" --type research --phases 3
 syn workflow init ./my-plugin --name "My Plugin" --multi --type research
 ```
 
+### Export
+
+```bash
+# Export as installable package
+syn workflow export <workflow-id> --output ./my-package/
+
+# Export as Claude Code plugin
+syn workflow export <workflow-id> --format plugin --output ./my-plugin/
+```
+
 ### List Installed
 
 ```bash
@@ -178,6 +188,73 @@ ecosystem:
 The `syntropic137.yaml` manifest intentionally uses `extra="ignore"` so
 future fields (dependencies, permissions, registry metadata) can be
 added without breaking existing packages.
+
+## Exporting Workflows
+
+Export reverses the install flow — taking a running workflow from the
+API and producing an installable package directory.
+
+### CLI
+
+```bash
+# Export as package (default)
+syn workflow export <workflow-id> --output ./my-package/
+
+# Export as Claude Code plugin
+syn workflow export <workflow-id> --format plugin --output ./my-plugin/
+```
+
+### API
+
+```
+GET /api/v1/workflows/{id}/export?format=package|plugin
+```
+
+Returns a JSON manifest with `files: dict[str, str]` mapping relative
+paths to file contents. The CLI writes these to disk.
+
+### Export Flow
+
+1. **Fetch workflow** — `GET /api/v1/workflows/{id}` (via projection)
+2. **Decompose phases** — each phase's `prompt_template` becomes a `.md`
+   file with kebab-case YAML frontmatter (`argument-hint`, `allowed-tools`,
+   `max-tokens`, `timeout-seconds`)
+3. **Generate workflow.yaml** — uses `prompt_file: phases/{id}.md`
+   references (not inline `prompt_template`)
+4. **Plugin extras** (if `--format plugin`) — generate `syntropic137.yaml`
+   manifest and a Claude Code command wrapper in `commands/`
+5. **Write to disk** — CLI creates the directory structure
+
+### Round-Trip Guarantee
+
+Exported packages MUST be re-importable via `syn workflow install`.
+This is enforced by:
+
+- Phase frontmatter using the same kebab-case keys that
+  `md_prompt_loader.py` reads on import
+- `workflow.yaml` using `prompt_file:` references that
+  `WorkflowDefinition.from_file()` resolves
+- Automated round-trip tests: export → `resolve_package()` → compare
+
+### Claude Code Command Wrapper
+
+Plugin exports auto-generate a CC command `.md` file:
+
+```markdown
+---
+model: sonnet
+argument-hint: "<task>"
+allowed-tools: Bash
+---
+
+# /syn-{slug} — Run {Name} Workflow
+
+Execute the {slug} workflow via Syntropic137:
+
+\`\`\`bash
+syn workflow run {workflow-id} --task "$ARGUMENTS"
+\`\`\`
+```
 
 ## Future Work
 
