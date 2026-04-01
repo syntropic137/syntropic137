@@ -6,6 +6,12 @@ specify a ``prompt_file`` referencing an external ``.md`` file instead
 of an inline ``prompt_template``. The ``.md`` file is loaded via
 :func:`~syn_domain.contexts.orchestration._shared.md_prompt_loader.load_md_prompt`
 and its frontmatter is merged into the phase definition at load time.
+
+Phases can also reference shared prompts from a phase library using
+the ``shared://`` prefix (e.g. ``prompt_file: shared://create-pr``),
+which resolves to ``phase-library/create-pr.md`` relative to the
+package root.  Content is resolved at load/install time (copy-on-create
+semantics) — no runtime coupling to the library.
 """
 
 from __future__ import annotations
@@ -28,30 +34,49 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowType,
 )
 
+_SHARED_PREFIX = "shared://"
 
-def _resolve_phase_prompt_file(phase: dict[str, Any], base_dir: Path) -> None:
-    """Resolve a single phase's prompt_file reference in-place.
 
-    Loads the .md file, sets prompt_template to its body,
-    merges normalized frontmatter (YAML values take precedence),
-    and removes the prompt_file key.
+def _resolve_shared_prompt_path(
+    phase_id: str,
+    prompt_file: str,
+    phase_library_dir: Path | None,
+) -> Path:
+    """Resolve a ``shared://`` prompt reference to a filesystem path.
 
     Raises:
-        ValueError: If prompt_template is already set, or the path
-            is absolute or escapes base_dir.
+        ValueError: If no library dir is provided, reference is empty,
+            or the resolved path escapes the library directory.
     """
-    # Fix 1: Mutual exclusivity — Pydantic validator can't fire on raw dicts.
-    if "prompt_template" in phase and phase["prompt_template"] is not None:
+    if phase_library_dir is None:
         msg = (
-            f"Phase '{phase.get('id', '?')}': specify either "
-            "'prompt_template' or 'prompt_file', not both"
+            f"Phase '{phase_id}': shared:// reference "
+            f"'{prompt_file}' requires a phase-library directory"
         )
         raise ValueError(msg)
 
-    # Fix 2: Path traversal security.
-    prompt_file = phase["prompt_file"]
-    prompt_path = Path(prompt_file)
+    ref_name = prompt_file.removeprefix(_SHARED_PREFIX)
+    if not ref_name:
+        msg = f"Phase '{phase_id}': shared:// reference is empty"
+        raise ValueError(msg)
 
+    prompt_path = phase_library_dir / f"{ref_name}.md"
+    resolved = prompt_path.resolve()
+    lib_resolved = phase_library_dir.resolve()
+    if lib_resolved not in resolved.parents and resolved != lib_resolved:
+        msg = f"Phase '{phase_id}': shared:// path '{ref_name}' escapes phase-library directory"
+        raise ValueError(msg)
+
+    return resolved
+
+
+def _resolve_local_prompt_path(prompt_file: str, base_dir: Path) -> Path:
+    """Resolve a relative prompt_file path with traversal security.
+
+    Raises:
+        ValueError: If the path is absolute or escapes the base directory.
+    """
+    prompt_path = Path(prompt_file)
     if prompt_path.is_absolute():
         msg = f"prompt_file must be a relative path, got: {prompt_file!r}"
         raise ValueError(msg)
@@ -61,6 +86,38 @@ def _resolve_phase_prompt_file(phase: dict[str, Any], base_dir: Path) -> None:
     if base_resolved not in resolved.parents and resolved != base_resolved:
         msg = f"prompt_file path {prompt_file!r} escapes base directory {str(base_resolved)!r}"
         raise ValueError(msg)
+
+    return resolved
+
+
+def _resolve_phase_prompt_file(
+    phase: dict[str, Any],
+    base_dir: Path,
+    *,
+    phase_library_dir: Path | None = None,
+) -> None:
+    """Resolve a single phase's prompt_file reference in-place.
+
+    Loads the .md file, sets prompt_template to its body,
+    merges normalized frontmatter (YAML values take precedence),
+    and removes the prompt_file key.
+
+    Supports ``shared://`` prefix for phase-library references.
+    """
+    if "prompt_template" in phase and phase["prompt_template"] is not None:
+        msg = (
+            f"Phase '{phase.get('id', '?')}': specify either "
+            "'prompt_template' or 'prompt_file', not both"
+        )
+        raise ValueError(msg)
+
+    prompt_file: str = phase["prompt_file"]
+    phase_id = str(phase.get("id", "?"))
+
+    if prompt_file.startswith(_SHARED_PREFIX):
+        resolved = _resolve_shared_prompt_path(phase_id, prompt_file, phase_library_dir)
+    else:
+        resolved = _resolve_local_prompt_path(prompt_file, base_dir)
 
     md_prompt = load_md_prompt(resolved)
 
@@ -230,16 +287,25 @@ class WorkflowDefinition(BaseModel):
         return cls.model_validate(data)
 
     @classmethod
-    def from_file(cls, path: Path, *, base_dir: Path | None = None) -> WorkflowDefinition:
+    def from_file(
+        cls,
+        path: Path,
+        *,
+        base_dir: Path | None = None,
+        phase_library_dir: Path | None = None,
+    ) -> WorkflowDefinition:
         """Load workflow definition from a YAML file.
 
         Resolves prompt_file references relative to base_dir (defaults to
-        the YAML file's parent directory).
+        the YAML file's parent directory).  ``shared://`` references are
+        resolved against *phase_library_dir* when provided.
 
         Args:
             path: Path to the YAML workflow file.
             base_dir: Base directory for resolving prompt_file paths.
                 Defaults to path.parent.
+            phase_library_dir: Directory containing shared ``.md`` files
+                for ``shared://`` references.
         """
         resolved_base = base_dir or path.parent
         content = path.read_text(encoding="utf-8")
@@ -247,16 +313,23 @@ class WorkflowDefinition(BaseModel):
         if not isinstance(data, dict):
             msg = "Workflow YAML must be a mapping at the root level"
             raise ValueError(msg)
-        cls._resolve_prompt_files(data, resolved_base)
+        cls._resolve_prompt_files(data, resolved_base, phase_library_dir=phase_library_dir)
         return cls.model_validate(data)
 
     @classmethod
-    def _resolve_prompt_files(cls, data: dict[str, Any], base_dir: Path) -> None:
+    def _resolve_prompt_files(
+        cls,
+        data: dict[str, Any],
+        base_dir: Path,
+        *,
+        phase_library_dir: Path | None = None,
+    ) -> None:
         """Resolve prompt_file references in-place on the raw YAML dict.
 
         Args:
             data: Raw parsed YAML dict (mutated in place).
             base_dir: Base directory for resolving relative paths.
+            phase_library_dir: Directory for ``shared://`` references.
         """
         phases = data.get("phases")
         if not phases or not isinstance(phases, list):
@@ -264,7 +337,7 @@ class WorkflowDefinition(BaseModel):
 
         for phase in phases:
             if isinstance(phase, dict) and "prompt_file" in phase:
-                _resolve_phase_prompt_file(phase, base_dir)
+                _resolve_phase_prompt_file(phase, base_dir, phase_library_dir=phase_library_dir)
 
     def get_domain_phases(self) -> list[PhaseDefinition]:
         """Convert all phases to domain PhaseDefinition objects."""
@@ -303,7 +376,10 @@ def load_workflow_definitions(directory: Path) -> list[WorkflowDefinition]:
 
 
 def validate_workflow_yaml(
-    content: str, *, base_dir: Path | None = None
+    content: str,
+    *,
+    base_dir: Path | None = None,
+    phase_library_dir: Path | None = None,
 ) -> tuple[bool, str | None]:
     """Validate workflow YAML content.
 
@@ -311,6 +387,7 @@ def validate_workflow_yaml(
         content: YAML content to validate.
         base_dir: If provided, resolve prompt_file references relative
             to this directory. Otherwise, only schema validation is performed.
+        phase_library_dir: Directory for ``shared://`` references.
 
     Returns:
         Tuple of (is_valid, error_message).
@@ -321,7 +398,9 @@ def validate_workflow_yaml(
             if not isinstance(data, dict):
                 msg = "Workflow YAML must be a mapping at the root level"
                 raise ValueError(msg)
-            WorkflowDefinition._resolve_prompt_files(data, base_dir)
+            WorkflowDefinition._resolve_prompt_files(
+                data, base_dir, phase_library_dir=phase_library_dir
+            )
             WorkflowDefinition.model_validate(data)
         else:
             WorkflowDefinition.from_yaml(content)

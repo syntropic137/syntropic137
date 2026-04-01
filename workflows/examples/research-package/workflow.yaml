@@ -1,0 +1,25 @@
+id: research-package-v1
+name: Research Package
+description: "Multi-phase research workflow with external prompt files"
+type: research
+classification: standard
+
+inputs:
+  - name: task
+    description: "The research topic to investigate"
+    required: true
+
+phases:
+  - id: discovery
+    name: Discovery
+    order: 1
+    execution_type: sequential
+    prompt_file: phases/discovery.md
+    output_artifacts: [research_scope, initial_questions]
+
+  - id: synthesis
+    name: Synthesis
+    order: 2
+    execution_type: sequential
+    prompt_file: phases/synthesis.md
+    output_artifacts: [final_report]

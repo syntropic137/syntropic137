@@ -19,7 +19,35 @@ syn --help
 
 ### `syn workflow`
 
-Manage and trigger workflows.
+Manage, install, and run workflows.
+
+#### Install & Manage Packages
+
+```bash
+# Install a workflow package from a local directory
+syn workflow install ./my-package/
+
+# Install from a git repository
+syn workflow install https://github.com/org/workflow-library
+syn workflow install org/repo              # GitHub shorthand
+syn workflow install org/repo --ref v2.0   # Specific version
+
+# Validate a package without installing
+syn workflow install ./my-package/ --dry-run
+
+# Validate a package or YAML file
+syn workflow validate ./my-package/
+syn workflow validate ./workflow.yaml
+
+# List installed packages
+syn workflow installed
+
+# Scaffold a new workflow package
+syn workflow init ./my-workflow --name "My Workflow" --type research --phases 3
+syn workflow init ./my-plugin --name "My Plugin" --multi
+```
+
+#### CRUD & Execution
 
 ```bash
 # List workflows
@@ -33,11 +61,17 @@ syn workflow create --type implementation --repo owner/repo
 syn workflow delete <id>                # soft-delete with confirmation
 syn workflow delete <id> --force        # skip confirmation prompt
 
-# Run a workflow
-syn workflow run --name <workflow-name>
+# Show workflow details
+syn workflow show <workflow-id>
 
-# Get workflow status
-syn workflow status <execution-id>
+# Create a workflow from parameters
+syn workflow create "My Workflow" --type research
+
+# Run a workflow
+syn workflow run <workflow-id> --task "Your task here"
+
+# Show workflow run history
+syn workflow status <workflow-id>
 ```
 
 ### `syn agent`
