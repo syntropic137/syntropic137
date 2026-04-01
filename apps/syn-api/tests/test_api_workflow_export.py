@@ -219,6 +219,50 @@ async def test_export_workflow_not_found():
     assert isinstance(result, Err)
 
 
+async def test_export_package_preserves_execution_type():
+    """Non-sequential execution_type should appear in workflow.yaml."""
+    from syn_api.routes.workflows import export_workflow
+
+    wf_id = await _create_test_workflow(
+        phases=[
+            {
+                "phase_id": "parallel-phase",
+                "name": "Parallel",
+                "order": 1,
+                "execution_type": "parallel",
+                "prompt_template": "Run in parallel.",
+            },
+        ],
+    )
+    result = await export_workflow(wf_id, fmt="package")
+    assert isinstance(result, Ok)
+
+    yaml_content = result.value.files["workflow.yaml"]
+    assert "execution_type: parallel" in yaml_content
+
+
+async def test_export_package_preserves_max_tokens():
+    """max_tokens should appear in phase .md frontmatter."""
+    from syn_api.routes.workflows import export_workflow
+
+    wf_id = await _create_test_workflow(
+        phases=[
+            {
+                "phase_id": "limited",
+                "name": "Limited",
+                "order": 1,
+                "prompt_template": "Work carefully.",
+                "max_tokens": 4096,
+            },
+        ],
+    )
+    result = await export_workflow(wf_id, fmt="package")
+    assert isinstance(result, Ok)
+
+    phase_md = result.value.files["phases/limited.md"]
+    assert "max-tokens: 4096" in phase_md
+
+
 async def test_export_workflow_with_input_declarations():
     """Input declarations should appear in workflow.yaml."""
     from syn_api.routes.workflows import export_workflow

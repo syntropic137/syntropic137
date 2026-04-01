@@ -142,6 +142,10 @@ def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDef
             allowed_tools=list(p.allowed_tools),
             argument_hint=p.argument_hint,
             model=p.model,
+            execution_type=p.execution_type,
+            max_tokens=p.max_tokens,
+            input_artifact_types=list(p.input_artifact_types),
+            output_artifact_types=list(p.output_artifact_types),
         )
         for p in (raw_phases or [])
     ]
@@ -240,10 +244,13 @@ async def export_workflow(
     files: dict[str, str] = {}
     slug = _sanitize_slug(detail.name)
 
-    if fmt == "plugin":
-        _build_plugin_files(detail, slug, files)
-    else:
-        _build_package_files(detail, files)
+    try:
+        if fmt == "plugin":
+            _build_plugin_files(detail, slug, files)
+        else:
+            _build_package_files(detail, files)
+    except ValueError as exc:
+        return Err(WorkflowError.INVALID_INPUT, message=str(exc))
 
     return Ok(
         ExportManifestResponse(
@@ -301,13 +308,15 @@ def _build_phase_md(phase: PhaseDefinitionResponse) -> str:
     frontmatter_lines: list[str] = []
 
     if phase.model:
-        frontmatter_lines.append(f"model: {phase.model}")
+        frontmatter_lines.append(f"model: {_yaml_quote(phase.model)}")
     if phase.argument_hint:
-        frontmatter_lines.append(f'argument-hint: "{phase.argument_hint}"')
+        frontmatter_lines.append(f"argument-hint: {_yaml_quote(phase.argument_hint)}")
     if phase.allowed_tools:
         frontmatter_lines.append(f"allowed-tools: {','.join(phase.allowed_tools)}")
     if phase.timeout_seconds and phase.timeout_seconds != 300:
         frontmatter_lines.append(f"timeout-seconds: {phase.timeout_seconds}")
+    if phase.max_tokens is not None:
+        frontmatter_lines.append(f"max-tokens: {phase.max_tokens}")
 
     body = phase.prompt_template or ""
 
@@ -339,12 +348,14 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
         f"  - id: {pid}",
         f"    name: {_yaml_quote(phase.name)}",
         f"    order: {phase.order}",
-        "    execution_type: sequential",
+        f"    execution_type: {phase.execution_type}",
     ]
     if phase.description:
         lines.append(f"    description: {_yaml_quote(phase.description)}")
     lines.append(f"    prompt_file: phases/{pid}.md")
-    lines.append(f"    output_artifacts: [{pid}_output]")
+    if phase.output_artifact_types:
+        artifacts = ", ".join(phase.output_artifact_types)
+        lines.append(f"    output_artifacts: [{artifacts}]")
     return lines
 
 
@@ -549,7 +560,9 @@ async def export_workflow_endpoint(
     """Export a workflow as a distributable package or Claude Code plugin."""
     result = await export_workflow(workflow_id, fmt=format)
     if isinstance(result, Err):
-        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        if result.error == WorkflowError.NOT_FOUND:
+            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        raise HTTPException(status_code=422, detail=result.message)
     return result.value
 
 
