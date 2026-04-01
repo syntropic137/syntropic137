@@ -11,9 +11,9 @@ jobs:
     name: Check generated docs are up to date
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Generate CLI docs
         run: uvx --with typer --with rich --with pyyaml python apps/syn-docs/scripts/generate-cli-docs.py
