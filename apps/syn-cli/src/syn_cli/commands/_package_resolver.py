@@ -4,10 +4,14 @@ Detects the package format (single workflow, multi-workflow plugin, or
 standalone YAML), resolves all ``prompt_file`` and ``shared://``
 references, and produces :class:`ResolvedWorkflow` payloads ready to
 POST to the Syntropic137 API.
+
+Plugin manifests use ``syntropic137-plugin.json`` (primary) with
+``syntropic137.yaml`` supported as a legacy fallback.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import tempfile
@@ -66,6 +70,8 @@ def record_installation(
     source_ref: str,
     fmt: PackageFormat,
     workflows: list[InstalledWorkflowRef],
+    marketplace_source: str | None = None,
+    git_sha: str | None = None,
 ) -> None:
     """Append an installation record and persist."""
     registry = load_installed()
@@ -77,6 +83,8 @@ def record_installation(
         installed_at=datetime.now(tz=UTC).isoformat(),
         format=fmt.value,
         workflows=workflows,
+        marketplace_source=marketplace_source,
+        git_sha=git_sha,
     )
     updated = InstalledRegistry(
         version=registry.version,
@@ -169,21 +177,34 @@ def detect_format(path: Path) -> PackageFormat:
 
 
 def load_manifest(path: Path) -> PluginManifest | None:
-    """Load ``syntropic137.yaml`` manifest from a package directory.
+    """Load plugin manifest from a package directory.
 
-    Returns None if the manifest file doesn't exist.
+    Checks for ``syntropic137-plugin.json`` first, then falls back to
+    the legacy ``syntropic137.yaml`` for backward compatibility.
+
+    Returns None if neither manifest file exists.
     """
-    manifest_path = path / "syntropic137.yaml"
-    if not manifest_path.exists():
-        return None
+    # Primary: JSON manifest
+    json_path = path / "syntropic137-plugin.json"
+    if json_path.exists():
+        content = json_path.read_text(encoding="utf-8")
+        data = json.loads(content)
+        if not isinstance(data, dict):
+            msg = f"syntropic137-plugin.json must be a JSON object, got {type(data).__name__}"
+            raise ValueError(msg)
+        return PluginManifest.model_validate(data)
 
-    content = manifest_path.read_text(encoding="utf-8")
-    data = yaml.safe_load(content)
-    if not isinstance(data, dict):
-        msg = f"syntropic137.yaml must be a YAML mapping, got {type(data).__name__}"
-        raise ValueError(msg)
+    # Fallback: legacy YAML manifest
+    yaml_path = path / "syntropic137.yaml"
+    if yaml_path.exists():
+        content = yaml_path.read_text(encoding="utf-8")
+        data = yaml.safe_load(content)
+        if not isinstance(data, dict):
+            msg = f"syntropic137.yaml must be a YAML mapping, got {type(data).__name__}"
+            raise ValueError(msg)
+        return PluginManifest.model_validate(data)
 
-    return PluginManifest.model_validate(data)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -418,12 +439,12 @@ syn workflow run {workflow_id} --task "Your task here"
 {phase_list}
 """
 
-_MANIFEST_TEMPLATE = """\
-manifest_version: 1
-name: {name}
-version: "0.1.0"
-description: "{description}"
-"""
+_MANIFEST_TEMPLATE = {
+    "manifest_version": 1,
+    "name": "",
+    "version": "0.1.0",
+    "description": "",
+}
 
 
 def scaffold_single_package(
@@ -491,12 +512,16 @@ def scaffold_multi_package(
     """Scaffold a multi-workflow plugin package directory."""
     directory.mkdir(parents=True, exist_ok=True)
 
-    # syntropic137.yaml manifest
-    manifest = _MANIFEST_TEMPLATE.format(
-        name=name.lower().replace(" ", "-"),
-        description=f"{name} plugin",
+    # syntropic137-plugin.json manifest
+    manifest = {
+        **_MANIFEST_TEMPLATE,
+        "name": name.lower().replace(" ", "-"),
+        "description": f"{name} plugin",
+    }
+    (directory / "syntropic137-plugin.json").write_text(
+        json.dumps(manifest, indent=2) + "\n",
+        encoding="utf-8",
     )
-    (directory / "syntropic137.yaml").write_text(manifest, encoding="utf-8")
 
     # phase-library/ with a shared phase
     lib_dir = directory / "phase-library"

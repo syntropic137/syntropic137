@@ -62,7 +62,7 @@ Bundle multiple workflows with a shared phase library:
 
 ```
 my-plugin/
-├── syntropic137.yaml   # Plugin manifest
+├── syntropic137-plugin.json  # Plugin manifest
 ├── workflows/
 │   ├── research/
 │   │   ├── workflow.yaml
@@ -119,15 +119,17 @@ Frontmatter provides defaults; `workflow.yaml` values always take precedence.
 
 ### Plugin Manifest
 
-Multi-workflow plugins use `syntropic137.yaml` for metadata:
+Multi-workflow plugins use `syntropic137-plugin.json` for metadata:
 
-```yaml
-manifest_version: 1
-name: my-plugin
-version: "1.0.0"
-description: "Research and review workflows"
-author: my-org
-license: MIT
+```json
+{
+  "manifest_version": 1,
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "Research and review workflows",
+  "author": "my-org",
+  "license": "MIT"
+}
 ```
 
 ## Exporting Workflows
@@ -162,7 +164,7 @@ Produces a full Claude Code plugin with a manifest, command wrapper, and workflo
 
 ```
 my-plugin/
-├── syntropic137.yaml                  # Plugin manifest
+├── syntropic137-plugin.json            # Plugin manifest
 ├── commands/
 │   └── syn-deep-research.md           # Auto-generated CC command
 ├── workflows/
@@ -206,8 +208,244 @@ The repository includes reference implementations:
 - **`workflows/examples/research-package/`** — Single workflow with discovery + synthesis phases
 - **`workflows/examples/starter-plugin/`** — Multi-workflow plugin with shared summarize phase
 
+## Marketplace
+
+The marketplace lets you discover, install, and share workflow plugins from
+GitHub-hosted registries. Any GitHub repository with a `marketplace.json` at the
+root can serve as a marketplace.
+
+### Register a Marketplace
+
+```bash
+# Add the official Syntropic137 marketplace
+syn marketplace add syntropic137/workflow-library
+
+# Add a company-internal marketplace
+syn marketplace add myorg/internal-workflows --name my-company
+
+# Add from a specific branch or tag
+syn marketplace add myorg/workflows --ref v2.0
+
+# List registered marketplaces
+syn marketplace list
+
+# Refresh cached indexes
+syn marketplace refresh
+
+# Refresh a specific marketplace
+syn marketplace refresh my-company
+
+# Remove a marketplace
+syn marketplace remove my-company
+```
+
+### Discover Workflows
+
+```bash
+# Search across all registered marketplaces
+syn workflow search "research"
+syn workflow search --category research
+syn workflow search --tag multi-phase
+
+# Show details of a specific plugin
+syn workflow info research-toolkit
+```
+
+Search matches against plugin name, description, category, and tags
+(case-insensitive). An empty query returns all plugins across all registries.
+
+### Install from Marketplace
+
+```bash
+# Install by plugin name (resolved from registered marketplaces)
+syn workflow install research-toolkit
+
+# Still works: install from local paths and git URLs
+syn workflow install ./my-package/
+syn workflow install org/repo
+```
+
+When you pass a bare name (no slashes, not a path), the CLI checks registered
+marketplaces first. If found, it clones the marketplace repo, resolves the
+plugin's subdirectory, and installs the workflows.
+
+### Update and Uninstall
+
+```bash
+# Update a package to the latest version
+syn workflow update research-toolkit
+
+# Check for updates without applying
+syn workflow update research-toolkit --dry-run
+
+# Uninstall (removes workflows from the platform)
+syn workflow uninstall research-toolkit
+
+# Uninstall but keep workflows running
+syn workflow uninstall research-toolkit --keep-workflows
+```
+
+Updates compare the remote git SHA against the installed SHA. If they match,
+the package is already up to date and no action is taken.
+
+### Creating a Marketplace Repository
+
+Any GitHub repository can be a marketplace. Create a `marketplace.json` at the
+root and organize plugins in subdirectories:
+
+#### Step 1: Create the Repository Structure
+
+```
+my-marketplace/
+├── marketplace.json          # Required: marketplace index
+├── plugins/
+│   ├── research-toolkit/     # Each plugin is a standard package
+│   │   ├── syntropic137-plugin.json
+│   │   ├── workflows/
+│   │   │   ├── deep-research/
+│   │   │   │   ├── workflow.yaml
+│   │   │   │   └── phases/*.md
+│   │   │   └── quick-scan/
+│   │   │       ├── workflow.yaml
+│   │   │       └── phases/*.md
+│   │   └── phase-library/
+│   │       └── summarize.md
+│   └── pr-automation/
+│       ├── workflow.yaml
+│       └── phases/*.md
+└── README.md
+```
+
+#### Step 2: Write `marketplace.json`
+
+```json
+{
+  "name": "my-marketplace",
+  "syntropic137": {
+    "type": "workflow-marketplace"
+  },
+  "plugins": [
+    {
+      "name": "research-toolkit",
+      "source": "./plugins/research-toolkit",
+      "version": "1.2.0",
+      "description": "Deep research and quick-scan workflows",
+      "category": "research",
+      "tags": ["multi-phase", "deep-dive", "synthesis"]
+    },
+    {
+      "name": "pr-automation",
+      "source": "./plugins/pr-automation",
+      "version": "0.5.0",
+      "description": "Automated PR review and feedback",
+      "category": "ci",
+      "tags": ["github", "code-review"]
+    }
+  ]
+}
+```
+
+#### Step 3: Push and Register
+
+```bash
+git push origin main
+
+# Users register your marketplace:
+syn marketplace add your-org/my-marketplace
+```
+
+### `marketplace.json` Schema
+
+The `marketplace.json` file is the index that describes all plugins in the
+marketplace. It must be a JSON object at the repository root.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Human-readable marketplace name (used as default registry name) |
+| `syntropic137` | object | Yes | Marker identifying this as a Syntropic137 marketplace |
+| `syntropic137.type` | string | Yes | Must be `"workflow-marketplace"` |
+| `syntropic137.min_platform_version` | string | No | Minimum platform version (default `"0.0.0"`) |
+| `plugins` | array | No | List of plugin entries (default `[]`) |
+
+Each plugin entry in the `plugins` array:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Unique plugin name (used for `syn workflow install <name>`) |
+| `source` | string | Yes | Relative path to the plugin directory (e.g., `"./plugins/my-plugin"`) |
+| `version` | string | No | Semver version string (default `"0.1.0"`) |
+| `description` | string | No | Short description shown in search results |
+| `category` | string | No | Plugin category (e.g., `"research"`, `"ci"`, `"analysis"`) |
+| `tags` | array | No | List of tags for filtering (e.g., `["multi-phase", "github"]`) |
+
+The `source` path must be relative (no absolute paths or `..` traversal). Each
+plugin directory follows the standard [package format](#package-formats) — either
+a single workflow or a multi-workflow plugin.
+
+### Caching and Refresh
+
+Marketplace indexes are cached locally at `~/.syntropic137/marketplace/cache/`
+to avoid cloning on every search or install.
+
+- **Cache TTL:** 4 hours. After this, the next search or install re-fetches the index.
+- **Force refresh:** `syn marketplace refresh` bypasses the TTL and fetches fresh indexes.
+- **Cache location:** `~/.syntropic137/marketplace/cache/<registry-name>.json`
+- **Registry config:** `~/.syntropic137/registries.json`
+
+Searches and plugin lookups use the cache when fresh, falling back to a fresh
+fetch when stale. If a fetch fails (network error, repo not found), stale cache
+entries are skipped silently.
+
+### Private Marketplaces
+
+Private GitHub repositories work as marketplaces if git can authenticate.
+The CLI uses your local git credential configuration — no special flags needed.
+
+```bash
+# Ensure git can access the private repo (any of these work):
+# - GitHub CLI: gh auth login
+# - SSH key: git clone git@github.com:myorg/private-marketplace.git
+# - Credential helper: git config credential.helper
+
+# Then register normally:
+syn marketplace add myorg/private-marketplace --name internal
+```
+
+For CI environments, set the `GIT_ASKPASS` or `GH_TOKEN` environment variable,
+or configure a credential helper that reads from environment variables.
+
+### Troubleshooting
+
+**"No marketplace.json found in repo"** — The repository must have a
+`marketplace.json` at the root of the default branch (or the branch specified
+with `--ref`).
+
+**"syntropic137.type must be 'workflow-marketplace'"** — The `syntropic137`
+key in `marketplace.json` must contain `"type": "workflow-marketplace"`.
+This marker distinguishes marketplace repos from other Syntropic137 content.
+
+**"Invalid registry name"** — Registry names must start with an alphanumeric
+character and contain only letters, digits, hyphens, underscores, and dots.
+Names like `../evil` or `my/registry` are rejected.
+
+**Plugin not found after registering** — Run `syn marketplace refresh` to
+re-fetch the latest index. The local cache may be stale.
+
+**Private repo access denied** — Ensure `git clone` works for the repo URL
+from your terminal. The CLI uses the same git credentials as your shell.
+
+**"Package is already up to date"** — `syn workflow update` compares git
+SHAs. If the remote HEAD hasn't changed, no update is needed.
+
+### Limitations
+
+- One marketplace index per repository (no nested marketplace files)
+- No dependency resolution between plugins
+- No version conflict detection across multiple marketplaces
+- No rollback to a previous plugin version (uninstall and re-install at a pinned `--ref`)
+- Search is substring-based, not fuzzy or ranked
+
 ## Learn More
 
-- [Full package format specification](/docs/workflow-packages.md) — manifest schema, shared phases, Claude Code alignment
-- [CLI Reference](/docs/cli) — all `syn workflow` commands
+- [CLI Reference](/docs/cli) — all `syn workflow` and `syn marketplace` commands
 - [API Reference](/docs/api/workflows) — workflow creation endpoints

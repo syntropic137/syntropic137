@@ -341,7 +341,7 @@ class TestScaffoldMulti:
         pkg_dir = tmp_path / "my-plugin"
         scaffold_multi_package(pkg_dir, name="My Plugin", num_phases=2)
 
-        assert (pkg_dir / "syntropic137.yaml").exists()
+        assert (pkg_dir / "syntropic137-plugin.json").exists()
         assert (pkg_dir / "README.md").exists()
         assert (pkg_dir / "phase-library").is_dir()
         assert (pkg_dir / "workflows").is_dir()

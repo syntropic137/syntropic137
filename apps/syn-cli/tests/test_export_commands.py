@@ -75,7 +75,7 @@ _EXPORT_RESPONSE_PLUGIN: dict = {
     "workflow_id": "deep-research-v1",
     "workflow_name": "Deep Research",
     "files": {
-        "syntropic137.yaml": 'manifest_version: 1\nname: deep-research\nversion: "0.1.0"\n',
+        "syntropic137-plugin.json": '{\n  "manifest_version": 1,\n  "name": "deep-research",\n  "version": "0.1.0",\n  "description": "Deep Research"\n}\n',
         "README.md": "# Deep Research\n",
         "commands/syn-deep-research.md": "---\nmodel: sonnet\n---\n\nRun workflow.\n",
         "workflows/deep-research/workflow.yaml": "id: deep-research-v1\n",
@@ -127,7 +127,7 @@ class TestExportWorkflow:
             )
 
         assert result.exit_code == 0, result.stdout
-        assert (out_dir / "syntropic137.yaml").exists()
+        assert (out_dir / "syntropic137-plugin.json").exists()
         assert (out_dir / "commands" / "syn-deep-research.md").exists()
         assert (out_dir / "workflows" / "deep-research" / "workflow.yaml").exists()
 

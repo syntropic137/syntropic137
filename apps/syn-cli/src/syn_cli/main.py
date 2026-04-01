@@ -18,6 +18,7 @@ from syn_cli.commands import (
     events,
     execution,
     insights,
+    marketplace,
     metrics,
     observe,
     org,
@@ -42,6 +43,7 @@ console = Console()
 
 # Register subcommands
 app.add_typer(workflow.app, name="workflow")
+app.add_typer(marketplace.app, name="marketplace")
 app.add_typer(agent.app, name="agent")
 app.add_typer(artifacts.app, name="artifacts")
 app.add_typer(config.app, name="config")

@@ -87,6 +87,50 @@ syn workflow run <workflow-id> --task "Your task here"
 syn workflow status <workflow-id>
 ```
 
+#### Search & Marketplace Install
+
+```bash
+# Search across registered marketplaces
+syn workflow search "research"
+syn workflow search --category research
+syn workflow search --tag multi-phase
+
+# Show plugin details
+syn workflow info research-toolkit
+
+# Install by marketplace plugin name
+syn workflow install research-toolkit
+
+# Update an installed marketplace package
+syn workflow update research-toolkit
+syn workflow update research-toolkit --dry-run
+
+# Uninstall a package
+syn workflow uninstall research-toolkit
+syn workflow uninstall research-toolkit --keep-workflows
+```
+
+### `syn marketplace`
+
+Manage workflow marketplace registries.
+
+```bash
+# Register a marketplace
+syn marketplace add syntropic137/workflow-library
+syn marketplace add myorg/internal-workflows --name my-company
+syn marketplace add myorg/workflows --ref v2.0
+
+# List registered marketplaces
+syn marketplace list
+
+# Force-refresh cached indexes
+syn marketplace refresh
+syn marketplace refresh my-company
+
+# Remove a marketplace
+syn marketplace remove my-company
+```
+
 ### `syn agent`
 
 Manage agent sessions.

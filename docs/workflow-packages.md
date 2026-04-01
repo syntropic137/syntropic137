@@ -180,9 +180,10 @@ ecosystem:
 
 | Concept | Claude Code | Syntropic137 |
 |---------|-------------|--------------|
-| Registry | `marketplace.json` | Future: `registry.yaml` |
-| Package | `.claude-plugin/plugin.json` | `syntropic137.yaml` |
-| Install | `plugin install name@marketplace` | `syn workflow install source` |
+| Registry | `marketplace.json` | `marketplace.json` (same format) |
+| Package | `.claude-plugin/plugin.json` | `syntropic137.yaml` / `syntropic137-plugin.json` |
+| Install | `plugin install name@marketplace` | `syn workflow install <name>` |
+| Discovery | marketplace search | `syn workflow search` / `syn workflow info` |
 | Content | skills, agents, hooks, MCP | workflows, phases, phase-library |
 
 The `syntropic137.yaml` manifest intentionally uses `extra="ignore"` so
@@ -256,10 +257,92 @@ syn workflow run {workflow-id} --task "$ARGUMENTS"
 \`\`\`
 ```
 
+## Marketplace
+
+Workflow marketplaces are GitHub repositories with a `marketplace.json`
+index at the root. Users register marketplaces, then install plugins by
+name.
+
+### `marketplace.json` Schema
+
+```json
+{
+  "name": "my-marketplace",
+  "syntropic137": {
+    "type": "workflow-marketplace",
+    "min_platform_version": "0.0.0"
+  },
+  "plugins": [
+    {
+      "name": "research-toolkit",
+      "source": "./plugins/research-toolkit",
+      "version": "1.2.0",
+      "description": "Deep research workflows",
+      "category": "research",
+      "tags": ["multi-phase", "synthesis"]
+    }
+  ]
+}
+```
+
+**Required fields:**
+- `name` — marketplace display name (also used as default registry name)
+- `syntropic137.type` — must be `"workflow-marketplace"`
+- `plugins[].name` — unique plugin identifier
+- `plugins[].source` — relative path to plugin directory (no `..` or absolute paths)
+
+**Optional fields:**
+- `syntropic137.min_platform_version` — minimum platform version (default `"0.0.0"`)
+- `plugins[].version` — semver (default `"0.1.0"`)
+- `plugins[].description` — shown in search results
+- `plugins[].category` — filterable category (e.g., `"research"`, `"ci"`)
+- `plugins[].tags` — filterable tags list
+
+### Security
+
+- Plugin `source` paths are validated against path traversal (`..`, absolute
+  paths) before cloning
+- Registry names are sanitized — must match `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`
+  and cannot contain `..`
+- Marketplace indexes are fetched via shallow `git clone` (same as package
+  install)
+
+### Caching
+
+- Indexes cached at `~/.syntropic137/marketplace/cache/<name>.json`
+- Default TTL: 4 hours
+- Force refresh: `syn marketplace refresh`
+- Stale or corrupt caches are silently re-fetched
+
+### CLI Commands
+
+```bash
+# Registry management
+syn marketplace add org/repo [--ref branch] [--name alias]
+syn marketplace list
+syn marketplace remove <name>
+syn marketplace refresh [name]
+
+# Discovery
+syn workflow search "query" [--category cat] [--tag tag]
+syn workflow info <plugin-name>
+
+# Install / update / uninstall
+syn workflow install <plugin-name>
+syn workflow update <package-name> [--ref ref] [--dry-run]
+syn workflow uninstall <package-name> [--keep-workflows]
+```
+
+### Private Repositories
+
+Private GitHub repos work as marketplaces if git can authenticate via
+your local credential configuration (SSH keys, `gh auth`, credential
+helpers). No special CLI flags are needed.
+
 ## Future Work
 
-- **Registry management** — `syn workflow registry add/list/remove`
 - **Package publishing** — `syn workflow publish`
 - **Version conflict detection** — `--force` / `--upgrade` flags
-- **Marketplace UI** — web browsing and discovery
-- **Private git authentication** — `--token` for private repos
+- **Marketplace UI** — web browsing and discovery in the dashboard
+- **Dependency resolution** — plugins declaring dependencies on other plugins
+- **Rollback** — `syn workflow update --rollback` to revert to previous version
