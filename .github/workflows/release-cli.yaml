@@ -146,15 +146,15 @@ jobs:
       - name: Verify build artifact
         working-directory: apps/syn-cli-node
         run: |
-          if [[ ! -f dist/syn.mjs ]]; then
-            echo "::error::Build artifact dist/syn.mjs not found"
+          if [[ ! -f dist/syn.js ]]; then
+            echo "::error::Build artifact dist/syn.js not found"
             exit 1
           fi
-          SIZE=$(wc -c < dist/syn.mjs | tr -d ' ')
-          echo "Build artifact: dist/syn.mjs ($SIZE bytes)"
+          SIZE=$(wc -c < dist/syn.js | tr -d ' ')
+          echo "Build artifact: dist/syn.js ($SIZE bytes)"
 
           # Smoke test: --version should print without errors
-          node dist/syn.mjs version
+          node dist/syn.js version
 
       # Uses npm Trusted Publishing (OIDC) — no stored npm token needed.
       # The npm registry exchanges the GitHub OIDC token for a short-lived

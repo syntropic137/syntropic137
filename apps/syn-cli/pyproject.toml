@@ -1,6 +1,6 @@
 [project]
 name = "syn-cli"
-version = "0.19.5"
+version = "0.19.6"
 description = "CLI for Syntropic137 — thin wrapper over syn-api"
 requires-python = ">=3.12"
 
