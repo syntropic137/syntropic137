@@ -19,6 +19,7 @@ REGRESSION: Catches bugs where:
 
 import asyncio
 import os
+from datetime import UTC, datetime
 
 import pytest
 
@@ -31,8 +32,6 @@ from event_sourcing import (
 )
 from event_sourcing.client.memory import MemoryEventStoreClient
 from event_sourcing.core.checkpoint import ProjectionCheckpoint
-from datetime import UTC, datetime
-
 from event_sourcing.core.event import DomainEvent, EventEnvelope, EventMetadata
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
