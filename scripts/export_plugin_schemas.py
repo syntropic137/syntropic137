@@ -23,6 +23,10 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
 # Ensure the repo root is importable so we can reach all packages.
@@ -42,8 +46,6 @@ sys.path.insert(0, str(REPO_ROOT))
 #
 # These imports must come after sys.path.insert above, hence the E402 noqa.
 # ---------------------------------------------------------------------------
-
-from pydantic import BaseModel  # noqa: E402
 
 from schemas.plugin.trigger_file_schema import TriggerFileSchema  # noqa: E402
 
