@@ -23,9 +23,13 @@ and managing repositories.
 
 ### Setup
 
-1. Run `just github-app-setup` to create the GitHub App
-2. Install the app on your target repositories
-3. The setup wizard handles credential encryption automatically
+Run the GitHub App setup via the CLI:
+
+```bash
+npx @syntropic137/setup github-app
+```
+
+See [GitHub Integration](/docs/guide/github-integration) for the full setup guide including trigger rules and webhook configuration. For secret storage details, see [Secrets Management](/docs/guide/secrets).
 
 ### Environment Variables
 

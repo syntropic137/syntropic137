@@ -37,4 +37,5 @@ export {
   DeploymentArchitectureFlow,
   WorkspaceIsolationFlow,
   ScalingFlow,
+  PluginEcosystemFlow,
 } from './interactive/diagrams';

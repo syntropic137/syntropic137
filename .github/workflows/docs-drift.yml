@@ -1,0 +1,28 @@
+name: Docs Drift Check
+
+# Only runs on main — not on PRs to avoid slowing down trunk-based development.
+# Must be green before any release.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  check-drift:
+    name: Check generated docs are up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Generate CLI docs
+        run: uvx --with typer --with rich --with pyyaml python apps/syn-docs/scripts/generate-cli-docs.py
+
+      - name: Check for drift
+        run: |
+          if ! git diff --quiet apps/syn-docs/content/docs/cli/; then
+            echo "::error::CLI docs are out of sync with syn-cli. Run 'pnpm generate' in apps/syn-docs/ and commit the result."
+            git diff --stat apps/syn-docs/content/docs/cli/
+            exit 1
+          fi
+          echo "CLI docs are up to date."

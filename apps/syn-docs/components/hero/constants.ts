@@ -10,11 +10,16 @@ export const DARK_COLORS = {
   hook: '#A1A1AA',     // zinc-400
   line: '#38BDF8',
   particle: '#7DD3FC',
+  particleAccent: '#a78bfa', // violet-400 accent particles
+  particleDim: '#1e3a5f',   // muted blue for depth
   coreOuter: '#38BDF8',
   coreMiddle: '#0EA5E9',
   coreInner: '#7DD3FC',
+  coreGlow: '#4d80ff',      // primary blue glow
   ring1: '#38BDF8',
   ring2: '#0EA5E9',
+  ring3: '#6366f1',          // indigo for third ring
+  ring4: '#2563eb',          // blue-600 for fourth ring
 };
 
 export const LIGHT_COLORS = {
@@ -25,11 +30,16 @@ export const LIGHT_COLORS = {
   hook: '#71717A',     // zinc-500
   line: '#0EA5E9',
   particle: '#0284C7',
+  particleAccent: '#7c3aed', // violet-600 accent
+  particleDim: '#64748b',    // slate-500
   coreOuter: '#0EA5E9',
   coreMiddle: '#0284C7',
   coreInner: '#0369A1',
+  coreGlow: '#3b82f6',
   ring1: '#0EA5E9',
   ring2: '#0284C7',
+  ring3: '#4f46e5',
+  ring4: '#1d4ed8',
 };
 
 export function useTheme() {

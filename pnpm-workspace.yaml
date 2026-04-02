@@ -1,5 +1,19 @@
 packages:
-  - 'apps/syn-dashboard-ui'
-  - 'apps/syn-docs'
-  - 'apps/syn-pulse-ui'
-  - 'packages/openclaw-plugin'
+  - apps/syn-dashboard-ui
+  - apps/syn-docs
+  - apps/syn-pulse-ui
+  - packages/openclaw-plugin
+
+overrides:
+  brace-expansion@<1.1.13: '>=1.1.13 <2'
+  dompurify@<3.3.2: '>=3.3.2'
+  dompurify@>=3.1.3 <=3.3.1: '>=3.3.2'
+  fast-xml-parser@>=4.0.0-beta.3 <=5.5.6: '>=5.5.7'
+  fast-xml-parser@>=5.0.0 <5.3.8: '>=5.3.8'
+  fast-xml-parser@>=5.0.0 <5.5.6: '>=5.5.6'
+  lodash-es@>=4.0.0 <=4.17.22: '>=4.17.23'
+  next@>=16.0.0-beta.0 <16.1.7: '>=16.1.7'
+  next@>=16.0.1 <16.1.7: '>=16.1.7'
+  path-to-regexp@>=8.0.0 <8.4.0: '>=8.4.0'
+  picomatch@>=4.0.0 <4.0.4: '>=4.0.4'
+  yaml@>=2.0.0 <2.8.3: '>=2.8.3'

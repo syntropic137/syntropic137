@@ -1,0 +1,205 @@
+---
+title: syn workflow
+description: "Manage workflows - create, list, run, and inspect"
+---
+
+Manage workflows - create, list, run, and inspect
+
+## `syn workflow create`
+
+Create a new workflow.
+
+```bash
+syn workflow create <name>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | `text` | Yes | Name of the workflow |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--type`, `-t` | `text` | `custom` | Type: research, planning, implementation, review, deployment, custom |
+| `--repo`, `-r` | `text` | `https://github.com/example/repo` | Repository URL for the workflow |
+| `--ref` | `text` | `main` | Repository ref/branch |
+| `--description`, `-d` | `text` | --- | Workflow description |
+
+---
+
+## `syn workflow delete`
+
+Archive (soft-delete) a workflow template.
+
+Archived workflows are hidden from 'syn workflow list' by default.
+Use 'syn workflow list --include-archived' to see them.
+
+```bash
+syn workflow delete <workflow_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `workflow_id` | `text` | Yes | Workflow ID (partial match supported) |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--force`, `-f` | `boolean` | `false` | Skip confirmation prompt |
+
+---
+
+## `syn workflow init`
+
+Scaffold a new workflow package from a template.
+
+```bash
+syn workflow init <directory>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `directory` | `path` | No | Directory to scaffold |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name`, `-n` | `text` | --- | Workflow name |
+| `--type`, `-t` | `text` | `research` | Workflow type |
+| `--phases` | `integer` | `3` | Number of phases |
+| `--multi` | `boolean` | `false` | Scaffold multi-workflow plugin |
+
+---
+
+## `syn workflow install`
+
+Install workflow(s) from a package directory or git repository.
+
+```bash
+syn workflow install <source>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `source` | `text` | Yes | Local path, GitHub URL, or org/repo shorthand |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--ref` | `text` | `main` | Git branch/tag to clone |
+| `--dry-run`, `-n` | `boolean` | `false` | Validate without installing |
+
+---
+
+## `syn workflow installed`
+
+List installed workflow packages.
+
+```bash
+syn workflow installed
+```
+
+---
+
+## `syn workflow list`
+
+List all workflows in the system.
+
+```bash
+syn workflow list
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--include-archived` | `boolean` | `false` | Include archived workflows |
+
+---
+
+## `syn workflow run`
+
+Execute a workflow.
+
+```bash
+syn workflow run <workflow_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `workflow_id` | `text` | Yes | Workflow ID (partial match supported) |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--input`, `-i` | `text` | --- | Input variables as key=value |
+| `--task`, `-t` | `text` | --- | Primary task description ($ARGUMENTS) |
+| `--dry-run`, `-n` | `boolean` | `false` | Validate without executing |
+| `--quiet`, `-q` | `boolean` | `false` | Minimal output |
+| `--container`, `-c` | `boolean` | `true` | Run in isolated container |
+| `--tenant` | `text` | --- | Tenant ID for multi-tenant attribution |
+
+---
+
+## `syn workflow show`
+
+Show details of a specific workflow.
+
+```bash
+syn workflow show <workflow_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `workflow_id` | `text` | Yes | Workflow ID (partial match supported) |
+
+---
+
+## `syn workflow status`
+
+Show execution history for a workflow.
+
+```bash
+syn workflow status <workflow_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `workflow_id` | `text` | Yes | Workflow ID (partial match supported) |
+
+---
+
+## `syn workflow validate`
+
+Validate a workflow YAML file or package directory without creating it.
+
+```bash
+syn workflow validate <file>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `file` | `path` | Yes | YAML file or package directory to validate |
+
+---

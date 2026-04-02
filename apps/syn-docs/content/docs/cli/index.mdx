@@ -15,11 +15,15 @@ uv sync
 syn --help
 ```
 
-## Commands
+## Global Commands
 
-### `syn workflow`
+| Command | Description |
+|---------|-------------|
+| `syn health` | Check API server health status. |
+| `syn run` | Execute a workflow (shortcut for 'syn workflow run'). |
+| `syn version` | Show version information. |
 
-Manage, install, and run workflows.
+## Command Groups
 
 #### Install & Manage Packages
 
@@ -178,6 +182,3 @@ syn config validate
 | Option | Description |
 |--------|-------------|
 | `--help` | Show help message |
-| `--version` | Show version |
-| `--api-url` | Override API server URL |
-| `--format` | Output format (`json`, `table`) |

@@ -10,7 +10,9 @@ const CX = 400;
 const Y_USER = 0;
 const Y_PLATFORM = 120;
 const Y_INFRA = 380;
-const Y_AGENT = 490;
+const Y_SECURITY = 500;
+const Y_AGENT = 630;
+const Y_EXTERNAL = 770;
 
 // User layer
 const userPositions = layoutRow(['cli', 'dashboardUi', 'github'], Y_USER + 35, CX, 30);
@@ -23,8 +25,14 @@ const eventPositions = layoutRow(['eventStore', 'projections', 'eventCollector',
 // Infrastructure
 const infraPositions = layoutRow(['timescaledb', 'redis', 'minio'], Y_INFRA + 35, CX, 30, NODE_WIDTH.sm);
 
-// Agent Execution
+// Security & Proxy
+const securityPositions = layoutRow(['envoyProxy', 'tokenInjector', 'dockerSocketProxy'], Y_SECURITY + 35, CX, 30, NODE_WIDTH.sm);
+
+// Agent Execution (agent-net isolated)
 const agentPositions = layoutRow(['workspace', 'aiAgent'], Y_AGENT + 35, CX, 40);
+
+// External APIs
+const externalPositions = layoutRow(['externalApis'], Y_EXTERNAL + 35, CX, 30);
 
 const nodes: Node[] = [
   // Groups
@@ -44,9 +52,19 @@ const nodes: Node[] = [
     style: { width: 600, height: 85 },
   },
   {
+    id: 'grpSecurity', type: 'groupNode', position: { x: CX - 300, y: Y_SECURITY },
+    data: { title: 'Security & Proxy', color: 'amber' },
+    style: { width: 600, height: 85 },
+  },
+  {
     id: 'grpAgent', type: 'groupNode', position: { x: CX - 230, y: Y_AGENT },
-    data: { title: 'Agent Execution', color: 'pink' },
+    data: { title: 'Agent Execution (agent-net)', color: 'pink' },
     style: { width: 460, height: 85 },
+  },
+  {
+    id: 'grpExternal', type: 'groupNode', position: { x: CX - 170, y: Y_EXTERNAL },
+    data: { title: 'External APIs', color: 'emerald' },
+    style: { width: 340, height: 85 },
   },
 
   // User Layer
@@ -70,9 +88,17 @@ const nodes: Node[] = [
   { id: 'redis', type: 'flowNode', position: infraPositions.redis, data: { icon: 'zap', label: 'Redis', sublabel: 'Cache + Pub/Sub', color: 'amber', size: 'sm' } },
   { id: 'minio', type: 'flowNode', position: infraPositions.minio, data: { icon: 'drive', label: 'MinIO', sublabel: 'S3 Artifacts', color: 'pink', size: 'sm' } },
 
-  // Agent Execution
-  { id: 'workspace', type: 'flowNode', position: agentPositions.workspace, data: { icon: 'container', label: 'Isolated Workspace', sublabel: 'Docker', color: 'pink' } },
-  { id: 'aiAgent', type: 'flowNode', position: agentPositions.aiAgent, data: { icon: 'zap', label: 'Claude / AI Agent', color: 'pink' } },
+  // Security & Proxy
+  { id: 'envoyProxy', type: 'flowNode', position: securityPositions.envoyProxy, data: { icon: 'shield', label: 'envoy-proxy', sublabel: ':8081', color: 'amber', size: 'sm' } },
+  { id: 'tokenInjector', type: 'flowNode', position: securityPositions.tokenInjector, data: { icon: 'lock', label: 'token-injector', sublabel: 'ext_authz :9002', color: 'amber', size: 'sm' } },
+  { id: 'dockerSocketProxy', type: 'flowNode', position: securityPositions.dockerSocketProxy, data: { icon: 'container', label: 'docker-socket-proxy', sublabel: ':2375', color: 'amber', size: 'sm' } },
+
+  // Agent Execution (agent-net network isolation)
+  { id: 'workspace', type: 'flowNode', position: agentPositions.workspace, data: { icon: 'container', label: 'Isolated Workspace', sublabel: 'Docker / agent-net', color: 'pink' } },
+  { id: 'aiAgent', type: 'flowNode', position: agentPositions.aiAgent, data: { icon: 'zap', label: 'Claude / AI Agent', sublabel: 'no real API keys', color: 'pink' } },
+
+  // External APIs
+  { id: 'externalApis', type: 'flowNode', position: externalPositions.externalApis, data: { icon: 'globe', label: 'External APIs', sublabel: 'Anthropic, GitHub, PyPI, npm', color: 'emerald' } },
 ];
 
 const edges: Edge[] = [
@@ -90,11 +116,19 @@ const edges: Edge[] = [
   edge('eventStore', 'timescaledb', 'Events'),
   edge('projections', 'redis', 'Cache'),
   edge('workspaceMgr', 'minio', 'Artifacts', 'slow'),
+  // Platform → Security
+  edge('fastapi', 'dockerSocketProxy', 'Docker API'),
   // Platform → Agent
   edge('workspaceMgr', 'workspace', 'Isolated Execution'),
   hedge('workspace', 'aiAgent'),
+  // Agent → Security (egress path — the key security story)
+  edge('aiAgent', 'envoyProxy', 'Egress via proxy URL'),
+  // Security internal
+  hedge('envoyProxy', 'tokenInjector', 'ext_authz'),
+  // Security → External APIs (credentials injected at egress)
+  edge('envoyProxy', 'externalApis', 'Real API keys injected'),
 ];
 
 export function SystemArchitectureFlow() {
-  return <ReactFlowDiagram nodes={nodes} edges={edges} minHeight={620} />;
+  return <ReactFlowDiagram nodes={nodes} edges={edges} minHeight={900} />;
 }

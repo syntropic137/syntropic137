@@ -1,0 +1,196 @@
+---
+title: syn system
+description: "Manage systems and their observability"
+---
+
+Manage systems and their observability
+
+## `syn system activity`
+
+Show recent execution activity for a system.
+
+```bash
+syn system activity <system_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `system_id` | `text` | Yes | System ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | `integer` | `50` | Max entries |
+| `--offset` | `integer` | `0` | Pagination offset |
+
+---
+
+## `syn system cost`
+
+Show cost breakdown for a system.
+
+```bash
+syn system cost <system_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `system_id` | `text` | Yes | System ID |
+
+---
+
+## `syn system create`
+
+Create a new system within an organization.
+
+```bash
+syn system create --org <org> --name <name>
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--org`, `-o` | `text` | --- | Organization ID |
+| `--name`, `-n` | `text` | --- | System name |
+| `--description`, `-d` | `text` | `` | Description |
+| `--created-by` | `text` | `cli` | Creator identifier |
+
+---
+
+## `syn system delete`
+
+Delete a system.
+
+```bash
+syn system delete <system_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `system_id` | `text` | Yes | System ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--force`, `-f` | `boolean` | `false` | Skip confirmation |
+
+---
+
+## `syn system history`
+
+Show full execution history for a system.
+
+```bash
+syn system history <system_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `system_id` | `text` | Yes | System ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | `integer` | `50` | Max entries |
+| `--offset` | `integer` | `0` | Pagination offset |
+
+---
+
+## `syn system list`
+
+List all systems, optionally filtered by organization.
+
+```bash
+syn system list
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--org`, `-o` | `text` | --- | Filter by organization ID |
+
+---
+
+## `syn system patterns`
+
+Show failure patterns and cost outliers for a system.
+
+```bash
+syn system patterns <system_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `system_id` | `text` | Yes | System ID |
+
+---
+
+## `syn system show`
+
+Show system details.
+
+```bash
+syn system show <system_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `system_id` | `text` | Yes | System ID |
+
+---
+
+## `syn system status`
+
+Show health status of a system and its repos.
+
+```bash
+syn system status <system_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `system_id` | `text` | Yes | System ID |
+
+---
+
+## `syn system update`
+
+Update a system's name or description.
+
+```bash
+syn system update <system_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `system_id` | `text` | Yes | System ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name`, `-n` | `text` | --- | New name |
+| `--description`, `-d` | `text` | --- | New description |
+
+---
