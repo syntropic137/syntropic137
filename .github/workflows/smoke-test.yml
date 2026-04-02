@@ -231,6 +231,37 @@ jobs:
               sys.exit(1)
           "
 
+      - name: Verify created workflow appears in listing (projection roundtrip)
+        run: |
+          # REGRESSION: Validates the full event pipeline:
+          # POST /workflows → event store → subscription coordinator → projection → GET /workflows
+          # Catches: killed subscriptions (non-idempotent connect), boolean filter
+          # serialization mismatches, projection handler registration gaps.
+          #
+          # Wait up to 10s for the subscription to deliver the event to the projection.
+          docker compose $COMPOSE_FILES exec -T api python -c "
+          import urllib.request, urllib.error, json, sys, time
+
+          workflow_name = 'smoke-test-workflow'
+
+          for attempt in range(1, 11):
+              try:
+                  with urllib.request.urlopen('http://localhost:8000/workflows', timeout=10) as r:
+                      workflows = json.loads(r.read())
+                      names = [w.get('name') for w in workflows]
+                      if workflow_name in names:
+                          print(f'Projection roundtrip OK (attempt {attempt}): found {len(workflows)} workflow(s)')
+                          sys.exit(0)
+                      print(f'  Attempt {attempt}/10: {len(workflows)} workflow(s), waiting for projection...')
+              except Exception as e:
+                  print(f'  Attempt {attempt}/10: GET /workflows failed: {e}')
+              time.sleep(1)
+
+          print(f'ERROR: \"{workflow_name}\" never appeared in GET /workflows after 10s')
+          print('This likely means the subscription coordinator is not delivering events to projections.')
+          sys.exit(1)
+          "
+
       # -------------------------------------------------------------------------
       # Teardown
       # -------------------------------------------------------------------------

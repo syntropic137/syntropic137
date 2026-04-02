@@ -95,7 +95,13 @@ export class SynClient {
     path: string,
     params?: Record<string, string | number | boolean | undefined>,
   ): URL {
-    const url = new URL(path, this.baseUrl);
+    // Concatenate base path with request path so that a base URL like
+    // "http://host:8137/api/v1" + "/health" → "http://host:8137/api/v1/health"
+    // (plain `new URL(path, base)` would discard the base path component).
+    const base = new URL(this.baseUrl);
+    const basePath = base.pathname.replace(/\/+$/, "");
+    const reqPath = path.startsWith("/") ? path : `/${path}`;
+    const url = new URL(`${basePath}${reqPath}`, base);
     if (params) {
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined) {

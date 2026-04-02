@@ -6,6 +6,17 @@ Extracted from postgres_helpers.py to reduce module cognitive complexity.
 from typing import Any
 
 
+def _serialize_filter_value(value: Any) -> str:
+    """Serialize a Python value to match PostgreSQL's JSONB ->> text extraction.
+
+    JSONB ->> extracts booleans as 'true'/'false' (lowercase JSON literals),
+    but Python's str(False) produces 'False'. This helper ensures values match.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
 def _build_where_clause(
     filters: dict[str, Any],
     start_idx: int,
@@ -15,7 +26,7 @@ def _build_where_clause(
     params: list[Any] = []
     for idx, (key, value) in enumerate(filters.items(), start=start_idx):
         conditions.append(f"data->>'{key}' = ${idx}")
-        params.append(str(value))
+        params.append(_serialize_filter_value(value))
     return " WHERE " + " AND ".join(conditions), params
 
 

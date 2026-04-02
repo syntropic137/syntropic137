@@ -240,10 +240,7 @@ class TestSubscriptionPositionAtomicity:
         await service.start()
 
         # Wait for catch-up
-        for _ in range(50):
-            if service.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await service.wait_until_caught_up(timeout=5.0)
 
         await service.stop()
 
@@ -287,6 +284,7 @@ class TestSubscriptionPositionAtomicity:
         await service1.start()
 
         # Wait for some processing (will fail at event 8)
+        # The service will error on event 8 and retry; wait briefly for events 1-7
         for _ in range(30):
             if len(projection_manager.processed_events) >= 7:
                 break
@@ -315,10 +313,7 @@ class TestSubscriptionPositionAtomicity:
         await service2.start()
 
         # Wait for catch-up
-        for _ in range(50):
-            if service2.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await service2.wait_until_caught_up(timeout=5.0)
 
         await service2.stop()
 
@@ -363,7 +358,7 @@ class TestSubscriptionPositionAtomicity:
 
         await service.start()
 
-        # Wait for processing to stabilize
+        # Wait for processing to stabilize (crash simulation — not a catch-up poll)
         await asyncio.sleep(0.5)
         await service.stop()
 
@@ -385,10 +380,7 @@ class TestSubscriptionPositionAtomicity:
         )
 
         await service2.start()
-        for _ in range(50):
-            if service2.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await service2.wait_until_caught_up(timeout=5.0)
         await service2.stop()
 
         # Event 6 should be in the restart processing
@@ -460,10 +452,7 @@ class TestSubscriptionPositionAtomicity:
         assert "warnings" in health
 
         await service.start()
-        for _ in range(50):
-            if service.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await service.wait_until_caught_up(timeout=5.0)
 
         # Check health while running
         health = await service.health_check()
@@ -500,10 +489,7 @@ class TestSubscriptionResumeCorrectness:
         )
 
         await service.start()
-        for _ in range(50):
-            if service.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await service.wait_until_caught_up(timeout=5.0)
         await service.stop()
 
         # Should process events 6-10 only (not 1-5 again)
@@ -544,10 +530,7 @@ class TestSubscriptionResumeCorrectness:
         )
 
         await service.start()
-        for _ in range(50):
-            if service.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await service.wait_until_caught_up(timeout=5.0)
         await service.stop()
 
         # Events 4-10 should be processed (4, 5 may be reprocessed, which is OK)

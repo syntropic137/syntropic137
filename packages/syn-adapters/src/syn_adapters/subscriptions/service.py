@@ -91,6 +91,7 @@ class EventSubscriptionService:
         # Background task
         self._subscription_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
+        self._caught_up_event = asyncio.Event()
 
         logger.debug(
             "[SUBSCRIPTION] Service initialized",
@@ -109,6 +110,14 @@ class EventSubscriptionService:
     def is_caught_up(self) -> bool:
         """Check if caught up with live events."""
         return self._caught_up
+
+    async def wait_until_caught_up(self, timeout: float = 5.0) -> None:
+        """Block until the service has caught up with the event store.
+
+        Args:
+            timeout: Maximum seconds to wait before raising TimeoutError.
+        """
+        await asyncio.wait_for(self._caught_up_event.wait(), timeout=timeout)
 
     @property
     def last_position(self) -> int:
@@ -155,6 +164,7 @@ class EventSubscriptionService:
         self._stop_event.clear()
         self._running = True
         self._caught_up = False
+        self._caught_up_event.clear()
         self._events_processed = 0
         self._reconnect_count = 0
 

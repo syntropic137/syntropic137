@@ -14,6 +14,19 @@ from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import Tr
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 
 
+class FakeClock:
+    """Deterministic clock for testing time-dependent behavior."""
+
+    def __init__(self, start: float = 0.0) -> None:
+        self._now = start
+
+    def __call__(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+
+
 class MockEventsClient:
     """Mock GitHub Events API client for testing."""
 
@@ -57,12 +70,27 @@ class NullRepository:
 class MockPollingSettings:
     """Minimal mock matching PollingSettings interface."""
 
-    poll_interval_seconds: float = 0.05  # Very fast for tests
-    safety_net_interval_seconds: float = 0.1
+    poll_interval_seconds: float = 60.0
+    safety_net_interval_seconds: float = 300.0
     webhook_stale_threshold_seconds: float = 1800.0
     dedup_ttl_seconds: int = 86400
     disabled: bool = False
     enabled: bool = True
+
+
+async def _instant_sleep(_seconds: float) -> None:
+    """No-op sleep for fast tests."""
+    await asyncio.sleep(0)
+
+
+async def _wait_for_poll_count(client: MockEventsClient, count: int, timeout: float = 2.0) -> None:
+    """Wait until the mock client has been polled at least ``count`` times."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while client.poll_count < count:
+        if asyncio.get_event_loop().time() > deadline:
+            msg = f"Timed out waiting for poll_count >= {count} (got {client.poll_count})"
+            raise TimeoutError(msg)
+        await asyncio.sleep(0)
 
 
 async def _index_trigger(store: InMemoryTriggerQueryStore) -> None:
@@ -84,6 +112,7 @@ async def _index_trigger(store: InMemoryTriggerQueryStore) -> None:
 class TestPollerStartStop:
     @pytest.mark.asyncio
     async def test_starts_and_stops_cleanly(self) -> None:
+        clock = FakeClock(start=1000.0)
         store = InMemoryTriggerQueryStore()
         poller = GitHubEventPoller(
             events_client=MockEventsClient(),
@@ -92,9 +121,10 @@ class TestPollerStartStop:
                 trigger_store=store,
                 trigger_repo=NullRepository(),
             ),
-            health_tracker=WebhookHealthTracker(),
+            health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,
             settings=MockPollingSettings(),  # type: ignore[arg-type]
+            sleep=_instant_sleep,
         )
 
         await poller.start()
@@ -105,6 +135,7 @@ class TestPollerStartStop:
 
     @pytest.mark.asyncio
     async def test_polls_repos_with_active_triggers(self) -> None:
+        clock = FakeClock(start=1000.0)
         store = InMemoryTriggerQueryStore()
         await _index_trigger(store)
 
@@ -116,21 +147,22 @@ class TestPollerStartStop:
                 trigger_store=store,
                 trigger_repo=NullRepository(),
             ),
-            health_tracker=WebhookHealthTracker(),
+            health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,
             settings=MockPollingSettings(),  # type: ignore[arg-type]
+            sleep=_instant_sleep,
         )
 
         await poller.start()
-        # Let it run a couple cycles
-        await asyncio.sleep(0.15)
+        await _wait_for_poll_count(mock_client, 1)
         await poller.stop()
 
         assert mock_client.poll_count >= 1
 
     @pytest.mark.asyncio
     async def test_no_api_calls_without_triggers(self) -> None:
-        store = InMemoryTriggerQueryStore()  # empty — no triggers
+        clock = FakeClock(start=1000.0)
+        store = InMemoryTriggerQueryStore()  # empty -- no triggers
         mock_client = MockEventsClient()
 
         poller = GitHubEventPoller(
@@ -140,19 +172,23 @@ class TestPollerStartStop:
                 trigger_store=store,
                 trigger_repo=NullRepository(),
             ),
-            health_tracker=WebhookHealthTracker(),
+            health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,
             settings=MockPollingSettings(),  # type: ignore[arg-type]
+            sleep=_instant_sleep,
         )
 
         await poller.start()
-        await asyncio.sleep(0.15)
+        # Let the poller run a few cycles (no triggers, so no polls to client)
+        # We wait briefly then check poll_count is still 0
+        await asyncio.sleep(0.05)
         await poller.stop()
 
         assert mock_client.poll_count == 0
 
     @pytest.mark.asyncio
     async def test_processes_polled_events(self) -> None:
+        clock = FakeClock(start=1000.0)
         store = InMemoryTriggerQueryStore()
         await _index_trigger(store)
 
@@ -167,20 +203,22 @@ class TestPollerStartStop:
         ]
 
         dedup = InMemoryDedup()
+        mock_client = MockEventsClient(events=events)
         poller = GitHubEventPoller(
-            events_client=MockEventsClient(events=events),
+            events_client=mock_client,
             pipeline=EventPipeline(
                 dedup=dedup,
                 trigger_store=store,
                 trigger_repo=NullRepository(),
             ),
-            health_tracker=WebhookHealthTracker(),
+            health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,
             settings=MockPollingSettings(),  # type: ignore[arg-type]
+            sleep=_instant_sleep,
         )
 
         await poller.start()
-        await asyncio.sleep(0.15)
+        await _wait_for_poll_count(mock_client, 1)
         await poller.stop()
 
         # The event's dedup key should have been recorded

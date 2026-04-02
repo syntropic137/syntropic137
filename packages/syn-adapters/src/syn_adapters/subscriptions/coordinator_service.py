@@ -30,6 +30,8 @@ from syn_adapters.subscriptions.realtime_adapter import (
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
+    from event_sourcing.core.checkpoint import ProjectionCheckpointStore
+
     from syn_adapters.projections.realtime import RealTimeProjection
 
 logger = get_logger(__name__)
@@ -56,6 +58,7 @@ class CoordinatorSubscriptionService:
         event_store: Any,
         projections: list[CheckpointedProjection],
         realtime_projection: RealTimeProjection | None = None,
+        checkpoint_store: ProjectionCheckpointStore | None = None,
     ) -> None:
         """Initialize the coordinator subscription service.
 
@@ -63,14 +66,17 @@ class CoordinatorSubscriptionService:
             event_store: Event store client with subscribe() method
             projections: List of CheckpointedProjection instances
             realtime_projection: Optional RealTimeProjection for SSE broadcast
+            checkpoint_store: Optional injected checkpoint store (e.g. MemoryCheckpointStore
+                for tests). If None, a PostgresCheckpointStore is created on start().
         """
         self._event_store = event_store
         self._projections = projections
         self._realtime_projection = realtime_projection
+        self._injected_checkpoint_store = checkpoint_store
 
         # Will be set on start
         self._db_pool: asyncpg.Pool | None = None
-        self._checkpoint_store: PostgresCheckpointStore | None = None
+        self._checkpoint_store: ProjectionCheckpointStore | None = None
         self._coordinator: SubscriptionCoordinator | None = None
         self._subscription_task: asyncio.Task[None] | None = None
         self._running = False
@@ -96,24 +102,29 @@ class CoordinatorSubscriptionService:
 
         logger.info("Starting coordinator subscription service...")
 
-        # Create database pool for checkpoint store (ADR-030)
-        settings = get_settings()
-        if not settings.syn_observability_db_url:
-            raise ValueError(
-                "SYN_OBSERVABILITY_DB_URL must be configured for subscription service. "
-                "Set it in your .env file."
+        if self._injected_checkpoint_store:
+            # Use injected checkpoint store (e.g. MemoryCheckpointStore for tests)
+            self._checkpoint_store = self._injected_checkpoint_store
+            logger.info("Using injected checkpoint store")
+        else:
+            # Create database pool for checkpoint store (ADR-030)
+            settings = get_settings()
+            if not settings.syn_observability_db_url:
+                raise ValueError(
+                    "SYN_OBSERVABILITY_DB_URL must be configured for subscription service. "
+                    "Set it in your .env file."
+                )
+            database_url = str(settings.syn_observability_db_url)
+            self._db_pool = await asyncpg.create_pool(
+                database_url,
+                min_size=2,
+                max_size=10,
             )
-        database_url = str(settings.syn_observability_db_url)
-        self._db_pool = await asyncpg.create_pool(
-            database_url,
-            min_size=2,
-            max_size=10,
-        )
-        logger.info("Database pool created for checkpoint store")
+            logger.info("Database pool created for checkpoint store")
 
-        # Create checkpoint store (table is created on first operation)
-        self._checkpoint_store = PostgresCheckpointStore(self._db_pool)
-        logger.info("Checkpoint store initialized")
+            # Create checkpoint store (table is created on first operation)
+            self._checkpoint_store = PostgresCheckpointStore(self._db_pool)
+            logger.info("Checkpoint store initialized")
 
         # Build projection list (add realtime adapter if configured)
         all_projections = list(self._projections)
@@ -159,6 +170,7 @@ def create_coordinator_service(
     projection_store: Any,
     realtime_projection: RealTimeProjection | None = None,
     execution_service: Any = None,
+    checkpoint_store: ProjectionCheckpointStore | None = None,
 ) -> CoordinatorSubscriptionService:
     """Factory to create the coordinator subscription service.
 
@@ -166,6 +178,8 @@ def create_coordinator_service(
         event_store: Event store client
         projection_store: Projection store (for creating projections)
         realtime_projection: Optional RealTimeProjection
+        checkpoint_store: Optional injected checkpoint store (e.g. MemoryCheckpointStore
+            for tests). If None, a PostgresCheckpointStore is created on start().
 
     Returns:
         Configured CoordinatorSubscriptionService
@@ -225,4 +239,5 @@ def create_coordinator_service(
         event_store=event_store,
         projections=projections,
         realtime_projection=realtime_projection,
+        checkpoint_store=checkpoint_store,
     )
