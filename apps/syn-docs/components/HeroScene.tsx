@@ -25,52 +25,45 @@ function usePrefersReducedMotion() {
 // ---------------------------------------------------------------------------
 // Floating Particles — varied sizes, color variation, accent highlights
 // ---------------------------------------------------------------------------
+const PARTICLE_COUNT = 800;
+const PARTICLE_SPREAD = 18;
+
+function generateParticleData(theme: typeof DARK_COLORS) {
+  const pos = new Float32Array(PARTICLE_COUNT * 3);
+  const sz = new Float32Array(PARTICLE_COUNT);
+  const col = new Float32Array(PARTICLE_COUNT * 3);
+
+  const primaryColor = new THREE.Color(theme.particle);
+  const accentColor = new THREE.Color(theme.particleAccent);
+  const dimColor = new THREE.Color(theme.particleDim);
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    pos[i * 3] = (Math.random() - 0.5) * PARTICLE_SPREAD;
+    pos[i * 3 + 1] = (Math.random() - 0.5) * PARTICLE_SPREAD;
+    pos[i * 3 + 2] = (Math.random() - 0.5) * PARTICLE_SPREAD;
+
+    const r = Math.random();
+    sz[i] = r < 0.05 ? 0.06 + Math.random() * 0.04
+          : r < 0.3  ? 0.025 + Math.random() * 0.015
+          :            0.008 + Math.random() * 0.012;
+
+    const c = r < 0.05 ? accentColor
+            : r < 0.4  ? primaryColor
+            :            dimColor.clone().lerp(primaryColor, Math.random() * 0.4);
+    col[i * 3] = c.r;
+    col[i * 3 + 1] = c.g;
+    col[i * 3 + 2] = c.b;
+  }
+
+  return { positions: pos, sizes: sz, colors: col };
+}
+
 function FloatingParticles({ isDark, reducedMotion }: { isDark: boolean; reducedMotion: boolean }) {
   const ref = useRef<THREE.Points>(null);
   const theme = isDark ? DARK_COLORS : LIGHT_COLORS;
 
-  const { positions, sizes, colors } = useMemo(() => {
-    const count = 800;
-    const pos = new Float32Array(count * 3);
-    const sz = new Float32Array(count);
-    const col = new Float32Array(count * 3);
-
-    const primaryColor = new THREE.Color(theme.particle);
-    const accentColor = new THREE.Color(theme.particleAccent);
-    const dimColor = new THREE.Color(theme.particleDim);
-
-    for (let i = 0; i < count; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 18;
-      pos[i * 3 + 1] = (Math.random() - 0.5) * 18;
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 18;
-
-      // Vary sizes: mostly small, a few larger for depth
-      const r = Math.random();
-      if (r < 0.05) {
-        sz[i] = 0.06 + Math.random() * 0.04; // bright accent — larger
-      } else if (r < 0.3) {
-        sz[i] = 0.025 + Math.random() * 0.015; // medium
-      } else {
-        sz[i] = 0.008 + Math.random() * 0.012; // small / distant
-      }
-
-      // Color variation
-      let c: THREE.Color;
-      if (r < 0.05) {
-        c = accentColor;
-      } else if (r < 0.4) {
-        c = primaryColor;
-      } else {
-        c = dimColor.clone().lerp(primaryColor, Math.random() * 0.4);
-      }
-      col[i * 3] = c.r;
-      col[i * 3 + 1] = c.g;
-      col[i * 3 + 2] = c.b;
-    }
-
-    return { positions: pos, sizes: sz, colors: col };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark]);
+  const { positions, sizes, colors } = useMemo(() => generateParticleData(theme), [isDark]);
 
   useFrame((state) => {
     if (ref.current && !reducedMotion) {
@@ -101,6 +94,15 @@ function FloatingParticles({ isDark, reducedMotion }: { isDark: boolean; reduced
 // ---------------------------------------------------------------------------
 // Central Core — nested rotating geometry with emissive glow + breathing
 // ---------------------------------------------------------------------------
+function animateMesh(mesh: THREE.Mesh | null, t: number, rotY: number, rotX: number, rotZ: number, breathSpeed: number, breathAmp: number, offset: number) {
+  if (!mesh) return;
+  mesh.rotation.y = t * rotY;
+  mesh.rotation.x = t * rotX;
+  if (rotZ) mesh.rotation.z = t * rotZ;
+  const s = 1 + Math.sin(t * breathSpeed + offset) * breathAmp;
+  mesh.scale.set(s, s, s);
+}
+
 function CentralCore({ isDark, reducedMotion }: { isDark: boolean; reducedMotion: boolean }) {
   const outerRef = useRef<THREE.Mesh>(null);
   const middleRef = useRef<THREE.Mesh>(null);
@@ -113,45 +115,23 @@ function CentralCore({ isDark, reducedMotion }: { isDark: boolean; reducedMotion
     const t = state.clock.elapsedTime;
     if (reducedMotion) return;
 
-    // Outer icosahedron — slow tumble
-    if (outerRef.current) {
-      outerRef.current.rotation.y = t * 0.15;
-      outerRef.current.rotation.x = t * 0.1;
-      const s = 1 + Math.sin(t * 0.8) * 0.03;
-      outerRef.current.scale.set(s, s, s);
-    }
+    animateMesh(outerRef.current, t, 0.15, 0.1, 0, 0.8, 0.03, 0);
+    animateMesh(middleRef.current, t, -0.35, 0, 0.2, 1.2, 0.04, 1);
+    animateMesh(innerRef.current, t, 0.6, -0.3, 0, 1.8, 0.05, 2);
 
-    // Middle icosahedron — counter-rotate
-    if (middleRef.current) {
-      middleRef.current.rotation.y = -t * 0.35;
-      middleRef.current.rotation.z = t * 0.2;
-      const s = 1 + Math.sin(t * 1.2 + 1) * 0.04;
-      middleRef.current.scale.set(s, s, s);
-    }
-
-    // Inner dodecahedron — faster spin
-    if (innerRef.current) {
-      innerRef.current.rotation.y = t * 0.6;
-      innerRef.current.rotation.x = -t * 0.3;
-      const s = 1 + Math.sin(t * 1.8 + 2) * 0.05;
-      innerRef.current.scale.set(s, s, s);
-    }
-
-    // Glow sphere — breathing
     if (glowSphereRef.current) {
       const breath = 1 + Math.sin(t * 1.5) * 0.08;
       glowSphereRef.current.scale.set(breath, breath, breath);
-      const mat = glowSphereRef.current.material as THREE.MeshBasicMaterial;
-      mat.opacity = (isDark ? 0.15 : 0.1) + Math.sin(t * 1.5) * 0.05;
+      (glowSphereRef.current.material as THREE.MeshBasicMaterial).opacity =
+        (isDark ? 0.15 : 0.1) + Math.sin(t * 1.5) * 0.05;
     }
 
-    // Pulse ring — expanding ring effect
     if (pulseRef.current) {
-      const cycle = (t * 0.4) % 1; // 0..1 repeating
+      const cycle = (t * 0.4) % 1;
       const s = 0.4 + cycle * 0.8;
       pulseRef.current.scale.set(s, s, s);
-      const mat = pulseRef.current.material as THREE.MeshBasicMaterial;
-      mat.opacity = (1 - cycle) * (isDark ? 0.15 : 0.1);
+      (pulseRef.current.material as THREE.MeshBasicMaterial).opacity =
+        (1 - cycle) * (isDark ? 0.15 : 0.1);
     }
   });
 

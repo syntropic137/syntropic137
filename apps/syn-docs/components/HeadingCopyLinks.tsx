@@ -59,34 +59,34 @@ function handleHeadingClick(e: MouseEvent) {
   }, 1500);
 }
 
-function handleCodeClick(e: MouseEvent) {
-  const target = e.target as HTMLElement;
-  if (target.closest('button')) return;
-
-  // Find the .line span (Shiki renders each line as span.line)
-  const lineSpan = target.closest('.line') as HTMLElement | null;
-  if (!lineSpan) return;
-  if (!lineSpan.closest('pre')) return;
-
-  // Skip if user is selecting text
-  const selection = window.getSelection();
-  if (selection && selection.toString().length > 0) return;
-
-  const text = lineSpan.textContent?.trim();
-  if (!text) return;
-
-  navigator.clipboard.writeText(text);
-  showTooltip('Line copied!', null, e.clientX, e.clientY);
-
-  // Flash the line and swap icon to checkmark
+function flashLineCopied(lineSpan: HTMLElement) {
   lineSpan.classList.add('line-copied');
   const icon = lineSpan.querySelector('.line-copy-icon');
   if (icon) icon.innerHTML = CHECK_ICON;
-
   setTimeout(() => {
     lineSpan.classList.remove('line-copied');
     if (icon) icon.innerHTML = COPY_ICON;
   }, 1200);
+}
+
+function getClickedLine(e: MouseEvent): HTMLElement | null {
+  const target = e.target as HTMLElement;
+  if (target.closest('button')) return null;
+  const lineSpan = target.closest('.line') as HTMLElement | null;
+  if (!lineSpan?.closest('pre')) return null;
+  const selection = window.getSelection();
+  if (selection && selection.toString().length > 0) return null;
+  return lineSpan;
+}
+
+function handleCodeClick(e: MouseEvent) {
+  const lineSpan = getClickedLine(e);
+  if (!lineSpan) return;
+  const text = lineSpan.textContent?.trim();
+  if (!text) return;
+  navigator.clipboard.writeText(text);
+  showTooltip('Line copied!', null, e.clientX, e.clientY);
+  flashLineCopied(lineSpan);
 }
 
 /** Inject a copy icon into each .line span in code blocks. */
