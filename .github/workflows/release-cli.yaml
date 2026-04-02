@@ -71,10 +71,11 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            VERSION="${{ github.event.release.tag_name }}"
-          elif [[ "${{ github.event_name }}" == "workflow_call" ]]; then
+          if [[ -n "${{ inputs.version }}" ]]; then
+            # workflow_call or workflow_dispatch with version
             VERSION="${{ inputs.version }}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
           else
             VERSION="v0.0.0-dry-run"
           fi
@@ -157,13 +158,13 @@ jobs:
       # The npm registry exchanges the GitHub OIDC token for a short-lived
       # publish credential. Do NOT set NODE_AUTH_TOKEN — it overrides OIDC.
       - name: Publish to npm
-        if: ${{ (github.event_name == 'release' || github.event_name == 'workflow_call') && !inputs.dry_run }}
+        if: ${{ steps.version.outputs.semver != '0.0.0-dry-run' && !inputs.dry_run }}
         working-directory: apps/syn-cli-node
         run: |
           npm publish --access public --tag ${{ steps.version.outputs.npm_tag }} --provenance
 
       - name: Publish summary
-        if: ${{ (github.event_name == 'release' || github.event_name == 'workflow_call') && !inputs.dry_run }}
+        if: ${{ steps.version.outputs.semver != '0.0.0-dry-run' && !inputs.dry_run }}
         run: |
           echo "## CLI Published: @syntropic137/cli@${{ steps.version.outputs.semver }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
