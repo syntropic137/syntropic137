@@ -274,28 +274,28 @@ function getIndent(line: string): number {
   return count;
 }
 
-interface ScanState {
-  ch: string;
-  index: number;
-  inQuote: boolean;
+const QUOTE_CHARS = new Set(["'", '"']);
+
+function toggleQuote(current: string, ch: string): string {
+  if (current === "") return QUOTE_CHARS.has(ch) ? ch : "";
+  return ch === current ? "" : current;
 }
 
-function* scanQuoteAware(text: string): Generator<ScanState> {
-  let inSingle = false;
-  let inDouble = false;
+function buildQuoteMask(text: string): boolean[] {
+  const mask = new Array<boolean>(text.length);
+  let quote = "";
   for (let i = 0; i < text.length; i++) {
-    const ch = text[i]!;
-    if (ch === "'" && !inDouble) inSingle = !inSingle;
-    else if (ch === '"' && !inSingle) inDouble = !inDouble;
-    yield { ch, index: i, inQuote: inSingle || inDouble };
+    quote = toggleQuote(quote, text[i]!);
+    mask[i] = quote !== "";
   }
+  return mask;
 }
 
 function findUnquotedColon(text: string): number {
-  for (const { ch, index, inQuote } of scanQuoteAware(text)) {
-    if (ch === ":" && !inQuote) {
-      if (index + 1 >= text.length || text[index + 1] === " ") return index;
-    }
+  const mask = buildQuoteMask(text);
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== ":" || mask[i]) continue;
+    if (i + 1 >= text.length || text[i + 1] === " ") return i;
   }
   return -1;
 }
@@ -308,44 +308,40 @@ function isQuoted(text: string): boolean {
 }
 
 function stripInlineComment(text: string): string {
-  for (const { ch, index, inQuote } of scanQuoteAware(text)) {
-    if (ch === " " && !inQuote && text[index + 1] === "#") {
-      return text.slice(0, index).trim();
-    }
+  const mask = buildQuoteMask(text);
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== " " || mask[i]) continue;
+    if (text[i + 1] === "#") return text.slice(0, i).trim();
   }
   return text;
 }
 
-function findFlowSplitPositions(text: string): number[] {
-  const positions: number[] = [];
+const DEPTH_CHANGE: Record<string, number> = { "[": 1, "]": -1 };
+
+function buildDepthMap(text: string, mask: boolean[]): Int8Array {
+  const depths = new Int8Array(text.length);
   let depth = 0;
-  let inSingle = false;
-  let inDouble = false;
-
   for (let i = 0; i < text.length; i++) {
-    const ch = text[i]!;
-    if (ch === "'" && !inDouble) inSingle = !inSingle;
-    else if (ch === '"' && !inSingle) inDouble = !inDouble;
-    if (inSingle || inDouble) continue;
-    if (ch === "[") depth++;
-    else if (ch === "]") depth--;
-    else if (ch === "," && depth === 0) positions.push(i);
+    if (!mask[i]) depth += DEPTH_CHANGE[text[i]!] ?? 0;
+    depths[i] = depth;
   }
-
-  return positions;
+  return depths;
 }
 
 function splitFlow(text: string): string[] {
-  const positions = findFlowSplitPositions(text);
-  if (positions.length === 0) return [text];
-
+  const mask = buildQuoteMask(text);
+  const depths = buildDepthMap(text, mask);
   const items: string[] = [];
   let start = 0;
-  for (const pos of positions) {
-    items.push(text.slice(start, pos));
-    start = pos + 1;
-  }
-  items.push(text.slice(start));
 
-  return items.filter((s) => s.trim() !== "");
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "," && !mask[i] && depths[i] === 0) {
+      items.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+
+  const last = text.slice(start);
+  if (last.trim()) items.push(last);
+  return items;
 }
