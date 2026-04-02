@@ -23,6 +23,12 @@ name: Release CLI
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      version:
+        description: "Version tag (e.g. v0.19.0)"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       dry_run:
@@ -58,6 +64,8 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "release" ]]; then
             VERSION="${{ github.event.release.tag_name }}"
+          elif [[ "${{ github.event_name }}" == "workflow_call" ]]; then
+            VERSION="${{ inputs.version }}"
           else
             VERSION="v0.0.0-dry-run"
           fi
@@ -132,7 +140,7 @@ jobs:
           node dist/syn.mjs version
 
       - name: Publish to npm
-        if: ${{ github.event_name == 'release' && !inputs.dry_run }}
+        if: ${{ (github.event_name == 'release' || github.event_name == 'workflow_call') && !inputs.dry_run }}
         working-directory: apps/syn-cli-node
         env:
           NODE_AUTH_TOKEN: ${{ secrets.CLI_PUBLISH_NPM_TOKEN }}
@@ -140,7 +148,7 @@ jobs:
           npm publish --access public --tag ${{ steps.version.outputs.npm_tag }} --provenance
 
       - name: Publish summary
-        if: ${{ github.event_name == 'release' && !inputs.dry_run }}
+        if: ${{ (github.event_name == 'release' || github.event_name == 'workflow_call') && !inputs.dry_run }}
         run: |
           echo "## CLI Published: @syntropic137/cli@${{ steps.version.outputs.semver }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"

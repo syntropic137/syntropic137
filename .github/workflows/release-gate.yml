@@ -1,0 +1,173 @@
+# =============================================================================
+# Release Gate — Pre-merge validation for main → release PRs
+# =============================================================================
+#
+# Runs on PRs targeting the `release` branch. All jobs must pass before merge.
+#
+# Checks:
+#   1. Version consistency — all 13 package files match and are bumped
+#   2. Release notes — PR body must contain meaningful release notes
+#   3. Docker dry-run — all container images build successfully (single-arch)
+#
+# Full CI (tests, lint, typecheck, security scans) also runs on these PRs
+# via ci.yml which triggers on pull_request to both main and release.
+# =============================================================================
+
+name: Release Gate
+
+on:
+  pull_request:
+    branches: [release]
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Version Consistency
+  # ---------------------------------------------------------------------------
+  version-check:
+    name: Version Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0  # Need release branch HEAD for comparison
+
+      - name: Validate version files match
+        run: python3 scripts/bump_version.py --check
+
+      - name: Validate version is bumped
+        run: |
+          PR_VERSION=$(python3 scripts/bump_version.py --current)
+          RELEASE_VERSION=$(git show origin/release:pyproject.toml | grep '^version = ' | head -1 | sed 's/version = "\(.*\)"/\1/')
+
+          echo "PR version:      $PR_VERSION"
+          echo "Release version: $RELEASE_VERSION"
+
+          if [ "$PR_VERSION" = "$RELEASE_VERSION" ]; then
+            echo "::error::Version $PR_VERSION has not been bumped from the current release."
+            echo "Run: just bump-version <new-version>"
+            exit 1
+          fi
+
+          # Compare versions using Python (handles semver correctly)
+          python3 -c "
+          import sys
+          from packaging.version import Version
+          pr = Version('$PR_VERSION')
+          rel = Version('$RELEASE_VERSION')
+          if pr <= rel:
+              print(f'::error::PR version {pr} is not greater than release version {rel}')
+              sys.exit(1)
+          print(f'OK: {pr} > {rel}')
+          " 2>/dev/null || {
+            # Fallback if packaging is not available — simple string comparison
+            echo "Note: packaging not available, using basic comparison"
+            if [ "$PR_VERSION" = "$RELEASE_VERSION" ]; then
+              exit 1
+            fi
+            echo "OK: $PR_VERSION != $RELEASE_VERSION (basic check)"
+          }
+
+  # ---------------------------------------------------------------------------
+  # Release Notes
+  # ---------------------------------------------------------------------------
+  changelog-check:
+    name: Release Notes Present
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR body has release notes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ -z "$PR_BODY" ]; then
+            echo "::error::PR body is empty. Add release notes describing what changed."
+            exit 1
+          fi
+
+          BODY_LENGTH=${#PR_BODY}
+          if [ "$BODY_LENGTH" -lt 20 ]; then
+            echo "::error::PR body is too short ($BODY_LENGTH chars). Add meaningful release notes."
+            exit 1
+          fi
+
+          echo "OK: Release notes present ($BODY_LENGTH chars)"
+
+  # ---------------------------------------------------------------------------
+  # Docker Dry-Run — verify all images build (single-arch, no push)
+  # ---------------------------------------------------------------------------
+  docker-dry-run:
+    name: "Docker Build: ${{ matrix.image }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: syn-api
+            dockerfile: infra/docker/images/syn-api/Dockerfile
+            context: "."
+            build-args: "INCLUDE_DOCKER_CLI=1"
+          - image: syn-gateway
+            dockerfile: infra/docker/images/gateway/Dockerfile
+            context: "."
+          - image: syn-collector
+            dockerfile: packages/syn-collector/Dockerfile
+            context: "."
+          - image: syn-dashboard-ui
+            dockerfile: apps/syn-dashboard-ui/Dockerfile
+            context: "."
+          - image: syn-pulse-ui
+            dockerfile: apps/syn-pulse-ui/Dockerfile
+            context: "."
+          - image: sidecar-proxy
+            dockerfile: docker/sidecar-proxy/Dockerfile
+            context: docker/sidecar-proxy
+          - image: token-injector
+            dockerfile: docker/token-injector/Dockerfile
+            context: docker/token-injector
+          # agentic-workspace uses build-provider.py staging — validated
+          # separately in e2e-container.yml, skip in gate to save CI time.
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: true
+
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Build (no push)
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: test/${{ matrix.image }}:gate
+          build-args: ${{ matrix.build-args }}
+          cache-from: type=gha
+
+  # ---------------------------------------------------------------------------
+  # Aggregator — required status check for branch protection
+  # ---------------------------------------------------------------------------
+  release-gate-success:
+    name: Release Gate
+    if: always()
+    needs: [version-check, changelog-check, docker-dry-run]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all gates passed
+        run: |
+          echo "version-check: ${{ needs.version-check.result }}"
+          echo "changelog-check: ${{ needs.changelog-check.result }}"
+          echo "docker-dry-run: ${{ needs.docker-dry-run.result }}"
+
+          if [[ "${{ needs.version-check.result }}" != "success" ]] || \
+             [[ "${{ needs.changelog-check.result }}" != "success" ]] || \
+             [[ "${{ needs.docker-dry-run.result }}" != "success" ]]; then
+            echo "::error::One or more release gate checks failed."
+            exit 1
+          fi
+
+          echo "All release gates passed."
