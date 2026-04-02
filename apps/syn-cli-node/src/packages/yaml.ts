@@ -316,31 +316,36 @@ function stripInlineComment(text: string): string {
   return text;
 }
 
-function isFlowDelimiter(ch: string, depth: number): "open" | "close" | "comma" | null {
-  if (ch === "[") return "open";
-  if (ch === "]") return "close";
-  if (ch === "," && depth === 0) return "comma";
-  return null;
+function findFlowSplitPositions(text: string): number[] {
+  const positions: number[] = [];
+  let depth = 0;
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    if (inSingle || inDouble) continue;
+    if (ch === "[") depth++;
+    else if (ch === "]") depth--;
+    else if (ch === "," && depth === 0) positions.push(i);
+  }
+
+  return positions;
 }
 
 function splitFlow(text: string): string[] {
+  const positions = findFlowSplitPositions(text);
+  if (positions.length === 0) return [text];
+
   const items: string[] = [];
-  let current = "";
-  let depth = 0;
-
-  for (const { ch, inQuote } of scanQuoteAware(text)) {
-    const delim = inQuote ? null : isFlowDelimiter(ch, depth);
-
-    if (delim === "comma") {
-      items.push(current);
-      current = "";
-    } else {
-      if (delim === "open") depth++;
-      else if (delim === "close") depth--;
-      current += ch;
-    }
+  let start = 0;
+  for (const pos of positions) {
+    items.push(text.slice(start, pos));
+    start = pos + 1;
   }
+  items.push(text.slice(start));
 
-  if (current.trim()) items.push(current);
-  return items;
+  return items.filter((s) => s.trim() !== "");
 }
