@@ -316,18 +316,29 @@ function stripInlineComment(text: string): string {
   return text;
 }
 
+function isFlowDelimiter(ch: string, depth: number): "open" | "close" | "comma" | null {
+  if (ch === "[") return "open";
+  if (ch === "]") return "close";
+  if (ch === "," && depth === 0) return "comma";
+  return null;
+}
+
 function splitFlow(text: string): string[] {
   const items: string[] = [];
   let current = "";
   let depth = 0;
 
   for (const { ch, inQuote } of scanQuoteAware(text)) {
-    if (!inQuote) {
-      if (ch === "[") { depth++; current += ch; continue; }
-      if (ch === "]") { depth--; current += ch; continue; }
-      if (ch === "," && depth === 0) { items.push(current); current = ""; continue; }
+    const delim = inQuote ? null : isFlowDelimiter(ch, depth);
+
+    if (delim === "comma") {
+      items.push(current);
+      current = "";
+    } else {
+      if (delim === "open") depth++;
+      else if (delim === "close") depth--;
+      current += ch;
     }
-    current += ch;
   }
 
   if (current.trim()) items.push(current);
