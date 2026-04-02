@@ -87,9 +87,9 @@ jobs:
         run: |
           # Find the most recently merged PR targeting release
           PR_NUM=$(gh pr list --state merged --base release --limit 1 \
-            --json number --jq '.[0].number')
+            --json number --jq '.[0].number // empty')
 
-          if [[ -n "$PR_NUM" ]]; then
+          if [[ -n "$PR_NUM" && "$PR_NUM" != "null" ]]; then
             echo "Found merged PR #$PR_NUM"
             # Write PR body to a file to avoid shell escaping issues
             gh pr view "$PR_NUM" --json body --jq '.body' > /tmp/release-notes.md

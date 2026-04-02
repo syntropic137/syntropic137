@@ -44,8 +44,6 @@ PACKAGE_JSON_FILES = [
     ROOT / "apps/syn-pulse-ui/package.json",
 ]
 
-ALL_FILES = PYPROJECT_FILES + PACKAGE_JSON_FILES
-
 # Semver-ish: 0.19.0, 0.20.0-beta.1, 1.0.0-rc.2, etc.
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
 
