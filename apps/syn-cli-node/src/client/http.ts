@@ -117,7 +117,9 @@ export class SynClient {
         headers: { ...this.authHeaders, ...existingHeaders },
         signal: controller.signal,
       });
-      const data = (await response.json()) as T;
+      const data = response.status === 204 || response.status === 205
+        ? (undefined as T)
+        : (await response.json()) as T;
       return { status: response.status, data };
     } finally {
       clearTimeout(timer);

@@ -61,28 +61,30 @@ export function recordInstallation(opts: {
 // Source parsing
 // ---------------------------------------------------------------------------
 
+const REMOTE_PREFIXES = ["https://", "http://", "git@", "ssh://"];
+
+function isRemoteUrl(source: string): boolean {
+  return REMOTE_PREFIXES.some((prefix) => source.startsWith(prefix));
+}
+
+function isLocalPath(source: string): boolean {
+  return fs.existsSync(source) || source.startsWith(".") || source.startsWith("/");
+}
+
+function isGitHubShorthand(source: string): boolean {
+  return source.includes("/") && !source.includes("@") && !source.startsWith(".");
+}
+
 export function parseSource(source: string): { resolved: string; isRemote: boolean } {
-  if (
-    source.startsWith("https://") ||
-    source.startsWith("http://") ||
-    source.startsWith("git@") ||
-    source.startsWith("ssh://")
-  ) {
+  if (isRemoteUrl(source)) {
     return { resolved: source, isRemote: true };
   }
-
-  if (
-    fs.existsSync(source) ||
-    source.startsWith(".") ||
-    source.startsWith("/")
-  ) {
+  if (isLocalPath(source)) {
     return { resolved: source, isRemote: false };
   }
-
-  if (source.includes("/") && !source.includes("@") && !source.startsWith(".")) {
+  if (isGitHubShorthand(source)) {
     return { resolved: `https://github.com/${source}.git`, isRemote: true };
   }
-
   return { resolved: source, isRemote: false };
 }
 
@@ -98,35 +100,33 @@ export function detectFormat(pkgPath: string): PackageFormat {
     throw new Error(`Package path is not a directory: ${pkgPath}`);
   }
 
-  // Multi-workflow: workflows/*/workflow.yaml
-  const workflowsDir = path.join(pkgPath, "workflows");
-  if (fs.existsSync(workflowsDir) && fs.statSync(workflowsDir).isDirectory()) {
-    const subdirs = fs.readdirSync(workflowsDir);
-    const hasWorkflow = subdirs.some((d) => {
-      const subPath = path.join(workflowsDir, d);
-      return (
-        fs.statSync(subPath).isDirectory() &&
-        fs.existsSync(path.join(subPath, "workflow.yaml"))
-      );
-    });
-    if (hasWorkflow) return "multi";
-  }
-
-  // Single workflow: workflow.yaml at root
-  if (fs.existsSync(path.join(pkgPath, "workflow.yaml"))) {
-    return "single";
-  }
-
-  // Standalone YAML
-  const files = fs.readdirSync(pkgPath);
-  const yamlFiles = files.filter(
-    (f) => f.endsWith(".yaml") || f.endsWith(".yml"),
-  );
-  if (yamlFiles.length > 0) return "standalone";
+  if (hasMultiWorkflowLayout(pkgPath)) return "multi";
+  if (fs.existsSync(path.join(pkgPath, "workflow.yaml"))) return "single";
+  if (hasYamlFiles(pkgPath)) return "standalone";
 
   throw new Error(
     `No workflow files found in ${pkgPath}\n` +
       "Expected: workflow.yaml, workflows/*/workflow.yaml, or *.yaml files",
+  );
+}
+
+function hasMultiWorkflowLayout(pkgPath: string): boolean {
+  const workflowsDir = path.join(pkgPath, "workflows");
+  if (!fs.existsSync(workflowsDir) || !fs.statSync(workflowsDir).isDirectory()) {
+    return false;
+  }
+  return fs.readdirSync(workflowsDir).some((d) => {
+    const subPath = path.join(workflowsDir, d);
+    return (
+      fs.statSync(subPath).isDirectory() &&
+      fs.existsSync(path.join(subPath, "workflow.yaml"))
+    );
+  });
+}
+
+function hasYamlFiles(pkgPath: string): boolean {
+  return fs.readdirSync(pkgPath).some(
+    (f) => f.endsWith(".yaml") || f.endsWith(".yml"),
   );
 }
 
@@ -137,25 +137,24 @@ export function detectFormat(pkgPath: string): PackageFormat {
 export function loadManifest(pkgPath: string): PluginManifest | null {
   const jsonPath = path.join(pkgPath, "syntropic137-plugin.json");
   if (fs.existsSync(jsonPath)) {
-    const content = fs.readFileSync(jsonPath, "utf-8");
-    const data: unknown = JSON.parse(content);
-    if (typeof data !== "object" || data === null || Array.isArray(data)) {
-      throw new Error("syntropic137-plugin.json must be a JSON object");
-    }
-    return PluginManifestSchema.parse(data);
+    return parseManifestFile(jsonPath, "json");
   }
 
   const yamlPath = path.join(pkgPath, "syntropic137.yaml");
   if (fs.existsSync(yamlPath)) {
-    const content = fs.readFileSync(yamlPath, "utf-8");
-    const data = parseYaml(content);
-    if (typeof data !== "object" || data === null || Array.isArray(data)) {
-      throw new Error("syntropic137.yaml must be a YAML mapping");
-    }
-    return PluginManifestSchema.parse(data);
+    return parseManifestFile(yamlPath, "yaml");
   }
 
   return null;
+}
+
+function parseManifestFile(filePath: string, format: "json" | "yaml"): PluginManifest {
+  const content = fs.readFileSync(filePath, "utf-8");
+  const data: unknown = format === "json" ? JSON.parse(content) : parseYaml(content);
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    throw new Error(`${path.basename(filePath)} must be a ${format === "json" ? "JSON object" : "YAML mapping"}`);
+  }
+  return PluginManifestSchema.parse(data);
 }
 
 // ---------------------------------------------------------------------------
@@ -175,51 +174,9 @@ function loadWorkflowYaml(
   const data = parseYaml(content) as Record<string, unknown>;
 
   const phases = Array.isArray(data["phases"]) ? data["phases"] : [];
-  const resolvedPhases = phases.map((phase) => {
-    const p = phase as Record<string, unknown>;
-    // Resolve prompt_file references
-    if (typeof p["prompt_file"] === "string" && !p["prompt_template"]) {
-      const promptPath = path.join(workflowDir, p["prompt_file"] as string);
-      if (fs.existsSync(promptPath)) {
-        const promptContent = fs.readFileSync(promptPath, "utf-8");
-        const { frontmatter, body } = parseFrontmatter(promptContent);
-        const resolved: Record<string, unknown> = { ...p, prompt_template: body };
-        delete resolved["prompt_file"];
-        // Merge frontmatter (YAML values take precedence)
-        if (frontmatter) {
-          if (frontmatter["argument-hint"] && !resolved["argument_hint"]) {
-            resolved["argument_hint"] = frontmatter["argument-hint"];
-          }
-          if (frontmatter["allowed-tools"] && !resolved["allowed_tools"]) {
-            const tools = String(frontmatter["allowed-tools"]);
-            resolved["allowed_tools"] = tools.split(",").map((t) => t.trim());
-          }
-          if (frontmatter["max-tokens"] && !resolved["max_tokens"]) {
-            resolved["max_tokens"] = Number(frontmatter["max-tokens"]);
-          }
-          if (frontmatter["timeout-seconds"] && !resolved["timeout_seconds"]) {
-            resolved["timeout_seconds"] = Number(frontmatter["timeout-seconds"]);
-          }
-          if (frontmatter["model"] && !resolved["model"]) {
-            resolved["model"] = frontmatter["model"];
-          }
-        }
-        return resolved;
-      }
-    }
-    return p;
-  });
-
-  const inputs = Array.isArray(data["inputs"]) ? data["inputs"] : [];
-  const inputDecls = inputs.map((i) => {
-    const inp = i as Record<string, unknown>;
-    return {
-      name: inp["name"] ?? "",
-      description: inp["description"] ?? "",
-      required: inp["required"] ?? true,
-      default: inp["default"] ?? null,
-    };
-  });
+  const resolvedPhases = phases.map((phase) =>
+    resolvePhase(phase as Record<string, unknown>, workflowDir),
+  );
 
   const repository = data["repository"] as Record<string, unknown> | undefined;
 
@@ -235,9 +192,68 @@ function loadWorkflowYaml(
     description: data["description"] ? String(data["description"]) : null,
     project_name: data["project_name"] ? String(data["project_name"]) : null,
     phases: resolvedPhases as Record<string, unknown>[],
-    input_declarations: inputDecls,
+    input_declarations: parseInputDeclarations(data),
     source_path: sourcePath,
   };
+}
+
+function resolvePhase(
+  phase: Record<string, unknown>,
+  workflowDir: string,
+): Record<string, unknown> {
+  if (typeof phase["prompt_file"] !== "string" || phase["prompt_template"]) {
+    return phase;
+  }
+
+  const promptPath = path.join(workflowDir, phase["prompt_file"] as string);
+  if (!fs.existsSync(promptPath)) return phase;
+
+  const promptContent = fs.readFileSync(promptPath, "utf-8");
+  const { frontmatter, body } = parseFrontmatter(promptContent);
+  const resolved: Record<string, unknown> = { ...phase, prompt_template: body };
+  delete resolved["prompt_file"];
+
+  if (frontmatter) {
+    mergeFrontmatter(resolved, frontmatter);
+  }
+  return resolved;
+}
+
+function mergeFrontmatter(
+  phase: Record<string, unknown>,
+  fm: Record<string, unknown>,
+): void {
+  const mappings: [string, string, ((v: unknown) => unknown)?][] = [
+    ["argument-hint", "argument_hint"],
+    ["allowed-tools", "allowed_tools", (v) => String(v).split(",").map((t) => t.trim())],
+    ["max-tokens", "max_tokens", Number],
+    ["timeout-seconds", "timeout_seconds", Number],
+    ["model", "model"],
+  ];
+
+  for (const [fmKey, phaseKey, transform] of mappings) {
+    if (fm[fmKey] && !phase[phaseKey]) {
+      phase[phaseKey] = transform ? transform(fm[fmKey]) : fm[fmKey];
+    }
+  }
+}
+
+function parseInputDeclarations(data: Record<string, unknown>): Array<{
+  name: unknown;
+  description: unknown;
+  required: unknown;
+  default: unknown;
+}> {
+  const inputs = Array.isArray(data["inputs"]) ? data["inputs"] : [];
+  return inputs.map((i) => {
+    const inp = i as Record<string, unknown>;
+    return {
+      name: inp["name"] ?? "",
+      description: inp["description"] ?? "",
+      required: inp["required"] ?? true,
+      default: inp["default"] ?? null,
+    };
+  });
 }
 
 function parseFrontmatter(content: string): {

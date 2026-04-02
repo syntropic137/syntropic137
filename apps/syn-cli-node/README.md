@@ -82,7 +82,7 @@ Environment variables take precedence. When no credentials are set, requests are
 ```bash
 syn workflow list                    # List all workflows
 syn workflow show <id>               # Show workflow details
-syn workflow create --file wf.yaml   # Create from YAML
+syn workflow create <name>           # Create a new workflow
 syn workflow run <id> -i key=value   # Execute a workflow
 syn workflow status <id>             # Show execution history
 syn workflow validate <path>         # Validate a workflow package

@@ -1,5 +1,5 @@
 import { BOLD, CYAN, DIM, style } from "../output/ansi.js";
-import type { CommandDef, CommandGroup } from "./command.js";
+import type { ArgDef, CommandDef, CommandGroup, OptionDef } from "./command.js";
 
 export function renderTopLevelHelp(
   name: string,
@@ -77,8 +77,20 @@ export function renderCommandHelp(
 
   lines.push(`${style(prefix, BOLD)} — ${command.description}`);
   lines.push("");
+  lines.push(style("Usage:", BOLD) + renderUsageLine(prefix, command));
 
-  // Usage line
+  if (command.args && command.args.length > 0) {
+    renderArguments(lines, command.args);
+  }
+
+  if (command.options) {
+    renderOptions(lines, command.options);
+  }
+
+  return lines.join("\n");
+}
+
+function renderUsageLine(prefix: string, command: CommandDef): string {
   let usage = `  ${prefix}`;
   if (command.args) {
     for (const arg of command.args) {
@@ -88,41 +100,40 @@ export function renderCommandHelp(
   if (command.options && Object.keys(command.options).length > 0) {
     usage += " [options]";
   }
-  lines.push(style("Usage:", BOLD) + usage);
+  return usage;
+}
 
-  // Arguments
-  if (command.args && command.args.length > 0) {
-    lines.push("");
-    lines.push(style("Arguments:", BOLD));
-    const maxLen = Math.max(...command.args.map((a) => a.name.length));
-    for (const arg of command.args) {
-      const req = arg.required !== false ? " (required)" : "";
-      lines.push(
-        `  ${style(arg.name.padEnd(maxLen), CYAN)}  ${arg.description}${style(req, DIM)}`,
-      );
-    }
+function renderArguments(lines: string[], args: readonly ArgDef[]): void {
+  lines.push("");
+  lines.push(style("Arguments:", BOLD));
+  const maxLen = Math.max(...args.map((a) => a.name.length));
+  for (const arg of args) {
+    const req = arg.required !== false ? " (required)" : "";
+    lines.push(
+      `  ${style(arg.name.padEnd(maxLen), CYAN)}  ${arg.description}${style(req, DIM)}`,
+    );
   }
+}
 
-  // Options
-  if (command.options) {
-    const entries = Object.entries(command.options);
-    if (entries.length > 0) {
-      lines.push("");
-      lines.push(style("Options:", BOLD));
-      const formatted = entries.map(([name, opt]) => {
-        const flag = opt.short ? `-${opt.short}, --${name}` : `    --${name}`;
-        return { flag, opt };
-      });
-      const maxLen = Math.max(...formatted.map((f) => f.flag.length));
-      for (const { flag, opt } of formatted) {
-        const def =
-          opt.default !== undefined ? ` ${style(`(default: ${String(opt.default)})`, DIM)}` : "";
-        lines.push(`  ${style(flag.padEnd(maxLen), CYAN)}  ${opt.description}${def}`);
-      }
-    }
+function renderOptions(
+  lines: string[],
+  options: Record<string, OptionDef>,
+): void {
+  const entries = Object.entries(options);
+  if (entries.length === 0) return;
+
+  lines.push("");
+  lines.push(style("Options:", BOLD));
+  const formatted = entries.map(([name, opt]) => {
+    const flag = opt.short ? `-${opt.short}, --${name}` : `    --${name}`;
+    return { flag, opt };
+  });
+  const maxLen = Math.max(...formatted.map((f) => f.flag.length));
+  for (const { flag, opt } of formatted) {
+    const def =
+      opt.default !== undefined ? ` ${style(`(default: ${String(opt.default)})`, DIM)}` : "";
+    lines.push(`  ${style(flag.padEnd(maxLen), CYAN)}  ${opt.description}${def}`);
   }
-
-  return lines.join("\n");
 }
 
 function maxNameLength(

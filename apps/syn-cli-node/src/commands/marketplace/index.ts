@@ -3,7 +3,7 @@
  */
 
 import { CommandGroup } from "../../framework/command.js";
-import { addCommand, listMarkeplaceCommand, removeCommand, refreshCommand } from "./registry.js";
+import { addCommand, listMarketplaceCommand, removeCommand, refreshCommand } from "./registry.js";
 
 export const marketplaceGroup = new CommandGroup(
   "marketplace",
@@ -12,6 +12,6 @@ export const marketplaceGroup = new CommandGroup(
 
 marketplaceGroup
   .command(addCommand)
-  .command(listMarkeplaceCommand)
+  .command(listMarketplaceCommand)
   .command(removeCommand)
   .command(refreshCommand);

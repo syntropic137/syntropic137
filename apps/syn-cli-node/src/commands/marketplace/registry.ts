@@ -97,7 +97,7 @@ export const addCommand: CommandDef = {
 // list
 // ---------------------------------------------------------------------------
 
-export const listMarkeplaceCommand: CommandDef = {
+export const listMarketplaceCommand: CommandDef = {
   name: "list",
   description: "List registered marketplace registries",
   handler: async () => {

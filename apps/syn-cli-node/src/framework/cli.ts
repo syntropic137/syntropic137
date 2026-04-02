@@ -46,14 +46,7 @@ export class CLI {
     const first = args[0];
 
     if (!first || first === "--help" || first === "-h") {
-      print(
-        renderTopLevelHelp(
-          this.name,
-          this.description,
-          this.groups,
-          this.rootCommands,
-        ),
-      );
+      print(renderTopLevelHelp(this.name, this.description, this.groups, this.rootCommands));
       process.exit(0);
     }
 
@@ -62,91 +55,102 @@ export class CLI {
       process.exit(0);
     }
 
-    // Root command?
     const rootCmd = this.rootCommands.get(first);
     if (rootCmd) {
-      const parsed = this.parseCommandArgs(rootCmd, args.slice(1));
-      if (parsed.values["help"]) {
-        print(renderCommandHelp(rootCmd, this.name));
-        process.exit(0);
-      }
-      await rootCmd.handler(parsed);
+      await this.executeCommand(rootCmd, args.slice(1));
       return;
     }
 
-    // Command group?
     const group = this.groups.get(first);
     if (group) {
-      const second = args[1];
-
-      if (!second || second === "--help" || second === "-h") {
-        print(renderGroupHelp(this.name, group));
-        process.exit(0);
-      }
-
-      const cmd = group.getCommand(second);
-      if (!cmd) {
-        printError(`Unknown command: ${first} ${second}`);
-        print("");
-        print(renderGroupHelp(this.name, group));
-        throw new CLIError(`Unknown command: ${first} ${second}`);
-      }
-
-      const parsed = this.parseCommandArgs(cmd, args.slice(2));
-      if (parsed.values["help"]) {
-        print(renderCommandHelp(cmd, this.name, group.name));
-        process.exit(0);
-      }
-      await cmd.handler(parsed);
+      await this.dispatchGroup(first, group, args.slice(1));
       return;
     }
 
-    printError(`Unknown command: ${first}`);
-    print("");
-    print(
-      renderTopLevelHelp(
-        this.name,
-        this.description,
-        this.groups,
-        this.rootCommands,
-      ),
-    );
-    throw new CLIError(`Unknown command: ${first}`);
+    throw new CLIError(`Unknown command: ${first}. Run '${this.name} --help' for usage.`);
+  }
+
+  private async dispatchGroup(
+    groupName: string,
+    group: CommandGroup,
+    args: readonly string[],
+  ): Promise<void> {
+    const second = args[0];
+
+    if (!second || second === "--help" || second === "-h") {
+      print(renderGroupHelp(this.name, group));
+      process.exit(0);
+    }
+
+    const cmd = group.getCommand(second);
+    if (!cmd) {
+      throw new CLIError(
+        `Unknown command: ${groupName} ${second}. Run '${this.name} ${groupName} --help' for usage.`,
+      );
+    }
+
+    await this.executeCommand(cmd, args.slice(1), group.name);
+  }
+
+  private async executeCommand(
+    cmd: CommandDef,
+    argv: readonly string[],
+    groupName?: string,
+  ): Promise<void> {
+    const parsed = this.parseCommandArgs(cmd, argv);
+    if (parsed.values["help"]) {
+      print(renderCommandHelp(cmd, this.name, groupName));
+      process.exit(0);
+    }
+    await cmd.handler(parsed);
   }
 
   private parseCommandArgs(
     cmd: CommandDef,
     argv: readonly string[],
   ): ParsedArgs {
-    const optionsConfig: Record<
-      string,
-      { type: "string" | "boolean"; short?: string; multiple?: boolean; default?: string | boolean }
-    > = {
-      help: { type: "boolean", short: "h", default: false },
-    };
+    const optionsConfig = buildOptionsConfig(cmd);
 
-    if (cmd.options) {
-      for (const [name, def] of Object.entries(cmd.options)) {
-        const entry: { type: "string" | "boolean"; short?: string; multiple?: boolean; default?: string | boolean } = {
-          type: def.type,
-        };
-        if (def.short) entry.short = def.short;
-        if (def.multiple) entry.multiple = def.multiple;
-        if (def.default !== undefined) entry.default = def.default;
-        optionsConfig[name] = entry;
-      }
+    try {
+      const { values, positionals } = parseArgs({
+        args: argv as string[],
+        options: optionsConfig,
+        allowPositionals: true,
+        strict: true,
+      });
+
+      return {
+        positionals,
+        values: values as ParsedArgs["values"],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new CLIError(msg);
     }
-
-    const { values, positionals } = parseArgs({
-      args: argv as string[],
-      options: optionsConfig,
-      allowPositionals: true,
-      strict: true,
-    });
-
-    return {
-      positionals,
-      values: values as ParsedArgs["values"],
-    };
   }
+}
+
+function buildOptionsConfig(
+  cmd: CommandDef,
+): Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean; default?: string | boolean }> {
+  const config: Record<
+    string,
+    { type: "string" | "boolean"; short?: string; multiple?: boolean; default?: string | boolean }
+  > = {
+    help: { type: "boolean", short: "h", default: false },
+  };
+
+  if (!cmd.options) return config;
+
+  for (const [name, def] of Object.entries(cmd.options)) {
+    const entry: { type: "string" | "boolean"; short?: string; multiple?: boolean; default?: string | boolean } = {
+      type: def.type,
+    };
+    if (def.short) entry.short = def.short;
+    if (def.multiple) entry.multiple = def.multiple;
+    if (def.default !== undefined) entry.default = def.default;
+    config[name] = entry;
+  }
+
+  return config;
 }
