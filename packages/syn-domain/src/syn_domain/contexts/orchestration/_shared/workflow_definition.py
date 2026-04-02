@@ -231,6 +231,44 @@ class PhaseYamlDefinition(BaseModel):
         )
 
 
+class PhaseFrontmatterSchema(BaseModel):
+    """Schema for the YAML frontmatter in phase .md prompt files.
+
+    This models only the optional metadata fields that appear in phase markdown
+    frontmatter — NOT the full phase definition (which includes required fields
+    like id/name/order that come from workflow.yaml, not frontmatter).
+
+    Source of truth for schemas/plugin/phase-frontmatter.schema.json.
+    See ADR-053 for the schema generation strategy.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    model: str | None = Field(
+        default=None, description="Model to use for this phase (e.g., 'sonnet', 'opus')."
+    )
+    allowed_tools: list[str] = Field(
+        default_factory=list,
+        description="Tools available during this phase (e.g., 'bash', 'git', 'read').",
+        alias="allowed-tools",
+    )
+    max_tokens: int | None = Field(
+        default=None, description="Maximum tokens for this phase.", alias="max-tokens"
+    )
+    timeout_seconds: int | None = Field(
+        default=None, description="Phase timeout in seconds.", alias="timeout-seconds"
+    )
+    execution_type: str | None = Field(
+        default=None,
+        description="Phase execution type ('sequential' or 'parallel').",
+        alias="execution-type",
+    )
+    description: str | None = Field(default=None, description="What this phase does.")
+    argument_hint: str | None = Field(
+        default=None, description="Hint for Claude Code command argument.", alias="argument-hint"
+    )
+
+
 class WorkflowDefinition(BaseModel):
     """Complete workflow definition as parsed from YAML.
 

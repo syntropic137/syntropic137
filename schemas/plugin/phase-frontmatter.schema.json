@@ -1,39 +1,68 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/phase-frontmatter.schema.json",
-  "$defs": {
-    "PhaseExecutionType": {
-      "description": "How a phase should be executed.",
-      "enum": [
-        "sequential",
-        "parallel",
-        "human_in_loop"
-      ],
-      "title": "PhaseExecutionType",
-      "type": "string"
-    }
-  },
-  "description": "Phase definition as parsed from YAML.\n\nConverts YAML snake_case to domain PhaseDefinition.",
+  "additionalProperties": false,
+  "description": "Schema for the YAML frontmatter in phase .md prompt files.\n\nThis models only the optional metadata fields that appear in phase markdown\nfrontmatter \u2014 NOT the full phase definition (which includes required fields\nlike id/name/order that come from workflow.yaml, not frontmatter).\n\nSource of truth for schemas/plugin/phase-frontmatter.schema.json.\nSee ADR-053 for the schema generation strategy.",
   "properties": {
-    "id": {
-      "minLength": 1,
-      "title": "Id",
-      "type": "string"
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Model to use for this phase (e.g., 'sonnet', 'opus').",
+      "title": "Model"
     },
-    "name": {
-      "maxLength": 255,
-      "minLength": 1,
-      "title": "Name",
-      "type": "string"
+    "allowed-tools": {
+      "description": "Tools available during this phase (e.g., 'bash', 'git', 'read').",
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed-Tools",
+      "type": "array"
     },
-    "order": {
-      "minimum": 1,
-      "title": "Order",
-      "type": "integer"
+    "max-tokens": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Maximum tokens for this phase.",
+      "title": "Max-Tokens"
     },
-    "execution_type": {
-      "$ref": "#/$defs/PhaseExecutionType",
-      "default": "sequential"
+    "timeout-seconds": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Phase timeout in seconds.",
+      "title": "Timeout-Seconds"
+    },
+    "execution-type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Phase execution type ('sequential' or 'parallel').",
+      "title": "Execution-Type"
     },
     "description": {
       "anyOf": [
@@ -45,23 +74,10 @@
         }
       ],
       "default": null,
+      "description": "What this phase does.",
       "title": "Description"
     },
-    "input_artifacts": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Input Artifacts",
-      "type": "array"
-    },
-    "output_artifacts": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Output Artifacts",
-      "type": "array"
-    },
-    "prompt_template": {
+    "argument-hint": {
       "anyOf": [
         {
           "type": "string"
@@ -71,81 +87,10 @@
         }
       ],
       "default": null,
-      "title": "Prompt Template"
-    },
-    "prompt_file": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Prompt File"
-    },
-    "max_tokens": {
-      "anyOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Max Tokens"
-    },
-    "timeout_seconds": {
-      "anyOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Timeout Seconds"
-    },
-    "allowed_tools": {
-      "items": {
-        "type": "string"
-      },
-      "title": "Allowed Tools",
-      "type": "array"
-    },
-    "argument_hint": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Argument Hint"
-    },
-    "model": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Model"
+      "description": "Hint for Claude Code command argument.",
+      "title": "Argument-Hint"
     }
   },
-  "required": [
-    "id",
-    "name",
-    "order"
-  ],
-  "title": "PhaseYamlDefinition",
+  "title": "PhaseFrontmatterSchema",
   "type": "object"
 }
