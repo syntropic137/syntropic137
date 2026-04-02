@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, feat/*]
   pull_request:
+    branches: [main, release]
   workflow_dispatch:
   schedule:
     # Run integration tests weekly on Sunday at 2am UTC
