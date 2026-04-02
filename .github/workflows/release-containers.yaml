@@ -46,8 +46,10 @@ concurrency:
   cancel-in-progress: false  # Never cancel an in-progress release
 
 # ISS-259: Least-privilege default. Jobs declare their own elevated permissions.
-permissions:
-  contents: read
+# No workflow-level permissions block — when called via workflow_call,
+# the caller's permissions cap what jobs can request. A workflow-level
+# block here would further restrict (intersection), blocking id-token
+# and packages:write. Job-level permissions below are sufficient.
 
 env:
   REGISTRY: ghcr.io
