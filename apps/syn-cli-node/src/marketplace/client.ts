@@ -204,26 +204,35 @@ export async function searchAllRegistries(
   return results;
 }
 
+function getSearchTargets(
+  config: RegistryConfig,
+  registry?: string | null,
+): Array<[string, RegistryEntry]> {
+  if (!registry) return Object.entries(config.registries);
+  const entry = config.registries[registry];
+  return entry ? [[registry, entry]] : [];
+}
+
+async function findPluginInRegistry(
+  regName: string,
+  entry: RegistryEntry,
+  pluginName: string,
+): Promise<[string, RegistryEntry, MarketplacePluginEntry] | null> {
+  const index = await getRegistryIndex(regName, entry);
+  if (index === null) return null;
+  const plugin = index.plugins.find((p) => p.name === pluginName);
+  return plugin ? [regName, entry, plugin] : null;
+}
+
 export async function resolvePluginByName(
   name: string,
   registry?: string | null,
 ): Promise<[string, RegistryEntry, MarketplacePluginEntry] | null> {
-  const config = loadRegistries();
-
-  const targets: Array<[string, RegistryEntry]> = registry
-    ? config.registries[registry]
-      ? [[registry, config.registries[registry]]]
-      : []
-    : Object.entries(config.registries);
+  const targets = getSearchTargets(loadRegistries(), registry);
 
   for (const [regName, entry] of targets) {
-    const index = await getRegistryIndex(regName, entry);
-    if (index === null) continue;
-    for (const plugin of index.plugins) {
-      if (plugin.name === name) {
-        return [regName, entry, plugin];
-      }
-    }
+    const result = await findPluginInRegistry(regName, entry, name);
+    if (result) return result;
   }
 
   return null;

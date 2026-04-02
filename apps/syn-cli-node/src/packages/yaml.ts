@@ -274,15 +274,27 @@ function getIndent(line: string): number {
   return count;
 }
 
-function findUnquotedColon(text: string): number {
+interface ScanState {
+  ch: string;
+  index: number;
+  inQuote: boolean;
+}
+
+function* scanQuoteAware(text: string): Generator<ScanState> {
   let inSingle = false;
   let inDouble = false;
   for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+    const ch = text[i]!;
     if (ch === "'" && !inDouble) inSingle = !inSingle;
     else if (ch === '"' && !inSingle) inDouble = !inDouble;
-    else if (ch === ":" && !inSingle && !inDouble) {
-      if (i + 1 >= text.length || text[i + 1] === " ") return i;
+    yield { ch, index: i, inQuote: inSingle || inDouble };
+  }
+}
+
+function findUnquotedColon(text: string): number {
+  for (const { ch, index, inQuote } of scanQuoteAware(text)) {
+    if (ch === ":" && !inQuote) {
+      if (index + 1 >= text.length || text[index + 1] === " ") return index;
     }
   }
   return -1;
@@ -296,14 +308,9 @@ function isQuoted(text: string): boolean {
 }
 
 function stripInlineComment(text: string): string {
-  let inSingle = false;
-  let inDouble = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === "'" && !inDouble) inSingle = !inSingle;
-    else if (ch === '"' && !inSingle) inDouble = !inDouble;
-    else if (ch === " " && !inSingle && !inDouble && text[i + 1] === "#") {
-      return text.slice(0, i).trim();
+  for (const { ch, index, inQuote } of scanQuoteAware(text)) {
+    if (ch === " " && !inQuote && text[index + 1] === "#") {
+      return text.slice(0, index).trim();
     }
   }
   return text;
@@ -313,21 +320,14 @@ function splitFlow(text: string): string[] {
   const items: string[] = [];
   let current = "";
   let depth = 0;
-  let inSingle = false;
-  let inDouble = false;
 
-  for (const ch of text) {
-    if (ch === "'" && !inDouble) inSingle = !inSingle;
-    else if (ch === '"' && !inSingle) inDouble = !inDouble;
-    else if (ch === "[" && !inSingle && !inDouble) depth++;
-    else if (ch === "]" && !inSingle && !inDouble) depth--;
-
-    if (ch === "," && depth === 0 && !inSingle && !inDouble) {
-      items.push(current);
-      current = "";
-    } else {
-      current += ch;
+  for (const { ch, inQuote } of scanQuoteAware(text)) {
+    if (!inQuote) {
+      if (ch === "[") { depth++; current += ch; continue; }
+      if (ch === "]") { depth--; current += ch; continue; }
+      if (ch === "," && depth === 0) { items.push(current); current = ""; continue; }
     }
+    current += ch;
   }
 
   if (current.trim()) items.push(current);

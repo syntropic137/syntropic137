@@ -23,6 +23,20 @@ const EVENT_STYLES: Record<string, string> = {
   ExecutionCancelled: RED,
 };
 
+function extractEventId(data: Record<string, unknown>): string {
+  return (data["workflow_execution_id"] ?? data["execution_id"] ?? data["session_id"] ?? "") as string;
+}
+
+function renderEventData(parts: string[], data: Record<string, unknown>): void {
+  const id = extractEventId(data);
+  if (id) parts.push(` ${style(id.slice(0, 12), DIM)}`);
+  if (data["workflow_name"]) parts.push(` ${String(data["workflow_name"])}`);
+  if (data["phase_name"]) parts.push(` phase:${String(data["phase_name"])}`);
+  if (data["total_tokens"]) parts.push(` tokens:${formatTokens(Number(data["total_tokens"]))}`);
+  if (data["cost_usd"]) parts.push(` cost:${formatCost(String(data["cost_usd"]))}`);
+  if (data["error_message"]) parts.push(` ${style(String(data["error_message"]).slice(0, 80), RED)}`);
+}
+
 function renderEvent(event: SSEEvent): void {
   const ts = event.timestamp ? formatTimestamp(event.timestamp) : style("now", DIM);
   const eventType = event.event_type ?? event.type ?? "unknown";
@@ -30,16 +44,8 @@ function renderEvent(event: SSEEvent): void {
 
   const parts = [style(ts, DIM), " ", eventStyle ? style(eventType, eventStyle) : eventType];
 
-  const data = event.data;
-  if (data) {
-    const id = (data["workflow_execution_id"] ?? data["execution_id"] ?? data["session_id"] ?? "") as string;
-    if (id) parts.push(` ${style(id.slice(0, 12), DIM)}`);
-
-    if (data["workflow_name"]) parts.push(` ${String(data["workflow_name"])}`);
-    if (data["phase_name"]) parts.push(` phase:${String(data["phase_name"])}`);
-    if (data["total_tokens"]) parts.push(` tokens:${formatTokens(Number(data["total_tokens"]))}`);
-    if (data["cost_usd"]) parts.push(` cost:${formatCost(String(data["cost_usd"]))}`);
-    if (data["error_message"]) parts.push(` ${style(String(data["error_message"]).slice(0, 80), RED)}`);
+  if (event.data) {
+    renderEventData(parts, event.data);
   }
 
   print(parts.join(""));
