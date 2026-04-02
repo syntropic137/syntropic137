@@ -1,6 +1,6 @@
 [project]
 name = "syn-domain"
-version = "0.19.3"
+version = "0.19.4"
 description = "Core domain model for Syntropic137"
 requires-python = ">=3.12"
 
