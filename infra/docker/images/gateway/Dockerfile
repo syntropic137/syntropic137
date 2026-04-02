@@ -9,8 +9,8 @@
 # =============================================================================
 FROM node:22-alpine AS dashboard-builder
 
-# Install pnpm (lockfile is v9.0)
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@10.24.0 --activate
 
 WORKDIR /workspace
 
@@ -39,7 +39,7 @@ RUN pnpm build
 # =============================================================================
 FROM node:22-alpine AS pulse-builder
 
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+RUN corepack enable && corepack prepare pnpm@10.24.0 --activate
 
 WORKDIR /workspace
 

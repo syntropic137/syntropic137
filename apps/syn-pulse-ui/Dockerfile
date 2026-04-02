@@ -9,8 +9,8 @@
 # =============================================================================
 FROM node:22-alpine AS builder
 
-# Install pnpm (lockfile is v9.0)
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@10.24.0 --activate
 
 WORKDIR /app
 
