@@ -103,6 +103,27 @@ class TestInMemoryProjectionStore:
         assert statuses == {"pending"}
 
     @pytest.mark.asyncio
+    async def test_query_with_boolean_filter(self, memory_store: InMemoryProjectionStore):
+        """REGRESSION: boolean filters must work correctly.
+
+        Python str(False)='False' vs JSONB 'false' caused zero matches
+        in Postgres. InMemoryProjectionStore must also handle booleans
+        consistently so tests don't diverge from prod behavior.
+        """
+        await memory_store.save("workflows", "wf-1", {"name": "Active", "is_archived": False})
+        await memory_store.save("workflows", "wf-2", {"name": "Archived", "is_archived": True})
+        await memory_store.save("workflows", "wf-3", {"name": "Also Active", "is_archived": False})
+
+        results = await memory_store.query("workflows", filters={"is_archived": False})
+        assert len(results) == 2
+        names = {r["name"] for r in results}
+        assert names == {"Active", "Also Active"}
+
+        results = await memory_store.query("workflows", filters={"is_archived": True})
+        assert len(results) == 1
+        assert results[0]["name"] == "Archived"
+
+    @pytest.mark.asyncio
     async def test_query_with_order(self, memory_store: InMemoryProjectionStore):
         """Test querying with ordering."""
         await memory_store.save("workflows", "wf-1", {"name": "Zebra"})
