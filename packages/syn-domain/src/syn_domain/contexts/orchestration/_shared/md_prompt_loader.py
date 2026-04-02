@@ -32,6 +32,7 @@ _FRONTMATTER_DELIMITER = "---"
 _KEBAB_TO_SNAKE: dict[str, str] = {
     "argument-hint": "argument_hint",
     "allowed-tools": "allowed_tools",
+    "execution-type": "execution_type",
     "max-tokens": "max_tokens",
     "timeout-seconds": "timeout_seconds",
 }

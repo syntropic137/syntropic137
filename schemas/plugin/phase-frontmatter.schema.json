@@ -1,6 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/phase-frontmatter.schema.json",
+  "$defs": {
+    "PhaseExecutionType": {
+      "description": "How a phase should be executed.",
+      "enum": [
+        "sequential",
+        "parallel",
+        "human_in_loop"
+      ],
+      "title": "PhaseExecutionType",
+      "type": "string"
+    }
+  },
   "additionalProperties": false,
   "description": "Schema for the YAML frontmatter in phase .md prompt files.\n\nThis models only the optional metadata fields that appear in phase markdown\nfrontmatter \u2014 NOT the full phase definition (which includes required fields\nlike id/name/order that come from workflow.yaml, not frontmatter).\n\nSource of truth for schemas/plugin/phase-frontmatter.schema.json.\nSee ADR-053 for the schema generation strategy.",
   "properties": {
@@ -18,12 +30,19 @@
       "title": "Model"
     },
     "allowed-tools": {
-      "description": "Tools available during this phase (e.g., 'bash', 'git', 'read').",
-      "items": {
-        "type": "string"
-      },
-      "title": "Allowed-Tools",
-      "type": "array"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "Tools available during this phase. Accepts a YAML list or a comma-separated string (e.g., 'bash, git, read').",
+      "title": "Allowed-Tools"
     },
     "max-tokens": {
       "anyOf": [
@@ -54,15 +73,14 @@
     "execution-type": {
       "anyOf": [
         {
-          "type": "string"
+          "$ref": "#/$defs/PhaseExecutionType"
         },
         {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Phase execution type ('sequential' or 'parallel').",
-      "title": "Execution-Type"
+      "description": "Phase execution type ('sequential', 'parallel', or 'human_in_loop')."
     },
     "description": {
       "anyOf": [

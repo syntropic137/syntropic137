@@ -247,9 +247,10 @@ class PhaseFrontmatterSchema(BaseModel):
     model: str | None = Field(
         default=None, description="Model to use for this phase (e.g., 'sonnet', 'opus')."
     )
-    allowed_tools: list[str] = Field(
+    allowed_tools: str | list[str] = Field(
         default_factory=list,
-        description="Tools available during this phase (e.g., 'bash', 'git', 'read').",
+        description="Tools available during this phase. "
+        "Accepts a YAML list or a comma-separated string (e.g., 'bash, git, read').",
         alias="allowed-tools",
     )
     max_tokens: int | None = Field(
@@ -258,9 +259,9 @@ class PhaseFrontmatterSchema(BaseModel):
     timeout_seconds: int | None = Field(
         default=None, description="Phase timeout in seconds.", alias="timeout-seconds"
     )
-    execution_type: str | None = Field(
+    execution_type: PhaseExecutionType | None = Field(
         default=None,
-        description="Phase execution type ('sequential' or 'parallel').",
+        description="Phase execution type ('sequential', 'parallel', or 'human_in_loop').",
         alias="execution-type",
     )
     description: str | None = Field(default=None, description="What this phase does.")
