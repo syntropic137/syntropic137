@@ -47,3 +47,8 @@ export const ScalingFlow = dynamic(
   () => import('./ScalingFlow').then(m => ({ default: m.ScalingFlow })),
   { ssr: false },
 );
+
+export const PluginEcosystemFlow = dynamic(
+  () => import('./PluginEcosystemFlow').then(m => ({ default: m.PluginEcosystemFlow })),
+  { ssr: false },
+);

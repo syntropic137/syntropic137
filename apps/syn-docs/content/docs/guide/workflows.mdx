@@ -147,14 +147,14 @@ Multi-workflow plugins use `syntropic137-plugin.json` for metadata:
 
 ## Exporting Workflows
 
-Export a running workflow from Syntropic137 as a distributable package. Exported
-packages can be re-imported on another instance or shared as a Claude Code plugin.
+Export a running workflow from Syntropic137 as a distributable plugin. Exported
+plugins can be re-imported on another instance or shared via a marketplace.
 
 ```bash
 # Export as a package (workflow.yaml + phase .md files)
 syn workflow export <workflow-id> --output ./my-package/
 
-# Export as a Claude Code plugin
+# Export as a plugin (includes CC command wrapper for slash-command invocation)
 syn workflow export <workflow-id> --format plugin --output ./my-plugin/
 ```
 
@@ -175,7 +175,7 @@ Produces a directory that can be re-installed with `syn workflow install`:
 
 ### Plugin Format
 
-Produces a full Claude Code plugin with a manifest, command wrapper, and workflow:
+Produces a Syntropic137 plugin with a manifest, CC command wrapper, and workflow:
 
 <Files>
   <Folder name="my-plugin" defaultOpen>
@@ -196,8 +196,9 @@ Produces a full Claude Code plugin with a manifest, command wrapper, and workflo
   </Folder>
 </Files>
 
-The generated CC command wrapper calls `syn workflow run` so the exported workflow
-is directly usable as a slash command in Claude Code.
+The `commands/syn-*.md` wrapper calls `syn workflow run`, so the exported workflow
+can also be invoked as a `/syn-*` slash command from Claude Code. The package itself
+is a Syntropic137 plugin — the CC command is a convenience bridge.
 
 ### Round-Trip Guarantee
 

@@ -2,6 +2,7 @@
   "title": "Documentation",
   "root": true,
   "pages": [
+    "why-syntropic137",
     "---Get Started---",
     "getting-started",
     "core-concepts",
