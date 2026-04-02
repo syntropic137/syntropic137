@@ -19,7 +19,7 @@ via which mechanism. It is used by:
 
 - **Trigger registration** — to warn when a trigger requires webhooks
 - **Event type mapper** — to define the polling type map
-- **Documentation** — this module IS the docs; read the tables below
+- **Documentation** — this module IS the docs; see the EVENTS registry below
 
 References:
     - Events API event types: https://docs.github.com/en/rest/using-the-rest-api/github-event-types
@@ -174,11 +174,7 @@ def build_events_api_type_map() -> dict[str, str]:
     Only includes events that are actually available via the Events API.
     This replaces the manually maintained map in ``event_type_mapper.py``.
     """
-    return {
-        e.events_api_name: e.webhook_name
-        for e in EVENTS
-        if e.events_api_name is not None
-    }
+    return {e.events_api_name: e.webhook_name for e in EVENTS if e.events_api_name is not None}
 
 
 # ---------------------------------------------------------------------------
