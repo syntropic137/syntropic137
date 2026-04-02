@@ -98,8 +98,7 @@ async def _wait_for_checkpoint(
             return
         await asyncio.sleep(0.05)
     raise TimeoutError(
-        f"Checkpoint '{projection_name}' did not reach position {target_position} "
-        f"within {timeout}s"
+        f"Checkpoint '{projection_name}' did not reach position {target_position} within {timeout}s"
     )
 
 
@@ -162,14 +161,10 @@ class TestSubscriptionCoordinatorIntegration:
                 workflow_type="research",
             )
             envelope = _make_envelope(event, "wf-test-1", nonce=1)
-            await event_store.append_events(
-                "WorkflowTemplate-wf-test-1", [envelope]
-            )
+            await event_store.append_events("WorkflowTemplate-wf-test-1", [envelope])
 
             # Wait for the coordinator to pick up and process the event
-            await _wait_for_checkpoint(
-                checkpoint_store, projection.get_name(), target_position=0
-            )
+            await _wait_for_checkpoint(checkpoint_store, projection.get_name(), target_position=0)
 
             # Verify the projection was updated
             results = await projection.query(include_archived=True)
@@ -210,14 +205,10 @@ class TestSubscriptionCoordinatorIntegration:
                     name=f"Workflow {i}",
                 )
                 envelope = _make_envelope(event, f"wf-{i}", nonce=1)
-                await event_store.append_events(
-                    f"WorkflowTemplate-wf-{i}", [envelope]
-                )
+                await event_store.append_events(f"WorkflowTemplate-wf-{i}", [envelope])
 
             # Wait for all 3 events (global nonce 0, 1, 2)
-            await _wait_for_checkpoint(
-                checkpoint_store, projection.get_name(), target_position=2
-            )
+            await _wait_for_checkpoint(checkpoint_store, projection.get_name(), target_position=2)
 
             results = await projection.query(include_archived=True)
             assert len(results) == 3
@@ -277,9 +268,7 @@ class TestSubscriptionCoordinatorIntegration:
             await event_store.append_events("WorkflowTemplate-wf-new", [new_envelope])
 
             # Wait for the new event to be processed (global nonce 1)
-            await _wait_for_checkpoint(
-                checkpoint_store, projection.get_name(), target_position=1
-            )
+            await _wait_for_checkpoint(checkpoint_store, projection.get_name(), target_position=1)
 
             # Only the new workflow should be in the projection
             # (the existing one was already checkpointed, so skipped)
@@ -324,9 +313,7 @@ class TestSubscriptionCoordinatorIntegration:
             envelope = _make_envelope(event, "wf-late", nonce=1)
             await event_store.append_events("WorkflowTemplate-wf-late", [envelope])
 
-            await _wait_for_checkpoint(
-                checkpoint_store, projection.get_name(), target_position=0
-            )
+            await _wait_for_checkpoint(checkpoint_store, projection.get_name(), target_position=0)
 
             results = await projection.query(include_archived=True)
             assert len(results) == 1
@@ -370,9 +357,7 @@ class TestSubscriptionCoordinatorIntegration:
             envelope = _make_envelope(event, "wf-filter", nonce=1)
             await event_store.append_events("WorkflowTemplate-wf-filter", [envelope])
 
-            await _wait_for_checkpoint(
-                checkpoint_store, projection.get_name(), target_position=0
-            )
+            await _wait_for_checkpoint(checkpoint_store, projection.get_name(), target_position=0)
 
             # Query with boolean filter — this was broken when str(False)='False'
             # Use the projection's query() which adds is_archived=False by default
