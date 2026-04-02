@@ -1,8 +1,10 @@
-# ADR-052: Documentation Site Deployment via Vercel CLI
+# ADR-052: Documentation Site Deployment via Vercel
 
 ## Status
 
-**Accepted** — 2026-03-31
+**Superseded** — 2026-04-01 (originally accepted 2026-03-31)
+
+Updated to use Vercel git integration instead of CLI-based deployment.
 
 ## Context
 
@@ -10,67 +12,46 @@ The public documentation site (`apps/syn-docs/`, Fumadocs + Next.js) needs to be
 
 Three deployment approaches were considered:
 
-1. **Vercel git integration** — connect the monorepo to Vercel, set root directory to `apps/syn-docs/`. Simple, but exposes the entire monorepo to Vercel and deploys on every push — too noisy for a docs site.
-2. **GitHub Actions + Vercel CLI** — build in CI, deploy via `vercel deploy --prod`. Full control over when deploys happen. Monorepo stays disconnected from Vercel.
-3. **Static export + Cloudflare Pages** — `next export` to static files, deploy to Cloudflare. Loses SSR/ISR capabilities and Vercel's Next.js optimizations.
+1. **Vercel git integration** — connect the monorepo to Vercel, set root directory to `apps/syn-docs/`. Simple, automatic PR previews, production deploys on merge.
+2. **GitHub Actions + Vercel CLI** — build in CI, deploy via `vercel deploy --prod`. Full control over when deploys happen, but requires managing secrets and no PR previews.
+3. **Static export + Cloudflare Pages** — `next export` to static files. Loses SSR/ISR capabilities.
 
 ## Decision
 
-Use **GitHub Actions + Vercel CLI** (Option 2) with release-only deployment.
+Use **Vercel git integration** (Option 1) with the monorepo connected.
 
-### Why
+### Why (updated)
 
-- **Monorepo isolation** — the monorepo is not connected to Vercel. Only the deploy workflow has access via `VERCEL_TOKEN`.
-- **Release-only deploys** — docs deploy alongside platform releases (`release: [published]`), not on every push. Docs should reflect released state, not work-in-progress.
-- **Trunk-based dev compatibility** — no preview deploys on PRs by default. The CI `docs-site` job already validates the build. Manual `workflow_dispatch` available for preview deploys when needed.
-- **Consistent pipeline** — follows the same pattern as `release-containers.yaml` (also triggered by releases).
+The original decision chose Option 2 (CLI-based) to avoid connecting the monorepo to Vercel. After further evaluation:
 
-### Deployment Trigger
+- **The repo is open source** — no security concern with Vercel having read access
+- **PR previews are valuable** — seeing docs changes before merge catches layout/content issues
+- **Less operational overhead** — no secrets to manage (`VERCEL_TOKEN`, org/project IDs), no workflow to maintain
+- **Build scoping works** — Vercel's root directory setting (`apps/syn-docs`) and "Ignored Build Step" prevent unnecessary builds from unrelated monorepo changes
+- **Production gating** — production branch can be set to a release branch if needed, or deploy on merge to main
 
-| Event | Action |
-|-------|--------|
-| GitHub release published | Auto-deploy to `docs.syntropic137.com` |
-| `workflow_dispatch` | Manual deploy (hotfixes, preview) |
-| PR / push to main | No deploy — CI build check only |
+### Vercel Project Configuration
 
-### Build Pipeline
+| Setting | Value |
+|---------|-------|
+| **Root Directory** | `apps/syn-docs` |
+| **Framework** | Next.js (auto-detected) |
+| **Build Command** | `pnpm run build` |
+| **Install Command** | `pnpm install` |
+| **Production Branch** | `main` (or a release branch for gated deploys) |
 
-```
-pnpm install → pnpm generate (CLI + OpenAPI docs) → pnpm build → vercel deploy --prod
-```
-
-The `generate` step runs two auto-generation scripts:
-- `generate:cli` — introspects the Typer CLI app (`apps/syn-cli/`) and outputs MDX files
-- `generate:openapi` — reads the OpenAPI spec and generates API reference pages
-
-### Required GitHub Secrets
-
-| Secret | Source |
-|--------|--------|
-| `VERCEL_TOKEN` | [vercel.com/account/tokens](https://vercel.com/account/tokens) |
-| `VERCEL_ORG_ID` | `.vercel/project.json` after `vercel link` |
-| `VERCEL_PROJECT_ID` | `.vercel/project.json` after `vercel link` |
-
-### One-Time Setup
-
-```bash
-cd apps/syn-docs
-npx vercel link
-# Follow prompts to create/link the project
-# Copy org_id and project_id from .vercel/project.json
-# Add all three secrets to GitHub repo settings
-```
-
-Then configure the custom domain `docs.syntropic137.com` in the Vercel project dashboard and add a CNAME record in Cloudflare DNS:
+### DNS
 
 ```
 docs.syntropic137.com → cname.vercel-dns.com
 ```
 
+Configure in Cloudflare DNS and add the custom domain in the Vercel project dashboard.
+
 ## Consequences
 
-- Docs are always in sync with releases — users never see unreleased docs
-- `workflow_dispatch` provides an escape hatch for urgent doc fixes
-- The `docs-drift.yml` CI check on main ensures generated docs stay fresh between releases
-- No Vercel build minutes consumed on PRs (only on releases + manual triggers)
-- Landing page (`syntropic137.com`) and docs (`docs.syntropic137.com`) are separate Vercel projects with independent deploy cycles
+- Automatic PR preview URLs for docs changes
+- Production deploys on merge to the production branch
+- No GitHub secrets or CLI workflows to maintain
+- CI `docs-site` job still validates the build independently
+- Landing page (`syntropic137.com`) and docs (`docs.syntropic137.com`) remain separate Vercel projects
