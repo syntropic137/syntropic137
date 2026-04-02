@@ -48,8 +48,10 @@ concurrency:
   group: release-cli-${{ github.ref }}
   cancel-in-progress: false  # Never cancel an in-progress release
 
-permissions:
-  contents: read
+# No workflow-level permissions block — when called via workflow_call,
+# the caller's permissions cap what jobs can request. A workflow-level
+# block here would further restrict (intersection), blocking id-token.
+# Job-level permissions below are sufficient.
 
 jobs:
   publish:
