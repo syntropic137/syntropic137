@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/triggers.schema.json",
+  "$defs": {
+    "TriggerConditionSchema": {
+      "additionalProperties": false,
+      "description": "A condition evaluated against the GitHub webhook payload.\n\nUses dot-notation paths to traverse nested payloads.\n\nExamples:\n    {\"field\": \"action\", \"operator\": \"eq\", \"value\": \"opened\"}\n    {\"field\": \"check_run.conclusion\", \"operator\": \"in\", \"value\": [\"failure\", \"timed_out\"]}\n    {\"field\": \"check_run.pull_requests\", \"operator\": \"not_empty\"}",
+      "properties": {
+        "field": {
+          "description": "Dot-notation path into the webhook payload (e.g., 'check_run.conclusion').",
+          "minLength": 1,
+          "title": "Field",
+          "type": "string"
+        },
+        "operator": {
+          "description": "Comparison operator. Unary operators (not_empty, is_empty) require no value. Binary operators (eq, neq, contains) require a scalar value. List operators (in, not_in) require an array value.",
+          "enum": [
+            "eq",
+            "neq",
+            "in",
+            "not_in",
+            "not_empty",
+            "is_empty",
+            "contains"
+          ],
+          "title": "Operator",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Expected value. Required for binary/list operators, must be omitted for unary operators.",
+          "title": "Value"
+        }
+      },
+      "required": [
+        "field",
+        "operator"
+      ],
+      "title": "TriggerConditionSchema",
+      "type": "object"
+    },
+    "TriggerDefinitionSchema": {
+      "additionalProperties": false,
+      "description": "A single trigger definition within a triggers.json file.\n\nDefines when a workflow should fire and how webhook payload fields\nmap to workflow input variables.",
+      "properties": {
+        "name": {
+          "description": "Human-readable trigger name (e.g., 'on-pr-opened').",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What this trigger does and when it fires.",
+          "title": "Description"
+        },
+        "event": {
+          "description": "GitHub webhook event type (e.g., 'pull_request', 'check_run', 'release'). See: https://docs.github.com/en/webhooks/webhook-events-and-payloads",
+          "minLength": 1,
+          "title": "Event",
+          "type": "string"
+        },
+        "conditions": {
+          "description": "Conditions that must ALL match for the trigger to fire. Empty list means the trigger fires on every event of this type.",
+          "items": {
+            "$ref": "#/$defs/TriggerConditionSchema"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "input_mapping": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Maps workflow input names to dot-notation paths into the webhook payload. Example: {'pr_number': 'pull_request.number', 'branch': 'pull_request.head.ref'}",
+          "title": "Input Mapping",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "event"
+      ],
+      "title": "TriggerDefinitionSchema",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Root schema for triggers.json \u2014 the distributable trigger definition format.\n\nEach workflow in a plugin package can include a triggers.json file that\ndefines when the workflow should automatically fire in response to GitHub events.\nTriggers are attached to repos at install time via `syn triggers create --from-package`.\n\nSource of truth for schemas/plugin/triggers.schema.json.\nSee ADR-052 for the schema generation strategy.",
+  "properties": {
+    "triggers": {
+      "description": "One or more trigger definitions for this workflow.",
+      "items": {
+        "$ref": "#/$defs/TriggerDefinitionSchema"
+      },
+      "minItems": 1,
+      "title": "Triggers",
+      "type": "array"
+    }
+  },
+  "required": [
+    "triggers"
+  ],
+  "title": "TriggerFileSchema",
+  "type": "object"
+}

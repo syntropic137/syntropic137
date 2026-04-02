@@ -5,7 +5,7 @@
   // ─────────────────────────────────────────────────────────────────────────────
   // WINDOW & TITLE
   // ─────────────────────────────────────────────────────────────────────────────
-  "window.title": "⚡ Syn137 • ${activeEditorShort}${separator}${rootName}",
+  "window.title": "⚡ ${rootName} ${separator} ${activeEditorShort}",
   "window.titleSeparator": " │ ",
   // ─────────────────────────────────────────────────────────────────────────────
   // WORKBENCH COLOR CUSTOMIZATIONS

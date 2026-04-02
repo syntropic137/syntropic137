@@ -1,0 +1,71 @@
+---
+title: syn marketplace
+description: "Manage workflow marketplace registries."
+---
+
+Manage workflow marketplace registries.
+
+## `syn marketplace add`
+
+Register a GitHub repo as a workflow marketplace.
+
+```bash
+syn marketplace add <repo>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `repo` | `text` | Yes | GitHub repo (org/repo shorthand) |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--ref`, `-r` | `text` | `main` | Git branch or tag |
+| `--name`, `-n` | `text` | --- | Override registry name |
+
+---
+
+## `syn marketplace list`
+
+List registered marketplace registries.
+
+```bash
+syn marketplace list
+```
+
+---
+
+## `syn marketplace refresh`
+
+Force-refresh cached marketplace indexes.
+
+```bash
+syn marketplace refresh <name>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | `text` | No | Registry name (refreshes all if omitted) |
+
+---
+
+## `syn marketplace remove`
+
+Remove a registered marketplace.
+
+```bash
+syn marketplace remove <name>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | `text` | Yes | Registry name to remove |
+
+---
