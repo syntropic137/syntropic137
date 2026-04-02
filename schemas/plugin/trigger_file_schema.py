@@ -10,7 +10,7 @@ in the aggregate. This model defines the distributable file format that plugin
 authors write. The two may intentionally diverge — the domain aggregate may
 support fields that aren't exposed in the distributable format, or vice versa.
 
-See ADR-052 for the schema generation strategy.
+See ADR-053 for the schema generation strategy.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ class TriggerConditionSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _validate_operator_value_consistency(self) -> "TriggerConditionSchema":
+    def _validate_operator_value_consistency(self) -> TriggerConditionSchema:
         op = self.operator
         val = self.value
         if op in UNARY_OPERATORS:
@@ -119,7 +119,7 @@ class TriggerFileSchema(BaseModel):
     Triggers are attached to repos at install time via `syn triggers create --from-package`.
 
     Source of truth for schemas/plugin/triggers.schema.json.
-    See ADR-052 for the schema generation strategy.
+    See ADR-053 for the schema generation strategy.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

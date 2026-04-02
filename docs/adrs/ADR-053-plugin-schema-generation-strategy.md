@@ -1,4 +1,4 @@
-# ADR-052: Plugin Schema Generation Strategy
+# ADR-053: Plugin Schema Generation Strategy
 
 ## Status
 

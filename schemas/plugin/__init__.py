@@ -15,5 +15,5 @@ The generated schemas live at schemas/plugin/*.schema.json and are:
 - Consumed by syn-cli, syn-cli-node (Zod), editor tooling, and CI
 - Validated for staleness in CI (re-generate and diff)
 
-See ADR-052 for the full strategy.
+See ADR-053 for the full strategy.
 """
