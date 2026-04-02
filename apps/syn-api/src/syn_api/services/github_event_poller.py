@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.github.slices.event_pipeline.event_type_mapper import (
@@ -43,6 +44,7 @@ class GitHubEventPoller:
         health_tracker: WebhookHealthTracker,
         trigger_store: TriggerQueryStore,
         settings: PollingSettings,
+        sleep: Callable[[float], Coroutine[object, object, None]] | None = None,
     ) -> None:
         self._events_client = events_client
         self._pipeline = pipeline
@@ -53,6 +55,7 @@ class GitHubEventPoller:
             safety_interval=settings.safety_net_interval_seconds,
         )
         self._task: asyncio.Task[None] | None = None
+        self._sleep = sleep or asyncio.sleep
 
     async def start(self) -> None:
         """Start the polling background task."""
@@ -87,7 +90,7 @@ class GitHubEventPoller:
             except Exception as exc:
                 interval = self._handle_poll_error(exc, interval)
 
-            await asyncio.sleep(interval)
+            await self._sleep(interval)
 
     async def _poll_all_repos(self, interval: float) -> float:
         """Poll all repos with active triggers, returning the effective interval."""
