@@ -103,110 +103,92 @@ function animateMesh(mesh: THREE.Mesh | null, t: number, rotY: number, rotX: num
   mesh.scale.set(s, s, s);
 }
 
+function CoreGlow({ isDark, glowRef, pulseRef, color }: {
+  isDark: boolean; glowRef: React.RefObject<THREE.Mesh | null>; pulseRef: React.RefObject<THREE.Mesh | null>; color: string;
+}) {
+  const blending = isDark ? THREE.AdditiveBlending : THREE.NormalBlending;
+  return (
+    <>
+      <mesh ref={glowRef}>
+        <sphereGeometry args={[0.9, 32, 32]} />
+        <meshBasicMaterial color={color} transparent opacity={isDark ? 0.12 : 0.08} depthWrite={false} blending={blending} />
+      </mesh>
+      <mesh ref={pulseRef} rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.95, 1.0, 64]} />
+        <meshBasicMaterial color={color} transparent opacity={0.1} side={THREE.DoubleSide} depthWrite={false} blending={blending} />
+      </mesh>
+    </>
+  );
+}
+
+function CoreGeometry({ isDark, outerRef, middleRef, innerRef, theme }: {
+  isDark: boolean; outerRef: React.RefObject<THREE.Mesh | null>; middleRef: React.RefObject<THREE.Mesh | null>; innerRef: React.RefObject<THREE.Mesh | null>; theme: typeof DARK_COLORS;
+}) {
+  return (
+    <>
+      <mesh ref={outerRef}>
+        <icosahedronGeometry args={[0.65, 1]} />
+        <meshBasicMaterial color={theme.coreOuter} wireframe transparent opacity={isDark ? 0.18 : 0.3} />
+      </mesh>
+      <mesh ref={middleRef}>
+        <icosahedronGeometry args={[0.45, 2]} />
+        <meshBasicMaterial color={theme.coreMiddle} wireframe transparent opacity={isDark ? 0.35 : 0.5} />
+      </mesh>
+      <mesh ref={innerRef}>
+        <dodecahedronGeometry args={[0.28, 0]} />
+        <meshBasicMaterial color={theme.coreInner} wireframe transparent opacity={0.7} />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[0.14, 24, 24]} />
+        <meshStandardMaterial color={theme.coreInner} emissive={theme.coreGlow} emissiveIntensity={isDark ? 2.0 : 0.8} transparent opacity={0.95} toneMapped={false} />
+      </mesh>
+    </>
+  );
+}
+
+function animateGlow(mesh: THREE.Mesh, t: number, baseOpacity: number) {
+  const breath = 1 + Math.sin(t * 1.5) * 0.08;
+  mesh.scale.set(breath, breath, breath);
+  (mesh.material as THREE.MeshBasicMaterial).opacity = baseOpacity + Math.sin(t * 1.5) * 0.05;
+}
+
+function animatePulse(mesh: THREE.Mesh, t: number, baseOpacity: number) {
+  const cycle = (t * 0.4) % 1;
+  const s = 0.4 + cycle * 0.8;
+  mesh.scale.set(s, s, s);
+  (mesh.material as THREE.MeshBasicMaterial).opacity = (1 - cycle) * baseOpacity;
+}
+
+function useCoreAnimation(isDark: boolean, reducedMotion: boolean, refs: {
+  outer: React.RefObject<THREE.Mesh | null>; middle: React.RefObject<THREE.Mesh | null>; inner: React.RefObject<THREE.Mesh | null>;
+  glow: React.RefObject<THREE.Mesh | null>; pulse: React.RefObject<THREE.Mesh | null>;
+}) {
+  const glowBase = isDark ? 0.15 : 0.1;
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    if (reducedMotion) return;
+    animateMesh(refs.outer.current, t, 0.15, 0.1, 0, 0.8, 0.03, 0);
+    animateMesh(refs.middle.current, t, -0.35, 0, 0.2, 1.2, 0.04, 1);
+    animateMesh(refs.inner.current, t, 0.6, -0.3, 0, 1.8, 0.05, 2);
+    if (refs.glow.current) animateGlow(refs.glow.current, t, glowBase);
+    if (refs.pulse.current) animatePulse(refs.pulse.current, t, glowBase);
+  });
+}
+
 function CentralCore({ isDark, reducedMotion }: { isDark: boolean; reducedMotion: boolean }) {
   const outerRef = useRef<THREE.Mesh>(null);
   const middleRef = useRef<THREE.Mesh>(null);
   const innerRef = useRef<THREE.Mesh>(null);
-  const glowSphereRef = useRef<THREE.Mesh>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
   const pulseRef = useRef<THREE.Mesh>(null);
   const theme = isDark ? DARK_COLORS : LIGHT_COLORS;
 
-  useFrame((state) => {
-    const t = state.clock.elapsedTime;
-    if (reducedMotion) return;
-
-    animateMesh(outerRef.current, t, 0.15, 0.1, 0, 0.8, 0.03, 0);
-    animateMesh(middleRef.current, t, -0.35, 0, 0.2, 1.2, 0.04, 1);
-    animateMesh(innerRef.current, t, 0.6, -0.3, 0, 1.8, 0.05, 2);
-
-    if (glowSphereRef.current) {
-      const breath = 1 + Math.sin(t * 1.5) * 0.08;
-      glowSphereRef.current.scale.set(breath, breath, breath);
-      (glowSphereRef.current.material as THREE.MeshBasicMaterial).opacity =
-        (isDark ? 0.15 : 0.1) + Math.sin(t * 1.5) * 0.05;
-    }
-
-    if (pulseRef.current) {
-      const cycle = (t * 0.4) % 1;
-      const s = 0.4 + cycle * 0.8;
-      pulseRef.current.scale.set(s, s, s);
-      (pulseRef.current.material as THREE.MeshBasicMaterial).opacity =
-        (1 - cycle) * (isDark ? 0.15 : 0.1);
-    }
-  });
+  useCoreAnimation(isDark, reducedMotion, { outer: outerRef, middle: middleRef, inner: innerRef, glow: glowRef, pulse: pulseRef });
 
   return (
     <group>
-      {/* Soft ambient glow sphere */}
-      <mesh ref={glowSphereRef}>
-        <sphereGeometry args={[0.9, 32, 32]} />
-        <meshBasicMaterial
-          color={theme.coreGlow}
-          transparent
-          opacity={isDark ? 0.12 : 0.08}
-          depthWrite={false}
-          blending={isDark ? THREE.AdditiveBlending : THREE.NormalBlending}
-        />
-      </mesh>
-
-      {/* Expanding pulse ring */}
-      <mesh ref={pulseRef} rotation={[Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.95, 1.0, 64]} />
-        <meshBasicMaterial
-          color={theme.coreGlow}
-          transparent
-          opacity={0.1}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-          blending={isDark ? THREE.AdditiveBlending : THREE.NormalBlending}
-        />
-      </mesh>
-
-      {/* Outer wireframe — icosahedron detail=1 */}
-      <mesh ref={outerRef}>
-        <icosahedronGeometry args={[0.65, 1]} />
-        <meshBasicMaterial
-          color={theme.coreOuter}
-          wireframe
-          transparent
-          opacity={isDark ? 0.18 : 0.3}
-        />
-      </mesh>
-
-      {/* Middle wireframe — icosahedron detail=2 for denser mesh */}
-      <mesh ref={middleRef}>
-        <icosahedronGeometry args={[0.45, 2]} />
-        <meshBasicMaterial
-          color={theme.coreMiddle}
-          wireframe
-          transparent
-          opacity={isDark ? 0.35 : 0.5}
-        />
-      </mesh>
-
-      {/* Inner wireframe — dodecahedron for geometric contrast */}
-      <mesh ref={innerRef}>
-        <dodecahedronGeometry args={[0.28, 0]} />
-        <meshBasicMaterial
-          color={theme.coreInner}
-          wireframe
-          transparent
-          opacity={0.7}
-        />
-      </mesh>
-
-      {/* Solid emissive core */}
-      <mesh>
-        <sphereGeometry args={[0.14, 24, 24]} />
-        <meshStandardMaterial
-          color={theme.coreInner}
-          emissive={theme.coreGlow}
-          emissiveIntensity={isDark ? 2.0 : 0.8}
-          transparent
-          opacity={0.95}
-          toneMapped={false}
-        />
-      </mesh>
+      <CoreGlow isDark={isDark} glowRef={glowRef} pulseRef={pulseRef} color={theme.coreGlow} />
+      <CoreGeometry isDark={isDark} outerRef={outerRef} middleRef={middleRef} innerRef={innerRef} theme={theme} />
     </group>
   );
 }
