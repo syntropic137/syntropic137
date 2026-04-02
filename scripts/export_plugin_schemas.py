@@ -38,33 +38,18 @@ sys.path.insert(0, str(REPO_ROOT))
 #
 # Each model owns one schema file. If you add a new plugin file format,
 # add its Pydantic model here and register it in SCHEMA_REGISTRY below.
+#
+# These imports must come after sys.path.insert above, hence the E402 noqa.
 # ---------------------------------------------------------------------------
 
-# Workflow definition — defines workflow.yaml format
-# Source: packages/syn-domain/.../orchestration/_shared/workflow_definition.py
-from syn_domain.contexts.orchestration._shared.workflow_definition import (
+from schemas.plugin.trigger_file_schema import TriggerFileSchema  # noqa: E402
+
+from syn_cli.commands._marketplace_models import MarketplaceIndex  # noqa: E402
+from syn_cli.commands._package_models import PluginManifest  # noqa: E402
+from syn_domain.contexts.orchestration._shared.workflow_definition import (  # noqa: E402
+    PhaseYamlDefinition,
     WorkflowDefinition,
 )
-
-# Plugin manifest — defines syntropic137-plugin.json format
-# Source: apps/syn-cli/src/syn_cli/commands/_package_models.py
-from syn_cli.commands._package_models import PluginManifest
-
-# Marketplace index — defines marketplace.json format
-# Source: apps/syn-cli/src/syn_cli/commands/_marketplace_models.py
-from syn_cli.commands._marketplace_models import MarketplaceIndex
-
-# Trigger file — defines triggers.json format
-# Source: schemas/plugin/trigger_file_schema.py (dedicated schema model,
-# separate from domain-level TriggerCondition/TriggerConfig dataclasses)
-from schemas.plugin.trigger_file_schema import TriggerFileSchema
-
-# Phase frontmatter — defines the YAML frontmatter in phase .md files
-# Source: packages/syn-domain/.../orchestration/_shared/workflow_definition.py
-from syn_domain.contexts.orchestration._shared.workflow_definition import (
-    PhaseYamlDefinition,
-)
-
 
 # ---------------------------------------------------------------------------
 # Schema registry — maps output filename to Pydantic model.
