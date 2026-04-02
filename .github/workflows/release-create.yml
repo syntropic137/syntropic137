@@ -27,9 +27,14 @@ concurrency:
   group: release-create
   cancel-in-progress: false  # Never cancel an in-progress release
 
+# Permissions must cover everything the reusable workflows need.
+# The caller's permissions cap what callees can request.
 permissions:
-  contents: write      # Create tag + release
-  pull-requests: read  # Read merged PR metadata for release notes
+  contents: write       # Create tag + release + release-assets upload
+  pull-requests: read   # Read merged PR metadata for release notes
+  packages: write       # Push Docker images to GHCR
+  id-token: write       # cosign signing + npm provenance (Sigstore OIDC)
+  security-events: write # Upload SARIF results from container scans
 
 jobs:
   # ---------------------------------------------------------------------------
