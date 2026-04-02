@@ -10,7 +10,7 @@
 #   3. Publish to npm with provenance
 #
 # Prerequisites:
-#   - NPM_TOKEN secret (npm automation token for @syntropic137 scope)
+#   - CLI_NPM_TOKEN secret (npm automation token for @syntropic137 scope)
 #
 # Security:
 #   - All actions SHA-pinned (ISS-259)
@@ -135,7 +135,7 @@ jobs:
         if: ${{ github.event_name == 'release' && !inputs.dry_run }}
         working-directory: apps/syn-cli-node
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.CLI_NPM_TOKEN }}
         run: |
           npm publish --access public --tag ${{ steps.version.outputs.npm_tag }} --provenance
 
