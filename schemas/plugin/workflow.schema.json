@@ -1,4 +1,6 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/workflow.schema.json",
   "$defs": {
     "InputYamlDefinition": {
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",

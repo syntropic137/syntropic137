@@ -1,4 +1,6 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/marketplace.schema.json",
   "$defs": {
     "MarketplacePluginEntry": {
       "description": "A single plugin listed in ``marketplace.json``.",

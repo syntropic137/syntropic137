@@ -6,12 +6,13 @@ Accepted
 
 ## Context
 
-The Syntropic plugin system defines four file formats that plugin authors must conform to:
+The Syntropic plugin system defines five file formats that plugin authors must conform to:
 
 1. `workflow.yaml` — Workflow definitions with phases and inputs
 2. `triggers.json` — Embedded trigger definitions per workflow
 3. `syntropic137-plugin.json` — Plugin manifest metadata
 4. `marketplace.json` — Marketplace registry index
+5. `phase-frontmatter` — Phase frontmatter blocks embedded in Markdown content
 
 Plugin authors need to know the valid schema for these formats. Without formal schemas, authors rely on examples and trial-and-error. Editors can't provide autocomplete. The CLI can't give meaningful validation errors.
 
