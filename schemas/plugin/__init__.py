@@ -5,6 +5,7 @@ These Pydantic models define the canonical schemas for:
 - triggers.json (TriggerFileSchema)
 - syntropic137-plugin.json (PluginManifest)
 - marketplace.json (MarketplaceIndex)
+- phase-frontmatter (PhaseYamlDefinition)
 
 JSON Schemas are generated from these models via:
     uv run python scripts/export_plugin_schemas.py

@@ -17,7 +17,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+UNARY_OPERATORS = frozenset({"not_empty", "is_empty"})
+BINARY_OPERATORS = frozenset({"eq", "neq", "contains"})
+LIST_OPERATORS = frozenset({"in", "not_in"})
 
 
 class TriggerConditionSchema(BaseModel):
@@ -40,13 +44,35 @@ class TriggerConditionSchema(BaseModel):
     )
     operator: Literal["eq", "neq", "in", "not_in", "not_empty", "is_empty", "contains"] = Field(
         ...,
-        description="Comparison operator. Unary operators (not_empty, is_empty) ignore value.",
+        description="Comparison operator. Unary operators (not_empty, is_empty) require no value. "
+        "Binary operators (eq, neq, contains) require a scalar value. "
+        "List operators (in, not_in) require an array value.",
     )
     value: str | int | bool | list[str] | None = Field(
         default=None,
-        description="Expected value. Required for binary operators (eq, neq, in, not_in, contains). "
-        "Ignored for unary operators (not_empty, is_empty).",
+        description="Expected value. Required for binary/list operators, must be omitted for unary operators.",
     )
+
+    @model_validator(mode="after")
+    def _validate_operator_value_consistency(self) -> "TriggerConditionSchema":
+        op = self.operator
+        val = self.value
+        if op in UNARY_OPERATORS:
+            if val is not None:
+                msg = f"Unary operator '{op}' must not have a value (got {val!r})."
+                raise ValueError(msg)
+        elif op in LIST_OPERATORS:
+            if not isinstance(val, list):
+                msg = f"List operator '{op}' requires an array value (got {type(val).__name__})."
+                raise ValueError(msg)
+        elif op in BINARY_OPERATORS:
+            if val is None:
+                msg = f"Binary operator '{op}' requires a value."
+                raise ValueError(msg)
+            if isinstance(val, list):
+                msg = f"Binary operator '{op}' requires a scalar value, not a list."
+                raise ValueError(msg)
+        return self
 
 
 class TriggerDefinitionSchema(BaseModel):

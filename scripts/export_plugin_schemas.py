@@ -20,6 +20,7 @@ See ADR-052 for the full schema generation strategy.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -42,6 +43,8 @@ sys.path.insert(0, str(REPO_ROOT))
 # These imports must come after sys.path.insert above, hence the E402 noqa.
 # ---------------------------------------------------------------------------
 
+from pydantic import BaseModel  # noqa: E402
+
 from schemas.plugin.trigger_file_schema import TriggerFileSchema  # noqa: E402
 
 from syn_cli.commands._marketplace_models import MarketplaceIndex  # noqa: E402
@@ -62,7 +65,7 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (  # n
 # 5. Commit the generated .schema.json file
 # ---------------------------------------------------------------------------
 
-SCHEMA_REGISTRY: dict[str, type] = {
+SCHEMA_REGISTRY: dict[str, type[BaseModel]] = {
     "workflow.schema.json": WorkflowDefinition,
     "plugin-manifest.schema.json": PluginManifest,
     "marketplace.schema.json": MarketplaceIndex,
@@ -71,15 +74,32 @@ SCHEMA_REGISTRY: dict[str, type] = {
 }
 
 
-def generate_schema(model: type) -> str:
+def _read_platform_version() -> str:
+    """Read the platform version from pyproject.toml."""
+    pyproject = REPO_ROOT / "pyproject.toml"
+    match = re.search(r'^version\s*=\s*"(.+?)"', pyproject.read_text(), re.MULTILINE)
+    if not match:
+        raise RuntimeError("Could not read version from pyproject.toml")
+    return match.group(1)
+
+
+PLATFORM_VERSION = _read_platform_version()
+SCHEMA_BASE_URL = "https://syntropic137.dev/schemas/plugin"
+
+
+def generate_schema(name: str, model: type[BaseModel]) -> str:
     """Generate a formatted JSON Schema string from a Pydantic model."""
-    schema = model.model_json_schema()  # type: ignore[attr-defined]
-    return json.dumps(schema, indent=2) + "\n"
+    schema = model.model_json_schema()
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = f"{SCHEMA_BASE_URL}/v{PLATFORM_VERSION}/{name}"
+    # Move $schema and $id to the top for readability
+    ordered = {"$schema": schema.pop("$schema"), "$id": schema.pop("$id"), **schema}
+    return json.dumps(ordered, indent=2) + "\n"
 
 
 def export_all() -> dict[str, str]:
     """Generate all schemas and return filename → content mapping."""
-    return {name: generate_schema(model) for name, model in SCHEMA_REGISTRY.items()}
+    return {name: generate_schema(name, model) for name, model in SCHEMA_REGISTRY.items()}
 
 
 def write_schemas(schemas: dict[str, str]) -> None:

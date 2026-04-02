@@ -1,4 +1,6 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/phase-frontmatter.schema.json",
   "$defs": {
     "PhaseExecutionType": {
       "description": "How a phase should be executed.",

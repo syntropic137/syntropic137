@@ -1,4 +1,6 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/triggers.schema.json",
   "$defs": {
     "TriggerConditionSchema": {
       "additionalProperties": false,
@@ -11,7 +13,7 @@
           "type": "string"
         },
         "operator": {
-          "description": "Comparison operator. Unary operators (not_empty, is_empty) ignore value.",
+          "description": "Comparison operator. Unary operators (not_empty, is_empty) require no value. Binary operators (eq, neq, contains) require a scalar value. List operators (in, not_in) require an array value.",
           "enum": [
             "eq",
             "neq",
@@ -46,7 +48,7 @@
             }
           ],
           "default": null,
-          "description": "Expected value. Required for binary operators (eq, neq, in, not_in, contains). Ignored for unary operators (not_empty, is_empty).",
+          "description": "Expected value. Required for binary/list operators, must be omitted for unary operators.",
           "title": "Value"
         }
       },
