@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "React feedback widget for capturing contextual UI feedback",
   "type": "module",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.24.0",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
   "types": "./index.d.ts",
