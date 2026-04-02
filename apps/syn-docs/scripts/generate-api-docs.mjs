@@ -10,6 +10,7 @@ async function main() {
     input: openapi,
     output: './content/docs/api',
     per: 'tag',
+    frontmatter: () => ({ full: false }),
   });
 
   console.log('Generated API reference docs from OpenAPI spec');

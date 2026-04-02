@@ -1,5 +1,6 @@
 'use client';
 
+/// <reference types="@react-three/fiber" />
 import { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Points, PointMaterial } from '@react-three/drei';
@@ -68,7 +69,7 @@ function applyRotation(obj: THREE.Object3D, t: number): void {
   obj.rotation.x = Math.sin(t * 0.04) * 0.1;
 }
 
-export function NetworkNodes({ isDark }: { isDark: boolean }) {
+export function NetworkNodes({ isDark, reducedMotion }: { isDark: boolean; reducedMotion?: boolean }) {
   const ref = useRef<THREE.Points>(null);
   const linesRef = useRef<THREE.LineSegments>(null);
   const lineMaterialRef = useRef<THREE.LineBasicMaterial>(null);

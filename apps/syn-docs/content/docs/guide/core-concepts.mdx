@@ -1,0 +1,123 @@
+---
+title: Core Concepts
+description: The mental model behind Syntropic137 — events, workspaces, workflows, and observability.
+---
+
+<Callout type="info">
+You don't need to understand event sourcing to use Syntropic137. This page gives you the mental model — the "why" behind what you see in the dashboard and CLI.
+</Callout>
+
+## Two Kinds of Events
+
+Syntropic137 separates all data into two lanes, each optimized for its purpose:
+
+| | Domain Events | Observability Events |
+|---|---|---|
+| **Purpose** | Source of truth for business logic and state transitions | High-throughput telemetry for dashboards and debugging |
+| **Storage** | TimescaleDB (append-only, replay-safe) | TimescaleDB (hypertable, time-series optimized) |
+| **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → Collector → EventBuffer → TimescaleDB |
+| **Examples** | `WorkflowCreated`, `ExecutionCompleted`, `TriggerFired` | `ToolExecuted`, `TokensUsed`, `StreamChunk` |
+
+**Domain events** are the source of truth for what happened. The current state of any workflow or execution is derived by replaying its events — there's no mutable database row to corrupt.
+
+**Observability events** are append-only telemetry. They power the dashboard metrics, cost tracking, and session timelines. They never affect business logic.
+
+## Workspaces
+
+Every agent execution runs inside an **isolated Docker container** — a workspace. Workspaces use a two-phase security model:
+
+1. **Setup Phase** — Secrets (API keys, Git credentials) are briefly available to configure credential helpers. Raw tokens are cleared before the agent starts.
+2. **Agent Phase** — The agent runs with only `ANTHROPIC_API_KEY` in its environment. Git operations use cached credentials from the setup phase. Network egress goes through an Envoy sidecar proxy.
+
+This means the agent never sees raw GitHub tokens or other secrets. Even if an agent is compromised, credentials are already gone.
+
+## Workflows
+
+A **workflow** is a YAML definition of work to be done. It consists of one or more **phases**, where each phase is a task for an AI agent:
+
+```yaml
+id: research-v1
+name: Research Workflow
+phases:
+  - id: discovery
+    prompt_file: phases/discovery.md
+    model: sonnet
+  - id: synthesis
+    prompt_file: phases/synthesis.md
+    model: opus
+```
+
+Phases execute sequentially. Each phase can reference the output of previous phases using `{{phase-id}}` substitution. The `$ARGUMENTS` variable passes user input into the prompt.
+
+Workflows can be packaged and distributed — see [Workflow Packages](/docs/guide/workflows).
+
+## Executions
+
+An **execution** is a running instance of a workflow. It progresses through a state machine:
+
+<div className="not-prose my-6 overflow-x-auto rounded-lg border border-fd-border bg-fd-card p-6">
+  <div className="flex flex-col gap-3 text-sm font-mono">
+    <div className="flex items-center gap-2">
+      <span className="inline-block w-28 rounded-md bg-fd-muted px-3 py-1.5 text-center text-fd-muted-foreground">NOT_STARTED</span>
+      <span className="text-fd-muted-foreground">→ start →</span>
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold">RUNNING</span>
+      <span className="text-fd-muted-foreground">→ finish →</span>
+      <span className="inline-block w-28 rounded-md bg-emerald-500/20 px-3 py-1.5 text-center text-emerald-400">COMPLETED</span>
+    </div>
+    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem)]">
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
+      <span className="text-fd-muted-foreground">→ error →</span>
+      <span className="inline-block w-28 rounded-md bg-red-500/20 px-3 py-1.5 text-center text-red-400">FAILED</span>
+    </div>
+    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem)]">
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
+      <span className="text-fd-muted-foreground">→ pause →</span>
+      <span className="inline-block w-28 rounded-md bg-amber-500/20 px-3 py-1.5 text-center text-amber-400">PAUSED</span>
+      <span className="text-fd-muted-foreground">→ resume →</span>
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary">RUNNING</span>
+    </div>
+    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem)]">
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
+      <span className="text-fd-muted-foreground">→ interrupt →</span>
+      <span className="inline-block w-28 rounded-md bg-orange-500/20 px-3 py-1.5 text-center text-orange-400">INTERRUPTED</span>
+      <span className="text-fd-muted-foreground">→ retry →</span>
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary">RUNNING</span>
+    </div>
+    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem+6rem+3.5rem+0.5rem)]">
+      <span className="inline-block w-28 rounded-md bg-amber-500/20 px-3 py-1.5 text-center text-amber-400 opacity-0">PAUSED</span>
+      <span className="text-fd-muted-foreground">→ cancel →</span>
+      <span className="inline-block w-28 rounded-md bg-zinc-500/20 px-3 py-1.5 text-center text-zinc-400">CANCELLED</span>
+    </div>
+  </div>
+</div>
+
+You can **pause**, **resume**, and **cancel** executions in real time via the REST API or the CLI. The agent can only be paused at safe yield points — between phases, after tool calls, or after LLM responses.
+
+## Sessions
+
+A **session** is an agent's working period within an execution. It captures:
+
+- **Conversation** — the full message history
+- **Tool timeline** — every tool call with input, output, and duration
+- **Token metrics** — input/output tokens per model
+- **Cost** — calculated from token usage and model pricing
+
+Sessions are the primary unit of observability. When you debug a failed execution or analyze costs, you're looking at session data.
+
+## Artifacts
+
+**Artifacts** are outputs produced by agents — code files, reports, design documents, test results. They're stored in MinIO (S3-compatible object storage) and linked to their source execution.
+
+## Triggers
+
+A **trigger** connects a GitHub event to a workflow. When a matching event arrives (PR opened, push to main, issue labeled), the trigger automatically starts a workflow execution.
+
+Triggers have built-in safety limits:
+
+| Guard | Purpose |
+|-------|---------|
+| `daily_limit` | Maximum executions per day |
+| `cooldown` | Minimum seconds between executions |
+| `budget` | Maximum spend before pausing |
+
+See [GitHub Integration](/docs/guide/github-integration) for setup details.

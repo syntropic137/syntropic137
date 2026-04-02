@@ -2,11 +2,23 @@
   "title": "Documentation",
   "root": true,
   "pages": [
+    "why-syntropic137",
+    "---Get Started---",
     "getting-started",
+    "core-concepts",
+    "setup-cli",
+    "---Build---",
+    "plugins",
     "workflows",
-    "architecture",
+    "claude-code-plugin",
+    "github-integration",
+    "---Operate---",
+    "self-hosting",
     "configuration",
+    "tunnels",
+    "secrets",
     "event-ingestion",
-    "self-hosting"
+    "---Reference---",
+    "architecture"
   ]
 }

@@ -1,0 +1,40 @@
+---
+title: syn execution
+description: "List and inspect workflow executions"
+---
+
+List and inspect workflow executions
+
+## `syn execution list`
+
+List all workflow executions across every workflow.
+
+```bash
+syn execution list
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--status`, `-s` | `text` | --- | Filter by status (running, completed, failed, …) |
+| `--page` | `integer` | `1` | Page number |
+| `--page-size` | `integer` | `50` | Items per page (max 100) |
+
+---
+
+## `syn execution show`
+
+Show detailed information about a single execution.
+
+```bash
+syn execution show <execution_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution_id` | `text` | Yes | Execution ID |
+
+---

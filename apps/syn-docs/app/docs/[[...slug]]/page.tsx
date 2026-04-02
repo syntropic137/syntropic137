@@ -10,6 +10,7 @@ import {
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/mdx-components';
 import { LLMCopyButton } from '@/components/LLMCopyButton';
+import { DocsFooter } from '@/components/DocsFooter';
 
 function getRawContent(slug?: string[]): string {
   const contentDir = path.join(process.cwd(), 'content/docs');
@@ -49,6 +50,28 @@ function stripFrontmatterAndJSX(content: string): string {
   return result;
 }
 
+/** Extract TOC entries from _openapi.toc in frontmatter (generated API pages). */
+function getOpenApiToc(slug?: string[]): Array<{ depth: number; title: string; url: string }> {
+  if (!slug || slug[0] !== 'api') return [];
+  const slugPath = slug.join('/');
+  const contentDir = path.join(process.cwd(), 'content/docs');
+  for (const candidate of [`${slugPath}.mdx`, `${slugPath}/index.mdx`]) {
+    const full = path.join(contentDir, candidate);
+    if (!fs.existsSync(full)) continue;
+    const raw = fs.readFileSync(full, 'utf-8');
+    const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) continue;
+    const entries: Array<{ depth: number; title: string; url: string }> = [];
+    const re = /- depth: (\d+)\n\s+title: (.*)\n\s+url: '([^']+)'/g;
+    let m;
+    while ((m = re.exec(fmMatch[1])) !== null) {
+      entries.push({ depth: parseInt(m[1]), title: m[2], url: m[3] });
+    }
+    return entries;
+  }
+  return [];
+}
+
 export default async function Page(props: {
   params: Promise<{ slug?: string[] }>;
 }) {
@@ -59,18 +82,23 @@ export default async function Page(props: {
   const MDXContent = page.data.body;
   const rawContent = getRawContent(params.slug);
   const editUrl = getEditUrl(params.slug);
-  const txtUrl = params.slug ? `/docs/${params.slug.join('/')}.txt` : '/docs.txt';
+  const mdUrl = params.slug ? `/docs/${params.slug.join('/')}.md` : '/docs.md';
+
+  // For API pages, MDX heading extraction is empty (headings rendered by APIPage at runtime).
+  // Fall back to _openapi.toc from frontmatter which has the correct entries.
+  const toc = page.data.toc.length > 0 ? page.data.toc : getOpenApiToc(params.slug);
 
   return (
-    <DocsPage toc={page.data.toc}>
+    <DocsPage toc={toc}>
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
-      <LLMCopyButton content={rawContent} title={page.data.title} editUrl={editUrl} txtUrl={txtUrl} />
+      <LLMCopyButton content={rawContent} title={page.data.title} editUrl={editUrl} mdUrl={mdUrl} />
       <DocsBody>
         <MDXContent
           components={getMDXComponents({})}
         />
       </DocsBody>
+      <DocsFooter />
     </DocsPage>
   );
 }

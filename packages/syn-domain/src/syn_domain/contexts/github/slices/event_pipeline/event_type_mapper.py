@@ -3,6 +3,9 @@
 The Events API uses different type naming (e.g. ``PushEvent`` vs webhook
 ``push``). This mapper bridges that gap and produces ``NormalizedEvent``
 instances ready for pipeline ingestion.
+
+The type map is derived from ``event_availability.py`` — the single source
+of truth for which events are available via which delivery channel (ISS-409).
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from syn_domain.contexts.github._shared.event_availability import build_events_api_type_map
 from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key
 from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
     EventSource,
@@ -19,23 +23,11 @@ from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
 
 logger = logging.getLogger(__name__)
 
-# Maps Events API type names to webhook event type names.
-_EVENTS_API_TYPE_MAP: dict[str, str] = {
-    "PushEvent": "push",
-    "PullRequestEvent": "pull_request",
-    "PullRequestReviewEvent": "pull_request_review",
-    "PullRequestReviewCommentEvent": "pull_request_review_comment",
-    "IssueCommentEvent": "issue_comment",
-    "IssuesEvent": "issues",
-    "CreateEvent": "create",
-    "DeleteEvent": "delete",
-    "CheckRunEvent": "check_run",
-    "CheckSuiteEvent": "check_suite",
-    "StatusEvent": "status",
-    "ReleaseEvent": "release",
-    "ForkEvent": "fork",
-    "WatchEvent": "watch",
-}
+# Maps Events API type names (e.g. "PushEvent") to webhook names (e.g. "push").
+# Derived from event_availability.py — only includes events actually returned
+# by the Events API (no dead entries for webhook-only types like CheckRunEvent).
+# https://docs.github.com/en/rest/using-the-rest-api/github-event-types
+_EVENTS_API_TYPE_MAP: dict[str, str] = build_events_api_type_map()
 
 
 def map_events_api_to_normalized(

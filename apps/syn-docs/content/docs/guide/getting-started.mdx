@@ -1,44 +1,103 @@
 ---
 title: Getting Started
-description: Install Syntropic137 and run your first AI agent workflow in minutes.
+description: Install Syntropic137 and run your first AI agent workflow in under 5 minutes.
 ---
+
+<Callout type="info">
+Get up and running in a single command — no config files, no YAML, no manual setup.
+</Callout>
+
+```bash title="Terminal"
+npx @syntropic137/setup
+```
+
+This opens an **interactive terminal** with arrow-key navigation, styled prompts, and progress tracking. Choose from available commands or jump straight to a full install with `init`.
+
+## Available Commands
+
+```bash title="Setup CLI"
+npx @syntropic137/setup init        # Full interactive install wizard
+npx @syntropic137/setup status      # Show running services
+npx @syntropic137/setup start       # Start the stack
+npx @syntropic137/setup stop        # Stop the stack
+npx @syntropic137/setup logs        # Tail service logs
+npx @syntropic137/setup update      # Pull latest images and restart
+npx @syntropic137/setup github-app  # Configure GitHub App integration
+npx @syntropic137/setup plugin      # Install Claude Code plugin
+```
 
 ## Prerequisites
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) package manager
-- Docker (for workspace isolation)
-- A GitHub account (for GitHub App integration)
+You need three things installed on your machine:
 
-## Installation
+- **Node.js 18+** — for running the setup CLI
+- **Docker** — for isolated agent workspaces
+- **Docker Compose v2.20+** — for orchestrating the service stack
 
-```bash
-# Clone the repository
-git clone https://github.com/syntropic137/syntropic137.git
-cd syntropic137
+<Callout type="warn">
+Syntropic137 requires Docker Compose v2 (the `docker compose` plugin), not the legacy v1 (`docker-compose`). Check with `docker compose version`.
+</Callout>
 
-# Install dependencies
-uv sync
+## Install
 
-# Copy environment configuration
-cp .env.example .env
+```bash title="Terminal"
+npx @syntropic137/setup init
 ```
 
-## First Workflow
+The `init` wizard walks you through the full setup step-by-step:
 
-```bash
-# Start the API server
-just api-dev
+1. **Docker check** — verifies Docker and Compose are available
+2. **Directory setup** — creates `~/.syntropic137/` with config, secrets, and workspace directories
+3. **Secret generation** — creates cryptographically random passwords for Postgres, Redis, and MinIO (stored as `chmod 600` files)
+4. **API key** — prompts for your `ANTHROPIC_API_KEY` (or detects `CLAUDE_CODE_OAUTH_TOKEN` if set)
+5. **GitHub App** — opens your browser to create a GitHub App via manifest flow for webhook-triggered workflows
+6. **Claude Code plugin** *(optional)* — installs the Syntropic137 plugin for Claude Code if the `claude` CLI is detected
+7. **Pull & start** — downloads container images and starts the full stack
 
-# In another terminal, trigger a workflow via CLI
-syn workflow run --name hello-world
+<Callout type="info">
+The Claude Code plugin step is optional — skip it during setup and add later with `npx @syntropic137/setup plugin`. The GitHub App is required for webhook-triggered workflows.
+</Callout>
+
+Once complete, the dashboard is live at **http://localhost:8137**.
+
+## Run Your First Workflow
+
+Install the example research workflow package and run it:
+
+```bash title="Terminal"
+# Install the starter research workflow from GitHub
+syn workflow install syntropic137/syntropic137 --ref main --path workflows/examples/research-package
+
+# Run it with a task
+syn workflow run research-package-v1 \
+  --task "Investigate event sourcing patterns for building reliable agent systems"
 ```
 
-Visit the [Dashboard API](/docs/api) to observe your workflow execution in
-real-time.
+The workflow executes in an isolated Docker workspace. Watch it in real time on the dashboard or via SSE:
+
+```bash title="Terminal"
+# Stream execution events
+curl -N http://localhost:8137/api/executions/{execution-id}/stream
+```
+
+## What's Running
+
+After setup, your `~/.syntropic137/` directory contains a Docker Compose stack with these services:
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| `gateway` | 8137 | nginx reverse proxy + dashboard UI |
+| `api` | 8000 | FastAPI — REST API, SSE |
+| `event-store` | 50051 | gRPC event sourcing server |
+| `collector` | 8080 | Agent event ingestion |
+| `timescaledb` | 5432 | PostgreSQL + TimescaleDB |
+| `redis` | 6379 | Caching and pub/sub |
+| `minio` | 9000 | S3-compatible artifact storage |
 
 ## Next Steps
 
-- [Self-Hosting Guide](/docs/guide/self-hosting) — deploy to production
-- [Configuration](/docs/guide/configuration) — customize settings
-- [CLI Reference](/docs/cli) — explore all commands
+- [Core Concepts](/docs/guide/core-concepts) — understand the mental model: events, workspaces, workflows
+- [Workflows](/docs/guide/workflows) — create and distribute workflow packages
+- [Claude Code Plugin](/docs/guide/claude-code-plugin) — manage Syntropic137 from inside Claude Code
+- [GitHub Integration](/docs/guide/github-integration) — trigger workflows from GitHub events
+- [Setup CLI Reference](/docs/guide/setup-cli) — all `npx @syntropic137/setup` commands

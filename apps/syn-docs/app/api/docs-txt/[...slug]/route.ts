@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { stripFrontmatter, stripJSX, parseFrontmatter } from '@/lib/mdx-text';
+import { stripFrontmatter, parseFrontmatter } from '@/lib/mdx-text';
 import { extractAPIOperations, getOpenAPISpec, renderOpenAPIPage } from '@/lib/openapi-renderer';
 
 function resolveFilePath(contentDir: string, slugPath: string): string | null {
@@ -18,7 +18,7 @@ function renderMarkdownPage(raw: string): string {
     const spec = getOpenAPISpec();
     return renderOpenAPIPage(fm.title, fm.description, operations, spec);
   }
-  const body = stripJSX(stripFrontmatter(raw));
+  const body = stripFrontmatter(raw);
   const lines: string[] = [];
   if (fm.title) lines.push(`# ${fm.title}`);
   if (fm.description) lines.push(`> ${fm.description}`);

@@ -22,7 +22,7 @@ function CopyButton({ text, label }: { text?: string; url?: string; label: strin
   return (
     <button
       onClick={handleCopy}
-      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-700 hover:border-sky-500/30 text-fd-foreground hover:bg-zinc-800/50 transition-all"
+      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-700 hover:border-fd-primary/30 text-fd-foreground hover:bg-zinc-800/50 transition-all"
     >
       {copied ? <Check className="w-4 h-4 text-teal-400" /> : <Copy className="w-4 h-4" />}
       {copied ? 'Copied!' : label}
@@ -48,7 +48,7 @@ function FetchCopyButton({ url, label }: { url: string; label: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-700 hover:border-sky-500/30 text-fd-foreground hover:bg-zinc-800/50 transition-all"
+      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-700 hover:border-fd-primary/30 text-fd-foreground hover:bg-zinc-800/50 transition-all"
     >
       {copied ? <Check className="w-4 h-4 text-teal-400" /> : <Copy className="w-4 h-4" />}
       {copied ? 'Copied!' : label}
@@ -60,52 +60,78 @@ export const SYSTEM_PROMPT = `You are an expert on Syntropic137, an agentic engi
 
 ## Quick Reference
 
-- **Docs Index**: Fetch /llms.txt for a structured index of all documentation pages
-- **Full Docs**: Fetch /llms-full.txt for complete documentation in a single file
-- **API Reference**: 45+ REST endpoints at /api on port 8000
+- **Docs Index**: Fetch /llms.md for a structured index of all documentation pages
+- **Full Docs**: Fetch /llms-full.md for complete documentation in a single file
+- **API Reference**: REST endpoints at /api — accessible via gateway on port 8137
 - **CLI**: The \`syn\` command-line tool for workflow management
+- **Setup CLI**: \`npx @syntropic137/setup\` for installation and platform management
 
 ## Architecture
 
-Syntropic137 uses event sourcing + CQRS with four bounded contexts:
+Syntropic137 uses event sourcing + CQRS with five bounded contexts:
 1. **Orchestration** — Workflows, Executions, Workspaces
 2. **Agent Sessions** — Conversations, tool calls, token metrics
-3. **GitHub Integration** — App installations, webhook triggers
+3. **GitHub Integration** — App installations, webhook triggers, hybrid event pipeline
 4. **Artifacts** — Output storage with S3-compatible backend
+5. **Organization** — Organizations, Systems, Repos — hierarchy for cost rollup and health monitoring
 
 ## Key Commands
 
 \`\`\`bash
-# Start the platform
-just api-dev
+# Install and start the platform
+npx @syntropic137/setup init
+
+# Manage the running stack
+npx @syntropic137/setup status
+npx @syntropic137/setup start
+npx @syntropic137/setup stop
 
 # Run a workflow
-syn workflow run --name <workflow-name>
+syn workflow run <workflow-id> --task "Your task here"
 
-# View execution status
-syn workflow status <execution-id>
+# View workflow run history
+syn workflow status <workflow-id>
+
+# Install a workflow package
+syn workflow install ./my-package/
+syn workflow install org/repo
 \`\`\`
 
 ## Services
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| syn-api | 8000 | FastAPI REST API + WebSocket + SSE |
+| gateway | 8137 | nginx reverse proxy + dashboard UI (primary access point) |
+| syn-api | 8000 | FastAPI REST API + WebSocket + SSE (internal — access through gateway) |
 | event-store | 50051 | gRPC event sourcing server |
 | event-collector | 8080 | High-throughput event ingestion |
 | TimescaleDB | 5432 | Events and metrics storage |
 | Redis | 6379 | Cache, pub/sub, projections |
 | MinIO | 9000 | S3-compatible artifact storage |
 
-When answering questions, reference the documentation. For API details, consult the full docs at /llms-full.txt.`;
+## Guide Topics
+
+- **Getting Started** — install and first workflow in 5 minutes
+- **Core Concepts** — events, workspaces, workflows, observability mental model
+- **Workflow Packages** — create, install, and distribute pre-built workflows
+- **Claude Code Plugin** — /syn-* slash commands and domain skills
+- **GitHub Integration** — webhook triggers and automated workflows
+- **Plugins** — distributable workflow bundles from GitHub repos
+- **Self-Hosting** — deploy on your own infrastructure
+- **Configuration** — environment variables and GitHub App setup
+- **Tunnels** — expose the platform for webhooks and remote access
+- **Secrets Management** — file-based secrets and 1Password integration
+- **Event Ingestion** — hybrid webhook + polling pipeline
+
+When answering questions, reference the documentation. For API details, consult the full docs at /llms-full.md.`;
 
 export function SystemPromptSection() {
   return (
-    <section className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-6 space-y-4">
+    <section className="rounded-lg border border-fd-primary/20 bg-fd-primary/5 p-6 space-y-4">
       <div className="flex items-center gap-2">
-        <Cpu className="w-5 h-5 text-sky-400" />
+        <Cpu className="w-5 h-5 text-fd-primary" />
         <h2 className="text-xl font-semibold text-fd-foreground">Agent System Prompt</h2>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/20">
+        <span className="text-xs px-2 py-0.5 rounded-full bg-fd-primary/15 text-fd-primary border border-fd-primary/20">
           Recommended
         </span>
       </div>
@@ -126,11 +152,11 @@ export function SystemPromptSection() {
 export function EndpointsGrid() {
   return (
     <div className="grid md:grid-cols-2 gap-6">
-      {/* llms.txt */}
+      {/* llms.md */}
       <section className="rounded-lg border border-fd-border p-6 space-y-3">
         <div className="flex items-center gap-2">
-          <FileText className="w-5 h-5 text-sky-400" />
-          <h2 className="text-lg font-semibold text-fd-foreground">llms.txt</h2>
+          <FileText className="w-5 h-5 text-fd-primary" />
+          <h2 className="text-lg font-semibold text-fd-foreground">llms.md</h2>
         </div>
         <p className="text-xs px-2 py-0.5 rounded-full bg-zinc-500/15 text-zinc-400 border border-zinc-500/20 inline-block">
           Structured Index
@@ -140,11 +166,11 @@ export function EndpointsGrid() {
           Point an agent here first for navigation.
         </p>
         <div className="flex flex-wrap gap-2">
-          <FetchCopyButton url="/llms.txt" label="Copy" />
+          <FetchCopyButton url="/llms.md" label="Copy" />
           <Link
-            href="/llms.txt"
+            href="/llms.md"
             target="_blank"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-700 hover:border-sky-500/30 text-fd-foreground hover:bg-zinc-800/50 transition-all"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-700 hover:border-fd-primary/30 text-fd-foreground hover:bg-zinc-800/50 transition-all"
           >
             <ExternalLink className="w-4 h-4" />
             View
@@ -152,13 +178,13 @@ export function EndpointsGrid() {
         </div>
       </section>
 
-      {/* llms-full.txt */}
+      {/* llms-full.md */}
       <section className="rounded-lg border border-fd-border p-6 space-y-3">
         <div className="flex items-center gap-2">
-          <BookOpen className="w-5 h-5 text-sky-400" />
-          <h2 className="text-lg font-semibold text-fd-foreground">llms-full.txt</h2>
+          <BookOpen className="w-5 h-5 text-fd-primary" />
+          <h2 className="text-lg font-semibold text-fd-foreground">llms-full.md</h2>
         </div>
-        <p className="text-xs px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/20 inline-block">
+        <p className="text-xs px-2 py-0.5 rounded-full bg-fd-primary/15 text-fd-primary border border-fd-primary/20 inline-block">
           Full Content
         </p>
         <p className="text-sm text-fd-muted-foreground">
@@ -166,11 +192,11 @@ export function EndpointsGrid() {
           Complete platform knowledge in a single fetch.
         </p>
         <div className="flex flex-wrap gap-2">
-          <FetchCopyButton url="/llms-full.txt" label="Copy" />
+          <FetchCopyButton url="/llms-full.md" label="Copy" />
           <Link
-            href="/llms-full.txt"
+            href="/llms-full.md"
             target="_blank"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-700 hover:border-sky-500/30 text-fd-foreground hover:bg-zinc-800/50 transition-all"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-700 hover:border-fd-primary/30 text-fd-foreground hover:bg-zinc-800/50 transition-all"
           >
             <ExternalLink className="w-4 h-4" />
             View
@@ -191,7 +217,7 @@ export function UsageExamples() {
           <h3 className="text-sm font-medium text-fd-foreground mb-2">Claude Code / CLAUDE.md</h3>
           <pre className="text-sm bg-zinc-950 rounded-lg p-4 overflow-x-auto border border-zinc-800">
             <code className="text-zinc-300">{`# In your CLAUDE.md or system prompt:
-Fetch https://docs.syntropic137.com/llms-full.txt for complete Syntropic137 docs.`}</code>
+Fetch https://docs.syntropic137.com/llms-full.md for complete Syntropic137 docs.`}</code>
           </pre>
         </div>
 
@@ -199,13 +225,13 @@ Fetch https://docs.syntropic137.com/llms-full.txt for complete Syntropic137 docs
           <h3 className="text-sm font-medium text-fd-foreground mb-2">curl / CLI</h3>
           <pre className="text-sm bg-zinc-950 rounded-lg p-4 overflow-x-auto border border-zinc-800">
             <code className="text-zinc-300">{`# Index only
-curl -s https://docs.syntropic137.com/llms.txt
+curl -s https://docs.syntropic137.com/llms.md
 
 # Full documentation
-curl -s https://docs.syntropic137.com/llms-full.txt
+curl -s https://docs.syntropic137.com/llms-full.md
 
 # Pipe directly to clipboard
-curl -s https://docs.syntropic137.com/llms-full.txt | pbcopy`}</code>
+curl -s https://docs.syntropic137.com/llms-full.md | pbcopy`}</code>
           </pre>
         </div>
 
@@ -213,7 +239,7 @@ curl -s https://docs.syntropic137.com/llms-full.txt | pbcopy`}</code>
           <h3 className="text-sm font-medium text-fd-foreground mb-2">MCP / Tool Use</h3>
           <pre className="text-sm bg-zinc-950 rounded-lg p-4 overflow-x-auto border border-zinc-800">
             <code className="text-zinc-300">{`// Use WebFetch to give an agent full context
-const docs = await fetch("https://docs.syntropic137.com/llms-full.txt");
+const docs = await fetch("https://docs.syntropic137.com/llms-full.md");
 const text = await docs.text();
 // Include in system prompt or tool response`}</code>
           </pre>

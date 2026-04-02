@@ -1,0 +1,47 @@
+---
+title: syn insights
+description: "Global system insights and cost analysis"
+---
+
+Global system insights and cost analysis
+
+## `syn insights cost`
+
+Show global cost breakdown across repos, workflows, and models.
+
+```bash
+syn insights cost
+```
+
+---
+
+## `syn insights heatmap`
+
+Show a contribution heatmap of activity over time.
+
+```bash
+syn insights heatmap
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--org` | `text` | --- | Filter by organization ID |
+| `--system` | `text` | --- | Filter by system ID |
+| `--repo` | `text` | --- | Filter by repo ID |
+| `--start` | `text` | --- | Start date (YYYY-MM-DD) |
+| `--end` | `text` | --- | End date (YYYY-MM-DD) |
+| `--metric`, `-m` | `text` | `sessions` | Metric: sessions, cost, tokens |
+
+---
+
+## `syn insights overview`
+
+Show a global overview of all systems and their health.
+
+```bash
+syn insights overview
+```
+
+---

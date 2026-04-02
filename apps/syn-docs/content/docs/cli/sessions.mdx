@@ -1,0 +1,40 @@
+---
+title: syn sessions
+description: "View and inspect agent sessions"
+---
+
+View and inspect agent sessions
+
+## `syn sessions list`
+
+List agent sessions.
+
+```bash
+syn sessions list
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--workflow`, `-w` | `text` | --- | Filter by workflow ID |
+| `--status`, `-s` | `text` | --- | Filter by status |
+| `--limit`, `-n` | `integer range` | `50` | Max results |
+
+---
+
+## `syn sessions show`
+
+Show detailed information for a session.
+
+```bash
+syn sessions show <session_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `session_id` | `text` | Yes | Session ID |
+
+---

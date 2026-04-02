@@ -1,0 +1,66 @@
+---
+title: "Setup CLI"
+description: "npx @syntropic137/setup — interactive CLI for installing and managing the Syntropic137 platform."
+---
+
+The setup CLI is a zero-dependency Node.js tool for bootstrapping and managing your Syntropic137 installation. It wraps Docker Compose operations with an interactive TUI.
+
+## Usage
+
+```bash
+npx @syntropic137/setup [command]
+```
+
+Running without a command shows an interactive menu.
+
+## Commands
+
+| Command | Purpose |
+|---------|---------|
+| `init` | Full setup wizard — Docker check, secrets, API key, GitHub App, plugin, pull images, start stack |
+| `status` | Show running services (`docker compose ps`) |
+| `start` | Start the stack |
+| `stop` | Stop the stack |
+| `logs` | Tail service logs (`docker compose logs -f`) |
+| `update` | Pull latest container images and restart |
+| `plugin` | Install or update the Claude Code plugin |
+| `github-app` | Create or reconfigure the GitHub App |
+
+## `init` Options
+
+```bash
+npx @syntropic137/setup init [options]
+
+--org <name>         Create GitHub App under an organization (default: personal account)
+--name <app-name>    GitHub App name (default: syntropic137)
+--dir <path>         Install directory (default: ~/.syntropic137)
+--skip-github        Skip GitHub App creation
+--skip-docker        Generate config files only — don't pull images or start services
+--webhook-url <url>  Set webhook URL for the GitHub App
+```
+
+## What `init` Creates
+
+```
+~/.syntropic137/
+├── docker-compose.syntropic137.yaml   # Service definitions
+├── selfhost-entrypoint.sh             # Secret injection script
+├── selfhost.env.example               # Configuration reference
+├── .env                               # Your configuration (chmod 600)
+├── init-db/
+│   └── 01-create-databases.sql        # Database initialization
+├── secrets/                           # All chmod 600
+│   ├── db-password.secret
+│   ├── redis-password.secret
+│   ├── minio-password.secret
+│   └── github-app-private-key.pem     # If GitHub App configured
+└── workspaces/                        # Agent workspace mount
+```
+
+## Reconfiguring
+
+Run `init` again to reconfigure. The wizard detects an existing installation and asks whether to reconfigure from scratch or update specific settings. Existing secrets are backed up to `.bak` files.
+
+<Callout type="idea">
+**Planned:** Tunnel management and secrets reconfiguration directly from the interactive TUI. Tracked in [syntropic137/syntropic137#422](https://github.com/syntropic137/syntropic137/issues/422).
+</Callout>

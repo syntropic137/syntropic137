@@ -1,0 +1,44 @@
+---
+title: syn observe
+description: "Observability data for sessions — tool timelines and token metrics"
+---
+
+Observability data for sessions — tool timelines and token metrics
+
+## `syn observe tokens`
+
+Show token breakdown for a session.
+
+```bash
+syn observe tokens <session_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `session_id` | `text` | Yes | Session ID |
+
+---
+
+## `syn observe tools`
+
+Show tool execution timeline for a session.
+
+```bash
+syn observe tools <session_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `session_id` | `text` | Yes | Session ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit`, `-n` | `integer range` | `100` | Max results |
+
+---

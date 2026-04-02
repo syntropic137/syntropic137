@@ -1,0 +1,89 @@
+---
+title: syn artifacts
+description: "Browse and retrieve workflow artifacts"
+---
+
+Browse and retrieve workflow artifacts
+
+## `syn artifacts content`
+
+Print the raw content of an artifact.
+
+```bash
+syn artifacts content <artifact_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `artifact_id` | `text` | Yes | Artifact ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--raw` | `boolean` | `false` | Print raw content without syntax highlighting |
+
+---
+
+## `syn artifacts create`
+
+Create a new artifact.
+
+```bash
+syn artifacts create --workflow <workflow> --type <artifact_type> --title <title> --content <content>
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--workflow`, `-w` | `text` | --- | Workflow ID |
+| `--type`, `-t` | `text` | --- | Artifact type (code, document, research_summary) |
+| `--title` | `text` | --- | Artifact title |
+| `--content`, `-c` | `text` | --- | Artifact content |
+| `--phase`, `-p` | `text` | --- | Phase ID |
+
+---
+
+## `syn artifacts list`
+
+List artifacts, optionally filtered by workflow or phase.
+
+```bash
+syn artifacts list
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--workflow`, `-w` | `text` | --- | Filter by workflow ID |
+| `--phase`, `-p` | `text` | --- | Filter by phase ID |
+| `--type`, `-t` | `text` | --- | Filter by artifact type |
+| `--limit` | `integer` | `50` | Max results (max 200) |
+
+---
+
+## `syn artifacts show`
+
+Show artifact metadata and optionally its content.
+
+```bash
+syn artifacts show <artifact_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `artifact_id` | `text` | Yes | Artifact ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-content` | `boolean` | `false` | Skip content; show metadata only |
+
+---

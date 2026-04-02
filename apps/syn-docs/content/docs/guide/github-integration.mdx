@@ -1,0 +1,89 @@
+---
+title: GitHub Integration
+description: Connect GitHub repositories to trigger automated agent workflows from events.
+---
+
+Syntropic137 integrates with GitHub through a GitHub App. This enables webhook-driven workflow automation — PRs opened, pushes to branches, issues labeled, and more can automatically trigger agent workflows.
+
+## Setting Up the GitHub App
+
+The setup wizard handles GitHub App creation:
+
+```bash
+npx @syntropic137/setup github-app
+```
+
+This opens your browser to GitHub's App manifest flow:
+
+1. You confirm the app creation on GitHub
+2. GitHub redirects back with credentials
+3. The CLI saves the App ID, private key (PEM), and webhook secret to `~/.syntropic137/secrets/`
+4. You choose which repositories the app can access
+
+The entire flow takes about 30 seconds.
+
+<Callout type="info">
+If you already ran `npx @syntropic137/setup init`, the GitHub App step was offered during initial setup. You can re-run it anytime with `npx @syntropic137/setup github-app`.
+</Callout>
+
+## Trigger Rules
+
+A **trigger rule** connects a GitHub event to a workflow. When a matching event arrives, Syntropic137 starts a workflow execution automatically.
+
+```bash
+# Create a trigger via CLI
+syn trigger create \
+  --repo owner/my-repo \
+  --event pull_request.opened \
+  --workflow pr-review-v1 \
+  --daily-limit 20 \
+  --cooldown 60
+```
+
+### Safety Limits
+
+Every trigger has built-in guards to prevent runaway execution:
+
+| Guard | Default | Purpose |
+|-------|---------|---------|
+| `daily_limit` | 50 | Maximum executions per day per trigger |
+| `cooldown` | 30s | Minimum seconds between executions |
+| `budget` | — | Maximum spend before pausing (optional) |
+
+These are enforced server-side and cannot be bypassed by webhook payloads.
+
+### Supported Events
+
+Triggers can fire on any GitHub webhook event type:
+
+- `push` — commits pushed to a branch
+- `pull_request.opened`, `pull_request.synchronize` — PR activity
+- `issues.labeled` — issue triage
+- `check_run.completed` — CI results
+- `workflow_run.completed` — GitHub Actions completion
+- And any other [GitHub webhook event](https://docs.github.com/en/webhooks/webhook-events-and-payloads)
+
+## Event Delivery: Webhooks + Polling
+
+Syntropic137 uses a hybrid approach for receiving GitHub events:
+
+**Webhooks** are the primary path — real-time delivery from GitHub when your App has a reachable URL (via [tunnel](/docs/guide/tunnels) or public server).
+
+**Events API polling** is the fallback — a background task polls GitHub's Events API on an adaptive interval. This enables zero-config onboarding without a tunnel.
+
+<Callout type="warn">
+GitHub's Events API does **not** include GitHub Actions webhook events (`workflow_run`, `check_run`, etc.). If you need to trigger workflows from Actions events, you must set up a [tunnel](/docs/guide/tunnels) for webhook delivery.
+</Callout>
+
+The system automatically deduplicates events using content-based keys (commit SHA, PR number, check run ID), so the same logical event is processed exactly once regardless of whether it arrived via webhook, polling, or both.
+
+For a deep dive into the event pipeline, deduplication strategy, and polling configuration, see [Event Ingestion](/docs/guide/event-ingestion).
+
+## Repository Installation
+
+After creating the GitHub App, install it on your repositories:
+
+1. Go to your GitHub App settings → **Install App**
+2. Select the organization or personal account
+3. Choose **All repositories** or select specific ones
+4. Syntropic137 dynamically resolves installation IDs per repository — no reconfiguration needed when you add new repos

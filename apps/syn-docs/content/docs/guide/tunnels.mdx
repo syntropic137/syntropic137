@@ -1,0 +1,69 @@
+---
+title: Tunnels
+description: Expose Syntropic137 to the internet for GitHub webhooks and remote access.
+---
+
+By default, Syntropic137 binds to `127.0.0.1:8137` — localhost only. A tunnel exposes it to the internet so GitHub can deliver webhooks and you can access the dashboard remotely.
+
+## When You Need a Tunnel
+
+<Callout type="info">
+Syntropic137's event polling covers most GitHub events **without** a tunnel — PRs, pushes, issues, and more work out of the box. Tunnels are only required for two things:
+</Callout>
+
+1. **GitHub Actions webhook events** — `workflow_run`, `check_run`, and other Actions events are not available via GitHub's Events API. Webhook delivery requires a reachable URL.
+2. **Remote access** — accessing the dashboard or API from outside your local network.
+
+If you only use push/PR/issue triggers and access the dashboard locally, you don't need a tunnel.
+
+## Cloudflare Tunnels
+
+Syntropic137 includes Cloudflare Tunnel support in its Docker Compose stack via the `tunnel` profile.
+
+### Setup
+
+1. Install cloudflared and authenticate:
+
+```bash
+brew install cloudflare/cloudflare/cloudflared
+cloudflared tunnel login
+```
+
+2. Create a tunnel in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/) and copy the tunnel token.
+
+3. Add three variables to your `~/.syntropic137/.env`:
+
+```bash
+COMPOSE_PROFILES=tunnel
+CLOUDFLARE_TUNNEL_TOKEN=your-tunnel-token-here
+SYN_PUBLIC_HOSTNAME=syn137.yourdomain.com
+```
+
+4. Restart the stack:
+
+```bash
+npx @syntropic137/setup stop
+npx @syntropic137/setup start
+```
+
+The `cloudflared` container starts automatically and routes traffic from your domain to the gateway service. No port forwarding needed.
+
+### Updating the GitHub App Webhook URL
+
+After setting up the tunnel, update your GitHub App's webhook URL:
+
+```bash
+npx @syntropic137/setup github-app
+```
+
+Or manually in GitHub → Settings → Developer Settings → Your App → Webhook URL → set to `https://syn137.yourdomain.com/api/v1/webhooks/github`.
+
+## Other Tunnel Options
+
+While Cloudflare Tunnels are the built-in option, any tunnel that forwards HTTPS traffic to `localhost:8137` works:
+
+- **ngrok** — `ngrok http 8137`
+- **Tailscale Funnel** — `tailscale funnel 8137`
+- **SSH tunnel** — `ssh -R 80:localhost:8137 your-server`
+
+Set `SYN_PUBLIC_HOSTNAME` in your `.env` to your tunnel's public URL regardless of which provider you use.

@@ -1,0 +1,131 @@
+---
+title: syn control
+description: "Control running executions"
+---
+
+Control running executions
+
+## `syn control cancel`
+
+Cancel a running or paused execution.
+
+```bash
+syn control cancel <execution_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution_id` | `text` | Yes | Execution ID to cancel |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--reason`, `-r` | `text` | --- | Reason for cancelling |
+| `--force`, `-f` | `boolean` | `false` | Skip confirmation prompt |
+
+---
+
+## `syn control inject`
+
+Inject a message into a running execution.
+
+```bash
+syn control inject <execution_id> --message <message>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution_id` | `text` | Yes | Execution ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--message`, `-m` | `text` | --- | Message to inject |
+
+---
+
+## `syn control pause`
+
+Pause a running execution at the next yield point.
+
+```bash
+syn control pause <execution_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution_id` | `text` | Yes | Execution ID to pause |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--reason`, `-r` | `text` | --- | Reason for pausing |
+
+---
+
+## `syn control resume`
+
+Resume a paused execution.
+
+```bash
+syn control resume <execution_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution_id` | `text` | Yes | Execution ID to resume |
+
+---
+
+## `syn control status`
+
+Get current execution control state.
+
+```bash
+syn control status <execution_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution_id` | `text` | Yes | Execution ID to check |
+
+---
+
+## `syn control stop`
+
+Forcefully stop a running execution via SIGINT.
+
+Sends a cancel signal that causes the engine to interrupt the Claude CLI
+process via SIGINT and capture partial output as an interrupted execution.
+
+```bash
+syn control stop <execution_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution_id` | `text` | Yes | Execution ID to stop |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--reason`, `-r` | `text` | --- | Reason for stopping |
+| `--force`, `-f` | `boolean` | `false` | Skip confirmation prompt |
+
+---
