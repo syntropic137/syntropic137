@@ -55,6 +55,45 @@ syn workflow delete <workflow_id>
 
 ---
 
+## `syn workflow export`
+
+Export a workflow as a distributable package or Claude Code plugin.
+
+```bash
+syn workflow export <workflow_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `workflow_id` | `text` | Yes | Workflow ID to export |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--format`, `-f` | `text` | `package` | Export format: 'package' (default) or 'plugin' (Claude Code plugin) |
+| `--output`, `-o` | `path` | `.` | Output directory (created if absent) |
+
+---
+
+## `syn workflow info`
+
+Show details of a marketplace workflow plugin.
+
+```bash
+syn workflow info <name>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | `text` | Yes | Plugin name from marketplace |
+
+---
+
 ## `syn workflow init`
 
 Scaffold a new workflow package from a template.
@@ -82,7 +121,7 @@ syn workflow init <directory>
 
 ## `syn workflow install`
 
-Install workflow(s) from a package directory or git repository.
+Install workflow(s) from a package, git repository, or marketplace.
 
 ```bash
 syn workflow install <source>
@@ -92,7 +131,7 @@ syn workflow install <source>
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `source` | `text` | Yes | Local path, GitHub URL, or org/repo shorthand |
+| `source` | `text` | Yes | Plugin name, local path, GitHub URL, or org/repo shorthand |
 
 **Options:**
 
@@ -156,6 +195,30 @@ syn workflow run <workflow_id>
 
 ---
 
+## `syn workflow search`
+
+Search for workflows across registered marketplaces.
+
+```bash
+syn workflow search <query>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `query` | `text` | No | Search term (matches name, description, tags) |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--category`, `-c` | `text` | --- | Filter by category |
+| `--tag`, `-t` | `text` | --- | Filter by tag |
+| `--registry`, `-r` | `text` | --- | Search specific marketplace only |
+
+---
+
 ## `syn workflow show`
 
 Show details of a specific workflow.
@@ -185,6 +248,51 @@ syn workflow status <workflow_id>
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `workflow_id` | `text` | Yes | Workflow ID (partial match supported) |
+
+---
+
+## `syn workflow uninstall`
+
+Uninstall a workflow package.
+
+```bash
+syn workflow uninstall <name>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | `text` | Yes | Package name to uninstall |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--keep-workflows` | `boolean` | `false` | Remove from registry but keep workflows in the platform |
+
+---
+
+## `syn workflow update`
+
+Update an installed workflow package to the latest version.
+
+```bash
+syn workflow update <name>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | `text` | Yes | Package name to update |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--ref` | `text` | --- | Override git ref |
+| `--dry-run`, `-n` | `boolean` | `false` | Check for updates without applying |
 
 ---
 
