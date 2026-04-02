@@ -18,6 +18,7 @@ REGRESSION: Catches bugs where:
 """
 
 import asyncio
+import contextlib
 import os
 from datetime import UTC, datetime
 
@@ -174,10 +175,8 @@ class TestSubscriptionCoordinatorIntegration:
         finally:
             await coordinator.stop()
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
     @pytest.mark.asyncio
     async def test_multiple_events_processed_in_order(
@@ -217,10 +216,8 @@ class TestSubscriptionCoordinatorIntegration:
         finally:
             await coordinator.stop()
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
     @pytest.mark.asyncio
     async def test_checkpoint_prevents_duplicate_processing(
@@ -278,10 +275,8 @@ class TestSubscriptionCoordinatorIntegration:
         finally:
             await coordinator.stop()
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
     @pytest.mark.asyncio
     async def test_events_appended_after_coordinator_starts(
@@ -321,10 +316,8 @@ class TestSubscriptionCoordinatorIntegration:
         finally:
             await coordinator.stop()
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
     @pytest.mark.asyncio
     async def test_boolean_filter_works_with_projection(
@@ -367,7 +360,5 @@ class TestSubscriptionCoordinatorIntegration:
         finally:
             await coordinator.stop()
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
