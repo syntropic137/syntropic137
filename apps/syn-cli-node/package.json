@@ -1,6 +1,6 @@
 {
   "name": "@syntropic137/cli",
-  "version": "0.19.2",
+  "version": "0.19.3",
   "description": "Syntropic137 CLI - Event-sourced workflow engine for AI agents",
   "type": "module",
   "bin": {
@@ -33,6 +33,11 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/syntropic137/syntropic137.git",
+    "directory": "apps/syn-cli-node"
   },
   "license": "MIT"
 }
