@@ -10,11 +10,19 @@
 #   3. Publish to npm with provenance
 #
 # Prerequisites:
-#   - CLI_PUBLISH_NPM_TOKEN secret (npm automation token for @syntropic137 scope)
+#   - Configure Trusted Publisher on npmjs.com for @syntropic137/cli:
+#     repo: syntropic137/syntropic137
+#     workflow: release-cli.yaml
+#     environment: npm-publish-cli
+#   - Requires npm >= 11.5.1 and Node >= 22 for OIDC token exchange
+#
+# IMPORTANT: Do NOT set NODE_AUTH_TOKEN — it overrides OIDC and breaks
+# trusted publishing. The OIDC token is obtained automatically.
 #
 # Security:
 #   - All actions SHA-pinned (ISS-259)
-#   - npm provenance enabled (links published package to this workflow run)
+#   - npm Trusted Publishing (OIDC) — no stored npm token
+#   - npm provenance enabled (Sigstore attestation)
 #   - Version mismatch check prevents accidental publishes
 # =============================================================================
 
@@ -48,10 +56,11 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: npm-publish-cli  # Must match Trusted Publisher config on npmjs.com
 
     permissions:
       contents: read
-      id-token: write  # npm provenance (Sigstore OIDC)
+      id-token: write  # npm provenance + OIDC Trusted Publishing
 
     steps:
       - name: Checkout repository
@@ -108,7 +117,12 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
+          # NOTE: Do NOT set registry-url — it creates an .npmrc with
+          # ${NODE_AUTH_TOKEN} which interferes with OIDC token exchange.
+
+      # Trusted Publishing OIDC requires npm >= 11.5.1
+      - name: Install pinned npm
+        run: npm install -g npm@11.7.0
 
       - name: Install dependencies
         working-directory: apps/syn-cli-node
@@ -139,11 +153,12 @@ jobs:
           # Smoke test: --version should print without errors
           node dist/syn.mjs version
 
+      # Uses npm Trusted Publishing (OIDC) — no stored npm token needed.
+      # The npm registry exchanges the GitHub OIDC token for a short-lived
+      # publish credential. Do NOT set NODE_AUTH_TOKEN — it overrides OIDC.
       - name: Publish to npm
         if: ${{ (github.event_name == 'release' || github.event_name == 'workflow_call') && !inputs.dry_run }}
         working-directory: apps/syn-cli-node
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.CLI_PUBLISH_NPM_TOKEN }}
         run: |
           npm publish --access public --tag ${{ steps.version.outputs.npm_tag }} --provenance
 
