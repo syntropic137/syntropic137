@@ -1,41 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, BookOpen, Rocket, Terminal, Activity, Workflow, Eye, Shield, Zap, GitBranch, Bot, Github, Twitter } from 'lucide-react';
-import { HeroScene } from '@/components/HeroScene';
-
-function FeatureCard({
-  icon,
-  title,
-  description,
-  variant,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  variant: 'primary' | 'secondary';
-}) {
-  const styles = {
-    primary: 'from-fd-primary/8 to-fd-primary/3 border-fd-primary/15 hover:border-fd-primary/30',
-    secondary: 'from-zinc-500/8 to-zinc-500/3 border-zinc-500/15 hover:border-zinc-500/30',
-  };
-  const iconStyles = {
-    primary: 'bg-fd-primary/15 text-fd-primary',
-    secondary: 'bg-zinc-500/15 text-zinc-400',
-  };
-
-  return (
-    <div
-      className={`group rounded-lg border bg-gradient-to-br p-6 transition-all ${styles[variant]}`}
-    >
-      <div className={`inline-flex p-3 rounded-lg mb-4 ${iconStyles[variant]}`}>
-        {icon}
-      </div>
-      <h3 className="font-semibold text-fd-foreground mb-2">{title}</h3>
-      <p className="text-sm text-fd-muted-foreground">{description}</p>
-    </div>
-  );
-}
+import { ArrowRight, BookOpen, Rocket, Terminal, Workflow, Eye, Zap, GitBranch, Bot, Github, Twitter } from 'lucide-react';
 
 function QuickLink({
   href,
@@ -51,7 +17,7 @@ function QuickLink({
   return (
     <Link
       href={href}
-      className="group flex flex-col p-6 rounded-lg border border-fd-border hover:border-fd-primary/30 bg-fd-card transition-all"
+      className="group flex flex-col p-5 rounded-lg border border-fd-border/60 hover:border-fd-primary/30 bg-fd-card/80 backdrop-blur-md transition-all"
     >
       <div className="text-fd-primary mb-3">{icon}</div>
       <h3 className="font-semibold text-fd-foreground mb-1 group-hover:text-fd-primary transition-colors">
@@ -62,11 +28,12 @@ function QuickLink({
   );
 }
 
-export function HeroSection() {
+export function HeroContent() {
   return (
-    <section className="relative overflow-hidden">
-      <div className="container mx-auto px-6 py-16 md:py-24">
-        <div className="flex flex-col items-center text-center">
+    <div className="container mx-auto px-6 pt-4 md:pt-4">
+      <div className="flex flex-col items-center text-center">
+        {/* Translucent text card */}
+        <div className="rounded-2xl border border-fd-primary/12 bg-fd-background/30 backdrop-blur-sm shadow-[0_0_40px_-12px_rgba(77,128,255,0.1)] px-8 py-6 md:px-14 md:py-8 max-w-3xl w-full mb-16 -translate-y-10">
           {/* Badges */}
           <div className="flex flex-wrap justify-center gap-2 mb-6">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-fd-primary/10 text-fd-primary border border-fd-primary/20">
@@ -93,96 +60,37 @@ export function HeroSection() {
           <p className="text-base font-medium text-fd-primary/80 mb-3">
             Get out of the loop. Get into orchestration.
           </p>
-          <p className="text-base text-fd-muted-foreground/70 max-w-2xl mb-8">
+          <p className="text-base text-fd-muted-foreground/70 max-w-2xl mx-auto">
             Self-hosted platform for orchestrating AI agents with event-sourced
             workflows. Every tool call, token, cost, and artifact is captured
             — data compounds with every run.
           </p>
-
-          {/* CTA Buttons */}
-          <div className="flex flex-wrap justify-center gap-4 mb-12">
-            <Link
-              href="/docs/guide/getting-started"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-lg font-semibold text-zinc-950 bg-fd-primary hover:bg-fd-primary/80 shadow-lg shadow-fd-primary/20 hover:shadow-fd-primary/30 transition-all"
-            >
-              <Rocket className="w-5 h-5" />
-              Get Started
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-            <Link
-              href="/docs"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-lg font-medium border border-zinc-700 hover:border-zinc-500 text-fd-foreground hover:bg-zinc-800/50 transition-all"
-            >
-              <BookOpen className="w-5 h-5" />
-              Documentation
-            </Link>
-            <Link
-              href="/llms"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-lg font-medium border border-zinc-700 hover:border-zinc-500 text-fd-foreground hover:bg-zinc-800/50 transition-all"
-            >
-              <Bot className="w-5 h-5" />
-              LLM Docs
-            </Link>
-          </div>
-
-          {/* Three.js Scene */}
-          <div className="w-full max-w-4xl">
-            <HeroScene />
-          </div>
         </div>
-      </div>
-    </section>
-  );
-}
 
-export function FeaturesGrid() {
-  return (
-    <section className="py-16 border-t border-fd-border">
-      <div className="container mx-auto px-6">
-        <h2 className="text-2xl md:text-3xl font-bold text-center mb-12">
-          Why Syntropic137?
-        </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <FeatureCard
-            icon={<Workflow className="w-6 h-6" />}
-            title="Repeatable Workflows"
-            description="Multi-phase pipelines built on the Claude Code command standard. Research, plan, implement, review — every workflow runs the same way, every time."
-            variant="primary"
-          />
-          <FeatureCard
-            icon={<Activity className="w-6 h-6" />}
-            title="Immutable Event Store"
-            description="Every state change is a permanent, queryable event. Domain events, observability telemetry, and conversation logs — nothing is ever lost."
-            variant="secondary"
-          />
-          <FeatureCard
-            icon={<GitBranch className="w-6 h-6" />}
-            title="GitHub-Native Triggers"
-            description="Webhook triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows. Agents respond in minutes."
-            variant="primary"
-          />
-          <FeatureCard
-            icon={<Shield className="w-6 h-6" />}
-            title="Workspace Isolation"
-            description="Every agent runs in an ephemeral Docker container. API keys are never exposed to workspaces. Egress proxies control outbound traffic."
-            variant="secondary"
-          />
-        </div>
+        {/* Single primary CTA — floating free over the scene */}
+        <Link
+          href="/docs/guide/getting-started"
+          className="inline-flex items-center gap-2 px-8 py-3.5 rounded-lg font-semibold text-zinc-950 bg-fd-primary hover:bg-fd-primary/80 shadow-lg shadow-fd-primary/20 hover:shadow-fd-primary/30 transition-all"
+        >
+          <Rocket className="w-5 h-5" />
+          Get Started
+          <ArrowRight className="w-4 h-4" />
+        </Link>
       </div>
-    </section>
+    </div>
   );
 }
 
 export function QuickLinksGrid() {
   return (
-    <section className="py-16 border-t border-fd-border">
+    <section className="py-0">
       <div className="container mx-auto px-6">
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-5xl mx-auto">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl mx-auto">
           <QuickLink
-            href="/docs/guide/getting-started"
-            icon={<Rocket className="w-6 h-6" />}
-            title="Quick Start"
-            description="Set up and run your first workflow"
+            href="/docs"
+            icon={<BookOpen className="w-6 h-6" />}
+            title="Documentation"
+            description="Guides, concepts, and configuration"
           />
           <QuickLink
             href="/docs/cli"
