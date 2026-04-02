@@ -12,6 +12,93 @@ Syntropic137 uses **trunk-based development** with a dedicated `release` branch 
 | `release` | Production deployments | Docker images, CLI, docs |
 | `feat/*` | Feature branches (short-lived) | Nothing (CI only) |
 
+## First-Time Setup
+
+These are the manual, one-time steps required before the automated release pipeline works. Based on the v0.19.0 release setup experience.
+
+### NPM Organization and Packages
+
+#### 1. Create the npm Organization
+
+Create `@syntropic137` at https://www.npmjs.com/org/create (if not already done).
+
+#### 2. @syntropic137/cli (main repo — `apps/syn-cli-node`)
+
+1. Login to npm with org scope:
+   ```bash
+   npm login --scope=@syntropic137
+   ```
+2. Initial manual publish to claim the package name:
+   ```bash
+   cd apps/syn-cli-node
+   pnpm install && pnpm build
+   npm publish --access public
+   ```
+3. Configure Trusted Publisher on npmjs.com:
+   - Go to https://www.npmjs.com/package/@syntropic137/cli/access
+   - Add Trusted Publisher: repo=`syntropic137/syntropic137`, workflow=`release-cli.yaml`, environment=`npm-publish-cli`
+4. Create the `npm-publish-cli` GitHub environment: repo Settings > Environments > New > `npm-publish-cli`
+5. After Trusted Publishing is configured, the `CLI_PUBLISH_NPM_TOKEN` secret is no longer needed and can be deleted.
+
+#### 3. @syntropic137/setup (npx repo — `syntropic137-npx`)
+
+1. Login (same org scope as above):
+   ```bash
+   npm login --scope=@syntropic137
+   ```
+2. Initial manual publish to claim the package name:
+   ```bash
+   cd /path/to/syntropic137-npx
+   npm install && npm run build
+   npm publish --access public
+   ```
+3. Configure Trusted Publisher on npmjs.com:
+   - Go to https://www.npmjs.com/package/@syntropic137/setup/access
+   - Add Trusted Publisher: repo=`syntropic137/syntropic137-npx`, workflow=`publish.yml`, environment=`npm-publish`
+4. Create the `npm-publish` GitHub environment on the `syntropic137-npx` repo.
+
+### NPM Trusted Publishing Requirements
+
+- npm >= 11.5.1 and Node >= 22.14.0 (for OIDC token exchange)
+- Do NOT set `NODE_AUTH_TOKEN` — it overrides OIDC
+- Do NOT set `registry-url` in `setup-node` — it creates `.npmrc` that interferes with OIDC
+- The `--provenance` flag is still recommended even though docs say it is automatic
+- npm returns E404 (not 401/403) for auth failures on scoped packages — this is misleading but means "not authenticated"
+
+### GitHub Environments
+
+Two environments are needed across the two repos:
+
+| Environment | Repository | Purpose |
+|-------------|------------|---------|
+| `npm-publish-cli` | `syntropic137/syntropic137` | CLI publishes via `release-cli.yaml` |
+| `npm-publish` | `syntropic137/syntropic137-npx` | npx setup publishes via `publish.yml` |
+
+### NPX Template Sync Setup
+
+1. Create a fine-grained PAT with these permissions, scoped to the `syntropic137-npx` repo only:
+   - Actions: Read & Write
+   - Contents: Read-only
+   - Metadata: Read-only
+2. Add as `NPX_DISPATCH_TOKEN` secret on the main `syntropic137/syntropic137` repo.
+3. Enable "Allow GitHub Actions to create and approve pull requests" at BOTH org level AND repo level. The repo-level setting is grayed out if the org does not allow it.
+
+### Release Branch Setup
+
+1. Create `release` branch from main (already done for this project):
+   ```bash
+   gh api repos/syntropic137/syntropic137/git/refs --method POST \
+     -f ref=refs/heads/release -f sha=$(git rev-parse main)
+   ```
+2. Branch ruleset: PR required, squash-only, Release Gate + CI Success checks, admin bypass.
+3. Vercel: set production branch to `release` in project settings.
+
+### Docker / Container Setup
+
+- **GHCR authentication** uses the built-in `GITHUB_TOKEN` — no additional setup needed.
+- **Cosign keyless signing** uses Sigstore OIDC — no additional setup needed.
+- **Multi-arch builds** (amd64 + arm64) use QEMU emulation via `docker/setup-qemu-action`.
+
 ## Production Release
 
 ### 1. Bump Version
@@ -152,3 +239,12 @@ Merge to release
 - Squash merge only
 - No force pushes, no deletions
 - Admin bypass for emergencies
+
+## Known Gotchas
+
+- **npm E404 on scoped packages:** npm returns E404 on PUT for scoped packages when auth fails. This is misleading — it means "not authenticated", not "package not found".
+- **npm Trusted Publishing version requirement:** OIDC-based registry auth requires npm >= 11.5.1. Older npm versions only use OIDC for Sigstore provenance signing, NOT for registry authentication.
+- **Missing README on npmjs.com:** The `files` array in `package.json` must explicitly include `README.md` or it will not appear on the npm package page.
+- **GITHUB_TOKEN loop prevention:** Releases and events created by `GITHUB_TOKEN` do NOT trigger other workflows (GitHub's anti-loop mechanism). That is why `release-create.yml` uses reusable workflow calls (`workflow_call`) instead of relying on `release.published` events.
+- **Org-level Actions permission gates repo setting:** The GitHub org-level "Allow Actions to create and approve pull requests" setting gates the repo-level setting. If the checkbox is grayed out at repo level, check org settings first.
+- **PAT permissions for `gh workflow run`:** A PAT used for `gh workflow run` needs Contents: Read-only in addition to Actions: Read & Write. The GraphQL `defaultBranchRef` resolution requires Contents access.
