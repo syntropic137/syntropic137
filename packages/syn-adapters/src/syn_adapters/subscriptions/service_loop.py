@@ -17,6 +17,7 @@ async def _run_cycle(svc: EventSubscriptionService) -> None:
     """Run a single catch-up-then-live cycle."""
     await svc._run_catchup()
     svc._caught_up = True
+    svc._caught_up_event.set()
 
     logger.info(
         "[SUBSCRIPTION] Catch-up complete, starting live",
@@ -26,6 +27,7 @@ async def _run_cycle(svc: EventSubscriptionService) -> None:
 
     # Live subscription exited — reconnect
     svc._caught_up = False
+    svc._caught_up_event.clear()
     logger.warning("[SUBSCRIPTION] Live stream ended, will reconnect")
 
 
@@ -44,6 +46,7 @@ async def _handle_loop_error(
 ) -> float:
     """Log the error, mark not caught up, sleep with backoff. Returns new delay."""
     svc._caught_up = False
+    svc._caught_up_event.clear()
     logger.error(
         "[SUBSCRIPTION] Loop failed",
         extra={"error": str(error), "retry_delay": retry_delay},

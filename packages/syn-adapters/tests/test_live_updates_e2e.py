@@ -269,10 +269,7 @@ class TestLiveUpdatesE2E:
         await subscription_service.start()
 
         # 3. Wait for catch-up
-        for _ in range(100):
-            if subscription_service.is_caught_up:
-                break
-            await asyncio.sleep(0.05)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         # 4. Verify event was dispatched to projection manager
         assert subscription_service.is_caught_up
@@ -347,10 +344,7 @@ class TestLiveUpdatesE2E:
         await subscription_service.start()
 
         # 4. Wait for catch-up and projection update
-        for _ in range(100):
-            if updated_record is not None:
-                break
-            await asyncio.sleep(0.05)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         # 5. Verify event was dispatched
         assert len(projection_manager.dispatched_events) == 1
@@ -424,10 +418,7 @@ class TestLiveUpdatesE2E:
         await subscription_service.start()
 
         # 3. Wait for catch-up
-        for _ in range(100):
-            if subscription_service.is_caught_up:
-                break
-            await asyncio.sleep(0.05)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         # 4. Verify all events were dispatched
         assert len(projection_manager.dispatched_events) == 5
@@ -481,10 +472,7 @@ class TestLiveUpdatesE2E:
         await service.start()
 
         # 5. Wait for catch-up
-        for _ in range(100):
-            if service.is_caught_up:
-                break
-            await asyncio.sleep(0.05)
+        await service.wait_until_caught_up(timeout=5.0)
 
         # 6. Verify only Event3 was processed (skipped 1 and 2)
         assert service.events_processed == 1
@@ -513,10 +501,7 @@ class TestLiveUpdatesE2E:
         await subscription_service.start()
 
         # 3. Wait for catch-up
-        for _ in range(100):
-            if subscription_service.is_caught_up:
-                break
-            await asyncio.sleep(0.05)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         # 4. Verify initial event processed
         assert subscription_service.is_caught_up
@@ -564,10 +549,7 @@ class TestLiveUpdatesE2E:
         assert not subscription_service.is_caught_up
 
         # 5. Wait for catch-up
-        for _ in range(100):
-            if subscription_service.is_caught_up:
-                break
-            await asyncio.sleep(0.05)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         # 6. Verify caught-up status
         assert subscription_service.is_running
@@ -679,10 +661,7 @@ class TestLiveUpdatesE2E:
         await subscription_service.start()
 
         # 3. Wait for catch-up
-        for _ in range(100):
-            if subscription_service.is_caught_up:
-                break
-            await asyncio.sleep(0.05)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         # 4. Verify all events processed
         assert subscription_service.events_processed == 4
@@ -739,10 +718,7 @@ class TestLiveUpdatesPerformance:
         await service.start()
 
         # 3. Wait for catch-up (may take multiple batches)
-        for _ in range(200):  # Longer timeout for 100 events
-            if service.is_caught_up:
-                break
-            await asyncio.sleep(0.05)
+        await service.wait_until_caught_up(timeout=5.0)
 
         # 4. Verify all events processed
         assert service.is_caught_up
@@ -779,10 +755,7 @@ class TestLiveUpdatesPerformance:
         await service.start()
 
         # 4. Wait for complete catch-up
-        for _ in range(200):
-            if service.is_caught_up:
-                break
-            await asyncio.sleep(0.05)
+        await service.wait_until_caught_up(timeout=5.0)
 
         # 5. Verify all events processed
         assert service.is_caught_up

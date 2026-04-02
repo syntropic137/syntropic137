@@ -229,7 +229,7 @@ class TestEventSubscriptionService:
         assert subscription_service.is_running
 
         # Give it a moment to start the loop
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
 
         await subscription_service.stop()
         assert not subscription_service.is_running
@@ -245,7 +245,7 @@ class TestEventSubscriptionService:
         projection_store._positions[SUBSCRIPTION_POSITION_KEY] = 42
 
         await subscription_service.start()
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
 
         assert subscription_service.last_position == 42
 
@@ -258,7 +258,7 @@ class TestEventSubscriptionService:
     ):
         """Test that subscription starts from 0 if no saved position."""
         await subscription_service.start()
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
 
         assert subscription_service.last_position == 0
 
@@ -282,10 +282,7 @@ class TestEventSubscriptionService:
         await subscription_service.start()
 
         # Wait for catch-up to complete
-        for _ in range(50):  # Max 5 seconds
-            if subscription_service.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         assert subscription_service.is_caught_up
         assert subscription_service.events_processed == 3
@@ -316,10 +313,7 @@ class TestEventSubscriptionService:
         await subscription_service.start()
 
         # Wait for catch-up
-        for _ in range(50):
-            if subscription_service.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         await subscription_service.stop()
 
@@ -354,10 +348,7 @@ class TestEventSubscriptionService:
         await service.start()
 
         # Wait for catch-up
-        for _ in range(50):
-            if service.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await service.wait_until_caught_up(timeout=5.0)
 
         await service.stop()
 
@@ -375,10 +366,7 @@ class TestEventSubscriptionService:
         await subscription_service.start()
 
         # Wait for catch-up
-        for _ in range(50):
-            if subscription_service.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         assert subscription_service.is_caught_up
         assert subscription_service.events_processed == 0
@@ -404,10 +392,7 @@ class TestEventSubscriptionService:
         await subscription_service.start()
 
         # Wait for processing
-        for _ in range(50):
-            if subscription_service.is_caught_up:
-                break
-            await asyncio.sleep(0.1)
+        await subscription_service.wait_until_caught_up(timeout=5.0)
 
         assert subscription_service.is_running
         assert subscription_service.is_caught_up
