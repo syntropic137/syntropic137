@@ -24,6 +24,22 @@ BINARY_OPERATORS = frozenset({"eq", "neq", "contains"})
 LIST_OPERATORS = frozenset({"in", "not_in"})
 
 
+def _check_operator_value(op: str, val: str | int | bool | list[str] | None) -> None:
+    """Validate that operator and value are consistent."""
+    if op in UNARY_OPERATORS and val is not None:
+        msg = f"Unary operator '{op}' must not have a value (got {val!r})."
+        raise ValueError(msg)
+    if op in LIST_OPERATORS and not isinstance(val, list):
+        msg = f"List operator '{op}' requires an array value (got {type(val).__name__})."
+        raise ValueError(msg)
+    if op in BINARY_OPERATORS and val is None:
+        msg = f"Binary operator '{op}' requires a value."
+        raise ValueError(msg)
+    if op in BINARY_OPERATORS and isinstance(val, list):
+        msg = f"Binary operator '{op}' requires a scalar value, not a list."
+        raise ValueError(msg)
+
+
 class TriggerConditionSchema(BaseModel):
     """A condition evaluated against the GitHub webhook payload.
 
@@ -55,23 +71,7 @@ class TriggerConditionSchema(BaseModel):
 
     @model_validator(mode="after")
     def _validate_operator_value_consistency(self) -> TriggerConditionSchema:
-        op = self.operator
-        val = self.value
-        if op in UNARY_OPERATORS:
-            if val is not None:
-                msg = f"Unary operator '{op}' must not have a value (got {val!r})."
-                raise ValueError(msg)
-        elif op in LIST_OPERATORS:
-            if not isinstance(val, list):
-                msg = f"List operator '{op}' requires an array value (got {type(val).__name__})."
-                raise ValueError(msg)
-        elif op in BINARY_OPERATORS:
-            if val is None:
-                msg = f"Binary operator '{op}' requires a value."
-                raise ValueError(msg)
-            if isinstance(val, list):
-                msg = f"Binary operator '{op}' requires a scalar value, not a list."
-                raise ValueError(msg)
+        _check_operator_value(self.operator, self.value)
         return self
 
 
