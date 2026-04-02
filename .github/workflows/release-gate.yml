@@ -153,9 +153,12 @@ jobs:
 
       - name: Check for drift
         run: |
-          if ! git diff --quiet apps/syn-docs/content/docs/cli/; then
+          CHANGED=$(git diff --name-only apps/syn-docs/content/docs/cli/)
+          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)
+          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
             echo "::error::CLI docs are out of sync with syn-cli. Run 'pnpm generate' in apps/syn-docs/ and commit the result."
-            git diff --stat apps/syn-docs/content/docs/cli/
+            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
+            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
             exit 1
           fi
           echo "CLI docs are up to date."
