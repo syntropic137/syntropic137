@@ -44,11 +44,11 @@ class TestBuildQuery:
         assert params == ["false"]
 
     def test_boolean_true_filter(self):
-        query, params = build_query("workflows", filters={"is_archived": True})
+        _, params = build_query("workflows", filters={"is_archived": True})
         assert params == ["true"]
 
     def test_mixed_filters(self):
-        query, params = build_query(
+        _, params = build_query(
             "workflows",
             filters={"is_archived": False, "workflow_type": "research"},
         )

@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.github.slices.event_pipeline.event_type_mapper import (
@@ -20,6 +19,7 @@ from syn_domain.contexts.github.slices.event_pipeline.event_type_mapper import (
 from syn_domain.contexts.github.slices.event_pipeline.poller_state import PollerState
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
     from typing import Any
 
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient

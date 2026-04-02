@@ -23,7 +23,6 @@ from event_sourcing import (
     PostgresCheckpointStore,
     SubscriptionCoordinator,
 )
-from event_sourcing.core.checkpoint import ProjectionCheckpointStore
 
 from syn_adapters.subscriptions.realtime_adapter import (
     RealTimeProjectionAdapter as RealTimeProjectionAdapter,
@@ -31,6 +30,8 @@ from syn_adapters.subscriptions.realtime_adapter import (
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
+    from event_sourcing.core.checkpoint import ProjectionCheckpointStore
+
     from syn_adapters.projections.realtime import RealTimeProjection
 
 logger = get_logger(__name__)

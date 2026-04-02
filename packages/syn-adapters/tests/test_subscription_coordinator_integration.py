@@ -38,7 +38,6 @@ from event_sourcing.core.event import DomainEvent, EventEnvelope, EventMetadata
 from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
