@@ -28,7 +28,8 @@ concurrency:
   cancel-in-progress: false  # Never cancel an in-progress release
 
 permissions:
-  contents: write  # Create tag + release
+  contents: write      # Create tag + release
+  pull-requests: read  # Read merged PR metadata for release notes
 
 jobs:
   # ---------------------------------------------------------------------------

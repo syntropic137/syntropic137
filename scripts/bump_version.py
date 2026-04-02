@@ -6,9 +6,12 @@ Usage:
     python scripts/bump_version.py --check          # Validate all files match
     python scripts/bump_version.py --current        # Print current version
 
-All 13 version files are updated atomically. Submodule versions
+This script updates the 13 tracked version files. Submodule versions
 (event-sourcing-platform, agentic-primitives, openclaw-plugin) are
 intentionally excluded — they have independent versioning.
+
+All files are pre-validated before any writes occur. If any file is
+missing a version field, the script fails without modifying anything.
 """
 
 from __future__ import annotations
@@ -101,7 +104,11 @@ def check_consistency() -> bool:
 
 
 def bump(target: str) -> None:
-    """Update all 13 files to the target version."""
+    """Update all 13 files to the target version.
+
+    Pre-validates all files before writing any changes. If any file
+    is missing a version field, fails without modifying anything.
+    """
     if not VERSION_RE.match(target):
         print(f"ERROR: Invalid version '{target}'. Expected semver (e.g., 0.20.0 or 0.20.0-beta.1)", file=sys.stderr)
         sys.exit(1)
@@ -113,25 +120,37 @@ def bump(target: str) -> None:
 
     print(f"Bumping: {current} → {target}\n")
 
+    # Phase 1: Pre-validate all files and prepare new contents
+    pending: list[tuple[Path, str]] = []
+    errors: list[str] = []
+
     for path in PYPROJECT_FILES:
         text = path.read_text()
         new_text = PYPROJECT_VERSION_RE.sub(rf'\g<1>{target}\2', text, count=1)
         if new_text == text:
-            print(f"  WARNING: No version found in {path.relative_to(ROOT)}", file=sys.stderr)
-            continue
-        path.write_text(new_text)
-        print(f"  ✓ {path.relative_to(ROOT)}")
+            errors.append(str(path.relative_to(ROOT)))
+        else:
+            pending.append((path, new_text))
 
     for path in PACKAGE_JSON_FILES:
         text = path.read_text()
         new_text = PACKAGE_JSON_VERSION_RE.sub(rf'\g<1>{target}\2', text, count=1)
         if new_text == text:
-            print(f"  WARNING: No version found in {path.relative_to(ROOT)}", file=sys.stderr)
-            continue
+            errors.append(str(path.relative_to(ROOT)))
+        else:
+            pending.append((path, new_text))
+
+    if errors:
+        print(f"ERROR: No version field found in: {', '.join(errors)}", file=sys.stderr)
+        print("No files were modified.", file=sys.stderr)
+        sys.exit(1)
+
+    # Phase 2: Write all files (only reached if all pre-checks passed)
+    for path, new_text in pending:
         path.write_text(new_text)
         print(f"  ✓ {path.relative_to(ROOT)}")
 
-    print(f"\nDone. Updated 13 files to v{target}.")
+    print(f"\nDone. Updated {len(pending)} files to v{target}.")
     print(f"Next: git add -A && git commit -m 'chore: bump version to v{target}'")
 
 
