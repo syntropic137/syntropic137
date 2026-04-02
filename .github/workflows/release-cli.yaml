@@ -1,0 +1,159 @@
+# =============================================================================
+# Release CLI — Build, Test, Publish @syntropic137/cli to npm
+# =============================================================================
+#
+# Trigger: GitHub release published (same as release-containers).
+#
+# Pipeline:
+#   1. Verify package.json version matches release tag
+#   2. Typecheck, test, build
+#   3. Publish to npm with provenance
+#
+# Prerequisites:
+#   - CLI_PUBLISH_NPM_TOKEN secret (npm automation token for @syntropic137 scope)
+#
+# Security:
+#   - All actions SHA-pinned (ISS-259)
+#   - npm provenance enabled (links published package to this workflow run)
+#   - Version mismatch check prevents accidental publishes
+# =============================================================================
+
+name: Release CLI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — build and test but don't publish"
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-cli-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel an in-progress release
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      id-token: write  # npm provenance (Sigstore OIDC)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          submodules: true
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="v0.0.0-dry-run"
+          fi
+          SEMVER="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "semver=$SEMVER" >> "$GITHUB_OUTPUT"
+
+          # Check for pre-release (contains hyphen: v0.18.0-beta.1)
+          if [[ "$SEMVER" == *"-"* ]]; then
+            echo "npm_tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify version consistency
+        working-directory: apps/syn-cli-node
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          RELEASE_VERSION="${{ steps.version.outputs.semver }}"
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Skipping version check for manual dispatch (dry run)"
+            exit 0
+          fi
+
+          if [[ "$PKG_VERSION" != "$RELEASE_VERSION" ]]; then
+            echo "::error::Version mismatch: package.json=$PKG_VERSION, release tag=$RELEASE_VERSION"
+            echo "Run the version bump command before creating the release."
+            exit 1
+          fi
+
+          echo "✓ Version consistent: $PKG_VERSION"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        working-directory: apps/syn-cli-node
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Typecheck
+        working-directory: apps/syn-cli-node
+        run: pnpm run typecheck
+
+      - name: Test
+        working-directory: apps/syn-cli-node
+        run: pnpm run test
+
+      - name: Build
+        working-directory: apps/syn-cli-node
+        run: pnpm run build
+
+      - name: Verify build artifact
+        working-directory: apps/syn-cli-node
+        run: |
+          if [[ ! -f dist/syn.mjs ]]; then
+            echo "::error::Build artifact dist/syn.mjs not found"
+            exit 1
+          fi
+          SIZE=$(wc -c < dist/syn.mjs | tr -d ' ')
+          echo "Build artifact: dist/syn.mjs ($SIZE bytes)"
+
+          # Smoke test: --version should print without errors
+          node dist/syn.mjs version
+
+      - name: Publish to npm
+        if: ${{ github.event_name == 'release' && !inputs.dry_run }}
+        working-directory: apps/syn-cli-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.CLI_PUBLISH_NPM_TOKEN }}
+        run: |
+          npm publish --access public --tag ${{ steps.version.outputs.npm_tag }} --provenance
+
+      - name: Publish summary
+        if: ${{ github.event_name == 'release' && !inputs.dry_run }}
+        run: |
+          echo "## CLI Published: @syntropic137/cli@${{ steps.version.outputs.semver }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **npm tag:** \`${{ steps.version.outputs.npm_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Install:** \`npm install -g @syntropic137/cli@${{ steps.version.outputs.semver }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Provenance:** Enabled (Sigstore OIDC)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry run summary
+        if: ${{ github.event_name == 'workflow_dispatch' || inputs.dry_run }}
+        run: |
+          echo "## CLI Dry Run" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Typecheck: ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tests: ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Build: ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Publish skipped** (dry run)" >> "$GITHUB_STEP_SUMMARY"

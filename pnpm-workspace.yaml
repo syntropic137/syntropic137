@@ -2,6 +2,7 @@ packages:
   - apps/syn-dashboard-ui
   - apps/syn-docs
   - apps/syn-pulse-ui
+  - apps/syn-cli-node
   - packages/openclaw-plugin
 
 overrides:

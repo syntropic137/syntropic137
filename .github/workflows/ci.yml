@@ -329,6 +329,50 @@ jobs:
         run: pnpm run build
 
   #############################################################################
+  # CLI NODE - TypeScript checks, tests, API drift detection
+  #############################################################################
+
+  cli-node:
+    name: CLI Node
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          submodules: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: apps/syn-cli-node
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Type check
+        working-directory: apps/syn-cli-node
+        run: pnpm run typecheck
+
+      - name: Run tests
+        working-directory: apps/syn-cli-node
+        env:
+          NO_COLOR: "1"
+        run: pnpm run test
+
+      - name: Build
+        working-directory: apps/syn-cli-node
+        run: pnpm run build
+
+      - name: API drift check
+        working-directory: apps/syn-cli-node
+        run: pnpm run check:api-drift
+
+  #############################################################################
   # SUBMODULE VALIDATION - Ensure submodules are properly referenced
   #############################################################################
 
@@ -461,6 +505,7 @@ jobs:
       - python-unit-tests
       - python-integration-tests
       - dashboard-ui
+      - cli-node
       - docs-site
       - submodule-check
       - osv-scan
@@ -475,6 +520,7 @@ jobs:
              [[ "${{ needs.architectural-fitness.result }}" == "failure" ]] || \
              [[ "${{ needs.python-unit-tests.result }}" == "failure" ]] || \
              [[ "${{ needs.dashboard-ui.result }}" == "failure" ]] || \
+             [[ "${{ needs.cli-node.result }}" == "failure" ]] || \
              [[ "${{ needs.docs-site.result }}" == "failure" ]] || \
              [[ "${{ needs.submodule-check.result }}" == "failure" ]] || \
              [[ "${{ needs.osv-scan.result }}" == "failure" ]] || \
@@ -502,6 +548,7 @@ jobs:
              [[ "${{ needs.architectural-fitness.result }}" == "cancelled" ]] || \
              [[ "${{ needs.python-unit-tests.result }}" == "cancelled" ]] || \
              [[ "${{ needs.dashboard-ui.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.cli-node.result }}" == "cancelled" ]] || \
              [[ "${{ needs.docs-site.result }}" == "cancelled" ]] || \
              [[ "${{ needs.osv-scan.result }}" == "cancelled" ]] || \
              [[ "${{ needs.pip-audit.result }}" == "cancelled" ]]; then
@@ -522,5 +569,6 @@ jobs:
           echo "| Python Unit Tests | ${{ needs.python-unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Python Integration Tests | ${{ needs.python-integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dashboard UI | ${{ needs.dashboard-ui.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CLI Node | ${{ needs.cli-node.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Submodule Check | ${{ needs.submodule-check.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| OSV Scan | ${{ needs.osv-scan.result }} |" >> $GITHUB_STEP_SUMMARY

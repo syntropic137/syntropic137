@@ -1,0 +1,79 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { insightsGroup } from "../../src/commands/insights.js";
+
+describe("insights commands", () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", mockFetch);
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function jsonResponse(data: unknown, status = 200): Response {
+    return new Response(JSON.stringify(data), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function stdout(): string {
+    return (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+  }
+
+  it("overview shows system summary", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        total_systems: 3,
+        total_repos: 10,
+        active_sessions: 2,
+        total_executions: 50,
+        health: { status: "healthy" },
+        systems: [],
+      }),
+    );
+
+    await insightsGroup.getCommand("overview")!.handler({ positionals: [], values: {} });
+    const out = stdout();
+    expect(out).toContain("System Overview");
+    expect(out).toContain("3");
+    expect(out).toContain("10");
+  });
+
+  it("cost shows cost breakdown", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        total_cost_usd: "1.50",
+        total_tokens: 100000,
+        by_repo: [{ repo_name: "test-repo", cost_usd: "1.50", tokens: 100000 }],
+        by_model: [],
+      }),
+    );
+
+    await insightsGroup.getCommand("cost")!.handler({ positionals: [], values: {} });
+    const out = stdout();
+    expect(out).toContain("$1.50");
+    expect(out).toContain("test-repo");
+  });
+
+  it("heatmap renders sparkline", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        buckets: [{ count: 5 }, { count: 10 }, { count: 3 }, { count: 0 }],
+        top_repos: [],
+      }),
+    );
+
+    await insightsGroup.getCommand("heatmap")!.handler({ positionals: [], values: {} });
+    const out = stdout();
+    expect(out).toContain("Activity Heatmap");
+    expect(out).toContain("18 total events");
+  });
+});

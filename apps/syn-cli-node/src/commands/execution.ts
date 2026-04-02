@@ -1,0 +1,108 @@
+/**
+ * Execution list and detail commands.
+ * Port of apps/syn-cli/src/syn_cli/commands/execution.py
+ */
+
+import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
+import { CLIError } from "../framework/errors.js";
+import { apiGet, buildParams } from "../client/api.js";
+import { print, printError, printDim } from "../output/console.js";
+import { style, BOLD, CYAN, DIM, RED } from "../output/ansi.js";
+import { formatCost, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
+import { Table } from "../output/table.js";
+import type { ExecutionListResponse, ExecutionDetailResponse } from "../generated/types.js";
+
+const listCommand: CommandDef = {
+  name: "list",
+  description: "List all workflow executions",
+  options: {
+    status: { type: "string", short: "s", description: "Filter by status" },
+    page: { type: "string", description: "Page number", default: "1" },
+    "page-size": { type: "string", description: "Items per page (max 100)", default: "50" },
+  },
+  handler: async (parsed: ParsedArgs) => {
+    const params = buildParams({
+      status: (parsed.values["status"] as string | undefined) ?? null,
+      page: (parsed.values["page"] as string | undefined) ?? "1",
+      page_size: (parsed.values["page-size"] as string | undefined) ?? "50",
+    });
+    const data = await apiGet<ExecutionListResponse>("/executions", { params });
+    const { executions, total } = data;
+    const page = parseInt((parsed.values["page"] as string) ?? "1", 10);
+    const pageSize = parseInt((parsed.values["page-size"] as string) ?? "50", 10);
+
+    if (executions.length === 0) { printDim("No executions found."); return; }
+
+    const table = new Table({ title: `Executions (page ${page}, ${total} total)` });
+    table.addColumn("ID", { style: CYAN });
+    table.addColumn("Workflow");
+    table.addColumn("Status");
+    table.addColumn("Started");
+    table.addColumn("Phases", { align: "right" });
+    table.addColumn("Tokens", { align: "right" });
+    table.addColumn("Cost", { align: "right" });
+
+    for (const ex of executions) {
+      table.addRow(
+        ex.workflow_execution_id,
+        ex.workflow_name,
+        formatStatus(ex.status),
+        formatTimestamp(ex.started_at),
+        `${ex.completed_phases}/${ex.total_phases}`,
+        formatTokens(ex.total_tokens),
+        formatCost(ex.total_cost_usd),
+      );
+    }
+    table.print();
+    if (total > page * pageSize) printDim(`Showing page ${page}. Use --page ${page + 1} for more.`);
+  },
+};
+
+const showCommand: CommandDef = {
+  name: "show",
+  description: "Show detailed information about a single execution",
+  args: [{ name: "execution-id", description: "Execution ID", required: true }],
+  handler: async (parsed: ParsedArgs) => {
+    const id = parsed.positionals[0];
+    if (!id) { printError("Missing execution-id"); throw new CLIError("Missing argument", 1); }
+
+    const ex = await apiGet<ExecutionDetailResponse>(`/executions/${id}`);
+
+    print(`${style("Execution:", BOLD)} ${ex.workflow_execution_id}`);
+    print(`  Workflow:   ${ex.workflow_name}`);
+    print(`  Status:     ${formatStatus(ex.status)}`);
+    print(`  Started:    ${formatTimestamp(ex.started_at)}`);
+    if (ex.completed_at) print(`  Completed:  ${formatTimestamp(ex.completed_at)}`);
+    print(`  Tokens:     ${formatTokens(ex.total_tokens)}`);
+    print(`  Cost:       ${formatCost(ex.total_cost_usd)}`);
+    if (ex.error_message) print(`  ${style("Error:", RED)}     ${ex.error_message}`);
+
+    const phases = ex.phases ?? [];
+    if (phases.length > 0) {
+      print("");
+      const table = new Table({ title: "Phases" });
+      table.addColumn("#", { align: "right", style: DIM });
+      table.addColumn("Name");
+      table.addColumn("Status");
+      table.addColumn("Started");
+      table.addColumn("Tokens", { align: "right" });
+      table.addColumn("Cost", { align: "right" });
+
+      for (let i = 0; i < phases.length; i++) {
+        const ph = phases[i]!;
+        table.addRow(
+          String(i + 1),
+          ph.name,
+          formatStatus(ph.status),
+          formatTimestamp(ph.started_at),
+          formatTokens(ph.total_tokens),
+          formatCost(ph.cost_usd),
+        );
+      }
+      table.print();
+    }
+  },
+};
+
+export const executionGroup = new CommandGroup("execution", "List and inspect workflow executions");
+executionGroup.command(listCommand).command(showCommand);
