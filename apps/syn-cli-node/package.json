@@ -1,6 +1,6 @@
 {
   "name": "@syntropic137/cli",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "description": "Syntropic137 CLI - Event-sourced workflow engine for AI agents",
   "type": "module",
   "bin": {
@@ -8,7 +8,8 @@
   },
   "main": "dist/syn.mjs",
   "files": [
-    "dist/"
+    "dist/",
+    "README.md"
   ],
   "scripts": {
     "build": "tsup",

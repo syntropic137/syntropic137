@@ -1,10 +1,10 @@
 name: Docs Drift Check
 
-# Only runs on main — not on PRs to avoid slowing down trunk-based development.
+# Runs on main and release — not on PRs to avoid slowing down development.
 # Must be green before any release.
 on:
   push:
-    branches: [main]
+    branches: [main, release]
 
 jobs:
   check-drift:
