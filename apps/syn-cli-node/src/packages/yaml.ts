@@ -27,21 +27,22 @@ interface ParseResult {
   nextLine: number;
 }
 
+function skipBlanksAndComments(lines: string[], start: number): number {
+  let i = start;
+  while (i < lines.length) {
+    const trimmed = lines[i]!.trim();
+    if (trimmed !== "" && !trimmed.startsWith("#")) break;
+    i++;
+  }
+  return i;
+}
+
 function parseNode(
   lines: string[],
   startLine: number,
   _parentIndent: number,
 ): ParseResult {
-  // Skip blank lines and comments
-  let i = startLine;
-  while (i < lines.length) {
-    const trimmed = lines[i]!.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) {
-      i++;
-      continue;
-    }
-    break;
-  }
+  const i = skipBlanksAndComments(lines, startLine);
 
   if (i >= lines.length) {
     return { value: null, nextLine: i };
@@ -51,18 +52,32 @@ function parseNode(
   const indent = getIndent(line);
   const trimmed = line.trim();
 
-  // List item
   if (trimmed.startsWith("- ") || trimmed === "-") {
     return parseList(lines, i, indent);
   }
 
-  // Map key
   if (trimmed.includes(":")) {
     return parseMap(lines, i, indent);
   }
 
-  // Scalar
   return { value: parseScalar(trimmed), nextLine: i + 1 };
+}
+
+function parseMapEntry(
+  lines: string[],
+  i: number,
+  afterColon: string,
+  mapIndent: number,
+): ParseResult {
+  if (afterColon === "" || afterColon.startsWith("#")) {
+    return parseNode(lines, i + 1, mapIndent);
+  }
+
+  if (afterColon === "|" || afterColon === ">") {
+    return parseMultilineString(lines, i + 1, afterColon as "|" | ">");
+  }
+
+  return { value: parseInlineValue(afterColon), nextLine: i + 1 };
 }
 
 function parseMap(
@@ -74,17 +89,15 @@ function parseMap(
   let i = startLine;
 
   while (i < lines.length) {
-    const line = lines[i]!;
-    const trimmed = line.trim();
+    const trimmed = lines[i]!.trim();
 
     if (trimmed === "" || trimmed.startsWith("#")) {
       i++;
       continue;
     }
 
-    const indent = getIndent(line);
-    if (indent < mapIndent) break;
-    if (indent > mapIndent) break; // Shouldn't happen at map level
+    const indent = getIndent(lines[i]!);
+    if (indent !== mapIndent) break;
 
     const colonIdx = findUnquotedColon(trimmed);
     if (colonIdx === -1) break;
@@ -92,30 +105,46 @@ function parseMap(
     const key = trimmed.slice(0, colonIdx).trim();
     const afterColon = trimmed.slice(colonIdx + 1).trim();
 
-    if (afterColon === "" || afterColon.startsWith("#")) {
-      // Block value on next line(s)
-      i++;
-      const { value, nextLine } = parseNode(lines, i, mapIndent);
-      result[key] = value;
-      i = nextLine;
-    } else if (afterColon === "|" || afterColon === ">") {
-      // Multiline string
-      i++;
-      const { value, nextLine } = parseMultilineString(
-        lines,
-        i,
-        afterColon as "|" | ">",
-      );
-      result[key] = value;
-      i = nextLine;
-    } else {
-      // Inline value — could be a flow list [a, b, c]
-      result[key] = parseInlineValue(afterColon);
-      i++;
-    }
+    const { value, nextLine } = parseMapEntry(lines, i, afterColon, mapIndent);
+    result[key] = value;
+    i = nextLine;
   }
 
   return { value: result, nextLine: i };
+}
+
+function parseListItem(
+  lines: string[],
+  i: number,
+  trimmed: string,
+  indent: number,
+): ParseResult {
+  const afterDash = trimmed.slice(2).trim();
+
+  if (afterDash === "" || trimmed === "-") {
+    const { value, nextLine } = parseNode(lines, i + 1, indent);
+    return { value, nextLine };
+  }
+
+  if (afterDash.includes(":") && !isQuoted(afterDash)) {
+    return parseInlineMapItem(lines, i, afterDash, indent);
+  }
+
+  return { value: parseInlineValue(afterDash), nextLine: i + 1 };
+}
+
+function parseInlineMapItem(
+  lines: string[],
+  i: number,
+  afterDash: string,
+  indent: number,
+): ParseResult {
+  const itemIndent = indent + 2;
+  const originalLine = lines[i]!;
+  lines[i] = " ".repeat(itemIndent) + afterDash;
+  const { value, nextLine } = parseMap(lines, i, itemIndent);
+  lines[i] = originalLine;
+  return { value, nextLine };
 }
 
 function parseList(
@@ -127,55 +156,31 @@ function parseList(
   let i = startLine;
 
   while (i < lines.length) {
-    const line = lines[i]!;
-    const trimmed = line.trim();
+    const trimmed = lines[i]!.trim();
 
     if (trimmed === "" || trimmed.startsWith("#")) {
       i++;
       continue;
     }
 
-    const indent = getIndent(line);
-    if (indent < listIndent) break;
-    if (indent > listIndent) break;
-
+    const indent = getIndent(lines[i]!);
+    if (indent !== listIndent) break;
     if (!trimmed.startsWith("- ") && trimmed !== "-") break;
 
-    const afterDash = trimmed.slice(2).trim();
-
-    if (afterDash === "" || trimmed === "-") {
-      // Block item on next line(s)
-      i++;
-      const { value, nextLine } = parseNode(lines, i, listIndent);
-      result.push(value);
-      i = nextLine;
-    } else if (afterDash.includes(":") && !isQuoted(afterDash)) {
-      // Inline map start: `- key: value`
-      // Re-parse lines starting from this dash as a map with increased indent
-      const itemIndent = indent + 2;
-      // Rewrite the line temporarily to remove "- " prefix
-      const originalLine = lines[i]!;
-      lines[i] = " ".repeat(itemIndent) + afterDash;
-      const { value, nextLine } = parseMap(lines, i, itemIndent);
-      lines[i] = originalLine; // Restore
-      result.push(value);
-      i = nextLine;
-    } else {
-      result.push(parseInlineValue(afterDash));
-      i++;
-    }
+    const { value, nextLine } = parseListItem(lines, i, trimmed, indent);
+    result.push(value);
+    i = nextLine;
   }
 
   return { value: result, nextLine: i };
 }
 
-function parseMultilineString(
+function collectMultilineContent(
   lines: string[],
   startLine: number,
-  style: "|" | ">",
-): ParseResult {
-  let i = startLine;
+): { contentLines: string[]; nextLine: number } {
   const contentLines: string[] = [];
+  let i = startLine;
   let blockIndent = -1;
 
   while (i < lines.length) {
@@ -192,24 +197,31 @@ function parseMultilineString(
     i++;
   }
 
-  // Trim trailing empty lines
   while (contentLines.length > 0 && contentLines[contentLines.length - 1] === "") {
     contentLines.pop();
   }
 
+  return { contentLines, nextLine: i };
+}
+
+function parseMultilineString(
+  lines: string[],
+  startLine: number,
+  blockStyle: "|" | ">",
+): ParseResult {
+  const { contentLines, nextLine } = collectMultilineContent(lines, startLine);
+
   const value =
-    style === "|"
+    blockStyle === "|"
       ? contentLines.join("\n")
       : contentLines.join(" ").replace(/\s+/g, " ").trim();
 
-  return { value, nextLine: i };
+  return { value, nextLine };
 }
 
 function parseInlineValue(raw: string): YamlValue {
-  // Strip inline comments
   const value = stripInlineComment(raw);
 
-  // Flow sequence: [a, b, c]
   if (value.startsWith("[") && value.endsWith("]")) {
     const inner = value.slice(1, -1).trim();
     if (inner === "") return [];
@@ -219,22 +231,36 @@ function parseInlineValue(raw: string): YamlValue {
   return parseScalar(value);
 }
 
-function parseScalar(raw: string): string | number | boolean | null {
-  if (raw === "null" || raw === "~" || raw === "") return null;
-  if (raw === "true" || raw === "True" || raw === "TRUE") return true;
-  if (raw === "false" || raw === "False" || raw === "FALSE") return false;
+const TRUE_VALUES = new Set(["true", "True", "TRUE"]);
+const FALSE_VALUES = new Set(["false", "False", "FALSE"]);
+const NULL_VALUES = new Set(["null", "~", ""]);
 
-  // Quoted strings
+function parseQuoted(raw: string): string | null {
   if (
     (raw.startsWith('"') && raw.endsWith('"')) ||
     (raw.startsWith("'") && raw.endsWith("'"))
   ) {
     return raw.slice(1, -1);
   }
+  return null;
+}
 
-  // Numbers
+function parseNumber(raw: string): number | null {
   if (/^-?\d+$/.test(raw)) return parseInt(raw, 10);
   if (/^-?\d+\.\d+$/.test(raw)) return parseFloat(raw);
+  return null;
+}
+
+function parseScalar(raw: string): string | number | boolean | null {
+  if (NULL_VALUES.has(raw)) return null;
+  if (TRUE_VALUES.has(raw)) return true;
+  if (FALSE_VALUES.has(raw)) return false;
+
+  const quoted = parseQuoted(raw);
+  if (quoted !== null) return quoted;
+
+  const num = parseNumber(raw);
+  if (num !== null) return num;
 
   return raw;
 }
@@ -256,7 +282,6 @@ function findUnquotedColon(text: string): number {
     if (ch === "'" && !inDouble) inSingle = !inSingle;
     else if (ch === '"' && !inSingle) inDouble = !inDouble;
     else if (ch === ":" && !inSingle && !inDouble) {
-      // Must be followed by space, end of string, or nothing
       if (i + 1 >= text.length || text[i + 1] === " ") return i;
     }
   }
@@ -271,7 +296,6 @@ function isQuoted(text: string): boolean {
 }
 
 function stripInlineComment(text: string): string {
-  // Only strip " #" (space + hash) outside quotes
   let inSingle = false;
   let inDouble = false;
   for (let i = 0; i < text.length; i++) {
