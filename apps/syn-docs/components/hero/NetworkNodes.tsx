@@ -1,5 +1,6 @@
 'use client';
 
+/// <reference types="@react-three/fiber" />
 import { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Points, PointMaterial } from '@react-three/drei';

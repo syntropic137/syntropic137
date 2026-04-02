@@ -1,8 +1,8 @@
 'use client';
 
+/// <reference types="@react-three/fiber" />
 import { useRef, useMemo, useEffect, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-// drei no longer needed in this file — native three.js primitives used directly
 import * as THREE from 'three';
 import { DARK_COLORS, LIGHT_COLORS, useTheme } from './hero/constants';
 import { NetworkNodes } from './hero/NetworkNodes';
