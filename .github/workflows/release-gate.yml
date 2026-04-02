@@ -7,7 +7,8 @@
 # Checks:
 #   1. Version consistency — all 13 package files match and are bumped
 #   2. Release notes — PR body must contain meaningful release notes
-#   3. Docker dry-run — all container images build successfully (single-arch)
+#   3. Docs drift — generated CLI docs match syn-cli source
+#   4. Docker dry-run — all container images build successfully (single-arch)
 #
 # Full CI (tests, lint, typecheck, security scans) also runs on these PRs
 # via ci.yml which triggers on pull_request to both main and release.
@@ -137,6 +138,29 @@ jobs:
           echo "OK: Release notes present ($BODY_LENGTH chars)"
 
   # ---------------------------------------------------------------------------
+  # Docs Drift — generated CLI docs must match syn-cli source
+  # ---------------------------------------------------------------------------
+  docs-drift:
+    name: Docs Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Generate CLI docs
+        run: uvx --with typer --with rich --with pyyaml python apps/syn-docs/scripts/generate-cli-docs.py
+
+      - name: Check for drift
+        run: |
+          if ! git diff --quiet apps/syn-docs/content/docs/cli/; then
+            echo "::error::CLI docs are out of sync with syn-cli. Run 'pnpm generate' in apps/syn-docs/ and commit the result."
+            git diff --stat apps/syn-docs/content/docs/cli/
+            exit 1
+          fi
+          echo "CLI docs are up to date."
+
+  # ---------------------------------------------------------------------------
   # Docker Dry-Run — verify all images build (single-arch, no push)
   # ---------------------------------------------------------------------------
   docker-dry-run:
@@ -196,17 +220,19 @@ jobs:
   release-gate-success:
     name: Release Gate
     if: always()
-    needs: [version-check, changelog-check, docker-dry-run]
+    needs: [version-check, changelog-check, docs-drift, docker-dry-run]
     runs-on: ubuntu-latest
     steps:
       - name: Check all gates passed
         run: |
           echo "version-check: ${{ needs.version-check.result }}"
           echo "changelog-check: ${{ needs.changelog-check.result }}"
+          echo "docs-drift: ${{ needs.docs-drift.result }}"
           echo "docker-dry-run: ${{ needs.docker-dry-run.result }}"
 
           if [[ "${{ needs.version-check.result }}" != "success" ]] || \
              [[ "${{ needs.changelog-check.result }}" != "success" ]] || \
+             [[ "${{ needs.docs-drift.result }}" != "success" ]] || \
              [[ "${{ needs.docker-dry-run.result }}" != "success" ]]; then
             echo "::error::One or more release gate checks failed."
             exit 1
