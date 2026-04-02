@@ -89,7 +89,7 @@ def test_org_event_handler_methods_exist():
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(
+@pytest.mark.xfail(  # #444
     reason="TODO(#444): 6 EVENT_HANDLERS entries reference methods that don't exist yet "
     "(ExecutionPaused, ExecutionResumed, CostRecorded). These events are silently dropped.",
     strict=True,
@@ -128,7 +128,7 @@ def test_all_handler_methods_exist_on_projections():
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(
+@pytest.mark.xfail(  # #444
     reason="TODO(#444): 5 orphaned on_* handlers exist but are not wired in EVENT_HANDLERS "
     "(WorkflowPhaseUpdated, WorkflowInterrupted, PhaseStarted). These handlers are never called.",
     strict=True,
