@@ -1,29 +1,51 @@
 ---
-title: Claude Code Plugin
+title: Claude Code Integration
 description: Monitor and manage Syntropic137 from inside Claude Code with slash commands and domain skills.
 ---
 
-The Syntropic137 Claude Code plugin adds slash commands and domain knowledge to Claude Code, letting you manage the platform without leaving your editor.
+
+The [Syntropic137 Claude Code plugin](https://github.com/syntropic137/syntropic137-claude-plugin)
+adds slash commands and domain knowledge to Claude Code, turning it into a Syntropic137
+orchestrator — create workflows, kick off executions, monitor costs, and troubleshoot
+issues without leaving your editor.
 
 <Callout type="info">
-The plugin is optional. Syntropic137 works independently — the CLI and API are always available. The plugin adds convenience for Claude Code users.
+This is a **Claude Code plugin** — it teaches Claude Code how to operate Syntropic137.
+It is not a [Syntropic137 plugin](/docs/guide/plugins) (workflow package). See
+[Plugin Ecosystem](/docs/guide/plugins#two-plugin-boundaries) for how these two concepts
+differ.
 </Callout>
 
 ## Installation
 
-If you have Claude Code installed:
+The recommended way to install the plugin is through the setup system, which handles
+everything automatically:
 
 ```bash
-claude plugin install syntropic137
+npx @syntropic137/setup
 ```
 
-Or install it through the setup CLI:
+The setup wizard detects the `claude` CLI and offers to install the plugin for you. You
+can also install the plugin step specifically:
 
 ```bash
 npx @syntropic137/setup plugin
 ```
 
-The setup wizard also offers to install the plugin automatically if it detects the `claude` CLI.
+### Manual Installation
+
+If you prefer to install directly from the Claude Code marketplace:
+
+```bash
+claude plugin marketplace add syntropic137/syntropic137-claude-plugin
+claude plugin install syntropic137
+```
+
+Or from a local clone (for development):
+
+```bash
+claude plugin install ./lib/syntropic137-claude-plugin --scope project
+```
 
 ## Slash Commands
 
@@ -66,3 +88,9 @@ The plugin runs a health check every time Claude Code starts a new session. It p
 ```bash
 claude plugin update syntropic137
 ```
+
+## Source
+
+The plugin source is in the [`syntropic137-claude-plugin`](https://github.com/syntropic137/syntropic137-claude-plugin)
+repository, also available as a submodule at `lib/syntropic137-claude-plugin` in the
+monorepo.

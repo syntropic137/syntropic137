@@ -1,13 +1,13 @@
 ---
 title: Plugin Ecosystem
-description: Discover, install, and share agent workflows — built on Claude Code conventions.
+description: Discover, install, and share agent workflows for the Syntropic137 platform.
 ---
 
 import { Files, Folder, File } from 'fumadocs-ui/components/files';
 
-Syntropic137 plugins are distributable bundles of agent workflows. Install pre-built
-plugins from GitHub-hosted marketplaces, or create your own and share them with the
-community.
+Syntropic137 plugins are distributable bundles of workflows for the Syntropic137 platform.
+Install pre-built plugins from GitHub-hosted marketplaces, or create your own and share
+them with the community.
 
 ```bash
 # Register a marketplace
@@ -23,15 +23,39 @@ syn workflow install research-toolkit
 syn workflow run deep-research --task "Analyze our authentication architecture"
 ```
 
-## Built on Claude Code Conventions
+## Two Plugin Boundaries
 
-The plugin system follows Claude Code's standards so workflows feel native to agents
-that already use Claude Code.
+Syntropic137 has two distinct plugin concepts. The diagram below shows how they relate:
 
-### Phase Prompts = Claude Code Commands
+<PluginEcosystemFlow />
 
-Every phase prompt is a `.md` file with the same format as a Claude Code custom command —
-optional YAML frontmatter for configuration, followed by the prompt body:
+### Syntropic137 Plugins
+
+Bundles of **workflows** (and eventually triggers) that are ingested into the Syntropic137
+platform. These are what you install from marketplaces, export from running workflows,
+and share with your team. They define *what work gets done* — the multi-phase execution
+plans that agents follow inside isolated Docker workspaces.
+
+- Distributed via GitHub-based marketplaces
+- Manifest: `syntropic137-plugin.json`
+- Content: `workflow.yaml` + phase `.md` files
+- Install: `syn workflow install <name>`
+
+### Claude Code Plugin
+
+A separate project ([`syntropic137-claude-plugin`](https://github.com/syntropic137/syntropic137-claude-plugin))
+that gives Claude Code the context to **operate** Syntropic137. It provides slash commands
+(`/syn-status`, `/syn-workflow`, etc.) and domain skills that teach Claude Code how to
+create workflows, kick off executions, query metrics, and manage the platform.
+
+The Claude Code plugin is *not* a Syntropic137 plugin — it's a Claude Code plugin *for*
+using Syntropic137. See [Claude Code Integration](/docs/guide/claude-code-plugin) for details.
+
+## Phase Prompt Format
+
+Phase prompts use `.md` files with optional YAML frontmatter — a convention inspired by
+Claude Code's custom command format. If you've written Claude Code commands, the format
+is familiar:
 
 ```markdown
 ---
@@ -55,16 +79,21 @@ Use {{discovery}} to reference output from a previous phase.
 | `max-tokens` | Maximum output tokens for the phase |
 | `timeout-seconds` | Phase execution timeout |
 
-### Export as Claude Code Plugin
+## Exporting Plugins
 
-Any Syntropic137 workflow can be exported as a Claude Code plugin, creating a slash
-command that wraps `syn workflow run`:
+Any workflow running in Syntropic137 can be exported as a distributable plugin:
 
 ```bash
-syn workflow export deep-research --format plugin --output ./my-plugin/
+# Export as a package (workflow.yaml + phase .md files)
+syn workflow export <workflow-id> --output ./my-plugin/
+
+# Export as a plugin with a Claude Code command wrapper
+syn workflow export <workflow-id> --format plugin --output ./my-plugin/
 ```
 
-This generates a directory you can drop into any Claude Code project:
+The `plugin` format adds a `commands/syn-*.md` wrapper that calls `syn workflow run`,
+so the exported workflow can also be invoked as a slash command in Claude Code. The
+package itself remains a Syntropic137 plugin — the CC command is a convenience bridge.
 
 <Files>
   <Folder name="my-plugin" defaultOpen>
@@ -84,20 +113,6 @@ This generates a directory you can drop into any Claude Code project:
     <File name="README.md" />
   </Folder>
 </Files>
-
-The generated `commands/syn-deep-research.md` is a Claude Code slash command that calls
-`syn workflow run`, so the workflow becomes `/syn-deep-research` in any Claude Code session.
-
-### Alignment with Claude Code
-
-| Concept | Claude Code | Syntropic137 |
-|---------|-------------|--------------|
-| Command format | `.md` with YAML frontmatter | Same — phase prompts use identical format |
-| Distribution | `marketplace.json` | Same schema and conventions |
-| Package manifest | `plugin.json` | `syntropic137-plugin.json` |
-| Install command | Plugin install | `syn workflow install <name>` |
-| Discovery | Marketplace search | `syn workflow search` / `syn workflow info` |
-| Content types | Skills, agents, hooks, MCP | Workflows, phases, phase libraries |
 
 ## Marketplace
 
@@ -162,6 +177,22 @@ syn workflow uninstall research-toolkit --keep-workflows
 Updates compare the remote git commit SHA against the installed SHA — if they match,
 the package is already up to date.
 
+## Trigger Support
+
+<Callout type="info">
+Trigger bundling in plugins is not yet implemented. Plugins currently contain workflows
+only. Track progress: [#430](https://github.com/syntropic137/syntropic137/issues/430)
+</Callout>
+
+The vision is that plugins will include trigger configurations alongside workflows — for
+example, a "PR Review" plugin that bundles a code review workflow *and* a trigger that
+fires it when a pull request is opened. Since triggers need to be attached to specific
+repos (which vary across setups), the CLI would prompt during install to select target
+repos.
+
+Triggers exist today as a [separate system](/docs/cli/triggers) (`syn triggers register/list/pause/resume/delete`)
+but aren't yet part of the plugin package format.
+
 ## Creating Plugins
 
 Plugins follow a standard package format. See [Workflow Packages](/docs/guide/workflows)
@@ -177,4 +208,4 @@ for the full guide on:
 
 - [Workflow Packages](/docs/guide/workflows) — detailed package creation, distribution, and marketplace setup
 - [CLI Reference](/docs/cli) — all `syn workflow` and `syn marketplace` commands
-- [Claude Code Plugin](/docs/guide/claude-code-plugin) — the Syntropic137 plugin for Claude Code (slash commands and domain skills)
+- [Claude Code Integration](/docs/guide/claude-code-plugin) — the Claude Code plugin for operating Syntropic137 (slash commands and domain skills)

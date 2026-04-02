@@ -3,6 +3,7 @@ import defaultMdxComponents from 'fumadocs-ui/mdx';
 import { Files, File, Folder } from 'fumadocs-ui/components/files';
 import { APIPage } from '@/lib/source';
 import { Badge } from '@/components/Badge';
+import { Callout } from '@/components/Callout';
 import { FeatureCard, FeatureGrid } from '@/components/FeatureCard';
 import { GradientButton, ButtonGroup } from '@/components/GradientButton';
 import {
@@ -16,11 +17,13 @@ import {
   SystemArchitectureFlow, EventSourcingFlow, TwoEventTypesFlow,
   CQRSFlow, DomainModelFlow, StateMachineFlow,
   DeploymentArchitectureFlow, WorkspaceIsolationFlow, ScalingFlow,
+  PluginEcosystemFlow,
 } from '@/components/diagrams';
 
 export function getMDXComponents(components: MDXComponents): MDXComponents {
   return {
     ...defaultMdxComponents,
+    Callout,
     APIPage,
     Badge,
     FeatureCard,
@@ -57,6 +60,7 @@ export function getMDXComponents(components: MDXComponents): MDXComponents {
     DeploymentArchitectureFlow,
     WorkspaceIsolationFlow,
     ScalingFlow,
+    PluginEcosystemFlow,
     // File tree components
     Files,
     File,

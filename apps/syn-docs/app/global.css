@@ -48,16 +48,98 @@ pre, code {
   font-family: var(--font-jetbrains), ui-monospace, 'Fira Code', monospace;
 }
 
-/* Code block — accent border */
-pre {
-  border: 1px solid rgba(77, 128, 255, 0.15) !important;
+/* ── Callouts ───────────────────────────────────────────────────────────
+   Enhanced callouts — tinted background from --callout-color, thicker accent bar.
+   .syn-callout is added by our custom Callout wrapper (components/Callout.tsx). */
+.syn-callout {
+  background: color-mix(in oklab, var(--callout-color, transparent) 8%, var(--color-fd-card)) !important;
+  border-color: color-mix(in oklab, var(--callout-color, transparent) 20%, var(--color-fd-border)) !important;
 }
 
-.dark pre {
-  border: 1px solid rgba(77, 128, 255, 0.12) !important;
+/* Thicker accent bar (first child div[role="none"]) */
+.syn-callout > [role="none"] {
+  width: 3px !important;
+  border-radius: 2px !important;
 }
 
-/* Accordion open state */
+/* ── Code blocks ───────────────────────────────────────────────────────
+   Compact padding. fd-scroll-container is a @utility in fumadocs-ui,
+   so overrides must be unlayered to win without !important. */
+.fd-scroll-container {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+/* Line hover — highlight + copy icon on the right */
+pre code .line {
+  position: relative;
+  padding: 0 2.25rem 0 0;
+  border-radius: 2px;
+  transition: background 0.12s ease;
+}
+
+pre code .line:hover {
+  background: rgba(77, 128, 255, 0.06);
+  cursor: pointer;
+}
+
+/* Copy icon — appears on line hover */
+pre code .line .line-copy-icon {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+  color: var(--color-fd-muted-foreground);
+}
+
+pre code .line:hover .line-copy-icon {
+  opacity: 0.5;
+}
+
+/* Flash animation when a line is copied */
+pre code .line-copied {
+  background: rgba(77, 128, 255, 0.15) !important;
+  transition: background 0s;
+}
+
+pre code .line-copied .line-copy-icon {
+  opacity: 0.8 !important;
+  color: var(--color-fd-primary);
+}
+
+/* Suppress focus ring on code block mouse-click (keyboard focus-visible kept) */
+.fd-scroll-container:focus:not(:focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+article thead th {
+  font-weight: 600 !important;
+  color: var(--color-fd-foreground) !important;
+}
+
+.dark article thead th {
+  background: rgba(77, 128, 255, 0.05);
+}
+
+/* ── Inline code ───────────────────────────────────────────────────── */
+.dark article :not(pre) > code {
+  background: rgba(77, 128, 255, 0.1) !important;
+  border: 1px solid rgba(77, 128, 255, 0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* ── API reference — see lib/source.tsx for parameter spacing ──── */
+
+/* ── Accordion open state ────────────────────────────────────────── */
 .dark [data-state="open"] > button {
   background: linear-gradient(135deg, rgba(77, 128, 255, 0.08), rgba(51, 102, 230, 0.05));
 }
@@ -91,12 +173,16 @@ article :is(h1, h2, h3, h4, h5, h6) > a[href^="#"] {
   cursor: pointer;
 }
 
-/* Link hover */
+/* Links — visible primary color, clear underline */
 article a:not([class]) {
-  text-decoration-color: rgba(77, 128, 255, 0.3);
-  transition: text-decoration-color 0.2s ease;
+  color: var(--color-fd-primary);
+  text-decoration: underline;
+  text-decoration-color: rgba(77, 128, 255, 0.4);
+  text-underline-offset: 3px;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
 }
 
 article a:not([class]):hover {
-  text-decoration-color: rgba(77, 128, 255, 0.8);
+  color: #6b9aff;
+  text-decoration-color: #6b9aff;
 }
