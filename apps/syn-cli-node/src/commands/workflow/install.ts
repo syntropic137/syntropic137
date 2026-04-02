@@ -23,7 +23,7 @@ import {
   scaffoldSinglePackage,
   scaffoldMultiPackage,
 } from "../../packages/resolver.js";
-import { removeTempDir } from "../../packages/git.js";
+import { gitClone, makeTempDir, removeTempDir } from "../../packages/git.js";
 import { resolvePluginByName, getGitHeadSha } from "../../marketplace/client.js";
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,14 @@ export async function tryMarketplaceResolution(
   print(`Found ${style(plugin.name, BOLD)} in marketplace ${style(regName, CYAN)}`);
   print(`Cloning ${style(entry.repo, CYAN)}@${effectiveRef}...`);
 
-  const { tmpdir, manifest: _m, workflows: _w } = await resolveFromGit(url, effectiveRef);
+  // Clone only — don't resolve at repo root (marketplace root != plugin root)
+  const tmpdir = makeTempDir("syn-pkg-");
+  try {
+    await gitClone(url, effectiveRef, tmpdir);
+  } catch (err) {
+    removeTempDir(tmpdir);
+    throw err;
+  }
 
   // Resolve from plugin's subdirectory
   const subdir = path.resolve(tmpdir, plugin.source.replace(/^\.\//, ""));
@@ -130,8 +137,9 @@ export async function installWorkflowsViaApi(
       const wfId = String(data["id"] ?? "unknown");
       print(`${style("done", GREEN)} (id: ${wfId})`);
       installed.push({ id: wfId, name: wf.name });
-    } catch {
+    } catch (err) {
       print(style("failed", "\x1b[31m"));
+      if (err instanceof Error) printError(err.message);
     }
   }
   return installed;
