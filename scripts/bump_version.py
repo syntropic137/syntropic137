@@ -110,7 +110,10 @@ def bump(target: str) -> None:
     is missing a version field, fails without modifying anything.
     """
     if not VERSION_RE.match(target):
-        print(f"ERROR: Invalid version '{target}'. Expected semver (e.g., 0.20.0 or 0.20.0-beta.1)", file=sys.stderr)
+        print(
+            f"ERROR: Invalid version '{target}'. Expected semver (e.g., 0.20.0 or 0.20.0-beta.1)",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     current = get_current_version()
@@ -126,7 +129,7 @@ def bump(target: str) -> None:
 
     for path in PYPROJECT_FILES:
         text = path.read_text()
-        new_text = PYPROJECT_VERSION_RE.sub(rf'\g<1>{target}\2', text, count=1)
+        new_text = PYPROJECT_VERSION_RE.sub(rf"\g<1>{target}\2", text, count=1)
         if new_text == text:
             errors.append(str(path.relative_to(ROOT)))
         else:
@@ -134,7 +137,7 @@ def bump(target: str) -> None:
 
     for path in PACKAGE_JSON_FILES:
         text = path.read_text()
-        new_text = PACKAGE_JSON_VERSION_RE.sub(rf'\g<1>{target}\2', text, count=1)
+        new_text = PACKAGE_JSON_VERSION_RE.sub(rf"\g<1>{target}\2", text, count=1)
         if new_text == text:
             errors.append(str(path.relative_to(ROOT)))
         else:
