@@ -52,12 +52,12 @@ Schemas include a top-level `$id` with the platform version:
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.18/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/workflow.schema.json",
   ...
 }
 ```
 
-The version in the `$id` is the **schema version**, which tracks the platform version at time of schema change. Not every platform release changes the schema — the version only bumps when the format itself changes.
+The version segment in the `$id` is derived directly from the platform's `pyproject.toml` `version`, so it bumps on every platform release when schemas are regenerated. Not every platform release actually changes the underlying schema structure, so consumers MUST NOT assume that a new version segment always implies a format change or a breaking change.
 
 ### Staleness detection
 

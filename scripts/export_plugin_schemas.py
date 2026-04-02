@@ -52,7 +52,7 @@ from schemas.plugin.trigger_file_schema import TriggerFileSchema  # noqa: E402
 from syn_cli.commands._marketplace_models import MarketplaceIndex  # noqa: E402
 from syn_cli.commands._package_models import PluginManifest  # noqa: E402
 from syn_domain.contexts.orchestration._shared.workflow_definition import (  # noqa: E402
-    PhaseYamlDefinition,
+    PhaseFrontmatterSchema,
     WorkflowDefinition,
 )
 
@@ -72,7 +72,7 @@ SCHEMA_REGISTRY: dict[str, type[BaseModel]] = {
     "plugin-manifest.schema.json": PluginManifest,
     "marketplace.schema.json": MarketplaceIndex,
     "triggers.schema.json": TriggerFileSchema,
-    "phase-frontmatter.schema.json": PhaseYamlDefinition,
+    "phase-frontmatter.schema.json": PhaseFrontmatterSchema,
 }
 
 
@@ -126,6 +126,14 @@ def check_staleness(schemas: dict[str, str]) -> bool:
         if actual != expected:
             print(f"  STALE: {path.relative_to(REPO_ROOT)}")
             stale = True
+
+    # Detect orphaned schema files not in the registry.
+    if SCHEMA_DIR.exists():
+        for path in sorted(SCHEMA_DIR.glob("*.schema.json")):
+            if path.name not in schemas:
+                print(f"  ORPHAN: {path.relative_to(REPO_ROOT)} (not in SCHEMA_REGISTRY)")
+                stale = True
+
     return stale
 
 
