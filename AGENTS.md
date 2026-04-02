@@ -274,60 +274,17 @@ gh project item-edit --project-id PVT_kwDOD5uLBM4BPw_5 --id <item-id> \
 
 ## Branching & Release Process
 
-### Branching Strategy
+The canonical release process lives in [docs/release-process.md](docs/release-process.md) — version bumping, workflow behavior, release steps, failure recovery, and docs deployment.
 
-- **`main`** — development trunk. All PRs target `main`. CI runs tests, lint, typecheck, security scans. No deployments.
-- **`release`** — deployment branch. Only updated via PRs from `main`. Merging triggers the full release pipeline.
+**Quick reference:**
+
+- **`main`** — development trunk. All PRs target `main`.
+- **`release`** — deployment branch. PRs from `main` only. Merge triggers the full release pipeline.
 - **Beta releases** bypass `release`: `gh release create v0.20.0-beta.1 --prerelease --target main`
+- **Version management:** `just bump-version 0.20.0` updates all 13 files. `just check-version` validates consistency.
+- **Docs:** `release` → Vercel production, `main` → preview only.
 
-### Release Workflow
-
-```
-1. just bump-version 0.20.0       # Updates all 13 version files
-2. git commit -m "chore: bump version to v0.20.0"
-3. Open PR: main → release         # Add release notes in PR body
-4. Release Gate checks run:
-   - Version consistency (13 files match, bumped vs current release)
-   - Release notes present (PR body ≥ 20 chars)
-   - Docker dry-run (7 images build successfully)
-   - Full CI (tests, lint, typecheck, security)
-5. Merge PR (squash)
-6. release-create.yml runs automatically:
-   - Creates git tag vX.Y.Z + GitHub Release
-   - Calls release-containers.yaml → builds, signs, pushes 8 Docker images to GHCR
-   - Calls release-cli.yaml → publishes @syntropic137/cli to npm
-   - Dispatches template sync to syntropic137-npx
-7. Vercel deploys docs from release branch (production)
-```
-
-### Version Management
-
-All 13 version files must stay in sync. Use the bump script — never edit manually:
-
-```bash
-just bump-version 0.20.0        # Bump all files
-just check-version               # Validate consistency
-```
-
-**The 13 files** (9 pyproject.toml + 4 package.json):
-- Root, syn-api, syn-cli, syn-adapters, syn-collector, syn-domain, syn-perf, syn-shared, syn-tokens
-- syn-cli-node, syn-dashboard-ui, syn-docs, syn-pulse-ui
-
-Submodules (agentic-primitives, event-sourcing-platform) have independent versioning — never bumped by this script.
-
-### Release Workflows
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `release-gate.yml` | PR targeting `release` | Pre-merge validation (version, notes, Docker dry-run) |
-| `release-create.yml` | Push to `release` | Create tag + GitHub Release, orchestrate downstream |
-| `release-containers.yaml` | Called by release-create (or `release.published`) | Build multi-arch Docker images, cosign sign, GHCR push, release assets |
-| `release-cli.yaml` | Called by release-create (or `release.published`) | Build + publish @syntropic137/cli to npm with provenance |
-
-### Docs Deployment
-
-- **`release` branch** → Vercel production (public docs site)
-- **`main` branch** → Vercel preview deployments only
+Submodules (agentic-primitives, event-sourcing-platform) have independent versioning — never bumped by the release script.
 
 ## Security
 

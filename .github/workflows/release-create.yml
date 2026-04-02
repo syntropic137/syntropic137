@@ -27,9 +27,14 @@ concurrency:
   group: release-create
   cancel-in-progress: false  # Never cancel an in-progress release
 
+# Permissions must cover everything the reusable workflows need.
+# The caller's permissions cap what callees can request.
 permissions:
-  contents: write      # Create tag + release
-  pull-requests: read  # Read merged PR metadata for release notes
+  contents: write       # Create tag + release + release-assets upload
+  pull-requests: read   # Read merged PR metadata for release notes
+  packages: write       # Push Docker images to GHCR
+  id-token: write       # cosign signing + npm provenance (Sigstore OIDC)
+  security-events: write # Upload SARIF results from container scans
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -40,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      created: ${{ steps.create.outputs.created }}
+      created: ${{ steps.check.outputs.created }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -82,9 +87,9 @@ jobs:
         run: |
           # Find the most recently merged PR targeting release
           PR_NUM=$(gh pr list --state merged --base release --limit 1 \
-            --json number --jq '.[0].number')
+            --json number --jq '.[0].number // empty')
 
-          if [[ -n "$PR_NUM" ]]; then
+          if [[ -n "$PR_NUM" && "$PR_NUM" != "null" ]]; then
             echo "Found merged PR #$PR_NUM"
             # Write PR body to a file to avoid shell escaping issues
             gh pr view "$PR_NUM" --json body --jq '.body' > /tmp/release-notes.md
