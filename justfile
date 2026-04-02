@@ -549,6 +549,28 @@ dev-doctor: _env-check
 cli *args:
     uv run --package syn-cli syn {{args}}
 
+# --- CLI Node ---
+
+# Build the Node.js CLI
+cli-node-build:
+    cd apps/syn-cli-node && pnpm run build
+
+# Generate TypeScript types from OpenAPI spec
+cli-node-gen:
+    cd apps/syn-cli-node && pnpm run generate:types
+
+# Run CLI Node tests
+cli-node-test:
+    cd apps/syn-cli-node && pnpm run test
+
+# Typecheck CLI Node
+cli-node-typecheck:
+    cd apps/syn-cli-node && pnpm run typecheck
+
+# Full CLI Node QA (typecheck + test + build)
+cli-node-qa: cli-node-typecheck cli-node-test cli-node-build
+    @echo "CLI Node checks passed!"
+
 # Start the API backend server
 # Loads .env for database connection and API keys
 api-backend:

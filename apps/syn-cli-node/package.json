@@ -1,0 +1,37 @@
+{
+  "name": "@syntropic137/cli",
+  "version": "0.18.0",
+  "description": "Syntropic137 CLI - Event-sourced workflow engine for AI agents",
+  "type": "module",
+  "bin": {
+    "syn": "./dist/syn.mjs"
+  },
+  "main": "dist/syn.mjs",
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "generate:types": "tsx scripts/generate-types.ts",
+    "check:api-drift": "tsx scripts/check-api-drift.ts"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "openapi-typescript": "^7.0.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "~5.9.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "MIT"
+}
