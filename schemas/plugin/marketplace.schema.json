@@ -1,0 +1,89 @@
+{
+  "$defs": {
+    "MarketplacePluginEntry": {
+      "description": "A single plugin listed in ``marketplace.json``.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "version": {
+          "default": "0.1.0",
+          "title": "Version",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "category": {
+          "default": "",
+          "title": "Category",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "title": "MarketplacePluginEntry",
+      "type": "object"
+    },
+    "SyntropicMarker": {
+      "description": "The ``syntropic137`` key in ``marketplace.json``.\n\nIdentifies a GitHub repo as a Syntropic137 workflow marketplace.",
+      "properties": {
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "min_platform_version": {
+          "default": "0.0.0",
+          "title": "Min Platform Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "SyntropicMarker",
+      "type": "object"
+    }
+  },
+  "description": "Parsed ``marketplace.json`` from a marketplace repository.",
+  "properties": {
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "syntropic137": {
+      "$ref": "#/$defs/SyntropicMarker"
+    },
+    "plugins": {
+      "items": {
+        "$ref": "#/$defs/MarketplacePluginEntry"
+      },
+      "title": "Plugins",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "syntropic137"
+  ],
+  "title": "MarketplaceIndex",
+  "type": "object"
+}

@@ -1,0 +1,319 @@
+{
+  "$defs": {
+    "InputYamlDefinition": {
+      "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "InputYamlDefinition",
+      "type": "object"
+    },
+    "PhaseExecutionType": {
+      "description": "How a phase should be executed.",
+      "enum": [
+        "sequential",
+        "parallel",
+        "human_in_loop"
+      ],
+      "title": "PhaseExecutionType",
+      "type": "string"
+    },
+    "PhaseYamlDefinition": {
+      "description": "Phase definition as parsed from YAML.\n\nConverts YAML snake_case to domain PhaseDefinition.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "order": {
+          "minimum": 1,
+          "title": "Order",
+          "type": "integer"
+        },
+        "execution_type": {
+          "$ref": "#/$defs/PhaseExecutionType",
+          "default": "sequential"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "input_artifacts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Artifacts",
+          "type": "array"
+        },
+        "output_artifacts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Artifacts",
+          "type": "array"
+        },
+        "prompt_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Template"
+        },
+        "prompt_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt File"
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Seconds"
+        },
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Tools",
+          "type": "array"
+        },
+        "argument_hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Argument Hint"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "order"
+      ],
+      "title": "PhaseYamlDefinition",
+      "type": "object"
+    },
+    "RepositoryConfig": {
+      "description": "Repository configuration for a workflow.",
+      "properties": {
+        "url": {
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "ref": {
+          "default": "main",
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "RepositoryConfig",
+      "type": "object"
+    },
+    "WorkflowClassification": {
+      "description": "Classification of workflow complexity.",
+      "enum": [
+        "simple",
+        "standard",
+        "complex",
+        "epic"
+      ],
+      "title": "WorkflowClassification",
+      "type": "string"
+    },
+    "WorkflowType": {
+      "description": "Type of workflow execution.",
+      "enum": [
+        "research",
+        "planning",
+        "implementation",
+        "review",
+        "deployment",
+        "custom"
+      ],
+      "title": "WorkflowType",
+      "type": "string"
+    }
+  },
+  "description": "Complete workflow definition as parsed from YAML.\n\nThis is the root model for workflow YAML files.",
+  "properties": {
+    "id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "type": {
+      "$ref": "#/$defs/WorkflowType",
+      "default": "custom"
+    },
+    "classification": {
+      "$ref": "#/$defs/WorkflowClassification",
+      "default": "standard"
+    },
+    "repository": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RepositoryConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "project_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Project Name"
+    },
+    "inputs": {
+      "items": {
+        "$ref": "#/$defs/InputYamlDefinition"
+      },
+      "title": "Inputs",
+      "type": "array"
+    },
+    "phases": {
+      "items": {
+        "$ref": "#/$defs/PhaseYamlDefinition"
+      },
+      "minItems": 1,
+      "title": "Phases",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "phases"
+  ],
+  "title": "WorkflowDefinition",
+  "type": "object"
+}

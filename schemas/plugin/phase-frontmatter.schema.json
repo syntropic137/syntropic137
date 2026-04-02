@@ -1,0 +1,149 @@
+{
+  "$defs": {
+    "PhaseExecutionType": {
+      "description": "How a phase should be executed.",
+      "enum": [
+        "sequential",
+        "parallel",
+        "human_in_loop"
+      ],
+      "title": "PhaseExecutionType",
+      "type": "string"
+    }
+  },
+  "description": "Phase definition as parsed from YAML.\n\nConverts YAML snake_case to domain PhaseDefinition.",
+  "properties": {
+    "id": {
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "order": {
+      "minimum": 1,
+      "title": "Order",
+      "type": "integer"
+    },
+    "execution_type": {
+      "$ref": "#/$defs/PhaseExecutionType",
+      "default": "sequential"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "input_artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Input Artifacts",
+      "type": "array"
+    },
+    "output_artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Output Artifacts",
+      "type": "array"
+    },
+    "prompt_template": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prompt Template"
+    },
+    "prompt_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prompt File"
+    },
+    "max_tokens": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Tokens"
+    },
+    "timeout_seconds": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timeout Seconds"
+    },
+    "allowed_tools": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Tools",
+      "type": "array"
+    },
+    "argument_hint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Argument Hint"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "order"
+  ],
+  "title": "PhaseYamlDefinition",
+  "type": "object"
+}
