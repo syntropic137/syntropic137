@@ -49,7 +49,7 @@ The `init` wizard walks you through the full setup step-by-step:
 1. **Docker check** — verifies Docker and Compose are available
 2. **Directory setup** — creates `~/.syntropic137/` with config, secrets, and workspace directories
 3. **Secret generation** — creates cryptographically random passwords for Postgres, Redis, and MinIO (stored as `chmod 600` files)
-4. **API key** — prompts for your `ANTHROPIC_API_KEY` (or detects `CLAUDE_CODE_OAUTH_TOKEN` if set)
+4. **API key** — prompts for your `ANTHROPIC_API_KEY`
 5. **GitHub App** — opens your browser to create a GitHub App via manifest flow for webhook-triggered workflows
 6. **Claude Code plugin** *(optional)* — installs the Syntropic137 plugin for Claude Code if the `claude` CLI is detected
 7. **Pull & start** — downloads container images and starts the full stack
