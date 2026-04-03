@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from agentic_logging import get_logger
 from fastapi import APIRouter, Request
