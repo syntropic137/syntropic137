@@ -1283,8 +1283,13 @@ diagram:
     @cd lib/event-sourcing-platform/vsa/vsa-visualizer && npm run build > /dev/null 2>&1
     @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/syn-manifest.json --format svg --type architecture --output docs/architecture
 
-# Start docs site dev server
-docs:
+# Generate CLI reference docs from Node CLI command metadata
+docs-cli-gen:
+    @echo "📄 Generating CLI reference docs..."
+    @cd apps/syn-cli-node && pnpm run generate:docs
+
+# Start docs site dev server (regenerates CLI docs first)
+docs: docs-cli-gen
     cd apps/syn-docs && pnpm run dev
 
 # Generate auto-generated architecture documentation
@@ -1320,9 +1325,28 @@ docs-sync:
         echo "   git add docs/architecture/ README.md && git commit -m 'docs: update generated architecture docs'"; \
         exit 1; \
     fi
+    @echo "🔄 Syncing CLI reference docs..."
+    @cd apps/syn-cli-node && pnpm run generate:docs > /dev/null 2>&1
+    @if git diff --quiet apps/syn-docs/content/docs/cli/ 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)" ]; then \
+        echo "✅ CLI docs are up-to-date"; \
+    else \
+        echo "❌ CLI docs need to be committed:"; \
+        echo "   git add apps/syn-docs/content/docs/cli/ && git commit -m 'docs: regenerate CLI docs'"; \
+        exit 1; \
+    fi
+    @echo "🔄 Syncing API reference docs..."
+    @uv run python scripts/extract_openapi.py > /dev/null 2>&1
+    @cd apps/syn-docs && pnpm run generate:openapi > /dev/null 2>&1
+    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
+        echo "✅ API docs are up-to-date"; \
+    else \
+        echo "❌ API docs need to be committed:"; \
+        echo "   git add apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ && git commit -m 'docs: regenerate API docs'"; \
+        exit 1; \
+    fi
 
-# Regenerate docs site content (OpenAPI spec + API reference MDX)
-docs-site-gen:
+# Regenerate docs site content (CLI reference + OpenAPI spec + API reference MDX)
+docs-site-gen: docs-cli-gen
     @echo "📄 Extracting OpenAPI spec from FastAPI..."
     uv run python scripts/extract_openapi.py
     @echo "📄 Generating API reference docs..."
