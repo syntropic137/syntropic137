@@ -7,94 +7,94 @@ Query domain events and session observability
 
 ## `syn events costs`
 
-Show token usage and cost breakdown for a session.
+Show token usage and cost breakdown for a session
 
 ```bash
-syn events costs <session_id>
+syn events costs <session-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `session_id` | `text` | Yes | Session ID |
+| `session-id` | `text` | Yes | Session ID |
 
 ---
 
 ## `syn events recent`
 
-Show recent domain events across all sessions.
+Show recent domain events across all sessions
 
 ```bash
-syn events recent
+syn events recent [options]
 ```
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--limit` | `integer` | `50` | Max events to show (max 200) |
+| `--limit` | `text` | `50` | Max events (max 200) |
 
 ---
 
 ## `syn events session`
 
-List events for a specific session.
+List events for a specific session
 
 ```bash
-syn events session <session_id>
+syn events session <session-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `session_id` | `text` | Yes | Session ID |
+| `session-id` | `text` | Yes | Session ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--type`, `-t` | `text` | --- | Filter by event type |
-| `--limit` | `integer` | `100` | Max events (max 1000) |
-| `--offset` | `integer` | `0` | Pagination offset |
+| `--limit` | `text` | `100` | Max events (max 1000) |
+| `--offset` | `text` | `0` | Pagination offset |
 
 ---
 
 ## `syn events timeline`
 
-Show a chronological tool-call timeline for a session.
+Show a chronological tool-call timeline for a session
 
 ```bash
-syn events timeline <session_id>
+syn events timeline <session-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `session_id` | `text` | Yes | Session ID |
+| `session-id` | `text` | Yes | Session ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--limit` | `integer` | `100` | Max entries (max 500) |
+| `--limit` | `text` | `100` | Max entries (max 500) |
 
 ---
 
 ## `syn events tools`
 
-Show tool usage summary for a session.
+Show tool usage summary for a session
 
 ```bash
-syn events tools <session_id>
+syn events tools <session-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `session_id` | `text` | Yes | Session ID |
+| `session-id` | `text` | Yes | Session ID |
 
 ---

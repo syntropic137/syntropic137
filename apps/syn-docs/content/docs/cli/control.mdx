@@ -7,17 +7,17 @@ Control running executions
 
 ## `syn control cancel`
 
-Cancel a running or paused execution.
+Cancel a running or paused execution
 
 ```bash
-syn control cancel <execution_id>
+syn control cancel <execution-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `execution_id` | `text` | Yes | Execution ID to cancel |
+| `execution-id` | `text` | Yes | Execution ID to cancel |
 
 **Options:**
 
@@ -30,17 +30,17 @@ syn control cancel <execution_id>
 
 ## `syn control inject`
 
-Inject a message into a running execution.
+Inject a message into a running execution
 
 ```bash
-syn control inject <execution_id> --message <message>
+syn control inject <execution-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `execution_id` | `text` | Yes | Execution ID |
+| `execution-id` | `text` | Yes | Execution ID |
 
 **Options:**
 
@@ -52,17 +52,17 @@ syn control inject <execution_id> --message <message>
 
 ## `syn control pause`
 
-Pause a running execution at the next yield point.
+Pause a running execution at the next yield point
 
 ```bash
-syn control pause <execution_id>
+syn control pause <execution-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `execution_id` | `text` | Yes | Execution ID to pause |
+| `execution-id` | `text` | Yes | Execution ID to pause |
 
 **Options:**
 
@@ -74,52 +74,49 @@ syn control pause <execution_id>
 
 ## `syn control resume`
 
-Resume a paused execution.
+Resume a paused execution
 
 ```bash
-syn control resume <execution_id>
+syn control resume <execution-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `execution_id` | `text` | Yes | Execution ID to resume |
+| `execution-id` | `text` | Yes | Execution ID to resume |
 
 ---
 
 ## `syn control status`
 
-Get current execution control state.
+Get current execution control state
 
 ```bash
-syn control status <execution_id>
+syn control status <execution-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `execution_id` | `text` | Yes | Execution ID to check |
+| `execution-id` | `text` | Yes | Execution ID to check |
 
 ---
 
 ## `syn control stop`
 
-Forcefully stop a running execution via SIGINT.
-
-Sends a cancel signal that causes the engine to interrupt the Claude CLI
-process via SIGINT and capture partial output as an interrupted execution.
+Forcefully stop a running execution via SIGINT
 
 ```bash
-syn control stop <execution_id>
+syn control stop <execution-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `execution_id` | `text` | Yes | Execution ID to stop |
+| `execution-id` | `text` | Yes | Execution ID to stop |
 
 **Options:**
 

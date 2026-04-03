@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "generate:types": "tsx scripts/generate-types.ts",
-    "check:api-drift": "tsx scripts/check-api-drift.ts"
+    "check:api-drift": "tsx scripts/check-api-drift.ts",
+    "generate:docs": "tsx scripts/generate-cli-docs.ts"
   },
   "dependencies": {
     "zod": "^3.24.0"

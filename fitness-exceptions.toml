@@ -24,27 +24,6 @@ issue = "#316"
 value = 20
 issue = "#316"
 
-# --- syn-docs build scripts ---
-
-[max-cognitive."python:apps.syn-docs.scripts.generate-cli-docs::_patch_syn_cli_internals"]
-value = 30
-issue = "#429"
-
-[max-cognitive."python:apps.syn-docs.scripts.generate-cli-docs::extract_cli_tree"]
-value = 25
-issue = "#429"
-
-[max-cognitive."python:apps.syn-docs.scripts.generate-cli-docs::_render_param_table"]
-value = 30
-issue = "#429"
-
-[max-cognitive."python:apps.syn-docs.scripts.generate-cli-docs::render_group_mdx"]
-value = 25
-issue = "#429"
-
-[max-cognitive."python:apps.syn-docs.scripts.generate-cli-docs::_extract_params"]
-value = 20
-issue = "#429"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)
