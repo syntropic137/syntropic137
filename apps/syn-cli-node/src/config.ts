@@ -12,7 +12,7 @@ export const SSE_CONNECT_TIMEOUT_MS = 5_000;
 export function getApiUrl(): string {
   const url = process.env["SYN_API_URL"] ?? "http://localhost:8137";
   // Strip /api/v1 suffix if present — the HTTP client adds it automatically.
-  return url.replace(/\/api\/v1\/?$/, "");
+  return url.replace(/\/api\/v1\/*$/, "");
 }
 
 /**

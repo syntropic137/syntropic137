@@ -16,6 +16,11 @@ from syn_api.types import (
     TriggerDetail,
     TriggerError,
     TriggerHistoryEntry,
+    TriggerHistoryEntryResponse,
+    TriggerHistoryListEntry,
+    TriggerHistoryListResponse,
+    TriggerHistoryResponse,
+    TriggerListResponse,
     TriggerSummary,
 )
 
@@ -146,70 +151,70 @@ async def get_trigger_history(
 # ---------------------------------------------------------------------------
 
 
-@router.get("")
+@router.get("", response_model=TriggerListResponse)
 async def list_triggers_endpoint(
     repository: str | None = None,
     status: str | None = None,
-) -> dict[str, Any]:
+) -> TriggerListResponse:
     """List all trigger rules."""
     result = await list_triggers(repository=repository, status=status)
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    return {
-        "triggers": [
-            {
-                "trigger_id": t.trigger_id,
-                "name": t.name,
-                "event": t.event,
-                "repository": t.repository,
-                "workflow_id": t.workflow_id,
-                "status": str(t.status),
-                "fire_count": t.fire_count,
-            }
+    return TriggerListResponse(
+        triggers=[
+            TriggerSummary(
+                trigger_id=t.trigger_id,
+                name=t.name,
+                event=t.event,
+                repository=t.repository,
+                workflow_id=t.workflow_id,
+                status=str(t.status),
+                fire_count=t.fire_count,
+            )
             for t in result.value
         ],
-        "total": len(result.value),
-    }
+        total=len(result.value),
+    )
 
 
 async def _collect_history_entries(
     triggers: list[TriggerSummary], limit: int
-) -> list[dict[str, Any]]:
+) -> list[TriggerHistoryListEntry]:
     """Collect history entries across all triggers."""
-    all_entries: list[dict[str, Any]] = []
+    all_entries: list[TriggerHistoryListEntry] = []
     for t in triggers:
         hist = await get_trigger_history(trigger_id=t.trigger_id, limit=limit)
         if isinstance(hist, Err):
             continue
         all_entries.extend(
-            {
-                "trigger_id": t.trigger_id,
-                "fired_at": e.fired_at.isoformat() if e.fired_at else None,
-                "execution_id": e.execution_id,
-                "event_type": e.github_event_type,
-                "pr_number": e.pr_number,
-                "status": e.status,
-            }
+            TriggerHistoryListEntry(
+                trigger_id=t.trigger_id,
+                fired_at=e.fired_at.isoformat() if e.fired_at else None,
+                execution_id=e.execution_id,
+                event_type=e.github_event_type,
+                pr_number=e.pr_number,
+                status=e.status,
+            )
             for e in hist.value
         )
     return all_entries
 
 
-@router.get("/history")
-async def get_all_history_endpoint(limit: int = 50) -> dict[str, Any]:
+@router.get("/history", response_model=TriggerHistoryListResponse)
+async def get_all_history_endpoint(limit: int = 50) -> TriggerHistoryListResponse:
     """Get all trigger activity (global)."""
     list_result = await list_triggers()
     if isinstance(list_result, Err):
-        return {"entries": [], "total": 0}
+        return TriggerHistoryListResponse(entries=[], total=0)
 
     all_entries = await _collect_history_entries(list_result.value, limit)
-    all_entries.sort(key=lambda x: x.get("fired_at") or "", reverse=True)
+    all_entries.sort(key=lambda x: x.fired_at or "", reverse=True)
     all_entries = all_entries[:limit]
-    return {"entries": all_entries, "total": len(all_entries)}
+    return TriggerHistoryListResponse(entries=all_entries, total=len(all_entries))
 
 
-@router.get("/{trigger_id}")
+@router.get("/{trigger_id}", response_model=TriggerDetail)
 async def get_trigger_endpoint(trigger_id: str) -> TriggerDetail:
     """Get trigger details."""
     result = await get_trigger(trigger_id)
@@ -219,28 +224,28 @@ async def get_trigger_endpoint(trigger_id: str) -> TriggerDetail:
     return result.value
 
 
-@router.get("/{trigger_id}/history")
+@router.get("/{trigger_id}/history", response_model=TriggerHistoryResponse)
 async def get_trigger_history_endpoint(
     trigger_id: str,
     limit: int = 50,
-) -> dict[str, Any]:
+) -> TriggerHistoryResponse:
     """Get execution history for a trigger."""
     result = await get_trigger_history(trigger_id=trigger_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
 
-    return {
-        "trigger_id": trigger_id,
-        "entries": [
-            {
-                "fired_at": e.fired_at.isoformat() if e.fired_at else None,
-                "execution_id": e.execution_id,
-                "webhook_delivery_id": e.webhook_delivery_id,
-                "event_type": e.github_event_type,
-                "pr_number": e.pr_number,
-                "status": e.status,
-                "cost_usd": e.cost_usd,
-            }
+    return TriggerHistoryResponse(
+        trigger_id=trigger_id,
+        entries=[
+            TriggerHistoryEntryResponse(
+                fired_at=e.fired_at.isoformat() if e.fired_at else None,
+                execution_id=e.execution_id,
+                webhook_delivery_id=e.webhook_delivery_id,
+                event_type=e.github_event_type,
+                pr_number=e.pr_number,
+                status=e.status,
+                cost_usd=e.cost_usd,
+            )
             for e in result.value
         ],
-    }
+    )

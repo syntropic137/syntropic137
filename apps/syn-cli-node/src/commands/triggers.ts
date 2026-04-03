@@ -49,9 +49,10 @@ const registerCommand: CommandDef = {
     const conditions = conditionStrs.length > 0 ? parseConditions(conditionStrs) : [];
 
     const body: Record<string, unknown> = {
-      repo_id: repo,
+      name: `${event} → ${workflow}`,
+      repository: repo,
       workflow_id: workflow,
-      event_type: event,
+      event: event,
       conditions,
       max_fires_per_period: parseInt((parsed.values["max-fires"] as string | undefined) ?? "5", 10),
       cooldown_seconds: parseInt((parsed.values["cooldown"] as string | undefined) ?? "300", 10),
@@ -78,7 +79,7 @@ const enablePresetCommand: CommandDef = {
     const repo = parsed.values["repo"] as string | undefined;
     if (!repo) { printError("Missing --repo"); throw new CLIError("Missing option", 1); }
 
-    const body: Record<string, unknown> = { preset, repo_id: repo };
+    const body: Record<string, unknown> = { preset, repository: repo };
     const workflow = parsed.values["workflow"] as string | undefined;
     if (workflow) body["workflow_id"] = workflow;
 
@@ -96,7 +97,7 @@ const listCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const params = buildParams({
-      repo_id: (parsed.values["repo"] as string | undefined) ?? null,
+      repository: (parsed.values["repo"] as string | undefined) ?? null,
       status: (parsed.values["status"] as string | undefined) ?? null,
     });
     const items = await apiGetPaginated<Record<string, unknown>>("/triggers", "triggers", { params });
@@ -113,8 +114,8 @@ const listCommand: CommandDef = {
     for (const t of items) {
       table.addRow(
         String(t["trigger_id"] ?? "").slice(0, 12),
-        String(t["event_type"] ?? ""),
-        String(t["repo_id"] ?? "").slice(0, 12),
+        String(t["event"] ?? ""),
+        String(t["repository"] ?? "").slice(0, 12),
         String(t["workflow_id"] ?? "").slice(0, 12),
         formatStatus(String(t["status"] ?? "")),
         String(t["fire_count"] ?? 0),
@@ -133,8 +134,8 @@ const showCommand: CommandDef = {
     const d = await apiGet<Record<string, unknown>>(`/triggers/${id}`);
 
     print(`${style("Trigger:", BOLD)} ${d["trigger_id"] ?? id}`);
-    print(`  Event:      ${d["event_type"] ?? ""}`);
-    print(`  Repo:       ${d["repo_id"] ?? ""}`);
+    print(`  Event:      ${d["event"] ?? ""}`);
+    print(`  Repo:       ${d["repository"] ?? ""}`);
     print(`  Workflow:   ${d["workflow_id"] ?? ""}`);
     print(`  Status:     ${formatStatus(String(d["status"] ?? ""))}`);
     print(`  Fires:      ${d["fire_count"] ?? 0} / max ${d["max_fires_per_period"] ?? "\u2014"}`);
@@ -237,7 +238,7 @@ const disableAllCommand: CommandDef = {
       printError(`Use --force to confirm disabling all triggers for repo ${repo}`);
       throw new CLIError("Confirmation required", 1);
     }
-    await apiPost(`/triggers/disable-all`, { body: { repo_id: repo } });
+    await apiPost(`/triggers/disable-all`, { body: { repository: repo } });
     printSuccess(`All triggers disabled for repository ${repo}.`);
   },
 };

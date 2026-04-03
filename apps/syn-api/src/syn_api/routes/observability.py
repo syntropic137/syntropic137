@@ -15,6 +15,9 @@ from syn_api.types import (
     ObservabilityError,
     Ok,
     Result,
+    SessionTokenMetrics,
+    ToolTimelineEntry,
+    ToolTimelineResponse,
 )
 
 if TYPE_CHECKING:
@@ -144,12 +147,12 @@ async def get_token_metrics(
 # =============================================================================
 
 
-@router.get("/sessions/{session_id}/tools")
+@router.get("/sessions/{session_id}/tools", response_model=ToolTimelineResponse)
 async def get_tool_timeline_endpoint(
     session_id: str,
     limit: int = 100,
     include_blocked: bool = True,
-) -> dict:
+) -> ToolTimelineResponse:
     """Get tool execution timeline for a session."""
     result = await get_tool_timeline(
         session_id=session_id,
@@ -170,18 +173,28 @@ async def get_tool_timeline_endpoint(
             detail=f"No tool executions found for session {session_id}",
         )
 
-    return {
-        "session_id": session_id,
-        "total_executions": len(timeline),
-        "executions": timeline,
-    }
+    return ToolTimelineResponse(
+        session_id=session_id,
+        total_executions=len(timeline),
+        executions=[
+            ToolTimelineEntry(
+                observation_id=t.get("observation_id", ""),
+                operation_type=t.get("operation_type", ""),
+                tool_name=t.get("tool_name"),
+                timestamp=t.get("timestamp"),
+                duration_ms=t.get("duration_ms"),
+                success=t.get("success"),
+            )
+            for t in timeline
+        ],
+    )
 
 
-@router.get("/sessions/{session_id}/tokens")
+@router.get("/sessions/{session_id}/tokens", response_model=SessionTokenMetrics)
 async def get_token_metrics_endpoint(
     session_id: str,
     include_records: bool = True,  # noqa: ARG001 - kept for API compatibility
-) -> dict:
+) -> SessionTokenMetrics:
     """Get token usage metrics for a session."""
     result = await get_token_metrics(session_id=session_id)
 
@@ -191,4 +204,13 @@ async def get_token_metrics_endpoint(
             detail=f"No token usage found for session {session_id}",
         )
 
-    return result.value
+    data = result.value
+    return SessionTokenMetrics(
+        session_id=data.get("session_id", session_id),
+        input_tokens=data.get("input_tokens", 0),
+        output_tokens=data.get("output_tokens", 0),
+        total_tokens=data.get("total_tokens", 0),
+        total_cost_usd=data.get("total_cost_usd", "0"),
+        cache_creation_tokens=data.get("cache_creation_tokens", 0),
+        cache_read_tokens=data.get("cache_read_tokens", 0),
+    )

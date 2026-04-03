@@ -37,7 +37,7 @@ const registerCommand: CommandDef = {
 
     const d = await apiPost<Record<string, unknown>>("/repos", { body, expected: [200, 201] });
     printSuccess(`Repository registered: ${d["repo_id"] ?? ""}`);
-    print(`  URL: ${d["repo_url"] ?? url}`);
+    print(`  Name: ${d["full_name"] ?? url}`);
     if (d["system_id"]) print(`  System: ${String(d["system_id"])}`);
   },
 };
@@ -59,16 +59,14 @@ const listCommand: CommandDef = {
 
     const table = new Table({ title: "Repositories" });
     table.addColumn("ID", { style: CYAN });
-    table.addColumn("URL");
+    table.addColumn("Name");
     table.addColumn("System", { style: DIM });
-    table.addColumn("Status");
 
     for (const r of items) {
       table.addRow(
         String(r["repo_id"] ?? ""),
-        String(r["repo_url"] ?? ""),
+        String(r["full_name"] ?? ""),
         String(r["system_id"] ?? "\u2014"),
-        formatStatus(String(r["status"] ?? "")),
       );
     }
     table.print();
@@ -82,11 +80,10 @@ const showCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const id = reqRepoId(parsed);
     const d = await apiGet<Record<string, unknown>>(`/repos/${id}`);
-    print(`${style("Repository:", BOLD)} ${d["repo_url"] ?? id}`);
+    print(`${style("Repository:", BOLD)} ${d["full_name"] ?? id}`);
     print(`  ID:     ${d["repo_id"] ?? id}`);
     if (d["system_id"]) print(`  System: ${String(d["system_id"])}`);
     if (d["organization_id"]) print(`  Org:    ${String(d["organization_id"])}`);
-    print(`  Status: ${formatStatus(String(d["status"] ?? ""))}`);
   },
 };
 

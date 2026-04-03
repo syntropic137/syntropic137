@@ -19,6 +19,7 @@ from syn_api._wiring import (
     sync_published_events_to_projections,
 )
 from syn_api.types import (
+    ArtifactActionResponse,
     ArtifactDetail,
     ArtifactError,
     ArtifactSummary,
@@ -566,8 +567,10 @@ async def create_artifact_endpoint(body: CreateArtifactRequest) -> CreateArtifac
     )
 
 
-@router.put("/{artifact_id}")
-async def update_artifact_endpoint(artifact_id: str, body: UpdateArtifactRequest) -> dict[str, str]:
+@router.put("/{artifact_id}", response_model=ArtifactActionResponse)
+async def update_artifact_endpoint(
+    artifact_id: str, body: UpdateArtifactRequest
+) -> ArtifactActionResponse:
     """Update artifact metadata."""
     result = await update_artifact(
         artifact_id=artifact_id,
@@ -585,11 +588,11 @@ async def update_artifact_endpoint(artifact_id: str, body: UpdateArtifactRequest
             raise HTTPException(status_code=500, detail=result.message)
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {"artifact_id": artifact_id, "status": "updated"}
+    return ArtifactActionResponse(artifact_id=artifact_id, status="updated")
 
 
-@router.delete("/{artifact_id}")
-async def delete_artifact_endpoint(artifact_id: str) -> dict[str, Any]:
+@router.delete("/{artifact_id}", response_model=ArtifactActionResponse)
+async def delete_artifact_endpoint(artifact_id: str) -> ArtifactActionResponse:
     """Soft-delete an artifact."""
     result = await delete_artifact(artifact_id=artifact_id, deleted_by="api")
 
@@ -602,7 +605,7 @@ async def delete_artifact_endpoint(artifact_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=500, detail=result.message)
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {"artifact_id": artifact_id, "status": "deleted"}
+    return ArtifactActionResponse(artifact_id=artifact_id, status="deleted")
 
 
 @router.post("/{artifact_id}/upload", response_model=UploadArtifactResponse)

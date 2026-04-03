@@ -281,7 +281,11 @@ async def get_organization_endpoint(organization_id: str) -> OrganizationSummary
     return result.value
 
 
-@router.put("/{organization_id}", response_model=OrganizationActionResponse)
+@router.put(
+    "/{organization_id}",
+    response_model=OrganizationActionResponse,
+    response_model_exclude_none=True,
+)
 async def update_organization_endpoint(
     organization_id: str, body: dict[str, Any]
 ) -> OrganizationActionResponse:
@@ -299,7 +303,11 @@ async def update_organization_endpoint(
     return OrganizationActionResponse(organization_id=organization_id, status="updated")
 
 
-@router.delete("/{organization_id}", response_model=OrganizationActionResponse)
+@router.delete(
+    "/{organization_id}",
+    response_model=OrganizationActionResponse,
+    response_model_exclude_none=True,
+)
 async def delete_organization_endpoint(organization_id: str) -> OrganizationActionResponse:
     """Soft-delete an organization."""
     result = await delete_organization(

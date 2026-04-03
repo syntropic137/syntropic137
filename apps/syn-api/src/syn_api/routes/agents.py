@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from syn_api.types import (
     AgentError,
     AgentProviderInfo,
+    AgentProviderListResponse,
     AgentTestResult,
     Err,
     Ok,
@@ -222,18 +223,18 @@ async def chat(
 # =============================================================================
 
 
-@router.get("/providers")
-async def list_providers_endpoint() -> dict[str, Any]:
+@router.get("/providers", response_model=AgentProviderListResponse)
+async def list_providers_endpoint() -> AgentProviderListResponse:
     """List available agent providers."""
     result = await list_providers()
 
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    return {
-        "providers": [p.model_dump() for p in result.value],
-        "total": len(result.value),
-    }
+    return AgentProviderListResponse(
+        providers=result.value,
+        total=len(result.value),
+    )
 
 
 @router.post("/test")

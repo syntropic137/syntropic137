@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiGet, apiGetList, apiPost, buildParams } from "../../src/client/api.js";
+import { apiGet, apiGetList, apiGetPaginated, apiPost, buildParams } from "../../src/client/api.js";
 import { CLIError } from "../../src/framework/errors.js";
 
 describe("api helpers", () => {
@@ -63,6 +63,31 @@ describe("api helpers", () => {
         body: { name: "test" },
       });
       expect(result.id).toBe("abc");
+    });
+  });
+
+  describe("apiGetPaginated", () => {
+    it("extracts keyed array from response", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ items: [{ id: 1 }, { id: 2 }], total: 2 }),
+      );
+      const result = await apiGetPaginated<{ id: number }>("/things", "items");
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe(1);
+    });
+
+    it("throws CLIError when key is missing", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ other: [] }));
+      await expect(
+        apiGetPaginated("/things", "items"),
+      ).rejects.toThrow(CLIError);
+    });
+
+    it("throws CLIError when value is not an array", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ items: "not-array" }));
+      await expect(
+        apiGetPaginated("/things", "items"),
+      ).rejects.toThrow(CLIError);
     });
   });
 

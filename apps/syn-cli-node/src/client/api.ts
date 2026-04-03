@@ -83,8 +83,14 @@ export async function apiGetPaginated<T = Record<string, unknown>>(
     client.get<Record<string, unknown>>(path, options?.params),
   );
   checkResponse(status, data, options?.expected ?? [200]);
+  if (typeof data !== "object" || data === null) {
+    throw new CLIError(`Unexpected API response for "${path}": expected an object containing "${key}".`);
+  }
   const items = data[key];
-  return Array.isArray(items) ? (items as T[]) : [];
+  if (!Array.isArray(items)) {
+    throw new CLIError(`Unexpected API response for "${path}": expected "${key}" to be an array.`);
+  }
+  return items as T[];
 }
 
 export async function apiPost<T = Record<string, unknown>>(
