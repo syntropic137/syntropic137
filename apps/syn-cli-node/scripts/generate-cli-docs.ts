@@ -191,23 +191,25 @@ function renderParamTable(params: ParamInfo[]): string {
   return lines.join("\n");
 }
 
-function formatParamUsage(p: ParamInfo): string | null {
-  if (p.paramType === "argument") {
-    return p.required ? `<${p.name}>` : `[${p.name}]`;
-  }
-  if (p.paramType === "option" && p.required && p.flags.length > 0) {
-    return `${p.flags[0]} <${p.name}>`;
-  }
-  return null;
-}
-
+/**
+ * Build the usage line for a command, mirroring the CLI's own
+ * `renderUsageLine` in src/framework/help.ts:
+ *   <prefix> <requiredArg> [optionalArg] [options]
+ *
+ * Arguments are rendered inline (<required> / [optional]).
+ * Options are never rendered individually — only the [options] suffix
+ * is appended when the command defines any options.
+ */
 function buildUsageLine(prefix: string, params: ParamInfo[]): string {
   const parts = [prefix];
   for (const p of params) {
-    const usage = formatParamUsage(p);
-    if (usage) parts.push(usage);
+    if (p.paramType === "argument") {
+      parts.push(p.required ? `<${p.name}>` : `[${p.name}]`);
+    }
   }
-  if (params.some((p) => p.paramType === "option")) parts.push("[options]");
+  if (params.some((p) => p.paramType === "option")) {
+    parts.push("[options]");
+  }
   return parts.join(" ");
 }
 
