@@ -61,7 +61,6 @@ const listCommand: CommandDef = {
     table.addColumn("Name");
     table.addColumn("Org", { style: DIM });
     table.addColumn("Repos", { align: "right" });
-    table.addColumn("Status");
 
     for (const s of items) {
       table.addRow(
@@ -69,7 +68,6 @@ const listCommand: CommandDef = {
         String(s["name"] ?? ""),
         String(s["organization_id"] ?? "\u2014"),
         String(s["repo_count"] ?? 0),
-        formatStatus(String(s["status"] ?? "")),
       );
     }
     table.print();
@@ -88,7 +86,6 @@ const showCommand: CommandDef = {
     if (d["description"]) print(`  Description: ${String(d["description"])}`);
     if (d["organization_id"]) print(`  Org:         ${String(d["organization_id"])}`);
     print(`  Repos:       ${d["repo_count"] ?? 0}`);
-    print(`  Status:      ${formatStatus(String(d["status"] ?? ""))}`);
   },
 };
 

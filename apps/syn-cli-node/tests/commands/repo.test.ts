@@ -36,14 +36,14 @@ describe("repo commands", () => {
   });
 
   it("register succeeds", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ repo_id: "repo-1", repo_url: "owner/repo" }));
+    mockFetch.mockResolvedValue(jsonResponse({ repo_id: "repo-1", full_name: "owner/repo" }));
     await repoGroup.getCommand("register")!.handler({ positionals: [], values: { url: "owner/repo" } });
     expect(stdout()).toContain("Repository registered");
   });
 
   it("list shows repos", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ repos: [{ repo_id: "repo-1", repo_url: "owner/repo", status: "active" }], total: 1 }),
+      jsonResponse({ repos: [{ repo_id: "repo-1", full_name: "owner/repo", system_id: "" }], total: 1 }),
     );
     await repoGroup.getCommand("list")!.handler({ positionals: [], values: {} });
     expect(stdout()).toContain("owner/repo");
