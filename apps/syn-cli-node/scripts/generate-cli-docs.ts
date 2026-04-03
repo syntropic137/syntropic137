@@ -191,17 +191,23 @@ function renderParamTable(params: ParamInfo[]): string {
   return lines.join("\n");
 }
 
+function formatParamUsage(p: ParamInfo): string | null {
+  if (p.paramType === "argument") {
+    return p.required ? `<${p.name}>` : `[${p.name}]`;
+  }
+  if (p.paramType === "option" && p.required && p.flags.length > 0) {
+    return `${p.flags[0]} <${p.name}>`;
+  }
+  return null;
+}
+
 function buildUsageLine(prefix: string, params: ParamInfo[]): string {
   const parts = [prefix];
-  const hasOptions = params.some((p) => p.paramType === "option");
   for (const p of params) {
-    if (p.paramType === "argument") {
-      parts.push(p.required ? `<${p.name}>` : `[${p.name}]`);
-    } else if (p.required && p.flags.length > 0) {
-      parts.push(`${p.flags[0]} <${p.name}>`);
-    }
+    const usage = formatParamUsage(p);
+    if (usage) parts.push(usage);
   }
-  if (hasOptions) parts.push("[options]");
+  if (params.some((p) => p.paramType === "option")) parts.push("[options]");
   return parts.join(" ");
 }
 
