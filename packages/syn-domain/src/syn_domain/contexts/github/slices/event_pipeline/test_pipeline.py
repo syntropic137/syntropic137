@@ -8,6 +8,9 @@ from typing import Any
 import pytest
 
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
+from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
+    EvaluateWebhookHandler,
+)
 from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
     EventSource,
     NormalizedEvent,
@@ -78,11 +81,17 @@ def _make_event(
     )
 
 
-def _make_pipeline(dedup: object | None = None) -> EventPipeline:
+def _make_pipeline(
+    dedup: object | None = None, store: InMemoryTriggerQueryStore | None = None
+) -> EventPipeline:
+    trigger_store = store or InMemoryTriggerQueryStore()
+    evaluator = EvaluateWebhookHandler(
+        store=trigger_store,
+        repository=NullRepository(),
+    )
     return EventPipeline(
         dedup=dedup or InMemoryDedup(),
-        trigger_store=InMemoryTriggerQueryStore(),
-        trigger_repo=NullRepository(),
+        evaluator=evaluator,
     )
 
 
@@ -164,11 +173,7 @@ class TestPipelineWithTriggers:
             status="active",
         )
 
-        pipeline = EventPipeline(
-            dedup=InMemoryDedup(),
-            trigger_store=store,
-            trigger_repo=NullRepository(),
-        )
+        pipeline = _make_pipeline(store=store)
 
         result = await pipeline.ingest(_make_event(event_type="push"))
         assert "tr-001" in result.triggers_fired

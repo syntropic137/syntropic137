@@ -11,6 +11,9 @@ from syn_api.services.github_event_poller import GitHubEventPoller
 from syn_api.services.webhook_health_tracker import WebhookHealthTracker
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
+from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
+    EvaluateWebhookHandler,
+)
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 
 
@@ -118,8 +121,7 @@ class TestPollerStartStop:
             events_client=MockEventsClient(),
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
-                trigger_store=store,
-                trigger_repo=NullRepository(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,
@@ -144,8 +146,7 @@ class TestPollerStartStop:
             events_client=mock_client,
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
-                trigger_store=store,
-                trigger_repo=NullRepository(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,
@@ -169,8 +170,7 @@ class TestPollerStartStop:
             events_client=mock_client,
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
-                trigger_store=store,
-                trigger_repo=NullRepository(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,
@@ -208,8 +208,7 @@ class TestPollerStartStop:
             events_client=mock_client,
             pipeline=EventPipeline(
                 dedup=dedup,
-                trigger_store=store,
-                trigger_repo=NullRepository(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,

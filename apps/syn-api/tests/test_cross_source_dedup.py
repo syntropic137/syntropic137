@@ -14,6 +14,9 @@ import pytest
 
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
+from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
+    EvaluateWebhookHandler,
+)
 from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key
 from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
     EventSource,
@@ -81,11 +84,8 @@ class TestCrossSourceDedup:
         store = InMemoryTriggerQueryStore()
         await _setup_trigger(store)
 
-        pipeline = EventPipeline(
-            dedup=dedup,
-            trigger_store=store,
-            trigger_repo=NullRepository(),
-        )
+        evaluator = EvaluateWebhookHandler(store=store, repository=NullRepository())
+        pipeline = EventPipeline(dedup=dedup, evaluator=evaluator)
 
         payload = _make_push_payload("abc123def456")
         dedup_key = compute_dedup_key("push", "", payload)
@@ -126,11 +126,8 @@ class TestCrossSourceDedup:
         store = InMemoryTriggerQueryStore()
         await _setup_trigger(store)
 
-        pipeline = EventPipeline(
-            dedup=dedup,
-            trigger_store=store,
-            trigger_repo=NullRepository(),
-        )
+        evaluator = EvaluateWebhookHandler(store=store, repository=NullRepository())
+        pipeline = EventPipeline(dedup=dedup, evaluator=evaluator)
 
         payload = _make_push_payload("feed0000dead")
         dedup_key = compute_dedup_key("push", "", payload)
@@ -171,11 +168,8 @@ class TestCrossSourceDedup:
         store = InMemoryTriggerQueryStore()
         await _setup_trigger(store)
 
-        pipeline = EventPipeline(
-            dedup=dedup,
-            trigger_store=store,
-            trigger_repo=NullRepository(),
-        )
+        evaluator = EvaluateWebhookHandler(store=store, repository=NullRepository())
+        pipeline = EventPipeline(dedup=dedup, evaluator=evaluator)
 
         payload_a = _make_push_payload("aaa111")
         payload_b = _make_push_payload("bbb222")

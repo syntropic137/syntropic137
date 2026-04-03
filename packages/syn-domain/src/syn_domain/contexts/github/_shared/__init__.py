@@ -2,6 +2,8 @@
 
 Contains:
 - Value objects: InstallationId, InstallationToken
+- Trigger evaluation types: TriggerMatchResult, TriggerDeferredResult
+- Trigger evaluator protocol
 - GitHub API client
 - Trigger query store port and in-memory adapter
 """
@@ -15,6 +17,11 @@ from syn_domain.contexts.github._shared.github_client import (
     get_github_client,
     reset_github_client,
 )
+from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+    TriggerDeferredResult,
+    TriggerMatchResult,
+)
+from syn_domain.contexts.github._shared.trigger_evaluator import TriggerEvaluator
 from syn_domain.contexts.github._shared.trigger_query_store import (
     InMemoryTriggerQueryStore,
     TriggerQueryStore,
@@ -40,6 +47,9 @@ __all__ = [
     "RepositoryPermission",
     "TokenFetchError",
     "TokenResponse",
+    "TriggerDeferredResult",
+    "TriggerEvaluator",
+    "TriggerMatchResult",
     "TriggerQueryStore",
     "get_github_client",
     "get_trigger_query_store",
