@@ -13,6 +13,13 @@ from fastapi import APIRouter, Query
 from starlette.responses import JSONResponse
 
 from syn_api._wiring import ensure_connected
+from syn_api.types import (
+    ContributionHeatmapResponse,
+    GlobalCostResponse,
+    GlobalOverviewResponse,
+    HeatmapDayBucketResponse,
+    SystemOverviewEntryResponse,
+)
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
@@ -133,19 +140,53 @@ async def get_contribution_heatmap(
 # =============================================================================
 
 
-@router.get("/overview")
-async def get_global_overview_endpoint() -> dict[str, Any]:
+@router.get("/overview", response_model=GlobalOverviewResponse)
+async def get_global_overview_endpoint() -> GlobalOverviewResponse:
     """Get global overview of all systems and repos."""
-    return await get_global_overview()
+    data = await get_global_overview()
+    systems_raw = data.get("systems", [])
+    return GlobalOverviewResponse(
+        total_systems=data.get("total_systems", 0),
+        total_repos=data.get("total_repos", 0),
+        unassigned_repos=data.get("unassigned_repos", 0),
+        total_active_executions=data.get("total_active_executions", 0),
+        total_cost_usd=str(data.get("total_cost_usd", "0")),
+        systems=[
+            SystemOverviewEntryResponse(
+                system_id=s.get("system_id", ""),
+                system_name=s.get("system_name", ""),
+                organization_id=s.get("organization_id", ""),
+                organization_name=s.get("organization_name", ""),
+                repo_count=s.get("repo_count", 0),
+                overall_status=s.get("overall_status", "healthy"),
+                active_executions=s.get("active_executions", 0),
+                total_cost_usd=str(s.get("total_cost_usd", "0")),
+            )
+            for s in systems_raw
+        ],
+    )
 
 
-@router.get("/cost")
-async def get_global_cost_endpoint() -> dict[str, Any]:
+@router.get("/cost", response_model=GlobalCostResponse)
+async def get_global_cost_endpoint() -> GlobalCostResponse:
     """Get global cost breakdown across all repos."""
-    return await get_global_cost()
+    data = await get_global_cost()
+    return GlobalCostResponse(
+        system_id=data.get("system_id", ""),
+        system_name=data.get("system_name", ""),
+        organization_id=data.get("organization_id", ""),
+        total_cost_usd=str(data.get("total_cost_usd", "0")),
+        total_tokens=data.get("total_tokens", 0),
+        total_input_tokens=data.get("total_input_tokens", 0),
+        total_output_tokens=data.get("total_output_tokens", 0),
+        cost_by_repo=data.get("cost_by_repo", {}),
+        cost_by_workflow=data.get("cost_by_workflow", {}),
+        cost_by_model=data.get("cost_by_model", {}),
+        execution_count=data.get("execution_count", 0),
+    )
 
 
-@router.get("/contribution-heatmap", response_model=None)
+@router.get("/contribution-heatmap", response_model=ContributionHeatmapResponse)
 async def get_contribution_heatmap_endpoint(
     organization_id: str | None = Query(None),
     system_id: str | None = Query(None),
@@ -153,16 +194,32 @@ async def get_contribution_heatmap_endpoint(
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
     metric: str = Query("sessions"),
-) -> dict[str, Any] | JSONResponse:
+) -> ContributionHeatmapResponse | JSONResponse:
     """Get daily contribution heatmap data."""
     try:
-        return await get_contribution_heatmap(
+        data = await get_contribution_heatmap(
             organization_id=organization_id,
             system_id=system_id,
             repo_id=repo_id,
             start_date=start_date,
             end_date=end_date,
             metric=metric,
+        )
+        days_raw = data.get("days", [])
+        return ContributionHeatmapResponse(
+            metric=data.get("metric", "sessions"),
+            start_date=data.get("start_date", ""),
+            end_date=data.get("end_date", ""),
+            total=data.get("total", 0.0),
+            days=[
+                HeatmapDayBucketResponse(
+                    date=d.get("date", ""),
+                    count=d.get("count", 0.0),
+                    breakdown=d.get("breakdown", {}),
+                )
+                for d in days_raw
+            ],
+            filter=data.get("filter", {}),
         )
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"detail": str(exc)})

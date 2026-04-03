@@ -771,3 +771,227 @@ class RealtimeHealth(BaseModel):
 
     active_executions: int = 0
     active_connections: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Shared base response models
+# ---------------------------------------------------------------------------
+
+
+class PaginatedResponse(BaseModel):
+    """Base for paginated list responses. Subclass and add typed items field."""
+
+    total: int
+
+
+# ---------------------------------------------------------------------------
+# Trigger response models
+# ---------------------------------------------------------------------------
+
+
+class TriggerActionResponse(BaseModel):
+    """Response for trigger create/update/delete actions."""
+
+    trigger_id: str
+    name: str = ""
+    status: str
+    preset: str | None = None
+    action: str | None = None
+
+
+class TriggerListResponse(PaginatedResponse):
+    """Paginated list of trigger summaries."""
+
+    triggers: list[TriggerSummary] = Field(default_factory=list)
+
+
+class TriggerHistoryListEntry(BaseModel):
+    """Entry in a cross-trigger history listing."""
+
+    trigger_id: str
+    fired_at: str | None = None
+    execution_id: str = ""
+    event_type: str = ""
+    pr_number: int | None = None
+    status: str = "dispatched"
+
+
+class TriggerHistoryListResponse(PaginatedResponse):
+    """Paginated list of trigger history entries (global)."""
+
+    entries: list[TriggerHistoryListEntry] = Field(default_factory=list)
+
+
+class TriggerHistoryEntryResponse(BaseModel):
+    """Single entry in a trigger-specific history response."""
+
+    fired_at: str | None = None
+    execution_id: str = ""
+    webhook_delivery_id: str = ""
+    event_type: str = ""
+    pr_number: int | None = None
+    status: str = "dispatched"
+    cost_usd: float | None = None
+
+
+class TriggerHistoryResponse(BaseModel):
+    """History entries for a specific trigger."""
+
+    trigger_id: str
+    entries: list[TriggerHistoryEntryResponse] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Organization response models
+# ---------------------------------------------------------------------------
+
+
+class OrganizationActionResponse(BaseModel):
+    """Response for organization create/update/delete actions."""
+
+    organization_id: str
+    name: str | None = None
+    slug: str | None = None
+    status: str
+
+
+class OrganizationListResponse(PaginatedResponse):
+    """Paginated list of organizations."""
+
+    organizations: list[OrganizationSummaryResponse] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Insight response models
+# ---------------------------------------------------------------------------
+
+
+class SystemOverviewEntryResponse(BaseModel):
+    """Summary of a single system for global overview."""
+
+    system_id: str = ""
+    system_name: str = ""
+    organization_id: str = ""
+    organization_name: str = ""
+    repo_count: int = 0
+    overall_status: str = "healthy"
+    active_executions: int = 0
+    total_cost_usd: str = "0"
+
+
+class GlobalOverviewResponse(BaseModel):
+    """Global overview of all systems and repos."""
+
+    total_systems: int = 0
+    total_repos: int = 0
+    unassigned_repos: int = 0
+    total_active_executions: int = 0
+    total_cost_usd: str = "0"
+    systems: list[SystemOverviewEntryResponse] = Field(default_factory=list)
+
+
+class GlobalCostResponse(BaseModel):
+    """Global cost breakdown across all repos."""
+
+    system_id: str = ""
+    system_name: str = ""
+    organization_id: str = ""
+    total_cost_usd: str = "0"
+    total_tokens: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    cost_by_repo: dict[str, str] = Field(default_factory=dict)
+    cost_by_workflow: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    execution_count: int = 0
+
+
+class HeatmapDayBucketResponse(BaseModel):
+    """Single day's aggregated activity."""
+
+    date: str
+    count: float = 0.0
+    breakdown: dict[str, float] = Field(default_factory=dict)
+
+
+class ContributionHeatmapResponse(BaseModel):
+    """Contribution heatmap data."""
+
+    metric: str
+    start_date: str
+    end_date: str
+    total: float = 0.0
+    days: list[HeatmapDayBucketResponse] = Field(default_factory=list)
+    filter: dict[str, str | None] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Agent response models
+# ---------------------------------------------------------------------------
+
+
+class AgentProviderListResponse(PaginatedResponse):
+    """Paginated list of agent providers."""
+
+    providers: list[AgentProviderInfo] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Observability response models
+# ---------------------------------------------------------------------------
+
+
+class ToolTimelineEntry(BaseModel):
+    """Single entry in a tool execution timeline."""
+
+    observation_id: str = ""
+    operation_type: str = ""
+    tool_name: str | None = None
+    timestamp: str | None = None
+    duration_ms: float | None = None
+    success: bool | None = None
+
+
+class ToolTimelineResponse(BaseModel):
+    """Tool execution timeline for a session."""
+
+    session_id: str
+    total_executions: int = 0
+    executions: list[ToolTimelineEntry] = Field(default_factory=list)
+
+
+class SessionTokenMetrics(BaseModel):
+    """Token usage metrics for a session."""
+
+    session_id: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    total_cost_usd: str = "0"
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Artifact action response models
+# ---------------------------------------------------------------------------
+
+
+class ArtifactActionResponse(BaseModel):
+    """Response for artifact update/delete actions."""
+
+    artifact_id: str
+    status: str
+
+
+# ---------------------------------------------------------------------------
+# SSE health response model
+# ---------------------------------------------------------------------------
+
+
+class SSEHealthResponse(BaseModel):
+    """Health status of the SSE subsystem."""
+
+    status: str
+    active_executions: int = 0
+    active_connections: int = 0

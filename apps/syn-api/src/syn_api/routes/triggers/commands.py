@@ -14,7 +14,7 @@ from syn_api._wiring import (
     get_workflow_repo,
     sync_published_events_to_projections,
 )
-from syn_api.types import Err, Ok, Result, TriggerError
+from syn_api.types import Err, Ok, Result, TriggerActionResponse, TriggerError
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
 
 if TYPE_CHECKING:
@@ -304,8 +304,8 @@ async def disable_triggers(
     return Ok(paused_count)
 
 
-@router.post("")
-async def register_trigger_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+@router.post("", response_model=TriggerActionResponse)
+async def register_trigger_endpoint(body: dict[str, Any]) -> TriggerActionResponse:
     """Register a new trigger rule."""
     try:
         result = await register_trigger(
@@ -324,11 +324,15 @@ async def register_trigger_endpoint(body: dict[str, Any]) -> dict[str, Any]:
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
-    return {"trigger_id": result.value, "name": body["name"], "status": "active"}
+    return TriggerActionResponse(
+        trigger_id=result.value, name=body["name"], status="active"
+    )
 
 
-@router.post("/presets/{preset_name}")
-async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> dict[str, Any]:
+@router.post("/presets/{preset_name}", response_model=TriggerActionResponse)
+async def enable_preset_endpoint(
+    preset_name: str, body: dict[str, Any]
+) -> TriggerActionResponse:
     """Enable a preset for a repository."""
     repository = body.get("repository", "")
     if not repository:
@@ -342,16 +346,18 @@ async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> dict
     )
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
-    return {
-        "trigger_id": result.value,
-        "name": preset_name,
-        "status": "active",
-        "preset": preset_name,
-    }
+    return TriggerActionResponse(
+        trigger_id=result.value,
+        name=preset_name,
+        status="active",
+        preset=preset_name,
+    )
 
 
-@router.patch("/{trigger_id}")
-async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> dict[str, Any]:
+@router.patch("/{trigger_id}", response_model=TriggerActionResponse)
+async def update_trigger_endpoint(
+    trigger_id: str, body: dict[str, Any]
+) -> TriggerActionResponse:
     """Update trigger (pause/resume)."""
     action = body.get("action", "")
     if action == "pause":
@@ -373,11 +379,13 @@ async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> dict
             status_code=409,
             detail=f"Cannot {action} trigger {trigger_id}: {result.message}",
         )
-    return {"trigger_id": trigger_id, "status": action + "d", "action": action}
+    return TriggerActionResponse(
+        trigger_id=trigger_id, status=action + "d", action=action
+    )
 
 
-@router.delete("/{trigger_id}")
-async def delete_trigger_endpoint(trigger_id: str) -> dict[str, Any]:
+@router.delete("/{trigger_id}", response_model=TriggerActionResponse)
+async def delete_trigger_endpoint(trigger_id: str) -> TriggerActionResponse:
     """Delete a trigger rule."""
     result = await delete_trigger(trigger_id=trigger_id, deleted_by="api")
     if isinstance(result, Err):
@@ -385,4 +393,4 @@ async def delete_trigger_endpoint(trigger_id: str) -> dict[str, Any]:
             status_code=409,
             detail=f"Cannot delete trigger {trigger_id}: {result.message}",
         )
-    return {"trigger_id": trigger_id, "status": "deleted"}
+    return TriggerActionResponse(trigger_id=trigger_id, status="deleted")
