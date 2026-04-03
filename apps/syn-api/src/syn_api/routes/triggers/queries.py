@@ -210,27 +210,13 @@ async def get_all_history_endpoint(limit: int = 50) -> dict[str, Any]:
 
 
 @router.get("/{trigger_id}")
-async def get_trigger_endpoint(trigger_id: str) -> dict[str, Any]:
+async def get_trigger_endpoint(trigger_id: str) -> TriggerDetail:
     """Get trigger details."""
     result = await get_trigger(trigger_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Trigger not found: {trigger_id}")
 
-    t = result.value
-    return {
-        "trigger_id": t.trigger_id,
-        "name": t.name,
-        "event": t.event,
-        "conditions": t.conditions,
-        "repository": t.repository,
-        "installation_id": t.installation_id,
-        "workflow_id": t.workflow_id,
-        "input_mapping": t.input_mapping,
-        "status": str(t.status),
-        "fire_count": t.fire_count,
-        "config": t.config,
-        "created_by": t.created_by,
-    }
+    return result.value
 
 
 @router.get("/{trigger_id}/history")

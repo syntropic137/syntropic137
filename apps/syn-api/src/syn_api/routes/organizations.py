@@ -17,7 +17,9 @@ from syn_api._wiring import (
 from syn_api.types import (
     Err,
     Ok,
+    OrganizationActionResponse,
     OrganizationError,
+    OrganizationListResponse,
     OrganizationSummaryResponse,
     Result,
 )
@@ -231,8 +233,8 @@ def _classify_org_error(error_msg: str) -> OrganizationError:
 # =============================================================================
 
 
-@router.post("")
-async def create_organization_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+@router.post("", response_model=OrganizationActionResponse)
+async def create_organization_endpoint(body: dict[str, Any]) -> OrganizationActionResponse:
     """Create a new organization."""
     try:
         result = await create_organization(
@@ -246,38 +248,43 @@ async def create_organization_endpoint(body: dict[str, Any]) -> dict[str, Any]:
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {"organization_id": result.value, "name": body["name"], "slug": body["slug"]}
+    return OrganizationActionResponse(
+        organization_id=result.value,
+        name=body["name"],
+        slug=body["slug"],
+        status="created",
+    )
 
 
-@router.get("")
-async def list_organizations_endpoint() -> dict[str, Any]:
+@router.get("", response_model=OrganizationListResponse)
+async def list_organizations_endpoint() -> OrganizationListResponse:
     """List all organizations."""
     result = await list_organizations()
 
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    return {
-        "organizations": [o.model_dump() for o in result.value],
-        "total": len(result.value),
-    }
+    return OrganizationListResponse(
+        organizations=result.value,
+        total=len(result.value),
+    )
 
 
-@router.get("/{organization_id}")
-async def get_organization_endpoint(organization_id: str) -> dict[str, Any]:
+@router.get("/{organization_id}", response_model=OrganizationSummaryResponse)
+async def get_organization_endpoint(organization_id: str) -> OrganizationSummaryResponse:
     """Get organization details."""
     result = await get_organization(organization_id)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value
 
 
-@router.put("/{organization_id}")
+@router.put("/{organization_id}", response_model=OrganizationActionResponse)
 async def update_organization_endpoint(
     organization_id: str, body: dict[str, Any]
-) -> dict[str, Any]:
+) -> OrganizationActionResponse:
     """Update an organization."""
     result = await update_organization(
         organization_id=organization_id,
@@ -289,11 +296,11 @@ async def update_organization_endpoint(
         status = 404 if result.error == OrganizationError.NOT_FOUND else 400
         raise HTTPException(status_code=status, detail=result.message)
 
-    return {"organization_id": organization_id, "status": "updated"}
+    return OrganizationActionResponse(organization_id=organization_id, status="updated")
 
 
-@router.delete("/{organization_id}")
-async def delete_organization_endpoint(organization_id: str) -> dict[str, Any]:
+@router.delete("/{organization_id}", response_model=OrganizationActionResponse)
+async def delete_organization_endpoint(organization_id: str) -> OrganizationActionResponse:
     """Soft-delete an organization."""
     result = await delete_organization(
         organization_id=organization_id,
@@ -304,4 +311,4 @@ async def delete_organization_endpoint(organization_id: str) -> dict[str, Any]:
         status = 404 if result.error == OrganizationError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
-    return {"organization_id": organization_id, "status": "deleted"}
+    return OrganizationActionResponse(organization_id=organization_id, status="deleted")
