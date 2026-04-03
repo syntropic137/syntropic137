@@ -1,0 +1,361 @@
+/**
+ * Generate MDX documentation for the syn CLI from Node CLI command metadata.
+ *
+ * This script imports all CommandGroup and CommandDef instances from the Node CLI,
+ * walks their metadata (name, description, args, options), and generates MDX files
+ * for the Fumadocs-based documentation site.
+ *
+ * Usage:
+ *   pnpm --filter @syntropic137/cli generate:docs
+ *   # or directly:
+ *   tsx scripts/generate-cli-docs.ts
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import type { ArgDef, CommandDef, OptionDef } from "../src/framework/command.js";
+import { CommandGroup } from "../src/framework/command.js";
+
+// ---------------------------------------------------------------------------
+// Import all command groups and root commands (mirrors src/index.ts)
+// ---------------------------------------------------------------------------
+
+import { healthCommand } from "../src/commands/health.js";
+import { versionCommand } from "../src/commands/version.js";
+import { runCommand } from "../src/commands/workflow/run.js";
+import { workflowGroup } from "../src/commands/workflow/index.js";
+import { marketplaceGroup } from "../src/commands/marketplace/index.js";
+import { artifactsGroup } from "../src/commands/artifacts.js";
+import { configGroup } from "../src/commands/config.js";
+import { controlGroup } from "../src/commands/control.js";
+import { conversationsGroup } from "../src/commands/conversations.js";
+import { costsGroup } from "../src/commands/costs.js";
+import { eventsGroup } from "../src/commands/events.js";
+import { executionGroup } from "../src/commands/execution.js";
+import { insightsGroup } from "../src/commands/insights.js";
+import { metricsGroup } from "../src/commands/metrics.js";
+import { observeGroup } from "../src/commands/observe.js";
+import { orgGroup } from "../src/commands/org.js";
+import { repoGroup } from "../src/commands/repo.js";
+import { sessionsGroup } from "../src/commands/sessions.js";
+import { systemGroup } from "../src/commands/system.js";
+import { triggersGroup } from "../src/commands/triggers.js";
+import { watchGroup } from "../src/commands/watch.js";
+
+// ---------------------------------------------------------------------------
+// Path setup
+// ---------------------------------------------------------------------------
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const OUTPUT_DIR = path.resolve(__dirname, "../../syn-docs/content/docs/cli");
+
+// ---------------------------------------------------------------------------
+// Data models (plain objects — no handler references)
+// ---------------------------------------------------------------------------
+
+interface ParamInfo {
+  name: string;
+  paramType: "argument" | "option";
+  typeStr: string;
+  required: boolean;
+  defaultValue: string | undefined;
+  help: string;
+  flags: string[];
+}
+
+interface CmdInfo {
+  name: string;
+  help: string;
+  params: ParamInfo[];
+}
+
+interface GrpInfo {
+  name: string;
+  help: string;
+  commands: CmdInfo[];
+}
+
+// ---------------------------------------------------------------------------
+// Extraction
+// ---------------------------------------------------------------------------
+
+function typeLabel(opt: OptionDef): string {
+  return opt.type === "string" ? "text" : "boolean";
+}
+
+function defaultStr(opt: OptionDef): string | undefined {
+  if (opt.default === undefined) return undefined;
+  if (typeof opt.default === "boolean") return String(opt.default);
+  return String(opt.default);
+}
+
+function buildFlags(name: string, opt: OptionDef): string[] {
+  const flags = [`--${name}`];
+  if (opt.short) flags.push(`-${opt.short}`);
+  return flags;
+}
+
+function extractCommand(def: CommandDef): CmdInfo {
+  const params: ParamInfo[] = [];
+
+  if (def.args) {
+    for (const arg of def.args) {
+      params.push({
+        name: arg.name,
+        paramType: "argument",
+        typeStr: "text",
+        required: arg.required !== false,
+        defaultValue: undefined,
+        help: arg.description,
+        flags: [],
+      });
+    }
+  }
+
+  if (def.options) {
+    for (const [name, opt] of Object.entries(def.options)) {
+      params.push({
+        name,
+        paramType: "option",
+        typeStr: typeLabel(opt),
+        required: false,
+        defaultValue: defaultStr(opt),
+        help: opt.description,
+        flags: buildFlags(name, opt),
+      });
+    }
+  }
+
+  return {
+    name: def.name,
+    help: def.description,
+    params,
+  };
+}
+
+function extractGroup(group: CommandGroup): GrpInfo {
+  const commands: CmdInfo[] = [];
+  for (const [, def] of [...group.commands].sort(([a], [b]) => a.localeCompare(b))) {
+    commands.push(extractCommand(def));
+  }
+  return {
+    name: group.name,
+    help: group.description,
+    commands,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// MDX rendering — matches the format of the previous Python generator
+// ---------------------------------------------------------------------------
+
+function renderParamTable(params: ParamInfo[]): string {
+  const args = params.filter((p) => p.paramType === "argument");
+  const opts = params.filter((p) => p.paramType === "option");
+  const lines: string[] = [];
+
+  if (args.length > 0) {
+    lines.push("**Arguments:**");
+    lines.push("");
+    lines.push("| Name | Type | Required | Description |");
+    lines.push("|------|------|----------|-------------|");
+    for (const a of args) {
+      const req = a.required ? "Yes" : "No";
+      lines.push(`| \`${a.name}\` | \`${a.typeStr}\` | ${req} | ${a.help} |`);
+    }
+    lines.push("");
+  }
+
+  if (opts.length > 0) {
+    lines.push("**Options:**");
+    lines.push("");
+    lines.push("| Flag | Type | Default | Description |");
+    lines.push("|------|------|---------|-------------|");
+    for (const o of opts) {
+      const flags = o.flags.map((f) => `\`${f}\``).join(", ");
+      const def = o.defaultValue !== undefined ? `\`${o.defaultValue}\`` : "---";
+      lines.push(`| ${flags} | \`${o.typeStr}\` | ${def} | ${o.help} |`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+function renderGroupMdx(group: GrpInfo): string {
+  const lines: string[] = [];
+
+  lines.push("---");
+  lines.push(`title: syn ${group.name}`);
+  lines.push(`description: "${group.help}"`);
+  lines.push("---");
+  lines.push("");
+  lines.push(group.help);
+  lines.push("");
+
+  for (const cmd of group.commands) {
+    lines.push(`## \`syn ${group.name} ${cmd.name}\``);
+    lines.push("");
+    if (cmd.help) {
+      lines.push(cmd.help);
+      lines.push("");
+    }
+
+    // Usage line
+    const usageParts = [`syn ${group.name} ${cmd.name}`];
+    for (const p of cmd.params) {
+      if (p.paramType === "argument") {
+        usageParts.push(`<${p.name}>`);
+      } else if (p.required && p.flags.length > 0) {
+        usageParts.push(`${p.flags[0]} <${p.name}>`);
+      }
+    }
+    lines.push("```bash");
+    lines.push(usageParts.join(" "));
+    lines.push("```");
+    lines.push("");
+
+    if (cmd.params.length > 0) {
+      lines.push(renderParamTable(cmd.params));
+    }
+
+    lines.push("---");
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+function renderIndexMdx(groups: GrpInfo[], topLevel: CmdInfo[]): string {
+  const lines: string[] = [];
+
+  lines.push("---");
+  lines.push("title: CLI Reference");
+  lines.push("description: Command-line interface for Syntropic137.");
+  lines.push("---");
+  lines.push("");
+  lines.push(
+    "The `syn` CLI provides commands for managing workflows, agents, and the Syntropic137",
+  );
+  lines.push("platform from your terminal.");
+  lines.push("");
+  lines.push("## Installation");
+  lines.push("");
+  lines.push("```bash");
+  lines.push("npm install -g @syntropic137/cli");
+  lines.push("syn --help");
+  lines.push("```");
+  lines.push("");
+
+  if (topLevel.length > 0) {
+    lines.push("## Global Commands");
+    lines.push("");
+    lines.push("| Command | Description |");
+    lines.push("|---------|-------------|");
+    for (const cmd of topLevel) {
+      lines.push(`| \`syn ${cmd.name}\` | ${cmd.help} |`);
+    }
+    lines.push("");
+  }
+
+  lines.push("## Command Groups");
+  lines.push("");
+  lines.push("| Group | Description |");
+  lines.push("|-------|-------------|");
+  for (const g of groups) {
+    lines.push(`| [\`syn ${g.name}\`](/docs/cli/${g.name}) | ${g.help} |`);
+  }
+  lines.push("");
+
+  lines.push("## Global Options");
+  lines.push("");
+  lines.push("| Option | Description |");
+  lines.push("|--------|-------------|");
+  lines.push("| `--help` | Show help message |");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+function renderMetaJson(groups: GrpInfo[]): string {
+  const pages = ["index", ...groups.map((g) => g.name)];
+  const meta = {
+    title: "CLI Reference",
+    root: true,
+    pages,
+  };
+  return JSON.stringify(meta, null, 2) + "\n";
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+function main(): void {
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
+  // Collect all groups (sorted alphabetically)
+  const allGroups: CommandGroup[] = [
+    artifactsGroup,
+    configGroup,
+    controlGroup,
+    conversationsGroup,
+    costsGroup,
+    eventsGroup,
+    executionGroup,
+    insightsGroup,
+    marketplaceGroup,
+    metricsGroup,
+    observeGroup,
+    orgGroup,
+    repoGroup,
+    sessionsGroup,
+    systemGroup,
+    triggersGroup,
+    watchGroup,
+    workflowGroup,
+  ];
+
+  // Root commands (order: health, run, version)
+  const rootCommands: CommandDef[] = [
+    healthCommand,
+    {
+      ...runCommand,
+      description: "Execute a workflow (shortcut for 'syn workflow run')",
+    },
+    versionCommand,
+  ];
+
+  const groups = allGroups.map(extractGroup);
+  const topLevel = rootCommands.map(extractCommand);
+
+  const totalCommands = groups.reduce((sum, g) => sum + g.commands.length, 0) + topLevel.length;
+  console.log(
+    `Extracted ${groups.length} command groups, ` +
+      `${topLevel.length} top-level commands ` +
+      `(${totalCommands} total)`,
+  );
+
+  // Write index
+  const indexPath = path.join(OUTPUT_DIR, "index.mdx");
+  fs.writeFileSync(indexPath, renderIndexMdx(groups, topLevel));
+  console.log(`  wrote content/docs/cli/index.mdx`);
+
+  // Write meta.json
+  const metaPath = path.join(OUTPUT_DIR, "meta.json");
+  fs.writeFileSync(metaPath, renderMetaJson(groups));
+  console.log(`  wrote content/docs/cli/meta.json`);
+
+  // Write per-group pages
+  for (const group of groups) {
+    const pagePath = path.join(OUTPUT_DIR, `${group.name}.mdx`);
+    fs.writeFileSync(pagePath, renderGroupMdx(group));
+    console.log(`  wrote content/docs/cli/${group.name}.mdx`);
+  }
+
+  console.log(`\nDone. ${groups.length + 2} files written to content/docs/cli/`);
+}
+
+main();
