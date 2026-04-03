@@ -151,80 +151,91 @@ function extractGroup(group: CommandGroup): GrpInfo {
 // MDX rendering — matches the format of the previous Python generator
 // ---------------------------------------------------------------------------
 
+function renderArgRows(args: ParamInfo[]): string[] {
+  const lines = [
+    "**Arguments:**",
+    "",
+    "| Name | Type | Required | Description |",
+    "|------|------|----------|-------------|",
+  ];
+  for (const a of args) {
+    const req = a.required ? "Yes" : "No";
+    lines.push(`| \`${a.name}\` | \`${a.typeStr}\` | ${req} | ${a.help} |`);
+  }
+  lines.push("");
+  return lines;
+}
+
+function renderOptRows(opts: ParamInfo[]): string[] {
+  const lines = [
+    "**Options:**",
+    "",
+    "| Flag | Type | Default | Description |",
+    "|------|------|---------|-------------|",
+  ];
+  for (const o of opts) {
+    const flags = o.flags.map((f) => `\`${f}\``).join(", ");
+    const def = o.defaultValue !== undefined ? `\`${o.defaultValue}\`` : "---";
+    lines.push(`| ${flags} | \`${o.typeStr}\` | ${def} | ${o.help} |`);
+  }
+  lines.push("");
+  return lines;
+}
+
 function renderParamTable(params: ParamInfo[]): string {
   const args = params.filter((p) => p.paramType === "argument");
   const opts = params.filter((p) => p.paramType === "option");
   const lines: string[] = [];
-
-  if (args.length > 0) {
-    lines.push("**Arguments:**");
-    lines.push("");
-    lines.push("| Name | Type | Required | Description |");
-    lines.push("|------|------|----------|-------------|");
-    for (const a of args) {
-      const req = a.required ? "Yes" : "No";
-      lines.push(`| \`${a.name}\` | \`${a.typeStr}\` | ${req} | ${a.help} |`);
-    }
-    lines.push("");
-  }
-
-  if (opts.length > 0) {
-    lines.push("**Options:**");
-    lines.push("");
-    lines.push("| Flag | Type | Default | Description |");
-    lines.push("|------|------|---------|-------------|");
-    for (const o of opts) {
-      const flags = o.flags.map((f) => `\`${f}\``).join(", ");
-      const def = o.defaultValue !== undefined ? `\`${o.defaultValue}\`` : "---";
-      lines.push(`| ${flags} | \`${o.typeStr}\` | ${def} | ${o.help} |`);
-    }
-    lines.push("");
-  }
-
+  if (args.length > 0) lines.push(...renderArgRows(args));
+  if (opts.length > 0) lines.push(...renderOptRows(opts));
   return lines.join("\n");
 }
 
-function renderGroupMdx(group: GrpInfo): string {
+function buildUsageLine(prefix: string, params: ParamInfo[]): string {
+  const parts = [prefix];
+  for (const p of params) {
+    if (p.paramType === "argument") {
+      parts.push(`<${p.name}>`);
+    } else if (p.required && p.flags.length > 0) {
+      parts.push(`${p.flags[0]} <${p.name}>`);
+    }
+  }
+  return parts.join(" ");
+}
+
+function renderCommandMdx(groupName: string, cmd: CmdInfo): string[] {
   const lines: string[] = [];
-
-  lines.push("---");
-  lines.push(`title: syn ${group.name}`);
-  lines.push(`description: "${group.help}"`);
-  lines.push("---");
+  lines.push(`## \`syn ${groupName} ${cmd.name}\``);
   lines.push("");
-  lines.push(group.help);
-  lines.push("");
-
-  for (const cmd of group.commands) {
-    lines.push(`## \`syn ${group.name} ${cmd.name}\``);
-    lines.push("");
-    if (cmd.help) {
-      lines.push(cmd.help);
-      lines.push("");
-    }
-
-    // Usage line
-    const usageParts = [`syn ${group.name} ${cmd.name}`];
-    for (const p of cmd.params) {
-      if (p.paramType === "argument") {
-        usageParts.push(`<${p.name}>`);
-      } else if (p.required && p.flags.length > 0) {
-        usageParts.push(`${p.flags[0]} <${p.name}>`);
-      }
-    }
-    lines.push("```bash");
-    lines.push(usageParts.join(" "));
-    lines.push("```");
-    lines.push("");
-
-    if (cmd.params.length > 0) {
-      lines.push(renderParamTable(cmd.params));
-    }
-
-    lines.push("---");
+  if (cmd.help) {
+    lines.push(cmd.help);
     lines.push("");
   }
+  lines.push("```bash");
+  lines.push(buildUsageLine(`syn ${groupName} ${cmd.name}`, cmd.params));
+  lines.push("```");
+  lines.push("");
+  if (cmd.params.length > 0) {
+    lines.push(renderParamTable(cmd.params));
+  }
+  lines.push("---");
+  lines.push("");
+  return lines;
+}
 
+function renderGroupMdx(group: GrpInfo): string {
+  const lines: string[] = [
+    "---",
+    `title: syn ${group.name}`,
+    `description: "${group.help}"`,
+    "---",
+    "",
+    group.help,
+    "",
+  ];
+  for (const cmd of group.commands) {
+    lines.push(...renderCommandMdx(group.name, cmd));
+  }
   return lines.join("\n");
 }
 
