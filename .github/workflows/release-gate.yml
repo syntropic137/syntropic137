@@ -226,10 +226,12 @@ jobs:
         run: |
           pnpm --filter @syntropic137/cli generate:types
           CHANGED=$(git diff --name-only apps/syn-cli-node/src/generated/)
-          if [[ -n "$CHANGED" ]]; then
+          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-cli-node/src/generated/)
+          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
             echo "::error::CLI generated types are out of sync with OpenAPI spec."
             echo "Run 'pnpm --filter @syntropic137/cli generate:types' and commit."
-            echo "Changed files:" && echo "$CHANGED"
+            [[ -n "$CHANGED" ]] && echo "Changed files:" && echo "$CHANGED"
+            [[ -n "$UNTRACKED" ]] && echo "Untracked files:" && echo "$UNTRACKED"
             exit 1
           fi
           echo "CLI types are in sync with OpenAPI spec."

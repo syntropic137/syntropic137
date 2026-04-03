@@ -155,8 +155,11 @@ jobs:
         run: |
           pnpm --filter @syntropic137/cli generate:types
           CHANGED=$(git diff --name-only apps/syn-cli-node/src/generated/)
-          if [[ -n "$CHANGED" ]]; then
+          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-cli-node/src/generated/)
+          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
             echo "::error::CLI types are stale — aborting release."
+            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
+            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
             exit 1
           fi
           echo "CLI types are in sync."
@@ -165,8 +168,11 @@ jobs:
         run: |
           pnpm --filter @syntropic137/cli generate:docs
           CHANGED=$(git diff --name-only apps/syn-docs/content/docs/cli/)
-          if [[ -n "$CHANGED" ]]; then
+          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)
+          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
             echo "::error::CLI docs are stale — aborting release."
+            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
+            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
             exit 1
           fi
           echo "CLI docs are in sync."
@@ -175,9 +181,12 @@ jobs:
         run: |
           cd apps/syn-docs && pnpm run generate:openapi
           cd ../..
-          CHANGED=$(git diff --name-only apps/syn-docs/content/docs/api/)
-          if [[ -n "$CHANGED" ]]; then
+          CHANGED=$(git diff --name-only apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/)
+          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)
+          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
             echo "::error::API docs are stale — aborting release."
+            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
+            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
             exit 1
           fi
           echo "API docs are in sync."
