@@ -66,8 +66,16 @@ describe("insights commands", () => {
   it("heatmap renders sparkline", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
-        buckets: [{ count: 5 }, { count: 10 }, { count: 3 }, { count: 0 }],
-        top_repos: [],
+        metric: "sessions",
+        start_date: "2026-03-20",
+        end_date: "2026-04-03",
+        total: 18,
+        days: [
+          { date: "2026-03-20", count: 5 },
+          { date: "2026-03-21", count: 10 },
+          { date: "2026-03-22", count: 3 },
+          { date: "2026-03-23", count: 0 },
+        ],
       }),
     );
 

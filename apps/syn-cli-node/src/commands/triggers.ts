@@ -71,7 +71,6 @@ const enablePresetCommand: CommandDef = {
   args: [{ name: "preset", description: "Preset name (self-healing, review-fix)", required: true }],
   options: {
     repo: { type: "string", short: "r", description: "Repository ID" },
-    workflow: { type: "string", short: "w", description: "Workflow ID" },
   },
   handler: async (parsed: ParsedArgs) => {
     const preset = parsed.positionals[0];
@@ -79,11 +78,7 @@ const enablePresetCommand: CommandDef = {
     const repo = parsed.values["repo"] as string | undefined;
     if (!repo) { printError("Missing --repo"); throw new CLIError("Missing option", 1); }
 
-    const body: Record<string, unknown> = { repository: repo };
-    const workflow = parsed.values["workflow"] as string | undefined;
-    if (workflow) body["workflow_id"] = workflow;
-
-    const d = await apiPost<Record<string, unknown>>(`/triggers/presets/${encodeURIComponent(preset)}`, { body, expected: [200, 201] });
+    const d = await apiPost<Record<string, unknown>>(`/triggers/presets/${encodeURIComponent(preset)}`, { body: { repository: repo }, expected: [200, 201] });
     printSuccess(`Preset "${preset}" enabled: ${d["trigger_id"] ?? ""}`);
   },
 };

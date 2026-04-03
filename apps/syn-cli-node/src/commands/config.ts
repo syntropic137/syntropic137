@@ -4,6 +4,7 @@
  */
 
 import { CommandGroup, type CommandDef } from "../framework/command.js";
+import { CLIError } from "../framework/errors.js";
 import { getApiUrl, getAuthHeaders, CLI_VERSION } from "../config.js";
 import { print } from "../output/console.js";
 import { style, BOLD, GREEN, RED, DIM } from "../output/ansi.js";
@@ -46,7 +47,13 @@ const validateCommand: CommandDef = {
     }
 
     const headers = getAuthHeaders();
-    if (Object.keys(headers).length === 0 && apiUrl !== "http://localhost:8137") {
+    let isLocal = false;
+    try {
+      const parsed = new URL(apiUrl);
+      isLocal = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    } catch { /* invalid URL already caught above */ }
+
+    if (Object.keys(headers).length === 0 && !isLocal) {
       issues.push("No authentication configured for non-localhost API URL");
     }
 
@@ -56,6 +63,7 @@ const validateCommand: CommandDef = {
       for (const issue of issues) {
         print(`${style("!", RED)} ${issue}`);
       }
+      throw new CLIError("Configuration has issues", 1);
     }
   },
 };

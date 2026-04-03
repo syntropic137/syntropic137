@@ -63,7 +63,7 @@ const executionCommand: CommandDef = {
     printDim("Press Ctrl+C to stop.\n");
 
     try {
-      for await (const event of streamSSE(`/watch/executions/${id}`)) {
+      for await (const event of streamSSE(`/sse/executions/${id}`)) {
         renderEvent(event);
       }
       print(style("\nStream ended.", DIM));
