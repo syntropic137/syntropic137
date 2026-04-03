@@ -43,7 +43,7 @@ describe("org commands", () => {
 
   it("list shows organizations", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse([{ organization_id: "org-1", name: "Acme", slug: "acme", system_count: 2, repo_count: 5 }]),
+      jsonResponse({ organizations: [{ organization_id: "org-1", name: "Acme", slug: "acme", system_count: 2, repo_count: 5 }], total: 1 }),
     );
     const handler = orgGroup.getCommand("list")!.handler;
     await handler({ positionals: [], values: {} });

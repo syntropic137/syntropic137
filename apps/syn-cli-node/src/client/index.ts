@@ -3,6 +3,7 @@ export type { ApiResponse, SynClientOptions } from "./http.js";
 export {
   apiGet,
   apiGetList,
+  apiGetPaginated,
   apiPost,
   apiPut,
   apiPatch,

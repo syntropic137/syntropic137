@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList, apiPost, apiPut, apiDelete } from "../client/api.js";
+import { apiGet, apiGetPaginated, apiPost, apiPut, apiDelete } from "../client/api.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { Table } from "../output/table.js";
@@ -42,7 +42,7 @@ const listCommand: CommandDef = {
   name: "list",
   description: "List all organizations",
   handler: async () => {
-    const items = await apiGetList<Record<string, unknown>>("/organizations");
+    const items = await apiGetPaginated<Record<string, unknown>>("/organizations", "organizations");
     if (items.length === 0) { printDim("No organizations found."); return; }
 
     const table = new Table({ title: "Organizations" });
