@@ -188,7 +188,7 @@ async def activity_sse(request: Request) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/sse/health", response_model=SSEHealthResponse)
+@router.get("/sse/health", response_model=SSEHealthResponse, response_model_exclude_none=True)
 async def sse_health() -> SSEHealthResponse:
     """Health check for the SSE subsystem.
 

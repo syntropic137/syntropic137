@@ -350,7 +350,9 @@ async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> Trig
     )
 
 
-@router.patch("/{trigger_id}", response_model=TriggerActionResponse)
+@router.patch(
+    "/{trigger_id}", response_model=TriggerActionResponse, response_model_exclude_none=True
+)
 async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> TriggerActionResponse:
     """Update trigger (pause/resume)."""
     action = body.get("action", "")
@@ -376,7 +378,9 @@ async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> Trig
     return TriggerActionResponse(trigger_id=trigger_id, status=action + "d", action=action)
 
 
-@router.delete("/{trigger_id}", response_model=TriggerActionResponse)
+@router.delete(
+    "/{trigger_id}", response_model=TriggerActionResponse, response_model_exclude_none=True
+)
 async def delete_trigger_endpoint(trigger_id: str) -> TriggerActionResponse:
     """Delete a trigger rule."""
     result = await delete_trigger(trigger_id=trigger_id, deleted_by="api")

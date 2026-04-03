@@ -72,7 +72,7 @@ describe("repo commands", () => {
   });
 
   it("failures shows empty message", async () => {
-    mockFetch.mockResolvedValue(jsonResponse([]));
+    mockFetch.mockResolvedValue(jsonResponse({ failures: [], total: 0 }));
     await repoGroup.getCommand("failures")!.handler({ positionals: ["repo-1"], values: {} });
     expect(stdout()).toContain("No recent failures");
   });

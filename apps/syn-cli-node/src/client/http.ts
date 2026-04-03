@@ -102,7 +102,8 @@ export class SynClient {
     const base = new URL(this.baseUrl);
     const basePath = base.pathname.replace(/\/+$/, "");
     const reqPath = path.startsWith("/") ? path : `/${path}`;
-    const url = new URL(`${basePath}${API_PREFIX}${reqPath}`, base);
+    const prefix = basePath.endsWith(API_PREFIX) ? "" : API_PREFIX;
+    const url = new URL(`${basePath}${prefix}${reqPath}`, base);
     if (params) {
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined) {

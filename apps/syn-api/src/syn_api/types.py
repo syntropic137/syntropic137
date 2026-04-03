@@ -974,24 +974,10 @@ class SystemCostResponse(BaseModel):
     execution_count: int = 0
 
 
-class SystemActivityEntryResponse(BaseModel):
-    """Single entry in a system's execution timeline."""
-
-    execution_id: str
-    workflow_id: str = ""
-    workflow_name: str = ""
-    status: str = ""
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
-    duration_seconds: float = 0.0
-    trigger_source: str = ""
-    repo_full_name: str = ""
-
-
 class SystemActivityResponse(BaseModel):
     """Paginated list of system activity entries."""
 
-    entries: list[SystemActivityEntryResponse] = Field(default_factory=list)
+    entries: list[RepoActivityEntryResponse] = Field(default_factory=list)
     total: int = 0
 
 
@@ -1044,7 +1030,7 @@ class TriggerActionResponse(BaseModel):
     """Response for trigger create/update/delete actions."""
 
     trigger_id: str
-    name: str = ""
+    name: str | None = None
     status: str
     preset: str | None = None
     action: str | None = None
@@ -1198,7 +1184,7 @@ class ToolTimelineEntry(BaseModel):
     observation_id: str = ""
     operation_type: str = ""
     tool_name: str | None = None
-    timestamp: str | None = None
+    timestamp: datetime | None = None
     duration_ms: float | None = None
     success: bool | None = None
 
@@ -1244,5 +1230,5 @@ class SSEHealthResponse(BaseModel):
     """Health status of the SSE subsystem."""
 
     status: str
-    active_executions: int = 0
-    active_connections: int = 0
+    active_executions: int | None = None
+    active_connections: int | None = None
