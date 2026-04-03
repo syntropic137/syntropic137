@@ -5,7 +5,7 @@
 # Trigger: GitHub release published (or manual dispatch for testing).
 #
 # Pipeline:
-#   1. Build multi-arch images (linux/amd64 + linux/arm64) for all services
+#   1. Build container images (multi-arch for servers, amd64-only for UI)
 #   2. Push to GHCR with version tags
 #   3. Sign with cosign (keyless OIDC), SBOM via BuildKit
 #   4. Attach release assets (compose file, syn-ctl, .env.example, SHA256SUMS)
@@ -78,29 +78,41 @@ jobs:
           - image: syn-api
             dockerfile: infra/docker/images/syn-api/Dockerfile
             context: "."
+            # Server images: multi-arch for selfhosters on ARM64 (e.g. Raspberry Pi, Graviton)
+            platforms: linux/amd64,linux/arm64
           - image: syn-gateway
             dockerfile: infra/docker/images/gateway/Dockerfile
             context: "."
+            platforms: linux/amd64,linux/arm64
           - image: syn-collector
             dockerfile: packages/syn-collector/Dockerfile
             context: "."
+            platforms: linux/amd64,linux/arm64
           - image: syn-dashboard-ui
             dockerfile: apps/syn-dashboard-ui/Dockerfile
             context: "."
+            # UI containers serve static JS/CSS via nginx — no ARM64 users in practice.
+            # QEMU cross-compilation adds ~40 min of build time for zero benefit.
+            platforms: linux/amd64
           - image: syn-pulse-ui
             dockerfile: apps/syn-pulse-ui/Dockerfile
             context: "."
+            # Same rationale as syn-dashboard-ui above.
+            platforms: linux/amd64
           # event-store is built and published by the event-sourcing-platform repo
           # (ghcr.io/syntropic137/event-store). Digest is resolved in release-assets.
           - image: sidecar-proxy
             dockerfile: docker/sidecar-proxy/Dockerfile
             context: docker/sidecar-proxy
+            platforms: linux/amd64,linux/arm64
           - image: token-injector
             dockerfile: docker/token-injector/Dockerfile
             context: docker/token-injector
+            platforms: linux/amd64,linux/arm64
           - image: agentic-workspace
             dockerfile: ""  # Built via build-provider.py (staged context)
             context: ""
+            platforms: linux/amd64,linux/arm64
 
     # NOTE: Matrix jobs cannot have per-entry outputs — digests are passed
     # to the release-assets job via upload/download artifact instead.
@@ -155,9 +167,10 @@ jobs:
       # QEMU (cross-platform emulation for multi-arch builds)
       # -----------------------------------------------------------------------
       - name: Set up QEMU
+        if: contains(matrix.platforms, 'arm64')
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
         with:
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms }}
 
       # -----------------------------------------------------------------------
       # GHCR login
@@ -239,7 +252,7 @@ jobs:
         with:
           context: ${{ steps.build-params.outputs.context }}
           file: ${{ steps.build-params.outputs.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
