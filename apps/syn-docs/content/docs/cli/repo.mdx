@@ -1,112 +1,111 @@
 ---
 title: syn repo
-description: "Manage repositories and their observability"
+description: "Manage repositories and view observability data"
 ---
 
-Manage repositories and their observability
+Manage repositories and view observability data
 
 ## `syn repo activity`
 
-Show recent execution activity for a repo.
+Show recent execution activity for a repository
 
 ```bash
-syn repo activity <repo_id>
+syn repo activity <repo-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `repo_id` | `text` | Yes | Repo ID |
+| `repo-id` | `text` | Yes | Repository ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--limit` | `integer` | `50` | Max entries |
-| `--offset` | `integer` | `0` | Pagination offset |
+| `--limit`, `-n` | `text` | `20` | Max results |
 
 ---
 
 ## `syn repo assign`
 
-Assign a repo to a system.
+Assign a repository to a system
 
 ```bash
-syn repo assign <repo_id> --system <system>
+syn repo assign <repo-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `repo_id` | `text` | Yes | Repo ID |
+| `repo-id` | `text` | Yes | Repository ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--system`, `-s` | `text` | --- | System ID |
+| `--system`, `-s` | `text` | --- | System ID to assign to |
 
 ---
 
 ## `syn repo cost`
 
-Show cost breakdown for a repo.
+Show cost breakdown for a repository
 
 ```bash
-syn repo cost <repo_id>
+syn repo cost <repo-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `repo_id` | `text` | Yes | Repo ID |
+| `repo-id` | `text` | Yes | Repository ID |
 
 ---
 
 ## `syn repo failures`
 
-Show recent execution failures for a repo.
+Show recent execution failures for a repository
 
 ```bash
-syn repo failures <repo_id>
+syn repo failures <repo-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `repo_id` | `text` | Yes | Repo ID |
+| `repo-id` | `text` | Yes | Repository ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--limit` | `integer` | `50` | Max failures to show |
+| `--limit`, `-n` | `text` | `10` | Max results |
 
 ---
 
 ## `syn repo health`
 
-Show health metrics for a repo.
+Show health metrics for a repository
 
 ```bash
-syn repo health <repo_id>
+syn repo health <repo-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `repo_id` | `text` | Yes | Repo ID |
+| `repo-id` | `text` | Yes | Repository ID |
 
 ---
 
 ## `syn repo list`
 
-List registered repositories.
+List repositories
 
 ```bash
 syn repo list
@@ -116,84 +115,79 @@ syn repo list
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--org`, `-o` | `text` | --- | Filter by organization ID |
-| `--system`, `-s` | `text` | --- | Filter by system ID |
-| `--unassigned` | `boolean` | `false` | Only repos without a system |
+| `--org`, `-o` | `text` | --- | Filter by organization |
+| `--system`, `-s` | `text` | --- | Filter by system |
 
 ---
 
 ## `syn repo register`
 
-Register a repository with an organization.
+Register a repository
 
 ```bash
-syn repo register --org <org> --url <url>
+syn repo register
 ```
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
+| `--url`, `-u` | `text` | --- | Repository URL (owner/repo or full URL) |
+| `--system`, `-s` | `text` | --- | Assign to system ID |
 | `--org`, `-o` | `text` | --- | Organization ID |
-| `--url`, `-u` | `text` | --- | Full repo name (owner/repo) |
-| `--system`, `-s` | `text` | --- | Assign to system immediately |
-| `--provider` | `text` | `github` | Provider (github, gitlab, …) |
-| `--branch` | `text` | `main` | Default branch |
-| `--private` | `boolean` | `false` | Private repo |
-| `--created-by` | `text` | `cli` | Creator identifier |
 
 ---
 
 ## `syn repo sessions`
 
-Show agent sessions associated with a repo.
+Show agent sessions for a repository
 
 ```bash
-syn repo sessions <repo_id>
+syn repo sessions <repo-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `repo_id` | `text` | Yes | Repo ID |
+| `repo-id` | `text` | Yes | Repository ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--limit` | `integer` | `50` | Max sessions to show |
+| `--limit`, `-n` | `text` | `20` | Max results |
 
 ---
 
 ## `syn repo show`
 
-Show repo details.
+Show repository details
 
 ```bash
-syn repo show <repo_id>
+syn repo show <repo-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `repo_id` | `text` | Yes | Repo ID |
+| `repo-id` | `text` | Yes | Repository ID |
 
 ---
 
 ## `syn repo unassign`
 
-Remove a repo from its system.
+Remove repository from its system
 
 ```bash
-syn repo unassign <repo_id>
+syn repo unassign <repo-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `repo_id` | `text` | Yes | Repo ID |
+| `repo-id` | `text` | Yes | Repository ID |
 
 ---

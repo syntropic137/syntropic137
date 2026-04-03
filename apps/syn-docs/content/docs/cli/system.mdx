@@ -1,81 +1,79 @@
 ---
 title: syn system
-description: "Manage systems and their observability"
+description: "Manage systems and view system observability"
 ---
 
-Manage systems and their observability
+Manage systems and view system observability
 
 ## `syn system activity`
 
-Show recent execution activity for a system.
+Show recent execution activity for a system
 
 ```bash
-syn system activity <system_id>
+syn system activity <system-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `system_id` | `text` | Yes | System ID |
+| `system-id` | `text` | Yes | System ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--limit` | `integer` | `50` | Max entries |
-| `--offset` | `integer` | `0` | Pagination offset |
+| `--limit`, `-n` | `text` | `20` | Max results |
 
 ---
 
 ## `syn system cost`
 
-Show cost breakdown for a system.
+Show cost breakdown for a system
 
 ```bash
-syn system cost <system_id>
+syn system cost <system-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `system_id` | `text` | Yes | System ID |
+| `system-id` | `text` | Yes | System ID |
 
 ---
 
 ## `syn system create`
 
-Create a new system within an organization.
+Create a new system
 
 ```bash
-syn system create --org <org> --name <name>
+syn system create
 ```
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--org`, `-o` | `text` | --- | Organization ID |
 | `--name`, `-n` | `text` | --- | System name |
-| `--description`, `-d` | `text` | `` | Description |
-| `--created-by` | `text` | `cli` | Creator identifier |
+| `--description`, `-d` | `text` | --- | System description |
+| `--org`, `-o` | `text` | --- | Organization ID |
 
 ---
 
 ## `syn system delete`
 
-Delete a system.
+Delete a system
 
 ```bash
-syn system delete <system_id>
+syn system delete <system-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `system_id` | `text` | Yes | System ID |
+| `system-id` | `text` | Yes | System ID |
 
 **Options:**
 
@@ -87,30 +85,30 @@ syn system delete <system_id>
 
 ## `syn system history`
 
-Show full execution history for a system.
+Show full execution history for a system
 
 ```bash
-syn system history <system_id>
+syn system history <system-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `system_id` | `text` | Yes | System ID |
+| `system-id` | `text` | Yes | System ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--limit` | `integer` | `50` | Max entries |
-| `--offset` | `integer` | `0` | Pagination offset |
+| `--limit`, `-n` | `text` | `50` | Max results |
+| `--status`, `-s` | `text` | --- | Filter by status |
 
 ---
 
 ## `syn system list`
 
-List all systems, optionally filtered by organization.
+List all systems
 
 ```bash
 syn system list
@@ -120,71 +118,71 @@ syn system list
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--org`, `-o` | `text` | --- | Filter by organization ID |
+| `--org`, `-o` | `text` | --- | Filter by organization |
 
 ---
 
 ## `syn system patterns`
 
-Show failure patterns and cost outliers for a system.
+Show failure patterns and cost outliers for a system
 
 ```bash
-syn system patterns <system_id>
+syn system patterns <system-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `system_id` | `text` | Yes | System ID |
+| `system-id` | `text` | Yes | System ID |
 
 ---
 
 ## `syn system show`
 
-Show system details.
+Show system details
 
 ```bash
-syn system show <system_id>
+syn system show <system-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `system_id` | `text` | Yes | System ID |
+| `system-id` | `text` | Yes | System ID |
 
 ---
 
 ## `syn system status`
 
-Show health status of a system and its repos.
+Show system health status
 
 ```bash
-syn system status <system_id>
+syn system status <system-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `system_id` | `text` | Yes | System ID |
+| `system-id` | `text` | Yes | System ID |
 
 ---
 
 ## `syn system update`
 
-Update a system's name or description.
+Update a system
 
 ```bash
-syn system update <system_id>
+syn system update <system-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `system_id` | `text` | Yes | System ID |
+| `system-id` | `text` | Yes | System ID |
 
 **Options:**
 

@@ -7,7 +7,7 @@ List and inspect workflow executions
 
 ## `syn execution list`
 
-List all workflow executions across every workflow.
+List all workflow executions
 
 ```bash
 syn execution list
@@ -17,24 +17,24 @@ syn execution list
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--status`, `-s` | `text` | --- | Filter by status (running, completed, failed, …) |
-| `--page` | `integer` | `1` | Page number |
-| `--page-size` | `integer` | `50` | Items per page (max 100) |
+| `--status`, `-s` | `text` | --- | Filter by status |
+| `--page` | `text` | `1` | Page number |
+| `--page-size` | `text` | `50` | Items per page (max 100) |
 
 ---
 
 ## `syn execution show`
 
-Show detailed information about a single execution.
+Show detailed information about a single execution
 
 ```bash
-syn execution show <execution_id>
+syn execution show <execution-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `execution_id` | `text` | Yes | Execution ID |
+| `execution-id` | `text` | Yes | Execution ID |
 
 ---

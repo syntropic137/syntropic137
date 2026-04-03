@@ -7,39 +7,39 @@ Inspect agent conversation logs
 
 ## `syn conversations metadata`
 
-Show metadata summary for a session's conversation.
+Show metadata summary for a session's conversation
 
 ```bash
-syn conversations metadata <session_id>
+syn conversations metadata <session-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `session_id` | `text` | Yes | Session ID |
+| `session-id` | `text` | Yes | Session ID |
 
 ---
 
 ## `syn conversations show`
 
-Show parsed conversation log lines for a session.
+Show parsed conversation log lines for a session
 
 ```bash
-syn conversations show <session_id>
+syn conversations show <session-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `session_id` | `text` | Yes | Session ID |
+| `session-id` | `text` | Yes | Session ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--offset` | `integer` | `0` | Line offset for pagination |
-| `--limit` | `integer` | `100` | Max lines to show (max 500) |
+| `--offset` | `text` | `0` | Line offset for pagination |
+| `--limit` | `text` | `100` | Max lines to show (max 500) |
 
 ---

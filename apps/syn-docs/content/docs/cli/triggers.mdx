@@ -7,85 +7,91 @@ Manage self-healing trigger rules
 
 ## `syn triggers delete`
 
-Delete a trigger rule.
+Delete a trigger rule
 
 ```bash
-syn triggers delete <trigger_id>
+syn triggers delete <trigger-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `trigger_id` | `text` | Yes | Trigger ID |
+| `trigger-id` | `text` | Yes | Trigger ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--force`, `-f` | `boolean` | `false` | Skip confirmation |
 
 ---
 
-## `syn triggers disable`
+## `syn triggers disable-all`
 
-Disable all triggers for a repository.
+Disable all triggers for a repository
 
 ```bash
-syn triggers disable --repository <repository>
+syn triggers disable-all
 ```
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--repository`, `-r` | `text` | --- | Disable all triggers for repo |
+| `--repo`, `-r` | `text` | --- | Repository ID |
+| `--force`, `-f` | `boolean` | `false` | Skip confirmation |
 
 ---
 
 ## `syn triggers enable`
 
-Enable a built-in preset for a repository.
+Enable a built-in trigger preset
 
 ```bash
-syn triggers enable <preset> --repository <repository>
+syn triggers enable <preset>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `preset` | `text` | Yes | Preset name: self-healing | review-fix |
+| `preset` | `text` | Yes | Preset name (self-healing, review-fix) |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--repository`, `-r` | `text` | --- | Repository (owner/repo) |
-| `--installation-id` | `text` | `` | GitHub App installation ID |
-| `--created-by` | `text` | `cli` | Creator identifier |
+| `--repo`, `-r` | `text` | --- | Repository ID |
+| `--workflow`, `-w` | `text` | --- | Workflow ID |
 
 ---
 
 ## `syn triggers history`
 
-Show trigger execution history.
+Show trigger execution history
 
 ```bash
-syn triggers history <trigger_id>
+syn triggers history <trigger-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `trigger_id` | `text` | Yes | Trigger ID |
+| `trigger-id` | `text` | Yes | Trigger ID |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--limit` | `integer` | `50` | Max entries to show |
+| `--limit`, `-n` | `text` | `20` | Max results |
 
 ---
 
 ## `syn triggers list`
 
-List all registered triggers.
+List trigger rules
 
 ```bash
 syn triggers list
@@ -95,86 +101,77 @@ syn triggers list
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--repository`, `-r` | `text` | --- | Filter by repository |
+| `--repo`, `-r` | `text` | --- | Filter by repository |
 | `--status`, `-s` | `text` | --- | Filter by status |
 
 ---
 
 ## `syn triggers pause`
 
-Pause a trigger rule.
+Pause a trigger rule
 
 ```bash
-syn triggers pause <trigger_id>
+syn triggers pause <trigger-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `trigger_id` | `text` | Yes | Trigger ID |
-
-**Options:**
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--reason` | `text` | --- | Reason for pausing |
+| `trigger-id` | `text` | Yes | Trigger ID |
 
 ---
 
 ## `syn triggers register`
 
-Register a new trigger rule.
+Register a new trigger rule
 
 ```bash
-syn triggers register --name <name> --event <event> --repository <repository> --workflow <workflow>
+syn triggers register
 ```
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--name`, `-n` | `text` | --- | Human-readable name |
-| `--event`, `-e` | `text` | --- | GitHub event (e.g., check_run.completed) |
-| `--repository`, `-r` | `text` | --- | Repository (owner/repo) |
+| `--repo`, `-r` | `text` | --- | Repository ID |
 | `--workflow`, `-w` | `text` | --- | Workflow ID to execute |
-| `--condition`, `-c` | `text` | --- | Conditions: 'field operator value' |
-| `--max-attempts` | `integer` | `3` | Max retry attempts per PR |
-| `--budget` | `float` | `5.0` | Budget per trigger in USD |
-| `--daily-limit` | `integer` | `20` | Max triggers per day |
-| `--installation-id` | `text` | `` | GitHub App installation ID |
-| `--created-by` | `text` | `cli` | Creator identifier |
+| `--event`, `-e` | `text` | --- | GitHub event type (e.g. check_run.completed) |
+| `--condition`, `-c` | `text` | --- | Condition as key=value (repeatable) |
+| `--max-fires` | `text` | `5` | Maximum fires per period |
+| `--cooldown` | `text` | `300` | Cooldown in seconds |
+| `--budget` | `text` | --- | Budget limit in USD |
 
 ---
 
 ## `syn triggers resume`
 
-Resume a paused trigger rule.
+Resume a paused trigger rule
 
 ```bash
-syn triggers resume <trigger_id>
+syn triggers resume <trigger-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `trigger_id` | `text` | Yes | Trigger ID |
+| `trigger-id` | `text` | Yes | Trigger ID |
 
 ---
 
 ## `syn triggers show`
 
-Show trigger details.
+Show trigger details
 
 ```bash
-syn triggers show <trigger_id>
+syn triggers show <trigger-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `trigger_id` | `text` | Yes | Trigger ID |
+| `trigger-id` | `text` | Yes | Trigger ID |
 
 ---
