@@ -74,7 +74,7 @@ const costCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const days = (parsed.values["days"] as string | undefined) ?? "30";
-    const d = await apiGet<Record<string, unknown>>("/insights/costs", { params: { days } });
+    const d = await apiGet<Record<string, unknown>>("/insights/cost", { params: { days } });
 
     print(style(`Cost Overview (last ${days} days)`, CYAN));
     print(`  ${style("Total cost:", BOLD)}   ${formatCost(String(d["total_cost_usd"] ?? "0"))}`);
@@ -120,7 +120,7 @@ const heatmapCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const days = (parsed.values["days"] as string | undefined) ?? "14";
-    const d = await apiGet<Record<string, unknown>>("/insights/heatmap", { params: { days } });
+    const d = await apiGet<Record<string, unknown>>("/insights/contribution-heatmap", { params: { days } });
 
     const buckets = (d["buckets"] ?? []) as Record<string, unknown>[];
     if (buckets.length === 0) { printDim("No activity data."); return; }

@@ -156,7 +156,7 @@ const costCommand: CommandDef = {
   args: [{ name: "repo-id", description: "Repository ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqRepoId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/repos/${id}/costs`);
+    const d = await apiGet<Record<string, unknown>>(`/repos/${id}/cost`);
 
     print(`${style("Repository Costs:", BOLD)} ${id}`);
     print(`  Total cost:  ${formatCost(String(d["total_cost_usd"] ?? "0"))}`);
