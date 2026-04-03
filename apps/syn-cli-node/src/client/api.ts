@@ -70,6 +70,23 @@ export async function apiGetList<T = Record<string, unknown>>(
   return data;
 }
 
+export async function apiGetPaginated<T = Record<string, unknown>>(
+  path: string,
+  key: string,
+  options?: {
+    params?: Record<string, string | number | boolean | undefined>;
+    expected?: readonly number[];
+  },
+): Promise<T[]> {
+  const client = new SynClient();
+  const { status, data } = await safeRequest(() =>
+    client.get<Record<string, unknown>>(path, options?.params),
+  );
+  checkResponse(status, data, options?.expected ?? [200]);
+  const items = data[key];
+  return Array.isArray(items) ? (items as T[]) : [];
+}
+
 export async function apiPost<T = Record<string, unknown>>(
   path: string,
   options?: {

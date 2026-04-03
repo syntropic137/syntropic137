@@ -43,7 +43,7 @@ describe("repo commands", () => {
 
   it("list shows repos", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse([{ repo_id: "repo-1", repo_url: "owner/repo", status: "active" }]),
+      jsonResponse({ repos: [{ repo_id: "repo-1", repo_url: "owner/repo", status: "active" }], total: 1 }),
     );
     await repoGroup.getCommand("list")!.handler({ positionals: [], values: {} });
     expect(stdout()).toContain("owner/repo");
