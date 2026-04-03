@@ -264,14 +264,14 @@ async def list_organizations_endpoint() -> dict[str, Any]:
 
 
 @router.get("/{organization_id}")
-async def get_organization_endpoint(organization_id: str) -> dict[str, Any]:
+async def get_organization_endpoint(organization_id: str) -> OrganizationSummaryResponse:
     """Get organization details."""
     result = await get_organization(organization_id)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value
 
 
 @router.put("/{organization_id}")

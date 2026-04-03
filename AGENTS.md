@@ -63,6 +63,7 @@ Treat Python like TypeScript. Strict type safety everywhere.
 - **No string-keyed lookups** when attribute access is possible
 - **Pydantic** for all API boundaries, configs, and domain events (`frozen=True`, `extra="forbid"`)
 - **All public interfaces fully typed** — no implicit signatures
+- **API routes MUST use Pydantic response models** — never `-> dict[str, Any]`. FastAPI generates the OpenAPI spec from return type annotations. Untyped routes are invisible to the spec, which breaks the CLI type generation pipeline (`openAPI spec → openapi-typescript → CLI types`). Always define a response model and use it: `async def list_foos() -> FooListResponse:`
 
 ### Bounded Contexts & Aggregates (ADR-020)
 

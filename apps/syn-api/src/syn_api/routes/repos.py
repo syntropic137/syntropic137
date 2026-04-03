@@ -18,7 +18,18 @@ from syn_api._wiring import (
 from syn_api.types import (
     Err,
     Ok,
+    RepoActionResponse,
+    RepoActivityEntryResponse,
+    RepoActivityResponse,
+    RepoCostResponse,
+    RepoCreatedResponse,
     RepoError,
+    RepoFailureEntryResponse,
+    RepoFailuresResponse,
+    RepoHealthResponse,
+    RepoListResponse,
+    RepoSessionEntryResponse,
+    RepoSessionsResponse,
     RepoSummaryResponse,
     Result,
 )
@@ -500,7 +511,7 @@ def _classify_repo_error(error_msg: str) -> RepoError:
 
 
 @router.post("")
-async def register_repo_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+async def register_repo_endpoint(body: dict[str, Any]) -> RepoCreatedResponse:
     """Register a new repo."""
     try:
         result = await register_repo(
@@ -520,7 +531,7 @@ async def register_repo_endpoint(body: dict[str, Any]) -> dict[str, Any]:
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {"repo_id": result.value, "full_name": body["full_name"]}
+    return RepoCreatedResponse(repo_id=result.value, full_name=body["full_name"])
 
 
 @router.get("")
@@ -529,7 +540,7 @@ async def list_repos_endpoint(
     system_id: str | None = None,
     provider: str | None = None,
     unassigned: bool = False,
-) -> dict[str, Any]:
+) -> RepoListResponse:
     """List repos with optional filters."""
     result = await list_repos(
         organization_id=organization_id,
@@ -541,21 +552,18 @@ async def list_repos_endpoint(
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    return {
-        "repos": [r.model_dump() for r in result.value],
-        "total": len(result.value),
-    }
+    return RepoListResponse(repos=result.value, total=len(result.value))
 
 
 @router.get("/{repo_id}")
-async def get_repo_endpoint(repo_id: str) -> dict[str, Any]:
+async def get_repo_endpoint(repo_id: str) -> RepoSummaryResponse:
     """Get repo details."""
     result = await get_repo(repo_id)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value
 
 
 @router.put("/{repo_id}")

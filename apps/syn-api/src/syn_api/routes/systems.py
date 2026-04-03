@@ -432,14 +432,14 @@ async def list_systems_endpoint(organization_id: str | None = None) -> dict[str,
 
 
 @router.get("/{system_id}")
-async def get_system_endpoint(system_id: str) -> dict[str, Any]:
+async def get_system_endpoint(system_id: str) -> SystemSummaryResponse:
     """Get system details."""
     result = await get_system(system_id)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value
 
 
 @router.put("/{system_id}")
