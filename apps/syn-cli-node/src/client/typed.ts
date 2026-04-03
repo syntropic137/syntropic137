@@ -16,7 +16,7 @@ import { getApiUrl, getAuthHeaders } from "../config.js";
 const API_PREFIX = "/api/v1";
 
 export function createTypedClient() {
-  const baseUrl = getApiUrl();
+  const baseUrl = getApiUrl().replace(/\/+$/, "");
   return createClient<paths>({
     baseUrl: `${baseUrl}${API_PREFIX}`,
     headers: getAuthHeaders(),
