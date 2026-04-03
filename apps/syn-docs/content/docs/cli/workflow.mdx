@@ -10,7 +10,7 @@ Manage workflows - create, list, run, and inspect
 Create a new workflow
 
 ```bash
-syn workflow create <name>
+syn workflow create <name> [options]
 ```
 
 **Arguments:**
@@ -35,7 +35,7 @@ syn workflow create <name>
 Archive (soft-delete) a workflow
 
 ```bash
-syn workflow delete <workflow-id>
+syn workflow delete <workflow-id> [options]
 ```
 
 **Arguments:**
@@ -57,7 +57,7 @@ syn workflow delete <workflow-id>
 Export a workflow as a distributable package or Claude Code plugin
 
 ```bash
-syn workflow export <workflow-id>
+syn workflow export <workflow-id> [options]
 ```
 
 **Arguments:**
@@ -96,7 +96,7 @@ syn workflow info <name>
 Scaffold a new workflow package from a template
 
 ```bash
-syn workflow init <directory>
+syn workflow init <directory> [options]
 ```
 
 **Arguments:**
@@ -121,7 +121,7 @@ syn workflow init <directory>
 Install workflow(s) from a package, git repository, or marketplace
 
 ```bash
-syn workflow install <source>
+syn workflow install <source> [options]
 ```
 
 **Arguments:**
@@ -154,7 +154,7 @@ syn workflow installed
 List all workflows
 
 ```bash
-syn workflow list
+syn workflow list [options]
 ```
 
 **Options:**
@@ -170,7 +170,7 @@ syn workflow list
 Execute a workflow
 
 ```bash
-syn workflow run <workflow-id>
+syn workflow run <workflow-id> [options]
 ```
 
 **Arguments:**
@@ -195,7 +195,7 @@ syn workflow run <workflow-id>
 Search for workflows across registered marketplaces
 
 ```bash
-syn workflow search <query>
+syn workflow search <query> [options]
 ```
 
 **Arguments:**
@@ -251,7 +251,7 @@ syn workflow status <workflow-id>
 Uninstall a workflow package
 
 ```bash
-syn workflow uninstall <name>
+syn workflow uninstall <name> [options]
 ```
 
 **Arguments:**
@@ -273,7 +273,7 @@ syn workflow uninstall <name>
 Update an installed workflow package to the latest version
 
 ```bash
-syn workflow update <name>
+syn workflow update <name> [options]
 ```
 
 **Arguments:**

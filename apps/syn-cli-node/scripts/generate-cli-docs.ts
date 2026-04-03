@@ -193,13 +193,15 @@ function renderParamTable(params: ParamInfo[]): string {
 
 function buildUsageLine(prefix: string, params: ParamInfo[]): string {
   const parts = [prefix];
+  const hasOptions = params.some((p) => p.paramType === "option");
   for (const p of params) {
     if (p.paramType === "argument") {
-      parts.push(`<${p.name}>`);
+      parts.push(p.required ? `<${p.name}>` : `[${p.name}]`);
     } else if (p.required && p.flags.length > 0) {
       parts.push(`${p.flags[0]} <${p.name}>`);
     }
   }
+  if (hasOptions) parts.push("[options]");
   return parts.join(" ");
 }
 
@@ -349,6 +351,9 @@ function main(): void {
       `(${totalCommands} total)`,
   );
 
+  // Track generated files to clean up stale ones
+  const generatedFiles = new Set<string>(["index.mdx", "meta.json"]);
+
   // Write index
   const indexPath = path.join(OUTPUT_DIR, "index.mdx");
   fs.writeFileSync(indexPath, renderIndexMdx(groups, topLevel));
@@ -361,9 +366,19 @@ function main(): void {
 
   // Write per-group pages
   for (const group of groups) {
-    const pagePath = path.join(OUTPUT_DIR, `${group.name}.mdx`);
+    const filename = `${group.name}.mdx`;
+    generatedFiles.add(filename);
+    const pagePath = path.join(OUTPUT_DIR, filename);
     fs.writeFileSync(pagePath, renderGroupMdx(group));
-    console.log(`  wrote content/docs/cli/${group.name}.mdx`);
+    console.log(`  wrote content/docs/cli/${filename}`);
+  }
+
+  // Remove stale .mdx files from previous generations
+  for (const file of fs.readdirSync(OUTPUT_DIR)) {
+    if (file.endsWith(".mdx") && !generatedFiles.has(file)) {
+      fs.unlinkSync(path.join(OUTPUT_DIR, file));
+      console.log(`  removed stale content/docs/cli/${file}`);
+    }
   }
 
   console.log(`\nDone. ${groups.length + 2} files written to content/docs/cli/`);

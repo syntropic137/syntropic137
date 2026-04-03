@@ -10,7 +10,7 @@ Control running executions
 Cancel a running or paused execution
 
 ```bash
-syn control cancel <execution-id>
+syn control cancel <execution-id> [options]
 ```
 
 **Arguments:**
@@ -33,7 +33,7 @@ syn control cancel <execution-id>
 Inject a message into a running execution
 
 ```bash
-syn control inject <execution-id>
+syn control inject <execution-id> [options]
 ```
 
 **Arguments:**
@@ -55,7 +55,7 @@ syn control inject <execution-id>
 Pause a running execution at the next yield point
 
 ```bash
-syn control pause <execution-id>
+syn control pause <execution-id> [options]
 ```
 
 **Arguments:**
@@ -109,7 +109,7 @@ syn control status <execution-id>
 Forcefully stop a running execution via SIGINT
 
 ```bash
-syn control stop <execution-id>
+syn control stop <execution-id> [options]
 ```
 
 **Arguments:**
