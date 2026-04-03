@@ -1,7 +1,10 @@
 export const CLI_NAME = "syn";
-export const CLI_VERSION = "0.18.0";
 export const CLI_DESCRIPTION =
   "Syntropic137 - Event-sourced workflow engine for AI agents";
+
+declare const __CLI_VERSION__: string;
+export const CLI_VERSION =
+  typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : "0.0.0-dev";
 
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const SSE_CONNECT_TIMEOUT_MS = 5_000;
