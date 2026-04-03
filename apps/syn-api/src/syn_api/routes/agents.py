@@ -238,7 +238,7 @@ async def list_providers_endpoint() -> AgentProviderListResponse:
 
 
 @router.post("/test")
-async def test_agent_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+async def test_agent_endpoint(body: dict[str, Any]) -> AgentTestResult:
     """Test an agent provider with a simple prompt."""
     try:
         result = await test_agent(
@@ -253,11 +253,11 @@ async def test_agent_endpoint(body: dict[str, Any]) -> dict[str, Any]:
         status = 400 if result.error == AgentError.PROVIDER_NOT_FOUND else 502
         raise HTTPException(status_code=status, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value
 
 
 @router.post("/chat")
-async def chat_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+async def chat_endpoint(body: dict[str, Any]) -> AgentTestResult:
     """Send a stateless chat completion request."""
     try:
         result = await chat(
@@ -272,4 +272,4 @@ async def chat_endpoint(body: dict[str, Any]) -> dict[str, Any]:
         status = 400 if result.error == AgentError.PROVIDER_NOT_FOUND else 502
         raise HTTPException(status_code=status, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value

@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList, apiPost, apiDelete, buildParams } from "../client/api.js";
+import { apiGet, apiGetPaginated, apiPost, apiDelete, buildParams } from "../client/api.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { formatCost, formatStatus, formatTimestamp } from "../output/format.js";
@@ -99,7 +99,7 @@ const listCommand: CommandDef = {
       repo_id: (parsed.values["repo"] as string | undefined) ?? null,
       status: (parsed.values["status"] as string | undefined) ?? null,
     });
-    const items = await apiGetList<Record<string, unknown>>("/triggers", { params });
+    const items = await apiGetPaginated<Record<string, unknown>>("/triggers", "triggers", { params });
     if (items.length === 0) { printDim("No triggers found."); return; }
 
     const table = new Table({ title: "Triggers" });
@@ -162,7 +162,7 @@ const historyCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
     const limit = (parsed.values["limit"] as string | undefined) ?? "20";
-    const items = await apiGetList<Record<string, unknown>>(`/triggers/${id}/history`, { params: { limit } });
+    const items = await apiGetPaginated<Record<string, unknown>>(`/triggers/${id}/history`, "entries", { params: { limit } });
     if (items.length === 0) { printDim("No trigger history."); return; }
 
     const table = new Table({ title: `Trigger History: ${id.slice(0, 12)}` });

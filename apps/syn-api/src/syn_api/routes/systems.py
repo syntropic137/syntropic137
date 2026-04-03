@@ -16,10 +16,22 @@ from syn_api._wiring import (
     sync_published_events_to_projections,
 )
 from syn_api.types import (
+    CostOutlierResponse,
     Err,
+    FailurePatternResponse,
     Ok,
+    RepoActivityEntryResponse,
+    RepoStatusEntryResponse,
     Result,
+    SystemActionResponse,
+    SystemActivityResponse,
+    SystemCostResponse,
+    SystemCreatedResponse,
     SystemErrorCode,
+    SystemHistoryResponse,
+    SystemListResponse,
+    SystemPatternsResponse,
+    SystemStatusResponse,
     SystemSummaryResponse,
 )
 
@@ -399,7 +411,7 @@ def _classify_sys_error(error_msg: str) -> SystemErrorCode:
 
 
 @router.post("")
-async def create_system_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+async def create_system_endpoint(body: dict[str, Any]) -> SystemCreatedResponse:
     """Create a new system."""
     try:
         result = await create_system(
@@ -414,36 +426,33 @@ async def create_system_endpoint(body: dict[str, Any]) -> dict[str, Any]:
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {"system_id": result.value, "name": body["name"]}
+    return SystemCreatedResponse(system_id=result.value, name=body["name"])
 
 
 @router.get("")
-async def list_systems_endpoint(organization_id: str | None = None) -> dict[str, Any]:
+async def list_systems_endpoint(organization_id: str | None = None) -> SystemListResponse:
     """List systems with optional organization filter."""
     result = await list_systems(organization_id=organization_id)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    return {
-        "systems": [s.model_dump() for s in result.value],
-        "total": len(result.value),
-    }
+    return SystemListResponse(systems=result.value, total=len(result.value))
 
 
 @router.get("/{system_id}")
-async def get_system_endpoint(system_id: str) -> dict[str, Any]:
+async def get_system_endpoint(system_id: str) -> SystemSummaryResponse:
     """Get system details."""
     result = await get_system(system_id)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value
 
 
 @router.put("/{system_id}")
-async def update_system_endpoint(system_id: str, body: dict[str, Any]) -> dict[str, Any]:
+async def update_system_endpoint(system_id: str, body: dict[str, Any]) -> SystemActionResponse:
     """Update a system."""
     result = await update_system(
         system_id=system_id,
@@ -455,11 +464,11 @@ async def update_system_endpoint(system_id: str, body: dict[str, Any]) -> dict[s
         status = 404 if result.error == SystemErrorCode.NOT_FOUND else 400
         raise HTTPException(status_code=status, detail=result.message)
 
-    return {"system_id": system_id, "status": "updated"}
+    return SystemActionResponse(system_id=system_id, status="updated")
 
 
 @router.delete("/{system_id}")
-async def delete_system_endpoint(system_id: str) -> dict[str, Any]:
+async def delete_system_endpoint(system_id: str) -> SystemActionResponse:
     """Soft-delete a system."""
     result = await delete_system(
         system_id=system_id,
@@ -470,7 +479,7 @@ async def delete_system_endpoint(system_id: str) -> dict[str, Any]:
         status = 404 if result.error == SystemErrorCode.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
-    return {"system_id": system_id, "status": "deleted"}
+    return SystemActionResponse(system_id=system_id, status="deleted")
 
 
 # ---------------------------------------------------------------------------
@@ -479,49 +488,62 @@ async def delete_system_endpoint(system_id: str) -> dict[str, Any]:
 
 
 @router.get("/{system_id}/status")
-async def get_system_status_endpoint(system_id: str) -> dict[str, Any]:
+async def get_system_status_endpoint(system_id: str) -> SystemStatusResponse:
     """Get cross-repo health overview for a system."""
     result = await get_system_status(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return result.value
+    data = result.value
+    repos = [RepoStatusEntryResponse(**r) for r in data.get("repos", [])]
+    return SystemStatusResponse(**{**data, "repos": repos})
 
 
 @router.get("/{system_id}/cost")
-async def get_system_cost_endpoint(system_id: str) -> dict[str, Any]:
+async def get_system_cost_endpoint(system_id: str) -> SystemCostResponse:
     """Get cost breakdown for a system."""
     result = await get_system_cost(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return result.value
+    return SystemCostResponse(**result.value)
 
 
 @router.get("/{system_id}/activity")
 async def get_system_activity_endpoint(
     system_id: str, offset: int = 0, limit: int = 50
-) -> dict[str, Any]:
+) -> SystemActivityResponse:
     """Get execution timeline for a system."""
     result = await get_system_activity(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return {"entries": result.value, "total": len(result.value)}
+    entries = [RepoActivityEntryResponse(**e) for e in result.value]
+    return SystemActivityResponse(entries=entries, total=len(entries))
 
 
 @router.get("/{system_id}/patterns")
-async def get_system_patterns_endpoint(system_id: str) -> dict[str, Any]:
+async def get_system_patterns_endpoint(system_id: str) -> SystemPatternsResponse:
     """Get recurring failure and cost patterns for a system."""
     result = await get_system_patterns(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return result.value
+    data = result.value
+    failure_patterns = [FailurePatternResponse(**p) for p in data.get("failure_patterns", [])]
+    cost_outliers = [CostOutlierResponse(**o) for o in data.get("cost_outliers", [])]
+    return SystemPatternsResponse(
+        system_id=data.get("system_id", ""),
+        system_name=data.get("system_name", ""),
+        failure_patterns=failure_patterns,
+        cost_outliers=cost_outliers,
+        analysis_window_hours=data.get("analysis_window_hours", 168),
+    )
 
 
 @router.get("/{system_id}/history")
 async def get_system_history_endpoint(
     system_id: str, offset: int = 0, limit: int = 50
-) -> dict[str, Any]:
+) -> SystemHistoryResponse:
     """Get historical execution timeline for a system."""
     result = await get_system_history(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return {"entries": result.value, "total": len(result.value)}
+    entries = [RepoActivityEntryResponse(**e) for e in result.value]
+    return SystemHistoryResponse(entries=entries, total=len(entries))

@@ -778,10 +778,261 @@ class RealtimeHealth(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class StatusActionResponse(BaseModel):
+    """Generic response for create/update/delete actions."""
+
+    entity_id: str
+    status: str
+
+
 class PaginatedResponse(BaseModel):
     """Base for paginated list responses. Subclass and add typed items field."""
 
     total: int
+
+
+# ---------------------------------------------------------------------------
+# Repo response models
+# ---------------------------------------------------------------------------
+
+
+class RepoCreatedResponse(BaseModel):
+    """Response after registering a new repo."""
+
+    repo_id: str
+    full_name: str
+
+
+class RepoActionResponse(BaseModel):
+    """Response for repo mutation actions (update, deregister, assign, unassign)."""
+
+    repo_id: str
+    status: str
+    system_id: str | None = None
+
+
+class RepoListResponse(BaseModel):
+    """Paginated list of repos."""
+
+    repos: list[RepoSummaryResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class RepoHealthResponse(BaseModel):
+    """Per-repo health snapshot with success rate, trend, and windowed costs."""
+
+    repo_id: str = ""
+    repo_full_name: str = ""
+    total_executions: int = 0
+    successful_executions: int = 0
+    failed_executions: int = 0
+    success_rate: float = 0.0
+    trend: str = "stable"
+    window_cost_usd: str = "0"
+    window_tokens: int = 0
+    last_execution_at: str = ""
+
+
+class RepoCostResponse(BaseModel):
+    """Per-repo cost breakdown by workflow and model."""
+
+    repo_id: str = ""
+    repo_full_name: str = ""
+    total_cost_usd: str = "0"
+    total_tokens: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    cost_by_workflow: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    execution_count: int = 0
+
+
+class RepoActivityEntryResponse(BaseModel):
+    """Single entry in a repo's execution timeline."""
+
+    execution_id: str
+    workflow_id: str = ""
+    workflow_name: str = ""
+    status: str = ""
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    duration_seconds: float = 0.0
+    trigger_source: str = ""
+
+
+class RepoActivityResponse(BaseModel):
+    """Paginated list of repo activity entries."""
+
+    entries: list[RepoActivityEntryResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class RepoFailureEntryResponse(BaseModel):
+    """A failed execution record for a repository."""
+
+    execution_id: str
+    workflow_id: str = ""
+    workflow_name: str = ""
+    failed_at: datetime | None = None
+    error_message: str = ""
+    error_type: str = ""
+    phase_name: str = ""
+    conversation_tail: list[str] = Field(default_factory=list)
+
+
+class RepoFailuresResponse(BaseModel):
+    """Paginated list of repo failure entries."""
+
+    failures: list[RepoFailureEntryResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class RepoSessionEntryResponse(BaseModel):
+    """Lightweight session record for repo insight views."""
+
+    id: str
+    execution_id: str
+    status: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    agent_type: str = ""
+    total_tokens: int = 0
+    total_cost_usd: str = "0"
+
+
+class RepoSessionsResponse(BaseModel):
+    """Paginated list of repo session entries."""
+
+    sessions: list[RepoSessionEntryResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+# ---------------------------------------------------------------------------
+# System response models
+# ---------------------------------------------------------------------------
+
+
+class SystemCreatedResponse(BaseModel):
+    """Response after creating a new system."""
+
+    system_id: str
+    name: str
+
+
+class SystemActionResponse(BaseModel):
+    """Response for system mutation actions (update, delete)."""
+
+    system_id: str
+    status: str
+
+
+class SystemListResponse(BaseModel):
+    """Paginated list of systems."""
+
+    systems: list[SystemSummaryResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class RepoStatusEntryResponse(BaseModel):
+    """Health status for a single repo within a system."""
+
+    repo_id: str = ""
+    repo_full_name: str = ""
+    status: str = "inactive"
+    success_rate: float = 0.0
+    active_executions: int = 0
+    last_execution_at: str = ""
+
+
+class SystemStatusResponse(BaseModel):
+    """Cross-repo health overview within a system."""
+
+    system_id: str = ""
+    system_name: str = ""
+    organization_id: str = ""
+    overall_status: str = "healthy"
+    total_repos: int = 0
+    healthy_repos: int = 0
+    degraded_repos: int = 0
+    failing_repos: int = 0
+    repos: list[RepoStatusEntryResponse] = Field(default_factory=list)
+
+
+class SystemCostResponse(BaseModel):
+    """System-wide cost breakdown by repo, workflow, and model."""
+
+    system_id: str = ""
+    system_name: str = ""
+    organization_id: str = ""
+    total_cost_usd: str = "0"
+    total_tokens: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    cost_by_repo: dict[str, str] = Field(default_factory=dict)
+    cost_by_workflow: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    execution_count: int = 0
+
+
+class SystemActivityEntryResponse(BaseModel):
+    """Single entry in a system's execution timeline."""
+
+    execution_id: str
+    workflow_id: str = ""
+    workflow_name: str = ""
+    status: str = ""
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    duration_seconds: float = 0.0
+    trigger_source: str = ""
+    repo_full_name: str = ""
+
+
+class SystemActivityResponse(BaseModel):
+    """Paginated list of system activity entries."""
+
+    entries: list[SystemActivityEntryResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class FailurePatternResponse(BaseModel):
+    """A recurring failure pattern within a system."""
+
+    error_type: str = ""
+    error_message: str = ""
+    occurrence_count: int = 0
+    affected_repos: list[str] = Field(default_factory=list)
+    first_seen: str = ""
+    last_seen: str = ""
+
+
+class CostOutlierResponse(BaseModel):
+    """An execution with unusually high cost."""
+
+    execution_id: str = ""
+    repo_full_name: str = ""
+    workflow_name: str = ""
+    cost_usd: str = "0"
+    median_cost_usd: str = "0"
+    deviation_factor: float = 0.0
+    executed_at: str = ""
+
+
+class SystemPatternsResponse(BaseModel):
+    """Recurring failure and cost patterns within a system."""
+
+    system_id: str = ""
+    system_name: str = ""
+    failure_patterns: list[FailurePatternResponse] = Field(default_factory=list)
+    cost_outliers: list[CostOutlierResponse] = Field(default_factory=list)
+    analysis_window_hours: int = 168
+
+
+class SystemHistoryResponse(BaseModel):
+    """Paginated list of system history entries."""
+
+    entries: list[RepoActivityEntryResponse] = Field(default_factory=list)
+    total: int = 0
 
 
 # ---------------------------------------------------------------------------

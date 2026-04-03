@@ -296,9 +296,7 @@ async def update_organization_endpoint(
         status = 404 if result.error == OrganizationError.NOT_FOUND else 400
         raise HTTPException(status_code=status, detail=result.message)
 
-    return OrganizationActionResponse(
-        organization_id=organization_id, status="updated"
-    )
+    return OrganizationActionResponse(organization_id=organization_id, status="updated")
 
 
 @router.delete("/{organization_id}", response_model=OrganizationActionResponse)
@@ -313,6 +311,4 @@ async def delete_organization_endpoint(organization_id: str) -> OrganizationActi
         status = 404 if result.error == OrganizationError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
-    return OrganizationActionResponse(
-        organization_id=organization_id, status="deleted"
-    )
+    return OrganizationActionResponse(organization_id=organization_id, status="deleted")

@@ -324,15 +324,11 @@ async def register_trigger_endpoint(body: dict[str, Any]) -> TriggerActionRespon
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
-    return TriggerActionResponse(
-        trigger_id=result.value, name=body["name"], status="active"
-    )
+    return TriggerActionResponse(trigger_id=result.value, name=body["name"], status="active")
 
 
 @router.post("/presets/{preset_name}", response_model=TriggerActionResponse)
-async def enable_preset_endpoint(
-    preset_name: str, body: dict[str, Any]
-) -> TriggerActionResponse:
+async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> TriggerActionResponse:
     """Enable a preset for a repository."""
     repository = body.get("repository", "")
     if not repository:
@@ -355,9 +351,7 @@ async def enable_preset_endpoint(
 
 
 @router.patch("/{trigger_id}", response_model=TriggerActionResponse)
-async def update_trigger_endpoint(
-    trigger_id: str, body: dict[str, Any]
-) -> TriggerActionResponse:
+async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> TriggerActionResponse:
     """Update trigger (pause/resume)."""
     action = body.get("action", "")
     if action == "pause":
@@ -379,9 +373,7 @@ async def update_trigger_endpoint(
             status_code=409,
             detail=f"Cannot {action} trigger {trigger_id}: {result.message}",
         )
-    return TriggerActionResponse(
-        trigger_id=trigger_id, status=action + "d", action=action
-    )
+    return TriggerActionResponse(trigger_id=trigger_id, status=action + "d", action=action)
 
 
 @router.delete("/{trigger_id}", response_model=TriggerActionResponse)
