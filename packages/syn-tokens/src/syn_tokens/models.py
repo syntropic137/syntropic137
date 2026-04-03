@@ -9,10 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 
-class TokenType(str, Enum):
+class TokenType(StrEnum):
     """Type of token being vended."""
 
     ANTHROPIC = "anthropic"
@@ -23,7 +23,7 @@ class TokenType(str, Enum):
     CUSTOM = "custom"
 
 
-class WorkflowType(str, Enum):
+class WorkflowType(StrEnum):
     """Workflow type for budget allocation."""
 
     RESEARCH = "research"

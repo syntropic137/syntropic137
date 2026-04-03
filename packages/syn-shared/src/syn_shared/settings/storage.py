@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import Field, SecretStr, model_validator
@@ -27,7 +27,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _logger = logging.getLogger(__name__)
 
 
-class StorageProvider(str, Enum):
+class StorageProvider(StrEnum):
     """Available storage providers for artifacts.
 
     LOCAL: Filesystem storage (development/testing)

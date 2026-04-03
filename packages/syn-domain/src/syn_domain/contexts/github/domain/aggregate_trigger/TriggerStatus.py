@@ -1,9 +1,9 @@
 """Trigger rule status enum."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class TriggerStatus(str, Enum):
+class TriggerStatus(StrEnum):
     """Status of a trigger rule."""
 
     ACTIVE = "active"

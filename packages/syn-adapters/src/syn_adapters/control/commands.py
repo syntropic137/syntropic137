@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 
-class ControlSignalType(str, Enum):
+class ControlSignalType(StrEnum):
     """Types of control signals."""
 
     PAUSE = "pause"

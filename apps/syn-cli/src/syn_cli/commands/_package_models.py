@@ -7,7 +7,7 @@ resolved workflow payloads, and the local installation registry
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # ---------------------------------------------------------------------------
 
 
-class PackageFormat(str, Enum):
+class PackageFormat(StrEnum):
     """Detected layout of a workflow package directory."""
 
     SINGLE_WORKFLOW = "single"  # workflow.yaml at root

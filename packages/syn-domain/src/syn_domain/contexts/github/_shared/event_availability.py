@@ -30,11 +30,11 @@ References:
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import NamedTuple
 
 
-class DeliveryChannel(str, Enum):
+class DeliveryChannel(StrEnum):
     """How a GitHub event can reach our system."""
 
     WEBHOOK = "webhook"
