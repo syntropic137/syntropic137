@@ -74,7 +74,7 @@ const costCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const days = (parsed.values["days"] as string | undefined) ?? "30";
-    const d = await apiGet<Record<string, unknown>>("/insights/costs", { params: { days } });
+    const d = await apiGet<Record<string, unknown>>("/insights/cost", { params: { days } });
 
     print(style(`Cost Overview (last ${days} days)`, CYAN));
     print(`  ${style("Total cost:", BOLD)}   ${formatCost(String(d["total_cost_usd"] ?? "0"))}`);
@@ -119,30 +119,24 @@ const heatmapCommand: CommandDef = {
     days: { type: "string", short: "d", description: "Number of days to show", default: "14" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const days = (parsed.values["days"] as string | undefined) ?? "14";
-    const d = await apiGet<Record<string, unknown>>("/insights/heatmap", { params: { days } });
+    const numDays = parseInt((parsed.values["days"] as string | undefined) ?? "14", 10);
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - numDays);
+    const fmt = (dt: Date) => dt.toISOString().split("T")[0]!;
 
-    const buckets = (d["buckets"] ?? []) as Record<string, unknown>[];
-    if (buckets.length === 0) { printDim("No activity data."); return; }
+    const d = await apiGet<Record<string, unknown>>("/insights/contribution-heatmap", {
+      params: { start_date: fmt(startDate), end_date: fmt(endDate) },
+    });
 
-    const values = buckets.map((b) => Number(b["count"] ?? 0));
-    print(style(`Activity Heatmap (last ${days} days)`, CYAN));
+    const days = (d["days"] ?? []) as Record<string, unknown>[];
+    if (days.length === 0) { printDim("No activity data."); return; }
+
+    const values = days.map((b) => Number(b["count"] ?? 0));
+    print(style(`Activity Heatmap (last ${numDays} days)`, CYAN));
     print(`  ${renderSparkline(values)}`);
-    print(style(`  ${values.reduce((a, b) => a + b, 0)} total events`, DIM));
-
-    const topRepos = (d["top_repos"] ?? []) as Record<string, unknown>[];
-    if (topRepos.length > 0) {
-      const table = new Table({ title: "Top Repositories" });
-      table.addColumn("Repository", { style: CYAN });
-      table.addColumn("Events", { align: "right" });
-      for (const r of topRepos.slice(0, 5)) {
-        table.addRow(
-          String(r["repo_name"] ?? r["repo_id"] ?? ""),
-          String(r["count"] ?? 0),
-        );
-      }
-      table.print();
-    }
+    const total = Number(d["total"] ?? values.reduce((a, b) => a + b, 0));
+    print(style(`  ${total} total events`, DIM));
   },
 };
 

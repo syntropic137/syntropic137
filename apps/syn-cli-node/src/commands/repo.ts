@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetPaginated, apiPost, apiPut, buildParams } from "../client/api.js";
+import { apiGet, apiGetPaginated, apiPost, buildParams } from "../client/api.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCost, formatDuration, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
@@ -98,7 +98,7 @@ const assignCommand: CommandDef = {
     const id = reqRepoId(parsed);
     const system = parsed.values["system"] as string | undefined;
     if (!system) { printError("Missing --system"); throw new CLIError("Missing option", 1); }
-    await apiPut(`/repos/${id}/assign`, { body: { system_id: system } });
+    await apiPost(`/repos/${id}/assign`, { body: { system_id: system } });
     printSuccess(`Repository ${id} assigned to system ${system}.`);
   },
 };
@@ -156,7 +156,7 @@ const costCommand: CommandDef = {
   args: [{ name: "repo-id", description: "Repository ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqRepoId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/repos/${id}/costs`);
+    const d = await apiGet<Record<string, unknown>>(`/repos/${id}/cost`);
 
     print(`${style("Repository Costs:", BOLD)} ${id}`);
     print(`  Total cost:  ${formatCost(String(d["total_cost_usd"] ?? "0"))}`);

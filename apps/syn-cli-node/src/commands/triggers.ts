@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetPaginated, apiPost, apiDelete, buildParams } from "../client/api.js";
+import { apiGet, apiGetPaginated, apiPost, apiPatch, apiDelete, buildParams } from "../client/api.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { formatCost, formatStatus, formatTimestamp } from "../output/format.js";
@@ -71,7 +71,6 @@ const enablePresetCommand: CommandDef = {
   args: [{ name: "preset", description: "Preset name (self-healing, review-fix)", required: true }],
   options: {
     repo: { type: "string", short: "r", description: "Repository ID" },
-    workflow: { type: "string", short: "w", description: "Workflow ID" },
   },
   handler: async (parsed: ParsedArgs) => {
     const preset = parsed.positionals[0];
@@ -79,11 +78,7 @@ const enablePresetCommand: CommandDef = {
     const repo = parsed.values["repo"] as string | undefined;
     if (!repo) { printError("Missing --repo"); throw new CLIError("Missing option", 1); }
 
-    const body: Record<string, unknown> = { preset, repository: repo };
-    const workflow = parsed.values["workflow"] as string | undefined;
-    if (workflow) body["workflow_id"] = workflow;
-
-    const d = await apiPost<Record<string, unknown>>("/triggers/presets", { body, expected: [200, 201] });
+    const d = await apiPost<Record<string, unknown>>(`/triggers/presets/${encodeURIComponent(preset)}`, { body: { repository: repo }, expected: [200, 201] });
     printSuccess(`Preset "${preset}" enabled: ${d["trigger_id"] ?? ""}`);
   },
 };
@@ -190,7 +185,7 @@ const pauseCommand: CommandDef = {
   args: [{ name: "trigger-id", description: "Trigger ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    await apiPost(`/triggers/${id}/pause`);
+    await apiPatch(`/triggers/${id}`, { body: { action: "pause" } });
     printSuccess(`Trigger ${id} paused.`);
   },
 };
@@ -201,7 +196,7 @@ const resumeCommand: CommandDef = {
   args: [{ name: "trigger-id", description: "Trigger ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    await apiPost(`/triggers/${id}/resume`);
+    await apiPatch(`/triggers/${id}`, { body: { action: "resume" } });
     printSuccess(`Trigger ${id} resumed.`);
   },
 };
@@ -238,8 +233,19 @@ const disableAllCommand: CommandDef = {
       printError(`Use --force to confirm disabling all triggers for repo ${repo}`);
       throw new CLIError("Confirmation required", 1);
     }
-    await apiPost(`/triggers/disable-all`, { body: { repository: repo } });
-    printSuccess(`All triggers disabled for repository ${repo}.`);
+    const triggers = await apiGetPaginated<Record<string, unknown>>("/triggers", "triggers", {
+      params: { repository: repo, status: "active" },
+    });
+    if (triggers.length === 0) { printDim("No active triggers found."); return; }
+    let count = 0;
+    for (const t of triggers) {
+      const tid = String(t["trigger_id"] ?? "");
+      if (tid) {
+        await apiPatch(`/triggers/${tid}`, { body: { action: "pause" } });
+        count++;
+      }
+    }
+    printSuccess(`Disabled ${count} trigger(s) for repository ${repo}.`);
   },
 };
 

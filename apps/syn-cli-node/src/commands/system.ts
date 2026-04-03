@@ -175,7 +175,7 @@ const costCommand: CommandDef = {
   args: [{ name: "system-id", description: "System ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/systems/${id}/costs`);
+    const d = await apiGet<Record<string, unknown>>(`/systems/${id}/cost`);
 
     print(`${style("System Costs:", BOLD)} ${id}`);
     print(`  Total cost:  ${formatCost(String(d["total_cost_usd"] ?? "0"))}`);
