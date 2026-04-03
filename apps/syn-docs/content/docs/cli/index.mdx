@@ -8,10 +8,8 @@ platform from your terminal.
 
 ## Installation
 
-The CLI is included when you install Syntropic137:
-
 ```bash
-uv sync
+npm install -g @syntropic137/cli
 syn --help
 ```
 
@@ -19,33 +17,32 @@ syn --help
 
 | Command | Description |
 |---------|-------------|
-| `syn health` | Check API server health status. |
-| `syn run` | Execute a workflow (shortcut for 'syn workflow run'). |
-| `syn version` | Show version information. |
+| `syn health` | Check API server health status |
+| `syn run` | Execute a workflow (shortcut for 'syn workflow run') |
+| `syn version` | Show version information |
 
 ## Command Groups
 
 | Group | Description |
 |-------|-------------|
-| [`syn agent`](./agent) | AI agent management and testing |
-| [`syn artifacts`](./artifacts) | Browse and retrieve workflow artifacts |
-| [`syn config`](./config) | Configuration management |
-| [`syn control`](./control) | Control running executions |
-| [`syn conversations`](./conversations) | Inspect agent conversation logs |
-| [`syn costs`](./costs) | View cost tracking data for sessions and executions |
-| [`syn events`](./events) | Query domain events and session observability |
-| [`syn execution`](./execution) | List and inspect workflow executions |
-| [`syn insights`](./insights) | Global system insights and cost analysis |
-| [`syn marketplace`](./marketplace) | Manage workflow marketplace registries. |
-| [`syn metrics`](./metrics) | View aggregated workflow and session metrics |
-| [`syn observe`](./observe) | Observability data for sessions — tool timelines and token metrics |
-| [`syn org`](./org) | Manage organizations |
-| [`syn repo`](./repo) | Manage repositories and their observability |
-| [`syn sessions`](./sessions) | View and inspect agent sessions |
-| [`syn system`](./system) | Manage systems and their observability |
-| [`syn triggers`](./triggers) | Manage self-healing trigger rules |
-| [`syn watch`](./watch) | Watch live execution or activity streams |
-| [`syn workflow`](./workflow) | Manage workflows - create, list, run, and inspect |
+| [`syn artifacts`](/docs/cli/artifacts) | Browse and retrieve workflow artifacts |
+| [`syn config`](/docs/cli/config) | CLI configuration |
+| [`syn control`](/docs/cli/control) | Control running executions |
+| [`syn conversations`](/docs/cli/conversations) | Inspect agent conversation logs |
+| [`syn costs`](/docs/cli/costs) | View cost tracking data for sessions and executions |
+| [`syn events`](/docs/cli/events) | Query domain events and session observability |
+| [`syn execution`](/docs/cli/execution) | List and inspect workflow executions |
+| [`syn insights`](/docs/cli/insights) | Global system insights and cost analysis |
+| [`syn marketplace`](/docs/cli/marketplace) | Manage workflow marketplace registries |
+| [`syn metrics`](/docs/cli/metrics) | View aggregated workflow and session metrics |
+| [`syn observe`](/docs/cli/observe) | Session observability — tool timelines and token metrics |
+| [`syn org`](/docs/cli/org) | Manage organizations |
+| [`syn repo`](/docs/cli/repo) | Manage repositories and view observability data |
+| [`syn sessions`](/docs/cli/sessions) | List and inspect agent sessions |
+| [`syn system`](/docs/cli/system) | Manage systems and view system observability |
+| [`syn triggers`](/docs/cli/triggers) | Manage self-healing trigger rules |
+| [`syn watch`](/docs/cli/watch) | Stream live execution events via SSE |
+| [`syn workflow`](/docs/cli/workflow) | Manage workflows - create, list, run, and inspect |
 
 ## Global Options
 

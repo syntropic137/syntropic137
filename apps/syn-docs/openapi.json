@@ -241,6 +241,65 @@
         }
       }
     },
+    "/workflows/{workflow_id}/export": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Export Workflow Endpoint",
+        "description": "Export a workflow as a distributable package or Claude Code plugin.",
+        "operationId": "export_workflow_endpoint_workflows__workflow_id__export_get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "package",
+                "plugin"
+              ],
+              "type": "string",
+              "description": "Export format: 'package' (workflow.yaml + phases) or 'plugin' (full CC plugin)",
+              "default": "package",
+              "title": "Format"
+            },
+            "description": "Export format: 'package' (workflow.yaml + phases) or 'plugin' (full CC plugin)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportManifestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workflows/{workflow_id}/runs": {
       "get": {
         "tags": [
@@ -1297,6 +1356,98 @@
             }
           }
         }
+      },
+      "put": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Update Artifact Endpoint",
+        "description": "Update artifact metadata.",
+        "operationId": "update_artifact_endpoint_artifacts__artifact_id__put",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArtifactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Delete Artifact Endpoint",
+        "description": "Soft-delete an artifact.",
+        "operationId": "delete_artifact_endpoint_artifacts__artifact_id__delete",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/artifacts/{artifact_id}/content": {
@@ -1492,9 +1643,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Tool Timeline Endpoint Observability Sessions  Session Id  Tools Get"
+                  "$ref": "#/components/schemas/ToolTimelineResponse"
                 }
               }
             }
@@ -1547,9 +1696,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Token Metrics Endpoint Observability Sessions  Session Id  Tokens Get"
+                  "$ref": "#/components/schemas/SessionTokenMetrics"
                 }
               }
             }
@@ -2282,9 +2429,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response List Triggers Endpoint Triggers Get"
+                  "$ref": "#/components/schemas/TriggerListResponse"
                 }
               }
             }
@@ -2326,9 +2471,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Register Trigger Endpoint Triggers Post"
+                  "$ref": "#/components/schemas/TriggerActionResponse"
                 }
               }
             }
@@ -2372,9 +2515,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get All History Endpoint Triggers History Get"
+                  "$ref": "#/components/schemas/TriggerHistoryListResponse"
                 }
               }
             }
@@ -2417,9 +2558,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Trigger Endpoint Triggers  Trigger Id  Get"
+                  "$ref": "#/components/schemas/TriggerDetail"
                 }
               }
             }
@@ -2472,9 +2611,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Update Trigger Endpoint Triggers  Trigger Id  Patch"
+                  "$ref": "#/components/schemas/TriggerActionResponse"
                 }
               }
             }
@@ -2515,9 +2652,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Delete Trigger Endpoint Triggers  Trigger Id  Delete"
+                  "$ref": "#/components/schemas/TriggerActionResponse"
                 }
               }
             }
@@ -2570,9 +2705,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Trigger History Endpoint Triggers  Trigger Id  History Get"
+                  "$ref": "#/components/schemas/TriggerHistoryResponse"
                 }
               }
             }
@@ -2627,9 +2760,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Enable Preset Endpoint Triggers Presets  Preset Name  Post"
+                  "$ref": "#/components/schemas/TriggerActionResponse"
                 }
               }
             }
@@ -2792,9 +2923,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Sse Health Sse Health Get"
+                  "$ref": "#/components/schemas/SSEHealthResponse"
                 }
               }
             }
@@ -2816,9 +2945,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response List Organizations Endpoint Organizations Get"
+                  "$ref": "#/components/schemas/OrganizationListResponse"
                 }
               }
             }
@@ -2850,9 +2977,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Create Organization Endpoint Organizations Post"
+                  "$ref": "#/components/schemas/OrganizationActionResponse"
                 }
               }
             }
@@ -2895,9 +3020,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Organization Endpoint Organizations  Organization Id  Get"
+                  "$ref": "#/components/schemas/OrganizationSummaryResponse"
                 }
               }
             }
@@ -2950,9 +3073,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Update Organization Endpoint Organizations  Organization Id  Put"
+                  "$ref": "#/components/schemas/OrganizationActionResponse"
                 }
               }
             }
@@ -2993,9 +3114,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Delete Organization Endpoint Organizations  Organization Id  Delete"
+                  "$ref": "#/components/schemas/OrganizationActionResponse"
                 }
               }
             }
@@ -3039,9 +3158,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Create System Endpoint Systems Post"
+                  "$ref": "#/components/schemas/SystemCreatedResponse"
                 }
               }
             }
@@ -3089,9 +3206,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response List Systems Endpoint Systems Get"
+                  "$ref": "#/components/schemas/SystemListResponse"
                 }
               }
             }
@@ -3134,9 +3249,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get System Endpoint Systems  System Id  Get"
+                  "$ref": "#/components/schemas/SystemSummaryResponse"
                 }
               }
             }
@@ -3189,9 +3302,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Update System Endpoint Systems  System Id  Put"
+                  "$ref": "#/components/schemas/SystemActionResponse"
                 }
               }
             }
@@ -3232,9 +3343,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Delete System Endpoint Systems  System Id  Delete"
+                  "$ref": "#/components/schemas/SystemActionResponse"
                 }
               }
             }
@@ -3277,9 +3386,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get System Status Endpoint Systems  System Id  Status Get"
+                  "$ref": "#/components/schemas/SystemStatusResponse"
                 }
               }
             }
@@ -3322,9 +3429,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get System Cost Endpoint Systems  System Id  Cost Get"
+                  "$ref": "#/components/schemas/SystemCostResponse"
                 }
               }
             }
@@ -3387,9 +3492,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get System Activity Endpoint Systems  System Id  Activity Get"
+                  "$ref": "#/components/schemas/SystemActivityResponse"
                 }
               }
             }
@@ -3432,9 +3535,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get System Patterns Endpoint Systems  System Id  Patterns Get"
+                  "$ref": "#/components/schemas/SystemPatternsResponse"
                 }
               }
             }
@@ -3497,9 +3598,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get System History Endpoint Systems  System Id  History Get"
+                  "$ref": "#/components/schemas/SystemHistoryResponse"
                 }
               }
             }
@@ -3543,9 +3642,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Register Repo Endpoint Repos Post"
+                  "$ref": "#/components/schemas/RepoCreatedResponse"
                 }
               }
             }
@@ -3635,9 +3732,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response List Repos Endpoint Repos Get"
+                  "$ref": "#/components/schemas/RepoListResponse"
                 }
               }
             }
@@ -3680,9 +3775,101 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Repo Endpoint Repos  Repo Id  Get"
+                  "$ref": "#/components/schemas/RepoSummaryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Update Repo Endpoint",
+        "description": "Update mutable fields of a repo.",
+        "operationId": "update_repo_endpoint_repos__repo_id__put",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Deregister Repo Endpoint",
+        "description": "Deregister (soft-delete) a repo.",
+        "operationId": "deregister_repo_endpoint_repos__repo_id__delete",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoActionResponse"
                 }
               }
             }
@@ -3737,9 +3924,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Assign Repo To System Endpoint Repos  Repo Id  Assign Post"
+                  "$ref": "#/components/schemas/RepoActionResponse"
                 }
               }
             }
@@ -3782,9 +3967,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Unassign Repo From System Endpoint Repos  Repo Id  Unassign Post"
+                  "$ref": "#/components/schemas/RepoActionResponse"
                 }
               }
             }
@@ -3827,9 +4010,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Repo Health Endpoint Repos  Repo Id  Health Get"
+                  "$ref": "#/components/schemas/RepoHealthResponse"
                 }
               }
             }
@@ -3872,9 +4053,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Repo Cost Endpoint Repos  Repo Id  Cost Get"
+                  "$ref": "#/components/schemas/RepoCostResponse"
                 }
               }
             }
@@ -3937,9 +4116,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Repo Activity Endpoint Repos  Repo Id  Activity Get"
+                  "$ref": "#/components/schemas/RepoActivityResponse"
                 }
               }
             }
@@ -3992,9 +4169,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Repo Failures Endpoint Repos  Repo Id  Failures Get"
+                  "$ref": "#/components/schemas/RepoFailuresResponse"
                 }
               }
             }
@@ -4047,9 +4222,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Repo Sessions Endpoint Repos  Repo Id  Sessions Get"
+                  "$ref": "#/components/schemas/RepoSessionsResponse"
                 }
               }
             }
@@ -4081,9 +4254,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Get Global Overview Endpoint Insights Overview Get"
+                  "$ref": "#/components/schemas/GlobalOverviewResponse"
                 }
               }
             }
@@ -4105,9 +4276,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Get Global Cost Endpoint Insights Cost Get"
+                  "$ref": "#/components/schemas/GlobalCostResponse"
                 }
               }
             }
@@ -4222,7 +4391,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ContributionHeatmapResponse"
+                }
               }
             }
           },
@@ -4253,9 +4424,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response List Providers Endpoint Agents Providers Get"
+                  "$ref": "#/components/schemas/AgentProviderListResponse"
                 }
               }
             }
@@ -4289,9 +4458,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Test Agent Endpoint Agents Test Post"
+                  "$ref": "#/components/schemas/AgentTestResult"
                 }
               }
             }
@@ -4335,9 +4502,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Chat Endpoint Agents Chat Post"
+                  "$ref": "#/components/schemas/AgentTestResult"
                 }
               }
             }
@@ -4402,6 +4567,109 @@
   },
   "components": {
     "schemas": {
+      "AgentProviderInfo": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "default_model": {
+            "type": "string",
+            "title": "Default Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "display_name",
+          "available",
+          "default_model"
+        ],
+        "title": "AgentProviderInfo",
+        "description": "Information about an available agent provider."
+      },
+      "AgentProviderListResponse": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/AgentProviderInfo"
+            },
+            "type": "array",
+            "title": "Providers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "AgentProviderListResponse",
+        "description": "Paginated list of agent providers."
+      },
+      "AgentTestResult": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "response_text": {
+            "type": "string",
+            "title": "Response Text"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens",
+            "default": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "response_text"
+        ],
+        "title": "AgentTestResult",
+        "description": "Result of testing an agent provider."
+      },
+      "ArtifactActionResponse": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "status"
+        ],
+        "title": "ArtifactActionResponse",
+        "description": "Response for artifact update/delete actions."
+      },
       "ArtifactContentResponse": {
         "properties": {
           "artifact_id": {
@@ -4655,7 +4923,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           }
         },
@@ -4682,6 +4950,56 @@
         "type": "object",
         "title": "CancelRequest",
         "description": "Request to cancel an execution."
+      },
+      "ContributionHeatmapResponse": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "start_date": {
+            "type": "string",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "title": "End Date"
+          },
+          "total": {
+            "type": "number",
+            "title": "Total",
+            "default": 0.0
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/HeatmapDayBucketResponse"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "filter": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Filter"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "start_date",
+          "end_date"
+        ],
+        "title": "ContributionHeatmapResponse",
+        "description": "Contribution heatmap data."
       },
       "ControlResponse": {
         "properties": {
@@ -4981,6 +5299,48 @@
         "title": "ConversationMetadataResponse",
         "description": "Conversation index metadata."
       },
+      "CostOutlierResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id",
+            "default": ""
+          },
+          "repo_full_name": {
+            "type": "string",
+            "title": "Repo Full Name",
+            "default": ""
+          },
+          "workflow_name": {
+            "type": "string",
+            "title": "Workflow Name",
+            "default": ""
+          },
+          "cost_usd": {
+            "type": "string",
+            "title": "Cost Usd",
+            "default": "0"
+          },
+          "median_cost_usd": {
+            "type": "string",
+            "title": "Median Cost Usd",
+            "default": "0"
+          },
+          "deviation_factor": {
+            "type": "number",
+            "title": "Deviation Factor",
+            "default": 0.0
+          },
+          "executed_at": {
+            "type": "string",
+            "title": "Executed At",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "CostOutlierResponse",
+        "description": "An execution with unusually high cost."
+      },
       "CreateArtifactRequest": {
         "properties": {
           "workflow_id": {
@@ -5067,6 +5427,20 @@
       },
       "CreateWorkflowRequest": {
         "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
           "name": {
             "type": "string",
             "title": "Name"
@@ -5102,6 +5476,17 @@
             ],
             "title": "Description"
           },
+          "project_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Name"
+          },
           "phases": {
             "anyOf": [
               {
@@ -5116,6 +5501,21 @@
               }
             ],
             "title": "Phases"
+          },
+          "input_declarations": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Declarations"
           }
         },
         "additionalProperties": false,
@@ -5905,6 +6305,188 @@
         ],
         "title": "ExecutionSummaryResponse"
       },
+      "ExportManifestResponse": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "package",
+              "plugin"
+            ],
+            "title": "Format"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "workflow_name": {
+            "type": "string",
+            "title": "Workflow Name"
+          },
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "format",
+          "workflow_id",
+          "workflow_name",
+          "files"
+        ],
+        "title": "ExportManifestResponse",
+        "description": "Structured export of a workflow as a file manifest.\n\nEach key in ``files`` is a relative path; each value is the file content.\nThe CLI writes these to disk to produce an installable package or plugin."
+      },
+      "FailurePatternResponse": {
+        "properties": {
+          "error_type": {
+            "type": "string",
+            "title": "Error Type",
+            "default": ""
+          },
+          "error_message": {
+            "type": "string",
+            "title": "Error Message",
+            "default": ""
+          },
+          "occurrence_count": {
+            "type": "integer",
+            "title": "Occurrence Count",
+            "default": 0
+          },
+          "affected_repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Affected Repos"
+          },
+          "first_seen": {
+            "type": "string",
+            "title": "First Seen",
+            "default": ""
+          },
+          "last_seen": {
+            "type": "string",
+            "title": "Last Seen",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "FailurePatternResponse",
+        "description": "A recurring failure pattern within a system."
+      },
+      "GlobalCostResponse": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id",
+            "default": ""
+          },
+          "system_name": {
+            "type": "string",
+            "title": "System Name",
+            "default": ""
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id",
+            "default": ""
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "title": "Total Cost Usd",
+            "default": "0"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          },
+          "total_input_tokens": {
+            "type": "integer",
+            "title": "Total Input Tokens",
+            "default": 0
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "title": "Total Output Tokens",
+            "default": 0
+          },
+          "cost_by_repo": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Repo"
+          },
+          "cost_by_workflow": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Workflow"
+          },
+          "cost_by_model": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Model"
+          },
+          "execution_count": {
+            "type": "integer",
+            "title": "Execution Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "GlobalCostResponse",
+        "description": "Global cost breakdown across all repos."
+      },
+      "GlobalOverviewResponse": {
+        "properties": {
+          "total_systems": {
+            "type": "integer",
+            "title": "Total Systems",
+            "default": 0
+          },
+          "total_repos": {
+            "type": "integer",
+            "title": "Total Repos",
+            "default": 0
+          },
+          "unassigned_repos": {
+            "type": "integer",
+            "title": "Unassigned Repos",
+            "default": 0
+          },
+          "total_active_executions": {
+            "type": "integer",
+            "title": "Total Active Executions",
+            "default": 0
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "title": "Total Cost Usd",
+            "default": "0"
+          },
+          "systems": {
+            "items": {
+              "$ref": "#/components/schemas/SystemOverviewEntryResponse"
+            },
+            "type": "array",
+            "title": "Systems"
+          }
+        },
+        "type": "object",
+        "title": "GlobalOverviewResponse",
+        "description": "Global overview of all systems and repos."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -5917,6 +6499,32 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HeatmapDayBucketResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "count": {
+            "type": "number",
+            "title": "Count",
+            "default": 0.0
+          },
+          "breakdown": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Breakdown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date"
+        ],
+        "title": "HeatmapDayBucketResponse",
+        "description": "Single day's aggregated activity."
       },
       "InjectRequest": {
         "properties": {
@@ -6251,6 +6859,119 @@
         "title": "OperationInfo",
         "description": "Information about a session operation."
       },
+      "OrganizationActionResponse": {
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "organization_id",
+          "status"
+        ],
+        "title": "OrganizationActionResponse",
+        "description": "Response for organization create/update/delete actions."
+      },
+      "OrganizationListResponse": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "organizations": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationSummaryResponse"
+            },
+            "type": "array",
+            "title": "Organizations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "OrganizationListResponse",
+        "description": "Paginated list of organizations."
+      },
+      "OrganizationSummaryResponse": {
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": ""
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "system_count": {
+            "type": "integer",
+            "title": "System Count",
+            "default": 0
+          },
+          "repo_count": {
+            "type": "integer",
+            "title": "Repo Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "organization_id",
+          "name",
+          "slug"
+        ],
+        "title": "OrganizationSummaryResponse",
+        "description": "Summary of an organization for list views."
+      },
       "PauseRequest": {
         "properties": {
           "reason": {
@@ -6574,6 +7295,570 @@
           "operation_type"
         ],
         "title": "PhaseOperationInfo"
+      },
+      "RepoActionResponse": {
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "title": "Repo Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "system_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo_id",
+          "status"
+        ],
+        "title": "RepoActionResponse",
+        "description": "Response for repo mutation actions (update, deregister, assign, unassign)."
+      },
+      "RepoActivityEntryResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id",
+            "default": ""
+          },
+          "workflow_name": {
+            "type": "string",
+            "title": "Workflow Name",
+            "default": ""
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": ""
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "duration_seconds": {
+            "type": "number",
+            "title": "Duration Seconds",
+            "default": 0.0
+          },
+          "trigger_source": {
+            "type": "string",
+            "title": "Trigger Source",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id"
+        ],
+        "title": "RepoActivityEntryResponse",
+        "description": "Single entry in a repo's execution timeline."
+      },
+      "RepoActivityResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RepoActivityEntryResponse"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "RepoActivityResponse",
+        "description": "Paginated list of repo activity entries."
+      },
+      "RepoCostResponse": {
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "title": "Repo Id",
+            "default": ""
+          },
+          "repo_full_name": {
+            "type": "string",
+            "title": "Repo Full Name",
+            "default": ""
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "title": "Total Cost Usd",
+            "default": "0"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          },
+          "total_input_tokens": {
+            "type": "integer",
+            "title": "Total Input Tokens",
+            "default": 0
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "title": "Total Output Tokens",
+            "default": 0
+          },
+          "cost_by_workflow": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Workflow"
+          },
+          "cost_by_model": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Model"
+          },
+          "execution_count": {
+            "type": "integer",
+            "title": "Execution Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "RepoCostResponse",
+        "description": "Per-repo cost breakdown by workflow and model."
+      },
+      "RepoCreatedResponse": {
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "title": "Repo Id"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo_id",
+          "full_name"
+        ],
+        "title": "RepoCreatedResponse",
+        "description": "Response after registering a new repo."
+      },
+      "RepoFailureEntryResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id",
+            "default": ""
+          },
+          "workflow_name": {
+            "type": "string",
+            "title": "Workflow Name",
+            "default": ""
+          },
+          "failed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At"
+          },
+          "error_message": {
+            "type": "string",
+            "title": "Error Message",
+            "default": ""
+          },
+          "error_type": {
+            "type": "string",
+            "title": "Error Type",
+            "default": ""
+          },
+          "phase_name": {
+            "type": "string",
+            "title": "Phase Name",
+            "default": ""
+          },
+          "conversation_tail": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Conversation Tail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id"
+        ],
+        "title": "RepoFailureEntryResponse",
+        "description": "A failed execution record for a repository."
+      },
+      "RepoFailuresResponse": {
+        "properties": {
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/RepoFailureEntryResponse"
+            },
+            "type": "array",
+            "title": "Failures"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "RepoFailuresResponse",
+        "description": "Paginated list of repo failure entries."
+      },
+      "RepoHealthResponse": {
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "title": "Repo Id",
+            "default": ""
+          },
+          "repo_full_name": {
+            "type": "string",
+            "title": "Repo Full Name",
+            "default": ""
+          },
+          "total_executions": {
+            "type": "integer",
+            "title": "Total Executions",
+            "default": 0
+          },
+          "successful_executions": {
+            "type": "integer",
+            "title": "Successful Executions",
+            "default": 0
+          },
+          "failed_executions": {
+            "type": "integer",
+            "title": "Failed Executions",
+            "default": 0
+          },
+          "success_rate": {
+            "type": "number",
+            "title": "Success Rate",
+            "default": 0.0
+          },
+          "trend": {
+            "type": "string",
+            "title": "Trend",
+            "default": "stable"
+          },
+          "window_cost_usd": {
+            "type": "string",
+            "title": "Window Cost Usd",
+            "default": "0"
+          },
+          "window_tokens": {
+            "type": "integer",
+            "title": "Window Tokens",
+            "default": 0
+          },
+          "last_execution_at": {
+            "type": "string",
+            "title": "Last Execution At",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "RepoHealthResponse",
+        "description": "Per-repo health snapshot with success rate, trend, and windowed costs."
+      },
+      "RepoListResponse": {
+        "properties": {
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/RepoSummaryResponse"
+            },
+            "type": "array",
+            "title": "Repos"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "RepoListResponse",
+        "description": "Paginated list of repos."
+      },
+      "RepoSessionEntryResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "agent_type": {
+            "type": "string",
+            "title": "Agent Type",
+            "default": ""
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "title": "Total Cost Usd",
+            "default": "0"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "execution_id",
+          "status"
+        ],
+        "title": "RepoSessionEntryResponse",
+        "description": "Lightweight session record for repo insight views."
+      },
+      "RepoSessionsResponse": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/RepoSessionEntryResponse"
+            },
+            "type": "array",
+            "title": "Sessions"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "RepoSessionsResponse",
+        "description": "Paginated list of repo session entries."
+      },
+      "RepoStatusEntryResponse": {
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "title": "Repo Id",
+            "default": ""
+          },
+          "repo_full_name": {
+            "type": "string",
+            "title": "Repo Full Name",
+            "default": ""
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "inactive"
+          },
+          "success_rate": {
+            "type": "number",
+            "title": "Success Rate",
+            "default": 0.0
+          },
+          "active_executions": {
+            "type": "integer",
+            "title": "Active Executions",
+            "default": 0
+          },
+          "last_execution_at": {
+            "type": "string",
+            "title": "Last Execution At",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "RepoStatusEntryResponse",
+        "description": "Health status for a single repo within a system."
+      },
+      "RepoSummaryResponse": {
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "title": "Repo Id"
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "system_id": {
+            "type": "string",
+            "title": "System Id",
+            "default": ""
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "default": "github"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name",
+            "default": ""
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner",
+            "default": ""
+          },
+          "default_branch": {
+            "type": "string",
+            "title": "Default Branch",
+            "default": "main"
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id",
+            "default": ""
+          },
+          "is_private": {
+            "type": "boolean",
+            "title": "Is Private",
+            "default": false
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": ""
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo_id",
+          "organization_id"
+        ],
+        "title": "RepoSummaryResponse",
+        "description": "Summary of a repo for list views."
+      },
+      "SSEHealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "active_executions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Executions"
+          },
+          "active_connections": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Connections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "SSEHealthResponse",
+        "description": "Health status of the SSE subsystem."
       },
       "SessionCostResponse": {
         "properties": {
@@ -7044,6 +8329,50 @@
         "title": "SessionSummaryResponse",
         "description": "Summary of an agent session."
       },
+      "SessionTokenMetrics": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens",
+            "default": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens",
+            "default": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "title": "Total Cost Usd",
+            "default": "0"
+          },
+          "cache_creation_tokens": {
+            "type": "integer",
+            "title": "Cache Creation Tokens",
+            "default": 0
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "SessionTokenMetrics",
+        "description": "Token usage metrics for a session."
+      },
       "StateResponse": {
         "properties": {
           "execution_id": {
@@ -7062,6 +8391,357 @@
         ],
         "title": "StateResponse",
         "description": "Response with execution state."
+      },
+      "SystemActionResponse": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "system_id",
+          "status"
+        ],
+        "title": "SystemActionResponse",
+        "description": "Response for system mutation actions (update, delete)."
+      },
+      "SystemActivityResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RepoActivityEntryResponse"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "SystemActivityResponse",
+        "description": "Paginated list of system activity entries."
+      },
+      "SystemCostResponse": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id",
+            "default": ""
+          },
+          "system_name": {
+            "type": "string",
+            "title": "System Name",
+            "default": ""
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id",
+            "default": ""
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "title": "Total Cost Usd",
+            "default": "0"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          },
+          "total_input_tokens": {
+            "type": "integer",
+            "title": "Total Input Tokens",
+            "default": 0
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "title": "Total Output Tokens",
+            "default": 0
+          },
+          "cost_by_repo": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Repo"
+          },
+          "cost_by_workflow": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Workflow"
+          },
+          "cost_by_model": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Model"
+          },
+          "execution_count": {
+            "type": "integer",
+            "title": "Execution Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "SystemCostResponse",
+        "description": "System-wide cost breakdown by repo, workflow, and model."
+      },
+      "SystemCreatedResponse": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "system_id",
+          "name"
+        ],
+        "title": "SystemCreatedResponse",
+        "description": "Response after creating a new system."
+      },
+      "SystemHistoryResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RepoActivityEntryResponse"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "SystemHistoryResponse",
+        "description": "Paginated list of system history entries."
+      },
+      "SystemListResponse": {
+        "properties": {
+          "systems": {
+            "items": {
+              "$ref": "#/components/schemas/SystemSummaryResponse"
+            },
+            "type": "array",
+            "title": "Systems"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "SystemListResponse",
+        "description": "Paginated list of systems."
+      },
+      "SystemOverviewEntryResponse": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id",
+            "default": ""
+          },
+          "system_name": {
+            "type": "string",
+            "title": "System Name",
+            "default": ""
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id",
+            "default": ""
+          },
+          "organization_name": {
+            "type": "string",
+            "title": "Organization Name",
+            "default": ""
+          },
+          "repo_count": {
+            "type": "integer",
+            "title": "Repo Count",
+            "default": 0
+          },
+          "overall_status": {
+            "type": "string",
+            "title": "Overall Status",
+            "default": "healthy"
+          },
+          "active_executions": {
+            "type": "integer",
+            "title": "Active Executions",
+            "default": 0
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "title": "Total Cost Usd",
+            "default": "0"
+          }
+        },
+        "type": "object",
+        "title": "SystemOverviewEntryResponse",
+        "description": "Summary of a single system for global overview."
+      },
+      "SystemPatternsResponse": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id",
+            "default": ""
+          },
+          "system_name": {
+            "type": "string",
+            "title": "System Name",
+            "default": ""
+          },
+          "failure_patterns": {
+            "items": {
+              "$ref": "#/components/schemas/FailurePatternResponse"
+            },
+            "type": "array",
+            "title": "Failure Patterns"
+          },
+          "cost_outliers": {
+            "items": {
+              "$ref": "#/components/schemas/CostOutlierResponse"
+            },
+            "type": "array",
+            "title": "Cost Outliers"
+          },
+          "analysis_window_hours": {
+            "type": "integer",
+            "title": "Analysis Window Hours",
+            "default": 168
+          }
+        },
+        "type": "object",
+        "title": "SystemPatternsResponse",
+        "description": "Recurring failure and cost patterns within a system."
+      },
+      "SystemStatusResponse": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id",
+            "default": ""
+          },
+          "system_name": {
+            "type": "string",
+            "title": "System Name",
+            "default": ""
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id",
+            "default": ""
+          },
+          "overall_status": {
+            "type": "string",
+            "title": "Overall Status",
+            "default": "healthy"
+          },
+          "total_repos": {
+            "type": "integer",
+            "title": "Total Repos",
+            "default": 0
+          },
+          "healthy_repos": {
+            "type": "integer",
+            "title": "Healthy Repos",
+            "default": 0
+          },
+          "degraded_repos": {
+            "type": "integer",
+            "title": "Degraded Repos",
+            "default": 0
+          },
+          "failing_repos": {
+            "type": "integer",
+            "title": "Failing Repos",
+            "default": 0
+          },
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/RepoStatusEntryResponse"
+            },
+            "type": "array",
+            "title": "Repos"
+          }
+        },
+        "type": "object",
+        "title": "SystemStatusResponse",
+        "description": "Cross-repo health overview within a system."
+      },
+      "SystemSummaryResponse": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id"
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": ""
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "repo_count": {
+            "type": "integer",
+            "title": "Repo Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "system_id",
+          "organization_id",
+          "name"
+        ],
+        "title": "SystemSummaryResponse",
+        "description": "Summary of a system for list views."
       },
       "TimelineEntryResponse": {
         "properties": {
@@ -7152,6 +8832,515 @@
         ],
         "title": "ToolSummary",
         "description": "Tool usage summary."
+      },
+      "ToolTimelineEntry": {
+        "properties": {
+          "observation_id": {
+            "type": "string",
+            "title": "Observation Id",
+            "default": ""
+          },
+          "operation_type": {
+            "type": "string",
+            "title": "Operation Type",
+            "default": ""
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Name"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "success": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success"
+          }
+        },
+        "type": "object",
+        "title": "ToolTimelineEntry",
+        "description": "Single entry in a tool execution timeline."
+      },
+      "ToolTimelineResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "total_executions": {
+            "type": "integer",
+            "title": "Total Executions",
+            "default": 0
+          },
+          "executions": {
+            "items": {
+              "$ref": "#/components/schemas/ToolTimelineEntry"
+            },
+            "type": "array",
+            "title": "Executions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "ToolTimelineResponse",
+        "description": "Tool execution timeline for a session."
+      },
+      "TriggerActionResponse": {
+        "properties": {
+          "trigger_id": {
+            "type": "string",
+            "title": "Trigger Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trigger_id",
+          "status"
+        ],
+        "title": "TriggerActionResponse",
+        "description": "Response for trigger create/update/delete actions."
+      },
+      "TriggerDetail": {
+        "properties": {
+          "trigger_id": {
+            "type": "string",
+            "title": "Trigger Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "fire_count": {
+            "type": "integer",
+            "title": "Fire Count",
+            "default": 0
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "conditions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Conditions"
+          },
+          "input_mapping": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Input Mapping"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id",
+            "default": ""
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": ""
+          },
+          "last_fired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Fired At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trigger_id",
+          "name",
+          "event",
+          "repository",
+          "workflow_id",
+          "status"
+        ],
+        "title": "TriggerDetail",
+        "description": "Detailed trigger rule response."
+      },
+      "TriggerHistoryEntryResponse": {
+        "properties": {
+          "fired_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fired At"
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id",
+            "default": ""
+          },
+          "webhook_delivery_id": {
+            "type": "string",
+            "title": "Webhook Delivery Id",
+            "default": ""
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "default": ""
+          },
+          "pr_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Number"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "dispatched"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "title": "TriggerHistoryEntryResponse",
+        "description": "Single entry in a trigger-specific history response."
+      },
+      "TriggerHistoryListEntry": {
+        "properties": {
+          "trigger_id": {
+            "type": "string",
+            "title": "Trigger Id"
+          },
+          "fired_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fired At"
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id",
+            "default": ""
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "default": ""
+          },
+          "pr_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Number"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "dispatched"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trigger_id"
+        ],
+        "title": "TriggerHistoryListEntry",
+        "description": "Entry in a cross-trigger history listing."
+      },
+      "TriggerHistoryListResponse": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TriggerHistoryListEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "TriggerHistoryListResponse",
+        "description": "Paginated list of trigger history entries (global)."
+      },
+      "TriggerHistoryResponse": {
+        "properties": {
+          "trigger_id": {
+            "type": "string",
+            "title": "Trigger Id"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TriggerHistoryEntryResponse"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trigger_id"
+        ],
+        "title": "TriggerHistoryResponse",
+        "description": "History entries for a specific trigger."
+      },
+      "TriggerListResponse": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "triggers": {
+            "items": {
+              "$ref": "#/components/schemas/TriggerSummary"
+            },
+            "type": "array",
+            "title": "Triggers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "TriggerListResponse",
+        "description": "Paginated list of trigger summaries."
+      },
+      "TriggerSummary": {
+        "properties": {
+          "trigger_id": {
+            "type": "string",
+            "title": "Trigger Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "fire_count": {
+            "type": "integer",
+            "title": "Fire Count",
+            "default": 0
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trigger_id",
+          "name",
+          "event",
+          "repository",
+          "workflow_id",
+          "status"
+        ],
+        "title": "TriggerSummary",
+        "description": "Summary of a trigger rule for list views."
+      },
+      "UpdateArtifactRequest": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "is_primary_deliverable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Primary Deliverable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateArtifactRequest"
       },
       "UpdatePhasePromptRequest": {
         "properties": {
@@ -7322,6 +9511,13 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",

@@ -4,19 +4,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
-    EvaluateWebhookHandler,
+from syn_domain.contexts.github._shared.trigger_evaluation_types import (
     TriggerDeferredResult,
     TriggerMatchResult,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
-    from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
-    from syn_domain.contexts.github.slices.evaluate_webhook.debouncer import TriggerDebouncer
+    from syn_domain.contexts.github._shared.trigger_evaluator import TriggerEvaluator
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
 
@@ -51,18 +47,10 @@ class EventPipeline:
     def __init__(
         self,
         dedup: DedupPort,
-        trigger_store: TriggerQueryStore,
-        trigger_repo: object,
-        debouncer: TriggerDebouncer | None = None,
-        on_fire: Callable[[Any, dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
+        evaluator: TriggerEvaluator,
     ) -> None:
         self._dedup = dedup
-        self._handler = EvaluateWebhookHandler(
-            store=trigger_store,
-            repository=trigger_repo,
-            debouncer=debouncer,
-            on_fire=on_fire,
-        )
+        self._evaluator = evaluator
 
     async def ingest(self, event: NormalizedEvent) -> PipelineResult:
         """Process a normalized event through dedup and trigger evaluation.
@@ -92,7 +80,7 @@ class EventPipeline:
         payload = {**event.payload, "_delivery_id": event.delivery_id}
 
         # 3. Evaluate triggers
-        results = await self._handler.evaluate(
+        results = await self._evaluator.evaluate(
             event=compound_event,
             repository=event.repository,
             installation_id=event.installation_id,

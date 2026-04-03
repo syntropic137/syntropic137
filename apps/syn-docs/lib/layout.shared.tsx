@@ -1,5 +1,6 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 import Image from 'next/image';
+import packageJson from '../package.json';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -23,7 +24,12 @@ export function baseOptions(): BaseLayoutProps {
         </div>
       ),
     },
-    links: [],
+    links: [
+      {
+        text: `v${packageJson.version}`,
+        url: `https://github.com/syntropic137/syntropic137/releases/tag/v${packageJson.version}`,
+      },
+    ],
     githubUrl: 'https://github.com/syntropic137/syntropic137',
   };
 }

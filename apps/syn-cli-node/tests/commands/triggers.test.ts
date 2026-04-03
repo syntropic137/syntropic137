@@ -48,9 +48,9 @@ describe("triggers commands", () => {
 
   it("list shows triggers table", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse([
-        { trigger_id: "trig-1", event_type: "push", repo_id: "r1", workflow_id: "w1", status: "active", fire_count: 3 },
-      ]),
+      jsonResponse({ triggers: [
+        { trigger_id: "trig-1", event: "push", repository: "r1", workflow_id: "w1", status: "active", fire_count: 3 },
+      ], total: 1 }),
     );
     await triggersGroup.getCommand("list")!.handler({ positionals: [], values: {} });
     expect(stdout()).toContain("trig-1");
@@ -60,8 +60,8 @@ describe("triggers commands", () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
         trigger_id: "trig-1",
-        event_type: "push",
-        repo_id: "r1",
+        event: "push",
+        repository: "r1",
         workflow_id: "w1",
         status: "active",
         fire_count: 5,

@@ -7,7 +7,7 @@ Each variable has a description explaining its purpose and where to get it.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated
 
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     )
 
 
-class AppEnvironment(str, Enum):
+class AppEnvironment(StrEnum):
     """Application environment."""
 
     DEVELOPMENT = "development"

@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from syn_api.types import (
     AgentError,
     AgentProviderInfo,
+    AgentProviderListResponse,
     AgentTestResult,
     Err,
     Ok,
@@ -222,22 +223,22 @@ async def chat(
 # =============================================================================
 
 
-@router.get("/providers")
-async def list_providers_endpoint() -> dict[str, Any]:
+@router.get("/providers", response_model=AgentProviderListResponse)
+async def list_providers_endpoint() -> AgentProviderListResponse:
     """List available agent providers."""
     result = await list_providers()
 
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    return {
-        "providers": [p.model_dump() for p in result.value],
-        "total": len(result.value),
-    }
+    return AgentProviderListResponse(
+        providers=result.value,
+        total=len(result.value),
+    )
 
 
 @router.post("/test")
-async def test_agent_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+async def test_agent_endpoint(body: dict[str, Any]) -> AgentTestResult:
     """Test an agent provider with a simple prompt."""
     try:
         result = await test_agent(
@@ -252,11 +253,11 @@ async def test_agent_endpoint(body: dict[str, Any]) -> dict[str, Any]:
         status = 400 if result.error == AgentError.PROVIDER_NOT_FOUND else 502
         raise HTTPException(status_code=status, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value
 
 
 @router.post("/chat")
-async def chat_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+async def chat_endpoint(body: dict[str, Any]) -> AgentTestResult:
     """Send a stateless chat completion request."""
     try:
         result = await chat(
@@ -271,4 +272,4 @@ async def chat_endpoint(body: dict[str, Any]) -> dict[str, Any]:
         status = 400 if result.error == AgentError.PROVIDER_NOT_FOUND else 502
         raise HTTPException(status_code=status, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value

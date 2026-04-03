@@ -43,7 +43,7 @@ describe("system commands", () => {
 
   it("list shows systems", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse([{ system_id: "sys-1", name: "Backend", repo_count: 3, status: "active" }]),
+      jsonResponse({ systems: [{ system_id: "sys-1", name: "Backend", repo_count: 3, organization_id: "org-1" }], total: 1 }),
     );
     await systemGroup.getCommand("list")!.handler({ positionals: [], values: {} });
     expect(stdout()).toContain("Backend");

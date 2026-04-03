@@ -63,6 +63,37 @@ Treat Python like TypeScript. Strict type safety everywhere.
 - **No string-keyed lookups** when attribute access is possible
 - **Pydantic** for all API boundaries, configs, and domain events (`frozen=True`, `extra="forbid"`)
 - **All public interfaces fully typed** — no implicit signatures
+- **API routes MUST use Pydantic response models** — never `-> dict[str, Any]`. FastAPI generates the OpenAPI spec from return type annotations. Untyped routes are invisible to the spec, which breaks the CLI type generation pipeline (`openAPI spec → openapi-typescript → CLI types`). Always define a response model and use it: `async def list_foos() -> FooListResponse:`
+
+### API → CLI Type Pipeline
+
+Single source of truth for the API contract, fully automated:
+
+```
+Pydantic models (syn-api/types.py)
+  → FastAPI generates OpenAPI spec (/openapi.json)
+    → openapi-typescript generates TypeScript types (syn-cli-node/src/generated/api-types.ts)
+      → CLI commands use typed client (compile-time path + response validation)
+```
+
+**Key files:**
+- `apps/syn-api/src/syn_api/types.py` — All response/request models (single source)
+- `apps/syn-cli-node/src/generated/api-types.ts` — Auto-generated, never hand-edit
+- `apps/syn-cli-node/scripts/generate-types.ts` — Regeneration script
+- `apps/syn-cli-node/scripts/check-api-drift.ts` — CI drift detection
+
+**Workflow — adding/changing an endpoint:**
+1. Define Pydantic response model in `apps/syn-api/src/syn_api/types.py`
+2. Use it as the route return type: `async def list_foos() -> FooListResponse:`
+3. Regenerate OpenAPI spec: start API, fetch `/openapi.json` → `apps/syn-docs/openapi.json`
+4. Regenerate CLI types: `pnpm --filter @syntropic137/cli generate:types`
+5. Use the typed client in CLI commands: `import { api } from "../client/typed.js";`
+
+**Rules:**
+- CLI field names MUST match API response model field names exactly — never use legacy/alias names
+- Domain model field names (e.g. `event`, `repository`) flow through to API responses and CLI — keep them consistent across all three layers
+- CI `check:api-drift` fails if generated types are stale
+- New CLI commands SHOULD use the typed client (`api.GET`, `api.POST`) — existing commands are being migrated incrementally
 
 ### Bounded Contexts & Aggregates (ADR-020)
 

@@ -1,6 +1,6 @@
 {
   "name": "@syntropic137/cli",
-  "version": "0.19.7",
+  "version": "0.20.0",
   "description": "Syntropic137 CLI - Event-sourced workflow engine for AI agents",
   "type": "module",
   "bin": {
@@ -18,9 +18,11 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "generate:types": "tsx scripts/generate-types.ts",
-    "check:api-drift": "tsx scripts/check-api-drift.ts"
+    "check:api-drift": "tsx scripts/check-api-drift.ts",
+    "generate:docs": "tsx scripts/generate-cli-docs.ts"
   },
   "dependencies": {
+    "openapi-fetch": "^0.17.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

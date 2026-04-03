@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class SessionStatus(str, Enum):
+class SessionStatus(StrEnum):
     """Status of an agent session."""
 
     RUNNING = "running"
@@ -18,7 +18,7 @@ class SessionStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class OperationType(str, Enum):
+class OperationType(StrEnum):
     """Type of operation recorded in a session.
 
     Operations track granular activities within an agent session.

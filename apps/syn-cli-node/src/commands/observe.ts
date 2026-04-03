@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList } from "../client/api.js";
+import { apiGet, apiGetPaginated } from "../client/api.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED } from "../output/ansi.js";
 import { formatCost, formatDuration, formatTimestamp } from "../output/format.js";
@@ -27,7 +27,7 @@ const toolTimelineCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const sid = reqSessionId(parsed);
     const limit = (parsed.values["limit"] as string | undefined) ?? "100";
-    const entries = await apiGetList<Record<string, unknown>>(`/observe/sessions/${sid}/tools`, { params: { limit } });
+    const entries = await apiGetPaginated<Record<string, unknown>>(`/observability/sessions/${sid}/tools`, "executions", { params: { limit } });
     if (entries.length === 0) { printDim("No tool timeline entries."); return; }
 
     const table = new Table({ title: `Tool Timeline: ${sid.slice(0, 12)}` });
@@ -56,7 +56,7 @@ const tokenMetricsCommand: CommandDef = {
   args: [{ name: "session-id", description: "Session ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const sid = reqSessionId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/observe/sessions/${sid}/tokens`);
+    const d = await apiGet<Record<string, unknown>>(`/observability/sessions/${sid}/tokens`);
 
     print(`${style("Token Metrics:", BOLD)} ${d["session_id"] ?? sid}`);
     print(`  Input tokens:       ${Number(d["input_tokens"] ?? 0).toLocaleString()}`);

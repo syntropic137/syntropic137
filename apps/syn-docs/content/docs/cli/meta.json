@@ -3,7 +3,6 @@
   "root": true,
   "pages": [
     "index",
-    "agent",
     "artifacts",
     "config",
     "control",

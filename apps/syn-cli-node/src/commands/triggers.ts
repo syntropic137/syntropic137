@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList, apiPost, apiDelete, buildParams } from "../client/api.js";
+import { apiGet, apiGetPaginated, apiPost, apiPatch, apiDelete, buildParams } from "../client/api.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { formatCost, formatStatus, formatTimestamp } from "../output/format.js";
@@ -49,9 +49,10 @@ const registerCommand: CommandDef = {
     const conditions = conditionStrs.length > 0 ? parseConditions(conditionStrs) : [];
 
     const body: Record<string, unknown> = {
-      repo_id: repo,
+      name: `${event} → ${workflow}`,
+      repository: repo,
       workflow_id: workflow,
-      event_type: event,
+      event: event,
       conditions,
       max_fires_per_period: parseInt((parsed.values["max-fires"] as string | undefined) ?? "5", 10),
       cooldown_seconds: parseInt((parsed.values["cooldown"] as string | undefined) ?? "300", 10),
@@ -70,7 +71,6 @@ const enablePresetCommand: CommandDef = {
   args: [{ name: "preset", description: "Preset name (self-healing, review-fix)", required: true }],
   options: {
     repo: { type: "string", short: "r", description: "Repository ID" },
-    workflow: { type: "string", short: "w", description: "Workflow ID" },
   },
   handler: async (parsed: ParsedArgs) => {
     const preset = parsed.positionals[0];
@@ -78,11 +78,7 @@ const enablePresetCommand: CommandDef = {
     const repo = parsed.values["repo"] as string | undefined;
     if (!repo) { printError("Missing --repo"); throw new CLIError("Missing option", 1); }
 
-    const body: Record<string, unknown> = { preset, repo_id: repo };
-    const workflow = parsed.values["workflow"] as string | undefined;
-    if (workflow) body["workflow_id"] = workflow;
-
-    const d = await apiPost<Record<string, unknown>>("/triggers/presets", { body, expected: [200, 201] });
+    const d = await apiPost<Record<string, unknown>>(`/triggers/presets/${encodeURIComponent(preset)}`, { body: { repository: repo }, expected: [200, 201] });
     printSuccess(`Preset "${preset}" enabled: ${d["trigger_id"] ?? ""}`);
   },
 };
@@ -96,10 +92,10 @@ const listCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const params = buildParams({
-      repo_id: (parsed.values["repo"] as string | undefined) ?? null,
+      repository: (parsed.values["repo"] as string | undefined) ?? null,
       status: (parsed.values["status"] as string | undefined) ?? null,
     });
-    const items = await apiGetList<Record<string, unknown>>("/triggers", { params });
+    const items = await apiGetPaginated<Record<string, unknown>>("/triggers", "triggers", { params });
     if (items.length === 0) { printDim("No triggers found."); return; }
 
     const table = new Table({ title: "Triggers" });
@@ -113,8 +109,8 @@ const listCommand: CommandDef = {
     for (const t of items) {
       table.addRow(
         String(t["trigger_id"] ?? "").slice(0, 12),
-        String(t["event_type"] ?? ""),
-        String(t["repo_id"] ?? "").slice(0, 12),
+        String(t["event"] ?? ""),
+        String(t["repository"] ?? "").slice(0, 12),
         String(t["workflow_id"] ?? "").slice(0, 12),
         formatStatus(String(t["status"] ?? "")),
         String(t["fire_count"] ?? 0),
@@ -133,8 +129,8 @@ const showCommand: CommandDef = {
     const d = await apiGet<Record<string, unknown>>(`/triggers/${id}`);
 
     print(`${style("Trigger:", BOLD)} ${d["trigger_id"] ?? id}`);
-    print(`  Event:      ${d["event_type"] ?? ""}`);
-    print(`  Repo:       ${d["repo_id"] ?? ""}`);
+    print(`  Event:      ${d["event"] ?? ""}`);
+    print(`  Repo:       ${d["repository"] ?? ""}`);
     print(`  Workflow:   ${d["workflow_id"] ?? ""}`);
     print(`  Status:     ${formatStatus(String(d["status"] ?? ""))}`);
     print(`  Fires:      ${d["fire_count"] ?? 0} / max ${d["max_fires_per_period"] ?? "\u2014"}`);
@@ -162,7 +158,7 @@ const historyCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
     const limit = (parsed.values["limit"] as string | undefined) ?? "20";
-    const items = await apiGetList<Record<string, unknown>>(`/triggers/${id}/history`, { params: { limit } });
+    const items = await apiGetPaginated<Record<string, unknown>>(`/triggers/${id}/history`, "entries", { params: { limit } });
     if (items.length === 0) { printDim("No trigger history."); return; }
 
     const table = new Table({ title: `Trigger History: ${id.slice(0, 12)}` });
@@ -189,7 +185,7 @@ const pauseCommand: CommandDef = {
   args: [{ name: "trigger-id", description: "Trigger ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    await apiPost(`/triggers/${id}/pause`);
+    await apiPatch(`/triggers/${id}`, { body: { action: "pause" } });
     printSuccess(`Trigger ${id} paused.`);
   },
 };
@@ -200,7 +196,7 @@ const resumeCommand: CommandDef = {
   args: [{ name: "trigger-id", description: "Trigger ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    await apiPost(`/triggers/${id}/resume`);
+    await apiPatch(`/triggers/${id}`, { body: { action: "resume" } });
     printSuccess(`Trigger ${id} resumed.`);
   },
 };
@@ -237,8 +233,19 @@ const disableAllCommand: CommandDef = {
       printError(`Use --force to confirm disabling all triggers for repo ${repo}`);
       throw new CLIError("Confirmation required", 1);
     }
-    await apiPost(`/triggers/disable-all`, { body: { repo_id: repo } });
-    printSuccess(`All triggers disabled for repository ${repo}.`);
+    const triggers = await apiGetPaginated<Record<string, unknown>>("/triggers", "triggers", {
+      params: { repository: repo, status: "active" },
+    });
+    if (triggers.length === 0) { printDim("No active triggers found."); return; }
+    let count = 0;
+    for (const t of triggers) {
+      const tid = String(t["trigger_id"] ?? "");
+      if (tid) {
+        await apiPatch(`/triggers/${tid}`, { body: { action: "pause" } });
+        count++;
+      }
+    }
+    printSuccess(`Disabled ${count} trigger(s) for repository ${repo}.`);
   },
 };
 

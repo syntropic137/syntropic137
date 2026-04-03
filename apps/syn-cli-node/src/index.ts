@@ -3,7 +3,6 @@ import { healthCommand } from "./commands/health.js";
 import { versionCommand } from "./commands/version.js";
 import { workflowGroup } from "./commands/workflow/index.js";
 import { marketplaceGroup } from "./commands/marketplace/index.js";
-import { agentGroup } from "./commands/agent.js";
 import { artifactsGroup } from "./commands/artifacts.js";
 import { configGroup } from "./commands/config.js";
 import { controlGroup } from "./commands/control.js";
@@ -42,7 +41,6 @@ cli.addCommand({
 // Command groups
 cli.addGroup(workflowGroup);
 cli.addGroup(marketplaceGroup);
-cli.addGroup(agentGroup);
 cli.addGroup(artifactsGroup);
 cli.addGroup(configGroup);
 cli.addGroup(controlGroup);

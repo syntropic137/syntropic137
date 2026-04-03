@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 logger = logging.getLogger(__name__)
 
 
-class PollerMode(str, Enum):
+class PollerMode(StrEnum):
     """Polling mode determined by webhook health."""
 
     ACTIVE_POLLING = "active_polling"

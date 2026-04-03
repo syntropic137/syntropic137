@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList, apiPost, apiPut, apiDelete, buildParams } from "../client/api.js";
+import { apiGet, apiGetPaginated, apiPost, apiPut, apiDelete, buildParams } from "../client/api.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCost, formatDuration, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
@@ -53,7 +53,7 @@ const listCommand: CommandDef = {
     const params = buildParams({
       organization_id: (parsed.values["org"] as string | undefined) ?? null,
     });
-    const items = await apiGetList<Record<string, unknown>>("/systems", { params });
+    const items = await apiGetPaginated<Record<string, unknown>>("/systems", "systems", { params });
     if (items.length === 0) { printDim("No systems found."); return; }
 
     const table = new Table({ title: "Systems" });
@@ -61,7 +61,6 @@ const listCommand: CommandDef = {
     table.addColumn("Name");
     table.addColumn("Org", { style: DIM });
     table.addColumn("Repos", { align: "right" });
-    table.addColumn("Status");
 
     for (const s of items) {
       table.addRow(
@@ -69,7 +68,6 @@ const listCommand: CommandDef = {
         String(s["name"] ?? ""),
         String(s["organization_id"] ?? "\u2014"),
         String(s["repo_count"] ?? 0),
-        formatStatus(String(s["status"] ?? "")),
       );
     }
     table.print();
@@ -88,7 +86,6 @@ const showCommand: CommandDef = {
     if (d["description"]) print(`  Description: ${String(d["description"])}`);
     if (d["organization_id"]) print(`  Org:         ${String(d["organization_id"])}`);
     print(`  Repos:       ${d["repo_count"] ?? 0}`);
-    print(`  Status:      ${formatStatus(String(d["status"] ?? ""))}`);
   },
 };
 
@@ -178,7 +175,7 @@ const costCommand: CommandDef = {
   args: [{ name: "system-id", description: "System ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/systems/${id}/costs`);
+    const d = await apiGet<Record<string, unknown>>(`/systems/${id}/cost`);
 
     print(`${style("System Costs:", BOLD)} ${id}`);
     print(`  Total cost:  ${formatCost(String(d["total_cost_usd"] ?? "0"))}`);
@@ -212,7 +209,7 @@ const activityCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
     const limit = (parsed.values["limit"] as string | undefined) ?? "20";
-    const items = await apiGetList<Record<string, unknown>>(`/systems/${id}/activity`, { params: { limit } });
+    const items = await apiGetPaginated<Record<string, unknown>>(`/systems/${id}/activity`, "entries", { params: { limit } });
     if (items.length === 0) { printDim("No recent activity."); return; }
 
     const table = new Table({ title: `Activity: ${id}` });
@@ -297,7 +294,7 @@ const historyCommand: CommandDef = {
       limit: (parsed.values["limit"] as string | undefined) ?? "50",
       status: (parsed.values["status"] as string | undefined) ?? null,
     });
-    const items = await apiGetList<Record<string, unknown>>(`/systems/${id}/history`, { params });
+    const items = await apiGetPaginated<Record<string, unknown>>(`/systems/${id}/history`, "entries", { params });
     if (items.length === 0) { printDim("No execution history."); return; }
 
     const table = new Table({ title: `History: ${id}` });

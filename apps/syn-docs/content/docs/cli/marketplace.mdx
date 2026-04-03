@@ -1,16 +1,16 @@
 ---
 title: syn marketplace
-description: "Manage workflow marketplace registries."
+description: "Manage workflow marketplace registries"
 ---
 
-Manage workflow marketplace registries.
+Manage workflow marketplace registries
 
 ## `syn marketplace add`
 
-Register a GitHub repo as a workflow marketplace.
+Register a GitHub repo as a workflow marketplace
 
 ```bash
-syn marketplace add <repo>
+syn marketplace add <repo> [options]
 ```
 
 **Arguments:**
@@ -30,7 +30,7 @@ syn marketplace add <repo>
 
 ## `syn marketplace list`
 
-List registered marketplace registries.
+List registered marketplace registries
 
 ```bash
 syn marketplace list
@@ -40,7 +40,7 @@ syn marketplace list
 
 ## `syn marketplace refresh`
 
-Force-refresh cached marketplace indexes.
+Force-refresh cached marketplace indexes
 
 ```bash
 syn marketplace refresh <name>
@@ -50,13 +50,13 @@ syn marketplace refresh <name>
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `name` | `text` | No | Registry name (refreshes all if omitted) |
+| `name` | `text` | Yes | Registry name (refreshes all if omitted) |
 
 ---
 
 ## `syn marketplace remove`
 
-Remove a registered marketplace.
+Remove a registered marketplace
 
 ```bash
 syn marketplace remove <name>

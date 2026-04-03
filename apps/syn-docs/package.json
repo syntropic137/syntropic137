@@ -1,6 +1,6 @@
 {
   "name": "syn-docs",
-  "version": "0.19.7",
+  "version": "0.20.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
@@ -10,7 +10,7 @@
     "start": "next start",
     "types:check": "tsc --noEmit",
     "generate:openapi": "node scripts/generate-api-docs.mjs",
-    "generate:cli": "uvx --with typer --with rich --with pyyaml python scripts/generate-cli-docs.py"
+    "generate:cli": "pnpm --filter @syntropic137/cli generate:docs"
   },
   "dependencies": {
     "@react-three/drei": "10.7.7",

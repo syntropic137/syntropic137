@@ -294,11 +294,18 @@ def get_event_pipeline() -> EventPipeline:
         assert isinstance(_event_pipeline_singleton, EventPipeline)
         return _event_pipeline_singleton
 
+    from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
+        EvaluateWebhookHandler,
+    )
+
     dedup = _create_dedup_adapter()
+    evaluator = EvaluateWebhookHandler(
+        store=get_trigger_store(),
+        repository=get_trigger_repo(),
+    )
     pipeline = EventPipeline(
         dedup=dedup,
-        trigger_store=get_trigger_store(),
-        trigger_repo=get_trigger_repo(),
+        evaluator=evaluator,
     )
     _event_pipeline_singleton = pipeline
     return pipeline

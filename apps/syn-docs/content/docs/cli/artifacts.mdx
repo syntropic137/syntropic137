@@ -7,32 +7,26 @@ Browse and retrieve workflow artifacts
 
 ## `syn artifacts content`
 
-Print the raw content of an artifact.
+Print the raw content of an artifact
 
 ```bash
-syn artifacts content <artifact_id>
+syn artifacts content <artifact-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `artifact_id` | `text` | Yes | Artifact ID |
-
-**Options:**
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--raw` | `boolean` | `false` | Print raw content without syntax highlighting |
+| `artifact-id` | `text` | Yes | Artifact ID |
 
 ---
 
 ## `syn artifacts create`
 
-Create a new artifact.
+Create a new artifact
 
 ```bash
-syn artifacts create --workflow <workflow> --type <artifact_type> --title <title> --content <content>
+syn artifacts create [options]
 ```
 
 **Options:**
@@ -49,10 +43,10 @@ syn artifacts create --workflow <workflow> --type <artifact_type> --title <title
 
 ## `syn artifacts list`
 
-List artifacts, optionally filtered by workflow or phase.
+List artifacts
 
 ```bash
-syn artifacts list
+syn artifacts list [options]
 ```
 
 **Options:**
@@ -62,23 +56,23 @@ syn artifacts list
 | `--workflow`, `-w` | `text` | --- | Filter by workflow ID |
 | `--phase`, `-p` | `text` | --- | Filter by phase ID |
 | `--type`, `-t` | `text` | --- | Filter by artifact type |
-| `--limit` | `integer` | `50` | Max results (max 200) |
+| `--limit` | `text` | `50` | Max results (max 200) |
 
 ---
 
 ## `syn artifacts show`
 
-Show artifact metadata and optionally its content.
+Show artifact metadata and content
 
 ```bash
-syn artifacts show <artifact_id>
+syn artifacts show <artifact-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `artifact_id` | `text` | Yes | Artifact ID |
+| `artifact-id` | `text` | Yes | Artifact ID |
 
 **Options:**
 

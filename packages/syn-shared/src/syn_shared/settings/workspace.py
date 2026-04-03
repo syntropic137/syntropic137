@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import shutil
 import sys
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
@@ -34,7 +34,7 @@ from syn_shared.settings.workspace_security import (  # noqa: F401
 )
 
 
-class IsolationBackend(str, Enum):
+class IsolationBackend(StrEnum):
     """Available isolation backends for agent workspaces."""
 
     FIRECRACKER = "firecracker"
@@ -44,7 +44,7 @@ class IsolationBackend(str, Enum):
     CLOUD = "cloud"
 
 
-class CloudProvider(str, Enum):
+class CloudProvider(StrEnum):
     """Cloud sandbox providers for overflow capacity."""
 
     E2B = "e2b"

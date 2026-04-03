@@ -18,7 +18,18 @@ from syn_api._wiring import (
 from syn_api.types import (
     Err,
     Ok,
+    RepoActionResponse,
+    RepoActivityEntryResponse,
+    RepoActivityResponse,
+    RepoCostResponse,
+    RepoCreatedResponse,
     RepoError,
+    RepoFailureEntryResponse,
+    RepoFailuresResponse,
+    RepoHealthResponse,
+    RepoListResponse,
+    RepoSessionEntryResponse,
+    RepoSessionsResponse,
     RepoSummaryResponse,
     Result,
 )
@@ -500,7 +511,7 @@ def _classify_repo_error(error_msg: str) -> RepoError:
 
 
 @router.post("")
-async def register_repo_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+async def register_repo_endpoint(body: dict[str, Any]) -> RepoCreatedResponse:
     """Register a new repo."""
     try:
         result = await register_repo(
@@ -520,7 +531,7 @@ async def register_repo_endpoint(body: dict[str, Any]) -> dict[str, Any]:
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {"repo_id": result.value, "full_name": body["full_name"]}
+    return RepoCreatedResponse(repo_id=result.value, full_name=body["full_name"])
 
 
 @router.get("")
@@ -529,7 +540,7 @@ async def list_repos_endpoint(
     system_id: str | None = None,
     provider: str | None = None,
     unassigned: bool = False,
-) -> dict[str, Any]:
+) -> RepoListResponse:
     """List repos with optional filters."""
     result = await list_repos(
         organization_id=organization_id,
@@ -541,25 +552,22 @@ async def list_repos_endpoint(
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    return {
-        "repos": [r.model_dump() for r in result.value],
-        "total": len(result.value),
-    }
+    return RepoListResponse(repos=result.value, total=len(result.value))
 
 
 @router.get("/{repo_id}")
-async def get_repo_endpoint(repo_id: str) -> dict[str, Any]:
+async def get_repo_endpoint(repo_id: str) -> RepoSummaryResponse:
     """Get repo details."""
     result = await get_repo(repo_id)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
 
-    return result.value.model_dump()
+    return result.value
 
 
 @router.put("/{repo_id}")
-async def update_repo_endpoint(repo_id: str, body: dict[str, Any]) -> dict[str, Any]:
+async def update_repo_endpoint(repo_id: str, body: dict[str, Any]) -> RepoActionResponse:
     """Update mutable fields of a repo."""
     result = await update_repo(
         repo_id=repo_id,
@@ -576,11 +584,11 @@ async def update_repo_endpoint(repo_id: str, body: dict[str, Any]) -> dict[str, 
             raise HTTPException(status_code=409, detail=result.message)
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {"repo_id": repo_id, "status": "updated"}
+    return RepoActionResponse(repo_id=repo_id, status="updated")
 
 
 @router.delete("/{repo_id}")
-async def deregister_repo_endpoint(repo_id: str) -> dict[str, Any]:
+async def deregister_repo_endpoint(repo_id: str) -> RepoActionResponse:
     """Deregister (soft-delete) a repo."""
     result = await deregister_repo(repo_id=repo_id, deregistered_by="api")
 
@@ -593,11 +601,11 @@ async def deregister_repo_endpoint(repo_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=503, detail=result.message)
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {"repo_id": repo_id, "status": "deregistered"}
+    return RepoActionResponse(repo_id=repo_id, status="deregistered")
 
 
 @router.post("/{repo_id}/assign")
-async def assign_repo_to_system_endpoint(repo_id: str, body: dict[str, Any]) -> dict[str, Any]:
+async def assign_repo_to_system_endpoint(repo_id: str, body: dict[str, Any]) -> RepoActionResponse:
     """Assign a repo to a system."""
     try:
         result = await assign_repo_to_system(
@@ -611,11 +619,11 @@ async def assign_repo_to_system_endpoint(repo_id: str, body: dict[str, Any]) -> 
         status = 404 if result.error == RepoError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
-    return {"repo_id": repo_id, "system_id": body["system_id"], "status": "assigned"}
+    return RepoActionResponse(repo_id=repo_id, system_id=body["system_id"], status="assigned")
 
 
 @router.post("/{repo_id}/unassign")
-async def unassign_repo_from_system_endpoint(repo_id: str) -> dict[str, Any]:
+async def unassign_repo_from_system_endpoint(repo_id: str) -> RepoActionResponse:
     """Unassign a repo from its system."""
     result = await unassign_repo_from_system(repo_id=repo_id)
 
@@ -623,7 +631,7 @@ async def unassign_repo_from_system_endpoint(repo_id: str) -> dict[str, Any]:
         status = 404 if result.error == RepoError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
-    return {"repo_id": repo_id, "status": "unassigned"}
+    return RepoActionResponse(repo_id=repo_id, status="unassigned")
 
 
 # ---------------------------------------------------------------------------
@@ -632,50 +640,50 @@ async def unassign_repo_from_system_endpoint(repo_id: str) -> dict[str, Any]:
 
 
 @router.get("/{repo_id}/health")
-async def get_repo_health_endpoint(repo_id: str) -> dict[str, Any]:
+async def get_repo_health_endpoint(repo_id: str) -> RepoHealthResponse:
     """Get health snapshot for a repo."""
     result = await get_repo_health(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return result.value
+    return RepoHealthResponse(**result.value)
 
 
 @router.get("/{repo_id}/cost")
-async def get_repo_cost_endpoint(repo_id: str) -> dict[str, Any]:
+async def get_repo_cost_endpoint(repo_id: str) -> RepoCostResponse:
     """Get cost breakdown for a repo."""
     result = await get_repo_cost(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return result.value
+    return RepoCostResponse(**result.value)
 
 
 @router.get("/{repo_id}/activity")
 async def get_repo_activity_endpoint(
     repo_id: str, offset: int = 0, limit: int = 50
-) -> dict[str, Any]:
+) -> RepoActivityResponse:
     """Get execution timeline for a repo."""
     result = await get_repo_activity(repo_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    entries = result.value
-    return {"entries": entries, "total": len(entries)}
+    entries = [RepoActivityEntryResponse(**e) for e in result.value]
+    return RepoActivityResponse(entries=entries, total=len(entries))
 
 
 @router.get("/{repo_id}/failures")
-async def get_repo_failures_endpoint(repo_id: str, limit: int = 50) -> dict[str, Any]:
+async def get_repo_failures_endpoint(repo_id: str, limit: int = 50) -> RepoFailuresResponse:
     """Get recent failures for a repo."""
     result = await get_repo_failures(repo_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    entries = result.value
-    return {"failures": entries, "total": len(entries)}
+    failures = [RepoFailureEntryResponse(**e) for e in result.value]
+    return RepoFailuresResponse(failures=failures, total=len(failures))
 
 
 @router.get("/{repo_id}/sessions")
-async def get_repo_sessions_endpoint(repo_id: str, limit: int = 50) -> dict[str, Any]:
+async def get_repo_sessions_endpoint(repo_id: str, limit: int = 50) -> RepoSessionsResponse:
     """Get agent sessions for a repo."""
     result = await get_repo_sessions(repo_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    sessions = result.value
-    return {"sessions": sessions, "total": len(sessions)}
+    sessions = [RepoSessionEntryResponse(**s) for s in result.value]
+    return RepoSessionsResponse(sessions=sessions, total=len(sessions))

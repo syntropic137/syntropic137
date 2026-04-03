@@ -11,18 +11,30 @@ jobs:
     name: Check generated docs are up to date
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Install CLI dependencies
+        run: pnpm --filter @syntropic137/cli install --frozen-lockfile
 
       - name: Generate CLI docs
-        run: uvx --with typer --with rich --with pyyaml python apps/syn-docs/scripts/generate-cli-docs.py
+        run: pnpm --filter @syntropic137/cli generate:docs
 
       - name: Check for drift
         run: |
-          if ! git diff --quiet apps/syn-docs/content/docs/cli/; then
-            echo "::error::CLI docs are out of sync with syn-cli. Run 'pnpm generate' in apps/syn-docs/ and commit the result."
-            git diff --stat apps/syn-docs/content/docs/cli/
+          CHANGED=$(git diff --name-only apps/syn-docs/content/docs/cli/)
+          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)
+          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
+            echo "::error::CLI docs are out of sync. Run 'pnpm --filter @syntropic137/cli generate:docs' and commit."
+            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
+            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
             exit 1
           fi
           echo "CLI docs are up to date."

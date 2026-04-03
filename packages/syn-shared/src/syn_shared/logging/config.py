@@ -1,11 +1,11 @@
 """Logging configuration."""
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class LogLevel(str, Enum):
+class LogLevel(StrEnum):
     """Log levels."""
 
     DEBUG = "DEBUG"

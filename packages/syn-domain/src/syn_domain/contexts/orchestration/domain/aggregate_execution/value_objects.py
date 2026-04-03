@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ExecutionStatus(str, Enum):
+class ExecutionStatus(StrEnum):
     """Status of workflow execution."""
 
     NOT_STARTED = "not_started"
@@ -21,7 +21,7 @@ class ExecutionStatus(str, Enum):
     INTERRUPTED = "interrupted"
 
 
-class PhaseStatus(str, Enum):
+class PhaseStatus(StrEnum):
     """Status of a single phase execution."""
 
     PENDING = "pending"

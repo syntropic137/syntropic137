@@ -8,10 +8,13 @@ from __future__ import annotations
 import copy
 import logging
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+    TriggerDeferredResult,
+    TriggerMatchResult,
+)
 from syn_domain.contexts.github.domain.commands.RecordTriggerFiredCommand import (
     RecordTriggerFiredCommand,
 )
@@ -36,19 +39,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class TriggerMatchResult:
-    trigger_id: str
-    execution_id: str
-
-
-@dataclass
-class TriggerDeferredResult:
-    trigger_id: str
-    reason: str
-    defer_seconds: float
 
 
 OnFireCallback = Callable[[Any, dict[str, Any]], Coroutine[Any, Any, None]]

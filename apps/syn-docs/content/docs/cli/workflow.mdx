@@ -7,10 +7,10 @@ Manage workflows - create, list, run, and inspect
 
 ## `syn workflow create`
 
-Create a new workflow.
+Create a new workflow
 
 ```bash
-syn workflow create <name>
+syn workflow create <name> [options]
 ```
 
 **Arguments:**
@@ -23,8 +23,8 @@ syn workflow create <name>
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--type`, `-t` | `text` | `custom` | Type: research, planning, implementation, review, deployment, custom |
-| `--repo`, `-r` | `text` | `https://github.com/example/repo` | Repository URL for the workflow |
+| `--type`, `-t` | `text` | `custom` | Workflow type (research, planning, implementation, review, deployment, custom) |
+| `--repo`, `-r` | `text` | `https://github.com/example/repo` | Repository URL |
 | `--ref` | `text` | `main` | Repository ref/branch |
 | `--description`, `-d` | `text` | --- | Workflow description |
 
@@ -32,20 +32,17 @@ syn workflow create <name>
 
 ## `syn workflow delete`
 
-Archive (soft-delete) a workflow template.
-
-Archived workflows are hidden from 'syn workflow list' by default.
-Use 'syn workflow list --include-archived' to see them.
+Archive (soft-delete) a workflow
 
 ```bash
-syn workflow delete <workflow_id>
+syn workflow delete <workflow-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `workflow_id` | `text` | Yes | Workflow ID (partial match supported) |
+| `workflow-id` | `text` | Yes | Workflow ID (partial match supported) |
 
 **Options:**
 
@@ -57,30 +54,30 @@ syn workflow delete <workflow_id>
 
 ## `syn workflow export`
 
-Export a workflow as a distributable package or Claude Code plugin.
+Export a workflow as a distributable package or Claude Code plugin
 
 ```bash
-syn workflow export <workflow_id>
+syn workflow export <workflow-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `workflow_id` | `text` | Yes | Workflow ID to export |
+| `workflow-id` | `text` | Yes | Workflow ID to export |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--format`, `-f` | `text` | `package` | Export format: 'package' (default) or 'plugin' (Claude Code plugin) |
-| `--output`, `-o` | `path` | `.` | Output directory (created if absent) |
+| `--format`, `-f` | `text` | `package` | Export format: 'package' (default) or 'plugin' |
+| `--output`, `-o` | `text` | `.` | Output directory (created if absent) |
 
 ---
 
 ## `syn workflow info`
 
-Show details of a marketplace workflow plugin.
+Show details of a marketplace workflow plugin
 
 ```bash
 syn workflow info <name>
@@ -96,17 +93,17 @@ syn workflow info <name>
 
 ## `syn workflow init`
 
-Scaffold a new workflow package from a template.
+Scaffold a new workflow package from a template
 
 ```bash
-syn workflow init <directory>
+syn workflow init <directory> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `directory` | `path` | No | Directory to scaffold |
+| `directory` | `text` | Yes | Directory to scaffold (defaults to current dir) |
 
 **Options:**
 
@@ -114,17 +111,17 @@ syn workflow init <directory>
 |------|------|---------|-------------|
 | `--name`, `-n` | `text` | --- | Workflow name |
 | `--type`, `-t` | `text` | `research` | Workflow type |
-| `--phases` | `integer` | `3` | Number of phases |
+| `--phases` | `text` | `3` | Number of phases |
 | `--multi` | `boolean` | `false` | Scaffold multi-workflow plugin |
 
 ---
 
 ## `syn workflow install`
 
-Install workflow(s) from a package, git repository, or marketplace.
+Install workflow(s) from a package, git repository, or marketplace
 
 ```bash
-syn workflow install <source>
+syn workflow install <source> [options]
 ```
 
 **Arguments:**
@@ -144,7 +141,7 @@ syn workflow install <source>
 
 ## `syn workflow installed`
 
-List installed workflow packages.
+List installed workflow packages
 
 ```bash
 syn workflow installed
@@ -154,10 +151,10 @@ syn workflow installed
 
 ## `syn workflow list`
 
-List all workflows in the system.
+List all workflows
 
 ```bash
-syn workflow list
+syn workflow list [options]
 ```
 
 **Options:**
@@ -170,17 +167,17 @@ syn workflow list
 
 ## `syn workflow run`
 
-Execute a workflow.
+Execute a workflow
 
 ```bash
-syn workflow run <workflow_id>
+syn workflow run <workflow-id> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `workflow_id` | `text` | Yes | Workflow ID (partial match supported) |
+| `workflow-id` | `text` | Yes | Workflow ID (partial match supported) |
 
 **Options:**
 
@@ -190,24 +187,22 @@ syn workflow run <workflow_id>
 | `--task`, `-t` | `text` | --- | Primary task description ($ARGUMENTS) |
 | `--dry-run`, `-n` | `boolean` | `false` | Validate without executing |
 | `--quiet`, `-q` | `boolean` | `false` | Minimal output |
-| `--container`, `-c` | `boolean` | `true` | Run in isolated container |
-| `--tenant` | `text` | --- | Tenant ID for multi-tenant attribution |
 
 ---
 
 ## `syn workflow search`
 
-Search for workflows across registered marketplaces.
+Search for workflows across registered marketplaces
 
 ```bash
-syn workflow search <query>
+syn workflow search <query> [options]
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `query` | `text` | No | Search term (matches name, description, tags) |
+| `query` | `text` | Yes | Search term (matches name, description, tags) |
 
 **Options:**
 
@@ -221,42 +216,42 @@ syn workflow search <query>
 
 ## `syn workflow show`
 
-Show details of a specific workflow.
+Show details of a workflow
 
 ```bash
-syn workflow show <workflow_id>
+syn workflow show <workflow-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `workflow_id` | `text` | Yes | Workflow ID (partial match supported) |
+| `workflow-id` | `text` | Yes | Workflow ID (partial match supported) |
 
 ---
 
 ## `syn workflow status`
 
-Show execution history for a workflow.
+Show execution history for a workflow
 
 ```bash
-syn workflow status <workflow_id>
+syn workflow status <workflow-id>
 ```
 
 **Arguments:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `workflow_id` | `text` | Yes | Workflow ID (partial match supported) |
+| `workflow-id` | `text` | Yes | Workflow ID (partial match supported) |
 
 ---
 
 ## `syn workflow uninstall`
 
-Uninstall a workflow package.
+Uninstall a workflow package
 
 ```bash
-syn workflow uninstall <name>
+syn workflow uninstall <name> [options]
 ```
 
 **Arguments:**
@@ -275,10 +270,10 @@ syn workflow uninstall <name>
 
 ## `syn workflow update`
 
-Update an installed workflow package to the latest version.
+Update an installed workflow package to the latest version
 
 ```bash
-syn workflow update <name>
+syn workflow update <name> [options]
 ```
 
 **Arguments:**
@@ -298,7 +293,7 @@ syn workflow update <name>
 
 ## `syn workflow validate`
 
-Validate a workflow YAML file or package directory without creating it.
+Validate a workflow YAML file or package directory
 
 ```bash
 syn workflow validate <file>
@@ -308,6 +303,6 @@ syn workflow validate <file>
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `file` | `path` | Yes | YAML file or package directory to validate |
+| `file` | `text` | Yes | YAML file or package directory |
 
 ---

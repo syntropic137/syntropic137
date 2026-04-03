@@ -31,14 +31,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from agentic_logging import get_logger
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 import syn_api.services.realtime as rt
-from syn_api.types import Err
+from syn_api.types import Err, SSEHealthResponse
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -188,8 +188,8 @@ async def activity_sse(request: Request) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/sse/health")
-async def sse_health() -> dict[str, Any]:
+@router.get("/sse/health", response_model=SSEHealthResponse, response_model_exclude_none=True)
+async def sse_health() -> SSEHealthResponse:
     """Health check for the SSE subsystem.
 
     Returns active subscriber and execution counts from the RealTimeProjection.
@@ -197,11 +197,11 @@ async def sse_health() -> dict[str, Any]:
     result = await rt.get_realtime_health()
 
     if isinstance(result, Err):
-        return {"status": "unhealthy"}
+        return SSEHealthResponse(status="unhealthy")
 
     health = result.value
-    return {
-        "status": "healthy",
-        "active_executions": health.active_executions,
-        "active_connections": health.active_connections,
-    }
+    return SSEHealthResponse(
+        status="healthy",
+        active_executions=health.active_executions,
+        active_connections=health.active_connections,
+    )

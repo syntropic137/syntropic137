@@ -1,13 +1,18 @@
 export const CLI_NAME = "syn";
-export const CLI_VERSION = "0.18.0";
 export const CLI_DESCRIPTION =
   "Syntropic137 - Event-sourced workflow engine for AI agents";
+
+declare const __CLI_VERSION__: string;
+export const CLI_VERSION =
+  typeof __CLI_VERSION__ !== "undefined" ? __CLI_VERSION__ : "0.0.0-dev";
 
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const SSE_CONNECT_TIMEOUT_MS = 5_000;
 
 export function getApiUrl(): string {
-  return process.env["SYN_API_URL"] ?? "http://localhost:8137";
+  const url = process.env["SYN_API_URL"] ?? "http://localhost:8137";
+  // Strip /api/v1 suffix if present — the HTTP client adds it automatically.
+  return url.replace(/\/api\/v1\/*$/, "");
 }
 
 /**

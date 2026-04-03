@@ -30,7 +30,7 @@ describe("SynClient", () => {
     expect(result.data).toEqual({ ok: true });
     expect(mockFetch).toHaveBeenCalledOnce();
     const url = mockFetch.mock.calls[0]![0] as string;
-    expect(url).toBe("http://test:8000/health");
+    expect(url).toBe("http://test:8000/api/v1/health");
   });
 
   it("appends query params and filters undefined", async () => {

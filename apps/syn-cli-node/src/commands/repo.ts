@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList, apiPost, apiPut, buildParams } from "../client/api.js";
+import { apiGet, apiGetPaginated, apiPost, buildParams } from "../client/api.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCost, formatDuration, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
@@ -37,7 +37,7 @@ const registerCommand: CommandDef = {
 
     const d = await apiPost<Record<string, unknown>>("/repos", { body, expected: [200, 201] });
     printSuccess(`Repository registered: ${d["repo_id"] ?? ""}`);
-    print(`  URL: ${d["repo_url"] ?? url}`);
+    print(`  Name: ${d["full_name"] ?? url}`);
     if (d["system_id"]) print(`  System: ${String(d["system_id"])}`);
   },
 };
@@ -54,21 +54,19 @@ const listCommand: CommandDef = {
       organization_id: (parsed.values["org"] as string | undefined) ?? null,
       system_id: (parsed.values["system"] as string | undefined) ?? null,
     });
-    const items = await apiGetList<Record<string, unknown>>("/repos", { params });
+    const items = await apiGetPaginated<Record<string, unknown>>("/repos", "repos", { params });
     if (items.length === 0) { printDim("No repositories found."); return; }
 
     const table = new Table({ title: "Repositories" });
     table.addColumn("ID", { style: CYAN });
-    table.addColumn("URL");
+    table.addColumn("Name");
     table.addColumn("System", { style: DIM });
-    table.addColumn("Status");
 
     for (const r of items) {
       table.addRow(
         String(r["repo_id"] ?? ""),
-        String(r["repo_url"] ?? ""),
+        String(r["full_name"] ?? ""),
         String(r["system_id"] ?? "\u2014"),
-        formatStatus(String(r["status"] ?? "")),
       );
     }
     table.print();
@@ -82,11 +80,10 @@ const showCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const id = reqRepoId(parsed);
     const d = await apiGet<Record<string, unknown>>(`/repos/${id}`);
-    print(`${style("Repository:", BOLD)} ${d["repo_url"] ?? id}`);
+    print(`${style("Repository:", BOLD)} ${d["full_name"] ?? id}`);
     print(`  ID:     ${d["repo_id"] ?? id}`);
     if (d["system_id"]) print(`  System: ${String(d["system_id"])}`);
     if (d["organization_id"]) print(`  Org:    ${String(d["organization_id"])}`);
-    print(`  Status: ${formatStatus(String(d["status"] ?? ""))}`);
   },
 };
 
@@ -101,7 +98,7 @@ const assignCommand: CommandDef = {
     const id = reqRepoId(parsed);
     const system = parsed.values["system"] as string | undefined;
     if (!system) { printError("Missing --system"); throw new CLIError("Missing option", 1); }
-    await apiPut(`/repos/${id}/assign`, { body: { system_id: system } });
+    await apiPost(`/repos/${id}/assign`, { body: { system_id: system } });
     printSuccess(`Repository ${id} assigned to system ${system}.`);
   },
 };
@@ -159,7 +156,7 @@ const costCommand: CommandDef = {
   args: [{ name: "repo-id", description: "Repository ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqRepoId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/repos/${id}/costs`);
+    const d = await apiGet<Record<string, unknown>>(`/repos/${id}/cost`);
 
     print(`${style("Repository Costs:", BOLD)} ${id}`);
     print(`  Total cost:  ${formatCost(String(d["total_cost_usd"] ?? "0"))}`);
@@ -193,7 +190,7 @@ const activityCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const id = reqRepoId(parsed);
     const limit = (parsed.values["limit"] as string | undefined) ?? "20";
-    const items = await apiGetList<Record<string, unknown>>(`/repos/${id}/activity`, { params: { limit } });
+    const items = await apiGetPaginated<Record<string, unknown>>(`/repos/${id}/activity`, "entries", { params: { limit } });
     if (items.length === 0) { printDim("No recent activity."); return; }
 
     const table = new Table({ title: `Activity: ${id}` });
@@ -228,7 +225,7 @@ const failuresCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const id = reqRepoId(parsed);
     const limit = (parsed.values["limit"] as string | undefined) ?? "10";
-    const items = await apiGetList<Record<string, unknown>>(`/repos/${id}/failures`, { params: { limit } });
+    const items = await apiGetPaginated<Record<string, unknown>>(`/repos/${id}/failures`, "failures", { params: { limit } });
     if (items.length === 0) { printDim("No recent failures."); return; }
 
     const table = new Table({ title: `Failures: ${id}` });
@@ -259,7 +256,7 @@ const sessionsCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const id = reqRepoId(parsed);
     const limit = (parsed.values["limit"] as string | undefined) ?? "20";
-    const items = await apiGetList<Record<string, unknown>>(`/repos/${id}/sessions`, { params: { limit } });
+    const items = await apiGetPaginated<Record<string, unknown>>(`/repos/${id}/sessions`, "sessions", { params: { limit } });
     if (items.length === 0) { printDim("No sessions found."); return; }
 
     const table = new Table({ title: `Sessions: ${id}` });

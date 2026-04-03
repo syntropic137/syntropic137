@@ -1,5 +1,7 @@
 import { DEFAULT_TIMEOUT_MS, SSE_CONNECT_TIMEOUT_MS, getApiUrl, getAuthHeaders } from "../config.js";
 
+const API_PREFIX = "/api/v1";
+
 export interface ApiResponse<T> {
   status: number;
   data: T;
@@ -95,13 +97,13 @@ export class SynClient {
     path: string,
     params?: Record<string, string | number | boolean | undefined>,
   ): URL {
-    // Concatenate base path with request path so that a base URL like
-    // "http://host:8137/api/v1" + "/health" → "http://host:8137/api/v1/health"
-    // (plain `new URL(path, base)` would discard the base path component).
+    // Build full URL: base (e.g. "http://host:8137") + API prefix + request path.
+    // Users set SYN_API_URL to just the server origin; the /api/v1 prefix is added here.
     const base = new URL(this.baseUrl);
     const basePath = base.pathname.replace(/\/+$/, "");
     const reqPath = path.startsWith("/") ? path : `/${path}`;
-    const url = new URL(`${basePath}${reqPath}`, base);
+    const prefix = basePath.endsWith(API_PREFIX) ? "" : API_PREFIX;
+    const url = new URL(`${basePath}${prefix}${reqPath}`, base);
     if (params) {
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined) {
