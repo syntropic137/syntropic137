@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 _MILLION = Decimal("1000000")
 
@@ -14,7 +14,7 @@ def _token_cost(count: int, price_per_million: Decimal | None) -> Decimal:
     return (Decimal(count) * price_per_million) / _MILLION
 
 
-class CostType(str, Enum):
+class CostType(StrEnum):
     """Types of costs that can be incurred."""
 
     LLM_TOKENS = "llm_tokens"

@@ -64,12 +64,12 @@ async def _resolve_trigger_details(
 
 # Dispatch table for extracting PR numbers from webhook payloads
 _PR_EXTRACTORS: dict[str, Any] = {
-    "issue_comment": lambda p: p.get("issue", {}).get("number")
-    if p.get("issue", {}).get("pull_request")
-    else None,
-    "check_run": lambda p: prs[0].get("number")
-    if (prs := p.get("check_run", {}).get("pull_requests", []))
-    else None,
+    "issue_comment": lambda p: (
+        p.get("issue", {}).get("number") if p.get("issue", {}).get("pull_request") else None
+    ),
+    "check_run": lambda p: (
+        prs[0].get("number") if (prs := p.get("check_run", {}).get("pull_requests", [])) else None
+    ),
     "pull_request_review": lambda p: p.get("pull_request", {}).get("number"),
     "pull_request": lambda p: p.get("pull_request", {}).get("number"),
 }

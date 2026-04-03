@@ -8,10 +8,10 @@ Placed in `_shared/` per VSA rules for cross-slice types.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class TodoAction(str, Enum):
+class TodoAction(StrEnum):
     """Action the processor should dispatch for a to-do item.
 
     Lifecycle per phase:

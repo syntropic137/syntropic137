@@ -11,7 +11,7 @@ All value objects are immutable (frozen dataclasses) per DDD principles.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
-class IsolationBackendType(str, Enum):
+class IsolationBackendType(StrEnum):
     """Isolation backend types matching syn-shared settings."""
 
     FIRECRACKER = "firecracker"
@@ -36,7 +36,7 @@ class IsolationBackendType(str, Enum):
     LOCAL = "local"  # For development only (DEPRECATED)
 
 
-class WorkspaceStatus(str, Enum):
+class WorkspaceStatus(StrEnum):
     """Workspace lifecycle status."""
 
     PENDING = "pending"  # Command received, not yet started
@@ -48,7 +48,7 @@ class WorkspaceStatus(str, Enum):
     ERROR = "error"  # Failed state
 
 
-class TokenType(str, Enum):
+class TokenType(StrEnum):
     """Types of tokens that can be injected into workspace."""
 
     ANTHROPIC = "anthropic"  # Claude API token
@@ -57,7 +57,7 @@ class TokenType(str, Enum):
     CUSTOM = "custom"  # User-provided tokens
 
 
-class CapabilityType(str, Enum):
+class CapabilityType(StrEnum):
     """Workspace capabilities that can be enabled."""
 
     NETWORK = "network"  # Outbound network access (via sidecar)
@@ -67,7 +67,7 @@ class CapabilityType(str, Enum):
     ARTIFACTS = "artifacts"  # Artifact collection
 
 
-class InjectionMethod(str, Enum):
+class InjectionMethod(StrEnum):
     """How tokens are injected into workspace."""
 
     SIDECAR = "sidecar"  # Via sidecar proxy (preferred, ADR-022)

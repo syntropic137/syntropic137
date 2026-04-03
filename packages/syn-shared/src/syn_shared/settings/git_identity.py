@@ -5,14 +5,14 @@ See ADR-021: Isolated Workspace Architecture - Git Identity section.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class GitCredentialType(str, Enum):
+class GitCredentialType(StrEnum):
     """Git credential types for authentication."""
 
     HTTPS = "https"

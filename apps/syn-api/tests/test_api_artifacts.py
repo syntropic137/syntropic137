@@ -53,7 +53,7 @@ async def test_create_artifact():
 
     result = await create_artifact(
         workflow_id="wf-test-123",
-        artifact_type="document",
+        artifact_type="other",
         title="Test Artifact",
         content="Hello, world!",
     )

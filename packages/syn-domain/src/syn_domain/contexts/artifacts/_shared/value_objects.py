@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-from enum import Enum
+from enum import StrEnum
 
 
-class ArtifactType(str, Enum):
+class ArtifactType(StrEnum):
     """Type of artifact produced by a phase.
 
     Artifacts can be:
@@ -57,7 +57,7 @@ class ArtifactType(str, Enum):
     FILE_PATH = "file_path"  # Path reference (not content)
 
 
-class ContentType(str, Enum):
+class ContentType(StrEnum):
     """MIME type of artifact content."""
 
     TEXT_PLAIN = "text/plain"

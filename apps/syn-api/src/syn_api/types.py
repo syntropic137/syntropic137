@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,7 +44,7 @@ Result = Ok[T] | Err[E]
 # ---------------------------------------------------------------------------
 
 
-class WorkflowError(str, Enum):
+class WorkflowError(StrEnum):
     """Errors returned by workflow operations."""
 
     NOT_FOUND = "not_found"
@@ -56,7 +56,7 @@ class WorkflowError(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"
 
 
-class ExecutionError(str, Enum):
+class ExecutionError(StrEnum):
     """Errors returned by execution operations."""
 
     NOT_FOUND = "not_found"
@@ -65,21 +65,21 @@ class ExecutionError(str, Enum):
     SIGNAL_FAILED = "signal_failed"
 
 
-class MetricsError(str, Enum):
+class MetricsError(StrEnum):
     """Errors returned by metrics operations."""
 
     QUERY_FAILED = "query_failed"
     NOT_FOUND = "not_found"
 
 
-class LifecycleError(str, Enum):
+class LifecycleError(StrEnum):
     """Errors returned by lifecycle operations."""
 
     CONNECTION_FAILED = "connection_failed"
     VALIDATION_FAILED = "validation_failed"
 
 
-class SessionError(str, Enum):
+class SessionError(StrEnum):
     """Errors returned by session operations."""
 
     NOT_FOUND = "not_found"
@@ -88,7 +88,7 @@ class SessionError(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"
 
 
-class ArtifactError(str, Enum):
+class ArtifactError(StrEnum):
     """Errors returned by artifact operations."""
 
     NOT_FOUND = "not_found"
@@ -98,7 +98,7 @@ class ArtifactError(str, Enum):
     ALREADY_DELETED = "already_deleted"
 
 
-class GitHubError(str, Enum):
+class GitHubError(StrEnum):
     """Errors returned by GitHub operations."""
 
     NOT_FOUND = "not_found"
@@ -110,7 +110,7 @@ class GitHubError(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"
 
 
-class ObservabilityError(str, Enum):
+class ObservabilityError(StrEnum):
     """Errors returned by observability operations."""
 
     NOT_FOUND = "not_found"
@@ -118,7 +118,7 @@ class ObservabilityError(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"
 
 
-class TriggerError(str, Enum):
+class TriggerError(StrEnum):
     """Errors returned by trigger operations."""
 
     NOT_FOUND = "not_found"
@@ -130,7 +130,7 @@ class TriggerError(str, Enum):
     WORKFLOW_NOT_FOUND = "workflow_not_found"
 
 
-class OrganizationError(str, Enum):
+class OrganizationError(StrEnum):
     """Errors returned by organization operations."""
 
     NOT_FOUND = "not_found"
@@ -141,7 +141,7 @@ class OrganizationError(str, Enum):
     HAS_REPOS = "has_repos"
 
 
-class SystemErrorCode(str, Enum):
+class SystemErrorCode(StrEnum):
     """Errors returned by system operations."""
 
     NOT_FOUND = "not_found"
@@ -152,7 +152,7 @@ class SystemErrorCode(str, Enum):
     HAS_REPOS = "has_repos"
 
 
-class RepoError(str, Enum):
+class RepoError(StrEnum):
     """Errors returned by repo operations."""
 
     NOT_FOUND = "not_found"
@@ -167,7 +167,7 @@ class RepoError(str, Enum):
     TRIGGER_CHECK_FAILED = "trigger_check_failed"
 
 
-class AgentError(str, Enum):
+class AgentError(StrEnum):
     """Errors returned by agent operations."""
 
     PROVIDER_NOT_FOUND = "provider_not_found"
@@ -175,7 +175,7 @@ class AgentError(str, Enum):
     COMPLETION_FAILED = "completion_failed"
 
 
-class ConfigError(str, Enum):
+class ConfigError(StrEnum):
     """Errors returned by config operations."""
 
     LOAD_FAILED = "load_failed"

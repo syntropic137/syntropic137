@@ -7,14 +7,14 @@ This enables dependency injection and easy testing with mock agents.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 
-class AgentRole(str, Enum):
+class AgentRole(StrEnum):
     """Role of the agent in the conversation."""
 
     USER = "user"
@@ -22,7 +22,7 @@ class AgentRole(str, Enum):
     SYSTEM = "system"
 
 
-class AgentProvider(str, Enum):
+class AgentProvider(StrEnum):
     """Supported AI agent providers."""
 
     CLAUDE = "claude"

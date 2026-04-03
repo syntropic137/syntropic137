@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class WorkflowType(str, Enum):
+class WorkflowType(StrEnum):
     """Type of workflow execution."""
 
     RESEARCH = "research"
@@ -18,7 +18,7 @@ class WorkflowType(str, Enum):
     CUSTOM = "custom"
 
 
-class WorkflowClassification(str, Enum):
+class WorkflowClassification(StrEnum):
     """Classification of workflow complexity."""
 
     SIMPLE = "simple"
@@ -27,7 +27,7 @@ class WorkflowClassification(str, Enum):
     EPIC = "epic"
 
 
-class PhaseExecutionType(str, Enum):
+class PhaseExecutionType(StrEnum):
     """How a phase should be executed."""
 
     SEQUENTIAL = "sequential"

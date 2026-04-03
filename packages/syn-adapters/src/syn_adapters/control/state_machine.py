@@ -6,10 +6,10 @@ Pure logic - no I/O dependencies.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ExecutionState(str, Enum):
+class ExecutionState(StrEnum):
     """Possible execution states."""
 
     PENDING = "pending"

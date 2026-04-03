@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from datetime import datetime
 
 
-class EventSource(str, Enum):
+class EventSource(StrEnum):
     """Origin of a GitHub event."""
 
     WEBHOOK = "webhook"

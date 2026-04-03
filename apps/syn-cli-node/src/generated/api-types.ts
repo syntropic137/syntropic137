@@ -52,6 +52,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Workflow Endpoint
+         * @description Export a workflow as a distributable package or Claude Code plugin.
+         */
+        get: operations["export_workflow_endpoint_workflows__workflow_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}/runs": {
         parameters: {
             query?: never;
@@ -408,9 +428,17 @@ export interface paths {
          * @description Get artifact details by ID.
          */
         get: operations["get_artifact_endpoint_artifacts__artifact_id__get"];
-        put?: never;
+        /**
+         * Update Artifact Endpoint
+         * @description Update artifact metadata.
+         */
+        put: operations["update_artifact_endpoint_artifacts__artifact_id__put"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete Artifact Endpoint
+         * @description Soft-delete an artifact.
+         */
+        delete: operations["delete_artifact_endpoint_artifacts__artifact_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1198,9 +1226,17 @@ export interface paths {
          * @description Get repo details.
          */
         get: operations["get_repo_endpoint_repos__repo_id__get"];
-        put?: never;
+        /**
+         * Update Repo Endpoint
+         * @description Update mutable fields of a repo.
+         */
+        put: operations["update_repo_endpoint_repos__repo_id__put"];
         post?: never;
-        delete?: never;
+        /**
+         * Deregister Repo Endpoint
+         * @description Deregister (soft-delete) a repo.
+         */
+        delete: operations["deregister_repo_endpoint_repos__repo_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1510,6 +1546,62 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AgentProviderInfo
+         * @description Information about an available agent provider.
+         */
+        AgentProviderInfo: {
+            /** Provider */
+            provider: string;
+            /** Display Name */
+            display_name: string;
+            /** Available */
+            available: boolean;
+            /** Default Model */
+            default_model: string;
+        };
+        /**
+         * AgentProviderListResponse
+         * @description Paginated list of agent providers.
+         */
+        AgentProviderListResponse: {
+            /** Total */
+            total: number;
+            /** Providers */
+            providers?: components["schemas"]["AgentProviderInfo"][];
+        };
+        /**
+         * AgentTestResult
+         * @description Result of testing an agent provider.
+         */
+        AgentTestResult: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Response Text */
+            response_text: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+        };
+        /**
+         * ArtifactActionResponse
+         * @description Response for artifact update/delete actions.
+         */
+        ArtifactActionResponse: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Status */
+            status: string;
+        };
         /** ArtifactContentResponse */
         ArtifactContentResponse: {
             /** Artifact Id */
@@ -1593,10 +1685,7 @@ export interface components {
         };
         /** Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post */
         Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /**
@@ -1606,6 +1695,29 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * ContributionHeatmapResponse
+         * @description Contribution heatmap data.
+         */
+        ContributionHeatmapResponse: {
+            /** Metric */
+            metric: string;
+            /** Start Date */
+            start_date: string;
+            /** End Date */
+            end_date: string;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /** Days */
+            days?: components["schemas"]["HeatmapDayBucketResponse"][];
+            /** Filter */
+            filter?: {
+                [key: string]: string | null;
+            };
         };
         /**
          * ControlResponse
@@ -1693,6 +1805,47 @@ export interface components {
             /** Size Bytes */
             size_bytes?: number | null;
         };
+        /**
+         * CostOutlierResponse
+         * @description An execution with unusually high cost.
+         */
+        CostOutlierResponse: {
+            /**
+             * Execution Id
+             * @default
+             */
+            execution_id: string;
+            /**
+             * Repo Full Name
+             * @default
+             */
+            repo_full_name: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
+            /**
+             * Cost Usd
+             * @default 0
+             */
+            cost_usd: string;
+            /**
+             * Median Cost Usd
+             * @default 0
+             */
+            median_cost_usd: string;
+            /**
+             * Deviation Factor
+             * @default 0
+             */
+            deviation_factor: number;
+            /**
+             * Executed At
+             * @default
+             */
+            executed_at: string;
+        };
         /** CreateArtifactRequest */
         CreateArtifactRequest: {
             /** Workflow Id */
@@ -1726,6 +1879,8 @@ export interface components {
         };
         /** CreateWorkflowRequest */
         CreateWorkflowRequest: {
+            /** Id */
+            id?: string | null;
             /** Name */
             name: string;
             /**
@@ -1750,8 +1905,14 @@ export interface components {
             repository_ref: string;
             /** Description */
             description?: string | null;
+            /** Project Name */
+            project_name?: string | null;
             /** Phases */
             phases?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Input Declarations */
+            input_declarations?: {
                 [key: string]: unknown;
             }[] | null;
         };
@@ -2152,10 +2313,173 @@ export interface components {
              */
             tool_call_count: number;
         };
+        /**
+         * ExportManifestResponse
+         * @description Structured export of a workflow as a file manifest.
+         *
+         *     Each key in ``files`` is a relative path; each value is the file content.
+         *     The CLI writes these to disk to produce an installable package or plugin.
+         */
+        ExportManifestResponse: {
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "package" | "plugin";
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Name */
+            workflow_name: string;
+            /** Files */
+            files: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * FailurePatternResponse
+         * @description A recurring failure pattern within a system.
+         */
+        FailurePatternResponse: {
+            /**
+             * Error Type
+             * @default
+             */
+            error_type: string;
+            /**
+             * Error Message
+             * @default
+             */
+            error_message: string;
+            /**
+             * Occurrence Count
+             * @default 0
+             */
+            occurrence_count: number;
+            /** Affected Repos */
+            affected_repos?: string[];
+            /**
+             * First Seen
+             * @default
+             */
+            first_seen: string;
+            /**
+             * Last Seen
+             * @default
+             */
+            last_seen: string;
+        };
+        /**
+         * GlobalCostResponse
+         * @description Global cost breakdown across all repos.
+         */
+        GlobalCostResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /**
+             * Organization Id
+             * @default
+             */
+            organization_id: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Input Tokens
+             * @default 0
+             */
+            total_input_tokens: number;
+            /**
+             * Total Output Tokens
+             * @default 0
+             */
+            total_output_tokens: number;
+            /** Cost By Repo */
+            cost_by_repo?: {
+                [key: string]: string;
+            };
+            /** Cost By Workflow */
+            cost_by_workflow?: {
+                [key: string]: string;
+            };
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /**
+             * Execution Count
+             * @default 0
+             */
+            execution_count: number;
+        };
+        /**
+         * GlobalOverviewResponse
+         * @description Global overview of all systems and repos.
+         */
+        GlobalOverviewResponse: {
+            /**
+             * Total Systems
+             * @default 0
+             */
+            total_systems: number;
+            /**
+             * Total Repos
+             * @default 0
+             */
+            total_repos: number;
+            /**
+             * Unassigned Repos
+             * @default 0
+             */
+            unassigned_repos: number;
+            /**
+             * Total Active Executions
+             * @default 0
+             */
+            total_active_executions: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /** Systems */
+            systems?: components["schemas"]["SystemOverviewEntryResponse"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HeatmapDayBucketResponse
+         * @description Single day's aggregated activity.
+         */
+        HeatmapDayBucketResponse: {
+            /** Date */
+            date: string;
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /** Breakdown */
+            breakdown?: {
+                [key: string]: number;
+            };
         };
         /**
          * InjectRequest
@@ -2291,6 +2615,59 @@ export interface components {
             git_branch?: string | null;
             /** Git Repo */
             git_repo?: string | null;
+        };
+        /**
+         * OrganizationActionResponse
+         * @description Response for organization create/update/delete actions.
+         */
+        OrganizationActionResponse: {
+            /** Organization Id */
+            organization_id: string;
+            /** Name */
+            name?: string | null;
+            /** Slug */
+            slug?: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * OrganizationListResponse
+         * @description Paginated list of organizations.
+         */
+        OrganizationListResponse: {
+            /** Total */
+            total: number;
+            /** Organizations */
+            organizations?: components["schemas"]["OrganizationSummaryResponse"][];
+        };
+        /**
+         * OrganizationSummaryResponse
+         * @description Summary of an organization for list views.
+         */
+        OrganizationSummaryResponse: {
+            /** Organization Id */
+            organization_id: string;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Created By
+             * @default
+             */
+            created_by: string;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * System Count
+             * @default 0
+             */
+            system_count: number;
+            /**
+             * Repo Count
+             * @default 0
+             */
+            repo_count: number;
         };
         /**
          * PauseRequest
@@ -2437,6 +2814,390 @@ export interface components {
              * @default true
              */
             success: boolean;
+        };
+        /**
+         * RepoActionResponse
+         * @description Response for repo mutation actions (update, deregister, assign, unassign).
+         */
+        RepoActionResponse: {
+            /** Repo Id */
+            repo_id: string;
+            /** Status */
+            status: string;
+            /** System Id */
+            system_id?: string | null;
+        };
+        /**
+         * RepoActivityEntryResponse
+         * @description Single entry in a repo's execution timeline.
+         */
+        RepoActivityEntryResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /**
+             * Workflow Id
+             * @default
+             */
+            workflow_id: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Duration Seconds
+             * @default 0
+             */
+            duration_seconds: number;
+            /**
+             * Trigger Source
+             * @default
+             */
+            trigger_source: string;
+        };
+        /**
+         * RepoActivityResponse
+         * @description Paginated list of repo activity entries.
+         */
+        RepoActivityResponse: {
+            /** Entries */
+            entries?: components["schemas"]["RepoActivityEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * RepoCostResponse
+         * @description Per-repo cost breakdown by workflow and model.
+         */
+        RepoCostResponse: {
+            /**
+             * Repo Id
+             * @default
+             */
+            repo_id: string;
+            /**
+             * Repo Full Name
+             * @default
+             */
+            repo_full_name: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Input Tokens
+             * @default 0
+             */
+            total_input_tokens: number;
+            /**
+             * Total Output Tokens
+             * @default 0
+             */
+            total_output_tokens: number;
+            /** Cost By Workflow */
+            cost_by_workflow?: {
+                [key: string]: string;
+            };
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /**
+             * Execution Count
+             * @default 0
+             */
+            execution_count: number;
+        };
+        /**
+         * RepoCreatedResponse
+         * @description Response after registering a new repo.
+         */
+        RepoCreatedResponse: {
+            /** Repo Id */
+            repo_id: string;
+            /** Full Name */
+            full_name: string;
+        };
+        /**
+         * RepoFailureEntryResponse
+         * @description A failed execution record for a repository.
+         */
+        RepoFailureEntryResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /**
+             * Workflow Id
+             * @default
+             */
+            workflow_id: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
+            /** Failed At */
+            failed_at?: string | null;
+            /**
+             * Error Message
+             * @default
+             */
+            error_message: string;
+            /**
+             * Error Type
+             * @default
+             */
+            error_type: string;
+            /**
+             * Phase Name
+             * @default
+             */
+            phase_name: string;
+            /** Conversation Tail */
+            conversation_tail?: string[];
+        };
+        /**
+         * RepoFailuresResponse
+         * @description Paginated list of repo failure entries.
+         */
+        RepoFailuresResponse: {
+            /** Failures */
+            failures?: components["schemas"]["RepoFailureEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * RepoHealthResponse
+         * @description Per-repo health snapshot with success rate, trend, and windowed costs.
+         */
+        RepoHealthResponse: {
+            /**
+             * Repo Id
+             * @default
+             */
+            repo_id: string;
+            /**
+             * Repo Full Name
+             * @default
+             */
+            repo_full_name: string;
+            /**
+             * Total Executions
+             * @default 0
+             */
+            total_executions: number;
+            /**
+             * Successful Executions
+             * @default 0
+             */
+            successful_executions: number;
+            /**
+             * Failed Executions
+             * @default 0
+             */
+            failed_executions: number;
+            /**
+             * Success Rate
+             * @default 0
+             */
+            success_rate: number;
+            /**
+             * Trend
+             * @default stable
+             */
+            trend: string;
+            /**
+             * Window Cost Usd
+             * @default 0
+             */
+            window_cost_usd: string;
+            /**
+             * Window Tokens
+             * @default 0
+             */
+            window_tokens: number;
+            /**
+             * Last Execution At
+             * @default
+             */
+            last_execution_at: string;
+        };
+        /**
+         * RepoListResponse
+         * @description Paginated list of repos.
+         */
+        RepoListResponse: {
+            /** Repos */
+            repos?: components["schemas"]["RepoSummaryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * RepoSessionEntryResponse
+         * @description Lightweight session record for repo insight views.
+         */
+        RepoSessionEntryResponse: {
+            /** Id */
+            id: string;
+            /** Execution Id */
+            execution_id: string;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Agent Type
+             * @default
+             */
+            agent_type: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+        };
+        /**
+         * RepoSessionsResponse
+         * @description Paginated list of repo session entries.
+         */
+        RepoSessionsResponse: {
+            /** Sessions */
+            sessions?: components["schemas"]["RepoSessionEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * RepoStatusEntryResponse
+         * @description Health status for a single repo within a system.
+         */
+        RepoStatusEntryResponse: {
+            /**
+             * Repo Id
+             * @default
+             */
+            repo_id: string;
+            /**
+             * Repo Full Name
+             * @default
+             */
+            repo_full_name: string;
+            /**
+             * Status
+             * @default inactive
+             */
+            status: string;
+            /**
+             * Success Rate
+             * @default 0
+             */
+            success_rate: number;
+            /**
+             * Active Executions
+             * @default 0
+             */
+            active_executions: number;
+            /**
+             * Last Execution At
+             * @default
+             */
+            last_execution_at: string;
+        };
+        /**
+         * RepoSummaryResponse
+         * @description Summary of a repo for list views.
+         */
+        RepoSummaryResponse: {
+            /** Repo Id */
+            repo_id: string;
+            /** Organization Id */
+            organization_id: string;
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * Provider
+             * @default github
+             */
+            provider: string;
+            /**
+             * Full Name
+             * @default
+             */
+            full_name: string;
+            /**
+             * Owner
+             * @default
+             */
+            owner: string;
+            /**
+             * Default Branch
+             * @default main
+             */
+            default_branch: string;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /**
+             * Is Private
+             * @default false
+             */
+            is_private: boolean;
+            /**
+             * Created By
+             * @default
+             */
+            created_by: string;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /**
+         * SSEHealthResponse
+         * @description Health status of the SSE subsystem.
+         */
+        SSEHealthResponse: {
+            /** Status */
+            status: string;
+            /** Active Executions */
+            active_executions?: number | null;
+            /** Active Connections */
+            active_connections?: number | null;
         };
         /**
          * SessionCostResponse
@@ -2637,6 +3398,44 @@ export interface components {
             completed_at?: string | null;
         };
         /**
+         * SessionTokenMetrics
+         * @description Token usage metrics for a session.
+         */
+        SessionTokenMetrics: {
+            /** Session Id */
+            session_id: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+        };
+        /**
          * StateResponse
          * @description Response with execution state.
          */
@@ -2645,6 +3444,271 @@ export interface components {
             execution_id: string;
             /** State */
             state: string;
+        };
+        /**
+         * SystemActionResponse
+         * @description Response for system mutation actions (update, delete).
+         */
+        SystemActionResponse: {
+            /** System Id */
+            system_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * SystemActivityResponse
+         * @description Paginated list of system activity entries.
+         */
+        SystemActivityResponse: {
+            /** Entries */
+            entries?: components["schemas"]["RepoActivityEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * SystemCostResponse
+         * @description System-wide cost breakdown by repo, workflow, and model.
+         */
+        SystemCostResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /**
+             * Organization Id
+             * @default
+             */
+            organization_id: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Input Tokens
+             * @default 0
+             */
+            total_input_tokens: number;
+            /**
+             * Total Output Tokens
+             * @default 0
+             */
+            total_output_tokens: number;
+            /** Cost By Repo */
+            cost_by_repo?: {
+                [key: string]: string;
+            };
+            /** Cost By Workflow */
+            cost_by_workflow?: {
+                [key: string]: string;
+            };
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /**
+             * Execution Count
+             * @default 0
+             */
+            execution_count: number;
+        };
+        /**
+         * SystemCreatedResponse
+         * @description Response after creating a new system.
+         */
+        SystemCreatedResponse: {
+            /** System Id */
+            system_id: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * SystemHistoryResponse
+         * @description Paginated list of system history entries.
+         */
+        SystemHistoryResponse: {
+            /** Entries */
+            entries?: components["schemas"]["RepoActivityEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * SystemListResponse
+         * @description Paginated list of systems.
+         */
+        SystemListResponse: {
+            /** Systems */
+            systems?: components["schemas"]["SystemSummaryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * SystemOverviewEntryResponse
+         * @description Summary of a single system for global overview.
+         */
+        SystemOverviewEntryResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /**
+             * Organization Id
+             * @default
+             */
+            organization_id: string;
+            /**
+             * Organization Name
+             * @default
+             */
+            organization_name: string;
+            /**
+             * Repo Count
+             * @default 0
+             */
+            repo_count: number;
+            /**
+             * Overall Status
+             * @default healthy
+             */
+            overall_status: string;
+            /**
+             * Active Executions
+             * @default 0
+             */
+            active_executions: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+        };
+        /**
+         * SystemPatternsResponse
+         * @description Recurring failure and cost patterns within a system.
+         */
+        SystemPatternsResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /** Failure Patterns */
+            failure_patterns?: components["schemas"]["FailurePatternResponse"][];
+            /** Cost Outliers */
+            cost_outliers?: components["schemas"]["CostOutlierResponse"][];
+            /**
+             * Analysis Window Hours
+             * @default 168
+             */
+            analysis_window_hours: number;
+        };
+        /**
+         * SystemStatusResponse
+         * @description Cross-repo health overview within a system.
+         */
+        SystemStatusResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /**
+             * Organization Id
+             * @default
+             */
+            organization_id: string;
+            /**
+             * Overall Status
+             * @default healthy
+             */
+            overall_status: string;
+            /**
+             * Total Repos
+             * @default 0
+             */
+            total_repos: number;
+            /**
+             * Healthy Repos
+             * @default 0
+             */
+            healthy_repos: number;
+            /**
+             * Degraded Repos
+             * @default 0
+             */
+            degraded_repos: number;
+            /**
+             * Failing Repos
+             * @default 0
+             */
+            failing_repos: number;
+            /** Repos */
+            repos?: components["schemas"]["RepoStatusEntryResponse"][];
+        };
+        /**
+         * SystemSummaryResponse
+         * @description Summary of a system for list views.
+         */
+        SystemSummaryResponse: {
+            /** System Id */
+            system_id: string;
+            /** Organization Id */
+            organization_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Created By
+             * @default
+             */
+            created_by: string;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Repo Count
+             * @default 0
+             */
+            repo_count: number;
         };
         /**
          * TimelineEntryResponse
@@ -2679,6 +3743,235 @@ export interface components {
             total_duration_ms: number;
             /** Avg Duration Ms */
             avg_duration_ms: number;
+        };
+        /**
+         * ToolTimelineEntry
+         * @description Single entry in a tool execution timeline.
+         */
+        ToolTimelineEntry: {
+            /**
+             * Observation Id
+             * @default
+             */
+            observation_id: string;
+            /**
+             * Operation Type
+             * @default
+             */
+            operation_type: string;
+            /** Tool Name */
+            tool_name?: string | null;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Success */
+            success?: boolean | null;
+        };
+        /**
+         * ToolTimelineResponse
+         * @description Tool execution timeline for a session.
+         */
+        ToolTimelineResponse: {
+            /** Session Id */
+            session_id: string;
+            /**
+             * Total Executions
+             * @default 0
+             */
+            total_executions: number;
+            /** Executions */
+            executions?: components["schemas"]["ToolTimelineEntry"][];
+        };
+        /**
+         * TriggerActionResponse
+         * @description Response for trigger create/update/delete actions.
+         */
+        TriggerActionResponse: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Name */
+            name?: string | null;
+            /** Status */
+            status: string;
+            /** Preset */
+            preset?: string | null;
+            /** Action */
+            action?: string | null;
+        };
+        /**
+         * TriggerDetail
+         * @description Detailed trigger rule response.
+         */
+        TriggerDetail: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Name */
+            name: string;
+            /** Event */
+            event: string;
+            /** Repository */
+            repository: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Status */
+            status: string;
+            /**
+             * Fire Count
+             * @default 0
+             */
+            fire_count: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Conditions */
+            conditions?: {
+                [key: string]: unknown;
+            }[];
+            /** Input Mapping */
+            input_mapping?: {
+                [key: string]: string;
+            };
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /**
+             * Created By
+             * @default
+             */
+            created_by: string;
+            /** Last Fired At */
+            last_fired_at?: string | null;
+        };
+        /**
+         * TriggerHistoryEntryResponse
+         * @description Single entry in a trigger-specific history response.
+         */
+        TriggerHistoryEntryResponse: {
+            /** Fired At */
+            fired_at?: string | null;
+            /**
+             * Execution Id
+             * @default
+             */
+            execution_id: string;
+            /**
+             * Webhook Delivery Id
+             * @default
+             */
+            webhook_delivery_id: string;
+            /**
+             * Event Type
+             * @default
+             */
+            event_type: string;
+            /** Pr Number */
+            pr_number?: number | null;
+            /**
+             * Status
+             * @default dispatched
+             */
+            status: string;
+            /** Cost Usd */
+            cost_usd?: number | null;
+        };
+        /**
+         * TriggerHistoryListEntry
+         * @description Entry in a cross-trigger history listing.
+         */
+        TriggerHistoryListEntry: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Fired At */
+            fired_at?: string | null;
+            /**
+             * Execution Id
+             * @default
+             */
+            execution_id: string;
+            /**
+             * Event Type
+             * @default
+             */
+            event_type: string;
+            /** Pr Number */
+            pr_number?: number | null;
+            /**
+             * Status
+             * @default dispatched
+             */
+            status: string;
+        };
+        /**
+         * TriggerHistoryListResponse
+         * @description Paginated list of trigger history entries (global).
+         */
+        TriggerHistoryListResponse: {
+            /** Total */
+            total: number;
+            /** Entries */
+            entries?: components["schemas"]["TriggerHistoryListEntry"][];
+        };
+        /**
+         * TriggerHistoryResponse
+         * @description History entries for a specific trigger.
+         */
+        TriggerHistoryResponse: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Entries */
+            entries?: components["schemas"]["TriggerHistoryEntryResponse"][];
+        };
+        /**
+         * TriggerListResponse
+         * @description Paginated list of trigger summaries.
+         */
+        TriggerListResponse: {
+            /** Total */
+            total: number;
+            /** Triggers */
+            triggers?: components["schemas"]["TriggerSummary"][];
+        };
+        /**
+         * TriggerSummary
+         * @description Summary of a trigger rule for list views.
+         */
+        TriggerSummary: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Name */
+            name: string;
+            /** Event */
+            event: string;
+            /** Repository */
+            repository: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Status */
+            status: string;
+            /**
+             * Fire Count
+             * @default 0
+             */
+            fire_count: number;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /** UpdateArtifactRequest */
+        UpdateArtifactRequest: {
+            /** Title */
+            title?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Is Primary Deliverable */
+            is_primary_deliverable?: boolean | null;
         };
         /** UpdatePhasePromptRequest */
         UpdatePhasePromptRequest: {
@@ -2744,6 +4037,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /** WorkflowListResponse */
         WorkflowListResponse: {
@@ -3029,6 +4326,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_workflow_endpoint_workflows__workflow_id__export_get: {
+        parameters: {
+            query?: {
+                /** @description Export format: 'package' (workflow.yaml + phases) or 'plugin' (full CC plugin) */
+                format?: "package" | "plugin";
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportManifestResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -3676,6 +5007,72 @@ export interface operations {
             };
         };
     };
+    update_artifact_endpoint_artifacts__artifact_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_artifact_endpoint_artifacts__artifact_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_artifact_content_endpoint_artifacts__artifact_id__content_get: {
         parameters: {
             query?: never;
@@ -3794,9 +5191,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ToolTimelineResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3829,9 +5224,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SessionTokenMetrics"];
                 };
             };
             /** @description Validation Error */
@@ -4250,9 +5643,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TriggerListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4287,9 +5678,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TriggerActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4320,9 +5709,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TriggerHistoryListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4353,9 +5740,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TriggerDetail"];
                 };
             };
             /** @description Validation Error */
@@ -4386,9 +5771,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TriggerActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4425,9 +5808,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TriggerActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4460,9 +5841,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TriggerHistoryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4499,9 +5878,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TriggerActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4616,9 +5993,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SSEHealthResponse"];
                 };
             };
         };
@@ -4638,9 +6013,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OrganizationListResponse"];
                 };
             };
         };
@@ -4666,9 +6039,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OrganizationActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4699,9 +6070,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OrganizationSummaryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4738,9 +6107,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OrganizationActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4771,9 +6138,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OrganizationActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4804,9 +6169,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4841,9 +6204,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemCreatedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4874,9 +6235,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemSummaryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4913,9 +6272,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4946,9 +6303,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4979,9 +6334,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5012,9 +6365,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemCostResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5048,9 +6399,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemActivityResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5081,9 +6430,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemPatternsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5117,9 +6464,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SystemHistoryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5153,9 +6498,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5190,9 +6533,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoCreatedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5223,9 +6564,75 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_repo_endpoint_repos__repo_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deregister_repo_endpoint_repos__repo_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5262,9 +6669,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5295,9 +6700,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5328,9 +6731,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoHealthResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5361,9 +6762,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoCostResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5397,9 +6796,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoActivityResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5432,9 +6829,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoFailuresResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5467,9 +6862,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RepoSessionsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5498,9 +6891,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["GlobalOverviewResponse"];
                 };
             };
         };
@@ -5520,9 +6911,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["GlobalCostResponse"];
                 };
             };
         };
@@ -5549,7 +6938,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ContributionHeatmapResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5578,9 +6967,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentProviderListResponse"];
                 };
             };
         };
@@ -5606,9 +6993,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentTestResult"];
                 };
             };
             /** @description Validation Error */
@@ -5643,9 +7028,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentTestResult"];
                 };
             };
             /** @description Validation Error */

@@ -5,7 +5,7 @@ Location: orchestration/domain/aggregate_workflow_template/ (per ADR-020)
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -128,7 +128,7 @@ def _parse_typed_list(raw: list, type_name: str) -> list:
     return [cls(**item) if isinstance(item, dict) else item for item in (raw or [])]
 
 
-class WorkflowStatus(str, Enum):
+class WorkflowStatus(StrEnum):
     """Status of a workflow."""
 
     PENDING = "pending"

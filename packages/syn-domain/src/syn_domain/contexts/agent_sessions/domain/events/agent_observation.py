@@ -16,13 +16,13 @@ from __future__ import annotations
 
 from dataclasses import field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from event_sourcing import DomainEvent, event
 
 
-class ObservationType(str, Enum):
+class ObservationType(StrEnum):
     """Type of agent observation.
 
     Categorizes raw telemetry from agent execution.

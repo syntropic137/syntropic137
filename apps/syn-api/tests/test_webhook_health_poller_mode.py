@@ -15,6 +15,9 @@ from syn_api.services.github_event_poller import GitHubEventPoller
 from syn_api.services.webhook_health_tracker import WebhookHealthTracker
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
+from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
+    EvaluateWebhookHandler,
+)
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 from syn_domain.contexts.github.slices.event_pipeline.poller_state import PollerMode
 
@@ -161,7 +164,8 @@ class TestPollerModeTransitions:
         poller = GitHubEventPoller(
             events_client=mock_client,
             pipeline=EventPipeline(
-                dedup=InMemoryDedup(), trigger_store=store, trigger_repo=NullRepository()
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=tracker,
             trigger_store=store,
@@ -186,7 +190,8 @@ class TestPollerModeTransitions:
         poller = GitHubEventPoller(
             events_client=mock_client,
             pipeline=EventPipeline(
-                dedup=InMemoryDedup(), trigger_store=store, trigger_repo=NullRepository()
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=tracker,
             trigger_store=store,
@@ -211,7 +216,8 @@ class TestPollerModeTransitions:
         poller = GitHubEventPoller(
             events_client=mock_client,
             pipeline=EventPipeline(
-                dedup=InMemoryDedup(), trigger_store=store, trigger_repo=NullRepository()
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=tracker,
             trigger_store=store,
@@ -243,7 +249,8 @@ class TestPollerModeTransitions:
         poller = GitHubEventPoller(
             events_client=mock_client,
             pipeline=EventPipeline(
-                dedup=InMemoryDedup(), trigger_store=store, trigger_repo=NullRepository()
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=tracker,
             trigger_store=store,
@@ -276,7 +283,8 @@ class TestPollerErrorBackoff:
         poller = GitHubEventPoller(
             events_client=error_client,  # type: ignore[arg-type]
             pipeline=EventPipeline(
-                dedup=InMemoryDedup(), trigger_store=store, trigger_repo=NullRepository()
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=tracker,
             trigger_store=store,
@@ -309,7 +317,8 @@ class TestPollerErrorBackoff:
         poller = GitHubEventPoller(
             events_client=mock_client,
             pipeline=EventPipeline(
-                dedup=InMemoryDedup(), trigger_store=store, trigger_repo=NullRepository()
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
             ),
             health_tracker=tracker,
             trigger_store=store,

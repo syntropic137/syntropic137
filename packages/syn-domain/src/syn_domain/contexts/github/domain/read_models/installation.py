@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003 - needed for runtime type annotations
-from enum import Enum
+from enum import StrEnum
 
 
-class InstallationStatus(str, Enum):
+class InstallationStatus(StrEnum):
     """Status of a GitHub App installation."""
 
     ACTIVE = "active"

@@ -8,7 +8,8 @@
 #   1. Version consistency — all 13 package files match and are bumped
 #   2. Release notes — PR body must contain meaningful release notes
 #   3. Docs drift — generated CLI + API docs match source
-#   4. Docker dry-run — all container images build successfully (single-arch)
+#   4. CLI ↔ API sync — generated CLI types match OpenAPI spec (single source of truth)
+#   5. Docker dry-run — all container images build successfully (single-arch)
 #
 # Full CI (tests, lint, typecheck, security scans) also runs on these PRs
 # via ci.yml which triggers on pull_request to both main and release.
@@ -194,6 +195,48 @@ jobs:
           echo "API docs are up to date."
 
   # ---------------------------------------------------------------------------
+  # CLI ↔ API Sync — generated CLI types must match OpenAPI spec
+  # ---------------------------------------------------------------------------
+  cli-api-sync:
+    name: CLI ↔ API Sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install CLI dependencies
+        run: pnpm --filter @syntropic137/cli install --frozen-lockfile
+
+      - name: Regenerate OpenAPI spec
+        run: uv run python scripts/extract_openapi.py
+
+      - name: Check CLI types vs OpenAPI spec
+        run: pnpm --filter @syntropic137/cli run check:api-drift
+
+      - name: Regenerate CLI types and check for drift
+        run: |
+          pnpm --filter @syntropic137/cli generate:types
+          CHANGED=$(git diff --name-only apps/syn-cli-node/src/generated/)
+          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-cli-node/src/generated/)
+          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
+            echo "::error::CLI generated types are out of sync with OpenAPI spec."
+            echo "Run 'pnpm --filter @syntropic137/cli generate:types' and commit."
+            [[ -n "$CHANGED" ]] && echo "Changed files:" && echo "$CHANGED"
+            [[ -n "$UNTRACKED" ]] && echo "Untracked files:" && echo "$UNTRACKED"
+            exit 1
+          fi
+          echo "CLI types are in sync with OpenAPI spec."
+
+  # ---------------------------------------------------------------------------
   # Docker Dry-Run — verify all images build (single-arch, no push)
   # ---------------------------------------------------------------------------
   docker-dry-run:
@@ -253,7 +296,7 @@ jobs:
   release-gate-success:
     name: Release Gate
     if: always()
-    needs: [version-check, changelog-check, docs-drift, docker-dry-run]
+    needs: [version-check, changelog-check, docs-drift, cli-api-sync, docker-dry-run]
     runs-on: ubuntu-latest
     steps:
       - name: Check all gates passed
@@ -261,11 +304,13 @@ jobs:
           echo "version-check: ${{ needs.version-check.result }}"
           echo "changelog-check: ${{ needs.changelog-check.result }}"
           echo "docs-drift: ${{ needs.docs-drift.result }}"
+          echo "cli-api-sync: ${{ needs.cli-api-sync.result }}"
           echo "docker-dry-run: ${{ needs.docker-dry-run.result }}"
 
           if [[ "${{ needs.version-check.result }}" != "success" ]] || \
              [[ "${{ needs.changelog-check.result }}" != "success" ]] || \
              [[ "${{ needs.docs-drift.result }}" != "success" ]] || \
+             [[ "${{ needs.cli-api-sync.result }}" != "success" ]] || \
              [[ "${{ needs.docker-dry-run.result }}" != "success" ]]; then
             echo "::error::One or more release gate checks failed."
             exit 1

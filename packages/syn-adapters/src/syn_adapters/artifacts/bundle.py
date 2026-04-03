@@ -21,7 +21,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from syn_adapters.object_storage.protocol import StorageProtocol
 
 
-class ArtifactType(str, Enum):
+class ArtifactType(StrEnum):
     """Type of artifact produced by a phase.
 
     Mirrors the domain ArtifactType for consistency.
