@@ -12,3 +12,4 @@ export {
 } from "./api.js";
 export { streamSSE, parseSseLine } from "./sse.js";
 export type { SSEEvent } from "./sse.js";
+export { api, createTypedClient } from "./typed.js";
