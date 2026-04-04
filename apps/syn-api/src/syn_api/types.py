@@ -297,6 +297,15 @@ class SessionSummary(BaseModel):
     completed_at: datetime | None = None
 
 
+class SessionListResponse(BaseModel):
+    """Wrapped list of session summaries."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    sessions: list[SessionSummary] = Field(default_factory=list)
+    total: int = 0
+
+
 class ArtifactSummary(BaseModel):
     """Summary of an artifact."""
 
