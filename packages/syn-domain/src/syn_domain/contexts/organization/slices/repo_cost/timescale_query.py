@@ -76,9 +76,7 @@ class TimescaleRepoCostQuery:
 
         async with self._pool.acquire() as conn:
             # Try session_summary aggregation first
-            rows = await conn.fetch(
-                _EXECUTION_COSTS_QUERY, SESSION_SUMMARY, execution_ids
-            )
+            rows = await conn.fetch(_EXECUTION_COSTS_QUERY, SESSION_SUMMARY, execution_ids)
 
             total_cost = Decimal("0")
             total_input = 0
@@ -140,9 +138,7 @@ class TimescaleRepoCostQuery:
         all_execution_ids = [eid for eids in repo_executions.values() for eid in eids]
 
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                _EXECUTION_COSTS_QUERY, SESSION_SUMMARY, all_execution_ids
-            )
+            rows = await conn.fetch(_EXECUTION_COSTS_QUERY, SESSION_SUMMARY, all_execution_ids)
 
             # Build per-execution cost map
             exec_costs: dict[str, dict[str, Any]] = {}
@@ -151,7 +147,9 @@ class TimescaleRepoCostQuery:
                     exec_costs[row["execution_id"]] = {
                         "total_input": row["total_input"] or 0,
                         "total_output": row["total_output"] or 0,
-                        "total_cost": Decimal(str(row["total_cost"])) if row["total_cost"] else Decimal("0"),
+                        "total_cost": Decimal(str(row["total_cost"]))
+                        if row["total_cost"]
+                        else Decimal("0"),
                     }
 
             # If no session_summary data, try token_usage

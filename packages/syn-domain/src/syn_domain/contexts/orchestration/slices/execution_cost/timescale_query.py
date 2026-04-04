@@ -115,9 +115,7 @@ class TimescaleExecutionCostQuery:
         """
         async with self._pool.acquire() as conn:
             # Try session_summary first (authoritative totals)
-            summary_row = await conn.fetchrow(
-                _SESSION_SUMMARY_QUERY, execution_id, SESSION_SUMMARY
-            )
+            summary_row = await conn.fetchrow(_SESSION_SUMMARY_QUERY, execution_id, SESSION_SUMMARY)
 
             has_summary = summary_row is not None and summary_row["total_input"] is not None
 
@@ -159,9 +157,7 @@ class TimescaleExecutionCostQuery:
             if has_summary:
                 turn_count = int(summary_row.get("total_turns") or 0)
             else:
-                turn_count = await conn.fetchval(
-                    _TURN_COUNT_QUERY, execution_id, TOKEN_USAGE
-                ) or 0
+                turn_count = await conn.fetchval(_TURN_COUNT_QUERY, execution_id, TOKEN_USAGE) or 0
 
             # Session info
             session_ids: list[str] = list(token_row.get("session_ids") or [])
@@ -188,9 +184,7 @@ class TimescaleExecutionCostQuery:
             # Per-phase breakdown
             cost_by_phase: dict[str, Decimal] = {}
             if has_summary:
-                phase_rows = await conn.fetch(
-                    _COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY
-                )
+                phase_rows = await conn.fetch(_COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY)
                 for row in phase_rows:
                     if row["phase_id"] and row["phase_cost"] is not None:
                         cost_by_phase[row["phase_id"]] = Decimal(str(row["phase_cost"]))
@@ -198,9 +192,7 @@ class TimescaleExecutionCostQuery:
             # Per-model breakdown
             cost_by_model: dict[str, Decimal] = {}
             if has_summary:
-                model_rows = await conn.fetch(
-                    _COST_BY_MODEL_QUERY, execution_id, SESSION_SUMMARY
-                )
+                model_rows = await conn.fetch(_COST_BY_MODEL_QUERY, execution_id, SESSION_SUMMARY)
                 for row in model_rows:
                     if row["model"] and row["model_cost"] is not None:
                         cost_by_model[row["model"]] = Decimal(str(row["model_cost"]))
