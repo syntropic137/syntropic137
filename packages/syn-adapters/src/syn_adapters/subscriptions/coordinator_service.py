@@ -218,11 +218,17 @@ def create_coordinator_service(
     from syn_adapters.subscriptions.realtime_adapter import (
         SystemListAdapter as _SystemListAdapter,
     )
+    from syn_adapters.subscriptions.realtime_adapter import (
+        TriggerHistoryAdapter as _TriggerHistoryAdapter,
+    )
     from syn_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
     from syn_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
     from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow import (
         WorkflowDispatchProjection,
+    )
+    from syn_domain.contexts.github.slices.trigger_history.projection import (
+        TriggerHistoryProjection,
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
@@ -257,7 +263,7 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
-    # Create all checkpointed projections (20 total)
+    # Create all checkpointed projections (21 total)
     projections: list[CheckpointedProjection] = [
         # --- Orchestration context (AutoDispatchProjection — direct) ---
         WorkflowListProjection(projection_store),
@@ -282,6 +288,8 @@ def create_coordinator_service(
         RepoCostProjection(projection_store, pool=pool),
         # RepoCorrelation handles mixed namespaces (github.* + unnamespaced)
         _RepoCorrelationAdapter(RepoCorrelationProjection(projection_store)),
+        # Trigger history — github.TriggerFired → fire log entries
+        _TriggerHistoryAdapter(TriggerHistoryProjection(projection_store)),
         # --- Observability projections — plain classes wrapped via adapters ---
         ToolTimelineAdapter(ToolTimelineProjection(projection_store)),
         ExecutionCostAdapter(ExecutionCostProjection(projection_store, pool=pool)),

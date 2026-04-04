@@ -41,6 +41,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         RepoCorrelationAdapter,
         RepoListAdapter,
         SystemListAdapter,
+        TriggerHistoryAdapter,
     )
     from syn_domain.contexts.agent_sessions.slices.list_sessions import (
         SessionListProjection,
@@ -90,6 +91,9 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.organization.slices.list_systems.projection import (
         SystemProjection,
     )
+    from syn_domain.contexts.github.slices.trigger_history.projection import (
+        TriggerHistoryProjection,
+    )
     from syn_domain.contexts.organization.slices.repo_correlation import (
         RepoCorrelationProjection,
     )
@@ -120,6 +124,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         RepoListAdapter(RepoProjection(dummy)),
         # Organization insight — correlation, health, cost
         RepoCorrelationAdapter(RepoCorrelationProjection(dummy)),
+        TriggerHistoryAdapter(TriggerHistoryProjection(dummy)),
         RepoHealthProjection(dummy),
         RepoCostProjection(dummy),
         # Observability — adapted plain-class projections
@@ -132,7 +137,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
 # Expected count — update when adding/removing projections from the coordinator.
 # If this fails, you added or removed a projection. Update _EXPECTED_COUNT
 # and the list in _get_coordinator_projections() above.
-_EXPECTED_COUNT = 20
+_EXPECTED_COUNT = 21
 
 
 # ---------------------------------------------------------------------------

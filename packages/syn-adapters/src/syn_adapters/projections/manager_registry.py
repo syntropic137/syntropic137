@@ -13,9 +13,6 @@ from syn_domain.contexts.agent_sessions.slices.list_sessions import SessionListP
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection
 from syn_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
 from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
-from syn_domain.contexts.github.slices.trigger_history.projection import (
-    TriggerHistoryProjection,
-)
 from syn_domain.contexts.orchestration.slices.dashboard_metrics import DashboardMetricsProjection
 from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
@@ -157,7 +154,6 @@ def build_projection_registry(store: ProjectionStoreProtocol) -> dict[str, Any]:
         "repo_list": RepoProjection(store),
         # Organization insight projections — cross-context correlation
         "repo_correlation": RepoCorrelationProjection(store),
-        "trigger_history": TriggerHistoryProjection(store),
         "repo_health": RepoHealthProjection(store),
         "repo_cost": _create_repo_cost_projection(store),
         # Processor to-do list (ISS-196) — store-backed for crash resilience (ISS-222)
