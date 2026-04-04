@@ -128,9 +128,7 @@ async def list_session_costs(
 
         # Client-side filter by execution_id if provided
         costs = (
-            [c for c in all_costs if c.execution_id == execution_id]
-            if execution_id
-            else all_costs
+            [c for c in all_costs if c.execution_id == execution_id] if execution_id else all_costs
         )
 
         return Ok(

@@ -22,9 +22,7 @@ def _repo_root() -> Path:
 class TestCostQuerySeparation:
     def test_cost_routes_use_query_service_not_projection(self) -> None:
         """Cost routes must import query services, not access projections directly."""
-        costs_file = (
-            _repo_root() / "apps" / "syn-api" / "src" / "syn_api" / "routes" / "costs.py"
-        )
+        costs_file = _repo_root() / "apps" / "syn-api" / "src" / "syn_api" / "routes" / "costs.py"
         content = costs_file.read_text(encoding="utf-8")
 
         violations: list[str] = []
@@ -41,9 +39,7 @@ class TestCostQuerySeparation:
 
         # Should not call projection.get_all() for cost data
         if "projection.get_all" in content:
-            violations.append(
-                "costs.py calls projection.get_all() — use query_service.list_all()"
-            )
+            violations.append("costs.py calls projection.get_all() — use query_service.list_all()")
 
         # Should not import get_projection_mgr for cost reads
         if "get_projection_mgr" in content:
@@ -138,9 +134,7 @@ class TestCostQuerySeparation:
             content = qs_file.read_text(encoding="utf-8")
             # Pool must NOT be optional (no `| None`, no `Optional`)
             if "pool: Any | None" in content or "pool: Optional" in content:
-                violations.append(
-                    f"{name} has optional pool — TimescaleDB pool must be required"
-                )
+                violations.append(f"{name} has optional pool — TimescaleDB pool must be required")
 
         if violations:
             joined = "\n  ".join(violations)

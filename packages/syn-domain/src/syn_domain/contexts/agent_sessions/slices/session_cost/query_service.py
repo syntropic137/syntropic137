@@ -117,28 +117,18 @@ class SessionCostQueryService:
         """
         async with self._pool.acquire() as conn:
             # 1. Get authoritative data from session_summary events
-            summary_rows = await conn.fetch(
-                _LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY
-            )
+            summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY)
             summarized_session_ids = {row["session_id"] for row in summary_rows}
 
             # 2. Get in-progress sessions from token_usage (no summary yet)
-            token_rows = await conn.fetch(
-                _LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE
-            )
+            token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
 
             # 3. Get tool counts per session
-            tool_rows = await conn.fetch(
-                _TOOL_COUNT_BY_SESSION_QUERY, TOOL_EXECUTION_COMPLETED
-            )
-            tool_counts: dict[str, int] = {
-                row["session_id"]: row["cnt"] for row in tool_rows
-            }
+            tool_rows = await conn.fetch(_TOOL_COUNT_BY_SESSION_QUERY, TOOL_EXECUTION_COMPLETED)
+            tool_counts: dict[str, int] = {row["session_id"]: row["cnt"] for row in tool_rows}
 
             # 4. Get started_at per session
-            started_rows = await conn.fetch(
-                _STARTED_AT_BY_SESSION_QUERY, SESSION_STARTED
-            )
+            started_rows = await conn.fetch(_STARTED_AT_BY_SESSION_QUERY, SESSION_STARTED)
             started_map: dict[str, Any] = {
                 row["session_id"]: row["started_at"] for row in started_rows
             }

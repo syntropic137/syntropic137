@@ -136,23 +136,15 @@ class ExecutionCostQueryService:
         """
         async with self._pool.acquire() as conn:
             # 1. Authoritative data from session_summary events
-            summary_rows = await conn.fetch(
-                _LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY
-            )
+            summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY)
             summarized_exec_ids = {row["execution_id"] for row in summary_rows}
 
             # 2. In-progress executions from token_usage
-            token_rows = await conn.fetch(
-                _LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE
-            )
+            token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
 
             # 3. Tool counts per execution
-            tool_rows = await conn.fetch(
-                _TOOL_COUNT_BY_EXECUTION_QUERY, TOOL_EXECUTION_COMPLETED
-            )
-            tool_counts: dict[str, int] = {
-                row["execution_id"]: row["cnt"] for row in tool_rows
-            }
+            tool_rows = await conn.fetch(_TOOL_COUNT_BY_EXECUTION_QUERY, TOOL_EXECUTION_COMPLETED)
+            tool_counts: dict[str, int] = {row["execution_id"]: row["cnt"] for row in tool_rows}
 
             # 4. Phase breakdowns (from session_summary)
             phase_rows = await conn.fetch(_COST_BY_PHASE_QUERY, SESSION_SUMMARY)
