@@ -558,6 +558,11 @@ async def list_repos_endpoint(
 @router.get("/{repo_id}")
 async def get_repo_endpoint(repo_id: str) -> RepoSummaryResponse:
     """Get repo details."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo(repo_id)
 
     if isinstance(result, Err):
@@ -642,6 +647,11 @@ async def unassign_repo_from_system_endpoint(repo_id: str) -> RepoActionResponse
 @router.get("/{repo_id}/health")
 async def get_repo_health_endpoint(repo_id: str) -> RepoHealthResponse:
     """Get health snapshot for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_health(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -651,6 +661,11 @@ async def get_repo_health_endpoint(repo_id: str) -> RepoHealthResponse:
 @router.get("/{repo_id}/cost")
 async def get_repo_cost_endpoint(repo_id: str) -> RepoCostResponse:
     """Get cost breakdown for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_cost(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -662,6 +677,11 @@ async def get_repo_activity_endpoint(
     repo_id: str, offset: int = 0, limit: int = 50
 ) -> RepoActivityResponse:
     """Get execution timeline for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_activity(repo_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -672,6 +692,11 @@ async def get_repo_activity_endpoint(
 @router.get("/{repo_id}/failures")
 async def get_repo_failures_endpoint(repo_id: str, limit: int = 50) -> RepoFailuresResponse:
     """Get recent failures for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_failures(repo_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -682,6 +707,11 @@ async def get_repo_failures_endpoint(repo_id: str, limit: int = 50) -> RepoFailu
 @router.get("/{repo_id}/sessions")
 async def get_repo_sessions_endpoint(repo_id: str, limit: int = 50) -> RepoSessionsResponse:
     """Get agent sessions for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_sessions(repo_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)

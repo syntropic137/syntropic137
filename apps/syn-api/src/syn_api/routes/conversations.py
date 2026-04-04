@@ -244,6 +244,11 @@ async def get_conversation_log_endpoint(
     limit: int = 100,
 ) -> ConversationLogResponse:
     """Get conversation log for a session."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     if limit > 500:
         limit = 500
 
@@ -287,6 +292,11 @@ async def get_conversation_metadata_endpoint(
     session_id: str,
 ) -> ConversationMetadataResponse | None:
     """Get conversation metadata for a session."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_conversation_metadata(session_id)
 
     if isinstance(result, Err):
