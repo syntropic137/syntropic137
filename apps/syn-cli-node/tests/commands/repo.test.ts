@@ -37,7 +37,7 @@ describe("repo commands", () => {
 
   it("register succeeds", async () => {
     mockFetch.mockResolvedValue(jsonResponse({ repo_id: "repo-1", full_name: "owner/repo" }));
-    await repoGroup.getCommand("register")!.handler({ positionals: [], values: { url: "owner/repo" } });
+    await repoGroup.getCommand("register")!.handler({ positionals: [], values: { url: "owner/repo", org: "org-1" } });
     expect(stdout()).toContain("Repository registered");
   });
 

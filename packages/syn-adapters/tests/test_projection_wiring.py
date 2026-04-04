@@ -23,7 +23,10 @@ from event_sourcing import (
     MemoryCheckpointStore,
 )
 
-from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore, InMemoryProjectionStoreError
+from syn_adapters.projection_stores.memory_store import (
+    InMemoryProjectionStore,
+    InMemoryProjectionStoreError,
+)
 from syn_adapters.projections.trigger_query_projection import (
     NS_DELIVERIES,
     NS_FIRE_RECORDS,
