@@ -12,6 +12,11 @@ These tests use no infrastructure — they import classes and inspect structure.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from event_sourcing import CheckpointedProjection
+
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -19,20 +24,32 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _get_coordinator_projections() -> list[object]:
+def _get_coordinator_projections() -> list[CheckpointedProjection]:
     """Instantiate the coordinator's projection list without infrastructure.
 
     Uses object() as the store arg — constructors just store it,
     no validation occurs.
     """
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
+    from syn_adapters.subscriptions.projection_adapters import (
+        ExecutionCostAdapter,
+        SessionCostAdapter,
+        ToolTimelineAdapter,
+    )
     from syn_adapters.subscriptions.realtime_adapter import (
         OrganizationListAdapter,
+        RepoCorrelationAdapter,
         RepoListAdapter,
         SystemListAdapter,
     )
     from syn_domain.contexts.agent_sessions.slices.list_sessions import (
         SessionListProjection,
+    )
+    from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
+        SessionCostProjection,
+    )
+    from syn_domain.contexts.agent_sessions.slices.tool_timeline import (
+        ToolTimelineProjection,
     )
     from syn_domain.contexts.artifacts.slices.list_artifacts import (
         ArtifactListProjection,
@@ -42,6 +59,12 @@ def _get_coordinator_projections() -> list[object]:
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
+        ExecutionCostProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+        ExecutionTodoProjection,
     )
     from syn_domain.contexts.orchestration.slices.get_execution_detail import (
         WorkflowExecutionDetailProjection,
@@ -55,6 +78,9 @@ def _get_coordinator_projections() -> list[object]:
     from syn_domain.contexts.orchestration.slices.list_workflows import (
         WorkflowListProjection,
     )
+    from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
+        WorkflowPhaseMetricsProjection,
+    )
     from syn_domain.contexts.organization._shared.organization_projection import (
         OrganizationProjection,
     )
@@ -64,28 +90,49 @@ def _get_coordinator_projections() -> list[object]:
     from syn_domain.contexts.organization.slices.list_systems.projection import (
         SystemProjection,
     )
+    from syn_domain.contexts.organization.slices.repo_correlation import (
+        RepoCorrelationProjection,
+    )
+    from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
+    from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
-    dummy = object()
+    dummy = cast(Any, object())
     return [
+        # Orchestration — workflow CRUD and execution views
         WorkflowListProjection(dummy),
         WorkflowDetailProjection(dummy),
         WorkflowExecutionListProjection(dummy),
         WorkflowExecutionDetailProjection(dummy),
-        SessionListProjection(dummy),
-        ArtifactListProjection(dummy),
         DashboardMetricsProjection(dummy),
+        # Orchestration — phase metrics and execution todo
+        WorkflowPhaseMetricsProjection(dummy),
+        ExecutionTodoProjection(store=dummy),
+        # Agent sessions
+        SessionListProjection(dummy),
+        # Artifacts
+        ArtifactListProjection(dummy),
+        # GitHub — dispatch and trigger index
         WorkflowDispatchProjection(execution_service=None, store=dummy),
         TriggerQueryProjection(dummy),
+        # Organization — adapted namespace projections
         OrganizationListAdapter(OrganizationProjection(dummy)),
         SystemListAdapter(SystemProjection(dummy)),
         RepoListAdapter(RepoProjection(dummy)),
+        # Organization insight — correlation, health, cost
+        RepoCorrelationAdapter(RepoCorrelationProjection(dummy)),
+        RepoHealthProjection(dummy),
+        RepoCostProjection(dummy),
+        # Observability — adapted plain-class projections
+        ToolTimelineAdapter(ToolTimelineProjection(dummy)),
+        ExecutionCostAdapter(ExecutionCostProjection(dummy)),
+        SessionCostAdapter(SessionCostProjection(dummy)),
     ]
 
 
 # Expected count — update when adding/removing projections from the coordinator.
 # If this fails, you added or removed a projection. Update _EXPECTED_COUNT
 # and the list in _get_coordinator_projections() above.
-_EXPECTED_COUNT = 12
+_EXPECTED_COUNT = 20
 
 
 # ---------------------------------------------------------------------------

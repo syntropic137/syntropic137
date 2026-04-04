@@ -1,6 +1,11 @@
 """Event handler mapping, provenance, and dispatch for projection manager.
 
-Extracted from manager.py to reduce module complexity.
+DEPRECATED: The coordinator service (ADR-055) uses per-projection
+AutoDispatchProjection with handle_event() instead. EVENT_HANDLERS
+and dispatch_to_handlers() are only used by the legacy ProjectionManager
+path. Remove this file when ProjectionManager is fully retired.
+
+Refs: #504, #517
 """
 
 from __future__ import annotations

@@ -195,9 +195,18 @@ def create_coordinator_service(
     Returns:
         Configured CoordinatorSubscriptionService
     """
+    from syn_adapters.projections.manager_registry import create_session_cost_projection
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
+    from syn_adapters.subscriptions.projection_adapters import (
+        ExecutionCostAdapter,
+        SessionCostAdapter,
+        ToolTimelineAdapter,
+    )
     from syn_adapters.subscriptions.realtime_adapter import (
         OrganizationListAdapter as _OrganizationListAdapter,
+    )
+    from syn_adapters.subscriptions.realtime_adapter import (
+        RepoCorrelationAdapter as _RepoCorrelationAdapter,
     )
     from syn_adapters.subscriptions.realtime_adapter import (
         RepoListAdapter as _RepoListAdapter,
@@ -206,12 +215,19 @@ def create_coordinator_service(
         SystemListAdapter as _SystemListAdapter,
     )
     from syn_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
+    from syn_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
     from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow import (
         WorkflowDispatchProjection,
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
+        ExecutionCostProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+        ExecutionTodoProjection,
     )
     from syn_domain.contexts.orchestration.slices.get_execution_detail import (
         WorkflowExecutionDetailProjection,
@@ -223,27 +239,49 @@ def create_coordinator_service(
         WorkflowExecutionListProjection,
     )
     from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
+    from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
+        WorkflowPhaseMetricsProjection,
+    )
     from syn_domain.contexts.organization._shared.organization_projection import (
         OrganizationProjection,
     )
     from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
     from syn_domain.contexts.organization.slices.list_systems.projection import SystemProjection
+    from syn_domain.contexts.organization.slices.repo_correlation import (
+        RepoCorrelationProjection,
+    )
+    from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
+    from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
-    # Create all checkpointed projections
+    # Create all checkpointed projections (20 total — see ADR-055)
     projections: list[CheckpointedProjection] = [
+        # --- Orchestration context (AutoDispatchProjection — direct) ---
         WorkflowListProjection(projection_store),
         WorkflowDetailProjection(projection_store),
         WorkflowExecutionListProjection(projection_store),
         WorkflowExecutionDetailProjection(projection_store),
-        SessionListProjection(projection_store),
-        ArtifactListProjection(projection_store),
         DashboardMetricsProjection(projection_store),
+        WorkflowPhaseMetricsProjection(projection_store),
+        ExecutionTodoProjection(store=projection_store),
         WorkflowDispatchProjection(execution_service=execution_service, store=projection_store),
         TriggerQueryProjection(projection_store),
-        # Organization context — namespace-qualified events require adapters
+        # --- Agent sessions context ---
+        SessionListProjection(projection_store),
+        # --- Artifacts context ---
+        ArtifactListProjection(projection_store),
+        # --- Organization context — namespace-qualified events require adapters ---
         _OrganizationListAdapter(OrganizationProjection(projection_store)),
         _SystemListAdapter(SystemProjection(projection_store)),
         _RepoListAdapter(RepoProjection(projection_store)),
+        # Organization insight projections (AutoDispatchProjection — direct)
+        RepoHealthProjection(projection_store),
+        RepoCostProjection(projection_store),
+        # RepoCorrelation handles mixed namespaces (github.* + unnamespaced)
+        _RepoCorrelationAdapter(RepoCorrelationProjection(projection_store)),
+        # --- Observability projections — plain classes wrapped via adapters ---
+        ToolTimelineAdapter(ToolTimelineProjection(projection_store)),
+        ExecutionCostAdapter(ExecutionCostProjection(projection_store)),
+        SessionCostAdapter(create_session_cost_projection(projection_store)),
     ]
 
     return CoordinatorSubscriptionService(
