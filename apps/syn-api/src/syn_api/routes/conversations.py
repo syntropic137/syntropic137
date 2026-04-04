@@ -79,37 +79,45 @@ class ConversationMetadataResponse(BaseModel):
 # =============================================================================
 
 
+def _get_top_level_content(data: dict[str, Any]) -> str:
+    """Check top-level ``content`` / ``text`` fields."""
+    content = data.get("content") or data.get("text") or ""
+    if content and isinstance(content, str):
+        return content
+    return ""
+
+
+def _get_message_content(data: dict[str, Any]) -> str:
+    """Check nested ``message.content`` (Claude Code JSONL format)."""
+    msg = data.get("message")
+    if not isinstance(msg, dict):
+        return ""
+    msg_content = msg.get("content")
+    if isinstance(msg_content, str):
+        return msg_content
+    if isinstance(msg_content, list):
+        return next(
+            (p["text"] for p in msg_content if isinstance(p, dict) and p.get("text")),
+            "",
+        )
+    return ""
+
+
+def _get_result_content(data: dict[str, Any]) -> str:
+    """Check nested ``result.output`` / ``result.text``."""
+    result = data.get("result")
+    if isinstance(result, dict):
+        return result.get("output", "") or result.get("text", "")
+    return ""
+
+
 def _extract_content_preview(data: dict[str, Any]) -> str:
     """Extract content text from a parsed JSONL object.
 
     Checks top-level fields, then nested message.content (Claude Code format),
     then result.output.
     """
-    # Top-level content
-    content = data.get("content") or data.get("text") or ""
-    if content:
-        return content if isinstance(content, str) else ""
-
-    # Nested message.content (Claude Code JSONL)
-    msg = data.get("message")
-    if isinstance(msg, dict):
-        msg_content = msg.get("content")
-        if isinstance(msg_content, str):
-            return msg_content
-        if isinstance(msg_content, list):
-            text = next(
-                (p["text"] for p in msg_content if isinstance(p, dict) and p.get("text")),
-                "",
-            )
-            if text:
-                return text
-
-    # Nested result.output
-    result = data.get("result")
-    if isinstance(result, dict):
-        return result.get("output", "") or result.get("text", "")
-
-    return ""
+    return _get_top_level_content(data) or _get_message_content(data) or _get_result_content(data)
 
 
 def _extract_line_fields(
