@@ -180,3 +180,21 @@ class RepoListAdapter(_NamespacedProjectionAdapter):
         "organization.RepoAssignedToSystem",
         "organization.RepoUnassignedFromSystem",
     }
+
+
+class RepoCorrelationAdapter(_NamespacedProjectionAdapter):
+    """Adapter for RepoCorrelationProjection — handles mixed-namespace events.
+
+    Subscribes to both namespaced (github.TriggerFired) and unnamespaced
+    (WorkflowExecutionStarted) events. The base class split(".")[-1] logic
+    handles both cases correctly:
+    - "github.TriggerFired" → "TriggerFired" → on_trigger_fired
+    - "WorkflowExecutionStarted" → "WorkflowExecutionStarted" → on_workflow_execution_started
+    """
+
+    PROJECTION_NAME: ClassVar[str] = "repo_correlation"
+    VERSION: ClassVar[int] = 1
+    _SUBSCRIBED: ClassVar[set[str]] = {
+        "github.TriggerFired",
+        "WorkflowExecutionStarted",
+    }
