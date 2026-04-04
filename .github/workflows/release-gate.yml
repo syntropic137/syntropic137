@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -260,15 +261,19 @@ jobs:
             docker:
               - 'infra/docker/**'
               - 'docker/**'
-              - '**/Dockerfile'
+              - '**/Dockerfile*'
               - 'apps/syn-api/**'
               - 'apps/syn-dashboard-ui/**'
               - 'apps/syn-pulse-ui/**'
               - 'packages/syn-collector/**'
+              - 'packages/syn-domain/**'
+              - 'packages/syn-adapters/**'
+              - 'packages/syn-shared/**'
               - 'lib/**'
               - 'pyproject.toml'
               - 'uv.lock'
               - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
 
   # ---------------------------------------------------------------------------
   # Docker Dry-Run — verify all images build (single-arch, no push)
