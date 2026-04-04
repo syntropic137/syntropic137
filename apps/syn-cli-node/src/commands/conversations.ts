@@ -67,6 +67,11 @@ const metadataCommand: CommandDef = {
 
     const m = await apiGet<ConversationMetadataResponse>(`/conversations/${sessionId}/metadata`);
 
+    if (!m || !m.session_id) {
+      printError("Session not found or no metadata available.");
+      throw new CLIError("Not found", 1);
+    }
+
     print(`${style("Metadata:", BOLD)} ${m.session_id}`);
 
     if (m.model != null) print(`  Model:            ${m.model}`);

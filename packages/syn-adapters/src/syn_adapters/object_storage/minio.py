@@ -204,6 +204,14 @@ class MinioStorage:
         """Get the bucket name."""
         return self._bucket_name
 
+    async def ensure_ready(self) -> None:
+        """Ensure the storage is ready (bucket exists).
+
+        Call at startup to eagerly create the bucket, rather than
+        waiting for the first upload.
+        """
+        await self._ensure_bucket()
+
     async def _ensure_bucket(self) -> None:
         """Ensure the bucket exists, create if not."""
         client = self._get_client()

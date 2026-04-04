@@ -67,7 +67,7 @@ describe("triggers commands", () => {
         fire_count: 5,
         max_fires_per_period: 10,
         cooldown_seconds: 300,
-        conditions: [{ key: "branch", value: "main" }],
+        conditions: [{ field: "branch", operator: "eq", value: "main" }],
       }),
     );
     await triggersGroup.getCommand("show")!.handler({ positionals: ["trig-1"], values: {} });
