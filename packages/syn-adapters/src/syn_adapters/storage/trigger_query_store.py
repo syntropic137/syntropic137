@@ -73,6 +73,12 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
             status=data.get("status", "active"),
         )
         trigger.fire_count = data.get("fire_count", 0)
+        raw_created_at = data.get("created_at")
+        if isinstance(raw_created_at, str):
+            trigger.created_at = datetime.fromisoformat(raw_created_at)
+        raw_last_fired = data.get("last_fired_at")
+        if isinstance(raw_last_fired, str):
+            trigger.last_fired_at = datetime.fromisoformat(raw_last_fired)
         return trigger
 
     # --- Read methods ---
@@ -156,6 +162,7 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         installation_id: str,
         created_by: str,
         status: str,
+        created_at: datetime | None = None,
     ) -> None:
         pass  # Writes come from TriggerQueryProjection
 

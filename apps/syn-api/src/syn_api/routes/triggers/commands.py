@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
@@ -119,6 +120,7 @@ async def _index_and_sync_trigger(store: Any, aggregate: Any) -> None:
         installation_id=aggregate.installation_id,
         created_by=aggregate.created_by,
         status=aggregate.status.value,
+        created_at=datetime.now(UTC),
     )
     await sync_published_events_to_projections()
 
@@ -380,6 +382,9 @@ async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> Trig
 )
 async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> TriggerActionResponse:
     """Update trigger (pause/resume)."""
+    from .queries import _resolve_trigger_id
+
+    trigger_id = await _resolve_trigger_id(trigger_id)
     action = body.get("action", "")
     if action == "pause":
         result = await pause_trigger(
@@ -408,6 +413,9 @@ async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> Trig
 )
 async def delete_trigger_endpoint(trigger_id: str) -> TriggerActionResponse:
     """Delete a trigger rule."""
+    from .queries import _resolve_trigger_id
+
+    trigger_id = await _resolve_trigger_id(trigger_id)
     result = await delete_trigger(trigger_id=trigger_id, deleted_by="api")
     if isinstance(result, Err):
         raise HTTPException(

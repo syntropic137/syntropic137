@@ -41,6 +41,7 @@ class TriggerQueryStore(ABC):
         installation_id: str,
         created_by: str,
         status: str,
+        created_at: datetime | None = None,
     ) -> None:
         """Index a trigger for fast lookups."""
         ...
@@ -171,8 +172,9 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         installation_id: str,
         created_by: str,
         status: str,
+        created_at: datetime | None = None,
     ) -> None:
-        self._triggers[trigger_id] = _IndexedTrigger(
+        trigger = _IndexedTrigger(
             trigger_id=trigger_id,
             name=name,
             event=event,
@@ -185,6 +187,8 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
             created_by=created_by,
             status=status,
         )
+        trigger.created_at = created_at or datetime.now(UTC)
+        self._triggers[trigger_id] = trigger
 
     async def update_status(self, trigger_id: str, status: str) -> None:
         trigger = self._triggers.get(trigger_id)
