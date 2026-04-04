@@ -171,6 +171,7 @@ def create_coordinator_service(
     realtime_projection: RealTimeProjection | None = None,
     execution_service: Any = None,
     checkpoint_store: ProjectionCheckpointStore | None = None,
+    pool: asyncpg.Pool | None = None,
 ) -> CoordinatorSubscriptionService:
     """Factory to create the coordinator subscription service.
 
@@ -191,6 +192,9 @@ def create_coordinator_service(
         execution_service: Optional execution service (required by WorkflowDispatchProjection)
         checkpoint_store: Optional injected checkpoint store (e.g. MemoryCheckpointStore
             for tests). If None, a PostgresCheckpointStore is created on start().
+        pool: Optional asyncpg Pool for TimescaleDB direct queries.
+            Cost projections use this to bypass empty projection stores
+            and read from the actual observability data source (Lane 2).
 
     Returns:
         Configured CoordinatorSubscriptionService
@@ -275,12 +279,12 @@ def create_coordinator_service(
         _RepoListAdapter(RepoProjection(projection_store)),
         # Organization insight projections (AutoDispatchProjection — direct)
         RepoHealthProjection(projection_store),
-        RepoCostProjection(projection_store),
+        RepoCostProjection(projection_store, pool=pool),
         # RepoCorrelation handles mixed namespaces (github.* + unnamespaced)
         _RepoCorrelationAdapter(RepoCorrelationProjection(projection_store)),
         # --- Observability projections — plain classes wrapped via adapters ---
         ToolTimelineAdapter(ToolTimelineProjection(projection_store)),
-        ExecutionCostAdapter(ExecutionCostProjection(projection_store)),
+        ExecutionCostAdapter(ExecutionCostProjection(projection_store, pool=pool)),
         SessionCostAdapter(create_session_cost_projection(projection_store)),
     ]
 
