@@ -188,3 +188,7 @@ class MinioArtifactStorage:
             return True
         except Exception:
             return False
+
+    async def ensure_ready(self) -> None:
+        """Ensure the underlying storage backend is ready (bucket exists, etc.)."""
+        await self._storage.ensure_ready()

@@ -167,8 +167,9 @@ async def execute(
         result = await handler.handle(cmd)
     except WorkflowNotFoundError:
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
-    except Exception as e:
-        return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
+    except Exception:
+        logger.exception("Workflow execution error for %s", workflow_id)
+        return Err(WorkflowError.EXECUTION_FAILED, message="internal error")
 
     return Ok(
         ExecutionSummary(
@@ -198,12 +199,21 @@ async def execute_workflow_endpoint(
     execution_id = str(uuid4())
 
     async def _run() -> None:
-        await execute(
+        result = await execute(
             workflow_id=workflow_id,
             inputs=request.inputs,
             execution_id=execution_id,
             task=request.task,
         )
+        if isinstance(result, Err):
+            logger.error(
+                "Workflow execution failed",
+                extra={
+                    "execution_id": execution_id,
+                    "workflow_id": workflow_id,
+                    "error": result.message,
+                },
+            )
 
     background_tasks.add_task(_run)
     logger.info(

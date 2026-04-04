@@ -428,8 +428,6 @@ jobs:
           scan-args: |-
             --lockfile=uv.lock
             --lockfile=pnpm-lock.yaml
-            --lockfile=apps/syn-dashboard-ui/pnpm-lock.yaml
-            --lockfile=apps/syn-pulse-ui/pnpm-lock.yaml
 
   #############################################################################
   # PIP-AUDIT - Python dependency audit against PyPI advisory database

@@ -20,8 +20,8 @@ function reqId(parsed: ParsedArgs): string {
 function parseConditions(condStrs: string[]): Record<string, string>[] {
   return condStrs.map((c) => {
     const eqIdx = c.indexOf("=");
-    if (eqIdx < 1) throw new CLIError(`Invalid condition format: ${c} (expected key=value)`, 1);
-    return { key: c.slice(0, eqIdx), value: c.slice(eqIdx + 1) };
+    if (eqIdx < 1) throw new CLIError(`Invalid condition format: ${c} (expected field=value)`, 1);
+    return { field: c.slice(0, eqIdx), operator: "eq", value: c.slice(eqIdx + 1) };
   });
 }
 
@@ -32,7 +32,7 @@ const registerCommand: CommandDef = {
     repo: { type: "string", short: "r", description: "Repository ID" },
     workflow: { type: "string", short: "w", description: "Workflow ID to execute" },
     event: { type: "string", short: "e", description: "GitHub event type (e.g. check_run.completed)" },
-    condition: { type: "string", short: "c", multiple: true, description: "Condition as key=value (repeatable)" },
+    condition: { type: "string", short: "c", multiple: true, description: "Condition as field=value (repeatable, uses 'eq' operator)" },
     "max-fires": { type: "string", description: "Maximum fires per period", default: "5" },
     cooldown: { type: "string", description: "Cooldown in seconds", default: "300" },
     budget: { type: "string", description: "Budget limit in USD" },
@@ -142,7 +142,7 @@ const showCommand: CommandDef = {
     if (conditions.length > 0) {
       print(style("  Conditions:", BOLD));
       for (const c of conditions) {
-        print(`    ${c["key"] ?? ""} = ${c["value"] ?? ""}`);
+        print(`    ${c["field"] ?? ""} = ${c["value"] ?? ""}`);
       }
     }
   },

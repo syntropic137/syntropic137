@@ -251,6 +251,18 @@ The aggregate enforces ordering via command guards (e.g., reject `CompletePhaseC
 
 Rule: If you need it after a restart, it must be an event. If it's only needed during the current process lifecycle, hold it in the processor.
 
+### Subscription Architecture
+
+Production uses `CoordinatorSubscriptionService` with per-projection checkpoints ([ADR-055](docs/adrs/ADR-055-projection-checkpoint-coordinator-architecture.md)). Legacy `EventSubscriptionService` ([ADR-010](docs/adrs/ADR-010-event-subscription-architecture.md)) is deprecated. See `create_coordinator_service()` in `packages/syn-adapters/src/syn_adapters/subscriptions/coordinator_service.py` for the 12-projection registry.
+
+### Background Task Error Handling
+
+FastAPI `BackgroundTasks` silently swallow exceptions and `Result` errors. Any `background_tasks.add_task()` closure MUST check `isinstance(result, Err)` and log explicitly. Reference pattern: `apps/syn-api/src/syn_api/routes/executions/commands.py:200-217`.
+
+### Object Storage Bucket Initialization
+
+MinIO buckets MUST be created eagerly at startup via `ensure_ready()`, not lazily on first upload. Downloads fail with `NoSuchBucket` before any upload happens. See `lifecycle.py:_init_artifact_storage()` and [ADR-012](docs/adrs/ADR-012-artifact-storage.md).
+
 ### Rules
 
 - Aggregates MUST be the decision-makers — never let an engine/service decide "what's next"

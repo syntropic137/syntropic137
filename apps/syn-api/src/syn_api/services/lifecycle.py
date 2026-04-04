@@ -55,6 +55,13 @@ async def startup(
 ) -> Result[dict, LifecycleError]:
     """Initialize the application: connect to event store, start subscriptions.
 
+    Startup sequence (order matters):
+      1. Event store connection (CRITICAL — abort on failure)
+      2. Artifact storage bucket (DEGRADED — warn and continue)
+      3. Subscription coordinator (DEGRADED — warn and continue)
+      4. GitHub event poller (DEGRADED — warn and continue)
+      5. Orphan reconciliation (always runs)
+
     Critical failures (event store, DB) abort startup.
     Degraded failures (GitHub, Anthropic, Redis, subscriptions) warn and continue.
 
@@ -88,6 +95,7 @@ async def startup(
         return result
 
     # Degraded path — warn and continue
+    await _init_artifact_storage(_state)
     await _init_subscriptions(_state)
     await _init_event_poller(_state)
     await reconcile_orphaned_sessions()
@@ -197,6 +205,19 @@ def _enrich_subscription_health(response: dict, mode: str) -> None:
                 response["mode"] = "degraded"
     except Exception:
         response["subscription"] = {"status": "unknown"}
+
+
+async def _init_artifact_storage(state: LifecycleState) -> None:
+    """Ensure artifact storage bucket exists at startup (degraded on failure)."""
+    try:
+        from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
+
+        storage = await get_artifact_storage()
+        await storage.ensure_ready()
+        logger.info("Artifact storage bucket verified")
+    except Exception:
+        logger.exception("Failed to initialize artifact storage bucket (degraded mode)")
+        state.degraded_reasons.append("artifact_storage")
 
 
 async def _init_subscriptions(state: LifecycleState) -> None:

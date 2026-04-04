@@ -11,11 +11,17 @@ overrides:
   fast-xml-parser@>=4.0.0-beta.3 <=5.5.6: '>=5.5.7'
   fast-xml-parser@>=5.0.0 <5.3.8: '>=5.3.8'
   fast-xml-parser@>=5.0.0 <5.5.6: '>=5.5.6'
-  lodash-es@>=4.0.0 <=4.17.22: '>=4.17.23'
+  flatted@<=3.4.1: '>=3.4.2'
+  lodash@>=4.0.0 <=4.17.23: '>=4.18.0'
+  lodash-es@>=4.0.0 <=4.17.23: '>=4.18.0'
+  minimatch@<3.1.3: '>=3.1.3'
+  minimatch@>=9.0.0 <9.0.7: '>=9.0.7'
   next@>=16.0.0-beta.0 <16.1.7: '>=16.1.7'
   next@>=16.0.1 <16.1.7: '>=16.1.7'
   path-to-regexp@>=8.0.0 <8.4.0: '>=8.4.0'
   picomatch@>=4.0.0 <4.0.4: '>=4.0.4'
+  react-router@>=7.0.0 <7.12.0: '>=7.12.0'
+  rollup@>=4.0.0 <4.59.0: '>=4.59.0'
   yaml@>=2.0.0 <2.8.3: '>=2.8.3'
 
 importers:
@@ -3484,7 +3490,7 @@ packages:
       next: '>=16.1.7'
       react: ^19.2.0
       react-dom: ^19.2.0
-      react-router: 7.x.x
+      react-router: '>=7.12.0'
       waku: ^0.26.0 || ^0.27.0 || ^1.0.0
       zod: 4.x.x
     peerDependenciesMeta:
@@ -4102,14 +4108,14 @@ packages:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
     engines: {node: '>=10'}
 
-  lodash-es@4.17.23:
-    resolution: {integrity: sha512-kVI48u3PZr38HdYz98UmfPnXl2DXrpdctLrFLCd3kOx1xUkOmpFPx7gCWWM5MPkL/fD8zb+Ph0QzjGFs4+hHWg==}
+  lodash-es@4.18.1:
+    resolution: {integrity: sha512-J8xewKD/Gk22OZbhpOVSwcs60zhd95ESDwezOFuA3/099925PdHJ7OFHNTGtajL3AlZkykD32HykiMo+BIBI8A==}
 
   lodash.merge@4.6.2:
     resolution: {integrity: sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ==}
 
-  lodash@4.17.23:
-    resolution: {integrity: sha512-LgVTMpQtIopCi79SJeDiP0TfWi5CNEc/L/aRdTh3yIvmZXTnheWpKjSZhnvMl8iXbC1tFg9gdHHDMLoV7CnG+w==}
+  lodash@4.18.1:
+    resolution: {integrity: sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q==}
 
   longest-streak@3.1.0:
     resolution: {integrity: sha512-9Ri+o0JYgehTaVBBDoMqIl8GXtbWg711O3srftcHhZ0dqnETqLaoIK0x17fUw9rFSlK/0NlsKe0Ahhyl5pXE2g==}
@@ -5748,12 +5754,12 @@ snapshots:
     dependencies:
       '@chevrotain/gast': 11.0.3
       '@chevrotain/types': 11.0.3
-      lodash-es: 4.17.23
+      lodash-es: 4.18.1
 
   '@chevrotain/gast@11.0.3':
     dependencies:
       '@chevrotain/types': 11.0.3
-      lodash-es: 4.17.23
+      lodash-es: 4.18.1
 
   '@chevrotain/regexp-to-ast@11.0.3': {}
 
@@ -6263,7 +6269,7 @@ snapshots:
       d3-scale: 4.0.2
       d3-time: 1.1.0
       d3-time-format: 3.0.0
-      lodash: 4.17.23
+      lodash: 4.18.1
       react: 19.2.4
     transitivePeerDependencies:
       - react-dom
@@ -6278,7 +6284,7 @@ snapshots:
       d3-color: 3.1.0
       d3-scale: 4.0.2
       d3-scale-chromatic: 3.1.0
-      lodash: 4.17.23
+      lodash: 4.18.1
       react: 19.2.4
     transitivePeerDependencies:
       - react-dom
@@ -6296,7 +6302,7 @@ snapshots:
       d3-scale-chromatic: 3.1.0
       d3-shape: 3.2.0
       d3-time-format: 3.0.0
-      lodash: 4.17.23
+      lodash: 4.18.1
       react: 19.2.4
       react-virtualized-auto-sizer: 1.0.26(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       use-debounce: 10.1.0(react@19.2.4)
@@ -6326,7 +6332,7 @@ snapshots:
 
   '@nivo/theming@0.99.0(react@19.2.4)':
     dependencies:
-      lodash: 4.17.23
+      lodash: 4.18.1
       react: 19.2.4
 
   '@nivo/tooltip@0.99.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
@@ -8131,7 +8137,7 @@ snapshots:
   chevrotain-allstar@0.3.1(chevrotain@11.0.3):
     dependencies:
       chevrotain: 11.0.3
-      lodash-es: 4.17.23
+      lodash-es: 4.18.1
 
   chevrotain@11.0.3:
     dependencies:
@@ -8140,7 +8146,7 @@ snapshots:
       '@chevrotain/regexp-to-ast': 11.0.3
       '@chevrotain/types': 11.0.3
       '@chevrotain/utils': 11.0.3
-      lodash-es: 4.17.23
+      lodash-es: 4.18.1
 
   chokidar@4.0.3:
     dependencies:
@@ -8413,7 +8419,7 @@ snapshots:
   dagre-d3-es@7.0.13:
     dependencies:
       d3: 7.9.0
-      lodash-es: 4.17.23
+      lodash-es: 4.18.1
 
   data-urls@7.0.0:
     dependencies:
@@ -9455,11 +9461,11 @@ snapshots:
     dependencies:
       p-locate: 5.0.0
 
-  lodash-es@4.17.23: {}
+  lodash-es@4.18.1: {}
 
   lodash.merge@4.6.2: {}
 
-  lodash@4.17.23: {}
+  lodash@4.18.1: {}
 
   longest-streak@3.1.0: {}
 
@@ -9704,7 +9710,7 @@ snapshots:
       dompurify: 3.3.3
       katex: 0.16.28
       khroma: 2.1.0
-      lodash-es: 4.17.23
+      lodash-es: 4.18.1
       marked: 16.4.2
       roughjs: 4.6.6
       stylis: 4.3.6
