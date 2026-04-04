@@ -1394,23 +1394,29 @@ docs-sync:
         echo "   git add apps/syn-docs/content/docs/cli/ && git commit -m 'docs: regenerate CLI docs'"; \
         exit 1; \
     fi
-    @echo "🔄 Syncing API reference docs..."
-    @uv run python scripts/extract_openapi.py > /dev/null 2>&1
-    @cd apps/syn-docs && pnpm run generate:openapi > /dev/null 2>&1
-    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
-        echo "✅ API docs are up-to-date"; \
+    @echo "🔄 Syncing API reference docs + CLI types..."
+    @just sync-api > /dev/null 2>&1
+    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
+        echo "✅ API docs and CLI types are up-to-date"; \
     else \
-        echo "❌ API docs need to be committed:"; \
-        echo "   git add apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ && git commit -m 'docs: regenerate API docs'"; \
+        echo "❌ API artifacts need to be committed:"; \
+        echo "   git add apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts && git commit -m 'chore: regenerate API artifacts'"; \
         exit 1; \
     fi
 
-# Regenerate docs site content (CLI reference + OpenAPI spec + API reference MDX)
-docs-site-gen: docs-cli-gen
+# Regenerate all API-derived artifacts (OpenAPI spec + API docs MDX + CLI types)
+# Single entry point for the full pipeline: FastAPI -> openapi.json -> MDX + TS types
+sync-api:
     @echo "📄 Extracting OpenAPI spec from FastAPI..."
     uv run python scripts/extract_openapi.py
     @echo "📄 Generating API reference docs..."
     cd apps/syn-docs && pnpm run generate:openapi
+    @echo "📄 Generating CLI TypeScript types..."
+    cd apps/syn-cli-node && pnpm run generate:types
+    @echo "✅ API artifacts synced (openapi.json, API docs, CLI types)"
+
+# Regenerate docs site content (CLI reference + OpenAPI spec + API reference MDX)
+docs-site-gen: docs-cli-gen sync-api
 
 # Build docs site (runs generation + next build)
 docs-site-build: docs-site-gen
