@@ -6,7 +6,9 @@ Accepted
 
 ## Date
 
-2026-04-03
+2026-04-04
+
+**Partially Supersedes:** ADR-010 (subscription mechanism section)
 
 ## Related
 
@@ -54,6 +56,18 @@ Each `CheckpointedProjection` tracks its own position in a `projection_checkpoin
 | `SystemProjection` (via adapter) | organization |
 | `RepoProjection` (via adapter) | organization |
 
+### `AutoDispatchProjection` base class
+
+Most projections extend `AutoDispatchProjection` from the ESP library, which uses `get_subscribed_event_types()` to auto-route events to `handle_<EventType>` methods. This eliminates the fragile two-places-to-update pattern where adding an event type to the subscription list and adding a handler method had to stay in sync manually.
+
+### `_NamespacedProjectionAdapter` for organization context
+
+Organization-context projections (`OrganizationProjection`, `SystemProjection`, `RepoProjection`) use namespace-qualified event type strings (e.g., `organization.OrganizationCreated`). The coordinator strips namespace prefixes when matching subscribed event types, so thin adapter wrappers (`OrganizationListAdapter`, `SystemListAdapter`, `RepoListAdapter`) handle the namespace translation.
+
+### `SessionToolsProjection` excluded
+
+`SessionToolsProjection` is not registered in the coordinator. It is a read-only SQL query against TimescaleDB observability tables, not an event consumer. It has no `handle_event` method and does not implement `CheckpointedProjection`.
+
 ### `RealTimeProjectionAdapter` wraps legacy `RealTimeProjection` for SSE
 
 `RealTimeProjection` (non-persisting, SSE broadcast) predates `CheckpointedProjection`. Rather than rewrite it, `RealTimeProjectionAdapter` wraps it as a `CheckpointedProjection` that always returns `ProjectionResult.SUCCESS` without saving a checkpoint. This keeps the SSE path unchanged (documented in ADR-010's RealTimeProjection section) while integrating it into the coordinator lifecycle.
@@ -91,6 +105,7 @@ Logic lives in `coordinator_helpers.run_coordinator()`.
 - **More complex wiring.** `create_coordinator_service()` must be kept in sync with all projections; forgetting to register a new projection silently omits it from the subscription.
 - **Checkpoint store dependency.** A running PostgreSQL instance is required before `start()` is called. Tests must inject a `MemoryCheckpointStore` (via the `checkpoint_store` parameter) to avoid the database dependency.
 - **Organization adapters.** Organization-context projections use namespace-qualified event types that require thin adapter wrappers (`OrganizationListAdapter`, `SystemListAdapter`, `RepoListAdapter`). New projections in similar contexts may need the same treatment.
+- **Two registries coexist.** The coordinator registry (`create_coordinator_service()`) and the legacy `ProjectionManager` with its `EVENT_HANDLERS` map coexist during migration. Delete the legacy `ProjectionManager` and `EVENT_HANDLERS` when migration is complete.
 
 ## Legacy Status of ADR-010
 
