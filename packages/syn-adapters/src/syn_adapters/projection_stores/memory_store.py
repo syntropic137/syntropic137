@@ -101,6 +101,16 @@ class InMemoryProjectionStore:
         results = apply_sorting(results, order_by)
         return apply_pagination(results, offset, limit)
 
+    async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
+        """Get all records whose key starts with the given prefix."""
+        if projection not in self._data:
+            return []
+        return [
+            (key, data.copy())
+            for key, data in self._data[projection].items()
+            if key.startswith(prefix)
+        ][:10]
+
     async def get_position(self, projection: str) -> int | None:
         """Get the last processed event position for a projection."""
         state = self._state.get(projection)

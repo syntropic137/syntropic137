@@ -133,6 +133,22 @@ class PostgresProjectionStore:
         table_name = self._table_name(projection)
         return await fetch_get_all(pool, table_name, self._deserialize)
 
+    async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
+        """Get all records whose key starts with the given prefix."""
+        await self._ensure_table(projection)
+        pool = await self._get_pool()
+        table_name = self._table_name(projection)
+
+        # Escape LIKE meta-characters to prevent injection
+        safe_prefix = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT id, data FROM {table_name} WHERE id LIKE $1 || '%%' ESCAPE '\\' LIMIT 10",
+                safe_prefix,
+            )
+            return [(row["id"], self._deserialize(row["data"])) for row in rows]
+
     async def delete(self, projection: str, key: str) -> None:
         """Delete a projection record."""
         await self._ensure_table(projection)
