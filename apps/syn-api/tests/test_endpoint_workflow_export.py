@@ -14,6 +14,15 @@ from syn_api.routes.workflows.queries import (
 from syn_api.types import Err, Ok, WorkflowError
 
 
+def _patch_prefix_resolver(workflow_id: str):  # noqa: ANN202
+    """Mock resolve_or_raise to return the workflow_id as-is (skip DB lookup)."""
+    return patch(
+        "syn_api.prefix_resolver.resolve_or_raise",
+        new_callable=AsyncMock,
+        return_value=workflow_id,
+    )
+
+
 async def test_export_endpoint_success_package() -> None:
     manifest = ExportManifestResponse(
         format="package",
@@ -25,10 +34,13 @@ async def test_export_endpoint_success_package() -> None:
             "README.md": "# Test Workflow\n",
         },
     )
-    with patch(
-        "syn_api.routes.workflows.queries.export_workflow",
-        new_callable=AsyncMock,
-        return_value=Ok(manifest),
+    with (
+        _patch_prefix_resolver("wf-123"),
+        patch(
+            "syn_api.routes.workflows.queries.export_workflow",
+            new_callable=AsyncMock,
+            return_value=Ok(manifest),
+        ),
     ):
         result = await export_workflow_endpoint("wf-123", format="package")
 
@@ -49,10 +61,13 @@ async def test_export_endpoint_success_plugin() -> None:
             "README.md": "# Plugin\n",
         },
     )
-    with patch(
-        "syn_api.routes.workflows.queries.export_workflow",
-        new_callable=AsyncMock,
-        return_value=Ok(manifest),
+    with (
+        _patch_prefix_resolver("wf-456"),
+        patch(
+            "syn_api.routes.workflows.queries.export_workflow",
+            new_callable=AsyncMock,
+            return_value=Ok(manifest),
+        ),
     ):
         result = await export_workflow_endpoint("wf-456", format="plugin")
 
@@ -63,6 +78,7 @@ async def test_export_endpoint_success_plugin() -> None:
 
 async def test_export_endpoint_not_found() -> None:
     with (
+        _patch_prefix_resolver("not-found"),
         patch(
             "syn_api.routes.workflows.queries.export_workflow",
             new_callable=AsyncMock,
