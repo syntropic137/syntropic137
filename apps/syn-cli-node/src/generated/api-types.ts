@@ -1411,7 +1411,7 @@ export interface paths {
         };
         /**
          * Get Global Cost Endpoint
-         * @description Get global cost breakdown across all repos.
+         * @description Get global cost breakdown, optionally filtered by system.
          */
         get: operations["get_global_cost_endpoint_insights_cost_get"];
         put?: never;
@@ -2312,6 +2312,8 @@ export interface components {
              * @default 0
              */
             tool_call_count: number;
+            /** Error Message */
+            error_message?: string | null;
         };
         /**
          * ExportManifestResponse
@@ -3294,6 +3296,19 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
+        };
+        /**
+         * SessionListResponse
+         * @description Wrapped list of session summaries.
+         */
+        SessionListResponse: {
+            /** Sessions */
+            sessions?: components["schemas"]["SessionSummaryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
         };
         /**
          * SessionResponse
@@ -4871,7 +4886,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionSummaryResponse"][];
+                    "application/json": components["schemas"]["SessionListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6914,7 +6929,10 @@ export interface operations {
     };
     get_global_cost_endpoint_insights_cost_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Filter costs by system ID */
+                system_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6928,6 +6946,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GlobalCostResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

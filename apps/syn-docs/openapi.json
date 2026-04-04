@@ -1092,11 +1092,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SessionSummaryResponse"
-                  },
-                  "title": "Response List Sessions Endpoint Sessions Get"
+                  "$ref": "#/components/schemas/SessionListResponse"
                 }
               }
             }
@@ -4286,8 +4282,28 @@
           "insights"
         ],
         "summary": "Get Global Cost Endpoint",
-        "description": "Get global cost breakdown across all repos.",
+        "description": "Get global cost breakdown, optionally filtered by system.",
         "operationId": "get_global_cost_endpoint_insights_cost_get",
+        "parameters": [
+          {
+            "name": "system_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter costs by system ID",
+              "title": "System Id"
+            },
+            "description": "Filter costs by system ID"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4295,6 +4311,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GlobalCostResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -6312,6 +6338,17 @@
             "type": "integer",
             "title": "Tool Call Count",
             "default": 0
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
           }
         },
         "type": "object",
@@ -8048,6 +8085,25 @@
         ],
         "title": "SessionCostResponse",
         "description": "Cost for a single session."
+      },
+      "SessionListResponse": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionSummaryResponse"
+            },
+            "type": "array",
+            "title": "Sessions"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "SessionListResponse",
+        "description": "Wrapped list of session summaries."
       },
       "SessionResponse": {
         "properties": {
