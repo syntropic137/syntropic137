@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import datetime
 from decimal import Decimal
@@ -219,9 +220,26 @@ async def get(
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionDetail, ExecutionError]:
     await ensure_connected()
-    detail = await get_projection_mgr().workflow_execution_detail.get_by_id(execution_id)
+    manager = get_projection_mgr()
+    detail = await manager.workflow_execution_detail.get_by_id(execution_id)
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
+
+    # Enrich with TimescaleDB cost data when available (#505)
+    total_input = detail.total_input_tokens
+    total_output = detail.total_output_tokens
+    total_cost = detail.total_cost_usd
+    total_duration = detail.total_duration_seconds
+
+    with contextlib.suppress(Exception):
+        exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
+        if exec_cost is not None and exec_cost.total_tokens > 0:
+            total_input = exec_cost.input_tokens
+            total_output = exec_cost.output_tokens
+            total_cost = exec_cost.total_cost_usd
+            if exec_cost.duration_ms > 0:
+                total_duration = exec_cost.duration_ms / 1000.0
+
     return Ok(
         ExecutionDetail(
             workflow_execution_id=detail.workflow_execution_id,
@@ -230,10 +248,10 @@ async def get(
             status=detail.status,
             started_at=detail.started_at,
             completed_at=detail.completed_at,
-            total_input_tokens=detail.total_input_tokens,
-            total_output_tokens=detail.total_output_tokens,
-            total_cost_usd=detail.total_cost_usd,
-            total_duration_seconds=detail.total_duration_seconds,
+            total_input_tokens=total_input,
+            total_output_tokens=total_output,
+            total_cost_usd=total_cost,
+            total_duration_seconds=total_duration,
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
         )
@@ -250,6 +268,17 @@ async def get_detail(
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     phases = [await _map_phase_detail(p, manager) for p in detail.phases]
+
+    # Enrich with TimescaleDB cost data when available (#505)
+    total_tokens = detail.total_input_tokens + detail.total_output_tokens
+    total_cost = detail.total_cost_usd
+
+    with contextlib.suppress(Exception):
+        exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
+        if exec_cost is not None and exec_cost.total_tokens > 0:
+            total_tokens = exec_cost.total_tokens
+            total_cost = exec_cost.total_cost_usd
+
     return Ok(
         ExecutionDetailFull(
             workflow_execution_id=detail.workflow_execution_id,
@@ -257,8 +286,8 @@ async def get_detail(
             workflow_name=detail.workflow_name,
             status=detail.status,
             phases=phases,
-            total_tokens=detail.total_input_tokens + detail.total_output_tokens,
-            total_cost_usd=detail.total_cost_usd,
+            total_tokens=total_tokens,
+            total_cost_usd=total_cost,
             started_at=detail.started_at,
             completed_at=detail.completed_at,
             error_message=detail.error_message,
