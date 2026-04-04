@@ -68,17 +68,22 @@ const registerCommand: CommandDef = {
 const enablePresetCommand: CommandDef = {
   name: "enable",
   description: "Enable a built-in trigger preset",
-  args: [{ name: "preset", description: "Preset name (self-healing, review-fix)", required: true }],
+  args: [{ name: "preset", description: "Preset name (self-healing, review-fix, comment-command)", required: true }],
   options: {
     repo: { type: "string", short: "r", description: "Repository ID" },
+    workflow: { type: "string", short: "w", description: "Workflow ID to dispatch (default: preset default)" },
   },
   handler: async (parsed: ParsedArgs) => {
     const preset = parsed.positionals[0];
     if (!preset) { printError("Missing preset name"); throw new CLIError("Missing argument", 1); }
     const repo = parsed.values["repo"] as string | undefined;
     if (!repo) { printError("Missing --repo"); throw new CLIError("Missing option", 1); }
+    const workflow = parsed.values["workflow"] as string | undefined;
 
-    const d = await apiPost<Record<string, unknown>>(`/triggers/presets/${encodeURIComponent(preset)}`, { body: { repository: repo }, expected: [200, 201] });
+    const body: Record<string, unknown> = { repository: repo };
+    if (workflow) body["workflow_id"] = workflow;
+
+    const d = await apiPost<Record<string, unknown>>(`/triggers/presets/${encodeURIComponent(preset)}`, { body, expected: [200, 201] });
     printSuccess(`Preset "${preset}" enabled: ${d["trigger_id"] ?? ""}`);
   },
 };

@@ -79,6 +79,47 @@ class ConversationMetadataResponse(BaseModel):
 # =============================================================================
 
 
+def _get_top_level_content(data: dict[str, Any]) -> str:
+    """Check top-level ``content`` / ``text`` fields."""
+    content = data.get("content") or data.get("text") or ""
+    if content and isinstance(content, str):
+        return content
+    return ""
+
+
+def _get_message_content(data: dict[str, Any]) -> str:
+    """Check nested ``message.content`` (Claude Code JSONL format)."""
+    msg = data.get("message")
+    if not isinstance(msg, dict):
+        return ""
+    msg_content = msg.get("content")
+    if isinstance(msg_content, str):
+        return msg_content
+    if isinstance(msg_content, list):
+        return next(
+            (p["text"] for p in msg_content if isinstance(p, dict) and p.get("text")),
+            "",
+        )
+    return ""
+
+
+def _get_result_content(data: dict[str, Any]) -> str:
+    """Check nested ``result.output`` / ``result.text``."""
+    result = data.get("result")
+    if isinstance(result, dict):
+        return result.get("output", "") or result.get("text", "")
+    return ""
+
+
+def _extract_content_preview(data: dict[str, Any]) -> str:
+    """Extract content text from a parsed JSONL object.
+
+    Checks top-level fields, then nested message.content (Claude Code format),
+    then result.output.
+    """
+    return _get_top_level_content(data) or _get_message_content(data) or _get_result_content(data)
+
+
 def _extract_line_fields(
     raw: str,
 ) -> tuple[str | None, str | None, str | None]:
@@ -94,8 +135,8 @@ def _extract_line_fields(
 
     event_type = data.get("type") or data.get("event_type")
     tool_name = data.get("tool_name") or data.get("name")
-    content = data.get("content") or data.get("text") or ""
-    preview = content[:200] if isinstance(content, str) and content else None
+    content = _extract_content_preview(data)
+    preview = content[:200] if content else None
     return event_type, tool_name, preview
 
 

@@ -134,6 +134,61 @@ async def query_execution_events(
     ]
 
 
+async def query_recent(
+    pool: asyncpg.Pool,
+    limit: int = 50,
+    event_type: str | None = None,
+) -> list[dict[str, Any]]:
+    """Query most recent events across all sessions.
+
+    When event_type is provided, filters to that single type.
+    Otherwise returns all event types.
+
+    Args:
+        pool: asyncpg connection pool.
+        limit: Maximum events to return.
+        event_type: Optional single event type filter.
+
+    Returns:
+        List of event dicts ordered by time DESC.
+    """
+    async with pool.acquire() as conn:
+        if event_type:
+            rows = await conn.fetch(
+                """
+                SELECT time, event_type, session_id, execution_id, phase_id, data
+                FROM agent_events
+                WHERE event_type = $1
+                ORDER BY time DESC
+                LIMIT $2
+                """,
+                event_type,
+                limit,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT time, event_type, session_id, execution_id, phase_id, data
+                FROM agent_events
+                ORDER BY time DESC
+                LIMIT $1
+                """,
+                limit,
+            )
+
+    return [
+        {
+            "time": row["time"].isoformat(),
+            "event_type": row["event_type"],
+            "session_id": row["session_id"],
+            "execution_id": row["execution_id"],
+            "phase_id": row["phase_id"],
+            "data": json.loads(row["data"]) if isinstance(row["data"], str) else row["data"],
+        }
+        for row in rows
+    ]
+
+
 async def query_recent_by_types(
     pool: asyncpg.Pool,
     event_types: list[str],

@@ -149,6 +149,11 @@ class ProjectionManager:
             await self.dispatch_event(event_type, event)
 
     @property
+    def store(self) -> Any:
+        """Access the underlying projection store (ProjectionStoreProtocol)."""
+        return self._store
+
+    @property
     def workflow_list(self) -> WorkflowListProjection:
         """Get the workflow list projection."""
         self._ensure_initialized()

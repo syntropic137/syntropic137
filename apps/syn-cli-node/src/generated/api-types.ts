@@ -34,7 +34,7 @@ export interface paths {
         };
         /**
          * Get Workflow Endpoint
-         * @description Get workflow details by ID.
+         * @description Get workflow details by ID (supports partial ID prefix matching).
          */
         get: operations["get_workflow_endpoint_workflows__workflow_id__get"];
         put?: never;
@@ -123,7 +123,7 @@ export interface paths {
         put?: never;
         /**
          * Validate Yaml Endpoint
-         * @description Validate a workflow YAML file.
+         * @description Validate a workflow YAML definition.
          */
         post: operations["validate_yaml_endpoint_workflows_validate_post"];
         delete?: never;
@@ -181,7 +181,7 @@ export interface paths {
         };
         /**
          * Get Execution Endpoint
-         * @description Get detailed information about a workflow execution run.
+         * @description Get detailed information about a workflow execution run (supports partial ID prefix matching).
          */
         get: operations["get_execution_endpoint_executions__execution_id__get"];
         put?: never;
@@ -381,7 +381,7 @@ export interface paths {
         };
         /**
          * Get Session Endpoint
-         * @description Get session details by ID.
+         * @description Get session details by ID (supports partial ID prefix matching).
          */
         get: operations["get_session_endpoint_sessions__session_id__get"];
         put?: never;
@@ -425,7 +425,7 @@ export interface paths {
         };
         /**
          * Get Artifact Endpoint
-         * @description Get artifact details by ID.
+         * @description Get artifact details by ID (supports partial ID prefix matching).
          */
         get: operations["get_artifact_endpoint_artifacts__artifact_id__get"];
         /**
@@ -653,7 +653,7 @@ export interface paths {
         };
         /**
          * Get Recent Activity Endpoint
-         * @description Get recent git activity events for the global dashboard feed.
+         * @description Get recent activity events for the global dashboard feed.
          */
         get: operations["get_recent_activity_endpoint_events_recent_get"];
         put?: never;
@@ -4004,8 +4004,22 @@ export interface components {
         };
         /** ValidateYamlRequest */
         ValidateYamlRequest: {
-            /** File */
-            file: string;
+            /**
+             * Content
+             * @description Raw YAML content to validate
+             */
+            content?: string | null;
+            /**
+             * Filename
+             * @description Original filename (informational)
+             * @default workflow.yaml
+             */
+            filename: string;
+            /**
+             * File
+             * @description Deprecated — file paths are no longer supported. Use 'content' instead.
+             */
+            file?: string | null;
         };
         /** ValidateYamlResponse */
         ValidateYamlResponse: {
@@ -5399,6 +5413,8 @@ export interface operations {
             query?: {
                 /** @description Max events to return */
                 limit?: number;
+                /** @description Filter by event type */
+                event_type?: string | null;
             };
             header?: never;
             path?: never;

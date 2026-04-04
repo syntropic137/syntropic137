@@ -56,13 +56,14 @@ syn triggers enable <preset> [options]
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `preset` | `text` | Yes | Preset name (self-healing, review-fix) |
+| `preset` | `text` | Yes | Preset name (self-healing, review-fix, comment-command) |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--repo`, `-r` | `text` | --- | Repository ID |
+| `--workflow`, `-w` | `text` | --- | Workflow ID to dispatch (default: preset default) |
 
 ---
 

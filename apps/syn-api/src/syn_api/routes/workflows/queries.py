@@ -511,7 +511,11 @@ async def list_workflows_endpoint(
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
-    """Get workflow details by ID."""
+    """Get workflow details by ID (supports partial ID prefix matching)."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
     result = await get_workflow(workflow_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
@@ -561,6 +565,10 @@ async def export_workflow_endpoint(
     ),
 ) -> ExportManifestResponse:
     """Export a workflow as a distributable package or Claude Code plugin."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
     result = await export_workflow(workflow_id, fmt=format)
     if isinstance(result, Err):
         if result.error == WorkflowError.NOT_FOUND:
@@ -572,8 +580,11 @@ async def export_workflow_endpoint(
 @router.get("/{workflow_id}/runs", response_model=ExecutionRunListResponse)
 async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListResponse:
     """List all execution runs for a workflow."""
+    from syn_api.prefix_resolver import resolve_or_raise
     from syn_api.routes.executions.queries import list_ as ex_list_
 
+    mgr = get_projection_mgr()
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
     wf_result = await get_workflow(workflow_id)
     if isinstance(wf_result, Err):
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
@@ -608,6 +619,10 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
 @router.get("/{workflow_id}/history", response_model=ExecutionHistoryResponse)
 async def get_workflow_history_endpoint(workflow_id: str) -> ExecutionHistoryResponse:
     """DEPRECATED: Use /workflows/{workflow_id}/runs instead."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
     wf_result = await get_workflow(workflow_id)
     if isinstance(wf_result, Err):
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")

@@ -130,6 +130,7 @@ async def enable_preset(
     repository: str,
     installation_id: str = "",
     created_by: str = "system",
+    workflow_id: str = "",
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, TriggerError]:
     """Enable a built-in trigger preset for a repository."""
@@ -146,6 +147,7 @@ async def enable_preset(
             repository=repository,
             installation_id=installation_id,
             created_by=created_by,
+            workflow_id=workflow_id,
         )
     except (ValueError, KeyError):
         return Err(TriggerError.PRESET_NOT_FOUND, message=f"Preset '{preset_name}' not found")
@@ -339,6 +341,7 @@ async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> Trig
         repository=repository,
         installation_id=body.get("installation_id", ""),
         created_by=body.get("created_by", "api"),
+        workflow_id=body.get("workflow_id", ""),
     )
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)

@@ -29,6 +29,16 @@ class TestTriggerPresets:
         assert cmd.workflow_id == "self-heal-pr"
         assert len(cmd.conditions) == 2
 
+    def test_self_healing_preset_custom_workflow_id(self) -> None:
+        """Test that workflow_id parameter overrides the preset default."""
+        cmd = create_preset_command(
+            preset_name="self-healing",
+            repository="syntropic137/my-project",
+            workflow_id="my-custom-workflow",
+        )
+
+        assert cmd.workflow_id == "my-custom-workflow"
+
     def test_review_fix_preset_creates_command(self) -> None:
         """Test creating a command from the review-fix preset."""
         cmd = create_preset_command(

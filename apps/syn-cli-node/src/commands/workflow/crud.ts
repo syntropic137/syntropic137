@@ -12,6 +12,7 @@ import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
 import type { WorkflowDetail } from "./models.js";
 import { detectFormat, resolvePackage } from "../../packages/resolver.js";
+import path from "node:path";
 
 // ---------------------------------------------------------------------------
 // create
@@ -159,8 +160,9 @@ export const validateCommand: CommandDef = {
       return;
     }
 
+    const content = fs.readFileSync(file, "utf-8");
     const data = await apiPost<Record<string, unknown>>("/workflows/validate", {
-      body: { file },
+      body: { content, filename: path.basename(file) },
     });
 
     if (data["valid"]) {

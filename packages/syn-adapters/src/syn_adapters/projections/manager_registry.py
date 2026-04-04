@@ -81,6 +81,46 @@ def create_session_cost_projection(store: ProjectionStoreProtocol) -> SessionCos
         return SessionCostProjection(store)
 
 
+def _create_execution_cost_projection(store: ProjectionStoreProtocol) -> ExecutionCostProjection:
+    """Create ExecutionCostProjection with TimescaleDB access.
+
+    This projection now queries TimescaleDB directly for real-time cost calculation.
+    See ADR-029: Simplified Event System
+    """
+    try:
+        from syn_adapters.events import get_event_store
+
+        event_store = get_event_store()
+        return ExecutionCostProjection(store, pool=event_store.pool)
+    except Exception as e:
+        logger.warning(
+            "Could not connect to TimescaleDB for execution cost projection, "
+            "falling back to projection store: %s",
+            e,
+        )
+        return ExecutionCostProjection(store)
+
+
+def _create_repo_cost_projection(store: ProjectionStoreProtocol) -> RepoCostProjection:
+    """Create RepoCostProjection with TimescaleDB access.
+
+    This projection now queries TimescaleDB directly for real-time cost calculation.
+    See ADR-029: Simplified Event System
+    """
+    try:
+        from syn_adapters.events import get_event_store
+
+        event_store = get_event_store()
+        return RepoCostProjection(store, pool=event_store.pool)
+    except Exception as e:
+        logger.warning(
+            "Could not connect to TimescaleDB for repo cost projection, "
+            "falling back to projection store: %s",
+            e,
+        )
+        return RepoCostProjection(store)
+
+
 def build_projection_registry(store: ProjectionStoreProtocol) -> dict[str, Any]:
     """Build the full projection registry dictionary.
 
@@ -105,7 +145,7 @@ def build_projection_registry(store: ProjectionStoreProtocol) -> dict[str, Any]:
         "tool_timeline": ToolTimelineProjection(store),
         # Cost tracking projections (now query TimescaleDB directly)
         "session_cost": create_session_cost_projection(store),
-        "execution_cost": ExecutionCostProjection(store),
+        "execution_cost": _create_execution_cost_projection(store),
         # TimescaleDB-backed observability projections (CQRS pattern)
         "session_tools": create_session_tools_projection(),
         # Organization context projections — list/show entities
@@ -115,7 +155,7 @@ def build_projection_registry(store: ProjectionStoreProtocol) -> dict[str, Any]:
         # Organization insight projections — cross-context correlation
         "repo_correlation": RepoCorrelationProjection(store),
         "repo_health": RepoHealthProjection(store),
-        "repo_cost": RepoCostProjection(store),
+        "repo_cost": _create_repo_cost_projection(store),
         # Processor to-do list (ISS-196) — store-backed for crash resilience (ISS-222)
         "execution_todo": ExecutionTodoProjection(store=store),
         # Real-time projection for SSE push (doesn't use store)
