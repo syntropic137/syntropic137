@@ -11,6 +11,8 @@ from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
     RegisterTriggerCommand,
 )
 
+_DEFAULT_WORKFLOW_ID = "self-heal-pr"
+
 SELF_HEALING_PRESET = {
     "name": "self-healing",
     "description": "Auto-fix CI failures on pull requests",
@@ -19,7 +21,7 @@ SELF_HEALING_PRESET = {
         {"field": "check_run.conclusion", "operator": "eq", "value": "failure"},
         {"field": "check_run.pull_requests", "operator": "not_empty"},
     ),
-    "workflow_id": "self-heal-pr",
+    "default_workflow_id": _DEFAULT_WORKFLOW_ID,
     "input_mapping": (
         ("repository", "repository.full_name"),
         ("pr_number", "check_run.pull_requests[0].number"),
@@ -45,7 +47,7 @@ REVIEW_FIX_PRESET = {
         {"field": "review.state", "operator": "in", "value": ["changes_requested", "commented"]},
         {"field": "pull_request.draft", "operator": "eq", "value": False},
     ),
-    "workflow_id": "self-heal-pr",
+    "default_workflow_id": _DEFAULT_WORKFLOW_ID,
     "input_mapping": (
         ("repository", "repository.full_name"),
         ("pr_number", "pull_request.number"),
@@ -73,7 +75,7 @@ COMMENT_COMMAND_PRESET = {
         # Slash command style — no GitHub @mention ping
         {"field": "comment.body", "operator": "contains", "value": "/syn"},
     ),
-    "workflow_id": "self-heal-pr",
+    "default_workflow_id": _DEFAULT_WORKFLOW_ID,
     "input_mapping": (
         ("repository", "repository.full_name"),
         ("pr_number", "issue.number"),
@@ -103,14 +105,17 @@ def create_preset_command(
     repository: str,
     installation_id: str = "",
     created_by: str = "system",
+    workflow_id: str = "",
 ) -> RegisterTriggerCommand:
     """Create a RegisterTriggerCommand from a preset.
 
     Args:
-        preset_name: Name of the preset (self-healing | review-fix).
+        preset_name: Name of the preset (self-healing | review-fix | comment-command).
         repository: Target repository (owner/repo).
         installation_id: GitHub App installation ID.
         created_by: User or agent enabling the preset.
+        workflow_id: Target workflow ID. Falls back to the preset's default
+            (``self-heal-pr``) when empty.
 
     Returns:
         RegisterTriggerCommand configured from the preset.
@@ -122,13 +127,15 @@ def create_preset_command(
     if preset is None:
         raise ValueError(f"Unknown preset: '{preset_name}'. Available: {list(PRESETS.keys())}")
 
+    resolved_workflow_id = workflow_id or preset["default_workflow_id"]
+
     return RegisterTriggerCommand(
         name=preset["name"],
         event=preset["event"],
         conditions=preset["conditions"],
         repository=repository,
         installation_id=installation_id,
-        workflow_id=preset["workflow_id"],
+        workflow_id=resolved_workflow_id,
         input_mapping=preset["input_mapping"],
         config=preset["config"],
         created_by=created_by,
