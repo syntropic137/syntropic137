@@ -11,7 +11,6 @@ import pytest
 from syn_collector.collector.otlp import parse_otlp_logs, parse_otlp_metrics
 from syn_collector.events.types import EventType
 
-
 # Sample OTLP metrics payload (Claude Code token usage)
 SAMPLE_METRICS_PAYLOAD = {
     "resourceMetrics": [

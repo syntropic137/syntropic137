@@ -49,6 +49,42 @@ async def _write_deduped(
     return accepted
 
 
+def _register_otlp_routes(
+    app: FastAPI,
+    store: ObservabilityStoreProtocol,
+    dedup: DeduplicationFilter,
+) -> None:
+    """Register OTLP endpoints for OTel JSON ingestion from workspace containers."""
+
+    async def _ingest_otlp(
+        request: Request,
+        parser: Callable[[dict[str, Any]], list[CollectedEvent]],
+        label: str,
+    ) -> JSONResponse:
+        """Shared handler for OTLP metric/log ingestion."""
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Invalid JSON payload"},
+            )
+        events = parser(payload)
+        accepted = await _write_deduped(events, store, dedup, label)
+        logger.info("OTLP %s: %d extracted, %d accepted", label, len(events), accepted)
+        return JSONResponse(content={"accepted": accepted})
+
+    @app.post("/v1/metrics")
+    async def otlp_metrics(request: Request) -> JSONResponse:
+        """Receive OTLP JSON metrics from workspace containers."""
+        return await _ingest_otlp(request, parse_otlp_metrics, "metrics")
+
+    @app.post("/v1/logs")
+    async def otlp_logs(request: Request) -> JSONResponse:
+        """Receive OTLP JSON logs from workspace containers."""
+        return await _ingest_otlp(request, parse_otlp_logs, "logs")
+
+
 def register_routes(
     app: FastAPI,
     store: ObservabilityStoreProtocol,
@@ -123,34 +159,4 @@ def register_routes(
         dedup.clear()
         return {"status": "reset"}
 
-    # =========================================================================
-    # OTLP Endpoints — OTel JSON ingestion from workspace containers
-    # =========================================================================
-
-    async def _ingest_otlp(
-        request: Request,
-        parser: Callable[[dict[str, Any]], list[CollectedEvent]],
-        label: str,
-    ) -> JSONResponse:
-        """Shared handler for OTLP metric/log ingestion."""
-        try:
-            payload = await request.json()
-        except Exception:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "Invalid JSON payload"},
-            )
-        events = parser(payload)
-        accepted = await _write_deduped(events, store, dedup, label)
-        logger.info("OTLP %s: %d extracted, %d accepted", label, len(events), accepted)
-        return JSONResponse(content={"accepted": accepted})
-
-    @app.post("/v1/metrics")
-    async def otlp_metrics(request: Request) -> JSONResponse:
-        """Receive OTLP JSON metrics from workspace containers."""
-        return await _ingest_otlp(request, parse_otlp_metrics, "metrics")
-
-    @app.post("/v1/logs")
-    async def otlp_logs(request: Request) -> JSONResponse:
-        """Receive OTLP JSON logs from workspace containers."""
-        return await _ingest_otlp(request, parse_otlp_logs, "logs")
+    _register_otlp_routes(app, store, dedup)

@@ -113,6 +113,25 @@ def _get(d: dict[str, Any], snake: str, camel: str) -> Any:
     return d.get(snake, d.get(camel, []))
 
 
+def _collect_known_datapoints(
+    scope_metrics_list: list[dict[str, Any]],
+    session_id: str,
+    start_index: int,
+) -> list[CollectedEvent]:
+    """Extract events from scope_metrics for known metric names."""
+    events: list[CollectedEvent] = []
+    idx = start_index
+    for scope_metrics in scope_metrics_list:
+        for metric in scope_metrics.get("metrics", []):
+            metric_name = metric.get("name", "")
+            if metric_name not in KNOWN_METRICS:
+                continue
+            for dp in _extract_data_points(metric):
+                events.append(_datapoint_to_event(dp, idx, session_id, metric_name))
+                idx += 1
+    return events
+
+
 def parse_otlp_metrics(payload: dict[str, Any]) -> list[CollectedEvent]:
     """Parse OTLP JSON metrics payload into CollectedEvent instances.
 
@@ -131,16 +150,10 @@ def parse_otlp_metrics(payload: dict[str, Any]) -> list[CollectedEvent]:
     for resource_metrics in _get(payload, "resource_metrics", "resourceMetrics"):
         resource = resource_metrics.get("resource", {})
         session_id = _extract_session_id(resource.get("attributes", []))
-
-        for scope_metrics in _get(resource_metrics, "scope_metrics", "scopeMetrics"):
-            for metric in scope_metrics.get("metrics", []):
-                metric_name = metric.get("name", "")
-                if metric_name not in KNOWN_METRICS:
-                    continue
-
-                for dp in _extract_data_points(metric):
-                    events.append(_datapoint_to_event(dp, dp_index, session_id, metric_name))
-                    dp_index += 1
+        scope_list = _get(resource_metrics, "scope_metrics", "scopeMetrics")
+        batch = _collect_known_datapoints(scope_list, session_id, dp_index)
+        dp_index += len(batch)
+        events.extend(batch)
 
     return events
 
