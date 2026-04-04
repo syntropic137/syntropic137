@@ -50,22 +50,12 @@ async def _resolve_trigger_id(trigger_id: str) -> str:
     if exact is not None:
         return trigger_id
 
-    # Prefix scan — early termination once >1 match found
+    # Prefix scan — collect up to 6 candidates then decide
     all_triggers = await store.list_all()
-    first_match: str | None = None
-    candidates: list[str] = []
+    candidates = [t.trigger_id for t in all_triggers if t.trigger_id.startswith(trigger_id)][:6]
 
-    for t in all_triggers:
-        if not t.trigger_id.startswith(trigger_id):
-            continue
-        if first_match is None:
-            first_match = t.trigger_id
-        candidates.append(t.trigger_id)
-        if len(candidates) > 5:
-            break
-
-    if first_match is not None and len(candidates) == 1:
-        return first_match
+    if len(candidates) == 1:
+        return candidates[0]
     if len(candidates) > 1:
         raise HTTPException(
             status_code=409,
