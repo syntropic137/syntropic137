@@ -35,11 +35,12 @@ async def _resolve_installation_id(installation_id: str, repository: str) -> str
         client = get_github_client()
         resolved = await client.get_installation_for_repo(repository)
         logger.info("Auto-resolved installation_id=%s for %s", resolved, repository)
-        return resolved
+        return str(resolved)
     except Exception:
         logger.warning(
             "Could not auto-resolve installation_id for %s",
             repository,
+            exc_info=True,
         )
         return installation_id
 
