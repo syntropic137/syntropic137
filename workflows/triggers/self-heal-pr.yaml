@@ -150,9 +150,46 @@ phases:
          git push origin {{branch}}
          ```
 
-      6. **Comment on the PR with a summary:**
+      6. **Post a code review with inline comments on specific lines:**
+         If during your CI fix or code review analysis you identified specific code
+         issues (even ones you already fixed), collect them as inline review comments.
+         This gives the reviewer precise, line-level context about what changed and why.
+
          ```bash
-         gh pr comment {{pr_number}} --body "## Self-Heal Summary
+         # Split repository into owner/repo
+         OWNER=$(echo "{{repository}}" | cut -d/ -f1)
+         REPO=$(echo "{{repository}}" | cut -d/ -f2)
+
+         # Get the PR's node ID for the GraphQL mutation
+         PR_NODE_ID=$(gh api repos/{{repository}}/pulls/{{pr_number}} --jq '.node_id')
+
+         # Build the inline comments JSON array from your findings.
+         # Each entry needs: path (relative file path), line (line number in the
+         # current version of the file), body (description of the fix or finding).
+         # Example with two inline comments — adapt to your actual findings:
+         COMMENTS='[
+           {"path": "path/to/file.py", "line": 42, "body": "Fixed: description of what was changed here"},
+           {"path": "path/to/other.py", "line": 17, "body": "Fixed: description of second fix"}
+         ]'
+
+         # Post a review with inline comments via GraphQL
+         gh api graphql -f query="
+         mutation(\$prId: ID!, \$comments: [DraftPullRequestReviewComment!]) {
+           addPullRequestReview(input: {
+             pullRequestId: \$prId,
+             event: COMMENT,
+             body: \"## Self-Heal Summary\n\n**CI Fixes:**\n- [list CI fixes applied, or 'No CI failures found']\n\n**Review Comments Addressed:**\n- [list fixed items with commit ref]\n\n**Review Comments Skipped (with rationale):**\n- [list skipped items with explanation, or 'None']\n\nAll fixable issues have been addressed. Commit: $(git rev-parse --short HEAD)\",
+             comments: \$comments
+           }) {
+             pullRequestReview { id }
+           }
+         }" -f prId="$PR_NODE_ID" --argjson comments "$COMMENTS"
+         ```
+
+         If you have NO inline findings to report (e.g., only review thread replies
+         were needed), fall back to a simple review comment without inline comments:
+         ```bash
+         gh pr review {{pr_number}} --comment --body "## Self-Heal Summary
 
          **CI Fixes:**
          - [list CI fixes applied, or 'No CI failures found']

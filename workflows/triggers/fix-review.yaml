@@ -127,9 +127,44 @@ phases:
          git push origin {{branch}}
          ```
 
-      6. **Comment on the PR with a summary:**
+      6. **Post a code review with inline comments on specific lines:**
+         If you made code changes, post a review with inline comments pointing to
+         the exact lines you modified. This gives the reviewer precise context.
+
          ```bash
-         gh pr comment {{pr_number}} --body "## Review Feedback Addressed
+         # Split repository into owner/repo
+         OWNER=$(echo "{{repository}}" | cut -d/ -f1)
+         REPO=$(echo "{{repository}}" | cut -d/ -f2)
+
+         # Get the PR's node ID for the GraphQL mutation
+         PR_NODE_ID=$(gh api repos/{{repository}}/pulls/{{pr_number}} --jq '.node_id')
+
+         # Build the inline comments JSON array from your fixes.
+         # Each entry needs: path (relative file path), line (line number in the
+         # current version of the file), body (description of the fix).
+         # Example — adapt to your actual fixes:
+         COMMENTS='[
+           {"path": "path/to/file.py", "line": 42, "body": "Fixed: description of change"}
+         ]'
+
+         # Post a review with inline comments via GraphQL
+         gh api graphql -f query="
+         mutation(\$prId: ID!, \$comments: [DraftPullRequestReviewComment!]) {
+           addPullRequestReview(input: {
+             pullRequestId: \$prId,
+             event: COMMENT,
+             body: \"## Review Feedback Addressed\n\nAddressed feedback from @{{reviewer}}:\n\n**Fixed:**\n- [list items fixed with commit refs]\n\n**Acknowledged (no code change):**\n- [list items with brief rationale]\n\nAll review threads have been resolved. Ready for re-review!\",
+             comments: \$comments
+           }) {
+             pullRequestReview { id }
+           }
+         }" -f prId="$PR_NODE_ID" --argjson comments "$COMMENTS"
+         ```
+
+         If you have NO inline findings (e.g., only acknowledged comments without
+         code changes), fall back to a simple review comment:
+         ```bash
+         gh pr review {{pr_number}} --comment --body "## Review Feedback Addressed
 
          Addressed feedback from @{{reviewer}}:
 
