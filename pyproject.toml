@@ -11,7 +11,6 @@ keywords = ["ai", "agents", "event-sourcing", "workflows", "metrics"]
 # Workspace member dependencies
 dependencies = [
     "syn-api",
-    "syn-cli",
     "syn-collector",
     "syn-domain",
     "syn-adapters",
@@ -57,7 +56,6 @@ exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-docs", "apps/
 
 [tool.uv.sources]
 syn-api = { workspace = true }
-syn-cli = { workspace = true }
 syn-collector = { workspace = true }
 syn-domain = { workspace = true }
 syn-adapters = { workspace = true }
@@ -122,11 +120,10 @@ max-complexity = 22
 "**/token_injector.py" = ["ARG002"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["syn_api", "syn_cli", "syn_collector", "syn_domain", "syn_adapters", "syn_shared", "syn_perf"]
+known-first-party = ["syn_api", "syn_collector", "syn_domain", "syn_adapters", "syn_shared", "syn_perf"]
 
 [tool.pytest.ini_options]
 testpaths = [
-    "apps/syn-cli/tests",
     "apps/syn-api/tests",
     "packages/syn-collector/tests",
     "packages/syn-domain/tests",
@@ -135,7 +132,6 @@ testpaths = [
     "packages/syn-shared/tests",
 ]
 pythonpath = [
-    "apps/syn-cli/src",
     "apps/syn-api/src",
     "packages/syn-collector/src",
     "packages/syn-domain/src",

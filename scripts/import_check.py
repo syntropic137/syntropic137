@@ -52,10 +52,6 @@ def main() -> int:
 
         modules_tested.append(api_app.title)
 
-        from syn_cli.main import app as cli_app
-
-        modules_tested.append(cli_app.info.name or "cli_app")
-
         # API
         import syn_api
 
@@ -96,7 +92,6 @@ def main() -> int:
 
     our_packages = (
         "syn_api",
-        "syn_cli",
         "syn_domain",
         "syn_adapters",
         "syn_shared",

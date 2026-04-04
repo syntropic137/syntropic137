@@ -12,10 +12,10 @@ from ci.fitness._imports import runtime_imports
 from ci.fitness.conftest import load_exceptions, rel_path, repo_root
 
 # Domain must not import these at runtime
-_DOMAIN_FORBIDDEN = {"syn_adapters", "syn_api", "syn_collector", "syn_cli"}
+_DOMAIN_FORBIDDEN = {"syn_adapters", "syn_api", "syn_collector"}
 
 # Adapters must not import these at runtime
-_ADAPTER_FORBIDDEN = {"syn_api", "syn_cli"}
+_ADAPTER_FORBIDDEN = {"syn_api"}
 
 
 def _check_layer(
