@@ -103,7 +103,8 @@ class TestStoreGuards:
     """Verify in-memory stores reject non-test environments."""
 
     def test_inmemory_projection_store_requires_test_env(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """InMemoryProjectionStore must raise outside test environment."""
         from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore

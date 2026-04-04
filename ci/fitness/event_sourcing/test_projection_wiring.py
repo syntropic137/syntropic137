@@ -19,6 +19,7 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_coordinator_projections() -> list[object]:
     """Instantiate the coordinator's projection list without infrastructure.
 
@@ -115,8 +116,7 @@ class TestProjectionWiring:
         names = [p.get_name() for p in projections]
         duplicates = [n for n in names if names.count(n) > 1]
         assert not duplicates, (
-            f"Duplicate projection names would cause checkpoint collisions: "
-            f"{set(duplicates)}"
+            f"Duplicate projection names would cause checkpoint collisions: {set(duplicates)}"
         )
 
     def test_all_projections_declare_event_subscriptions(self) -> None:
