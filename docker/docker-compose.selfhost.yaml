@@ -191,7 +191,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
-      - SYN_WORKSPACE_HOST_DIR=${PWD}/workspaces
+      - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-.}/workspaces
       # Docker socket proxy (ISS-164)
       - DOCKER_HOST=tcp://docker-socket-proxy:2375
       - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-production}_agent-net
