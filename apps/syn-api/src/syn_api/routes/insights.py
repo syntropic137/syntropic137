@@ -80,6 +80,38 @@ async def _get_execution_ids_for_system(system_id: str) -> set[str]:
     return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
 
 
+def _aggregate_costs(costs: list[Any]) -> dict[str, Any]:
+    """Aggregate cost entries into totals and breakdowns."""
+    from decimal import Decimal
+
+    total_cost = Decimal("0")
+    total_input = 0
+    total_output = 0
+    cost_by_workflow: dict[str, Decimal] = {}
+    cost_by_model: dict[str, Decimal] = {}
+
+    for c in costs:
+        total_cost += c.total_cost_usd
+        total_input += c.input_tokens
+        total_output += c.output_tokens
+        if c.workflow_id:
+            cost_by_workflow[c.workflow_id] = (
+                cost_by_workflow.get(c.workflow_id, Decimal("0")) + c.total_cost_usd
+            )
+        for model, model_cost in c.cost_by_model.items():
+            cost_by_model[model] = cost_by_model.get(model, Decimal("0")) + model_cost
+
+    return {
+        "total_cost_usd": str(total_cost),
+        "total_tokens": total_input + total_output,
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "cost_by_workflow": {k: str(v) for k, v in cost_by_workflow.items()},
+        "cost_by_model": {k: str(v) for k, v in cost_by_model.items()},
+        "execution_count": len(costs),
+    }
+
+
 async def get_global_cost(
     system_id: str | None = None,
     auth: AuthContext | None = None,  # noqa: ARG001
@@ -87,13 +119,7 @@ async def get_global_cost(
     """Get global cost breakdown across all executions.
 
     Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532/#542.
-
-    Args:
-        system_id: Optional system ID to filter costs by.
-        auth: Optional authentication context.
     """
-    from decimal import Decimal
-
     from syn_api._wiring import get_execution_cost_query
 
     await ensure_connected()
@@ -106,37 +132,12 @@ async def get_global_cost(
         allowed_exec_ids = await _get_execution_ids_for_system(system_id)
         all_costs = [c for c in all_costs if c.execution_id in allowed_exec_ids]
 
-    total_cost = Decimal("0")
-    total_input = 0
-    total_output = 0
-    cost_by_workflow: dict[str, Decimal] = {}
-    cost_by_model: dict[str, Decimal] = {}
-
-    for c in all_costs:
-        total_cost += c.total_cost_usd
-        total_input += c.input_tokens
-        total_output += c.output_tokens
-
-        if c.workflow_id:
-            cost_by_workflow[c.workflow_id] = (
-                cost_by_workflow.get(c.workflow_id, Decimal("0")) + c.total_cost_usd
-            )
-        for model, model_cost in c.cost_by_model.items():
-            cost_by_model[model] = cost_by_model.get(model, Decimal("0")) + model_cost
-
-    return {
-        "system_id": system_id or "",
-        "system_name": "global" if not system_id else "",
-        "organization_id": "",
-        "total_cost_usd": str(total_cost),
-        "total_tokens": total_input + total_output,
-        "total_input_tokens": total_input,
-        "total_output_tokens": total_output,
-        "cost_by_repo": {},
-        "cost_by_workflow": {k: str(v) for k, v in cost_by_workflow.items()},
-        "cost_by_model": {k: str(v) for k, v in cost_by_model.items()},
-        "execution_count": len(all_costs),
-    }
+    result = _aggregate_costs(all_costs)
+    result["system_id"] = system_id or ""
+    result["system_name"] = "global" if not system_id else ""
+    result["organization_id"] = ""
+    result["cost_by_repo"] = {}
+    return result
 
 
 async def get_contribution_heatmap(
