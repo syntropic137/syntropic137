@@ -154,6 +154,10 @@ async def get_tool_timeline_endpoint(
     include_blocked: bool = True,
 ) -> ToolTimelineResponse:
     """Get tool execution timeline for a session."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_tool_timeline(
         session_id=session_id,
         limit=limit,
@@ -196,6 +200,10 @@ async def get_token_metrics_endpoint(
     include_records: bool = True,  # noqa: ARG001 - kept for API compatibility
 ) -> SessionTokenMetrics:
     """Get token usage metrics for a session."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_token_metrics(session_id=session_id)
 
     if isinstance(result, Err):

@@ -398,6 +398,10 @@ async def get_session_cost_endpoint(
     include_breakdown: bool = Query(True, description="Include model/tool breakdowns"),
 ) -> SessionCostResponse:
     """Get cost for a specific session."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_session_cost(session_id, include_breakdown=include_breakdown)
 
     if isinstance(result, Err):
@@ -434,6 +438,10 @@ async def get_execution_cost_endpoint(
     include_session_ids: bool = Query(False, description="Include list of session IDs"),
 ) -> ExecutionCostResponse:
     """Get aggregated cost for a workflow execution."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    execution_id = await resolve_or_raise(mgr.store, "workflow_execution_details", execution_id, "Execution")
     result = await get_execution_cost(execution_id, include_breakdown=include_breakdown)
 
     if isinstance(result, Err):

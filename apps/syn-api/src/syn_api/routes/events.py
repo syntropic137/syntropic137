@@ -357,6 +357,10 @@ async def get_session_events_endpoint(
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ) -> EventListResponse:
     """Get all events for a session."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_session_events(
         session_id=session_id,
         event_type=event_type,
@@ -395,6 +399,10 @@ async def get_session_timeline_endpoint(
     limit: int = Query(100, ge=1, le=500, description="Max entries"),
 ) -> list[TimelineEntryResponse]:
     """Get a timeline view of session events."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_session_timeline(session_id=session_id, limit=limit)
 
     if isinstance(result, Err):
@@ -415,6 +423,10 @@ async def get_session_timeline_endpoint(
 @router.get("/sessions/{session_id}/costs", response_model=CostSummaryResponse)
 async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
     """Get cost summary for a session."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_token_metrics(session_id=session_id)
 
     if isinstance(result, Err):
@@ -435,6 +447,10 @@ async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
 @router.get("/sessions/{session_id}/tools", response_model=list[ToolSummary])
 async def get_session_tools_endpoint(session_id: str) -> list[ToolSummary]:
     """Get tool usage summary for a session."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_session_tool_summary(session_id=session_id)
 
     if isinstance(result, Err):
