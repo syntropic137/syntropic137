@@ -8,6 +8,7 @@ obtain properly-configured domain handlers and projections.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -560,10 +561,8 @@ def get_subscription_coordinator(
 
     # Pass TimescaleDB pool to cost projections (#505, #507)
     timescale_pool = None
-    try:
+    with contextlib.suppress(Exception):
         timescale_pool = get_event_store_instance().pool
-    except Exception:
-        pass  # Pool unavailable — cost projections fall back to projection store
 
     return create_coordinator_service(
         event_store=get_event_store_client(),
