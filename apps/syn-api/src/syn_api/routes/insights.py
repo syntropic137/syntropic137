@@ -134,9 +134,18 @@ async def get_global_cost(
 
     result = _aggregate_costs(all_costs)
     result["system_id"] = system_id or ""
-    result["system_name"] = "global" if not system_id else ""
     result["organization_id"] = ""
     result["cost_by_repo"] = {}
+
+    # Resolve system name when filtering by system_id
+    system_name = "global"
+    if system_id:
+        from syn_adapters.projection_stores import get_projection_store
+
+        sys_data = await get_projection_store().get("system_details", system_id)
+        system_name = sys_data.get("name", "") if sys_data else system_id
+
+    result["system_name"] = system_name
     return result
 
 

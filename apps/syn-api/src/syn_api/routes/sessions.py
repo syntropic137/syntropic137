@@ -28,7 +28,6 @@ from syn_api.types import (
     Result,
     SessionDetail,
     SessionError,
-    SessionListResponse,
     SessionSummary,
     ToolOperation,
 )
@@ -59,6 +58,13 @@ class SessionSummaryResponse(BaseModel):
     total_cost_usd: Decimal = Decimal("0")
     started_at: str | None = None
     completed_at: str | None = None
+
+
+class SessionListResponse(BaseModel):
+    """Wrapped list of session summaries."""
+
+    sessions: list[SessionSummaryResponse] = Field(default_factory=list)
+    total: int = 0
 
 
 class OperationInfo(BaseModel):
@@ -363,9 +369,24 @@ async def list_sessions_endpoint(
         raise HTTPException(status_code=500, detail=result.message)
 
     summaries = result.value
+    responses = [
+        SessionSummaryResponse(
+            id=s.id,
+            workflow_id=s.workflow_id,
+            execution_id=s.execution_id,
+            phase_id=s.phase_id,
+            status=s.status,
+            agent_provider=s.agent_type,
+            total_tokens=s.total_tokens,
+            total_cost_usd=s.total_cost_usd,
+            started_at=str(s.started_at) if s.started_at else None,
+            completed_at=str(s.completed_at) if s.completed_at else None,
+        )
+        for s in summaries
+    ]
     return SessionListResponse(
-        sessions=summaries,
-        total=len(summaries),
+        sessions=responses,
+        total=len(responses),
     )
 
 
