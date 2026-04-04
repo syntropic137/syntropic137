@@ -31,18 +31,21 @@ describe("sessions commands", () => {
 
   it("list shows sessions table", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse([
-        {
-          id: "sess-001",
-          workflow_id: "wf-1",
-          phase_id: null,
-          status: "completed",
-          agent_provider: "claude",
-          total_tokens: 5000,
-          total_cost_usd: "0.05",
-          started_at: "2026-01-01T00:00:00Z",
-        },
-      ]),
+      jsonResponse({
+        sessions: [
+          {
+            id: "sess-001",
+            workflow_id: "wf-1",
+            phase_id: null,
+            status: "completed",
+            agent_provider: "claude",
+            total_tokens: 5000,
+            total_cost_usd: "0.05",
+            started_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        total: 1,
+      }),
     );
 
     await sessionsGroup.getCommand("list")!.handler({ positionals: [], values: {} });
@@ -52,7 +55,7 @@ describe("sessions commands", () => {
   });
 
   it("list shows empty message", async () => {
-    mockFetch.mockResolvedValue(jsonResponse([]));
+    mockFetch.mockResolvedValue(jsonResponse({ sessions: [], total: 0 }));
     await sessionsGroup.getCommand("list")!.handler({ positionals: [], values: {} });
     expect(stdout()).toContain("No sessions found");
   });
