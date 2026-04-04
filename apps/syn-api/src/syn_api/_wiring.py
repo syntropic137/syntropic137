@@ -536,6 +536,34 @@ def get_event_store_instance() -> Any:
     return get_event_store()
 
 
+def get_session_cost_query():
+    """Return a SessionCostQueryService backed by TimescaleDB.
+
+    Read-only service for session cost data — separates reads from
+    the write-side projection. See #532.
+    """
+    from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
+        SessionCostQueryService,
+    )
+
+    pool = get_event_store_instance().pool
+    return SessionCostQueryService(pool=pool)
+
+
+def get_execution_cost_query():
+    """Return an ExecutionCostQueryService backed by TimescaleDB.
+
+    Read-only service for execution cost data — separates reads from
+    the write-side projection. See #532.
+    """
+    from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+        ExecutionCostQueryService,
+    )
+
+    pool = get_event_store_instance().pool
+    return ExecutionCostQueryService(pool=pool)
+
+
 async def get_conversation_store() -> Any:
     """Return the conversation storage (MinIO-backed)."""
     return await get_conversation_storage()

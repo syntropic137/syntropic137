@@ -276,6 +276,10 @@ class SessionCostProjection:
     async def get_session_cost(self, session_id: str) -> SessionCost | None:
         """Get session cost by session ID.
 
+        .. deprecated::
+            API routes should use ``SessionCostQueryService`` instead.
+            This method remains for handler/test use. See #532.
+
         Queries TimescaleDB directly for real-time cost calculation.
 
         Args:
@@ -327,6 +331,12 @@ class SessionCostProjection:
         return [SessionCost.from_dict(d) for d in data]
 
     async def get_all(self) -> list[SessionCost]:
-        """Get all session costs."""
+        """Get all session costs.
+
+        .. deprecated::
+            API routes should use ``SessionCostQueryService.list_all()`` instead.
+            This method reads from the projection store which is always empty
+            for cost data. See #532.
+        """
         data = await self._store.get_all(self.PROJECTION_NAME)
         return [SessionCost.from_dict(d) for d in data]
