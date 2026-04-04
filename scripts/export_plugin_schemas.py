@@ -69,7 +69,7 @@ SCHEMA_REGISTRY: dict[str, type[BaseModel]] = {
     "workflow.schema.json": WorkflowDefinition,
     "triggers.schema.json": TriggerFileSchema,
     "phase-frontmatter.schema.json": PhaseFrontmatterSchema,
-    # TODO(#???): plugin-manifest and marketplace schemas were previously generated
+    # TODO(#532): plugin-manifest and marketplace schemas were previously generated
     # from syn-cli Pydantic models. Now that syn-cli is deleted, these schemas are
     # maintained as static files until the models are relocated (e.g., to syn-domain).
 }
