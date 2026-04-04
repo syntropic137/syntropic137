@@ -157,7 +157,7 @@
           "workflows"
         ],
         "summary": "Get Workflow Endpoint",
-        "description": "Get workflow details by ID.",
+        "description": "Get workflow details by ID (supports partial ID prefix matching).",
         "operationId": "get_workflow_endpoint_workflows__workflow_id__get",
         "parameters": [
           {
@@ -392,7 +392,7 @@
           "workflows"
         ],
         "summary": "Validate Yaml Endpoint",
-        "description": "Validate a workflow YAML file.",
+        "description": "Validate a workflow YAML definition.",
         "operationId": "validate_yaml_endpoint_workflows_validate_post",
         "requestBody": {
           "content": {
@@ -575,7 +575,7 @@
           "executions"
         ],
         "summary": "Get Execution Endpoint",
-        "description": "Get detailed information about a workflow execution run.",
+        "description": "Get detailed information about a workflow execution run (supports partial ID prefix matching).",
         "operationId": "get_execution_endpoint_executions__execution_id__get",
         "parameters": [
           {
@@ -1120,7 +1120,7 @@
           "sessions"
         ],
         "summary": "Get Session Endpoint",
-        "description": "Get session details by ID.",
+        "description": "Get session details by ID (supports partial ID prefix matching).",
         "operationId": "get_session_endpoint_sessions__session_id__get",
         "parameters": [
           {
@@ -1309,7 +1309,7 @@
           "artifacts"
         ],
         "summary": "Get Artifact Endpoint",
-        "description": "Get artifact details by ID.",
+        "description": "Get artifact details by ID (supports partial ID prefix matching).",
         "operationId": "get_artifact_endpoint_artifacts__artifact_id__get",
         "parameters": [
           {
@@ -1986,7 +1986,7 @@
           "events"
         ],
         "summary": "Get Recent Activity Endpoint",
-        "description": "Get recent git activity events for the global dashboard feed.",
+        "description": "Get recent activity events for the global dashboard feed.",
         "operationId": "get_recent_activity_endpoint_events_recent_get",
         "parameters": [
           {
@@ -2002,6 +2002,24 @@
               "title": "Limit"
             },
             "description": "Max events to return"
+          },
+          {
+            "name": "event_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by event type",
+              "title": "Event Type"
+            },
+            "description": "Filter by event type"
           }
         ],
         "responses": {
@@ -9441,16 +9459,39 @@
       },
       "ValidateYamlRequest": {
         "properties": {
-          "file": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "Raw YAML content to validate"
+          },
+          "filename": {
             "type": "string",
-            "title": "File"
+            "title": "Filename",
+            "description": "Original filename (informational)",
+            "default": "workflow.yaml"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File",
+            "description": "Deprecated \u2014 file paths are no longer supported. Use 'content' instead."
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "file"
-        ],
         "title": "ValidateYamlRequest"
       },
       "ValidateYamlResponse": {
