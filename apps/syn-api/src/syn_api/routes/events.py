@@ -220,15 +220,17 @@ async def get_session_tool_summary(
 
 async def get_recent_activity_events(
     limit: int = 50,
+    event_type: str | None = None,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[dict[str, Any]], ObservabilityError]:
-    """Get recent git/activity events for the global dashboard feed.
+    """Get recent activity events for the global dashboard feed.
 
-    Returns the most recent git_commit, git_push, git_branch_changed, and
-    git_operation events across all sessions, ordered newest-first.
+    When event_type is provided, filters to that single type.
+    Otherwise returns all event types, ordered newest-first.
 
     Args:
         limit: Maximum events to return.
+        event_type: Optional event type filter (e.g. "git_commit").
         auth: Optional authentication context.
 
     Returns:
@@ -238,10 +240,7 @@ async def get_recent_activity_events(
     try:
         store = get_event_store_instance()
         await store.initialize()
-        events = await store.query_recent_by_types(
-            event_types=["git_commit", "git_push", "git_branch_changed", "git_operation"],
-            limit=limit,
-        )
+        events = await store.query_recent(limit=limit, event_type=event_type)
         return Ok(events)
     except Exception as e:
         return Err(ObservabilityError.QUERY_FAILED, message=str(e))
@@ -326,9 +325,10 @@ async def get_token_metrics(
 @router.get("/recent", response_model=EventListResponse)
 async def get_recent_activity_endpoint(
     limit: int = Query(50, ge=1, le=200, description="Max events to return"),
+    event_type: str | None = Query(None, description="Filter by event type"),
 ) -> EventListResponse:
-    """Get recent git activity events for the global dashboard feed."""
-    result = await get_recent_activity_events(limit=limit)
+    """Get recent activity events for the global dashboard feed."""
+    result = await get_recent_activity_events(limit=limit, event_type=event_type)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=f"Failed to query activity: {result.message}")

@@ -26,10 +26,17 @@ function reqSessionId(parsed: ParsedArgs): string {
 const recentCommand: CommandDef = {
   name: "recent",
   description: "Show recent domain events across all sessions",
-  options: { limit: { type: "string", description: "Max events (max 200)", default: "50" } },
+  options: {
+    limit: { type: "string", description: "Max events (max 200)", default: "50" },
+    type: { type: "string", short: "t", description: "Filter by event type" },
+  },
   handler: async (parsed: ParsedArgs) => {
     const limit = (parsed.values["limit"] as string | undefined) ?? "50";
-    const data = await apiGet<EventListResponse>("/events/recent", { params: { limit } });
+    const params = buildParams({
+      limit,
+      event_type: (parsed.values["type"] as string | undefined) ?? null,
+    });
+    const data = await apiGet<EventListResponse>("/events/recent", { params });
     if (data.events.length === 0) { printDim("No recent events."); return; }
 
     const table = new Table({ title: "Recent Events" });

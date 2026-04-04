@@ -20,9 +20,13 @@ app = typer.Typer(
 @app.command("recent")
 def recent(
     limit: Annotated[int, typer.Option(help="Max events to show (max 200)")] = 50,
+    event_type: Annotated[
+        str | None, typer.Option("--type", "-t", help="Filter by event type")
+    ] = None,
 ) -> None:
     """Show recent domain events across all sessions."""
-    data = api_get("/events/recent", params={"limit": limit})
+    params = build_params(limit=limit, event_type=event_type)
+    data = api_get("/events/recent", params=params)
 
     events = data.get("events", [])
     if not events:
