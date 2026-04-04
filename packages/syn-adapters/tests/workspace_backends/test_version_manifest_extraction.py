@@ -75,14 +75,15 @@ def _mock_service(
 class TestReadImageManifest:
     """Tests for _read_image_manifest."""
 
-    def test_valid_version_json(self) -> None:
+    @pytest.mark.asyncio
+    async def test_valid_version_json(self) -> None:
         """Valid version.json should return ImageManifest."""
         service = _mock_service(
             exec_exit_code=0,
             exec_output=json.dumps(SAMPLE_VERSION_JSON).encode(),
         )
 
-        result = _read_image_manifest(service, HANDLE)
+        result = await _read_image_manifest(service, HANDLE)
 
         assert result is not None
         assert isinstance(result, ImageManifest)
@@ -92,39 +93,44 @@ class TestReadImageManifest:
         assert result.components["rtk"] == "0.34.3"
         assert result.build_commit == "e63b4458332a"
 
-    def test_missing_version_json(self) -> None:
+    @pytest.mark.asyncio
+    async def test_missing_version_json(self) -> None:
         """Old image without version.json → None (no crash)."""
         service = _mock_service(exec_exit_code=1, exec_output=b"cat: No such file")
 
-        result = _read_image_manifest(service, HANDLE)
+        result = await _read_image_manifest(service, HANDLE)
 
         assert result is None
 
-    def test_malformed_json(self) -> None:
+    @pytest.mark.asyncio
+    async def test_malformed_json(self) -> None:
         """Malformed JSON → None (no crash)."""
         service = _mock_service(exec_exit_code=0, exec_output=b"not json {{{")
 
-        result = _read_image_manifest(service, HANDLE)
+        result = await _read_image_manifest(service, HANDLE)
 
         assert result is None
 
-    def test_no_provider(self) -> None:
+    @pytest.mark.asyncio
+    async def test_no_provider(self) -> None:
         """Memory backend without _provider → None."""
         service = _mock_service(has_provider=False)
 
-        result = _read_image_manifest(service, HANDLE)
+        result = await _read_image_manifest(service, HANDLE)
 
         assert result is None
 
-    def test_container_not_found(self) -> None:
+    @pytest.mark.asyncio
+    async def test_container_not_found(self) -> None:
         """Container not in _active_workspaces → None."""
         service = _mock_service(has_container=False)
 
-        result = _read_image_manifest(service, HANDLE)
+        result = await _read_image_manifest(service, HANDLE)
 
         assert result is None
 
-    def test_partial_version_json(self) -> None:
+    @pytest.mark.asyncio
+    async def test_partial_version_json(self) -> None:
         """version.json with missing optional fields → ImageManifest with defaults."""
         partial = {"provider": "claude-cli", "provider_version": "1.0.0", "components": {}}
         service = _mock_service(
@@ -132,7 +138,7 @@ class TestReadImageManifest:
             exec_output=json.dumps(partial).encode(),
         )
 
-        result = _read_image_manifest(service, HANDLE)
+        result = await _read_image_manifest(service, HANDLE)
 
         assert result is not None
         assert result.provider == "claude-cli"

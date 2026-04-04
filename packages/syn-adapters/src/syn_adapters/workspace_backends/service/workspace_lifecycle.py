@@ -8,6 +8,7 @@ See ADR-021, ADR-023, ADR-024.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING
@@ -127,7 +128,7 @@ VERSION_JSON_PATH = "/opt/agentic/version.json"
 """Path to the version manifest inside workspace images."""
 
 
-def _read_image_manifest(
+async def _read_image_manifest(
     service: WorkspaceService,
     handle: IsolationHandle,
 ) -> ImageManifest | None:
@@ -135,6 +136,10 @@ def _read_image_manifest(
 
     Returns None if the image doesn't contain a version manifest (older images)
     or if the read fails for any reason. Never raises.
+
+    The blocking Docker exec_run() call is dispatched to a thread via
+    asyncio.to_thread() so it does not stall the event loop if Docker is
+    slow or unresponsive.
     """
     try:
         provider = getattr(service._isolation, "_provider", None)
@@ -145,7 +150,7 @@ def _read_image_manifest(
         if container is None:
             return None
 
-        exit_code, output = container.exec_run(["cat", VERSION_JSON_PATH])
+        exit_code, output = await asyncio.to_thread(container.exec_run, ["cat", VERSION_JSON_PATH])
         if exit_code != 0:
             logger.debug("No version manifest in image (exit=%d)", exit_code)
             return None
@@ -193,7 +198,7 @@ async def provision_workspace(
     isolation_handle = await service._isolation.create(isolation_config)
 
     # Read image version manifest from container (best-effort)
-    manifest = _read_image_manifest(service, isolation_handle)
+    manifest = await _read_image_manifest(service, isolation_handle)
 
     aggregate.record_isolation_started(
         isolation_id=isolation_handle.isolation_id,

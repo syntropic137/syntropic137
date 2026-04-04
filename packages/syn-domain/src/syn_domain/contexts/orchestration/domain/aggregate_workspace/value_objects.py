@@ -87,13 +87,17 @@ class ImageManifest:
     """Version manifest from a workspace image (/opt/agentic/version.json).
 
     Read from the container after creation to capture provenance.
-    The manifest itself is optional (None when unavailable), but when
-    present, provider, provider_version, and components are required.
+    All fields have defaults so that partial or missing manifests (e.g. from
+    older images or failed reads) can still be reconstructed without raising.
+    The manifest itself is optional at the workspace level (None when
+    unavailable); when present, fields default to empty rather than failing.
     """
 
-    provider: str  # e.g. "claude-cli"
-    provider_version: str  # e.g. "1.1.0"
-    components: dict[str, str]  # e.g. {"claude_cli": "2.1.76", "rtk": "0.34.3"}
+    provider: str = ""  # e.g. "claude-cli"
+    provider_version: str = ""  # e.g. "1.1.0"
+    components: dict[str, str] = field(
+        default_factory=dict
+    )  # e.g. {"claude_cli": "2.1.76", "rtk": "0.34.3"}
     build_commit: str = ""  # Short SHA of the build commit
     built_at: str = ""  # ISO 8601 timestamp
     manifest_digest: str = ""  # Hash of the manifest.yaml used for the build
