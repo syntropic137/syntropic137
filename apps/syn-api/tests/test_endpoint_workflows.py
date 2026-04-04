@@ -116,7 +116,9 @@ async def test_validate_yaml_endpoint_success() -> None:
             )
         ),
     ):
-        result = await validate_yaml_endpoint(ValidateYamlRequest(content="name: Test WF\ntype: custom\n"))
+        result = await validate_yaml_endpoint(
+            ValidateYamlRequest(content="name: Test WF\ntype: custom\n")
+        )
     assert result.valid is True
     assert result.name == "Test WF"
     assert result.phase_count == 2
@@ -128,7 +130,9 @@ async def test_validate_yaml_endpoint_invalid_yaml() -> None:
         new_callable=AsyncMock,
         return_value=Ok(WorkflowValidation(valid=False, errors=["Missing required field: name"])),
     ):
-        result = await validate_yaml_endpoint(ValidateYamlRequest(content="name: Missing Required Fields\n"))
+        result = await validate_yaml_endpoint(
+            ValidateYamlRequest(content="name: Missing Required Fields\n")
+        )
     assert result.valid is False
     assert len(result.errors) == 1
 

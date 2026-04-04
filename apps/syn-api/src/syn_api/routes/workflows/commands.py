@@ -316,8 +316,12 @@ class CreateWorkflowRequest(BaseModel):
 
 class ValidateYamlRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    content: str = Field(..., description="Raw YAML content to validate")
+    content: str | None = Field(default=None, description="Raw YAML content to validate")
     filename: str = Field(default="workflow.yaml", description="Original filename (informational)")
+    file: str | None = Field(
+        default=None,
+        description="Deprecated — file paths are no longer supported. Use 'content' instead.",
+    )
 
 
 class UpdatePhasePromptRequest(BaseModel):
@@ -389,6 +393,19 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
 @router.post("/validate", response_model=ValidateYamlResponse)
 async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlResponse:
     """Validate a workflow YAML definition."""
+    if body.content is None and body.file is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The 'file' field (file paths) is no longer supported. "
+                "Please read the file locally and send its contents via the 'content' field."
+            ),
+        )
+    if body.content is None:
+        raise HTTPException(
+            status_code=400,
+            detail="The 'content' field is required.",
+        )
     result = await validate_yaml(yaml_content=body.content)
 
     if isinstance(result, Err):
