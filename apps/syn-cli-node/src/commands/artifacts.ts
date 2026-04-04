@@ -109,7 +109,7 @@ const createCommand: CommandDef = {
   description: "Create a new artifact",
   options: {
     workflow: { type: "string", short: "w", description: "Workflow ID" },
-    type: { type: "string", short: "t", description: "Artifact type (code, document, research_summary)" },
+    type: { type: "string", short: "t", description: "Artifact type (code, markdown, text, json, yaml, research_summary, plan, other)" },
     title: { type: "string", description: "Artifact title" },
     content: { type: "string", short: "c", description: "Artifact content" },
     phase: { type: "string", short: "p", description: "Phase ID" },

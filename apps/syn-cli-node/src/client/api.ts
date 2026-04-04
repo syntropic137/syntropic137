@@ -108,7 +108,7 @@ export async function apiPost<T = Record<string, unknown>>(
   const { status, data } = await safeRequest(() =>
     client.post<T>(path, options?.body, options?.params),
   );
-  checkResponse(status, data, options?.expected ?? [200]);
+  checkResponse(status, data, options?.expected ?? [200, 201]);
   return data;
 }
 
