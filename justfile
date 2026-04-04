@@ -734,6 +734,66 @@ test-e2e-container:
 test-e2e-container-build:
     uv run python scripts/e2e_agent_in_container_test.py --build
 
+# Quick E2E smoke test: validate the full dev stack is working (#516)
+# Starts the dev stack if not running, hits health endpoint, runs core CLI commands.
+e2e-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    API_URL="http://localhost:8137"
+
+    # 1. Check if the dev stack is already running; start it if not
+    if ! curl -sf "${API_URL}/health" > /dev/null 2>&1; then
+        echo "🔧 Dev stack not running — starting it..."
+        just dev
+        echo ""
+    fi
+
+    # 2. Wait briefly for services to stabilise
+    echo "⏳ Waiting for services..."
+    for i in $(seq 1 30); do
+        if curl -sf "${API_URL}/health" > /dev/null 2>&1; then
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "❌ Health endpoint did not respond within 30 seconds"
+            exit 1
+        fi
+        sleep 1
+    done
+
+    # 3. Health endpoint
+    echo "🏥 Checking health endpoint..."
+    curl -sf "${API_URL}/health" | python3 -m json.tool
+    echo ""
+
+    # 4. Core CLI smoke tests
+    echo "🔍 Running CLI smoke tests..."
+    echo ""
+
+    echo "  → syn workflow list"
+    just cli workflow list
+    echo ""
+
+    echo "  → syn session list"
+    just cli session list
+    echo ""
+
+    echo "  → syn events recent --limit 5"
+    just cli events recent --limit 5
+    echo ""
+
+    echo "  → syn org list"
+    just cli org list
+    echo ""
+
+    echo "  → syn status"
+    just cli status
+    echo ""
+
+    # 5. Success
+    echo "✅ E2E smoke test passed — full stack is operational"
+
 # Check for test debt (xfail, skip, TODO in tests)
 test-debt:
     @echo "🔍 Checking for test debt..."
