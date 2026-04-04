@@ -25,6 +25,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/triggers", tags=["triggers"])
 
 
+async def _resolve_installation_id(installation_id: str, repository: str) -> str:
+    """Auto-resolve installation_id from the GitHub App if not provided."""
+    if installation_id or not repository:
+        return installation_id
+    try:
+        from syn_adapters.github.client import get_github_client
+
+        client = get_github_client()
+        resolved = await client.get_installation_for_repo(repository)
+        logger.info("Auto-resolved installation_id=%s for %s", resolved, repository)
+        return resolved
+    except Exception:
+        logger.warning(
+            "Could not auto-resolve installation_id for %s",
+            repository,
+        )
+        return installation_id
+
+
 async def register_trigger(
     name: str,
     event: str,
@@ -46,6 +65,7 @@ async def register_trigger(
     )
 
     await ensure_connected()
+    installation_id = await _resolve_installation_id(installation_id, repository)
 
     workflow_repo = get_workflow_repo()
     if not await workflow_repo.exists(workflow_id):
@@ -140,6 +160,7 @@ async def enable_preset(
     )
 
     await ensure_connected()
+    installation_id = await _resolve_installation_id(installation_id, repository)
 
     try:
         command = create_preset_command(
