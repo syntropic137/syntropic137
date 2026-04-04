@@ -58,7 +58,7 @@ def map_events_api_to_normalized(
         return None
 
     payload: dict[str, Any] = raw_event.get("payload", {})
-    action: str = str(payload.get("action", ""))
+    action: str = payload.get("action") or ""
 
     # Normalize action names that differ between Events API and webhooks
     action_map = _EVENTS_API_ACTION_MAP.get(event_type)
