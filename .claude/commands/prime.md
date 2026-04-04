@@ -22,7 +22,7 @@ FOCUS_AREA: $ARGUMENTS
 ```
 syntropic137/
 ├── apps/                           # Applications
-│   ├── syn-cli/                    # CLI tool (`syn` command)
+│   ├── syn-cli-node/               # CLI tool (`syn` command) — Node.js
 │   ├── syn-dashboard/              # FastAPI backend (port 8000)
 │   └── syn-dashboard-ui/           # React frontend (port 5173)
 │
@@ -72,7 +72,7 @@ syntropic137/
 | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py` | Core orchestration - runs Claude in Docker | 2 (high) |
 | `packages/syn-adapters/src/syn_adapters/events/store.py` | Event storage (TimescaleDB) | 2 (high) |
 | `apps/syn-dashboard/src/syn_dashboard/main.py` | Dashboard API entry point | 2 (high) |
-| `apps/syn-cli/src/syn_cli/main.py` | CLI entry point | 2 (high) |
+| `apps/syn-cli-node/src/index.ts` | CLI entry point | 2 (high) |
 | `packages/syn-domain/src/syn_domain/` | Domain models per bounded context | 3 (medium) |
 | `docker/docker-compose.yaml` | Infrastructure services | 3 (medium) |
 | `docs/adrs/` | Architecture decisions (35+ ADRs) | 3 (medium) |
@@ -130,7 +130,7 @@ Test Stack: ports +10000 (15432, 55051, etc.) (ephemeral)
    |------|-----------|
    | `adapters` | `packages/syn-adapters/src/syn_adapters/` |
    | `dashboard` | `apps/syn-dashboard/src/syn_dashboard/` |
-   | `cli` | `apps/syn-cli/src/syn_cli/` |
+   | `cli` | `apps/syn-cli-node/src/` |
    | `events` | `packages/syn-adapters/src/syn_adapters/events/` |
    | `workspaces` | `packages/syn-adapters/src/syn_adapters/workspace_backends/` |
    | `domain` | `packages/syn-domain/src/syn_domain/` |

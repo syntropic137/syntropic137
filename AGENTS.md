@@ -24,7 +24,7 @@ The end goal: a `gh`-style CLI (`syn`) that integrates with Claude Code and Open
 syntropic137/
 ├── apps/
 │   ├── syn-api/               # FastAPI HTTP server (routes + v1 application services)
-│   ├── syn-cli/               # CLI tool ("syn") — HTTP client for syn-api
+│   ├── syn-cli-node/          # CLI tool ("syn") — Node.js, HTTP client for syn-api
 │   ├── syn-dashboard-ui/      # Dashboard frontend (Vite + React) — operational UI
 │   ├── syn-docs/              # Public-facing documentation site (Next.js + Fumadocs)
 │   └── syn-pulse-ui/          # Pulse/heatmap UI
