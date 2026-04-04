@@ -88,6 +88,7 @@ async def startup(
         return result
 
     # Degraded path — warn and continue
+    await _init_artifact_storage(_state)
     await _init_subscriptions(_state)
     await _init_event_poller(_state)
     await reconcile_orphaned_sessions()
@@ -197,6 +198,19 @@ def _enrich_subscription_health(response: dict, mode: str) -> None:
                 response["mode"] = "degraded"
     except Exception:
         response["subscription"] = {"status": "unknown"}
+
+
+async def _init_artifact_storage(state: LifecycleState) -> None:
+    """Ensure artifact storage bucket exists at startup (degraded on failure)."""
+    try:
+        from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
+
+        storage = await get_artifact_storage()
+        await storage._storage.ensure_ready()
+        logger.info("Artifact storage bucket verified")
+    except Exception:
+        logger.exception("Failed to initialize artifact storage bucket (degraded mode)")
+        state.degraded_reasons.append("artifact_storage")
 
 
 async def _init_subscriptions(state: LifecycleState) -> None:
