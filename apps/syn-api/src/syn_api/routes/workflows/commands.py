@@ -406,6 +406,7 @@ async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlRespo
             status_code=400,
             detail="The 'content' field is required.",
         )
+    assert body.content is not None  # guaranteed by guards above
     result = await validate_yaml(yaml_content=body.content)
 
     if isinstance(result, Err):
