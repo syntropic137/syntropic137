@@ -443,6 +443,11 @@ async def list_systems_endpoint(organization_id: str | None = None) -> SystemLis
 @router.get("/{system_id}")
 async def get_system_endpoint(system_id: str) -> SystemSummaryResponse:
     """Get system details."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system(system_id)
 
     if isinstance(result, Err):
@@ -490,6 +495,11 @@ async def delete_system_endpoint(system_id: str) -> SystemActionResponse:
 @router.get("/{system_id}/status")
 async def get_system_status_endpoint(system_id: str) -> SystemStatusResponse:
     """Get cross-repo health overview for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_status(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -501,6 +511,11 @@ async def get_system_status_endpoint(system_id: str) -> SystemStatusResponse:
 @router.get("/{system_id}/cost")
 async def get_system_cost_endpoint(system_id: str) -> SystemCostResponse:
     """Get cost breakdown for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_cost(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -512,6 +527,11 @@ async def get_system_activity_endpoint(
     system_id: str, offset: int = 0, limit: int = 50
 ) -> SystemActivityResponse:
     """Get execution timeline for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_activity(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -522,6 +542,11 @@ async def get_system_activity_endpoint(
 @router.get("/{system_id}/patterns")
 async def get_system_patterns_endpoint(system_id: str) -> SystemPatternsResponse:
     """Get recurring failure and cost patterns for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_patterns(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -542,6 +567,11 @@ async def get_system_history_endpoint(
     system_id: str, offset: int = 0, limit: int = 50
 ) -> SystemHistoryResponse:
     """Get historical execution timeline for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_history(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)

@@ -261,6 +261,13 @@ async def inject_context_endpoint(
 @router.get("/executions/{execution_id}/state", response_model=StateResponse)
 async def get_execution_state_endpoint(execution_id: str) -> StateResponse:
     """Get current execution state."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    execution_id = await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
     result = await get_state(execution_id)
 
     state_val = "unknown"

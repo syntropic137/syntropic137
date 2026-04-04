@@ -2,11 +2,11 @@
 """Bump version across all Syntropic137 packages.
 
 Usage:
-    python scripts/bump_version.py 0.20.0          # Update all 13 files
+    python scripts/bump_version.py 0.20.0          # Update all 12 files
     python scripts/bump_version.py --check          # Validate all files match
     python scripts/bump_version.py --current        # Print current version
 
-This script updates the 13 tracked version files. Submodule versions
+This script updates the 12 tracked version files. Submodule versions
 (event-sourcing-platform, agentic-primitives, openclaw-plugin) are
 intentionally excluded — they have independent versioning.
 
@@ -23,12 +23,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Hardcoded list — matches the 13 files in every "chore: bump version" commit.
+# Hardcoded list — matches the 12 files in every "chore: bump version" commit.
 # DO NOT discover dynamically. Submodules must be excluded.
 PYPROJECT_FILES = [
     ROOT / "pyproject.toml",
     ROOT / "apps/syn-api/pyproject.toml",
-    ROOT / "apps/syn-cli/pyproject.toml",
     ROOT / "packages/syn-adapters/pyproject.toml",
     ROOT / "packages/syn-collector/pyproject.toml",
     ROOT / "packages/syn-domain/pyproject.toml",

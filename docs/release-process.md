@@ -187,24 +187,23 @@ just bump-version 0.19.1
 
 ## Version Files Reference
 
-The `scripts/bump_version.py` script updates exactly these 13 files:
+The `scripts/bump_version.py` script updates exactly these 12 files:
 
 **Python (pyproject.toml):**
 1. `pyproject.toml` (root)
 2. `apps/syn-api/pyproject.toml`
-3. `apps/syn-cli/pyproject.toml`
-4. `packages/syn-adapters/pyproject.toml`
-5. `packages/syn-collector/pyproject.toml`
-6. `packages/syn-domain/pyproject.toml`
-7. `packages/syn-perf/pyproject.toml`
-8. `packages/syn-shared/pyproject.toml`
-9. `packages/syn-tokens/pyproject.toml`
+3. `packages/syn-adapters/pyproject.toml`
+4. `packages/syn-collector/pyproject.toml`
+5. `packages/syn-domain/pyproject.toml`
+6. `packages/syn-perf/pyproject.toml`
+7. `packages/syn-shared/pyproject.toml`
+8. `packages/syn-tokens/pyproject.toml`
 
 **Node.js (package.json):**
-10. `apps/syn-cli-node/package.json`
-11. `apps/syn-dashboard-ui/package.json`
-12. `apps/syn-docs/package.json`
-13. `apps/syn-pulse-ui/package.json`
+9. `apps/syn-cli-node/package.json`
+10. `apps/syn-dashboard-ui/package.json`
+11. `apps/syn-docs/package.json`
+12. `apps/syn-pulse-ui/package.json`
 
 **Not included** (independent versioning):
 - `lib/agentic-primitives/` — separate project

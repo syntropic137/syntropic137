@@ -144,7 +144,7 @@ uv run pytest -m integration
 ```
 syntropic137/
 ├── apps/
-│   └── syn-cli/              # CLI application
+│   └── syn-cli-node/         # CLI application (Node.js)
 ├── packages/
 │   ├── syn-domain/           # Domain model (aggregates, events)
 │   ├── syn-adapters/         # External integrations
