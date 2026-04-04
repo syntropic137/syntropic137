@@ -30,10 +30,11 @@ class GetRepoSessionsHandler:
         """Initialize with the shared ProjectionStore."""
         self._store = store
 
-    async def _get_execution_ids_for_repo(self, repo_id: str) -> set[str]:
+    async def _get_execution_ids_for_repo(self, repo_id: str, repo_full_name: str = "") -> set[str]:
         """Look up execution IDs correlated with a repo."""
         correlations = await self._store.get_all(REPO_CORRELATION)
-        return {c["execution_id"] for c in correlations if c.get("repo_full_name") == repo_id}
+        match_key = repo_full_name or repo_id
+        return {c["execution_id"] for c in correlations if c.get("repo_full_name") == match_key}
 
     async def handle(self, query: GetRepoSessionsQuery) -> list[RepoSessionRecord]:
         """Handle GetRepoSessionsQuery.
@@ -41,7 +42,7 @@ class GetRepoSessionsHandler:
         Returns session records from the session_list projection,
         filtered to sessions whose execution_id is correlated with the repo.
         """
-        execution_ids = await self._get_execution_ids_for_repo(query.repo_id)
+        execution_ids = await self._get_execution_ids_for_repo(query.repo_id, query.repo_full_name)
         if not execution_ids:
             return []
 
