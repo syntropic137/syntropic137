@@ -14,7 +14,7 @@ from syn_api.routes.workflows.queries import (
 from syn_api.types import Err, Ok, WorkflowError
 
 
-def _patch_prefix_resolver(workflow_id: str):  # noqa: ANN202
+def _patch_prefix_resolver(workflow_id: str):
     """Mock resolve_or_raise to return the workflow_id as-is (skip DB lookup)."""
     return patch(
         "syn_api.prefix_resolver.resolve_or_raise",
