@@ -11,13 +11,17 @@ See: GitHub issue #508
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi import HTTPException
 
 from syn_adapters.projection_stores.prefix_match import (
     format_ambiguous_error,
     resolve_by_prefix,
 )
-from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 
 async def resolve_or_raise(
