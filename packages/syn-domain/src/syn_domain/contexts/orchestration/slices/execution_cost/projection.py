@@ -223,6 +223,10 @@ class ExecutionCostProjection:
     async def get_execution_cost(self, execution_id: str) -> ExecutionCost | None:
         """Get execution cost by execution ID.
 
+        .. deprecated::
+            API routes should use ``ExecutionCostQueryService`` instead.
+            This method remains for handler/test use. See #532.
+
         Queries TimescaleDB directly when a pool is available (preferred).
         Falls back to projection store for environments without TimescaleDB.
 
@@ -265,9 +269,10 @@ class ExecutionCostProjection:
     async def get_all(self) -> list[ExecutionCost]:
         """Get all execution costs.
 
-        Note: TimescaleDB path not implemented for get_all() because
-        it would require scanning all execution IDs. Uses projection
-        store which has the list of known executions.
+        .. deprecated::
+            API routes should use ``ExecutionCostQueryService.list_all()`` instead.
+            This method reads from the projection store which is always empty
+            for cost data. See #532.
         """
         data = await self._store.get_all(self.PROJECTION_NAME)
         return [ExecutionCost.from_dict(d) for d in data]

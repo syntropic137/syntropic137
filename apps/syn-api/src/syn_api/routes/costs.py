@@ -1,6 +1,9 @@
 """Cost tracking API endpoints and service operations.
 
 Provides session-level and execution-level cost tracking with breakdowns.
+
+All cost reads go through CostQueryService (TimescaleDB) — NOT the projection
+store, which is empty for cost data. See #532 for the architectural rationale.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api._wiring import ensure_connected, get_execution_cost_query, get_session_cost_query
 from syn_api.types import (
     CostSummary,
     Err,
@@ -106,25 +109,30 @@ class CostSummaryResponse(BaseModel):
 
 async def list_session_costs(
     execution_id: str | None = None,
-    limit: int = 100,  # noqa: ARG001
+    limit: int = 100,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[SessionCostData], MetricsError]:
     """List cost data for sessions.
 
+    Uses SessionCostQueryService (TimescaleDB) for reads. See #532.
+
     Args:
-        execution_id: Optional filter by execution ID.
+        execution_id: Optional filter by execution ID. Applied client-side because
+            TimescaleDB stores execution_id in JSONB — a DB-level filter would
+            require a full table scan regardless. Filtering after fetch is equivalent.
         limit: Maximum results to return.
         auth: Optional authentication context.
     """
     await ensure_connected()
     try:
-        manager = get_projection_mgr()
-        projection = manager.session_cost
+        query_svc = get_session_cost_query()
+        all_costs = await query_svc.list_all()
 
-        if execution_id:
-            costs = await projection.get_sessions_for_execution(execution_id)
-        else:
-            costs = await projection.get_all()
+        # Client-side filter by execution_id (see docstring for rationale)
+        costs = (
+            [c for c in all_costs if c.execution_id == execution_id] if execution_id else all_costs
+        )
+        costs = costs[:limit]
 
         return Ok(
             [
@@ -149,7 +157,7 @@ async def list_session_costs(
                     started_at=c.started_at,
                     completed_at=c.completed_at,
                 )
-                for c in (costs or [])
+                for c in costs
             ]
         )
     except Exception as e:
@@ -163,6 +171,8 @@ async def get_session_cost(
 ) -> Result[SessionCostData, MetricsError]:
     """Get cost data for a single session.
 
+    Uses SessionCostQueryService (TimescaleDB) for reads. See #532.
+
     Args:
         session_id: The session ID.
         include_breakdown: Whether to include model/tool breakdowns.
@@ -170,9 +180,8 @@ async def get_session_cost(
     """
     await ensure_connected()
     try:
-        manager = get_projection_mgr()
-        projection = manager.session_cost
-        c = await projection.get_session_cost(session_id)
+        query_svc = get_session_cost_query()
+        c = await query_svc.get(session_id)
 
         if c is None:
             return Err(MetricsError.NOT_FOUND, message=f"Session {session_id} not found")
@@ -205,10 +214,12 @@ async def get_session_cost(
 
 
 async def list_execution_costs(
-    limit: int = 100,  # noqa: ARG001
+    limit: int = 100,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ExecutionCostData], MetricsError]:
     """List cost data for executions.
+
+    Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532.
 
     Args:
         limit: Maximum results to return.
@@ -216,9 +227,8 @@ async def list_execution_costs(
     """
     await ensure_connected()
     try:
-        manager = get_projection_mgr()
-        projection = manager.execution_cost
-        costs = await projection.get_all()
+        query_svc = get_execution_cost_query()
+        costs = await query_svc.list_all()
 
         return Ok(
             [
@@ -238,7 +248,7 @@ async def list_execution_costs(
                     started_at=c.started_at,
                     completed_at=c.completed_at,
                 )
-                for c in (costs or [])
+                for c in (costs or [])[:limit]
             ]
         )
     except Exception as e:
@@ -252,6 +262,8 @@ async def get_execution_cost(
 ) -> Result[ExecutionCostData, MetricsError]:
     """Get cost data for a single execution.
 
+    Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532.
+
     Args:
         execution_id: The execution ID.
         include_breakdown: Whether to include phase/model/tool breakdowns.
@@ -259,9 +271,8 @@ async def get_execution_cost(
     """
     await ensure_connected()
     try:
-        manager = get_projection_mgr()
-        projection = manager.execution_cost
-        c = await projection.get_execution_cost(execution_id)
+        query_svc = get_execution_cost_query()
+        c = await query_svc.get(execution_id)
 
         if c is None:
             return Err(MetricsError.NOT_FOUND, message=f"Execution {execution_id} not found")
@@ -293,20 +304,20 @@ async def get_cost_summary(
 ) -> Result[CostSummary, MetricsError]:
     """Get overall cost summary across all executions.
 
+    Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532.
+
     Args:
         auth: Optional authentication context.
     """
     await ensure_connected()
     try:
-        manager = get_projection_mgr()
-
-        # Aggregate from execution_cost projection
-        exec_projection = manager.execution_cost
-        all_costs = await exec_projection.get_all()
+        query_svc = get_execution_cost_query()
+        all_costs = await query_svc.list_all()
 
         total_cost = Decimal(str(sum(c.total_cost_usd for c in (all_costs or []))))
         total_tokens = sum(c.total_tokens for c in (all_costs or []))
         total_sessions = sum(c.session_count for c in (all_costs or []))
+        total_tool_calls = sum(c.tool_calls for c in (all_costs or []))
 
         return Ok(
             CostSummary(
@@ -314,7 +325,7 @@ async def get_cost_summary(
                 total_sessions=total_sessions,
                 total_executions=len(all_costs or []),
                 total_tokens=total_tokens,
-                total_tool_calls=0,
+                total_tool_calls=total_tool_calls,
                 top_models=[],
                 top_sessions=[],
             )
@@ -398,6 +409,7 @@ async def get_session_cost_endpoint(
     include_breakdown: bool = Query(True, description="Include model/tool breakdowns"),
 ) -> SessionCostResponse:
     """Get cost for a specific session."""
+    from syn_api._wiring import get_projection_mgr
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
@@ -438,6 +450,7 @@ async def get_execution_cost_endpoint(
     include_session_ids: bool = Query(False, description="Include list of session IDs"),
 ) -> ExecutionCostResponse:
     """Get aggregated cost for a workflow execution."""
+    from syn_api._wiring import get_projection_mgr
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
