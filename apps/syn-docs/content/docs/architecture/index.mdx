@@ -37,7 +37,7 @@ Commands and queries are strictly separated.
 
 <CQRSFlow />
 
-**Commands** modify state by going through aggregates. The aggregate validates the command against its current state, decides whether to accept or reject it, and emits one or more events. The command pipeline currently handles 12 commands: `CreateWorkflow`, `StartExecution`, `PauseExecution`, `ResumeExecution`, `CancelExecution`, `RegisterTrigger`, and more.
+**Commands** modify state by going through aggregates. The aggregate validates the command against its current state, decides whether to accept or reject it, and emits one or more events.
 
 **Queries** never touch aggregates. They read from pre-built projections — read models computed from the event stream and cached in Redis or PostgreSQL for fast lookups.
 
@@ -49,7 +49,7 @@ A projection subscribes to the event stream and builds a specialized read model 
 - **Checkpoint-aware** — each projection tracks its position in the event stream; on restart it catches up from the last processed event rather than replaying everything
 - **Never the source of truth** — if a projection becomes corrupt or out of date, it can always be discarded and rebuilt
 
-The system currently maintains 12 projections spanning all five bounded contexts.
+The full list of projections, aggregates, and bounded contexts is generated automatically by the [VSA tool](/docs/guide/architecture) from the codebase structure.
 
 <Callout type="warn">
 Projections are eventually consistent. A command that writes an event does not guarantee the projection has updated by the time the next query runs. For scenarios where a process needs immediate feedback from its own commands, the system uses in-process synchronous projection updates rather than polling the persistent projection.
@@ -57,7 +57,7 @@ Projections are eventually consistent. A command that writes an event does not g
 
 ## Bounded Contexts and Domain Model
 
-The domain is organized into five bounded contexts. Each context owns its aggregates and is the only thing allowed to modify them.
+The domain is organized into bounded contexts. Each context owns its aggregates and is the only thing allowed to modify them.
 
 <DomainModelFlow />
 
