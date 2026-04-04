@@ -20,8 +20,9 @@ the background task closure discarded the Result return value.
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 def _repo_root() -> Path:
