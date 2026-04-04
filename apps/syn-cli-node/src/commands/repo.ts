@@ -29,11 +29,12 @@ const registerCommand: CommandDef = {
     const url = parsed.values["url"] as string | undefined;
     if (!url) { printError("Missing --url"); throw new CLIError("Missing option", 1); }
 
-    const body: Record<string, unknown> = { repo_url: url };
-    const system = parsed.values["system"] as string | undefined;
     const org = parsed.values["org"] as string | undefined;
+    if (!org) { printError("Missing --org"); throw new CLIError("Missing option", 1); }
+
+    const body: Record<string, unknown> = { full_name: url, organization_id: org };
+    const system = parsed.values["system"] as string | undefined;
     if (system) body["system_id"] = system;
-    if (org) body["organization_id"] = org;
 
     const d = await apiPost<Record<string, unknown>>("/repos", { body, expected: [200, 201] });
     printSuccess(`Repository registered: ${d["repo_id"] ?? ""}`);
