@@ -62,6 +62,7 @@ class ExecutionSummaryResponse(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     tool_call_count: int = 0
+    error_message: str | None = None
 
 
 class ExecutionListResponse(BaseModel):
