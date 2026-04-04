@@ -156,10 +156,6 @@ phases:
          This gives the reviewer precise, line-level context about what changed and why.
 
          ```bash
-         # Split repository into owner/repo
-         OWNER=$(echo "{{repository}}" | cut -d/ -f1)
-         REPO=$(echo "{{repository}}" | cut -d/ -f2)
-
          # Get the PR's node ID for the GraphQL mutation
          PR_NODE_ID=$(gh api repos/{{repository}}/pulls/{{pr_number}} --jq '.node_id')
 
@@ -173,17 +169,10 @@ phases:
          ]'
 
          # Post a review with inline comments via GraphQL
-         gh api graphql -f query="
-         mutation(\$prId: ID!, \$comments: [DraftPullRequestReviewComment!]) {
-           addPullRequestReview(input: {
-             pullRequestId: \$prId,
-             event: COMMENT,
-             body: \"## Self-Heal Summary\n\n**CI Fixes:**\n- [list CI fixes applied, or 'No CI failures found']\n\n**Review Comments Addressed:**\n- [list fixed items with commit ref]\n\n**Review Comments Skipped (with rationale):**\n- [list skipped items with explanation, or 'None']\n\nAll fixable issues have been addressed. Commit: $(git rev-parse --short HEAD)\",
-             comments: \$comments
-           }) {
-             pullRequestReview { id }
-           }
-         }" -f prId="$PR_NODE_ID" --argjson comments "$COMMENTS"
+         jq -n --arg pullRequestId "$PR_NODE_ID" --argjson comments "$COMMENTS" '{
+           query: "mutation($input: AddPullRequestReviewInput!) { addPullRequestReview(input: $input) { pullRequestReview { id } } }",
+           variables: { input: { pullRequestId: $pullRequestId, event: "COMMENT", body: "## Self-Heal Summary\n\n**CI Fixes:**\n- [list CI fixes applied, or '\''No CI failures found'\'']\n\n**Review Comments Addressed:**\n- [list fixed items with commit ref]\n\n**Review Comments Skipped (with rationale):**\n- [list skipped items with explanation, or '\''None'\'']\n\nAll fixable issues have been addressed.", comments: $comments } }
+         }' | gh api graphql --input -
          ```
 
          If you have NO inline findings to report (e.g., only review thread replies

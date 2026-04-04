@@ -92,17 +92,10 @@ phases:
          ]'
 
          # Post a review with inline comments via GraphQL
-         gh api graphql -f query="
-         mutation(\$prId: ID!, \$comments: [DraftPullRequestReviewComment!]) {
-           addPullRequestReview(input: {
-             pullRequestId: \$prId,
-             event: COMMENT,
-             body: \"## CI Auto-Fix Applied\n\nFixed **{{check_name}}** failure:\n- **Error:** {{check_output_title}}\n- **Fix:** [describe what you changed]\n- **Commit:** $(git rev-parse --short HEAD)\n\nCI should re-run automatically.\",
-             comments: \$comments
-           }) {
-             pullRequestReview { id }
-           }
-         }" -f prId="$PR_NODE_ID" --argjson comments "$COMMENTS"
+         jq -n --arg pullRequestId "$PR_NODE_ID" --argjson comments "$COMMENTS" '{
+           query: "mutation($input: AddPullRequestReviewInput!) { addPullRequestReview(input: $input) { pullRequestReview { id } } }",
+           variables: { input: { pullRequestId: $pullRequestId, event: "COMMENT", body: "## CI Auto-Fix Applied\n\nFixed **{{check_name}}** failure:\n- **Error:** {{check_output_title}}\n- **Fix:** [describe what you changed]\n\nCI should re-run automatically.", comments: $comments } }
+         }' | gh api graphql --input -
          ```
 
          If you have no specific lines to annotate, fall back to a simple review:

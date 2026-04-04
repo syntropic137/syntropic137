@@ -132,10 +132,6 @@ phases:
          the exact lines you modified. This gives the reviewer precise context.
 
          ```bash
-         # Split repository into owner/repo
-         OWNER=$(echo "{{repository}}" | cut -d/ -f1)
-         REPO=$(echo "{{repository}}" | cut -d/ -f2)
-
          # Get the PR's node ID for the GraphQL mutation
          PR_NODE_ID=$(gh api repos/{{repository}}/pulls/{{pr_number}} --jq '.node_id')
 
@@ -148,17 +144,10 @@ phases:
          ]'
 
          # Post a review with inline comments via GraphQL
-         gh api graphql -f query="
-         mutation(\$prId: ID!, \$comments: [DraftPullRequestReviewComment!]) {
-           addPullRequestReview(input: {
-             pullRequestId: \$prId,
-             event: COMMENT,
-             body: \"## Review Feedback Addressed\n\nAddressed feedback from @{{reviewer}}:\n\n**Fixed:**\n- [list items fixed with commit refs]\n\n**Acknowledged (no code change):**\n- [list items with brief rationale]\n\nAll review threads have been resolved. Ready for re-review!\",
-             comments: \$comments
-           }) {
-             pullRequestReview { id }
-           }
-         }" -f prId="$PR_NODE_ID" --argjson comments "$COMMENTS"
+         jq -n --arg pullRequestId "$PR_NODE_ID" --argjson comments "$COMMENTS" '{
+           query: "mutation($input: AddPullRequestReviewInput!) { addPullRequestReview(input: $input) { pullRequestReview { id } } }",
+           variables: { input: { pullRequestId: $pullRequestId, event: "COMMENT", body: "## Review Feedback Addressed\n\nAddressed feedback from @{{reviewer}}:\n\n**Fixed:**\n- [list items fixed with commit refs]\n\n**Acknowledged (no code change):**\n- [list items with brief rationale]\n\nAll review threads have been resolved. Ready for re-review!", comments: $comments } }
+         }' | gh api graphql --input -
          ```
 
          If you have NO inline findings (e.g., only acknowledged comments without
