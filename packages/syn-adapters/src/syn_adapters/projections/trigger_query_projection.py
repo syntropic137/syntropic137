@@ -135,6 +135,7 @@ class TriggerQueryProjection(CheckpointedProjection):
                 "created_by": data.get("created_by", ""),
                 "status": "active",
                 "fire_count": 0,
+                "created_at": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -191,8 +192,9 @@ class TriggerQueryProjection(CheckpointedProjection):
                 },
             )
 
-        # Increment fire count on trigger index
+        # Increment fire count and update last_fired_at on trigger index
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
             existing["fire_count"] = existing.get("fire_count", 0) + 1
+            existing["last_fired_at"] = fired_at
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
