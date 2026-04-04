@@ -72,6 +72,9 @@ SYSTEM_NOTIFICATION = "system_notification"
 # User interaction events (from agentic_events.EventType)
 USER_PROMPT_SUBMITTED = "user_prompt_submitted"
 
+# OTLP observability events (from workspace OTel push — ADR-056)
+OTLP_LOG = "otlp_log"
+
 # Type-safe literal union (like TypeScript)
 # MUST match the constants above and agentic_isolation.EventType
 EventType = Literal[
@@ -106,6 +109,7 @@ EventType = Literal[
     "context_compacted",
     "system_notification",
     "user_prompt_submitted",
+    "otlp_log",
 ]
 
 # Runtime validation set (auto-generated from Literal)
@@ -129,6 +133,7 @@ __all__ = [
     "GIT_OPERATION",
     "GIT_PUSH",
     "GIT_REWRITE",
+    "OTLP_LOG",
     "PERMISSION_REQUESTED",
     "PHASE_COMPLETED",
     "PHASE_STARTED",
