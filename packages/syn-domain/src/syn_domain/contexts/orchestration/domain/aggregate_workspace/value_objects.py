@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import datetime
@@ -81,6 +83,27 @@ class InjectionMethod(StrEnum):
 
 
 @dataclass(frozen=True)
+class ImageManifest:
+    """Version manifest from a workspace image (/opt/agentic/version.json).
+
+    Read from the container after creation to capture provenance.
+    All fields have defaults so that partial or missing manifests (e.g. from
+    older images or failed reads) can still be reconstructed without raising.
+    The manifest itself is optional at the workspace level (None when
+    unavailable); when present, fields default to empty rather than failing.
+    """
+
+    provider: str = ""  # e.g. "claude-cli"
+    provider_version: str = ""  # e.g. "1.1.0"
+    components: dict[str, str] = field(
+        default_factory=dict
+    )  # e.g. {"claude_cli": "2.1.76", "rtk": "0.34.3"}
+    build_commit: str = ""  # Short SHA of the build commit
+    built_at: str = ""  # ISO 8601 timestamp
+    manifest_digest: str = ""  # Hash of the manifest.yaml used for the build
+
+
+@dataclass(frozen=True)
 class SecurityPolicy:
     """Security policy for workspace isolation.
 
@@ -129,7 +152,7 @@ class IsolationConfig:
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
 
     # Image/environment
-    image: str = "agentic-workspace-claude-cli:latest"
+    image: str = DEFAULT_WORKSPACE_IMAGE
     working_directory: str = "/workspace"
 
     # Capabilities

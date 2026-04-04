@@ -1,0 +1,83 @@
+---
+title: Features
+description: RTK token compression, OpenTelemetry observability, LSP code intelligence, and plugin hooks in workspace images.
+---
+
+## RTK Token Compression
+
+[RTK](https://github.com/rtk-ai/rtk) intercepts Bash tool calls and compresses output from commands like `ls`, `find`, `git log`, and `tree`. This reduces the tokens Claude consumes reading command output.
+
+### How It Works
+
+RTK is initialized via `rtk init` in the container entrypoint. It creates shell aliases that wrap common commands with token-optimized formatting. Claude Code's Bash tool calls go through these aliases transparently.
+
+### Measured Impact
+
+Live A/B evaluation on an "explore repository" task:
+
+| Metric | Without RTK | With RTK | Savings |
+|--------|-------------|----------|---------|
+| Context tokens | 61,117 | 28,663 | **53%** |
+| Cost (USD) | $0.13 | $0.09 | **29%** |
+| Conversation turns | 12 | 6 | **50%** |
+| Bash tool calls | 10 | 5 | **50%** |
+
+RTK reduces context consumption without changing agent behavior — the same tasks complete with fewer tokens.
+
+## OpenTelemetry Observability
+
+Workspace images export standard OTel metrics via OTLP, providing real-time token and cost tracking.
+
+### Exported Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `claude_code.token.usage` | Gauge | Token count per turn (input, output, cache) |
+| `claude_code.cost.usage` | Gauge | Cumulative cost in USD |
+
+### Configuration
+
+OTel export is enabled by default. The image declares the contract; orchestrators provide the collector endpoint:
+
+```bash
+# Set by the image (defaults)
+CLAUDE_CODE_ENABLE_TELEMETRY=1
+OTEL_METRICS_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=otlp
+OTEL_METRIC_EXPORT_INTERVAL=5000  # 5s granularity
+
+# Set by orchestrator at runtime
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:8138
+```
+
+If no endpoint is provided, OTel export silently no-ops (no crash, no side effects).
+
+### Two-Channel Observability
+
+Workspace observability uses two complementary channels:
+
+1. **Plugin hooks** (JSONL to stderr) — Custom events: git operations, context compaction, subagent lifecycle
+2. **Native OTel** (OTLP push) — Standard metrics: tokens, cost, tool timing
+
+Both channels flow through syn-collector into the observability pipeline.
+
+## LSP Code Intelligence
+
+The image bundles language servers for Claude Code's LSP plugins:
+
+| Language | Server | Plugin |
+|----------|--------|--------|
+| Python | pyright | pyright-lsp |
+| TypeScript | typescript-language-server | typescript-lsp |
+| Rust | rust-analyzer | rust-analyzer-lsp |
+
+LSP servers are **lazy** — they only start when Claude encounters files in the matching language. An agent working on a Python-only repo will not start rust-analyzer or typescript-language-server.
+
+## Pre-Bundled Plugins
+
+Plugins are baked into `/opt/agentic/plugins/` and loaded at runtime via `--plugin-dir`. Available plugins:
+
+- **sdlc** — Git operation hooks (commit metrics, branch tracking, push events)
+- **workspace** — Compaction tracking, subagent lifecycle events
+
+Plugin hooks emit JSONL events to stderr, captured by the orchestrator's event collection pipeline.

@@ -1,0 +1,100 @@
+---
+title: Configuration
+description: How to configure workspace images — custom images, environment variables, OTel endpoints, and plugin configuration.
+---
+
+## Choosing a Workspace Image
+
+The default workspace image is configured in `syn-shared`:
+
+```bash
+# Override via environment variable
+SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/agentparadise/agentic-workspace-claude-cli:2.1.76
+```
+
+To use a custom or locally-built image:
+
+```bash
+# Build locally
+cd lib/agentic-primitives
+uv run scripts/build-provider.py claude-cli --tag my-workspace:latest
+
+# Point syn137 at it
+SYN_WORKSPACE_DOCKER_IMAGE=my-workspace:latest
+```
+
+## Environment Variables
+
+### Set by the Image (Defaults)
+
+These are baked into the image and generally should not be overridden:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ANTHROPIC_NO_ATTRIBUTION` | `1` | Disable Claude attribution in commits |
+| `DISABLE_TELEMETRY` | `1` | Disable vendor usage metrics |
+| `DISABLE_ERROR_REPORTING` | `1` | Disable vendor error reporting |
+| `RTK_TELEMETRY_DISABLED` | `1` | Disable RTK analytics |
+| `CLAUDE_CODE_ENABLE_TELEMETRY` | `1` | Enable OTel metric export |
+| `OTEL_METRICS_EXPORTER` | `otlp` | Export metrics via OTLP |
+| `OTEL_METRIC_EXPORT_INTERVAL` | `5000` | 5s export interval |
+
+### Set by Orchestrator at Runtime
+
+These are injected by syn137 when creating workspaces:
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `ANTHROPIC_API_KEY` | Yes | Claude API key (injected via sidecar) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | Collector endpoint for OTel metrics |
+| `GITHUB_TOKEN` | No | GitHub access (injected via sidecar) |
+
+## OTel Configuration
+
+### Connecting to syn-collector
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` to your syn-collector instance:
+
+```bash
+# Docker network (default in compose)
+OTEL_EXPORTER_OTLP_ENDPOINT=http://syn-collector:8138
+
+# Host network (development)
+OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:8138
+```
+
+syn-collector accepts OTLP JSON on `/v1/metrics` and `/v1/logs`.
+
+### Privacy Controls
+
+By default, prompt content and tool I/O are not exported:
+
+```bash
+OTEL_LOG_USER_PROMPTS=0   # Don't log prompt content
+OTEL_LOG_TOOL_DETAILS=0   # Don't log tool input/output
+```
+
+Set to `1` to enable detailed logging (useful for debugging, not recommended for production).
+
+## Plugin Configuration
+
+Plugins are loaded from `/opt/agentic/plugins/` at container startup. The entrypoint builds `--plugin-dir` flags for each discovered plugin directory.
+
+### Plugin Environment Variables
+
+Plugins can declare required environment variables in their `plugin.json`. The orchestrator auto-forwards these from the workspace configuration. See [ADR-033](https://github.com/AgentParadise/agentic-primitives/docs/adrs/ADR-033-plugin-native-workspace-images.md) for the plugin specification.
+
+## Workspace Directory Structure
+
+```
+/workspace/
+  artifacts/
+    input/     # Previous phase outputs (read-only)
+    output/    # Current phase deliverables
+  repos/       # Cloned repositories
+/opt/agentic/
+  plugins/     # Pre-bundled plugins
+  config/      # Runtime configuration
+  version.json # Image version manifest
+  entrypoint.sh
+```
