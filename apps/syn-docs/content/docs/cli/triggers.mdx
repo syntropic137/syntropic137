@@ -136,7 +136,7 @@ syn triggers register [options]
 | `--repo`, `-r` | `text` | --- | Repository ID |
 | `--workflow`, `-w` | `text` | --- | Workflow ID to execute |
 | `--event`, `-e` | `text` | --- | GitHub event type (e.g. check_run.completed) |
-| `--condition`, `-c` | `text` | --- | Condition as key=value (repeatable) |
+| `--condition`, `-c` | `text` | --- | Condition as field=value (repeatable, uses 'eq' operator) |
 | `--max-fires` | `text` | `5` | Maximum fires per period |
 | `--cooldown` | `text` | `300` | Cooldown in seconds |
 | `--budget` | `text` | --- | Budget limit in USD |
