@@ -66,26 +66,50 @@ async def get_global_overview(
 async def get_global_cost(
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> dict[str, Any]:
-    """Get global cost breakdown across all repos."""
-    from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization.domain.queries.get_global_cost import (
-        GetGlobalCostQuery,
-    )
-    from syn_domain.contexts.organization.slices.global_cost.GetGlobalCostHandler import (
-        GetGlobalCostHandler,
-    )
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
-        get_repo_projection,
-    )
+    """Get global cost breakdown across all executions.
+
+    Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532/#542.
+    """
+    from decimal import Decimal
+
+    from syn_api._wiring import get_execution_cost_query
 
     await ensure_connected()
 
-    handler = GetGlobalCostHandler(
-        store=get_projection_store(),
-        repo_projection=get_repo_projection(),
-    )
-    result = await handler.handle(GetGlobalCostQuery())
-    return dict(result.to_dict())
+    query_svc = get_execution_cost_query()
+    all_costs = await query_svc.list_all()
+
+    total_cost = Decimal("0")
+    total_input = 0
+    total_output = 0
+    cost_by_workflow: dict[str, Decimal] = {}
+    cost_by_model: dict[str, Decimal] = {}
+
+    for c in all_costs:
+        total_cost += c.total_cost_usd
+        total_input += c.input_tokens
+        total_output += c.output_tokens
+
+        if c.workflow_id:
+            cost_by_workflow[c.workflow_id] = (
+                cost_by_workflow.get(c.workflow_id, Decimal("0")) + c.total_cost_usd
+            )
+        for model, model_cost in c.cost_by_model.items():
+            cost_by_model[model] = cost_by_model.get(model, Decimal("0")) + model_cost
+
+    return {
+        "system_id": "",
+        "system_name": "global",
+        "organization_id": "",
+        "total_cost_usd": str(total_cost),
+        "total_tokens": total_input + total_output,
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "cost_by_repo": {},
+        "cost_by_workflow": {k: str(v) for k, v in cost_by_workflow.items()},
+        "cost_by_model": {k: str(v) for k, v in cost_by_model.items()},
+        "execution_count": len(all_costs),
+    }
 
 
 async def get_contribution_heatmap(
