@@ -174,10 +174,21 @@ def create_coordinator_service(
 ) -> CoordinatorSubscriptionService:
     """Factory to create the coordinator subscription service.
 
+    This is the single registry for all checkpointed projections (ADR-055).
+    Every projection that must stay in sync with the event store must be
+    instantiated in the ``projections`` list below.
+
+    To add a new projection:
+      1. Create a CheckpointedProjection subclass in the owning context's slices/
+      2. Import it here and add to the ``projections`` list below
+      3. Update the fitness test count in ci/fitness/event_sourcing/test_projection_wiring.py
+      4. The fitness test will fail with guidance if you forget step 3
+
     Args:
         event_store: Event store client
         projection_store: Projection store (for creating projections)
         realtime_projection: Optional RealTimeProjection
+        execution_service: Optional execution service (required by WorkflowDispatchProjection)
         checkpoint_store: Optional injected checkpoint store (e.g. MemoryCheckpointStore
             for tests). If None, a PostgresCheckpointStore is created on start().
 

@@ -1,4 +1,9 @@
-"""Event subscription service for projection updates.
+"""Event subscription service for projection updates (DEPRECATED).
+
+.. deprecated::
+    Use ``CoordinatorSubscriptionService`` (ADR-055) instead.
+    This legacy service uses a single global checkpoint. The coordinator
+    uses per-projection checkpoints for independent rebuild and versioning.
 
 This service manages the lifecycle of event store subscriptions and dispatches
 events to projections. It implements the catch-up subscription with live tailing

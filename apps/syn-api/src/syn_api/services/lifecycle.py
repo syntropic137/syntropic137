@@ -55,6 +55,13 @@ async def startup(
 ) -> Result[dict, LifecycleError]:
     """Initialize the application: connect to event store, start subscriptions.
 
+    Startup sequence (order matters):
+      1. Event store connection (CRITICAL — abort on failure)
+      2. Artifact storage bucket (DEGRADED — warn and continue)
+      3. Subscription coordinator (DEGRADED — warn and continue)
+      4. GitHub event poller (DEGRADED — warn and continue)
+      5. Orphan reconciliation (always runs)
+
     Critical failures (event store, DB) abort startup.
     Degraded failures (GitHub, Anthropic, Redis, subscriptions) warn and continue.
 
