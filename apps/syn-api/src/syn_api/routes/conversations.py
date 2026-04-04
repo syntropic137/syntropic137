@@ -79,6 +79,39 @@ class ConversationMetadataResponse(BaseModel):
 # =============================================================================
 
 
+def _extract_content_preview(data: dict[str, Any]) -> str:
+    """Extract content text from a parsed JSONL object.
+
+    Checks top-level fields, then nested message.content (Claude Code format),
+    then result.output.
+    """
+    # Top-level content
+    content = data.get("content") or data.get("text") or ""
+    if content:
+        return content if isinstance(content, str) else ""
+
+    # Nested message.content (Claude Code JSONL)
+    msg = data.get("message")
+    if isinstance(msg, dict):
+        msg_content = msg.get("content")
+        if isinstance(msg_content, str):
+            return msg_content
+        if isinstance(msg_content, list):
+            text = next(
+                (p["text"] for p in msg_content if isinstance(p, dict) and p.get("text")),
+                "",
+            )
+            if text:
+                return text
+
+    # Nested result.output
+    result = data.get("result")
+    if isinstance(result, dict):
+        return result.get("output", "") or result.get("text", "")
+
+    return ""
+
+
 def _extract_line_fields(
     raw: str,
 ) -> tuple[str | None, str | None, str | None]:
@@ -94,27 +127,8 @@ def _extract_line_fields(
 
     event_type = data.get("type") or data.get("event_type")
     tool_name = data.get("tool_name") or data.get("name")
-
-    # Try top-level content first
-    content = data.get("content") or data.get("text") or ""
-
-    # Drill into nested message content (Claude Code JSONL format)
-    if not content and isinstance(data.get("message"), dict):
-        msg_content = data["message"].get("content")
-        if isinstance(msg_content, list):
-            for part in msg_content:
-                if isinstance(part, dict) and part.get("text"):
-                    content = part["text"]
-                    break
-        elif isinstance(msg_content, str):
-            content = msg_content
-
-    # Drill into result output
-    if not content and isinstance(data.get("result"), dict):
-        result = data["result"]
-        content = result.get("output", "") or result.get("text", "")
-
-    preview = content[:200] if isinstance(content, str) and content else None
+    content = _extract_content_preview(data)
+    preview = content[:200] if content else None
     return event_type, tool_name, preview
 
 
