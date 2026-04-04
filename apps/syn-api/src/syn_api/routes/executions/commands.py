@@ -238,7 +238,6 @@ async def get_execution_status_endpoint(
     execution_id: str,
 ) -> ExecutionStatusResponse:
     """Get the status of a workflow execution."""
-    from syn_api._wiring import get_projection_mgr
     from syn_api.prefix_resolver import resolve_or_raise
 
     from .queries import get_detail
