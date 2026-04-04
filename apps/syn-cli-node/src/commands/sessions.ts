@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList, buildParams } from "../client/api.js";
+import { apiGet, apiGetPaginated, buildParams } from "../client/api.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { formatCost, formatDuration, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
@@ -26,7 +26,7 @@ const listCommand: CommandDef = {
       status: (parsed.values["status"] as string | undefined) ?? null,
       limit: (parsed.values["limit"] as string | undefined) ?? "50",
     });
-    const items = await apiGetList<SessionSummaryResponse>("/sessions", { params });
+    const items = await apiGetPaginated<SessionSummaryResponse>("/sessions", "sessions", { params });
     if (items.length === 0) { printDim("No sessions found."); return; }
 
     const table = new Table({ title: "Sessions" });
