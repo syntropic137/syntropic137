@@ -27,24 +27,26 @@ from pathlib import Path
 
 import pytest
 
-# Endpoints exempt from prefix resolution.
+# Endpoints exempt from prefix resolution entirely.
 # Each entry is (filename_stem, path_param_name).
 # Add an entry ONLY for endpoints where the ID is not user-facing
 # (e.g. internal IDs, SSE streams, nested paths with pre-resolved parents).
 _EXEMPT: set[tuple[str, str]] = {
     # Trigger commands: trigger_id comes from domain events, not user input
     ("commands", "trigger_id"),
-    # Trigger queries: triggers live in TriggerQueryStore (not the projection store)
-    # because they need safety-guard queries (fire counts, cooldowns, delivery dedup)
-    # that the generic projection store doesn't support. Prefix resolution uses
-    # _resolve_trigger_id() in queries.py instead of resolve_or_raise(). See #542.
-    ("queries", "trigger_id"),
     # SSE streams: typically opened via dashboard links with full IDs
     ("sse", "execution_id"),
     # Nested execution path: workflow_id is pre-resolved by the parent route
     ("commands", "execution_id"),
     ("commands", "workflow_id"),
 }
+
+# Alternative resolver functions accepted in place of resolve_or_raise.
+# Triggers live in TriggerQueryStore (not the projection store) because they
+# need safety-guard queries (fire counts, cooldowns, delivery dedup) that the
+# generic projection store doesn't support. _resolve_trigger_id() provides
+# equivalent prefix matching against the trigger store. See #542.
+_ALTERNATIVE_RESOLVERS: set[str] = {"_resolve_trigger_id"}
 
 
 def _repo_root() -> Path:
@@ -62,7 +64,9 @@ _GUIDANCE = (
     "    entity_id = await resolve_or_raise(\n"
     '        mgr.store, "namespace", entity_id, "EntityName"\n'
     "    )\n\n"
-    "See issue #508 and apps/syn-api/src/syn_api/prefix_resolver.py."
+    "See issue #508 and apps/syn-api/src/syn_api/prefix_resolver.py.\n\n"
+    "For entities that don't use the projection store (e.g. triggers),\n"
+    "implement an equivalent resolver and add it to _ALTERNATIVE_RESOLVERS."
 )
 
 
@@ -104,7 +108,10 @@ def _find_show_endpoints_missing_resolver() -> list[str]:
 
             func_body = "\n".join(func_body_lines)
 
-            if "resolve_or_raise" not in func_body:
+            has_resolver = "resolve_or_raise" in func_body or any(
+                alt in func_body for alt in _ALTERNATIVE_RESOLVERS
+            )
+            if not has_resolver:
                 rel = py_file.relative_to(_repo_root())
                 violations.append(f"  {rel}:{i}  GET {route_path}  (missing resolve_or_raise)")
 

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 
+from syn_adapters.projection_stores.prefix_match import format_ambiguous_error
 from syn_api._wiring import ensure_connected, get_trigger_store
 from syn_api.types import (
     Err,
@@ -49,17 +50,26 @@ async def _resolve_trigger_id(trigger_id: str) -> str:
     if exact is not None:
         return trigger_id
 
-    # Prefix scan
+    # Prefix scan — early termination once >1 match found
     all_triggers = await store.list_all()
-    matches = [t.trigger_id for t in all_triggers if t.trigger_id.startswith(trigger_id)]
+    first_match: str | None = None
+    candidates: list[str] = []
 
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        candidates = ", ".join(matches[:5])
+    for t in all_triggers:
+        if not t.trigger_id.startswith(trigger_id):
+            continue
+        if first_match is None:
+            first_match = t.trigger_id
+        candidates.append(t.trigger_id)
+        if len(candidates) > 5:
+            break
+
+    if first_match is not None and len(candidates) == 1:
+        return first_match
+    if len(candidates) > 1:
         raise HTTPException(
             status_code=409,
-            detail=f"Ambiguous Trigger prefix '{trigger_id}': {candidates}",
+            detail=format_ambiguous_error("Trigger", trigger_id, candidates),
         )
     raise HTTPException(status_code=404, detail=f"Trigger not found: {trigger_id}")
 
