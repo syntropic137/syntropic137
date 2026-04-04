@@ -97,10 +97,7 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("organization_list", "on_repo_deregistered_decrement"),
         ("system_list", "on_repo_deregistered_decrement"),
     ],
-    "github.TriggerFired": [
-        ("repo_correlation", "on_trigger_fired"),
-        ("trigger_history", "handle_trigger_fired"),
-    ],
+    "github.TriggerFired": [("repo_correlation", "on_trigger_fired")],
     "WorkflowTemplateCreated": [
         ("workflow_list", "on_workflow_template_created"),
         ("workflow_detail", "on_workflow_template_created"),
