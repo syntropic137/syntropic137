@@ -14,6 +14,19 @@ from syn_domain.contexts.github.slices.trigger_history.projection import (
 
 
 @pytest.mark.unit
+class TestTriggerHistoryEventWiring:
+    """Verify trigger_history is wired in the event handler map."""
+
+    def test_trigger_fired_event_dispatches_to_trigger_history(self) -> None:
+        """TriggerFired must be wired to the trigger_history projection."""
+        from syn_adapters.projections.manager_event_map import EVENT_HANDLERS
+
+        handlers = EVENT_HANDLERS.get("github.TriggerFired", [])
+        projection_names = [h[0] for h in handlers]
+        assert "trigger_history" in projection_names
+
+
+@pytest.mark.unit
 class TestTriggerHistoryProjection:
     """Tests for TriggerHistoryProjection."""
 
