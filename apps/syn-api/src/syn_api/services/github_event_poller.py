@@ -137,10 +137,11 @@ class GitHubEventPoller:
             repo: str = t.repository
             if not repo or repo in seen:
                 continue
-            if not t.installation_id or not t.installation_id.strip():
+            inst_id = t.installation_id.strip() if t.installation_id else ""
+            if not inst_id:
                 logger.debug("Skipping repo %s: no installation_id configured", repo)
                 continue
-            seen[repo] = t.installation_id
+            seen[repo] = inst_id
         return list(seen.items())
 
     async def _process_events(self, raw_events: list[dict[str, Any]], installation_id: str) -> None:
