@@ -29,6 +29,14 @@ logger = logging.getLogger(__name__)
 # https://docs.github.com/en/rest/using-the-rest-api/github-event-types
 _EVENTS_API_TYPE_MAP: dict[str, str] = build_events_api_type_map()
 
+# Maps Events API action names to webhook action names for events where they differ.
+# GitHub's Events API uses different action values than webhooks for some event types.
+# Only PullRequestReviewEvent has known mismatches — all other events use matching actions.
+# See: https://docs.github.com/en/rest/using-the-rest-api/github-event-types
+_EVENTS_API_ACTION_MAP: dict[str, dict[str, str]] = {
+    "pull_request_review": {"created": "submitted", "updated": "edited"},
+}
+
 
 def map_events_api_to_normalized(
     raw_event: dict[str, Any],
@@ -50,7 +58,13 @@ def map_events_api_to_normalized(
         return None
 
     payload: dict[str, Any] = raw_event.get("payload", {})
-    action = payload.get("action", "")
+    action: str = str(payload.get("action", ""))
+
+    # Normalize action names that differ between Events API and webhooks
+    action_map = _EVENTS_API_ACTION_MAP.get(event_type)
+    if action_map:
+        action = action_map.get(action, action)
+
     # Events API uses "repo.name" which is "owner/repo" format
     repo_name = raw_event.get("repo", {}).get("name", "")
     event_id = str(raw_event.get("id", ""))

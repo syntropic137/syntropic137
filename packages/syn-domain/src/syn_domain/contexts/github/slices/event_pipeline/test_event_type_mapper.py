@@ -88,6 +88,46 @@ class TestEventTypeMapper:
         assert result is not None
         assert result.payload["repository"]["full_name"] == "owner/repo"
 
+    def test_normalizes_pull_request_review_created_to_submitted(self) -> None:
+        """Events API uses 'created' but webhooks expect 'submitted'."""
+        raw = {
+            "id": "review-123",
+            "type": "PullRequestReviewEvent",
+            "repo": {"name": "owner/repo"},
+            "payload": {"action": "created", "review": {"id": 999, "state": "commented"}},
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        result = map_events_api_to_normalized(raw, "inst-1")
+        assert result is not None
+        assert result.event_type == "pull_request_review"
+        assert result.action == "submitted"
+
+    def test_normalizes_pull_request_review_updated_to_edited(self) -> None:
+        """Events API 'updated' maps to webhook 'edited'."""
+        raw = {
+            "id": "review-456",
+            "type": "PullRequestReviewEvent",
+            "repo": {"name": "owner/repo"},
+            "payload": {"action": "updated", "review": {"id": 999}},
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        result = map_events_api_to_normalized(raw, "inst-1")
+        assert result is not None
+        assert result.action == "edited"
+
+    def test_pull_request_review_dismissed_passes_through(self) -> None:
+        """Actions without mapping pass through unchanged."""
+        raw = {
+            "id": "review-789",
+            "type": "PullRequestReviewEvent",
+            "repo": {"name": "owner/repo"},
+            "payload": {"action": "dismissed", "review": {"id": 999}},
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        result = map_events_api_to_normalized(raw, "inst-1")
+        assert result is not None
+        assert result.action == "dismissed"
+
     def test_dedup_key_matches_webhook_for_push(self) -> None:
         """Push events from both sources should produce the same dedup key."""
         from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key

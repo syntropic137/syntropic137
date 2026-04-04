@@ -47,6 +47,20 @@ async def register_trigger(
 
     await ensure_connected()
 
+    # Auto-resolve installation_id from GitHub App if not provided
+    if not installation_id and repository:
+        try:
+            from syn_adapters.github.client import get_github_client
+
+            client = get_github_client()
+            installation_id = await client.get_installation_for_repo(repository)
+            logger.info("Auto-resolved installation_id=%s for %s", installation_id, repository)
+        except Exception:
+            logger.warning(
+                "Could not auto-resolve installation_id for %s — trigger will register without it",
+                repository,
+            )
+
     workflow_repo = get_workflow_repo()
     if not await workflow_repo.exists(workflow_id):
         return Err(
@@ -140,6 +154,20 @@ async def enable_preset(
     )
 
     await ensure_connected()
+
+    # Auto-resolve installation_id from GitHub App if not provided
+    if not installation_id and repository:
+        try:
+            from syn_adapters.github.client import get_github_client
+
+            client = get_github_client()
+            installation_id = await client.get_installation_for_repo(repository)
+            logger.info("Auto-resolved installation_id=%s for %s", installation_id, repository)
+        except Exception:
+            logger.warning(
+                "Could not auto-resolve installation_id for %s — preset will register without it",
+                repository,
+            )
 
     try:
         command = create_preset_command(
