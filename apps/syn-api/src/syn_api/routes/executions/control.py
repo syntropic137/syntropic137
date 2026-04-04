@@ -204,6 +204,17 @@ async def get_state(
 # =============================================================================
 
 
+async def _resolve_execution_id(execution_id: str) -> str:
+    """Resolve a partial execution ID prefix to a full ID."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    return await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
+
+
 async def _handle_control_result(result: Any, _action: str = "") -> ControlResponse:
     """Convert control result to HTTP response."""
     if isinstance(result, Err):
@@ -227,6 +238,7 @@ async def pause_execution_endpoint(
     request: PauseRequest | None = None,
 ) -> ControlResponse:
     """Pause a running execution."""
+    execution_id = await _resolve_execution_id(execution_id)
     result = await pause(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "pause")
 
@@ -234,6 +246,7 @@ async def pause_execution_endpoint(
 @router.post("/executions/{execution_id}/resume", response_model=ControlResponse)
 async def resume_execution_endpoint(execution_id: str) -> ControlResponse:
     """Resume a paused execution."""
+    execution_id = await _resolve_execution_id(execution_id)
     result = await resume(execution_id)
     return await _handle_control_result(result, "resume")
 
@@ -244,6 +257,7 @@ async def cancel_execution_endpoint(
     request: CancelRequest | None = None,
 ) -> ControlResponse:
     """Cancel a running or paused execution."""
+    execution_id = await _resolve_execution_id(execution_id)
     result = await cancel(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "cancel")
 
@@ -254,6 +268,7 @@ async def inject_context_endpoint(
     request: InjectRequest,
 ) -> ControlResponse:
     """Inject a message into the execution context."""
+    execution_id = await _resolve_execution_id(execution_id)
     result = await inject(execution_id, message=request.message, role=request.role)
     return await _handle_control_result(result, "inject")
 

@@ -82,7 +82,9 @@ class ExecuteWorkflowHandler:
             workflow_name=workflow.name or "",
             phases=phases,
             inputs=merged_inputs,
-            execution_id=command.execution_id or str(uuid4()),
+            execution_id=command.execution_id
+            if command.execution_id and command.execution_id.startswith("exec-")
+            else f"exec-{uuid4().hex[:12]}",
             repo_url=repo_url,
         )
 
