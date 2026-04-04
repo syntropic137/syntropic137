@@ -30,7 +30,7 @@ def _repo_root() -> Path:
 
 
 _ERROR_HANDLING_PATTERNS = [
-    "isinstance",  # e.g. isinstance(result, Err)
+    "isinstance(result",  # e.g. isinstance(result, Err)
     "logger.error",
     "logger.exception",
 ]

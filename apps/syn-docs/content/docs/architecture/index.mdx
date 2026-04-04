@@ -49,7 +49,7 @@ A projection subscribes to the event stream and builds a specialized read model 
 - **Checkpoint-aware** — each projection tracks its position in the event stream; on restart it catches up from the last processed event rather than replaying everything
 - **Never the source of truth** — if a projection becomes corrupt or out of date, it can always be discarded and rebuilt
 
-The system currently maintains 14 projections, including a `repo_correlation` projection that maps repositories to workflow executions across bounded context boundaries.
+The system currently maintains 12 projections spanning all five bounded contexts.
 
 <Callout type="warn">
 Projections are eventually consistent. A command that writes an event does not guarantee the projection has updated by the time the next query runs. For scenarios where a process needs immediate feedback from its own commands, the system uses in-process synchronous projection updates rather than polling the persistent projection.

@@ -118,7 +118,6 @@ This directory contains all ADRs for the Syntropic137 project. ADRs capture sign
 | [ADR-022](ADR-022-secure-token-architecture.md) | Secure Token Architecture for Agentic Scale | Shared Envoy cluster for token vending (on hold pending auth/multi-tenant work) |
 | [ADR-024](ADR-024-setup-phase-secrets.md) | Setup Phase Secrets Pattern | Inject secrets during a pre-execution setup phase and clear them before agent starts |
 | [ADR-037](ADR-037-subagent-observability.md) | Subagent Observability | Track parent-child agent hierarchies with per-subagent tool attribution and cost |
-| [ADR-048](ADR-048-workflows-as-cc-commands.md) | Workflows as Claude Code Commands | (see also Orchestration) Phases use Claude Code command Markdown with `$ARGUMENTS` |
 
 ---
 
