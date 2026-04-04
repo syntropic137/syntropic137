@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLIError } from "../../../src/framework/errors.js";
 
-// Mock the marketplace client before importing the commands, since
-// search.ts imports from ../../marketplace/client.js which reads the
-// filesystem at module level.
+// Mock the marketplace client before importing the commands so
+// search.ts captures these mocked exports instead of the real
+// marketplace/client module.
 vi.mock("../../../src/marketplace/client.js", () => ({
   searchAllRegistries: vi.fn(),
   resolvePluginByName: vi.fn(),

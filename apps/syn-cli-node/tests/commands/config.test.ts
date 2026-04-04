@@ -11,6 +11,7 @@ describe("config commands", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   function stdout(): string {

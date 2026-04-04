@@ -1415,7 +1415,7 @@ sync-api:
     cd apps/syn-cli-node && pnpm run generate:types
     @echo "✅ API artifacts synced (openapi.json, API docs, CLI types)"
 
-# Regenerate docs site content (CLI reference + OpenAPI spec + API reference MDX)
+# Regenerate docs site content (CLI reference + OpenAPI spec + API reference MDX + CLI types)
 docs-site-gen: docs-cli-gen sync-api
 
 # Build docs site (runs generation + next build)

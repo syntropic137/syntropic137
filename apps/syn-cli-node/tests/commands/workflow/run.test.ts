@@ -6,6 +6,7 @@ describe("workflow run commands", () => {
   const mockFetch = vi.fn();
 
   beforeEach(() => {
+    mockFetch.mockReset();
     vi.stubGlobal("fetch", mockFetch);
     vi.spyOn(process.stdout, "write").mockReturnValue(true);
     vi.spyOn(process.stderr, "write").mockReturnValue(true);
