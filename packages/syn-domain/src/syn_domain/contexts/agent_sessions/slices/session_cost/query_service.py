@@ -10,9 +10,10 @@ See #532 for why reads and writes were separated.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING
 
-import asyncpg
+if TYPE_CHECKING:
+    import asyncpg
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
@@ -116,87 +117,100 @@ class SessionCostQueryService:
         haven't completed yet.
         """
         async with self._pool.acquire() as conn:
-            # 1. Get authoritative data from session_summary events
             summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY)
-            summarized_session_ids = {row["session_id"] for row in summary_rows}
-
-            # 2. Get in-progress sessions from token_usage (no summary yet)
+            summarized_session_ids = {row["session_id"] for row in summary_rows}  # type: ignore[index]
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
-
-            # 3. Get tool counts per session
-            tool_rows = await conn.fetch(_TOOL_COUNT_BY_SESSION_QUERY, TOOL_EXECUTION_COMPLETED)
-            tool_counts: dict[str, int] = {row["session_id"]: row["cnt"] for row in tool_rows}
-
-            # 4. Get started_at per session
-            started_rows = await conn.fetch(_STARTED_AT_BY_SESSION_QUERY, SESSION_STARTED)
-            started_map: dict[str, Any] = {
-                row["session_id"]: row["started_at"] for row in started_rows
-            }
+            tool_counts = await self._fetch_tool_counts(conn)
+            started_map = await self._fetch_started_map(conn)
 
             results: list[SessionCost] = []
-
-            # Build from session_summary rows (authoritative)
             for row in summary_rows:
-                sid = row["session_id"]
-                sdk_cost = (
-                    Decimal(str(row["sdk_cost"]))
-                    if row["sdk_cost"] is not None
-                    else self._cost_calculator.calculate_token_cost(
-                        input_tokens=row["total_input"] or 0,
-                        output_tokens=row["total_output"] or 0,
-                        cache_creation=row["cache_creation"] or 0,
-                        cache_read=row["cache_read"] or 0,
-                    )
-                )
-                sc = SessionCost(session_id=sid)
-                sc.input_tokens = row["total_input"] or 0
-                sc.output_tokens = row["total_output"] or 0
-                sc.cache_creation_tokens = row["cache_creation"] or 0
-                sc.cache_read_tokens = row["cache_read"] or 0
-                sc.total_cost_usd = sdk_cost
-                sc.token_cost_usd = sdk_cost
-                sc.tool_calls = tool_counts.get(sid, 0)
-                sc.turns = row["num_turns"] or 0
-                sc.duration_ms = float(row["duration_ms_val"] or 0)
-                sc.execution_id = row["execution_id"]
-                sc.phase_id = row["phase_id"]
-                sc.started_at = started_map.get(sid)
-                sc.completed_at = row["completed_at"]
-                sc.is_finalized = True
-                if row["agent_model"]:
-                    sc.agent_model = row["agent_model"]
-                results.append(sc)
-
-            # Build from token_usage rows (in-progress, no summary yet)
+                results.append(self._build_from_summary(row, tool_counts, started_map))
             for row in token_rows:
-                sid = row["session_id"]
-                if sid in summarized_session_ids:
-                    continue  # already covered by session_summary
-
-                total_input = row["total_input"] or 0
-                total_output = row["total_output"] or 0
-                cache_creation = row["cache_creation"] or 0
-                cache_read = row["cache_read"] or 0
-
-                cost = self._cost_calculator.calculate_token_cost(
-                    input_tokens=total_input,
-                    output_tokens=total_output,
-                    cache_creation=cache_creation,
-                    cache_read=cache_read,
-                )
-                sc = SessionCost(session_id=sid)
-                sc.input_tokens = total_input
-                sc.output_tokens = total_output
-                sc.cache_creation_tokens = cache_creation
-                sc.cache_read_tokens = cache_read
-                sc.total_cost_usd = cost
-                sc.token_cost_usd = cost
-                sc.tool_calls = tool_counts.get(sid, 0)
-                sc.execution_id = row["execution_id"]
-                sc.phase_id = row["phase_id"]
-                sc.started_at = started_map.get(sid) or row["started_at"]
-                if row["agent_model"]:
-                    sc.agent_model = row["agent_model"]
-                results.append(sc)
-
+                sid = row["session_id"]  # type: ignore[index]
+                if sid not in summarized_session_ids:
+                    results.append(self._build_from_token_usage(row, tool_counts, started_map))
             return results
+
+    async def _fetch_tool_counts(self, conn: object) -> dict[str, int]:
+        """Fetch tool call counts per session."""
+        rows = await conn.fetch(_TOOL_COUNT_BY_SESSION_QUERY, TOOL_EXECUTION_COMPLETED)  # type: ignore[union-attr]
+        return {row["session_id"]: row["cnt"] for row in rows}  # type: ignore[index]
+
+    async def _fetch_started_map(self, conn: object) -> dict[str, object]:
+        """Fetch the earliest started_at timestamp per session."""
+        rows = await conn.fetch(_STARTED_AT_BY_SESSION_QUERY, SESSION_STARTED)  # type: ignore[union-attr]
+        return {row["session_id"]: row["started_at"] for row in rows}  # type: ignore[index]
+
+    def _resolve_cost(self, row: object) -> Decimal:
+        """Resolve cost from sdk_cost field or calculate from token counts."""
+        sdk_cost = row["sdk_cost"]  # type: ignore[index]
+        if sdk_cost is not None:
+            return Decimal(str(sdk_cost))
+        return self._cost_calculator.calculate_token_cost(
+            input_tokens=row["total_input"] or 0,  # type: ignore[index]
+            output_tokens=row["total_output"] or 0,  # type: ignore[index]
+            cache_creation=row["cache_creation"] or 0,  # type: ignore[index]
+            cache_read=row["cache_read"] or 0,  # type: ignore[index]
+        )
+
+    def _build_from_summary(
+        self,
+        row: object,
+        tool_counts: dict[str, int],
+        started_map: dict[str, object],
+    ) -> SessionCost:
+        """Build a SessionCost from a session_summary row."""
+        sid = row["session_id"]  # type: ignore[index]
+        cost = self._resolve_cost(row)
+        sc = SessionCost(session_id=sid)
+        sc.input_tokens = row["total_input"] or 0  # type: ignore[index]
+        sc.output_tokens = row["total_output"] or 0  # type: ignore[index]
+        sc.cache_creation_tokens = row["cache_creation"] or 0  # type: ignore[index]
+        sc.cache_read_tokens = row["cache_read"] or 0  # type: ignore[index]
+        sc.total_cost_usd = cost
+        sc.token_cost_usd = cost
+        sc.tool_calls = tool_counts.get(sid, 0)
+        sc.turns = row["num_turns"] or 0  # type: ignore[index]
+        sc.duration_ms = float(row["duration_ms_val"] or 0)  # type: ignore[index]
+        sc.execution_id = row["execution_id"]  # type: ignore[index]
+        sc.phase_id = row["phase_id"]  # type: ignore[index]
+        sc.started_at = started_map.get(sid)  # type: ignore[arg-type]
+        sc.completed_at = row["completed_at"]  # type: ignore[index]
+        sc.is_finalized = True
+        if row["agent_model"]:  # type: ignore[index]
+            sc.agent_model = row["agent_model"]  # type: ignore[index]
+        return sc
+
+    def _build_from_token_usage(
+        self,
+        row: object,
+        tool_counts: dict[str, int],
+        started_map: dict[str, object],
+    ) -> SessionCost:
+        """Build a SessionCost from a token_usage aggregate row (in-progress)."""
+        sid = row["session_id"]  # type: ignore[index]
+        total_input = row["total_input"] or 0  # type: ignore[index]
+        total_output = row["total_output"] or 0  # type: ignore[index]
+        cache_creation = row["cache_creation"] or 0  # type: ignore[index]
+        cache_read = row["cache_read"] or 0  # type: ignore[index]
+        cost = self._cost_calculator.calculate_token_cost(
+            input_tokens=total_input,
+            output_tokens=total_output,
+            cache_creation=cache_creation,
+            cache_read=cache_read,
+        )
+        sc = SessionCost(session_id=sid)
+        sc.input_tokens = total_input
+        sc.output_tokens = total_output
+        sc.cache_creation_tokens = cache_creation
+        sc.cache_read_tokens = cache_read
+        sc.total_cost_usd = cost
+        sc.token_cost_usd = cost
+        sc.tool_calls = tool_counts.get(sid, 0)
+        sc.execution_id = row["execution_id"]  # type: ignore[index]
+        sc.phase_id = row["phase_id"]  # type: ignore[index]
+        sc.started_at = started_map.get(sid) or row["started_at"]  # type: ignore[index,arg-type]
+        if row["agent_model"]:  # type: ignore[index]
+            sc.agent_model = row["agent_model"]  # type: ignore[index]
+        return sc
