@@ -128,6 +128,43 @@ class TestEventTypeMapper:
         assert result is not None
         assert result.action == "dismissed"
 
+    def test_normalizes_null_draft_to_false(self) -> None:
+        """Events API returns null for pull_request.draft — normalize to False.
+
+        Without this, trigger conditions like ``pull_request.draft = false``
+        fail because ``None != False`` in the condition evaluator.
+        """
+        raw = {
+            "id": "draft-null",
+            "type": "PullRequestReviewEvent",
+            "repo": {"name": "owner/repo"},
+            "payload": {
+                "action": "created",
+                "review": {"id": 999, "state": "commented"},
+                "pull_request": {"number": 1, "draft": None},
+            },
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        result = map_events_api_to_normalized(raw, "inst-1")
+        assert result is not None
+        assert result.payload["pull_request"]["draft"] is False
+
+    def test_preserves_true_draft_value(self) -> None:
+        """If pull_request.draft is True, it should be preserved."""
+        raw = {
+            "id": "draft-true",
+            "type": "PullRequestEvent",
+            "repo": {"name": "owner/repo"},
+            "payload": {
+                "action": "opened",
+                "pull_request": {"number": 1, "draft": True},
+            },
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        result = map_events_api_to_normalized(raw, "inst-1")
+        assert result is not None
+        assert result.payload["pull_request"]["draft"] is True
+
     def test_dedup_key_matches_webhook_for_push(self) -> None:
         """Push events from both sources should produce the same dedup key."""
         from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key

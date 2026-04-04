@@ -14,11 +14,32 @@ if TYPE_CHECKING:
     )
 
 
+def _coerce_value(value: Any) -> Any:
+    """Coerce string-encoded values to their native Python types.
+
+    Conditions may arrive with string values from CLI or raw API calls
+    (e.g. ``"false"`` instead of ``False``, ``"a,b"`` instead of ``["a","b"]``).
+    This ensures consistent evaluation regardless of how the trigger was registered.
+    """
+    if not isinstance(value, str):
+        return value
+    lower = value.lower()
+    if lower == "true":
+        return True
+    if lower == "false":
+        return False
+    # Comma-separated strings → list (for "in" / "not_in" operators)
+    if "," in value:
+        return [v.strip() for v in value.split(",")]
+    return value
+
+
 def _check_operator(operator: str, resolved: Any, value: Any) -> bool:
     """Evaluate a single operator against resolved and expected values.
 
     Returns True if the condition passes, False if it fails.
     """
+    value = _coerce_value(value)
     match operator:
         case "eq":
             return resolved == value
@@ -29,9 +50,9 @@ def _check_operator(operator: str, resolved: Any, value: Any) -> bool:
         case "is_empty":
             return not resolved
         case "in":
-            return resolved in (value or [])
+            return resolved in (value if isinstance(value, list) else (value or []))
         case "not_in":
-            return resolved not in (value or [])
+            return resolved not in (value if isinstance(value, list) else (value or []))
         case "contains":
             return value in (resolved or "")  # type: ignore[operator]  # resolved is Any
         case _:

@@ -18,6 +18,7 @@ from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator import (
     _check_operator,
+    _coerce_value,
     _resolve_array_index,
     _resolve_field,
     _unpack_condition,
@@ -608,6 +609,28 @@ class TestExtractedHelpers:
     def test_check_operator_unknown(self) -> None:
         with pytest.raises(ValueError, match="Unknown operator"):
             _check_operator("unknown_op", "a", "b")
+
+    def test_eq_coerces_string_false_to_bool(self) -> None:
+        """String 'false' from CLI must match resolved boolean False."""
+        assert _check_operator("eq", False, "false") is True
+        assert _check_operator("eq", True, "true") is True
+        assert _check_operator("eq", True, "false") is False
+
+    def test_in_coerces_comma_separated_string(self) -> None:
+        """Comma-separated string 'a,b' from CLI must work as list for 'in'."""
+        assert _check_operator("in", "commented", "changes_requested,commented") is True
+        assert _check_operator("in", "approved", "changes_requested,commented") is False
+
+    def test_coerce_value_preserves_native_types(self) -> None:
+        assert _coerce_value(False) is False
+        assert _coerce_value(["a", "b"]) == ["a", "b"]
+        assert _coerce_value(42) == 42
+
+    def test_coerce_value_converts_strings(self) -> None:
+        assert _coerce_value("true") is True
+        assert _coerce_value("false") is False
+        assert _coerce_value("a,b") == ["a", "b"]
+        assert _coerce_value("hello") == "hello"
 
     def test_unpack_condition_dict(self) -> None:
         field, op, val = _unpack_condition({"field": "action", "operator": "eq", "value": "opened"})
