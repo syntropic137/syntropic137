@@ -34,7 +34,6 @@ from syn_adapters.projections.trigger_query_projection import (
     TriggerQueryProjection,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

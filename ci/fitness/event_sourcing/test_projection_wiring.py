@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -185,8 +184,8 @@ class TestEventHandlerCoverage:
     def test_trigger_projection_handlers_cover_all_events(self) -> None:
         """TriggerQueryProjection must handle every event it subscribes to."""
         from syn_adapters.projections.trigger_query_projection import (
-            TriggerQueryProjection,
             _SUBSCRIBED_EVENTS,
+            TriggerQueryProjection,
         )
 
         dispatch_map = TriggerQueryProjection._EVENT_DISPATCH
@@ -200,8 +199,8 @@ class TestEventHandlerCoverage:
     def test_no_orphaned_dispatch_entries(self) -> None:
         """_EVENT_DISPATCH must not contain events that aren't subscribed to."""
         from syn_adapters.projections.trigger_query_projection import (
-            TriggerQueryProjection,
             _SUBSCRIBED_EVENTS,
+            TriggerQueryProjection,
         )
 
         dispatch_map = TriggerQueryProjection._EVENT_DISPATCH
