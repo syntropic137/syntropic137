@@ -203,6 +203,8 @@ build/
 HANDOFF-*.md
 /workspaces/
 .playwright-mcp/
+.playwright-cli/
+.next/
 .agentic/
 
 # Root-level planning voice notes (scratch — not committed per AGENTS.md policy)
