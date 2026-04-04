@@ -515,9 +515,7 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    workflow_id = await resolve_or_raise(
-        mgr.store, "workflow_details", workflow_id, "Workflow"
-    )
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
     result = await get_workflow(workflow_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
@@ -570,9 +568,7 @@ async def export_workflow_endpoint(
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    workflow_id = await resolve_or_raise(
-        mgr.store, "workflow_details", workflow_id, "Workflow"
-    )
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
     result = await export_workflow(workflow_id, fmt=format)
     if isinstance(result, Err):
         if result.error == WorkflowError.NOT_FOUND:
@@ -588,9 +584,7 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
     from syn_api.routes.executions.queries import list_ as ex_list_
 
     mgr = get_projection_mgr()
-    workflow_id = await resolve_or_raise(
-        mgr.store, "workflow_details", workflow_id, "Workflow"
-    )
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
     wf_result = await get_workflow(workflow_id)
     if isinstance(wf_result, Err):
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
@@ -628,9 +622,7 @@ async def get_workflow_history_endpoint(workflow_id: str) -> ExecutionHistoryRes
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    workflow_id = await resolve_or_raise(
-        mgr.store, "workflow_details", workflow_id, "Workflow"
-    )
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
     wf_result = await get_workflow(workflow_id)
     if isinstance(wf_result, Err):
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")

@@ -110,20 +110,18 @@ class ProjectionStoreProtocol(Protocol):
         """
         ...
 
-    async def get_by_prefix(
-        self, projection: str, prefix: str
-    ) -> list[tuple[str, dict[str, Any]]]:
+    async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
         """Get all records whose key starts with the given prefix.
 
         Used for partial-ID resolution: the caller provides a short prefix
-        and this method returns all matching (key, data) pairs.
+        and this method returns up to 10 matching (key, data) pairs.
 
         Args:
             projection: Name of the projection
             prefix: The key prefix to match against
 
         Returns:
-            List of (key, data) tuples for all matching records
+            List of (key, data) tuples for matching records (max 10)
         """
         ...
 

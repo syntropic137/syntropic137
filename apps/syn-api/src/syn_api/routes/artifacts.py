@@ -498,9 +498,7 @@ async def get_artifact_endpoint(
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    artifact_id = await resolve_or_raise(
-        mgr.store, "artifact_summaries", artifact_id, "Artifact"
-    )
+    artifact_id = await resolve_or_raise(mgr.store, "artifact_summaries", artifact_id, "Artifact")
     result = await get_artifact(artifact_id, include_content=include_content)
 
     if isinstance(result, Err):
@@ -538,9 +536,7 @@ async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResp
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    artifact_id = await resolve_or_raise(
-        mgr.store, "artifact_summaries", artifact_id, "Artifact"
-    )
+    artifact_id = await resolve_or_raise(mgr.store, "artifact_summaries", artifact_id, "Artifact")
     result = await get_artifact(artifact_id, include_content=True)
 
     if isinstance(result, Err):

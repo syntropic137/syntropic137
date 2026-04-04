@@ -416,9 +416,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    session_id = await resolve_or_raise(
-        mgr.store, "session_summaries", session_id, "Session"
-    )
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_session(session_id)
 
     if isinstance(result, Err):

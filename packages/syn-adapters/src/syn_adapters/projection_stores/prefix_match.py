@@ -9,9 +9,10 @@ See: GitHub issue #508
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
-from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,9 @@ def format_ambiguous_error(entity_type: str, partial_id: str, candidates: list[s
         A formatted error message string.
     """
     preview = candidates[:5]
-    lines = [f"Ambiguous {entity_type.lower()} ID '{partial_id}' matches {len(candidates)} entries:"]
+    lines = [
+        f"Ambiguous {entity_type.lower()} ID '{partial_id}' matches {len(candidates)} entries:"
+    ]
     for cid in preview:
         lines.append(f"  - {cid[:12]}...")
     if len(candidates) > 5:
