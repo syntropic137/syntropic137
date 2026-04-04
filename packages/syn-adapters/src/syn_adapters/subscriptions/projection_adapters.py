@@ -135,7 +135,6 @@ _COST_HANDLER_MAP: dict[str, str] = {
     TOOL_EXECUTION_COMPLETED: "on_agent_observation",
     TOKEN_USAGE: "on_agent_observation",
     SESSION_SUMMARY: "on_session_summary",
-    "CostRecorded": "on_cost_recorded",
     "SessionCostFinalized": "on_session_cost_finalized",
 }
 

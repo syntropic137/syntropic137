@@ -14,7 +14,7 @@ import pytest
 # Known exceptions — projections that intentionally stay out of the coordinator
 _COORDINATOR_EXCEPTIONS = {
     "session_tools",  # Read-only TimescaleDB query interface, no event consumption
-    "realtime",  # Added dynamically by CoordinatorSubscriptionService.start()
+    "realtime",  # Manager key "realtime"; coordinator adds RealTimeProjectionAdapter as "realtime_sse" at runtime
 }
 
 # Manager registry uses legacy names; coordinator projections use get_name().

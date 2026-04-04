@@ -253,7 +253,7 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
-    # Create all checkpointed projections (20 total — see ADR-055)
+    # Create all checkpointed projections (20 total)
     projections: list[CheckpointedProjection] = [
         # --- Orchestration context (AutoDispatchProjection — direct) ---
         WorkflowListProjection(projection_store),
