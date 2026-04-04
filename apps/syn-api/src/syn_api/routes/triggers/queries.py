@@ -217,6 +217,11 @@ async def get_all_history_endpoint(limit: int = 50) -> TriggerHistoryListRespons
 @router.get("/{trigger_id}", response_model=TriggerDetail)
 async def get_trigger_endpoint(trigger_id: str) -> TriggerDetail:
     """Get trigger details."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    trigger_id = await resolve_or_raise(mgr.store, "trigger_rules", trigger_id, "Trigger")
     result = await get_trigger(trigger_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Trigger not found: {trigger_id}")
@@ -230,6 +235,11 @@ async def get_trigger_history_endpoint(
     limit: int = 50,
 ) -> TriggerHistoryResponse:
     """Get execution history for a trigger."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    trigger_id = await resolve_or_raise(mgr.store, "trigger_rules", trigger_id, "Trigger")
     result = await get_trigger_history(trigger_id=trigger_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)

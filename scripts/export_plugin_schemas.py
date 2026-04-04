@@ -49,8 +49,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from schemas.plugin.trigger_file_schema import TriggerFileSchema  # noqa: E402
 
-from syn_cli.commands._marketplace_models import MarketplaceIndex  # noqa: E402
-from syn_cli.commands._package_models import PluginManifest  # noqa: E402
 from syn_domain.contexts.orchestration._shared.workflow_definition import (  # noqa: E402
     PhaseFrontmatterSchema,
     WorkflowDefinition,
@@ -69,10 +67,11 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (  # n
 
 SCHEMA_REGISTRY: dict[str, type[BaseModel]] = {
     "workflow.schema.json": WorkflowDefinition,
-    "plugin-manifest.schema.json": PluginManifest,
-    "marketplace.schema.json": MarketplaceIndex,
     "triggers.schema.json": TriggerFileSchema,
     "phase-frontmatter.schema.json": PhaseFrontmatterSchema,
+    # TODO(#532): plugin-manifest and marketplace schemas were previously generated
+    # from syn-cli Pydantic models. Now that syn-cli is deleted, these schemas are
+    # maintained as static files until the models are relocated (e.g., to syn-domain).
 }
 
 

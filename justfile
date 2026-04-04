@@ -545,10 +545,6 @@ dev-doctor: _env-check
     @echo ""
     @echo "💡 Run 'just dev' to start the development stack."
 
-# Run the CLI application
-cli *args:
-    uv run --package syn-cli syn {{args}}
-
 # --- CLI Node ---
 
 # Build the Node.js CLI
@@ -724,7 +720,7 @@ test-e2e:
 
 # Run tests with coverage report
 test-cov:
-    uv run pytest --cov=apps/syn-cli/src --cov=packages/syn-domain/src --cov=packages/syn-adapters/src --cov=packages/syn-shared/src --cov-report=term-missing --cov-fail-under=80
+    uv run pytest --cov=packages/syn-domain/src --cov=packages/syn-adapters/src --cov=packages/syn-shared/src --cov-report=term-missing --cov-fail-under=80
 
 # Run E2E container execution tests (full flow: sidecar + workspace + agent)
 test-e2e-container:

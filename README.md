@@ -104,8 +104,7 @@ Regenerate diagram: `just diagram`
 ## CLI (`syn`)
 
 ```bash
-just cli -- <command>           # run via just
-# or install: uv tool install -e apps/syn-cli
+npx @syntropic137/cli <command>
 ```
 
 ### Workflows
@@ -202,7 +201,7 @@ syn version
 syntropic137/
 ├── apps/
 │   ├── syn-api/                 # FastAPI HTTP server
-│   ├── syn-cli/                 # CLI tool ("syn")
+│   ├── syn-cli-node/             # CLI tool ("syn") — Node.js
 │   ├── syn-dashboard-ui/        # Dashboard frontend (Vite + React)
 │   ├── syn-docs/                # Public documentation site (Next.js + Fumadocs)
 │   └── syn-pulse-ui/            # Pulse/heatmap UI
