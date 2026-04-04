@@ -406,6 +406,7 @@ async def get_session_cost_endpoint(
     include_breakdown: bool = Query(True, description="Include model/tool breakdowns"),
 ) -> SessionCostResponse:
     """Get cost for a specific session."""
+    from syn_api._wiring import get_projection_mgr
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
@@ -446,6 +447,7 @@ async def get_execution_cost_endpoint(
     include_session_ids: bool = Query(False, description="Include list of session IDs"),
 ) -> ExecutionCostResponse:
     """Get aggregated cost for a workflow execution."""
+    from syn_api._wiring import get_projection_mgr
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()

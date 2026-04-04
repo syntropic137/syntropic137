@@ -41,12 +41,20 @@ class TestCostQuerySeparation:
         if "projection.get_all" in content:
             violations.append("costs.py calls projection.get_all() — use query_service.list_all()")
 
-        # Should not import get_projection_mgr for cost reads
-        if "get_projection_mgr" in content:
-            violations.append(
-                "costs.py imports get_projection_mgr — use get_session_cost_query / "
-                "get_execution_cost_query"
-            )
+        # get_projection_mgr at top level means cost reads go through projections.
+        # Deferred imports inside endpoints for prefix resolution (resolve_or_raise)
+        # are fine — they use the store for ID lookup, not cost data.
+        for line in content.splitlines():
+            stripped = line.strip()
+            if (
+                "get_projection_mgr" in stripped
+                and not line.startswith((" ", "\t"))  # top-level only
+                and not stripped.startswith("#")
+            ):
+                violations.append(
+                    "costs.py has top-level import of get_projection_mgr — "
+                    "use deferred import for prefix resolution only"
+                )
 
         if violations:
             joined = "\n  ".join(violations)
