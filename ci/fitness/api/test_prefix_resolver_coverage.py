@@ -34,7 +34,10 @@ import pytest
 _EXEMPT: set[tuple[str, str]] = {
     # Trigger commands: trigger_id comes from domain events, not user input
     ("commands", "trigger_id"),
-    # Trigger queries: use _resolve_trigger_id (trigger store, not projection store)
+    # Trigger queries: triggers live in TriggerQueryStore (not the projection store)
+    # because they need safety-guard queries (fire counts, cooldowns, delivery dedup)
+    # that the generic projection store doesn't support. Prefix resolution uses
+    # _resolve_trigger_id() in queries.py instead of resolve_or_raise(). See #542.
     ("queries", "trigger_id"),
     # SSE streams: typically opened via dashboard links with full IDs
     ("sse", "execution_id"),

@@ -35,8 +35,12 @@ router = APIRouter(prefix="/triggers", tags=["triggers"])
 async def _resolve_trigger_id(trigger_id: str) -> str:
     """Resolve a (possibly partial) trigger ID against the trigger store.
 
-    Triggers live in their own store, not in the projection store,
-    so the generic ``resolve_or_raise`` (projection-based) doesn't work.
+    Unlike other entities, triggers live in ``TriggerQueryStore`` — not the
+    projection store — because they need specialized queries for safety guards
+    (fire counts, cooldowns) and delivery dedup that the generic projection
+    store protocol doesn't support.  The standard ``resolve_or_raise`` only
+    queries the projection store, so trigger endpoints use this helper instead.
+    See #542.
     """
     store = get_trigger_store()
 
