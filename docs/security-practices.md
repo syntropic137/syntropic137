@@ -30,9 +30,7 @@ CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every p
 
 **Lock files scanned:**
 - `uv.lock` — Python workspace
-- `apps/syn-dashboard-ui/package-lock.json` — Dashboard
-- `apps/syn-pulse-ui/pnpm-lock.yaml` — Pulse UI
-- `packages/openclaw-plugin/package-lock.json` — OpenClaw plugin
+- `pnpm-lock.yaml` — Node.js workspace (root, shared across all pnpm apps)
 
 **Rollout:** OSV runs in warn mode (`continue-on-error: true`) until a clean baseline is established, then switches to blocking. See `TODO(#259)` in `ci.yml`.
 
