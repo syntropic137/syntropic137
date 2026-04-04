@@ -58,6 +58,9 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow import (
         WorkflowDispatchProjection,
     )
+    from syn_domain.contexts.github.slices.trigger_history.projection import (
+        TriggerHistoryProjection,
+    )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
     )
@@ -90,9 +93,6 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     )
     from syn_domain.contexts.organization.slices.list_systems.projection import (
         SystemProjection,
-    )
-    from syn_domain.contexts.github.slices.trigger_history.projection import (
-        TriggerHistoryProjection,
     )
     from syn_domain.contexts.organization.slices.repo_correlation import (
         RepoCorrelationProjection,
