@@ -109,7 +109,7 @@ class CostSummaryResponse(BaseModel):
 
 async def list_session_costs(
     execution_id: str | None = None,
-    limit: int = 100,  # noqa: ARG001
+    limit: int = 100,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[SessionCostData], MetricsError]:
     """List cost data for sessions.
@@ -117,7 +117,9 @@ async def list_session_costs(
     Uses SessionCostQueryService (TimescaleDB) for reads. See #532.
 
     Args:
-        execution_id: Optional filter by execution ID.
+        execution_id: Optional filter by execution ID. Applied client-side because
+            TimescaleDB stores execution_id in JSONB — a DB-level filter would
+            require a full table scan regardless. Filtering after fetch is equivalent.
         limit: Maximum results to return.
         auth: Optional authentication context.
     """
@@ -126,10 +128,11 @@ async def list_session_costs(
         query_svc = get_session_cost_query()
         all_costs = await query_svc.list_all()
 
-        # Client-side filter by execution_id if provided
+        # Client-side filter by execution_id (see docstring for rationale)
         costs = (
             [c for c in all_costs if c.execution_id == execution_id] if execution_id else all_costs
         )
+        costs = costs[:limit]
 
         return Ok(
             [
@@ -154,7 +157,7 @@ async def list_session_costs(
                     started_at=c.started_at,
                     completed_at=c.completed_at,
                 )
-                for c in (costs or [])
+                for c in costs
             ]
         )
     except Exception as e:
@@ -211,7 +214,7 @@ async def get_session_cost(
 
 
 async def list_execution_costs(
-    limit: int = 100,  # noqa: ARG001
+    limit: int = 100,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ExecutionCostData], MetricsError]:
     """List cost data for executions.
@@ -245,7 +248,7 @@ async def list_execution_costs(
                     started_at=c.started_at,
                     completed_at=c.completed_at,
                 )
-                for c in (costs or [])
+                for c in (costs or [])[:limit]
             ]
         )
     except Exception as e:

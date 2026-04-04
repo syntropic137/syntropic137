@@ -541,12 +541,19 @@ def get_session_cost_query():
 
     Read-only service for session cost data — separates reads from
     the write-side projection. See #532.
+
+    Raises:
+        RuntimeError: If the TimescaleDB pool is not yet initialized.
     """
     from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
         SessionCostQueryService,
     )
 
     pool = get_event_store_instance().pool
+    if pool is None:
+        raise RuntimeError(
+            "TimescaleDB pool is not initialized — ensure_connected() must be called first"
+        )
     return SessionCostQueryService(pool=pool)
 
 
@@ -555,12 +562,19 @@ def get_execution_cost_query():
 
     Read-only service for execution cost data — separates reads from
     the write-side projection. See #532.
+
+    Raises:
+        RuntimeError: If the TimescaleDB pool is not yet initialized.
     """
     from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
         ExecutionCostQueryService,
     )
 
     pool = get_event_store_instance().pool
+    if pool is None:
+        raise RuntimeError(
+            "TimescaleDB pool is not initialized — ensure_connected() must be called first"
+        )
     return ExecutionCostQueryService(pool=pool)
 
 

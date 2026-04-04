@@ -59,7 +59,8 @@ class TestCostQuerySeparation:
         if violations:
             joined = "\n  ".join(violations)
             pytest.fail(
-                f"Cost routes must use CostQueryService (TimescaleDB), not projections:\n"
+                f"Cost routes must use SessionCostQueryService / ExecutionCostQueryService"
+                f" (TimescaleDB), not projections:\n"
                 f"  {joined}\n\n"
                 f"Cost data lives in TimescaleDB (Lane 2). Projection stores are empty.\n"
                 f"See #532 and apps/syn-api/src/syn_api/routes/costs.py docstring."
