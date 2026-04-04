@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import datetime
 from decimal import Decimal
@@ -230,13 +231,14 @@ async def get(
     total_cost = detail.total_cost_usd
     total_duration = detail.total_duration_seconds
 
-    exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
-    if exec_cost is not None and exec_cost.total_tokens > 0:
-        total_input = exec_cost.input_tokens
-        total_output = exec_cost.output_tokens
-        total_cost = exec_cost.total_cost_usd
-        if exec_cost.duration_ms > 0:
-            total_duration = exec_cost.duration_ms / 1000.0
+    with contextlib.suppress(Exception):
+        exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
+        if exec_cost is not None and exec_cost.total_tokens > 0:
+            total_input = exec_cost.input_tokens
+            total_output = exec_cost.output_tokens
+            total_cost = exec_cost.total_cost_usd
+            if exec_cost.duration_ms > 0:
+                total_duration = exec_cost.duration_ms / 1000.0
 
     return Ok(
         ExecutionDetail(
@@ -271,10 +273,11 @@ async def get_detail(
     total_tokens = detail.total_input_tokens + detail.total_output_tokens
     total_cost = detail.total_cost_usd
 
-    exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
-    if exec_cost is not None and exec_cost.total_tokens > 0:
-        total_tokens = exec_cost.total_tokens
-        total_cost = exec_cost.total_cost_usd
+    with contextlib.suppress(Exception):
+        exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
+        if exec_cost is not None and exec_cost.total_tokens > 0:
+            total_tokens = exec_cost.total_tokens
+            total_cost = exec_cost.total_cost_usd
 
     return Ok(
         ExecutionDetailFull(
