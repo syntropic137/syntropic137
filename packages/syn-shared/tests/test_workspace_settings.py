@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from syn_shared.settings import (
+    DEFAULT_WORKSPACE_IMAGE,
     CloudProvider,
     ContainerLoggingSettings,
     GitCredentialType,
@@ -139,7 +140,7 @@ class TestWorkspaceSettings:
             assert settings.cloud_api_key is None
 
             # Docker settings
-            assert settings.docker_image == "agentic-workspace-claude-cli:latest"
+            assert settings.docker_image == DEFAULT_WORKSPACE_IMAGE
             assert settings.docker_runtime == "runsc"
             assert settings.docker_network == "none"
 
@@ -209,6 +210,53 @@ class TestGetDefaultIsolationBackend:
         backend = get_default_isolation_backend()
         # macOS can't use Firecracker, should fall back to GVISOR
         assert backend == IsolationBackend.GVISOR
+
+
+class TestWorkspaceImages:
+    """Test workspace image registry (workspace_images.py)."""
+
+    def test_default_image_is_ghcr(self) -> None:
+        """Default image should reference GHCR, not a local-only name."""
+        assert DEFAULT_WORKSPACE_IMAGE.startswith("ghcr.io/")
+        assert "agentic-workspace-claude-cli" in DEFAULT_WORKSPACE_IMAGE
+
+    def test_workspace_image_ref_builds_correct_ref(self) -> None:
+        """workspace_image_ref should build a fully-qualified image reference."""
+        from syn_shared.settings.workspace_images import (
+            WorkspaceImageProvider,
+            workspace_image_ref,
+        )
+
+        ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI, "2.1.76")
+        assert ref == "ghcr.io/agentparadise/agentic-workspace-claude-cli:2.1.76"
+
+    def test_workspace_image_ref_custom_registry(self) -> None:
+        """workspace_image_ref should support custom registry/owner."""
+        from syn_shared.settings.workspace_images import (
+            WorkspaceImageProvider,
+            workspace_image_ref,
+        )
+
+        ref = workspace_image_ref(
+            WorkspaceImageProvider.CLAUDE_CLI,
+            "latest",
+            registry="registry.example.com",
+            owner="myorg",
+        )
+        assert ref == "registry.example.com/myorg/agentic-workspace-claude-cli:latest"
+
+    def test_default_image_matches_settings(self) -> None:
+        """WorkspaceSettings.docker_image default should match DEFAULT_WORKSPACE_IMAGE."""
+        with patch.dict(os.environ, {}, clear=True):
+            settings = WorkspaceSettings(_env_file=None)
+            assert settings.docker_image == DEFAULT_WORKSPACE_IMAGE
+
+    def test_docker_image_overridable_via_env(self) -> None:
+        """docker_image should be overridable via SYN_WORKSPACE_DOCKER_IMAGE."""
+        env = {"SYN_WORKSPACE_DOCKER_IMAGE": "my-registry/custom-image:v1"}
+        with patch.dict(os.environ, env, clear=True):
+            settings = WorkspaceSettings(_env_file=None)
+            assert settings.docker_image == "my-registry/custom-image:v1"
 
 
 class TestSettingsWorkspaceIntegration:

@@ -20,6 +20,8 @@ from typing import Literal
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
+
 # Re-export from sub-modules for backwards compatibility
 from syn_shared.settings.git_identity import (  # noqa: F401
     GitCredentialType,
@@ -104,7 +106,7 @@ class WorkspaceSettings(BaseSettings):
     )
 
     docker_image: str = Field(
-        default="agentic-workspace-claude-cli:latest",
+        default=DEFAULT_WORKSPACE_IMAGE,
         description="Docker image for Claude agent execution.",
     )
 

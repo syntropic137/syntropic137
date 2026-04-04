@@ -8,6 +8,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+from syn_collector.collector.otlp import parse_otlp_logs, parse_otlp_metrics
 from syn_collector.events.types import BatchResponse, EventBatch
 
 if TYPE_CHECKING:
@@ -92,3 +96,53 @@ def register_routes(
         """Reset collector state (for testing)."""
         dedup.clear()
         return {"status": "reset"}
+
+    # =========================================================================
+    # OTLP Endpoints — OTel JSON ingestion from workspace containers
+    # =========================================================================
+
+    @app.post("/v1/metrics")
+    async def otlp_metrics(request: Request) -> JSONResponse:
+        """Receive OTLP JSON metrics from workspace containers.
+
+        Parses Claude Code's OTel metrics (token usage, cost) and routes
+        them through the existing observability pipeline.
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Invalid JSON payload"},
+            )
+
+        events = parse_otlp_metrics(payload)
+        accepted = 0
+        for event in events:
+            if not dedup.is_duplicate(event.event_id):
+                await store.write_event(event)
+                accepted += 1
+
+        logger.info("OTLP metrics: %d extracted, %d accepted", len(events), accepted)
+        return JSONResponse(content={"accepted": accepted})
+
+    @app.post("/v1/logs")
+    async def otlp_logs(request: Request) -> JSONResponse:
+        """Receive OTLP JSON logs from workspace containers."""
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Invalid JSON payload"},
+            )
+
+        events = parse_otlp_logs(payload)
+        accepted = 0
+        for event in events:
+            if not dedup.is_duplicate(event.event_id):
+                await store.write_event(event)
+                accepted += 1
+
+        logger.info("OTLP logs: %d extracted, %d accepted", len(events), accepted)
+        return JSONResponse(content={"accepted": accepted})

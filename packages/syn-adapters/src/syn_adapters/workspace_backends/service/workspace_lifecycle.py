@@ -8,10 +8,12 @@ See ADR-021, ADR-023, ADR-024.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    ImageManifest,
     IsolationConfig,
     SecurityPolicy,
     SidecarConfig,
@@ -121,6 +123,47 @@ def build_isolation_config(
     )
 
 
+VERSION_JSON_PATH = "/opt/agentic/version.json"
+"""Path to the version manifest inside workspace images."""
+
+
+def _read_image_manifest(
+    service: WorkspaceService,
+    handle: IsolationHandle,
+) -> ImageManifest | None:
+    """Read /opt/agentic/version.json from a running container (best-effort).
+
+    Returns None if the image doesn't contain a version manifest (older images)
+    or if the read fails for any reason. Never raises.
+    """
+    try:
+        provider = getattr(service._isolation, "_provider", None)
+        if provider is None:
+            return None
+
+        container = getattr(provider, "_active_workspaces", {}).get(handle.isolation_id)
+        if container is None:
+            return None
+
+        exit_code, output = container.exec_run(["cat", VERSION_JSON_PATH])
+        if exit_code != 0:
+            logger.debug("No version manifest in image (exit=%d)", exit_code)
+            return None
+
+        data = json.loads(output)
+        return ImageManifest(
+            provider=data.get("provider", ""),
+            provider_version=data.get("provider_version", ""),
+            components=data.get("components", {}),
+            build_commit=data.get("build_commit", ""),
+            built_at=data.get("built_at", ""),
+            manifest_digest=data.get("manifest_digest", ""),
+        )
+    except Exception:
+        logger.debug("Failed to read image manifest", exc_info=True)
+        return None
+
+
 async def provision_workspace(
     service: WorkspaceService,
     isolation_config: IsolationConfig,
@@ -148,9 +191,14 @@ async def provision_workspace(
         isolation_config.execution_id,
     )
     isolation_handle = await service._isolation.create(isolation_config)
+
+    # Read image version manifest from container (best-effort)
+    manifest = _read_image_manifest(service, isolation_handle)
+
     aggregate.record_isolation_started(
         isolation_id=isolation_handle.isolation_id,
         isolation_type=isolation_handle.isolation_type,
+        image_manifest=manifest,
     )
 
     # Start sidecar if requested

@@ -39,6 +39,7 @@ from event_sourcing import AggregateRoot, aggregate, command_handler, event_sour
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
     ExecutionResult,
+    ImageManifest,
     InjectionMethod,
     IsolationBackendType,
     IsolationHandle,
@@ -174,6 +175,9 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
         self._terminated_at: datetime | None = None
         self._termination_reason: str | None = None
 
+        # Image version manifest
+        self._image_manifest: ImageManifest | None = None
+
         # Metadata
         self._metadata: dict[str, str | int | float | bool | None] = {}
 
@@ -277,6 +281,11 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             return None
         end = self._terminated_at or datetime.now(UTC)
         return (end - self._created_at).total_seconds()
+
+    @property
+    def image_manifest(self) -> ImageManifest | None:
+        """Get image version manifest (if available)."""
+        return self._image_manifest
 
     @property
     def is_terminated(self) -> bool:
@@ -430,10 +439,18 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
         isolation_type: str,
         proxy_url: str | None = None,
         started_at: datetime | None = None,
+        image_manifest: ImageManifest | None = None,
     ) -> None:
         """Record that isolation has started.
 
         Called by application layer after IsolationBackendPort.create() succeeds.
+
+        Args:
+            isolation_id: Container/VM/sandbox ID.
+            isolation_type: Backend type (docker, firecracker, etc.).
+            proxy_url: Sidecar proxy URL if applicable.
+            started_at: When isolation started (defaults to now).
+            image_manifest: Version manifest from /opt/agentic/version.json.
         """
         from syn_domain.contexts.orchestration.domain.events.IsolationStartedEvent import (
             IsolationStartedEvent,
@@ -443,11 +460,15 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             msg = "Workspace must be created first"
             raise ValueError(msg)
 
+        # Serialize manifest to dict for event storage
+        manifest_dict = dataclasses.asdict(image_manifest) if image_manifest else None
+
         event = IsolationStartedEvent(
             workspace_id=str(self._workspace_id),
             isolation_id=isolation_id,
             isolation_type=isolation_type,
             proxy_url=proxy_url,
+            image_manifest=manifest_dict,
             started_at=started_at or datetime.now(UTC),
         )
 
@@ -517,6 +538,10 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
         )
         self._sidecar_enabled = event.proxy_url is not None
         self._status = WorkspaceStatus.READY
+
+        # Reconstruct image manifest from event dict
+        if event.image_manifest:
+            self._image_manifest = ImageManifest(**event.image_manifest)
 
     @event_sourcing_handler("TokensInjected")
     def on_tokens_injected(self, event: TokensInjectedEvent) -> None:

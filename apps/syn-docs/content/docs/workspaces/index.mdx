@@ -1,0 +1,55 @@
+---
+title: Workspace Images
+description: Production-ready, multi-arch Docker images for isolated agent execution with built-in observability, token compression, and security hardening.
+---
+
+Syntropic137 runs AI agents inside **isolated workspace containers**. Each workspace is a disposable Docker container pre-loaded with everything an agent needs: the agent CLI, language tooling, token compression, and observability hooks.
+
+## What's in a Workspace Image
+
+Workspace images are built by [agentic-primitives](https://github.com/AgentParadise/agentic-primitives) and published to GHCR. The primary image is `ghcr.io/agentparadise/agentic-workspace-claude-cli`.
+
+| Component | Purpose |
+|-----------|---------|
+| Claude CLI | Agent runtime (pinned version) |
+| RTK | Token compression — 53% context reduction on Bash output |
+| Python 3.12 + uv | Hooks, scripts, agentic packages |
+| Node.js 22 LTS | Required for Claude CLI |
+| Rust toolchain | rust-analyzer LSP, cargo builds |
+| LSP servers | pyright, typescript-language-server, rust-analyzer |
+| Plugins | Pre-bundled hooks for git ops, compaction, subagent tracking |
+| GitHub CLI | Repository operations |
+
+## Version Manifest
+
+Every image includes `/opt/agentic/version.json` — a machine-readable manifest that orchestrators read after container creation:
+
+```json
+{
+  "provider": "claude-cli",
+  "provider_version": "1.1.0",
+  "components": {
+    "claude_cli": "2.1.76",
+    "rtk": "0.34.3",
+    "node": "22",
+    "python": "3.12"
+  },
+  "build_commit": "e63b4458",
+  "built_at": "2026-04-04T16:58:05Z"
+}
+```
+
+Syntropic137 records this manifest in the `IsolationStartedEvent`, enabling version-aware dashboards and audit trails.
+
+## Multi-Architecture Support
+
+Images are built for both `linux/amd64` and `linux/arm64`:
+
+- **amd64**: Pre-built static binaries (fast builds)
+- **arm64**: RTK built from source via cargo (supports Mac Mini fleets)
+
+## Next Steps
+
+- [Features](/docs/workspaces/features) — RTK, OTel observability, LSP, plugins
+- [Security](/docs/workspaces/security) — Non-root execution, secret injection, supply chain
+- [Configuration](/docs/workspaces/configuration) — Environment variables, custom images, tool setup

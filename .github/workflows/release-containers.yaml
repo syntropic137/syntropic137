@@ -109,10 +109,8 @@ jobs:
             dockerfile: docker/token-injector/Dockerfile
             context: docker/token-injector
             platforms: linux/amd64,linux/arm64
-          - image: agentic-workspace
-            dockerfile: ""  # Built via build-provider.py (staged context)
-            context: ""
-            platforms: linux/amd64,linux/arm64
+          # agentic-workspace images are built and published by agentic-primitives repo
+          # (ghcr.io/syntropic137/agentic-workspace-claude-cli). See ADR-056.
 
     # NOTE: Matrix jobs cannot have per-entry outputs — digests are passed
     # to the release-assets job via upload/download artifact instead.
@@ -183,45 +181,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # -----------------------------------------------------------------------
-      # Agentic workspace: staged build via build-provider.py
-      # -----------------------------------------------------------------------
-      - name: Set up Python (agentic-workspace only)
-        if: matrix.image == 'agentic-workspace'
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv (agentic-workspace only)
-        if: matrix.image == 'agentic-workspace'
-        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
-
-      - name: Stage agentic-workspace build context
-        if: matrix.image == 'agentic-workspace'
-        working-directory: lib/agentic-primitives
-        run: |
-          # build-provider.py stages files into build/claude-cli/ but we
-          # only want the staging step, not the docker build itself.
-          # Extract the staging logic by running with --help to check, then
-          # just run the full build (it builds locally, we'll rebuild with buildx).
-          uv run scripts/build-provider.py claude-cli --tag agentic-workspace-staged:latest
-          echo "AGENTIC_CONTEXT=lib/agentic-primitives/build/claude-cli" >> "$GITHUB_ENV"
-          echo "AGENTIC_DOCKERFILE=lib/agentic-primitives/build/claude-cli/Dockerfile" >> "$GITHUB_ENV"
-
-      # -----------------------------------------------------------------------
-      # Compute build context and dockerfile for dynamic matrix entries
-      # -----------------------------------------------------------------------
-      - name: Resolve build parameters
-        id: build-params
-        run: |
-          if [[ "${{ matrix.image }}" == "agentic-workspace" ]]; then
-            echo "context=${{ env.AGENTIC_CONTEXT }}" >> "$GITHUB_OUTPUT"
-            echo "dockerfile=${{ env.AGENTIC_DOCKERFILE }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "context=${{ matrix.context }}" >> "$GITHUB_OUTPUT"
-            echo "dockerfile=${{ matrix.dockerfile }}" >> "$GITHUB_OUTPUT"
-          fi
-
-      # -----------------------------------------------------------------------
       # Docker metadata (tags + labels)
       # -----------------------------------------------------------------------
       - name: Extract Docker metadata
@@ -250,8 +209,8 @@ jobs:
         if: ${{ !inputs.dry_run }}
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
         with:
-          context: ${{ steps.build-params.outputs.context }}
-          file: ${{ steps.build-params.outputs.dockerfile }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -485,7 +444,7 @@ jobs:
           echo "### Published Images" >> "$GITHUB_STEP_SUMMARY"
           echo "| Image | Digest |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
-          for IMAGE_NAME in syn-api syn-gateway syn-collector syn-dashboard-ui syn-pulse-ui event-store sidecar-proxy token-injector agentic-workspace; do
+          for IMAGE_NAME in syn-api syn-gateway syn-collector syn-dashboard-ui syn-pulse-ui event-store sidecar-proxy token-injector; do
             DIGEST_FILE="/tmp/digests/${IMAGE_NAME}"
             if [[ -f "$DIGEST_FILE" ]]; then
               DIGEST=$(cat "$DIGEST_FILE")
