@@ -336,7 +336,14 @@ async def list_executions_endpoint(
 
 @router.get("/executions/{execution_id}", response_model=ExecutionDetailResponse)
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
-    """Get detailed information about a workflow execution run."""
+    """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    execution_id = await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
     result = await get_detail(execution_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")

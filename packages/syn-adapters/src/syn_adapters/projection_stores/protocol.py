@@ -110,6 +110,23 @@ class ProjectionStoreProtocol(Protocol):
         """
         ...
 
+    async def get_by_prefix(
+        self, projection: str, prefix: str
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Get all records whose key starts with the given prefix.
+
+        Used for partial-ID resolution: the caller provides a short prefix
+        and this method returns all matching (key, data) pairs.
+
+        Args:
+            projection: Name of the projection
+            prefix: The key prefix to match against
+
+        Returns:
+            List of (key, data) tuples for all matching records
+        """
+        ...
+
     async def get_last_updated(self, projection: str) -> datetime | None:
         """Get the last update timestamp for a projection.
 

@@ -494,7 +494,13 @@ async def get_artifact_endpoint(
     artifact_id: str,
     include_content: bool = Query(True, description="Include artifact content in response"),
 ) -> ArtifactResponse:
-    """Get artifact details by ID."""
+    """Get artifact details by ID (supports partial ID prefix matching)."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    artifact_id = await resolve_or_raise(
+        mgr.store, "artifact_summaries", artifact_id, "Artifact"
+    )
     result = await get_artifact(artifact_id, include_content=include_content)
 
     if isinstance(result, Err):
@@ -529,6 +535,12 @@ async def get_artifact_endpoint(
 @router.get("/{artifact_id}/content", response_model=ArtifactContentResponse)
 async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResponse:
     """Get artifact content only (for large artifacts)."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    artifact_id = await resolve_or_raise(
+        mgr.store, "artifact_summaries", artifact_id, "Artifact"
+    )
     result = await get_artifact(artifact_id, include_content=True)
 
     if isinstance(result, Err):

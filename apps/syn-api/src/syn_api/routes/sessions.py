@@ -412,7 +412,13 @@ def _to_operation_info(op: ToolOperation) -> OperationInfo:
 
 @router.get("/{session_id}", response_model=SessionResponse)
 async def get_session_endpoint(session_id: str) -> SessionResponse:
-    """Get session details by ID."""
+    """Get session details by ID (supports partial ID prefix matching)."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(
+        mgr.store, "session_summaries", session_id, "Session"
+    )
     result = await get_session(session_id)
 
     if isinstance(result, Err):
