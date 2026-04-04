@@ -366,7 +366,11 @@ async def get_repo_sessions(
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
     handler = GetRepoSessionsHandler(store=get_projection_store())
-    results = await handler.handle(GetRepoSessionsQuery(repo_id=repo_id, limit=limit))
+    results = await handler.handle(
+        GetRepoSessionsQuery(
+            repo_id=repo_id, repo_full_name=repo_result.value.full_name, limit=limit
+        )
+    )
     return Ok([r.to_dict() for r in results])
 
 

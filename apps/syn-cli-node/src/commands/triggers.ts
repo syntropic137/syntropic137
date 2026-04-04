@@ -93,14 +93,21 @@ const listCommand: CommandDef = {
   description: "List trigger rules",
   options: {
     repo: { type: "string", short: "r", description: "Filter by repository" },
-    status: { type: "string", short: "s", description: "Filter by status" },
+    status: { type: "string", short: "s", description: "Filter by status (active, paused, deleted)" },
+    all: { type: "boolean", short: "a", description: "Include deleted triggers", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
+    const showAll = parsed.values["all"] === true;
+    const explicitStatus = (parsed.values["status"] as string | undefined) ?? null;
     const params = buildParams({
       repository: (parsed.values["repo"] as string | undefined) ?? null,
-      status: (parsed.values["status"] as string | undefined) ?? null,
+      status: explicitStatus,
     });
-    const items = await apiGetPaginated<Record<string, unknown>>("/triggers", "triggers", { params });
+    let items = await apiGetPaginated<Record<string, unknown>>("/triggers", "triggers", { params });
+    // Hide deleted triggers by default unless --all or explicit --status is set
+    if (!showAll && !explicitStatus) {
+      items = items.filter((t) => String(t["status"] ?? "") !== "deleted");
+    }
     if (items.length === 0) { printDim("No triggers found."); return; }
 
     const table = new Table({ title: "Triggers" });
