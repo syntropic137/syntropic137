@@ -277,7 +277,9 @@ async def get_organization_endpoint(organization_id: str) -> OrganizationSummary
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    organization_id = await resolve_or_raise(mgr.store, "organizations", organization_id, "Organization")
+    organization_id = await resolve_or_raise(
+        mgr.store, "organizations", organization_id, "Organization"
+    )
     result = await get_organization(organization_id)
 
     if isinstance(result, Err):

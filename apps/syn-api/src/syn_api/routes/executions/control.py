@@ -265,7 +265,9 @@ async def get_execution_state_endpoint(execution_id: str) -> StateResponse:
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    execution_id = await resolve_or_raise(mgr.store, "workflow_execution_details", execution_id, "Execution")
+    execution_id = await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
     result = await get_state(execution_id)
 
     state_val = "unknown"

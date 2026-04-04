@@ -441,7 +441,9 @@ async def get_execution_cost_endpoint(
     from syn_api.prefix_resolver import resolve_or_raise
 
     mgr = get_projection_mgr()
-    execution_id = await resolve_or_raise(mgr.store, "workflow_execution_details", execution_id, "Execution")
+    execution_id = await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
     result = await get_execution_cost(execution_id, include_breakdown=include_breakdown)
 
     if isinstance(result, Err):

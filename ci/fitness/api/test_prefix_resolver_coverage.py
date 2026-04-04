@@ -47,9 +47,7 @@ def _repo_root() -> Path:
 
 
 # Regex: match @router.get(".../{some_id}...") or @router.get(".../{some_id}")
-_ROUTE_PATTERN = re.compile(
-    r'@router\.get\(\s*["\']([^"\']*\{(\w+_id)\}[^"\']*)["\']'
-)
+_ROUTE_PATTERN = re.compile(r'@router\.get\(\s*["\']([^"\']*\{(\w+_id)\}[^"\']*)["\']')
 
 _GUIDANCE = (
     "Every GET endpoint with an {entity_id} path parameter must call\n"
@@ -103,9 +101,7 @@ def _find_show_endpoints_missing_resolver() -> list[str]:
 
             if "resolve_or_raise" not in func_body:
                 rel = py_file.relative_to(_repo_root())
-                violations.append(
-                    f"  {rel}:{i}  GET {route_path}  (missing resolve_or_raise)"
-                )
+                violations.append(f"  {rel}:{i}  GET {route_path}  (missing resolve_or_raise)")
 
     return violations
 
