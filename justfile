@@ -1483,9 +1483,7 @@ deps-audit-npm:
     # Scan the same lock files as CI's OSV Scanner job.
     # All Node packages standardized on pnpm — single root lock file.
     for lockfile in \
-        pnpm-lock.yaml \
-        apps/syn-dashboard-ui/pnpm-lock.yaml \
-        apps/syn-pulse-ui/pnpm-lock.yaml; do
+        pnpm-lock.yaml; do
         if [ -f "$lockfile" ]; then
             echo "--- $lockfile ---"
             if command -v osv-scanner &>/dev/null; then
