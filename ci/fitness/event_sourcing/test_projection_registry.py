@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # Known exceptions — projections that intentionally stay out of the coordinator
 _COORDINATOR_EXCEPTIONS = {
     "session_tools",  # Read-only TimescaleDB query interface, no event consumption

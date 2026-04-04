@@ -96,7 +96,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
-    dummy = cast(Any, object())
+    dummy = cast("Any", object())
     return [
         # Orchestration — workflow CRUD and execution views
         WorkflowListProjection(dummy),
