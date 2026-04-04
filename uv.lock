@@ -10,7 +10,6 @@ resolution-markers = [
 members = [
     "syn-adapters",
     "syn-api",
-    "syn-cli",
     "syn-collector",
     "syn-domain",
     "syn-perf",
@@ -1436,7 +1435,7 @@ wheels = [
 
 [[package]]
 name = "syn-adapters"
-version = "0.21.0"
+version = "0.21.1"
 source = { editable = "packages/syn-adapters" }
 dependencies = [
     { name = "agentic-events" },
@@ -1498,7 +1497,7 @@ provides-extras = ["postgres", "claude", "agents", "minio", "all"]
 
 [[package]]
 name = "syn-api"
-version = "0.21.0"
+version = "0.21.1"
 source = { editable = "apps/syn-api" }
 dependencies = [
     { name = "agentic-logging" },
@@ -1528,27 +1527,8 @@ requires-dist = [
 ]
 
 [[package]]
-name = "syn-cli"
-version = "0.21.0"
-source = { editable = "apps/syn-cli" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "rich" },
-    { name = "typer" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.28.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.9.0" },
-    { name = "typer", specifier = ">=0.15.0" },
-]
-
-[[package]]
 name = "syn-collector"
-version = "0.21.0"
+version = "0.21.1"
 source = { editable = "packages/syn-collector" }
 dependencies = [
     { name = "click" },
@@ -1588,7 +1568,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-domain"
-version = "0.21.0"
+version = "0.21.1"
 source = { editable = "packages/syn-domain" }
 dependencies = [
     { name = "agentic-events" },
@@ -1609,7 +1589,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-perf"
-version = "0.21.0"
+version = "0.21.1"
 source = { editable = "packages/syn-perf" }
 dependencies = [
     { name = "rich" },
@@ -1637,7 +1617,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-shared"
-version = "0.21.0"
+version = "0.21.1"
 source = { editable = "packages/syn-shared" }
 dependencies = [
     { name = "pydantic" },
@@ -1656,7 +1636,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-tokens"
-version = "0.21.0"
+version = "0.21.1"
 source = { editable = "packages/syn-tokens" }
 dependencies = [
     { name = "pydantic" },
@@ -1673,7 +1653,7 @@ requires-dist = [
 
 [[package]]
 name = "syntropic137"
-version = "0.21.0"
+version = "0.21.1"
 source = { editable = "." }
 dependencies = [
     { name = "event-sourcing-python" },
@@ -1682,7 +1662,6 @@ dependencies = [
     { name = "sqlmodel" },
     { name = "syn-adapters" },
     { name = "syn-api" },
-    { name = "syn-cli" },
     { name = "syn-collector" },
     { name = "syn-domain" },
     { name = "syn-shared" },
@@ -1708,7 +1687,6 @@ requires-dist = [
     { name = "sqlmodel", specifier = ">=0.0.27" },
     { name = "syn-adapters", editable = "packages/syn-adapters" },
     { name = "syn-api", editable = "apps/syn-api" },
-    { name = "syn-cli", editable = "apps/syn-cli" },
     { name = "syn-collector", editable = "packages/syn-collector" },
     { name = "syn-domain", editable = "packages/syn-domain" },
     { name = "syn-shared", editable = "packages/syn-shared" },

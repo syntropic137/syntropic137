@@ -1,6 +1,6 @@
 {
   "name": "@syntropic137/cli",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "description": "Syntropic137 CLI - Event-sourced workflow engine for AI agents",
   "type": "module",
   "bin": {
