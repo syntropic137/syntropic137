@@ -206,7 +206,7 @@ async def _init_artifact_storage(state: LifecycleState) -> None:
         from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
 
         storage = await get_artifact_storage()
-        await storage._storage.ensure_ready()
+        await storage.ensure_ready()
         logger.info("Artifact storage bucket verified")
     except Exception:
         logger.exception("Failed to initialize artifact storage bucket (degraded mode)")

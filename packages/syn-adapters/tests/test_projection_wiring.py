@@ -23,7 +23,7 @@ from event_sourcing import (
     MemoryCheckpointStore,
 )
 
-from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore, InMemoryProjectionStoreError
 from syn_adapters.projections.trigger_query_projection import (
     NS_DELIVERIES,
     NS_FIRE_RECORDS,
@@ -115,7 +115,7 @@ class TestStoreGuards:
 
         reset_settings()
 
-        with pytest.raises(Exception):  # noqa: B017 — InMemoryProjectionStoreError
+        with pytest.raises(InMemoryProjectionStoreError):
             InMemoryProjectionStore()
 
         # Restore
