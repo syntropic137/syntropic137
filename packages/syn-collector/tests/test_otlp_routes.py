@@ -128,13 +128,14 @@ class TestOtlpLogsEndpoint:
     def test_valid_payload_accepted(
         self, test_client: TestClient, store: InMemoryObservabilityStore
     ) -> None:
-        """Valid OTLP logs should be accepted and stored."""
+        """Valid OTLP logs should be accepted and stored as OTLP_LOG events."""
         response = test_client.post("/v1/logs", json=VALID_LOGS_PAYLOAD)
 
         assert response.status_code == 200
         data = response.json()
         assert data["accepted"] == 1
         assert len(store.events) == 1
+        assert store.events[0]["event_type"] == "otlp_log"
 
     def test_empty_payload(self, test_client: TestClient) -> None:
         """Empty payload should be accepted with 0."""

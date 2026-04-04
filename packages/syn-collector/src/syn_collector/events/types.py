@@ -100,6 +100,9 @@ class EventType(StrEnum):
     COST_RECORDED = "cost_recorded"
     SESSION_COST_FINALIZED = "session_cost_finalized"
 
+    # OTLP-sourced events
+    OTLP_LOG = "otlp_log"
+
 
 class CollectedEvent(BaseModel):
     """A single collected event with deterministic ID.

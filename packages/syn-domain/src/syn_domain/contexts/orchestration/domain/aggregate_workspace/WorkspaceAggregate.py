@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import dataclasses
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -118,6 +119,9 @@ def _build_command_event(
         timed_out=result.timed_out,
         failed_at=datetime.now(UTC),
     )
+
+
+logger = logging.getLogger(__name__)
 
 
 @aggregate("Workspace")
@@ -539,9 +543,13 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
         self._sidecar_enabled = event.proxy_url is not None
         self._status = WorkspaceStatus.READY
 
-        # Reconstruct image manifest from event dict
+        # Reconstruct image manifest from event dict (defensive: missing keys -> skip)
         if event.image_manifest:
-            self._image_manifest = ImageManifest(**event.image_manifest)
+            try:
+                self._image_manifest = ImageManifest(**event.image_manifest)
+            except (TypeError, KeyError):
+                logger.warning("Malformed image_manifest in event, skipping")
+                self._image_manifest = None
 
     @event_sourcing_handler("TokensInjected")
     def on_tokens_injected(self, event: TokensInjectedEvent) -> None:

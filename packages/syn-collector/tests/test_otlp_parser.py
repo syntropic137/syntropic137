@@ -158,6 +158,15 @@ class TestParseOtlpMetrics:
         ids2 = [e.event_id for e in events2]
         assert ids1 == ids2
 
+    def test_no_event_id_collisions_same_timestamp(self) -> None:
+        """Datapoints with same timestamp but different index get unique IDs."""
+        events = parse_otlp_metrics(SAMPLE_METRICS_PAYLOAD)
+
+        # Two token usage events share timestamp 1712250000000000000
+        token_events = [e for e in events if e.event_type == EventType.TOKEN_USAGE]
+        assert len(token_events) == 2
+        assert token_events[0].event_id != token_events[1].event_id
+
     def test_snake_case_keys(self) -> None:
         """Should handle snake_case OTLP keys (resource_metrics vs resourceMetrics)."""
         snake_payload = {
@@ -191,11 +200,12 @@ class TestParseOtlpLogs:
     """Tests for parse_otlp_logs."""
 
     def test_extracts_log_records(self) -> None:
-        """Should extract log records as events."""
+        """Should extract log records as OTLP_LOG events."""
         events = parse_otlp_logs(SAMPLE_LOGS_PAYLOAD)
 
         assert len(events) == 1
         event = events[0]
+        assert event.event_type == EventType.OTLP_LOG
         assert event.session_id == "sess-abc123"
         assert event.data["body"] == "Tool execution completed: Bash"
         assert event.data["severity"] == "INFO"

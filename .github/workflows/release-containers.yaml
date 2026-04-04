@@ -110,7 +110,7 @@ jobs:
             context: docker/token-injector
             platforms: linux/amd64,linux/arm64
           # agentic-workspace images are built and published by agentic-primitives repo
-          # (ghcr.io/syntropic137/agentic-workspace-claude-cli). See ADR-056.
+          # (ghcr.io/agentparadise/agentic-workspace-claude-cli). See ADR-056.
 
     # NOTE: Matrix jobs cannot have per-entry outputs — digests are passed
     # to the release-assets job via upload/download artifact instead.

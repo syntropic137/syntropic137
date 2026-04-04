@@ -87,8 +87,8 @@ class ImageManifest:
     """Version manifest from a workspace image (/opt/agentic/version.json).
 
     Read from the container after creation to capture provenance.
-    All fields are optional for backwards compatibility with older images
-    that don't include version.json.
+    The manifest itself is optional (None when unavailable), but when
+    present, provider, provider_version, and components are required.
     """
 
     provider: str  # e.g. "claude-cli"

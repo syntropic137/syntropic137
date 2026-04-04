@@ -2,7 +2,7 @@
 
 All workspace image names, tags, and GHCR paths are defined here. No other module
 should hardcode image strings. To add a new provider image, add an entry to
-WorkspaceImageProvider and register it in WORKSPACE_IMAGES.
+WorkspaceImageProvider.
 
 See ADR-056: Workspace Tooling Architecture
 """
@@ -49,10 +49,10 @@ def workspace_image_ref(
         provider: Which provider image to reference.
         tag: Image tag (version or 'latest').
         registry: Container registry (default: ghcr.io).
-        owner: Registry owner/org (default: syntropic137).
+        owner: Registry owner/org (default: agentparadise).
 
     Returns:
-        Full image reference, e.g. 'ghcr.io/syntropic137/agentic-workspace-claude-cli:latest'
+        Full image reference, e.g. 'ghcr.io/agentparadise/agentic-workspace-claude-cli:latest'
     """
     return f"{registry}/{owner}/{IMAGE_PREFIX}-{provider.value}:{tag}"
 
