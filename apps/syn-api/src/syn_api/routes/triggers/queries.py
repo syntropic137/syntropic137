@@ -32,6 +32,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/triggers", tags=["triggers"])
 
 
+async def _resolve_trigger_id(trigger_id: str) -> str:
+    """Resolve a (possibly partial) trigger ID against the trigger store.
+
+    Triggers live in their own store, not in the projection store,
+    so the generic ``resolve_or_raise`` (projection-based) doesn't work.
+    """
+    store = get_trigger_store()
+
+    # Fast path: exact match
+    exact = await store.get(trigger_id)
+    if exact is not None:
+        return trigger_id
+
+    # Prefix scan
+    all_triggers = await store.list_all()
+    matches = [t.trigger_id for t in all_triggers if t.trigger_id.startswith(trigger_id)]
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        candidates = ", ".join(matches[:5])
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ambiguous Trigger prefix '{trigger_id}': {candidates}",
+        )
+    raise HTTPException(status_code=404, detail=f"Trigger not found: {trigger_id}")
+
+
 # ---------------------------------------------------------------------------
 # Service functions (importable by tests)
 # ---------------------------------------------------------------------------
@@ -217,11 +245,7 @@ async def get_all_history_endpoint(limit: int = 50) -> TriggerHistoryListRespons
 @router.get("/{trigger_id}", response_model=TriggerDetail)
 async def get_trigger_endpoint(trigger_id: str) -> TriggerDetail:
     """Get trigger details."""
-    from syn_api._wiring import get_projection_mgr
-    from syn_api.prefix_resolver import resolve_or_raise
-
-    mgr = get_projection_mgr()
-    trigger_id = await resolve_or_raise(mgr.store, "trigger_rules", trigger_id, "Trigger")
+    trigger_id = await _resolve_trigger_id(trigger_id)
     result = await get_trigger(trigger_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Trigger not found: {trigger_id}")
@@ -235,11 +259,7 @@ async def get_trigger_history_endpoint(
     limit: int = 50,
 ) -> TriggerHistoryResponse:
     """Get execution history for a trigger."""
-    from syn_api._wiring import get_projection_mgr
-    from syn_api.prefix_resolver import resolve_or_raise
-
-    mgr = get_projection_mgr()
-    trigger_id = await resolve_or_raise(mgr.store, "trigger_rules", trigger_id, "Trigger")
+    trigger_id = await _resolve_trigger_id(trigger_id)
     result = await get_trigger_history(trigger_id=trigger_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)

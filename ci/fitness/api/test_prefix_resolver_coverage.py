@@ -34,6 +34,8 @@ import pytest
 _EXEMPT: set[tuple[str, str]] = {
     # Trigger commands: trigger_id comes from domain events, not user input
     ("commands", "trigger_id"),
+    # Trigger queries: use _resolve_trigger_id (trigger store, not projection store)
+    ("queries", "trigger_id"),
     # SSE streams: typically opened via dashboard links with full IDs
     ("sse", "execution_id"),
     # Nested execution path: workflow_id is pre-resolved by the parent route
