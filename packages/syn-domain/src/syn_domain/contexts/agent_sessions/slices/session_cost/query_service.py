@@ -46,6 +46,7 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
 ORDER BY time DESC
+LIMIT $2
 """
 
 # Fallback: list sessions from token_usage events (for in-progress sessions
@@ -109,15 +110,18 @@ class SessionCostQueryService:
         query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
         return await query.calculate(session_id)
 
-    async def list_all(self) -> list[SessionCost]:
+    async def list_all(self, limit: int = 500) -> list[SessionCost]:
         """List cost data for all sessions.
 
         Queries TimescaleDB directly, combining authoritative session_summary
         data with in-progress token_usage aggregation for sessions that
         haven't completed yet.
+
+        Args:
+            limit: Maximum number of results (pushed down to SQL).
         """
         async with self._pool.acquire() as conn:
-            summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY)
+            summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY, limit)
             summarized_session_ids = {row["session_id"] for row in summary_rows}  # type: ignore[index]
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
             tool_counts = await self._fetch_tool_counts(conn)

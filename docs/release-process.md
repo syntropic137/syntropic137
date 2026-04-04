@@ -203,7 +203,7 @@ The `scripts/bump_version.py` script updates exactly these 12 files:
 9. `apps/syn-cli-node/package.json`
 10. `apps/syn-dashboard-ui/package.json`
 11. `apps/syn-docs/package.json`
-13. `apps/syn-pulse-ui/package.json`
+12. `apps/syn-pulse-ui/package.json`
 
 **Not included** (independent versioning):
 - `lib/agentic-primitives/` — separate project

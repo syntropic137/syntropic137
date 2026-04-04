@@ -46,6 +46,7 @@ WHERE event_type = $1
   AND execution_id IS NOT NULL
 GROUP BY execution_id
 ORDER BY MAX(time) DESC
+LIMIT $2
 """
 
 # Fallback: list executions from token_usage (in-progress, no summary yet)
@@ -128,15 +129,18 @@ class ExecutionCostQueryService:
         query = TimescaleExecutionCostQuery(self._pool, self._cost_calculator)
         return await query.calculate(execution_id)
 
-    async def list_all(self) -> list[ExecutionCost]:
+    async def list_all(self, limit: int = 500) -> list[ExecutionCost]:
         """List cost data for all executions.
 
         Queries TimescaleDB directly, combining authoritative session_summary
         data with in-progress token_usage aggregation for executions that
         haven't completed yet.
+
+        Args:
+            limit: Maximum number of results (pushed down to SQL).
         """
         async with self._pool.acquire() as conn:
-            summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY)
+            summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY, limit)
             summarized_exec_ids = {row["execution_id"] for row in summary_rows}  # type: ignore[index]
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
             tool_counts = await self._fetch_tool_counts(conn)

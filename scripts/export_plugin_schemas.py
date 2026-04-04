@@ -127,9 +127,11 @@ def check_staleness(schemas: dict[str, str]) -> bool:
             stale = True
 
     # Detect orphaned schema files not in the registry.
+    # Static schemas maintained outside the registry (see TODO(#532) in SCHEMA_REGISTRY).
+    static_schemas = {"plugin-manifest.schema.json", "marketplace.schema.json"}
     if SCHEMA_DIR.exists():
         for path in sorted(SCHEMA_DIR.glob("*.schema.json")):
-            if path.name not in schemas:
+            if path.name not in schemas and path.name not in static_schemas:
                 print(f"  ORPHAN: {path.relative_to(REPO_ROOT)} (not in SCHEMA_REGISTRY)")
                 stale = True
 

@@ -117,22 +117,20 @@ async def list_session_costs(
     Uses SessionCostQueryService (TimescaleDB) for reads. See #532.
 
     Args:
-        execution_id: Optional filter by execution ID. Applied client-side because
-            TimescaleDB stores execution_id in JSONB — a DB-level filter would
-            require a full table scan regardless. Filtering after fetch is equivalent.
-        limit: Maximum results to return.
+        execution_id: Optional filter by execution ID. Applied client-side
+            because execution_id is a grouping dimension, not a primary filter
+            in the aggregate queries. For small result sets this is adequate.
+        limit: Maximum results to return (pushed down to SQL).
         auth: Optional authentication context.
     """
     await ensure_connected()
     try:
         query_svc = get_session_cost_query()
-        all_costs = await query_svc.list_all()
+        all_costs = await query_svc.list_all(limit=limit)
 
-        # Client-side filter by execution_id (see docstring for rationale)
         costs = (
             [c for c in all_costs if c.execution_id == execution_id] if execution_id else all_costs
         )
-        costs = costs[:limit]
 
         return Ok(
             [
@@ -228,7 +226,7 @@ async def list_execution_costs(
     await ensure_connected()
     try:
         query_svc = get_execution_cost_query()
-        costs = await query_svc.list_all()
+        costs = await query_svc.list_all(limit=limit)
 
         return Ok(
             [
