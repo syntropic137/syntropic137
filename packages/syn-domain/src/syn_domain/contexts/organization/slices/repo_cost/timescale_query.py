@@ -10,6 +10,7 @@ Pattern follows TimescaleSessionCostQuery from the session_cost slice.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -42,6 +43,15 @@ GROUP BY execution_id
 """
 
 
+@dataclass
+class _ExecutionCostEntry:
+    """Cost data for a single execution."""
+
+    total_input: int
+    total_output: int
+    total_cost: Decimal
+
+
 class TimescaleRepoCostQuery:
     """Calculates per-repo cost from TimescaleDB via repo-execution correlation.
 
@@ -62,6 +72,69 @@ class TimescaleRepoCostQuery:
         )
         return [c["execution_id"] for c in correlations if c.get("execution_id")]
 
+    async def _query_summary_costs(
+        self, conn: Any, execution_ids: list[str]
+    ) -> dict[str, _ExecutionCostEntry]:
+        """Query session_summary costs grouped by execution_id."""
+        rows = await conn.fetch(_EXECUTION_COSTS_QUERY, SESSION_SUMMARY, execution_ids)
+        result: dict[str, _ExecutionCostEntry] = {}
+        for row in rows:
+            if row["total_input"] is not None:
+                result[row["execution_id"]] = _ExecutionCostEntry(
+                    total_input=row["total_input"] or 0,
+                    total_output=row["total_output"] or 0,
+                    total_cost=Decimal(str(row["total_cost"]))
+                    if row["total_cost"]
+                    else Decimal("0"),
+                )
+        return result
+
+    async def _query_fallback_costs(
+        self, conn: Any, execution_ids: list[str]
+    ) -> dict[str, _ExecutionCostEntry]:
+        """Query token_usage costs as fallback for missing summary data."""
+        rows = await conn.fetch(_EXECUTION_COSTS_FALLBACK_QUERY, TOKEN_USAGE, execution_ids)
+        result: dict[str, _ExecutionCostEntry] = {}
+        for row in rows:
+            if row["total_input"] is not None:
+                result[row["execution_id"]] = _ExecutionCostEntry(
+                    total_input=row["total_input"] or 0,
+                    total_output=row["total_output"] or 0,
+                    total_cost=Decimal("0"),
+                )
+        return result
+
+    def _aggregate_repo_cost(
+        self,
+        repo_full_name: str,
+        execution_ids: list[str],
+        exec_costs: dict[str, _ExecutionCostEntry],
+    ) -> RepoCost | None:
+        """Aggregate execution costs into a single RepoCost for a repo."""
+        total_cost = Decimal("0")
+        total_input = 0
+        total_output = 0
+        execution_count = 0
+        for eid in execution_ids:
+            if eid in exec_costs:
+                entry = exec_costs[eid]
+                total_input += entry.total_input
+                total_output += entry.total_output
+                total_cost += entry.total_cost
+                execution_count += 1
+
+        if execution_count == 0:
+            return None
+
+        return RepoCost(
+            repo_full_name=repo_full_name,
+            total_cost_usd=total_cost,
+            total_tokens=total_input + total_output,
+            total_input_tokens=total_input,
+            total_output_tokens=total_output,
+            execution_count=execution_count,
+        )
+
     async def calculate_for_repo(self, repo_full_name: str) -> RepoCost:
         """Calculate cost for a single repo from TimescaleDB.
 
@@ -75,41 +148,41 @@ class TimescaleRepoCostQuery:
             return RepoCost(repo_full_name=repo_full_name)
 
         async with self._pool.acquire() as conn:
-            # Try session_summary aggregation first
-            rows = await conn.fetch(_EXECUTION_COSTS_QUERY, SESSION_SUMMARY, execution_ids)
+            exec_costs = await self._query_summary_costs(conn, execution_ids)
+            if not exec_costs:
+                exec_costs = await self._query_fallback_costs(conn, execution_ids)
 
-            total_cost = Decimal("0")
-            total_input = 0
-            total_output = 0
-            execution_count = 0
+        result = self._aggregate_repo_cost(repo_full_name, execution_ids, exec_costs)
+        return result or RepoCost(repo_full_name=repo_full_name)
 
-            if rows:
-                for row in rows:
-                    if row["total_input"] is not None:
-                        total_input += row["total_input"] or 0
-                        total_output += row["total_output"] or 0
-                        if row["total_cost"] is not None:
-                            total_cost += Decimal(str(row["total_cost"]))
-                        execution_count += 1
-            else:
-                # Fallback to token_usage aggregation
-                fallback_rows = await conn.fetch(
-                    _EXECUTION_COSTS_FALLBACK_QUERY, TOKEN_USAGE, execution_ids
-                )
-                for row in fallback_rows:
-                    if row["total_input"] is not None:
-                        total_input += row["total_input"] or 0
-                        total_output += row["total_output"] or 0
-                        execution_count += 1
+    async def _get_all_repo_executions(self) -> dict[str, list[str]]:
+        """Load all repo-to-execution mappings from the correlation store."""
+        from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 
-            return RepoCost(
-                repo_full_name=repo_full_name,
-                total_cost_usd=total_cost,
-                total_tokens=total_input + total_output,
-                total_input_tokens=total_input,
-                total_output_tokens=total_output,
-                execution_count=execution_count,
-            )
+        all_correlations = await self._store.get_all(REPO_CORRELATION)
+        if not all_correlations:
+            return {}
+
+        repo_executions: dict[str, list[str]] = {}
+        for c in all_correlations:
+            repo = c.get("repo_full_name", "")
+            exec_id = c.get("execution_id", "")
+            if repo and exec_id:
+                repo_executions.setdefault(repo, []).append(exec_id)
+        return repo_executions
+
+    async def _query_all_exec_costs(
+        self, conn: Any, all_execution_ids: list[str]
+    ) -> dict[str, _ExecutionCostEntry]:
+        """Query costs for all executions, with fallback for missing summaries."""
+        exec_costs = await self._query_summary_costs(conn, all_execution_ids)
+
+        missing_ids = [eid for eid in all_execution_ids if eid not in exec_costs]
+        if missing_ids:
+            fallback = await self._query_fallback_costs(conn, missing_ids)
+            exec_costs.update(fallback)
+
+        return exec_costs
 
     async def calculate_all(self) -> list[RepoCost]:
         """Calculate costs for all repos that have correlated executions.
@@ -117,80 +190,19 @@ class TimescaleRepoCostQuery:
         Returns:
             List of RepoCost for all repos with execution data.
         """
-        from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
-
-        all_correlations = await self._store.get_all(REPO_CORRELATION)
-        if not all_correlations:
-            return []
-
-        # Group execution IDs by repo
-        repo_executions: dict[str, list[str]] = {}
-        for c in all_correlations:
-            repo = c.get("repo_full_name", "")
-            exec_id = c.get("execution_id", "")
-            if repo and exec_id:
-                repo_executions.setdefault(repo, []).append(exec_id)
-
+        repo_executions = await self._get_all_repo_executions()
         if not repo_executions:
             return []
 
-        # Query all execution costs in one batch
         all_execution_ids = [eid for eids in repo_executions.values() for eid in eids]
 
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(_EXECUTION_COSTS_QUERY, SESSION_SUMMARY, all_execution_ids)
+            exec_costs = await self._query_all_exec_costs(conn, all_execution_ids)
 
-            # Build per-execution cost map
-            exec_costs: dict[str, dict[str, Any]] = {}
-            for row in rows:
-                if row["total_input"] is not None:
-                    exec_costs[row["execution_id"]] = {
-                        "total_input": row["total_input"] or 0,
-                        "total_output": row["total_output"] or 0,
-                        "total_cost": Decimal(str(row["total_cost"]))
-                        if row["total_cost"]
-                        else Decimal("0"),
-                    }
-
-            # If no session_summary data, try token_usage
-            missing_ids = [eid for eid in all_execution_ids if eid not in exec_costs]
-            if missing_ids:
-                fallback_rows = await conn.fetch(
-                    _EXECUTION_COSTS_FALLBACK_QUERY, TOKEN_USAGE, missing_ids
-                )
-                for row in fallback_rows:
-                    if row["total_input"] is not None:
-                        exec_costs[row["execution_id"]] = {
-                            "total_input": row["total_input"] or 0,
-                            "total_output": row["total_output"] or 0,
-                            "total_cost": Decimal("0"),
-                        }
-
-        # Aggregate per repo
         results: list[RepoCost] = []
         for repo, eids in repo_executions.items():
-            total_cost = Decimal("0")
-            total_input = 0
-            total_output = 0
-            execution_count = 0
-            for eid in eids:
-                if eid in exec_costs:
-                    ec = exec_costs[eid]
-                    total_input += ec["total_input"]
-                    total_output += ec["total_output"]
-                    total_cost += ec["total_cost"]
-                    execution_count += 1
-
-            if execution_count > 0:
-                results.append(
-                    RepoCost(
-                        repo_full_name=repo,
-                        total_cost_usd=total_cost,
-                        total_tokens=total_input + total_output,
-                        total_input_tokens=total_input,
-                        total_output_tokens=total_output,
-                        execution_count=execution_count,
-                    )
-                )
+            cost = self._aggregate_repo_cost(repo, eids, exec_costs)
+            if cost is not None:
+                results.append(cost)
 
         return results

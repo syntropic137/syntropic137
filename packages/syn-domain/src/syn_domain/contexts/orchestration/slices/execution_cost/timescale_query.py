@@ -10,8 +10,12 @@ Pattern follows TimescaleSessionCostQuery from the session_cost slice.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
@@ -93,6 +97,24 @@ GROUP BY data->>'model'
 """
 
 
+@dataclass
+class _TokenData:
+    """Intermediate token aggregation from a DB query row."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_creation: int
+    cache_read: int
+    session_count: int
+    session_ids: list[str]
+    started_at: datetime | None
+    end_at: datetime | None
+    sdk_cost: Decimal | None
+    duration_ms_raw: int
+    total_turns: int
+    from_summary: bool
+
+
 class TimescaleExecutionCostQuery:
     """Calculates execution cost directly from TimescaleDB observations.
 
@@ -104,6 +126,77 @@ class TimescaleExecutionCostQuery:
         self._pool = pool
         self._cost_calculator = cost_calculator or CostCalculator()
 
+    async def _query_session_summaries(self, conn: Any, execution_id: str) -> Any:
+        """Query session_summary events for authoritative totals."""
+        return await conn.fetchrow(_SESSION_SUMMARY_QUERY, execution_id, SESSION_SUMMARY)
+
+    async def _query_token_usage(self, conn: Any, execution_id: str) -> Any:
+        """Query token_usage events as fallback for in-progress executions."""
+        return await conn.fetchrow(_TOKEN_USAGE_FALLBACK_QUERY, execution_id, TOKEN_USAGE)
+
+    def _extract_token_data(self, row: Any, from_summary: bool) -> _TokenData:
+        """Extract token counts and metadata from a query row."""
+        end_key = "completed_at" if from_summary else "last_observation"
+        return _TokenData(
+            input_tokens=row["total_input"] or 0,
+            output_tokens=row["total_output"] or 0,
+            cache_creation=row.get("cache_creation") or 0,
+            cache_read=row.get("cache_read") or 0,
+            session_count=row.get("session_count") or 0,
+            session_ids=list(row.get("session_ids") or []),
+            started_at=row.get("started_at"),
+            end_at=row.get(end_key),
+            sdk_cost=Decimal(str(row["sdk_cost"]))
+            if from_summary and row.get("sdk_cost") is not None
+            else None,
+            duration_ms_raw=int(row.get("duration_ms_val") or 0) if from_summary else 0,
+            total_turns=int(row.get("total_turns") or 0) if from_summary else 0,
+            from_summary=from_summary,
+        )
+
+    def _calculate_cost(self, data: _TokenData) -> Decimal:
+        """Calculate total cost from token data, preferring SDK cost."""
+        if data.sdk_cost is not None:
+            return data.sdk_cost
+        return self._cost_calculator.calculate_token_cost(
+            input_tokens=data.input_tokens,
+            output_tokens=data.output_tokens,
+            cache_creation=data.cache_creation,
+            cache_read=data.cache_read,
+        )
+
+    def _calculate_duration(self, data: _TokenData) -> float:
+        """Calculate duration in ms from token data."""
+        if data.from_summary:
+            return float(data.duration_ms_raw)
+        if data.started_at and data.end_at:
+            return (data.end_at - data.started_at).total_seconds() * 1000
+        return 0
+
+    async def _query_turn_count(self, conn: Any, execution_id: str, data: _TokenData) -> int:
+        """Get turn count from summary data or token_usage event count."""
+        if data.from_summary:
+            return data.total_turns
+        return await conn.fetchval(_TURN_COUNT_QUERY, execution_id, TOKEN_USAGE) or 0
+
+    async def _query_cost_by_phase(self, conn: Any, execution_id: str) -> dict[str, Decimal]:
+        """Query per-phase cost breakdown from session_summary events."""
+        phase_rows = await conn.fetch(_COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY)
+        return {
+            row["phase_id"]: Decimal(str(row["phase_cost"]))
+            for row in phase_rows
+            if row["phase_id"] and row["phase_cost"] is not None
+        }
+
+    async def _query_cost_by_model(self, conn: Any, execution_id: str) -> dict[str, Decimal]:
+        """Query per-model cost breakdown from session_summary events."""
+        model_rows = await conn.fetch(_COST_BY_MODEL_QUERY, execution_id, SESSION_SUMMARY)
+        return {
+            row["model"]: Decimal(str(row["model_cost"]))
+            for row in model_rows
+            if row["model"] and row["model_cost"] is not None
+        }
+
     async def calculate(self, execution_id: str) -> ExecutionCost | None:
         """Calculate execution cost from TimescaleDB.
 
@@ -114,104 +207,46 @@ class TimescaleExecutionCostQuery:
             ExecutionCost with aggregated metrics, or None if no data found.
         """
         async with self._pool.acquire() as conn:
-            # Try session_summary first (authoritative totals)
-            summary_row = await conn.fetchrow(_SESSION_SUMMARY_QUERY, execution_id, SESSION_SUMMARY)
-
+            summary_row = await self._query_session_summaries(conn, execution_id)
             has_summary = summary_row is not None and summary_row["total_input"] is not None
 
             if has_summary:
                 token_row = summary_row
             else:
-                # Fall back to token_usage aggregation
-                token_row = await conn.fetchrow(
-                    _TOKEN_USAGE_FALLBACK_QUERY, execution_id, TOKEN_USAGE
-                )
+                token_row = await self._query_token_usage(conn, execution_id)
 
             if token_row is None or token_row["total_input"] is None:
                 return None
 
-            # Extract token counts
-            input_tokens = token_row["total_input"] or 0
-            output_tokens = token_row["total_output"] or 0
-            cache_creation = token_row.get("cache_creation") or 0
-            cache_read = token_row.get("cache_read") or 0
-
-            # Calculate cost
-            if has_summary and summary_row["sdk_cost"] is not None:
-                total_cost = Decimal(str(summary_row["sdk_cost"]))
-            else:
-                total_cost = self._cost_calculator.calculate_token_cost(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cache_creation=cache_creation,
-                    cache_read=cache_read,
-                )
-
-            # Tool count
-            tool_count = await conn.fetchval(
-                _TOOL_COUNT_QUERY, execution_id, TOOL_EXECUTION_COMPLETED
+            data = self._extract_token_data(token_row, from_summary=has_summary)
+            total_cost = self._calculate_cost(data)
+            duration_ms = self._calculate_duration(data)
+            tool_count: int = (
+                await conn.fetchval(_TOOL_COUNT_QUERY, execution_id, TOOL_EXECUTION_COMPLETED) or 0
             )
+            turn_count = await self._query_turn_count(conn, execution_id, data)
 
-            # Turn count (from token_usage events, each = one turn)
-            turn_count: int
-            if has_summary:
-                turn_count = int(summary_row.get("total_turns") or 0)
-            else:
-                turn_count = await conn.fetchval(_TURN_COUNT_QUERY, execution_id, TOKEN_USAGE) or 0
-
-            # Session info
-            session_ids: list[str] = list(token_row.get("session_ids") or [])
-            session_count: int = token_row.get("session_count") or 0
-
-            # Duration
-            duration_ms: float = 0
-            if has_summary:
-                duration_ms = float(summary_row.get("duration_ms_val") or 0)
-            else:
-                started_at = token_row.get("started_at")
-                last_obs = token_row.get("last_observation")
-                if started_at and last_obs:
-                    duration_ms = (last_obs - started_at).total_seconds() * 1000
-
-            # Timestamps
-            started_at = token_row.get("started_at")
-            completed_at = (
-                summary_row.get("completed_at")
-                if has_summary
-                else token_row.get("last_observation")
-            )
-
-            # Per-phase breakdown
             cost_by_phase: dict[str, Decimal] = {}
-            if has_summary:
-                phase_rows = await conn.fetch(_COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY)
-                for row in phase_rows:
-                    if row["phase_id"] and row["phase_cost"] is not None:
-                        cost_by_phase[row["phase_id"]] = Decimal(str(row["phase_cost"]))
-
-            # Per-model breakdown
             cost_by_model: dict[str, Decimal] = {}
             if has_summary:
-                model_rows = await conn.fetch(_COST_BY_MODEL_QUERY, execution_id, SESSION_SUMMARY)
-                for row in model_rows:
-                    if row["model"] and row["model_cost"] is not None:
-                        cost_by_model[row["model"]] = Decimal(str(row["model_cost"]))
+                cost_by_phase = await self._query_cost_by_phase(conn, execution_id)
+                cost_by_model = await self._query_cost_by_model(conn, execution_id)
 
             return ExecutionCost(
                 execution_id=execution_id,
-                session_count=session_count,
-                session_ids=session_ids,
+                session_count=data.session_count,
+                session_ids=data.session_ids,
                 total_cost_usd=total_cost,
                 token_cost_usd=total_cost,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_creation_tokens=cache_creation,
-                cache_read_tokens=cache_read,
-                tool_calls=tool_count or 0,
+                input_tokens=data.input_tokens,
+                output_tokens=data.output_tokens,
+                cache_creation_tokens=data.cache_creation,
+                cache_read_tokens=data.cache_read,
+                tool_calls=tool_count,
                 turns=turn_count,
                 duration_ms=duration_ms,
                 cost_by_phase=cost_by_phase,
                 cost_by_model=cost_by_model,
-                started_at=started_at,
-                completed_at=completed_at,
+                started_at=data.started_at,
+                completed_at=data.end_at,
             )
