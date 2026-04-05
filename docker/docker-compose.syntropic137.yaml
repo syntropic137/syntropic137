@@ -171,6 +171,7 @@ services:
         max-file: "3"
     networks:
     - syn-internal
+    - agent-net  # Workspace containers push OTLP metrics here (receive-only, no secrets)
     image: ghcr.io/syntropic137/syn-collector:${SYN_VERSION:-latest}
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
