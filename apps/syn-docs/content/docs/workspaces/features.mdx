@@ -32,34 +32,51 @@ Workspace images export standard OTel metrics via OTLP, providing real-time toke
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `claude_code.token.usage` | Gauge | Token count per turn (input, output, cache) |
-| `claude_code.cost.usage` | Gauge | Cumulative cost in USD |
+| `claude_code.token.usage` | Counter | Token count per turn (input, output, cacheRead, cacheCreation) |
+| `claude_code.cost.usage` | Counter | Cumulative cost in USD |
+| `claude_code.session.count` | Counter | Session counter |
+| `claude_code.commit.count` | Counter | Git commit counter |
+
+### Exported Log Events
+
+| Event | Description |
+|-------|-------------|
+| `claude_code.api_request` | Per-API-call cost, model, cache tokens, duration, speed mode |
+| `claude_code.api_error` | API error with status code and retry count |
+| `claude_code.tool_result` | Tool execution completion (name, duration, success) |
+| `claude_code.user_prompt` | User prompt submitted (length only, no content by default) |
 
 ### Configuration
 
-OTel export is enabled by default. The image declares the contract; orchestrators provide the collector endpoint:
+OTel export is enabled by default in the image. The orchestrator auto-injects the collector endpoint when `COLLECTOR_URL` is configured:
 
 ```bash
-# Set by the image (defaults)
+# Set by the image (defaults — no user action needed)
 CLAUDE_CODE_ENABLE_TELEMETRY=1
 OTEL_METRICS_EXPORTER=otlp
 OTEL_LOGS_EXPORTER=otlp
 OTEL_METRIC_EXPORT_INTERVAL=5000  # 5s granularity
 
-# Set by orchestrator at runtime
-OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:8138
+# Auto-injected by orchestrator when COLLECTOR_URL is set
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:8080
 ```
 
 If no endpoint is provided, OTel export silently no-ops (no crash, no side effects).
 
 ### Two-Channel Observability
 
-Workspace observability uses two complementary channels:
+Workspace observability uses two complementary channels. They capture different data — neither can fully replace the other:
 
-1. **Plugin hooks** (JSONL to stderr) — Custom events: git operations, context compaction, subagent lifecycle
-2. **Native OTel** (OTLP push) — Standard metrics: tokens, cost, tool timing
+| Captured by Plugin Hooks only | Captured by OTel only | Captured by both |
+|-------------------------------|----------------------|-----------------|
+| Subagent lifecycle | Per-API-call cost + model | Token usage totals |
+| Session end event | API errors (status code, retries) | Cost totals |
+| Context compaction | Cache token breakdown | Tool completion |
+| Git branch / merge / push | Active time tracking | User prompts |
+| Tool start events | `prompt.id` correlation | |
+| Permission requests | | |
 
-Both channels flow through syn-collector into the observability pipeline.
+See the [Observability guide](/docs/guide/observability) for the full event pipeline and how to verify both channels are flowing.
 
 ## LSP Code Intelligence
 
