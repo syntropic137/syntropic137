@@ -10,8 +10,10 @@ All value objects are immutable (frozen dataclasses) per DDD principles.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from enum import StrEnum
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
@@ -19,6 +21,10 @@ from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import datetime
+
+# Register MappingProxyType for copy/pickle support — required because
+# Pydantic model_copy() and event sourcing deepcopy individual fields.
+copy._deepcopy_dispatch[MappingProxyType] = lambda x, _memo: MappingProxyType(dict(x))  # type: ignore[attr-defined]
 
 
 # =============================================================================
@@ -95,12 +101,44 @@ class ImageManifest:
 
     provider: str = ""  # e.g. "claude-cli"
     provider_version: str = ""  # e.g. "1.1.0"
-    components: dict[str, str] = field(
+    components: Mapping[str, str] = field(
         default_factory=dict
     )  # e.g. {"claude_cli": "2.1.76", "rtk": "0.34.3"}
     build_commit: str = ""  # Short SHA of the build commit
     built_at: str = ""  # ISO 8601 timestamp
     manifest_digest: str = ""  # Hash of the manifest.yaml used for the build
+
+    def __post_init__(self) -> None:
+        # Enforce deep immutability — MappingProxyType prevents mutation.
+        # Register pickle/copy support since MappingProxyType is not natively
+        # picklable (required for event sourcing aggregate serialization).
+        object.__setattr__(self, "components", MappingProxyType(self.components))
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> ImageManifest:
+        return ImageManifest(
+            provider=self.provider,
+            provider_version=self.provider_version,
+            components=dict(self.components),
+            build_commit=self.build_commit,
+            built_at=self.built_at,
+            manifest_digest=self.manifest_digest,
+        )
+
+    def __copy__(self) -> ImageManifest:
+        return self  # frozen — shallow copy is identity
+
+    def __reduce__(self) -> tuple[type, tuple[str, str, dict[str, str], str, str, str]]:
+        return (
+            self.__class__,
+            (
+                self.provider,
+                self.provider_version,
+                dict(self.components),
+                self.build_commit,
+                self.built_at,
+                self.manifest_digest,
+            ),
+        )
 
 
 @dataclass(frozen=True)
