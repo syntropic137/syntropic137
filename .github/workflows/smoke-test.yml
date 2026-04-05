@@ -32,10 +32,9 @@ on:
       - main
       - release
       - 'release/**'
-    paths:
-      - 'docker/**'
-      - 'infra/docker/**'
-      - '.github/workflows/smoke-test.yml'
+    # No paths filter — every push to main/release gets a smoke test result.
+    # Required for release branch protection (smoke test must pass before
+    # main → release PR can merge).
   # Disabled: ~4 min Docker build is a CI/CD bottleneck for PR iteration.
   # Tier 1 fitness tests catch config drift on every push. This smoke test
   # runs post-merge as a safety net before release.
@@ -162,11 +161,14 @@ jobs:
           # The envoy image is minimal (no curl/wget). Use a lightweight
           # container on the agent-net network to verify DNS + HTTP connectivity.
           #
-          # Filter by compose project name to avoid grabbing a stale agent-net
-          # from a different project (e.g. dev stack).
-          PROJECT=$(docker compose $COMPOSE_FILES config --format json | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])")
-          AGENT_NET=$(docker network ls --filter "name=${PROJECT}_agent-net" --format '{{.Name}}' | head -1)
-          echo "Compose project: $PROJECT"
+          # Extract the actual network name from compose config — the network
+          # has an explicit name (syntropic137_${APP_ENVIRONMENT}_agent-net)
+          # that differs from the compose project prefix.
+          AGENT_NET=$(docker compose $COMPOSE_FILES config --format json | python3 -c "
+          import sys, json
+          config = json.load(sys.stdin)
+          print(config.get('networks', {}).get('agent-net', {}).get('name', ''))
+          ")
           echo "Agent network: $AGENT_NET"
           if [ -z "$AGENT_NET" ]; then
             echo "ERROR: Could not find agent-net network for project '$PROJECT'"
@@ -248,7 +250,9 @@ jobs:
           for attempt in range(1, 11):
               try:
                   with urllib.request.urlopen('http://localhost:8000/workflows', timeout=10) as r:
-                      workflows = json.loads(r.read())
+                      data = json.loads(r.read())
+                      # Response is WorkflowListResponse: {workflows: [...], total, page, page_size}
+                      workflows = data.get('workflows', []) if isinstance(data, dict) else data
                       names = [w.get('name') for w in workflows]
                       if workflow_name in names:
                           print(f'Projection roundtrip OK (attempt {attempt}): found {len(workflows)} workflow(s)')
