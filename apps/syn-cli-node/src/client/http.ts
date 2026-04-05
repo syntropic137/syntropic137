@@ -1,6 +1,6 @@
 import { DEFAULT_TIMEOUT_MS, SSE_CONNECT_TIMEOUT_MS, getApiUrl, getAuthHeaders } from "../config.js";
 
-const API_PREFIX = process.env["SYN_NO_PREFIX"] ? "" : "/api/v1";
+const API_PREFIX = (process.env["SYN_NO_PREFIX"] === "1" || process.env["SYN_NO_PREFIX"] === "true") ? "" : "/api/v1";
 
 export interface ApiResponse<T> {
   status: number;

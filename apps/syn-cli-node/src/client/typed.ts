@@ -13,7 +13,7 @@ import createClient from "openapi-fetch";
 import type { paths } from "../generated/api-types.js";
 import { getApiUrl, getAuthHeaders } from "../config.js";
 
-const API_PREFIX = process.env["SYN_NO_PREFIX"] ? "" : "/api/v1";
+const API_PREFIX = (process.env["SYN_NO_PREFIX"] === "1" || process.env["SYN_NO_PREFIX"] === "true") ? "" : "/api/v1";
 
 export function createTypedClient() {
   const baseUrl = getApiUrl().replace(/\/+$/, "");
