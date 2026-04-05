@@ -88,7 +88,7 @@ phases:
          # current version of the file), body (description of the fix).
          # Example — adapt to your actual fixes:
          COMMENTS='[
-           {"path": "path/to/file.py", "line": 42, "body": "Fixed: description of change"}
+           {"path": "path/to/file.py", "line": 42, "side": "RIGHT", "body": "Fixed: description of change"}
          ]'
 
          # Post a review with inline comments via GraphQL
