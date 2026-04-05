@@ -10,14 +10,15 @@ All value objects are immutable (frozen dataclasses) per DDD principles.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from datetime import datetime
 
 
@@ -95,12 +96,16 @@ class ImageManifest:
 
     provider: str = ""  # e.g. "claude-cli"
     provider_version: str = ""  # e.g. "1.1.0"
-    components: dict[str, str] = field(
+    components: Mapping[str, str] = field(
         default_factory=dict
     )  # e.g. {"claude_cli": "2.1.76", "rtk": "0.34.3"}
     build_commit: str = ""  # Short SHA of the build commit
     built_at: str = ""  # ISO 8601 timestamp
     manifest_digest: str = ""  # Hash of the manifest.yaml used for the build
+
+    def __post_init__(self) -> None:
+        # Enforce deep immutability — MappingProxyType prevents mutation
+        object.__setattr__(self, "components", MappingProxyType(self.components))
 
 
 @dataclass(frozen=True)
