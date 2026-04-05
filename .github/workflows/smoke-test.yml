@@ -250,7 +250,9 @@ jobs:
           for attempt in range(1, 11):
               try:
                   with urllib.request.urlopen('http://localhost:8000/workflows', timeout=10) as r:
-                      workflows = json.loads(r.read())
+                      data = json.loads(r.read())
+                      # Response is WorkflowListResponse: {workflows: [...], total, page, page_size}
+                      workflows = data.get('workflows', []) if isinstance(data, dict) else data
                       names = [w.get('name') for w in workflows]
                       if workflow_name in names:
                           print(f'Projection roundtrip OK (attempt {attempt}): found {len(workflows)} workflow(s)')
