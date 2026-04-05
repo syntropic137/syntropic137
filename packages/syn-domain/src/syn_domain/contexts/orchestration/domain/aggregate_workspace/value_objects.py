@@ -11,20 +11,20 @@ All value objects are immutable (frozen dataclasses) per DDD principles.
 from __future__ import annotations
 
 import copy
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-# Register MappingProxyType for copy/pickle support — required because
-# Pydantic model_copy() and event sourcing deepcopy individual fields.
-copy._deepcopy_dispatch[MappingProxyType] = lambda x, memo: MappingProxyType(dict(x))  # type: ignore[attr-defined]
-
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from datetime import datetime
+
+# Register MappingProxyType for copy/pickle support — required because
+# Pydantic model_copy() and event sourcing deepcopy individual fields.
+copy._deepcopy_dispatch[MappingProxyType] = lambda x, _memo: MappingProxyType(dict(x))  # type: ignore[attr-defined]
 
 
 # =============================================================================
