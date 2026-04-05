@@ -170,13 +170,14 @@ def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
         List of CollectedEvent instances.
     """
     events: list[CollectedEvent] = []
+    log_index = 0
 
     for resource_logs in _get(payload, "resource_logs", "resourceLogs"):
         resource = resource_logs.get("resource", {})
         session_id = _extract_session_id(resource.get("attributes", []))
 
         for scope_logs in _get(resource_logs, "scope_logs", "scopeLogs"):
-            for i, log_record in enumerate(_get(scope_logs, "log_records", "logRecords")):
+            for log_record in _get(scope_logs, "log_records", "logRecords"):
                 timestamp_ns = log_record.get("time_unix_nano", log_record.get("timeUnixNano", 0))
                 timestamp = _timestamp_from_nanos(timestamp_ns)
 
@@ -185,7 +186,7 @@ def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
 
                 events.append(
                     CollectedEvent(
-                        event_id=_otlp_event_id(session_id, "log", str(timestamp_ns), i),
+                        event_id=_otlp_event_id(session_id, "log", str(timestamp_ns), log_index),
                         event_type=EventType.OTLP_LOG,
                         session_id=session_id,
                         timestamp=timestamp,
@@ -196,5 +197,6 @@ def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
                         },
                     )
                 )
+                log_index += 1
 
     return events

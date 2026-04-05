@@ -5,9 +5,13 @@ Uses FastAPI TestClient with InMemoryObservabilityStore.
 
 from __future__ import annotations
 
+from typing import Any
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi.testclient import TestClient
 
+from syn_collector.collector.dedup import DeduplicationFilter
 from syn_collector.collector.service import create_app
 from syn_collector.collector.store import InMemoryObservabilityStore
 
@@ -143,3 +147,90 @@ class TestOtlpLogsEndpoint:
 
         assert response.status_code == 200
         assert response.json()["accepted"] == 0
+
+
+@pytest.mark.unit
+class TestOtlpPayloadValidation:
+    """Tests for payload type validation in OTLP endpoints."""
+
+    def test_array_payload_returns_400(self, test_client: TestClient) -> None:
+        """Sending a JSON array instead of object should return 400."""
+        response = test_client.post("/v1/metrics", json=[1, 2, 3])
+
+        assert response.status_code == 400
+        assert response.json()["error"] == "Payload must be a JSON object"
+
+    def test_string_payload_returns_400(self, test_client: TestClient) -> None:
+        """Sending a JSON string instead of object should return 400."""
+        response = test_client.post("/v1/logs", json="not an object")
+
+        assert response.status_code == 400
+        assert response.json()["error"] == "Payload must be a JSON object"
+
+    def test_number_payload_returns_400(self, test_client: TestClient) -> None:
+        """Sending a JSON number instead of object should return 400."""
+        response = test_client.post("/v1/metrics", json=42)
+
+        assert response.status_code == 400
+        assert response.json()["error"] == "Payload must be a JSON object"
+
+
+@pytest.mark.unit
+class TestDedupWriteFailureSafety:
+    """Tests that write failures don't permanently mark events as seen."""
+
+    @pytest.mark.asyncio
+    async def test_write_failure_allows_retry(self) -> None:
+        """If write_event fails, the event should NOT be marked as seen."""
+        from datetime import UTC, datetime
+
+        from syn_collector.collector.routes import _write_deduped
+        from syn_collector.events.types import CollectedEvent, EventType
+
+        event = CollectedEvent(
+            event_id="evt-fail-001-abcdef01",
+            event_type=EventType.TOKEN_USAGE,
+            session_id="sess-test",
+            timestamp=datetime.now(UTC),
+            data={"source": "otlp", "metric_name": "test", "value": 1},
+        )
+
+        failing_store = AsyncMock()
+        failing_store.write_event = AsyncMock(side_effect=RuntimeError("DB down"))
+        dedup = DeduplicationFilter()
+
+        # First attempt: write fails
+        accepted = await _write_deduped([event], failing_store, dedup, "test")
+        assert accepted == 0
+        assert dedup.is_seen(event.event_id) is False  # NOT marked as seen
+
+        # Second attempt: write succeeds (retry safe)
+        working_store = AsyncMock()
+        working_store.write_event = AsyncMock()
+        accepted = await _write_deduped([event], working_store, dedup, "test")
+        assert accepted == 1
+        assert dedup.is_seen(event.event_id) is True  # Now marked
+
+    @pytest.mark.asyncio
+    async def test_successful_write_marks_seen(self) -> None:
+        """After successful write, event should be marked as seen."""
+        from datetime import UTC, datetime
+
+        from syn_collector.collector.routes import _write_deduped
+        from syn_collector.events.types import CollectedEvent, EventType
+
+        event = CollectedEvent(
+            event_id="evt-ok-001-abcdef0123",
+            event_type=EventType.TOKEN_USAGE,
+            session_id="sess-test",
+            timestamp=datetime.now(UTC),
+            data={"source": "otlp", "metric_name": "test", "value": 1},
+        )
+
+        mock_store: Any = AsyncMock()
+        mock_store.write_event = AsyncMock()
+        dedup = DeduplicationFilter()
+
+        accepted = await _write_deduped([event], mock_store, dedup, "test")
+        assert accepted == 1
+        assert dedup.is_seen(event.event_id) is True

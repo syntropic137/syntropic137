@@ -214,3 +214,41 @@ class TestParseOtlpLogs:
         """Empty payload should return empty list."""
         events = parse_otlp_logs({})
         assert events == []
+
+    def test_unique_ids_across_scope_logs(self) -> None:
+        """Log records in different scopeLogs with same timestamp get unique event_ids."""
+        payload = {
+            "resourceLogs": [
+                {
+                    "resource": {
+                        "attributes": [
+                            {"key": "session.id", "value": {"stringValue": "sess-multi"}},
+                        ]
+                    },
+                    "scopeLogs": [
+                        {
+                            "logRecords": [
+                                {
+                                    "timeUnixNano": "1712250000000000000",
+                                    "severityText": "INFO",
+                                    "body": {"stringValue": "log from scope 1"},
+                                },
+                            ],
+                        },
+                        {
+                            "logRecords": [
+                                {
+                                    "timeUnixNano": "1712250000000000000",
+                                    "severityText": "WARN",
+                                    "body": {"stringValue": "log from scope 2"},
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+        events = parse_otlp_logs(payload)
+
+        assert len(events) == 2
+        assert events[0].event_id != events[1].event_id
