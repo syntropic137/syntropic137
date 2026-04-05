@@ -125,7 +125,7 @@ async def get_global_cost(
     await ensure_connected()
 
     query_svc = get_execution_cost_query()
-    all_costs = await query_svc.list_all()
+    all_costs = await query_svc.list_all(limit=10_000)
 
     # Fix(#542): filter by system_id when provided
     if system_id:
