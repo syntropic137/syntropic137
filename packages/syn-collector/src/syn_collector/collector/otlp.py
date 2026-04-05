@@ -4,7 +4,19 @@ Accepts OpenTelemetry JSON payloads from workspace containers and converts
 them to CollectedEvent instances for the existing observability pipeline.
 
 Claude Code exports OTel metrics/logs via OTLP when CLAUDE_CODE_ENABLE_TELEMETRY=1.
-Key metrics: claude_code.token.usage, claude_code.cost.usage.
+
+Metrics exported by Claude Code:
+- claude_code.token.usage    → TOKEN_USAGE (input/output/cache token counts)
+- claude_code.cost.usage     → COST_RECORDED (cumulative cost in USD)
+- claude_code.session.count  → SESSION_STARTED (session counter)
+- claude_code.commit.count   → GIT_COMMIT (commit counter)
+
+OTel log events exported by Claude Code:
+- claude_code.api_request    → API_REQUEST (per-call cost, model, cache, duration)
+- claude_code.api_error      → API_ERROR (error, status_code, retry count)
+- claude_code.tool_result    → TOOL_EXECUTION_COMPLETED (tool name, duration, success)
+- claude_code.user_prompt    → USER_PROMPT_SUBMITTED (prompt length)
+- (unknown)                  → OTLP_LOG (raw log body, for forward-compat)
 
 This module provides:
 - parse_otlp_metrics(): Extract metrics from OTLP JSON -> CollectedEvent list
@@ -27,11 +39,31 @@ logger = logging.getLogger(__name__)
 # Metric names we extract from OTLP payloads
 METRIC_TOKEN_USAGE = "claude_code.token.usage"
 METRIC_COST_USAGE = "claude_code.cost.usage"
-KNOWN_METRICS: frozenset[str] = frozenset({METRIC_TOKEN_USAGE, METRIC_COST_USAGE})
+METRIC_SESSION_COUNT = "claude_code.session.count"
+METRIC_COMMIT_COUNT = "claude_code.commit.count"
+
+KNOWN_METRICS: frozenset[str] = frozenset(
+    {
+        METRIC_TOKEN_USAGE,
+        METRIC_COST_USAGE,
+        METRIC_SESSION_COUNT,
+        METRIC_COMMIT_COUNT,
+    }
+)
 
 _METRIC_TO_EVENT_TYPE: dict[str, EventType] = {
     METRIC_TOKEN_USAGE: EventType.TOKEN_USAGE,
     METRIC_COST_USAGE: EventType.COST_RECORDED,
+    METRIC_SESSION_COUNT: EventType.SESSION_STARTED,
+    METRIC_COMMIT_COUNT: EventType.GIT_COMMIT,
+}
+
+# OTel log event names → EventType
+_LOG_EVENT_TO_EVENT_TYPE: dict[str, EventType] = {
+    "claude_code.api_request": EventType.API_REQUEST,
+    "claude_code.api_error": EventType.API_ERROR,
+    "claude_code.tool_result": EventType.TOOL_EXECUTION_COMPLETED,
+    "claude_code.user_prompt": EventType.USER_PROMPT_SUBMITTED,
 }
 
 
@@ -158,10 +190,50 @@ def parse_otlp_metrics(payload: dict[str, Any]) -> list[CollectedEvent]:
     return events
 
 
+def _parse_log_record(
+    log_record: dict[str, Any],
+    index: int,
+    session_id: str,
+) -> CollectedEvent:
+    """Convert a single OTel log record into a CollectedEvent.
+
+    Structured log events (e.g. claude_code.api_request) are mapped to
+    specific EventTypes. Unknown events fall back to OTLP_LOG.
+    """
+    timestamp_ns = log_record.get("time_unix_nano", log_record.get("timeUnixNano", 0))
+    timestamp = _timestamp_from_nanos(timestamp_ns)
+    severity = log_record.get("severity_text", log_record.get("severityText", "INFO"))
+
+    # Extract event name from log record attributes (Claude Code sets event.name)
+    log_attrs = {
+        attr.get("key", ""): _attr_value(attr.get("value", {}))
+        for attr in log_record.get("attributes", [])
+    }
+    event_name = str(log_attrs.get("event.name", ""))
+    event_type = _LOG_EVENT_TO_EVENT_TYPE.get(event_name, EventType.OTLP_LOG)
+
+    # Build data payload — include all attributes for known events,
+    # fall back to body string for unknown events
+    if event_type != EventType.OTLP_LOG:
+        data: dict[str, Any] = {"source": "otlp", **log_attrs}
+    else:
+        body = log_record.get("body", {}).get("stringValue", "")
+        data = {"source": "otlp", "severity": severity, "body": body[:2000]}
+
+    return CollectedEvent(
+        event_id=_otlp_event_id(session_id, event_name or "log", str(timestamp_ns), index),
+        event_type=event_type,
+        session_id=session_id,
+        timestamp=timestamp,
+        data=data,
+    )
+
+
 def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
     """Parse OTLP JSON logs payload into CollectedEvent instances.
 
-    Extracts log records and converts them to OTLP_LOG events.
+    Handles structured Claude Code log events (api_request, api_error,
+    tool_result, user_prompt) and falls back to OTLP_LOG for unknowns.
 
     Args:
         payload: OTLP JSON logs payload (ExportLogsServiceRequest).
@@ -177,24 +249,6 @@ def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
 
         for scope_logs in _get(resource_logs, "scope_logs", "scopeLogs"):
             for i, log_record in enumerate(_get(scope_logs, "log_records", "logRecords")):
-                timestamp_ns = log_record.get("time_unix_nano", log_record.get("timeUnixNano", 0))
-                timestamp = _timestamp_from_nanos(timestamp_ns)
-
-                body = log_record.get("body", {}).get("stringValue", "")
-                severity = log_record.get("severity_text", log_record.get("severityText", "INFO"))
-
-                events.append(
-                    CollectedEvent(
-                        event_id=_otlp_event_id(session_id, "log", str(timestamp_ns), i),
-                        event_type=EventType.OTLP_LOG,
-                        session_id=session_id,
-                        timestamp=timestamp,
-                        data={
-                            "source": "otlp",
-                            "severity": severity,
-                            "body": body[:2000],
-                        },
-                    )
-                )
+                events.append(_parse_log_record(log_record, i, session_id))
 
     return events

@@ -41,26 +41,31 @@ These are baked into the image and generally should not be overridden:
 
 ### Set by Orchestrator at Runtime
 
-These are injected by syn137 when creating workspaces:
+These are injected automatically by syn137 when creating workspaces:
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API key (injected via sidecar) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | Collector endpoint for OTel metrics |
-| `GITHUB_TOKEN` | No | GitHub access (injected via sidecar) |
+| Variable | Purpose |
+|----------|---------|
+| `ANTHROPIC_API_KEY` | Claude API key (injected via sidecar) |
+| `CLAUDE_CODE_ENABLE_TELEMETRY` | Activates OTel export (set to `1` when collector is configured) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint — auto-set to `COLLECTOR_URL` from syn-api config |
+| `GITHUB_TOKEN` | GitHub access (injected via sidecar) |
+
+You do not need to set these manually. The orchestrator injects them when workspace containers are provisioned.
 
 ## OTel Configuration
 
-### Connecting to syn-collector
+### How OTel connects to syn-collector
 
-Set `OTEL_EXPORTER_OTLP_ENDPOINT` to your syn-collector instance:
+`CLAUDE_CODE_ENABLE_TELEMETRY=1` is baked into the workspace image as a default. When syn-api has `COLLECTOR_URL` set, it also injects `OTEL_EXPORTER_OTLP_ENDPOINT` pointing at the collector. If no `COLLECTOR_URL` is configured, OTel export silently no-ops — no crash, no side effects.
 
-```bash
-# Docker network (default in compose)
-OTEL_EXPORTER_OTLP_ENDPOINT=http://syn-collector:8138
+syn-collector's internal port is **8080** (service name `collector` inside Docker). The host-mapped port is **8138** in the dev stack.
 
-# Host network (development)
-OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:8138
+```
+# Inside Docker (agent-net) — what the container uses:
+http://collector:8080
+
+# From your host machine — for debugging:
+http://localhost:8138
 ```
 
 syn-collector accepts OTLP JSON on `/v1/metrics` and `/v1/logs`.

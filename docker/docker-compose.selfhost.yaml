@@ -114,6 +114,7 @@ services:
         max-file: "3"
     networks:
       - syn-internal
+      - agent-net  # Workspace containers push OTLP metrics here (receive-only, no secrets)
 
   # ===========================================================================
   # DOCKER SOCKET PROXY (ISS-164)
@@ -389,3 +390,6 @@ networks:
     name: syn137_proxy
     driver: bridge
     internal: true  # no external routing — proxy ↔ api only
+  agent-net:
+    name: syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+    driver: bridge

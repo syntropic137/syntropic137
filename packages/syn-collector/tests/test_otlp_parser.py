@@ -11,6 +11,38 @@ import pytest
 from syn_collector.collector.otlp import parse_otlp_logs, parse_otlp_metrics
 from syn_collector.events.types import EventType
 
+
+def _log_payload(event_name: str, attrs: dict[str, str | int | float]) -> dict:
+    """Build a minimal OTLP logs payload with a structured log event."""
+    attributes = [
+        {"key": k, "value": {"stringValue": str(v)} if isinstance(v, str) else {"doubleValue": v}}
+        for k, v in attrs.items()
+    ]
+    attributes.insert(0, {"key": "event.name", "value": {"stringValue": event_name}})
+    return {
+        "resourceLogs": [
+            {
+                "resource": {
+                    "attributes": [
+                        {"key": "session.id", "value": {"stringValue": "sess-xyz789"}},
+                    ]
+                },
+                "scopeLogs": [
+                    {
+                        "logRecords": [
+                            {
+                                "timeUnixNano": "1712250005000000000",
+                                "severityText": "INFO",
+                                "attributes": attributes,
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+
 # Sample OTLP metrics payload (Claude Code token usage)
 SAMPLE_METRICS_PAYLOAD = {
     "resourceMetrics": [
@@ -214,3 +246,135 @@ class TestParseOtlpLogs:
         """Empty payload should return empty list."""
         events = parse_otlp_logs({})
         assert events == []
+
+
+@pytest.mark.unit
+class TestStructuredLogEvents:
+    """Tests for structured Claude Code OTel log event parsing."""
+
+    def test_api_request_event(self) -> None:
+        """claude_code.api_request log → API_REQUEST event with cost/model fields."""
+        payload = _log_payload(
+            "claude_code.api_request",
+            {
+                "model": "claude-opus-4-6",
+                "cost_usd": 0.0312,
+                "duration_ms": 1842.0,
+                "input_tokens": 2500.0,
+                "output_tokens": 800.0,
+                "cache_read_tokens": 1200.0,
+                "cache_creation_tokens": 0.0,
+                "speed": "normal",
+            },
+        )
+        events = parse_otlp_logs(payload)
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.event_type == EventType.API_REQUEST
+        assert event.session_id == "sess-xyz789"
+        assert event.data["event.name"] == "claude_code.api_request"
+        assert event.data["model"] == "claude-opus-4-6"
+        assert event.data["source"] == "otlp"
+
+    def test_api_error_event(self) -> None:
+        """claude_code.api_error log → API_ERROR event."""
+        payload = _log_payload(
+            "claude_code.api_error",
+            {
+                "model": "claude-opus-4-6",
+                "error": "overloaded_error",
+                "status_code": 529.0,
+                "duration_ms": 312.0,
+                "attempt": 2.0,
+            },
+        )
+        events = parse_otlp_logs(payload)
+
+        assert len(events) == 1
+        assert events[0].event_type == EventType.API_ERROR
+        assert events[0].data["error"] == "overloaded_error"
+
+    def test_tool_result_event(self) -> None:
+        """claude_code.tool_result log → TOOL_EXECUTION_COMPLETED event."""
+        payload = _log_payload(
+            "claude_code.tool_result",
+            {
+                "tool_name": "Bash",
+                "success": "true",
+                "duration_ms": 234.0,
+            },
+        )
+        events = parse_otlp_logs(payload)
+
+        assert len(events) == 1
+        assert events[0].event_type == EventType.TOOL_EXECUTION_COMPLETED
+        assert events[0].data["tool_name"] == "Bash"
+
+    def test_user_prompt_event(self) -> None:
+        """claude_code.user_prompt log → USER_PROMPT_SUBMITTED event."""
+        payload = _log_payload("claude_code.user_prompt", {"prompt_length": 142.0})
+        events = parse_otlp_logs(payload)
+
+        assert len(events) == 1
+        assert events[0].event_type == EventType.USER_PROMPT_SUBMITTED
+
+    def test_unknown_event_name_falls_back_to_otlp_log(self) -> None:
+        """Unrecognised event.name → OTLP_LOG (forward-compat fallback)."""
+        payload = _log_payload("claude_code.future_event", {"data": "x"})
+        events = parse_otlp_logs(payload)
+
+        assert len(events) == 1
+        assert events[0].event_type == EventType.OTLP_LOG
+
+    def test_no_event_name_falls_back_to_otlp_log(self) -> None:
+        """Log record without event.name attribute → OTLP_LOG."""
+        events = parse_otlp_logs(SAMPLE_LOGS_PAYLOAD)
+        assert events[0].event_type == EventType.OTLP_LOG
+
+
+@pytest.mark.unit
+class TestNewMetricMappings:
+    """Tests for newly added metric type mappings."""
+
+    def _metric_payload(self, metric_name: str) -> dict:
+        return {
+            "resourceMetrics": [
+                {
+                    "resource": {
+                        "attributes": [
+                            {"key": "session.id", "value": {"stringValue": "sess-new"}},
+                        ]
+                    },
+                    "scopeMetrics": [
+                        {
+                            "metrics": [
+                                {
+                                    "name": metric_name,
+                                    "sum": {
+                                        "dataPoints": [
+                                            {
+                                                "timeUnixNano": "1712250010000000000",
+                                                "asInt": 1,
+                                            }
+                                        ]
+                                    },
+                                }
+                            ]
+                        }
+                    ],
+                }
+            ]
+        }
+
+    def test_session_count_metric(self) -> None:
+        """claude_code.session.count → SESSION_STARTED event."""
+        events = parse_otlp_metrics(self._metric_payload("claude_code.session.count"))
+        assert len(events) == 1
+        assert events[0].event_type == EventType.SESSION_STARTED
+
+    def test_commit_count_metric(self) -> None:
+        """claude_code.commit.count → GIT_COMMIT event."""
+        events = parse_otlp_metrics(self._metric_payload("claude_code.commit.count"))
+        assert len(events) == 1
+        assert events[0].event_type == EventType.GIT_COMMIT

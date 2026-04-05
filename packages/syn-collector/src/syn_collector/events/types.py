@@ -55,6 +55,11 @@ class EventType(StrEnum):
     - WORKSPACE_DESTROYING: Workspace cleanup started
     - WORKSPACE_DESTROYED: Workspace fully cleaned up
     - WORKSPACE_ERROR: Workspace operation failed
+
+    OTLP-sourced events (OTel channel — from workspace containers):
+    - OTLP_LOG: Raw OTel log record (unrecognised event name)
+    - API_REQUEST: Per-API-call metrics (model, cost, cache tokens, duration)
+    - API_ERROR: API error with status code and retry count
     """
 
     # Session lifecycle
@@ -102,6 +107,8 @@ class EventType(StrEnum):
 
     # OTLP-sourced events
     OTLP_LOG = "otlp_log"
+    API_REQUEST = "api_request"  # Per-API-call cost, model, cache tokens, duration
+    API_ERROR = "api_error"  # API error with status code and retry context
 
 
 class CollectedEvent(BaseModel):
