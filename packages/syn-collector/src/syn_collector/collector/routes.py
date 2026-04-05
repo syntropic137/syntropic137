@@ -34,10 +34,11 @@ async def _write_deduped(
     """Write events through dedup filter with error handling. Returns accepted count."""
     accepted = 0
     for event in events:
-        if dedup.is_duplicate(event.event_id):
+        if dedup.is_seen(event.event_id):
             continue
         try:
             await store.write_event(event)
+            dedup.mark_seen(event.event_id)
             accepted += 1
         except Exception as e:
             logger.error(
@@ -68,6 +69,11 @@ def _register_otlp_routes(
             return JSONResponse(
                 status_code=400,
                 content={"error": "Invalid JSON payload"},
+            )
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Payload must be a JSON object"},
             )
         events = parser(payload)
         accepted = await _write_deduped(events, store, dedup, label)

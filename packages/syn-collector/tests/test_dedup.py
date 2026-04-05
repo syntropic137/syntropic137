@@ -119,3 +119,23 @@ class TestDeduplicationFilter:
         dedup = DeduplicationFilter()
 
         assert dedup.hit_rate() == 0.0
+
+    def test_is_seen_tracks_stats(self) -> None:
+        """is_seen should track checks and hits like is_duplicate."""
+        dedup = DeduplicationFilter()
+
+        dedup.mark_seen("event-001")
+        dedup.is_seen("event-001")  # check=1, hit=1
+        dedup.is_seen("event-002")  # check=2, hit=1
+
+        stats = dedup.stats
+        assert stats["checks"] == 2
+        assert stats["hits"] == 1
+
+    def test_is_seen_does_not_mark(self) -> None:
+        """is_seen should NOT mark unseen events as seen."""
+        dedup = DeduplicationFilter()
+
+        assert dedup.is_seen("event-001") is False
+        assert dedup.is_seen("event-001") is False  # Still not seen
+        assert dedup.size == 0
