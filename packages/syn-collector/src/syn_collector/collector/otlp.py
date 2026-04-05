@@ -54,8 +54,8 @@ KNOWN_METRICS: frozenset[str] = frozenset(
 _METRIC_TO_EVENT_TYPE: dict[str, EventType] = {
     METRIC_TOKEN_USAGE: EventType.TOKEN_USAGE,
     METRIC_COST_USAGE: EventType.COST_RECORDED,
-    METRIC_SESSION_COUNT: EventType.SESSION_STARTED,
-    METRIC_COMMIT_COUNT: EventType.GIT_COMMIT,
+    METRIC_SESSION_COUNT: EventType.OTLP_SESSION_COUNT,
+    METRIC_COMMIT_COUNT: EventType.OTLP_COMMIT_COUNT,
 }
 
 # OTel log event names → EventType
@@ -212,13 +212,23 @@ def _parse_log_record(
     event_name = str(log_attrs.get("event.name", ""))
     event_type = _LOG_EVENT_TO_EVENT_TYPE.get(event_name, EventType.OTLP_LOG)
 
-    # Build data payload — include all attributes for known events,
-    # fall back to body string for unknown events
+    # Build data payload — include all attributes for known events.
+    # For unknown events, preserve the body plus enough structured context
+    # for forward-compatible debugging without emitting an unbounded payload.
     if event_type != EventType.OTLP_LOG:
         data: dict[str, Any] = {"source": "otlp", **log_attrs}
     else:
         body = log_record.get("body", {}).get("stringValue", "")
-        data = {"source": "otlp", "severity": severity, "body": body[:2000]}
+        bounded_attrs: dict[str, str | int | float | bool] = {}
+        for k, v in list(log_attrs.items())[:50]:
+            bounded_attrs[k] = v[:500] if isinstance(v, str) else v
+        data = {
+            "source": "otlp",
+            "severity": severity,
+            "body": body[:2000],
+            "event_name": event_name,
+            "log_attrs": bounded_attrs,
+        }
 
     return CollectedEvent(
         event_id=_otlp_event_id(session_id, event_name or "log", str(timestamp_ns), index),
@@ -242,13 +252,15 @@ def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
         List of CollectedEvent instances.
     """
     events: list[CollectedEvent] = []
+    log_index = 0
 
     for resource_logs in _get(payload, "resource_logs", "resourceLogs"):
         resource = resource_logs.get("resource", {})
         session_id = _extract_session_id(resource.get("attributes", []))
 
         for scope_logs in _get(resource_logs, "scope_logs", "scopeLogs"):
-            for i, log_record in enumerate(_get(scope_logs, "log_records", "logRecords")):
-                events.append(_parse_log_record(log_record, i, session_id))
+            for log_record in _get(scope_logs, "log_records", "logRecords"):
+                events.append(_parse_log_record(log_record, log_index, session_id))
+                log_index += 1
 
     return events

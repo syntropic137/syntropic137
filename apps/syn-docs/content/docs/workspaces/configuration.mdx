@@ -58,14 +58,14 @@ You do not need to set these manually. The orchestrator injects them when worksp
 
 `CLAUDE_CODE_ENABLE_TELEMETRY=1` is baked into the workspace image as a default. When syn-api has `COLLECTOR_URL` set, it also injects `OTEL_EXPORTER_OTLP_ENDPOINT` pointing at the collector. If no `COLLECTOR_URL` is configured, OTel export silently no-ops — no crash, no side effects.
 
-syn-collector's internal port is **8080** (service name `collector` inside Docker). The host-mapped port is **8138** in the dev stack.
+syn-collector's internal port is **8080** (service name `collector` inside Docker). The dev stack maps it to `localhost:8080`.
 
 ```
 # Inside Docker (agent-net) — what the container uses:
 http://collector:8080
 
 # From your host machine — for debugging:
-http://localhost:8138
+http://localhost:8080
 ```
 
 syn-collector accepts OTLP JSON on `/v1/metrics` and `/v1/logs`.

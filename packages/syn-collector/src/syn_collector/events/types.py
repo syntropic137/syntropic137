@@ -60,6 +60,8 @@ class EventType(StrEnum):
     - OTLP_LOG: Raw OTel log record (unrecognised event name)
     - API_REQUEST: Per-API-call metrics (model, cost, cache tokens, duration)
     - API_ERROR: API error with status code and retry count
+    - OTLP_SESSION_COUNT: OTel session counter (distinct from hook SESSION_STARTED)
+    - OTLP_COMMIT_COUNT: OTel commit counter (distinct from hook GIT_COMMIT)
     """
 
     # Session lifecycle
@@ -109,6 +111,8 @@ class EventType(StrEnum):
     OTLP_LOG = "otlp_log"
     API_REQUEST = "api_request"  # Per-API-call cost, model, cache tokens, duration
     API_ERROR = "api_error"  # API error with status code and retry context
+    OTLP_SESSION_COUNT = "otlp_session_count"  # OTel session counter (distinct from hook session_started)
+    OTLP_COMMIT_COUNT = "otlp_commit_count"  # OTel commit counter (distinct from hook git_commit)
 
 
 class CollectedEvent(BaseModel):

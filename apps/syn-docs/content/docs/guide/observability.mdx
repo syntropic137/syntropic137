@@ -79,7 +79,8 @@ Workspace Container
 | `api_request` | `claude_code.api_request` log | model, cost_usd, duration_ms, input_tokens, output_tokens, cache_read_tokens, speed |
 | `api_error` | `claude_code.api_error` log | model, error, status_code, duration_ms, attempt |
 | `tool_execution_completed` | `claude_code.tool_result` log | tool_name, success, duration_ms |
-| `session_started` | `claude_code.session.count` metric | (counter increment) |
+| `otlp_session_count` | `claude_code.session.count` metric | (counter increment) |
+| `otlp_commit_count` | `claude_code.commit.count` metric | (counter increment) |
 
 ## Collector Configuration
 
@@ -110,7 +111,7 @@ curl http://localhost:8080/health
 ### Check recent events
 
 ```bash
-curl -s http://localhost:8138/events/recent | \
+curl -s http://localhost:8080/events/recent | \
   jq 'group_by(.event_type) | map({type: .[0].event_type, count: length})'
 ```
 

@@ -320,17 +320,57 @@ class TestStructuredLogEvents:
         assert events[0].event_type == EventType.USER_PROMPT_SUBMITTED
 
     def test_unknown_event_name_falls_back_to_otlp_log(self) -> None:
-        """Unrecognised event.name → OTLP_LOG (forward-compat fallback)."""
+        """Unrecognised event.name → OTLP_LOG with event_name + attrs preserved."""
         payload = _log_payload("claude_code.future_event", {"data": "x"})
         events = parse_otlp_logs(payload)
 
         assert len(events) == 1
         assert events[0].event_type == EventType.OTLP_LOG
+        assert events[0].data["event_name"] == "claude_code.future_event"
+        assert events[0].data["log_attrs"]["event.name"] == "claude_code.future_event"
+        assert events[0].data["log_attrs"]["data"] == "x"
 
     def test_no_event_name_falls_back_to_otlp_log(self) -> None:
         """Log record without event.name attribute → OTLP_LOG."""
         events = parse_otlp_logs(SAMPLE_LOGS_PAYLOAD)
         assert events[0].event_type == EventType.OTLP_LOG
+
+    def test_log_index_global_across_scopes(self) -> None:
+        """Log record index is global, not per-scope — no ID collisions."""
+        payload = {
+            "resourceLogs": [
+                {
+                    "resource": {
+                        "attributes": [
+                            {"key": "session.id", "value": {"stringValue": "sess-1"}},
+                        ]
+                    },
+                    "scopeLogs": [
+                        {
+                            "logRecords": [
+                                {
+                                    "timeUnixNano": "1712250005000000000",
+                                    "severityText": "INFO",
+                                    "body": {"stringValue": "log-a"},
+                                }
+                            ]
+                        },
+                        {
+                            "logRecords": [
+                                {
+                                    "timeUnixNano": "1712250005000000000",
+                                    "severityText": "INFO",
+                                    "body": {"stringValue": "log-b"},
+                                }
+                            ]
+                        },
+                    ],
+                }
+            ]
+        }
+        events = parse_otlp_logs(payload)
+        assert len(events) == 2
+        assert events[0].event_id != events[1].event_id
 
 
 @pytest.mark.unit
@@ -368,13 +408,13 @@ class TestNewMetricMappings:
         }
 
     def test_session_count_metric(self) -> None:
-        """claude_code.session.count → SESSION_STARTED event."""
+        """claude_code.session.count → OTLP_SESSION_COUNT (distinct from hook SESSION_STARTED)."""
         events = parse_otlp_metrics(self._metric_payload("claude_code.session.count"))
         assert len(events) == 1
-        assert events[0].event_type == EventType.SESSION_STARTED
+        assert events[0].event_type == EventType.OTLP_SESSION_COUNT
 
     def test_commit_count_metric(self) -> None:
-        """claude_code.commit.count → GIT_COMMIT event."""
+        """claude_code.commit.count → OTLP_COMMIT_COUNT (distinct from hook GIT_COMMIT)."""
         events = parse_otlp_metrics(self._metric_payload("claude_code.commit.count"))
         assert len(events) == 1
-        assert events[0].event_type == EventType.GIT_COMMIT
+        assert events[0].event_type == EventType.OTLP_COMMIT_COUNT
