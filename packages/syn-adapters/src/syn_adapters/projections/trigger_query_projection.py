@@ -79,7 +79,7 @@ class TriggerQueryProjection(CheckpointedProjection):
         handler_name = self._EVENT_DISPATCH.get(event_type)
         if handler_name is not None:
             handler = getattr(self, handler_name)
-            await handler(event_data)
+            await handler(event_data, envelope)
 
     async def handle_event(
         self,
@@ -117,7 +117,9 @@ class TriggerQueryProjection(CheckpointedProjection):
             await self._store.delete_all(NS_FIRE_RECORDS)
             await self._store.delete_all(NS_DELIVERIES)
 
-    async def _on_trigger_registered(self, data: dict[str, Any]) -> None:
+    async def _on_trigger_registered(
+        self, data: dict[str, Any], envelope: EventEnvelope[Any]
+    ) -> None:
         trigger_id = data.get("trigger_id", "")
         await self._store.save(
             NS_TRIGGER_INDEX,
@@ -135,24 +137,29 @@ class TriggerQueryProjection(CheckpointedProjection):
                 "created_by": data.get("created_by", ""),
                 "status": "active",
                 "fire_count": 0,
+                "created_at": envelope.metadata.timestamp.isoformat(),
             },
         )
 
-    async def _on_trigger_paused(self, data: dict[str, Any]) -> None:
+    async def _on_trigger_paused(self, data: dict[str, Any], _envelope: EventEnvelope[Any]) -> None:
         trigger_id = data.get("trigger_id", "")
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
             existing["status"] = "paused"
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
 
-    async def _on_trigger_resumed(self, data: dict[str, Any]) -> None:
+    async def _on_trigger_resumed(
+        self, data: dict[str, Any], _envelope: EventEnvelope[Any]
+    ) -> None:
         trigger_id = data.get("trigger_id", "")
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
             existing["status"] = "active"
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
 
-    async def _on_trigger_deleted(self, data: dict[str, Any]) -> None:
+    async def _on_trigger_deleted(
+        self, data: dict[str, Any], _envelope: EventEnvelope[Any]
+    ) -> None:
         trigger_id = data.get("trigger_id", "")
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
@@ -191,8 +198,9 @@ class TriggerQueryProjection(CheckpointedProjection):
                 },
             )
 
-        # Increment fire count on trigger index
+        # Increment fire count and update last_fired_at on trigger index
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
             existing["fire_count"] = existing.get("fire_count", 0) + 1
+            existing["last_fired_at"] = fired_at
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)

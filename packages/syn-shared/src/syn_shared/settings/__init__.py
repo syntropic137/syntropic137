@@ -66,12 +66,18 @@ from syn_shared.settings.workspace import (
     WorkspaceSettings,
     get_default_isolation_backend,
 )
+from syn_shared.settings.workspace_images import (
+    DEFAULT_WORKSPACE_IMAGE,
+    WorkspaceImageProvider,
+    workspace_image_ref,
+)
 from syn_shared.settings.workspace_security import (
     ContainerLoggingSettings,
     WorkspaceSecuritySettings,
 )
 
 __all__ = [
+    "DEFAULT_WORKSPACE_IMAGE",
     "AppEnvironment",
     "CloudProvider",
     "ContainerLoggingSettings",
@@ -84,6 +90,7 @@ __all__ = [
     "Settings",
     "StorageProvider",
     "StorageSettings",
+    "WorkspaceImageProvider",
     "WorkspaceSecuritySettings",
     "WorkspaceSettings",
     "get_default_isolation_backend",
@@ -91,4 +98,5 @@ __all__ = [
     "get_settings",
     "reset_github_settings",
     "reset_settings",
+    "workspace_image_ref",
 ]

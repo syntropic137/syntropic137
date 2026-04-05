@@ -21,8 +21,8 @@ graph LR
         e4[phase_completed]
         e5[trigger_fired]
         e6[phase_started]
-        e7[execution_cancelled]
-        e8[workflow_interrupted]
+        e7[workflow_interrupted]
+        e8[execution_cancelled]
         e9[workflow_template_created]
         e10[session_cost_finalized]
     end
@@ -45,23 +45,23 @@ graph LR
         p15[TriggerHistoryProjection]
     end
 
-    e5 --> p6
-    e5 --> p15
-    e6 --> p2
-    e7 --> p4
     e10 --> p10
     e10 --> p3
+    e5 --> p6
+    e5 --> p15
     e2 --> p8
     e2 --> p7
     e2 --> p4
     e2 --> p2
+    e6 --> p2
+    e1 --> p6
+    e1 --> p4
+    e1 --> p2
     e3 --> p8
     e3 --> p7
     e3 --> p4
     e3 --> p2
-    e1 --> p6
-    e1 --> p4
-    e1 --> p2
+    e7 --> p4
     e4 --> p4
     e8 --> p4
     e9 --> p2
@@ -87,8 +87,8 @@ graph LR
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
 | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
-| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
 | workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
 | workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
 | session_cost_finalized | SessionCostProjection, ExecutionCostProjection | 2 |
 

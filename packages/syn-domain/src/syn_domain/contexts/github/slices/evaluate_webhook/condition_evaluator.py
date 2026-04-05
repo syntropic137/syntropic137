@@ -14,6 +14,37 @@ if TYPE_CHECKING:
     )
 
 
+def _coerce_bool(value: Any) -> Any:
+    """Coerce string-encoded booleans to native Python bools.
+
+    Conditions may arrive with string values from CLI or raw API calls
+    (e.g. ``"false"`` instead of ``False``).
+    """
+    if not isinstance(value, str):
+        return value
+    lower = value.strip().lower()
+    if lower == "true":
+        return True
+    if lower == "false":
+        return False
+    return value
+
+
+def _coerce_to_list(value: Any) -> list:
+    """Coerce a value to a list for membership operators (in/not_in).
+
+    Handles comma-separated strings from CLI (``"a,b"`` → ``["a", "b"]``),
+    passes through existing lists, and wraps scalars.
+    """
+    if isinstance(value, list):
+        return value
+    if value is None:
+        return []
+    if isinstance(value, str) and "," in value:
+        return [v.strip() for v in value.split(",")]
+    return [value]
+
+
 def _check_operator(operator: str, resolved: Any, value: Any) -> bool:
     """Evaluate a single operator against resolved and expected values.
 
@@ -21,17 +52,17 @@ def _check_operator(operator: str, resolved: Any, value: Any) -> bool:
     """
     match operator:
         case "eq":
-            return resolved == value
+            return resolved == _coerce_bool(value)
         case "neq":
-            return resolved != value
+            return resolved != _coerce_bool(value)
         case "not_empty":
             return bool(resolved)
         case "is_empty":
             return not resolved
         case "in":
-            return resolved in (value or [])
+            return resolved in _coerce_to_list(value)
         case "not_in":
-            return resolved not in (value or [])
+            return resolved not in _coerce_to_list(value)
         case "contains":
             return value in (resolved or "")  # type: ignore[operator]  # resolved is Any
         case _:

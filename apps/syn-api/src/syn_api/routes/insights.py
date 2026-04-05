@@ -63,29 +63,90 @@ async def get_global_overview(
     return dict(result.to_dict())
 
 
-async def get_global_cost(
-    auth: AuthContext | None = None,  # noqa: ARG001
-) -> dict[str, Any]:
-    """Get global cost breakdown across all repos."""
+async def _get_execution_ids_for_system(system_id: str) -> set[str]:
+    """Look up execution IDs correlated with repos in a system."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization.domain.queries.get_global_cost import (
-        GetGlobalCostQuery,
-    )
-    from syn_domain.contexts.organization.slices.global_cost.GetGlobalCostHandler import (
-        GetGlobalCostHandler,
-    )
+    from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
     from syn_domain.contexts.organization.slices.list_repos.projection import (
         get_repo_projection,
     )
 
+    repo_projection = get_repo_projection()
+    repos = await repo_projection.list_all(system_id=system_id)
+    repo_names = {r.full_name for r in repos}
+
+    store = get_projection_store()
+    correlations = await store.get_all(REPO_CORRELATION)
+    return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
+
+
+def _aggregate_costs(costs: list[Any]) -> dict[str, Any]:
+    """Aggregate cost entries into totals and breakdowns."""
+    from decimal import Decimal
+
+    total_cost = Decimal("0")
+    total_input = 0
+    total_output = 0
+    cost_by_workflow: dict[str, Decimal] = {}
+    cost_by_model: dict[str, Decimal] = {}
+
+    for c in costs:
+        total_cost += c.total_cost_usd
+        total_input += c.input_tokens
+        total_output += c.output_tokens
+        if c.workflow_id:
+            cost_by_workflow[c.workflow_id] = (
+                cost_by_workflow.get(c.workflow_id, Decimal("0")) + c.total_cost_usd
+            )
+        for model, model_cost in c.cost_by_model.items():
+            cost_by_model[model] = cost_by_model.get(model, Decimal("0")) + model_cost
+
+    return {
+        "total_cost_usd": str(total_cost),
+        "total_tokens": total_input + total_output,
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "cost_by_workflow": {k: str(v) for k, v in cost_by_workflow.items()},
+        "cost_by_model": {k: str(v) for k, v in cost_by_model.items()},
+        "execution_count": len(costs),
+    }
+
+
+async def get_global_cost(
+    system_id: str | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> dict[str, Any]:
+    """Get global cost breakdown across all executions.
+
+    Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532/#542.
+    """
+    from syn_api._wiring import get_execution_cost_query
+
     await ensure_connected()
 
-    handler = GetGlobalCostHandler(
-        store=get_projection_store(),
-        repo_projection=get_repo_projection(),
-    )
-    result = await handler.handle(GetGlobalCostQuery())
-    return dict(result.to_dict())
+    query_svc = get_execution_cost_query()
+    all_costs = await query_svc.list_all(limit=10_000)
+
+    # Fix(#542): filter by system_id when provided
+    if system_id:
+        allowed_exec_ids = await _get_execution_ids_for_system(system_id)
+        all_costs = [c for c in all_costs if c.execution_id in allowed_exec_ids]
+
+    result = _aggregate_costs(all_costs)
+    result["system_id"] = system_id or ""
+    result["organization_id"] = ""
+    result["cost_by_repo"] = {}
+
+    # Resolve system name when filtering by system_id
+    system_name = "global"
+    if system_id:
+        from syn_adapters.projection_stores import get_projection_store
+
+        sys_data = await get_projection_store().get("system_details", system_id)
+        system_name = sys_data.get("name", "") if sys_data else system_id
+
+    result["system_name"] = system_name
+    return result
 
 
 async def get_contribution_heatmap(
@@ -168,9 +229,11 @@ async def get_global_overview_endpoint() -> GlobalOverviewResponse:
 
 
 @router.get("/cost", response_model=GlobalCostResponse)
-async def get_global_cost_endpoint() -> GlobalCostResponse:
-    """Get global cost breakdown across all repos."""
-    data = await get_global_cost()
+async def get_global_cost_endpoint(
+    system_id: str | None = Query(None, description="Filter costs by system ID"),
+) -> GlobalCostResponse:
+    """Get global cost breakdown, optionally filtered by system."""
+    data = await get_global_cost(system_id=system_id)
     return GlobalCostResponse(
         system_id=data.get("system_id", ""),
         system_name=data.get("system_name", ""),

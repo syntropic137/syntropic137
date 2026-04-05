@@ -78,9 +78,29 @@ phases:
          git push origin {{branch}}
          ```
 
-      7. **Comment on the PR:**
+      7. **Post a code review with inline comments on the lines you changed:**
          ```bash
-         gh pr comment {{pr_number}} --body "## CI Auto-Fix Applied
+         # Get the PR's node ID for the GraphQL mutation
+         PR_NODE_ID=$(gh api repos/{{repository}}/pulls/{{pr_number}} --jq '.node_id')
+
+         # Build the inline comments JSON array from your fixes.
+         # Each entry needs: path (relative file path), line (line number in the
+         # current version of the file), body (description of the fix).
+         # Example — adapt to your actual fixes:
+         COMMENTS='[
+           {"path": "path/to/file.py", "line": 42, "side": "RIGHT", "body": "Fixed: description of change"}
+         ]'
+
+         # Post a review with inline comments via GraphQL
+         jq -n --arg pullRequestId "$PR_NODE_ID" --argjson comments "$COMMENTS" '{
+           query: "mutation($input: AddPullRequestReviewInput!) { addPullRequestReview(input: $input) { pullRequestReview { id } } }",
+           variables: { input: { pullRequestId: $pullRequestId, event: "COMMENT", body: "## CI Auto-Fix Applied\n\nFixed **{{check_name}}** failure:\n- **Error:** {{check_output_title}}\n- **Fix:** [describe what you changed]\n\nCI should re-run automatically.", comments: $comments } }
+         }' | gh api graphql --input -
+         ```
+
+         If you have no specific lines to annotate, fall back to a simple review:
+         ```bash
+         gh pr review {{pr_number}} --comment --body "## CI Auto-Fix Applied
 
          Fixed **{{check_name}}** failure:
          - **Error:** {{check_output_title}}

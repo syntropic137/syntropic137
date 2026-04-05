@@ -60,6 +60,13 @@ class SessionSummaryResponse(BaseModel):
     completed_at: str | None = None
 
 
+class SessionListResponse(BaseModel):
+    """Wrapped list of session summaries."""
+
+    sessions: list[SessionSummaryResponse] = Field(default_factory=list)
+    total: int = 0
+
+
 class OperationInfo(BaseModel):
     """Information about a session operation."""
 
@@ -345,12 +352,12 @@ async def get_session(
 # =============================================================================
 
 
-@router.get("", response_model=list[SessionSummaryResponse])
+@router.get("", response_model=SessionListResponse)
 async def list_sessions_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
     status: str | None = Query(None, description="Filter by status"),
     limit: int = Query(50, ge=1, le=200, description="Max items to return"),
-) -> list[SessionSummaryResponse]:
+) -> SessionListResponse:
     """List agent sessions with optional filtering."""
     result = await list_sessions(
         workflow_id=workflow_id,
@@ -361,7 +368,8 @@ async def list_sessions_endpoint(
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    return [
+    summaries = result.value
+    responses = [
         SessionSummaryResponse(
             id=s.id,
             workflow_id=s.workflow_id,
@@ -370,12 +378,16 @@ async def list_sessions_endpoint(
             status=s.status,
             agent_provider=s.agent_type,
             total_tokens=s.total_tokens,
-            total_cost_usd=Decimal(str(s.total_cost_usd)),
+            total_cost_usd=s.total_cost_usd,
             started_at=str(s.started_at) if s.started_at else None,
             completed_at=str(s.completed_at) if s.completed_at else None,
         )
-        for s in result.value
+        for s in summaries
     ]
+    return SessionListResponse(
+        sessions=responses,
+        total=len(responses),
+    )
 
 
 def _parse_tool_input(input_preview: str | None) -> dict[str, Any] | None:

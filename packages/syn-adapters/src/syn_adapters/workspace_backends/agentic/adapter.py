@@ -28,6 +28,7 @@ from syn_shared.env_constants import (
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
     ENV_SYN_WORKSPACE_HOST_DIR,
 )
+from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
     from agentic_isolation import AgenticWorkspace
@@ -57,7 +58,7 @@ class AgenticIsolationAdapter:
     def __init__(
         self,
         *,
-        default_image: str = "agentic-workspace-claude-cli:latest",
+        default_image: str = DEFAULT_WORKSPACE_IMAGE,
         security: SecurityConfig | None = None,
         workspace_container_dir: str | None = None,
         workspace_host_dir: str | None = None,

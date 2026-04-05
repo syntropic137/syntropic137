@@ -21,6 +21,7 @@ class GetRepoSessionsQuery:
     """
 
     repo_id: str
+    repo_full_name: str = ""
     limit: int = 50
     offset: int = 0
     query_id: str = field(default_factory=lambda: str(uuid4()))

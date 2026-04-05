@@ -31,6 +31,7 @@ from syn_shared.events import (
     GIT_COMMIT,
     GIT_OPERATION,
     GIT_PUSH,
+    OTLP_LOG,
     PERMISSION_REQUESTED,
     SECURITY_DECISION,
     SESSION_COMPLETED,
@@ -90,6 +91,8 @@ _EVENT_TYPE_MAPPING: dict[str, str] = {
     SYSTEM_NOTIFICATION: SYSTEM_NOTIFICATION,
     # User interaction events (from agentic_events.EventType)
     USER_PROMPT_SUBMITTED: USER_PROMPT_SUBMITTED,
+    # OTLP observability events (from workspace OTel push — ADR-056)
+    OTLP_LOG: OTLP_LOG,
 }
 
 # Fields excluded from the data dict (they go in top-level AgentEvent fields)

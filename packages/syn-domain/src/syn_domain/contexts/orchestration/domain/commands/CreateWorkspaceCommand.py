@@ -11,6 +11,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationBackendType,
     SecurityPolicy,
 )
+from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 
 @dataclass
@@ -48,7 +49,7 @@ class CreateWorkspaceCommand(Command):
     security_policy: SecurityPolicy = field(default_factory=SecurityPolicy)
 
     # Image/environment
-    image: str = "agentic-workspace-claude-cli:latest"
+    image: str = DEFAULT_WORKSPACE_IMAGE
     working_directory: str = "/workspace"
 
     # Sidecar

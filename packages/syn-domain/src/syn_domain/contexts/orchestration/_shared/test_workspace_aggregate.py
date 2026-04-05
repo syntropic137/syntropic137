@@ -13,6 +13,7 @@ import pytest
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
     ExecutionResult,
+    ImageManifest,
     InjectionMethod,
     IsolationBackendType,
     SecurityPolicy,
@@ -638,3 +639,81 @@ class TestBuildCommandEvent:
         event = _build_command_event("ws-1", ["bad-cmd"], result)
         assert isinstance(event, CommandFailedEvent)
         assert len(event.error_message) == 500
+
+
+# =============================================================================
+# IMAGE MANIFEST TESTS (#545)
+# =============================================================================
+
+SAMPLE_MANIFEST = ImageManifest(
+    provider="claude-cli",
+    provider_version="1.1.0",
+    components={"claude_cli": "2.1.76", "rtk": "0.34.3", "node": "22"},
+    build_commit="e63b4458",
+    built_at="2026-04-04T16:58:05Z",
+    manifest_digest="d55e27a49de8",
+)
+
+
+@pytest.mark.unit
+class TestImageManifest:
+    """Tests for ImageManifest value object and aggregate integration."""
+
+    def test_image_manifest_is_frozen(self) -> None:
+        """ImageManifest should be immutable."""
+        with pytest.raises(AttributeError):
+            SAMPLE_MANIFEST.provider = "other"  # type: ignore[misc]
+
+    def test_image_manifest_fields(self) -> None:
+        """ImageManifest should expose all version fields."""
+        assert SAMPLE_MANIFEST.provider == "claude-cli"
+        assert SAMPLE_MANIFEST.provider_version == "1.1.0"
+        assert SAMPLE_MANIFEST.components["claude_cli"] == "2.1.76"
+        assert SAMPLE_MANIFEST.build_commit == "e63b4458"
+
+    def test_isolation_started_with_manifest(self, aggregate: WorkspaceAggregate) -> None:
+        """Aggregate should store image manifest from IsolationStartedEvent."""
+        cmd = CreateWorkspaceCommand(execution_id="exec-123")
+        aggregate.create_workspace(cmd)
+
+        aggregate.record_isolation_started(
+            isolation_id="container-abc",
+            isolation_type="docker",
+            image_manifest=SAMPLE_MANIFEST,
+        )
+
+        assert aggregate.status == WorkspaceStatus.READY
+        assert aggregate.image_manifest is not None
+        assert aggregate.image_manifest.provider == "claude-cli"
+        assert aggregate.image_manifest.components["rtk"] == "0.34.3"
+
+    def test_isolation_started_without_manifest(self, aggregate: WorkspaceAggregate) -> None:
+        """Aggregate should work without manifest (backwards compat)."""
+        cmd = CreateWorkspaceCommand(execution_id="exec-123")
+        aggregate.create_workspace(cmd)
+
+        aggregate.record_isolation_started(
+            isolation_id="container-abc",
+            isolation_type="docker",
+        )
+
+        assert aggregate.status == WorkspaceStatus.READY
+        assert aggregate.image_manifest is None
+
+    def test_manifest_survives_event_replay(self, aggregate: WorkspaceAggregate) -> None:
+        """Image manifest should survive serialization through event dict."""
+        cmd = CreateWorkspaceCommand(execution_id="exec-123")
+        aggregate.create_workspace(cmd)
+
+        aggregate.record_isolation_started(
+            isolation_id="container-abc",
+            isolation_type="docker",
+            image_manifest=SAMPLE_MANIFEST,
+        )
+
+        # Verify the event has the manifest as a dict
+        events = list(aggregate._uncommitted_events)
+        isolation_event = events[1].event  # Second event (after WorkspaceCreated)
+        assert isolation_event.event_type == "IsolationStarted"
+        assert isolation_event.image_manifest is not None
+        assert isolation_event.image_manifest["provider"] == "claude-cli"

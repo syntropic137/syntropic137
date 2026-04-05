@@ -198,3 +198,44 @@ class RepoCorrelationAdapter(_NamespacedProjectionAdapter):
         "github.TriggerFired",
         "WorkflowExecutionStarted",
     }
+
+
+class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
+    """Adapter for TriggerHistoryProjection.
+
+    Maps github.TriggerFired → handle_trigger_fired (projection uses
+    ``handle_`` prefix instead of ``on_``).
+    """
+
+    PROJECTION_NAME: ClassVar[str] = "trigger_history"
+    VERSION: ClassVar[int] = 1
+    _SUBSCRIBED: ClassVar[set[str]] = {"github.TriggerFired"}
+
+    async def handle_event(
+        self,
+        envelope: Any,
+        checkpoint_store: Any,
+    ) -> ProjectionResult:
+        event_data = envelope.event.model_dump()
+        global_nonce = envelope.metadata.global_nonce or 0
+        try:
+            # handle_trigger_fired uses attribute access (event.trigger_id),
+            # so wrap the dict in a SimpleNamespace for duck-typed access.
+            from types import SimpleNamespace
+
+            await self._projection.handle_trigger_fired(SimpleNamespace(**event_data))
+            await checkpoint_store.save_checkpoint(
+                ProjectionCheckpoint(
+                    projection_name=self.PROJECTION_NAME,
+                    global_position=global_nonce,
+                    updated_at=datetime.now(UTC),
+                    version=self.VERSION,
+                )
+            )
+            return ProjectionResult.SUCCESS
+        except Exception:
+            logger.exception(
+                "TriggerHistoryAdapter handler failed for event in %s",
+                self.PROJECTION_NAME,
+            )
+            return ProjectionResult.FAILURE

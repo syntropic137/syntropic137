@@ -366,7 +366,11 @@ async def get_repo_sessions(
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
     handler = GetRepoSessionsHandler(store=get_projection_store())
-    results = await handler.handle(GetRepoSessionsQuery(repo_id=repo_id, limit=limit))
+    results = await handler.handle(
+        GetRepoSessionsQuery(
+            repo_id=repo_id, repo_full_name=repo_result.value.full_name, limit=limit
+        )
+    )
     return Ok([r.to_dict() for r in results])
 
 
@@ -655,7 +659,11 @@ async def get_repo_health_endpoint(repo_id: str) -> RepoHealthResponse:
     result = await get_repo_health(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return RepoHealthResponse(**result.value)
+    response = RepoHealthResponse(**result.value)
+    # Fix(#542): read model may return empty repo_id — ensure it matches the request
+    if not response.repo_id:
+        response = response.model_copy(update={"repo_id": repo_id})
+    return response
 
 
 @router.get("/{repo_id}/cost")
@@ -669,7 +677,11 @@ async def get_repo_cost_endpoint(repo_id: str) -> RepoCostResponse:
     result = await get_repo_cost(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return RepoCostResponse(**result.value)
+    response = RepoCostResponse(**result.value)
+    # Fix(#542): read model may return empty repo_id — ensure it matches the request
+    if not response.repo_id:
+        response = response.model_copy(update={"repo_id": repo_id})
+    return response
 
 
 @router.get("/{repo_id}/activity")

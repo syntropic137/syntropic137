@@ -45,6 +45,10 @@ from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration.slices.execute_workflow import (
     WorkflowExecutionProcessor,
 )
+from syn_shared.env_constants import (
+    ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
+    ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
+)
 
 
 async def ensure_connected() -> None:
@@ -60,6 +64,28 @@ async def disconnect() -> None:
 def get_projection_mgr() -> ProjectionManager:
     """Return the singleton ProjectionManager."""
     return get_projection_manager()
+
+
+def _build_workspace_telemetry_env() -> dict[str, str]:
+    """Build OTel env vars to inject into workspace containers.
+
+    When collector_url is configured, enables Claude Code's OTLP export so
+    token/cost metrics and API-level events flow through the two-channel
+    observability pipeline (plugin hooks + OTel). See ADR-056.
+
+    Returns empty dict if collector_url is not set — OTel silently no-ops
+    inside the container (CLAUDE_CODE_ENABLE_TELEMETRY is already baked into
+    the workspace image as a default, so no-endpoint is a graceful fallback).
+    """
+    from syn_shared.settings import get_settings
+
+    collector_url = get_settings().collector_url
+    if not collector_url:
+        return {}
+    return {
+        ENV_CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+        ENV_OTEL_EXPORTER_OTLP_ENDPOINT: collector_url,
+    }
 
 
 async def get_execution_processor() -> WorkflowExecutionProcessor:
@@ -85,7 +111,9 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
         session_repository=get_session_repository(),
-        workspace_service=WorkspaceService.create(),
+        workspace_service=WorkspaceService.create(
+            environment=_build_workspace_telemetry_env(),
+        ),
         artifact_repository=get_artifact_repository(),
         artifact_content_storage=artifact_storage,
         artifact_query=artifact_query,

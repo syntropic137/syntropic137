@@ -77,6 +77,12 @@ def map_events_api_to_normalized(
         "repository": {"full_name": repo_name},
     }
 
+    # Events API returns null for pull_request.draft — normalize to False
+    # so trigger conditions like "pull_request.draft = false" evaluate correctly.
+    pr = enriched_payload.get("pull_request")
+    if isinstance(pr, dict) and pr.get("draft") is None:
+        enriched_payload["pull_request"] = {**pr, "draft": False}
+
     dedup_key = compute_dedup_key(event_type, action, enriched_payload)
 
     if created_at and created_at.endswith("Z"):

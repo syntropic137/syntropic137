@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from syn_api._wiring import (
     ensure_connected,
@@ -109,6 +110,7 @@ async def _seed_trigger_presets() -> int:
                 installation_id=aggregate.installation_id,
                 created_by=aggregate.created_by,
                 status=aggregate.status.value,
+                created_at=datetime.now(UTC),
             )
             count += 1
         except Exception:

@@ -28,6 +28,7 @@ from syn_shared.settings.git_identity import (  # noqa: F401
 from syn_shared.settings.git_identity_resolver import (
     GitIdentityResolver as GitIdentityResolver,
 )
+from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 from syn_shared.settings.workspace_security import (  # noqa: F401
     ContainerLoggingSettings,
     WorkspaceSecuritySettings,
@@ -104,7 +105,7 @@ class WorkspaceSettings(BaseSettings):
     )
 
     docker_image: str = Field(
-        default="agentic-workspace-claude-cli:latest",
+        default=DEFAULT_WORKSPACE_IMAGE,
         description="Docker image for Claude agent execution.",
     )
 

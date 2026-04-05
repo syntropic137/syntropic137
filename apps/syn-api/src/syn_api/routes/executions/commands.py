@@ -196,7 +196,7 @@ async def execute_workflow_endpoint(
     background_tasks: BackgroundTasks,
 ) -> ExecuteWorkflowResponse:
     """Start workflow execution in background."""
-    execution_id = str(uuid4())
+    execution_id = f"exec-{uuid4().hex[:12]}"
 
     async def _run() -> None:
         result = await execute(
@@ -238,8 +238,14 @@ async def get_execution_status_endpoint(
     execution_id: str,
 ) -> ExecutionStatusResponse:
     """Get the status of a workflow execution."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
     from .queries import get_detail
 
+    mgr = get_projection_mgr()
+    execution_id = await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
     result = await get_detail(execution_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")

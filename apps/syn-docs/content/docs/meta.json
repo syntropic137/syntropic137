@@ -1,6 +1,7 @@
 {
   "pages": [
     "guide",
+    "workspaces",
     "api",
     "cli"
   ]

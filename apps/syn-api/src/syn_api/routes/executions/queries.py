@@ -354,6 +354,7 @@ async def list_executions_endpoint(
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 tool_call_count=e.tool_call_count,
+                error_message=e.error_message,
             )
             for e in result.value
         ],

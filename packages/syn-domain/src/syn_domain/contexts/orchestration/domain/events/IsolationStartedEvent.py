@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003
+from typing import Any
 
 from event_sourcing import DomainEvent, event
 
@@ -23,6 +24,10 @@ class IsolationStartedEvent(DomainEvent):
 
     # Sidecar proxy (if enabled)
     proxy_url: str | None = None  # e.g., http://localhost:8080
+
+    # Image version manifest (from /opt/agentic/version.json)
+    # None for older images or non-Docker backends that don't provide it.
+    image_manifest: dict[str, Any] | None = None
 
     # Timing
     started_at: datetime
