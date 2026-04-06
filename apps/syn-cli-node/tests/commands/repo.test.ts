@@ -76,4 +76,84 @@ describe("repo commands", () => {
     await repoGroup.getCommand("failures")!.handler({ positionals: ["repo-1"], values: {} });
     expect(stdout()).toContain("No recent failures");
   });
+
+  describe("register org auto-selection", () => {
+    it("auto-selects the only organization", async () => {
+      // First call: list orgs (returns one org)
+      // Second call: register repo
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({ organizations: [{ organization_id: "org-42" }], total: 1 }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ repo_id: "repo-1", full_name: "owner/repo" }),
+        );
+
+      await repoGroup.getCommand("register")!.handler({
+        positionals: [],
+        values: { url: "owner/repo" },
+      });
+      const out = stdout();
+      expect(out).toContain("Using organization: org-42");
+      expect(out).toContain("Repository registered");
+    });
+
+    it("errors when no organizations exist", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ organizations: [], total: 0 }),
+      );
+
+      await expect(
+        repoGroup.getCommand("register")!.handler({
+          positionals: [],
+          values: { url: "owner/repo" },
+        }),
+      ).rejects.toThrow(CLIError);
+    });
+
+    it("errors when multiple organizations exist without --org", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          organizations: [
+            { organization_id: "org-1" },
+            { organization_id: "org-2" },
+          ],
+          total: 2,
+        }),
+      );
+
+      await expect(
+        repoGroup.getCommand("register")!.handler({
+          positionals: [],
+          values: { url: "owner/repo" },
+        }),
+      ).rejects.toThrow(CLIError);
+    });
+
+    it("errors when org ID is missing from API response", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ organizations: [{ name: "My Org" }], total: 1 }),
+      );
+
+      await expect(
+        repoGroup.getCommand("register")!.handler({
+          positionals: [],
+          values: { url: "owner/repo" },
+        }),
+      ).rejects.toThrow(CLIError);
+    });
+
+    it("errors when org ID is empty string", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ organizations: [{ organization_id: "" }], total: 1 }),
+      );
+
+      await expect(
+        repoGroup.getCommand("register")!.handler({
+          positionals: [],
+          values: { url: "owner/repo" },
+        }),
+      ).rejects.toThrow(CLIError);
+    });
+  });
 });

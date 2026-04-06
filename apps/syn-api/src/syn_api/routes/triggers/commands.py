@@ -218,9 +218,9 @@ async def pause_trigger(
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
     if indexed.status == TriggerStatus.PAUSED:
-        return Err(TriggerError.ALREADY_PAUSED)
+        return Err(TriggerError.ALREADY_PAUSED, message="Trigger is already paused")
     if indexed.status == TriggerStatus.DELETED:
-        return Err(TriggerError.ALREADY_DELETED)
+        return Err(TriggerError.ALREADY_DELETED, message="Trigger has been deleted")
 
     command = PauseTriggerCommand(trigger_id=trigger_id, paused_by=paused_by, reason=reason)
     repo = get_trigger_repo()
@@ -253,9 +253,9 @@ async def resume_trigger(
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
     if indexed.status == TriggerStatus.ACTIVE:
-        return Err(TriggerError.ALREADY_ACTIVE)
+        return Err(TriggerError.ALREADY_ACTIVE, message="Trigger is not paused")
     if indexed.status == TriggerStatus.DELETED:
-        return Err(TriggerError.ALREADY_DELETED)
+        return Err(TriggerError.ALREADY_DELETED, message="Trigger has been deleted")
 
     command = ResumeTriggerCommand(trigger_id=trigger_id, resumed_by=resumed_by)
     repo = get_trigger_repo()
@@ -288,7 +288,7 @@ async def delete_trigger(
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
     if indexed.status == TriggerStatus.DELETED:
-        return Err(TriggerError.ALREADY_DELETED)
+        return Err(TriggerError.ALREADY_DELETED, message="Trigger has already been deleted")
 
     command = DeleteTriggerCommand(trigger_id=trigger_id, deleted_by=deleted_by)
     repo = get_trigger_repo()

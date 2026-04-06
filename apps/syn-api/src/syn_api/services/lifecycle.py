@@ -270,12 +270,15 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     """Start subscription coordinator (degraded on failure)."""
     try:
         realtime = get_realtime()
-        state.workflow_dispatcher = await get_workflow_dispatcher()
+        workflow_dispatcher = await get_workflow_dispatcher()
         coordinator = get_subscription_coordinator(
             realtime_projection=realtime,
-            execution_service=state.workflow_dispatcher,
+            execution_service=workflow_dispatcher,
         )
         await coordinator.start()
+        # Only assign to state after coordinator starts successfully,
+        # so a partial failure doesn't orphan the dispatcher.
+        state.workflow_dispatcher = workflow_dispatcher
         state.subscription_service = coordinator
     except Exception:
         logger.exception("Failed to start subscription coordinator (degraded mode)")
@@ -389,13 +392,19 @@ async def _try_recover_subscriptions(state: LifecycleState) -> None:
 
     Unlike _init_subscriptions, does NOT append to degraded_reasons on
     failure — the caller handles retry logic.
+
+    Reuses the existing workflow dispatcher when present to avoid
+    orphaning a running dispatcher on each recovery attempt.
     """
     realtime = get_realtime()
-    state.workflow_dispatcher = await get_workflow_dispatcher()
+    workflow_dispatcher = state.workflow_dispatcher
+    if workflow_dispatcher is None:
+        workflow_dispatcher = await get_workflow_dispatcher()
     coordinator = get_subscription_coordinator(
         realtime_projection=realtime,
-        execution_service=state.workflow_dispatcher,
+        execution_service=workflow_dispatcher,
     )
     await coordinator.start()
+    state.workflow_dispatcher = workflow_dispatcher
     state.subscription_service = coordinator
     logger.info("Subscription coordinator started (recovered)")

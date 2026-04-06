@@ -191,7 +191,7 @@ async def test_pause_trigger():
 
 
 async def test_pause_already_paused():
-    """Pausing an already-paused trigger returns error."""
+    """Pausing an already-paused trigger returns error with descriptive message."""
     from syn_api.routes.triggers import pause_trigger, register_trigger
 
     reg_result = await register_trigger(
@@ -202,6 +202,37 @@ async def test_pause_already_paused():
     await pause_trigger(trigger_id)
     result = await pause_trigger(trigger_id)
     assert isinstance(result, Err)
+    assert result.error == "already_paused"
+    assert result.message is not None
+    assert "already paused" in result.message.lower()
+
+
+async def test_pause_deleted_trigger():
+    """Pausing a deleted trigger returns already-deleted error."""
+    from syn_api.routes.triggers import delete_trigger, pause_trigger, register_trigger
+
+    reg_result = await register_trigger(
+        name="pause-deleted", event="push", repository="owner/repo", workflow_id="wf-1"
+    )
+    trigger_id = reg_result.value
+
+    await delete_trigger(trigger_id)
+    result = await pause_trigger(trigger_id)
+    assert isinstance(result, Err)
+    assert result.error == "already_deleted"
+    assert result.message is not None
+    assert "deleted" in result.message.lower()
+
+
+async def test_pause_not_found():
+    """Pausing a nonexistent trigger returns not-found error."""
+    from syn_api.routes.triggers import pause_trigger
+
+    result = await pause_trigger("nonexistent-id")
+    assert isinstance(result, Err)
+    assert result.error == "not_found"
+    assert result.message is not None
+    assert "not found" in result.message.lower()
 
 
 async def test_resume_trigger():
@@ -239,8 +270,52 @@ async def test_delete_trigger():
     assert detail.value.status == "deleted"
 
 
+async def test_resume_active_trigger():
+    """Resuming an already-active trigger returns error with descriptive message."""
+    from syn_api.routes.triggers import register_trigger, resume_trigger
+
+    reg_result = await register_trigger(
+        name="resume-active", event="push", repository="owner/repo", workflow_id="wf-1"
+    )
+    trigger_id = reg_result.value
+
+    result = await resume_trigger(trigger_id)
+    assert isinstance(result, Err)
+    assert result.error == "already_active"
+    assert result.message is not None
+    assert "not paused" in result.message.lower()
+
+
+async def test_resume_deleted_trigger():
+    """Resuming a deleted trigger returns already-deleted error."""
+    from syn_api.routes.triggers import delete_trigger, register_trigger, resume_trigger
+
+    reg_result = await register_trigger(
+        name="resume-deleted", event="push", repository="owner/repo", workflow_id="wf-1"
+    )
+    trigger_id = reg_result.value
+
+    await delete_trigger(trigger_id)
+    result = await resume_trigger(trigger_id)
+    assert isinstance(result, Err)
+    assert result.error == "already_deleted"
+    assert result.message is not None
+    assert "deleted" in result.message.lower()
+
+
+async def test_resume_not_found():
+    """Resuming a nonexistent trigger returns not-found error."""
+    from syn_api.routes.triggers import resume_trigger
+
+    result = await resume_trigger("nonexistent-id")
+    assert isinstance(result, Err)
+    assert result.error == "not_found"
+    assert result.message is not None
+    assert "not found" in result.message.lower()
+
+
 async def test_delete_already_deleted():
-    """Deleting an already-deleted trigger returns error."""
+    """Deleting an already-deleted trigger returns error with descriptive message."""
     from syn_api.routes.triggers import delete_trigger, register_trigger
 
     reg_result = await register_trigger(
@@ -251,6 +326,20 @@ async def test_delete_already_deleted():
     await delete_trigger(trigger_id)
     result = await delete_trigger(trigger_id)
     assert isinstance(result, Err)
+    assert result.error == "already_deleted"
+    assert result.message is not None
+    assert "already been deleted" in result.message.lower()
+
+
+async def test_delete_not_found():
+    """Deleting a nonexistent trigger returns not-found error."""
+    from syn_api.routes.triggers import delete_trigger
+
+    result = await delete_trigger("nonexistent-id")
+    assert isinstance(result, Err)
+    assert result.error == "not_found"
+    assert result.message is not None
+    assert "not found" in result.message.lower()
 
 
 async def test_disable_triggers():
