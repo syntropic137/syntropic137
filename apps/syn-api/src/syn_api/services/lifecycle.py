@@ -340,6 +340,17 @@ async def _try_recover_reason(state: LifecycleState, reason: DegradedReason) -> 
     logger.info("Recovered: %s", reason)
 
 
+async def _attempt_recovery_pass(state: LifecycleState, delay: float) -> None:
+    """Try recovering each degraded subsystem once. Failures are logged, not raised."""
+    for reason in _get_recoverable(state):
+        if state._shutting_down:
+            return
+        try:
+            await _try_recover_reason(state, reason)
+        except Exception:
+            logger.debug("Recovery retry failed for %s, will retry in %.0fs", reason, delay)
+
+
 async def _recovery_loop(state: LifecycleState) -> None:
     """Background task: retry degraded subsystems with exponential backoff.
 
@@ -350,25 +361,14 @@ async def _recovery_loop(state: LifecycleState) -> None:
     delay = 10.0
     max_delay = 60.0
 
-    # Initial grace period — give dependent services time to stabilize.
     await asyncio.sleep(delay)
 
-    while not state._shutting_down:
-        recoverable = _get_recoverable(state)
-        if not recoverable:
-            break
-
-        for reason in recoverable:
-            if state._shutting_down:
-                return
-            try:
-                await _try_recover_reason(state, reason)
-            except Exception:
-                logger.debug("Recovery retry failed for %s, will retry in %.0fs", reason, delay)
+    while not state._shutting_down and _get_recoverable(state):
+        await _attempt_recovery_pass(state, delay)
 
         if _all_recovered(state):
             logger.info("All recoverable subsystems healthy — recovery loop exiting")
-            break
+            return
 
         await asyncio.sleep(delay)
         delay = min(delay * 2, max_delay)

@@ -113,7 +113,9 @@ class TriggerHistoryProjection:
             key = f"{entry.trigger_id}_blocked_{entry.webhook_delivery_id}"
         else:
             pr_part = str(entry.pr_number) if entry.pr_number else "no_pr"
-            key = f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
+            key = (
+                f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
+            )
         await self._store.save(PROJECTION_NAME, key, _entry_to_dict(entry))
         logger.info(f"Projected TriggerBlocked: {event.trigger_id} ({event.guard_name})")
         return entry
