@@ -235,7 +235,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
                 # so wrap the dict in a SimpleNamespace for duck-typed access.
                 from types import SimpleNamespace
 
-                ns = SimpleNamespace(**event_data)
+                ns = SimpleNamespace(**event_data, global_nonce=global_nonce)
                 if event_type == "github.TriggerBlocked":
                     await self._projection.handle_trigger_blocked(ns)
                 else:

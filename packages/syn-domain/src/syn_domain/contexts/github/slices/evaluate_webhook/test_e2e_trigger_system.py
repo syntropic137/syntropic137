@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+    TriggerBlockedResult,
+    TriggerMatchResult,
+)
 from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
 from syn_domain.contexts.github._shared.trigger_query_store import (
     InMemoryTriggerQueryStore,
@@ -19,10 +23,6 @@ from syn_domain.contexts.github.domain.commands.PauseTriggerCommand import (
 )
 from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
     RegisterTriggerCommand,
-)
-from syn_domain.contexts.github._shared.trigger_evaluation_types import (
-    TriggerBlockedResult,
-    TriggerMatchResult,
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,

@@ -108,11 +108,15 @@ class TriggerHistoryProjection:
             guard_name=event.guard_name,
             block_reason=getattr(event, "reason", ""),
         )
-        # Deterministic, replay-safe key namespaced by trigger_id
-        if entry.webhook_delivery_id:
+        # Deterministic, replay-safe key namespaced by trigger_id.
+        # Use global_nonce (stream position) when available for collision-free keys.
+        global_nonce = getattr(event, "global_nonce", None)
+        if global_nonce is not None:
+            key = f"{entry.trigger_id}_blocked_{global_nonce}"
+        elif entry.webhook_delivery_id:
             key = f"{entry.trigger_id}_blocked_{entry.webhook_delivery_id}"
         else:
-            pr_part = str(entry.pr_number) if entry.pr_number else "no_pr"
+            pr_part = str(entry.pr_number) if entry.pr_number is not None else "no_pr"
             key = (
                 f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
             )
