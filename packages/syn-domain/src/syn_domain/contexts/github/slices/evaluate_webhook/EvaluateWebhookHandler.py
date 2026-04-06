@@ -117,7 +117,11 @@ class EvaluateWebhookHandler:
         lock = self._fire_locks.setdefault(lock_key, asyncio.Lock())
         async with lock:
             return await self._guarded_evaluate(
-                rule, event, repository, installation_id, payload,
+                rule,
+                event,
+                repository,
+                installation_id,
+                payload,
             )
 
     async def _guarded_evaluate(
