@@ -34,7 +34,12 @@ const registerCommand: CommandDef = {
       // Auto-select if exactly one organization exists
       const orgs = await apiGetPaginated<Record<string, unknown>>("/organizations", "organizations");
       if (orgs.length === 1) {
-        org = String(orgs[0]!["organization_id"] ?? "");
+        const orgId = orgs[0]!["organization_id"];
+        if (typeof orgId !== "string" || orgId === "") {
+          printError("Organization found but has no valid ID");
+          throw new CLIError("Invalid organization data", 1);
+        }
+        org = orgId;
         printDim(`Using organization: ${org}`);
       } else if (orgs.length === 0) {
         printError("No organizations found. Create one first with: syn org create");
