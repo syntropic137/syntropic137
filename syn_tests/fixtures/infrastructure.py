@@ -23,6 +23,7 @@ from syn_shared.testing import (
     DEFAULT_DB_PASSWORD,
     DEFAULT_DB_USER,
     DEFAULT_HOST,
+    DEV_STACK_PORTS,
     ENV_TEST_COLLECTOR_URL,
     ENV_TEST_DATABASE_URL,
     ENV_TEST_EVENTSTORE_HOST,
@@ -121,12 +122,23 @@ def _get_env_infrastructure() -> TestInfrastructure:
             f"postgres://{DEFAULT_DB_USER}:{DEFAULT_DB_PASSWORD}@{host}:{port}/{DEFAULT_DB_NAME}"
         )
 
+    eventstore_port = int(
+        os.environ.get(ENV_TEST_EVENTSTORE_PORT, str(TEST_STACK_PORTS["eventstore"]))
+    )
+
+    # Poka-yoke: never let tests connect to the dev event store
+    if eventstore_port == DEV_STACK_PORTS["eventstore"]:
+        msg = (
+            f"SAFETY: TEST_EVENTSTORE_PORT={eventstore_port} matches the dev event store. "
+            "Tests must use test-stack ports to avoid polluting the dev event store. "
+            "Run 'just test-stack' or set TEST_EVENTSTORE_PORT to a test port (e.g. 55051)."
+        )
+        raise ValueError(msg)
+
     return TestInfrastructure(
         timescaledb_url=timescaledb_url,
         eventstore_host=os.environ.get(ENV_TEST_EVENTSTORE_HOST, DEFAULT_HOST),
-        eventstore_port=int(
-            os.environ.get(ENV_TEST_EVENTSTORE_PORT, str(TEST_STACK_PORTS["eventstore"]))
-        ),
+        eventstore_port=eventstore_port,
         collector_url=os.environ.get(
             ENV_TEST_COLLECTOR_URL, f"http://{DEFAULT_HOST}:{TEST_STACK_PORTS['collector']}"
         ),
