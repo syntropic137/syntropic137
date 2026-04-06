@@ -9,7 +9,6 @@ import pytest
 
 from syn_adapters.storage import (
     get_event_publisher,
-    get_event_store,
     get_workflow_repository,
     reset_storage,
 )
@@ -98,9 +97,8 @@ async def test_seed_from_file_dry_run(seeder: WorkflowSeeder) -> None:
         assert result.success is True
 
         # Verify no workflow was actually created
-        event_store = get_event_store()
-        events = event_store.get_all_events()
-        assert len(events) == 0
+        repo = get_workflow_repository()
+        assert await repo.exists("seeder-test-workflow") is False
     finally:
         path.unlink()
 

@@ -1,31 +1,22 @@
-"""Storage adapters - persistence implementations.
+"""Storage adapters — persistence implementations.
 
-This module provides storage adapters based on the event-sourcing-platform SDK.
+All repositories use the SDK's EventStoreRepository, wrapped by RepositoryAdapter.
+The event store client (event_store_client.py) is the single decision point:
+MemoryEventStoreClient for tests, GrpcEventStoreClient for dev/prod.
+
 See ADR-007: Event Store Integration for architecture details.
-
-Environment-based selection:
-- **TEST** (APP_ENVIRONMENT=test): Uses SDK's MemoryEventStoreClient
-  Fast, isolated, no external dependencies. For unit tests only.
-
-- **DEVELOPMENT/PRODUCTION**: Uses SDK's GrpcEventStoreClient
-  Connects to Event Store Server via gRPC (port 50051).
-  Event Store Server persists to PostgreSQL.
-  Start with: just dev
 
 Usage:
     from syn_adapters.storage import get_workflow_repository
 
-    # Get repository (auto-selects client based on environment)
     repo = get_workflow_repository()
-
-    # Use repository
-    workflow = await repo.load(workflow_id)
+    workflow = await repo.get_by_id(workflow_id)
     await repo.save(workflow)
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any
 
 # Event Store Client (SDK-based)
 from syn_adapters.storage.event_store_client import (
@@ -34,23 +25,9 @@ from syn_adapters.storage.event_store_client import (
     get_event_store_client,
     reset_event_store_client,
 )
-
-# Legacy in-memory implementations (for backwards compatibility and test utilities)
 from syn_adapters.storage.in_memory import (
-    InMemoryArtifactRepository,
     InMemoryEventPublisher,
-    InMemoryEventStore,
-    InMemorySessionRepository,
     InMemoryStorageError,
-    InMemoryWorkflowRepository,
-    StoredEvent,
-    get_event_store,
-)
-from syn_adapters.storage.in_memory import (
-    get_event_publisher as get_inmem_event_publisher,
-)
-from syn_adapters.storage.in_memory import (
-    reset_storage as reset_legacy_storage,
 )
 
 # SDK-based Repositories
@@ -62,119 +39,61 @@ from syn_adapters.storage.repositories import (
 )
 from syn_shared.settings import get_settings
 
-if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-        AgentSessionAggregate,
-    )
-    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
-        ArtifactAggregate,
-    )
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
-        WorkflowTemplateAggregate,
-    )
+# Singleton event publisher for test mode
+_event_publisher: InMemoryEventPublisher | None = None
 
 
 class NoOpEventPublisher:
-    """Minimal event publisher for SDK-based repositories.
+    """No-op event publisher for production.
 
-    With the subscription-based architecture (ADR-010), projections are
-    updated via EventSubscriptionService which subscribes to the event store.
-    This publisher exists for backwards compatibility and logging only.
-
-    The actual projection updates happen through:
-    1. Repository saves event to Event Store (via SDK)
-    2. EventSubscriptionService receives event via subscription
-    3. EventSubscriptionService dispatches to ProjectionManager
-
-    See: EventSubscriptionService, ADR-010
+    In production, projections are updated via EventSubscriptionService
+    (ADR-010), not via manual event publishing. This publisher is a no-op.
     """
 
     async def publish(self, events: list[Any]) -> None:
-        """Log event publication - projections updated via subscription.
-
-        Args:
-            events: Events that were persisted to the event store.
-        """
-        import logging
-
-        logger = logging.getLogger(__name__)
-        if events:
-            logger.debug(
-                "Events persisted to event store (projections updated via subscription)",
-                extra={"event_count": len(events)},
-            )
+        """No-op — projections updated via subscription in production."""
 
 
 def get_event_publisher() -> InMemoryEventPublisher | NoOpEventPublisher:
     """Get the appropriate event publisher based on environment.
 
-    For TEST: Returns InMemoryEventPublisher (for test assertions).
-    For DEV/PROD: Returns NoOpEventPublisher (SDK handles persistence).
+    For TEST: Returns InMemoryEventPublisher (for sync_published_events_to_projections).
+    For DEV/PROD: Returns NoOpEventPublisher (no-op).
     """
     settings = get_settings()
     if settings.uses_in_memory_stores:
-        return get_inmem_event_publisher()
+        global _event_publisher
+        if _event_publisher is None:
+            _event_publisher = InMemoryEventPublisher()
+        return _event_publisher
     return NoOpEventPublisher()
 
 
-# Repository protocols for type checking (backwards compatibility)
-class WorkflowRepositoryProtocol(Protocol):
-    """Protocol for workflow repositories."""
-
-    async def load(self, aggregate_id: str) -> WorkflowTemplateAggregate | None: ...
-    async def save(self, aggregate: WorkflowTemplateAggregate) -> None: ...
-    async def exists(self, aggregate_id: str) -> bool: ...
-
-
-class SessionRepositoryProtocol(Protocol):
-    """Protocol for session repositories."""
-
-    async def load(self, aggregate_id: str) -> AgentSessionAggregate | None: ...
-    async def save(self, aggregate: AgentSessionAggregate) -> None: ...
-    async def exists(self, aggregate_id: str) -> bool: ...
-
-
-class ArtifactRepositoryProtocol(Protocol):
-    """Protocol for artifact repositories."""
-
-    async def load(self, aggregate_id: str) -> ArtifactAggregate | None: ...
-    async def save(self, aggregate: ArtifactAggregate) -> None: ...
-    async def exists(self, aggregate_id: str) -> bool: ...
-
-
 def reset_storage() -> None:
-    """Reset all storage (for testing).
+    """Reset all storage (for testing between tests).
 
     Clears:
-    - Event store client cache
-    - Repository caches
-    - Legacy in-memory storage (if used)
+    1. Event store client cache → new MemoryEventStoreClient (empty streams)
+    2. Repository caches → new RepositoryAdapter instances on next access
+    3. Event publisher → clear collected events for projection sync
     """
+    global _event_publisher
+
     reset_event_store_client()
     reset_repositories()
-    reset_legacy_storage()
+
+    if _event_publisher is not None:
+        _event_publisher.clear()
 
 
 __all__ = [
-    # Protocols
-    "ArtifactRepositoryProtocol",
-    # Legacy in-memory (for backwards compatibility / test utilities)
-    "InMemoryArtifactRepository",
     "InMemoryEventPublisher",
-    "InMemoryEventStore",
-    "InMemorySessionRepository",
     "InMemoryStorageError",
-    "InMemoryWorkflowRepository",
     "NoOpEventPublisher",
-    "SessionRepositoryProtocol",
-    "StoredEvent",
-    "WorkflowRepositoryProtocol",
-    # SDK-based (preferred)
     "connect_event_store",
     "disconnect_event_store",
     "get_artifact_repository",
     "get_event_publisher",
-    "get_event_store",
     "get_event_store_client",
     "get_session_repository",
     "get_workflow_repository",

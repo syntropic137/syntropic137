@@ -1,8 +1,8 @@
 """Repository implementations using Event Sourcing SDK.
 
-This module provides repository factories that use the event_sourcing SDK's
-EventStoreRepository pattern for non-test environments. For tests, it falls
-back to in-memory implementations.
+All repositories use the SDK's EventStoreRepository, wrapped by RepositoryAdapter.
+The event store client (event_store_client.py) is the single decision point:
+MemoryEventStoreClient for tests, GrpcEventStoreClient for dev/prod.
 
 See ADR-007 for architecture details.
 
@@ -16,23 +16,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
-
-from syn_shared.settings import get_settings
-
-if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-        AgentSessionAggregate,
-    )
-    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
-        ArtifactAggregate,
-    )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-        WorkflowExecutionAggregate,
-    )
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
-        WorkflowTemplateAggregate,
-    )
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +26,10 @@ class RepositoryAdapter[TAggregate]:
 
     The SDK's EventStoreRepository uses `load()` for fetching aggregates,
     but our domain expects `get_by_id()`. This adapter provides the mapping.
+
+    After each save, uncommitted events are published to the event publisher
+    so that ``sync_published_events_to_projections()`` can dispatch them to
+    projections in test mode. In production the publisher is a no-op.
     """
 
     def __init__(self, sdk_repository: Any) -> None:
@@ -53,12 +41,16 @@ class RepositoryAdapter[TAggregate]:
         return await self._repo.load(aggregate_id)
 
     async def save(self, aggregate: TAggregate) -> None:
-        """Save an aggregate."""
+        """Save an aggregate and publish events for projection sync."""
+        uncommitted = self._capture_uncommitted(aggregate)
         await self._repo.save(aggregate)
+        await self._publish_events(uncommitted)
 
     async def save_new(self, aggregate: TAggregate) -> None:
         """Save a new aggregate (raises StreamAlreadyExistsError if stream exists)."""
+        uncommitted = self._capture_uncommitted(aggregate)
         await self._repo.save_new(aggregate)
+        await self._publish_events(uncommitted)
 
     async def exists(self, aggregate_id: str) -> bool:
         """Check if aggregate exists."""
@@ -70,12 +62,28 @@ class RepositoryAdapter[TAggregate]:
         """Get the underlying SDK repository."""
         return self._repo
 
+    @staticmethod
+    def _capture_uncommitted(aggregate: Any) -> list[Any]:
+        """Capture uncommitted events before the SDK marks them as committed."""
+        if hasattr(aggregate, "get_uncommitted_events"):
+            return list(aggregate.get_uncommitted_events())
+        return []
 
-# Cached repository instances (wrapped adapters for SDK-based repos)
-_workflow_repository: RepositoryAdapter[WorkflowTemplateAggregate] | None = None
-_workflow_execution_repository: RepositoryAdapter[WorkflowExecutionAggregate] | None = None
-_session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None
-_artifact_repository: RepositoryAdapter[ArtifactAggregate] | None = None
+    @staticmethod
+    async def _publish_events(events: list[Any]) -> None:
+        """Publish events to the event publisher (no-op in production)."""
+        if events:
+            from syn_adapters.storage import get_event_publisher
+
+            publisher = get_event_publisher()
+            await publisher.publish(events)
+
+
+# Cached repository instances (RepositoryAdapter wrapping SDK repos)
+_workflow_repository: RepositoryAdapter[Any] | None = None
+_workflow_execution_repository: RepositoryAdapter[Any] | None = None
+_session_repository: RepositoryAdapter[Any] | None = None
+_artifact_repository: RepositoryAdapter[Any] | None = None
 _trigger_repository: RepositoryAdapter[Any] | None = None
 _organization_repository: RepositoryAdapter[Any] | None = None
 _system_repository: RepositoryAdapter[Any] | None = None
@@ -84,7 +92,11 @@ _repo_claim_repository: RepositoryAdapter[Any] | None = None
 
 
 def _get_repository_factory() -> Any:
-    """Get a RepositoryFactory with the appropriate EventStoreClient."""
+    """Get a RepositoryFactory with the appropriate EventStoreClient.
+
+    The client is the single decision point: MemoryEventStoreClient for
+    tests, GrpcEventStoreClient for dev/prod (see event_store_client.py).
+    """
     from event_sourcing import RepositoryFactory
 
     from syn_adapters.storage.event_store_client import get_event_store_client
@@ -93,30 +105,9 @@ def _get_repository_factory() -> Any:
     return RepositoryFactory(client)
 
 
-def get_workflow_repository() -> (
-    Any
-):  # RepositoryAdapter[WorkflowTemplateAggregate] or InMemoryWorkflowRepository
-    """Get a WorkflowTemplateAggregate repository.
-
-    For TEST: Returns InMemoryWorkflowRepository (synchronous API)
-    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository (async SDK-based)
-
-    Returns:
-        Repository for WorkflowTemplateAggregate with get_by_id/save/exists interface.
-    """
-    settings = get_settings()
-
-    if settings.is_test:
-        # Use in-memory for tests (synchronous API, no external dependencies)
-        from syn_adapters.storage.in_memory import (
-            get_workflow_repository as get_inmem_workflow_repo,
-        )
-
-        return get_inmem_workflow_repo()
-
-    # Use SDK-based repository for non-test environments
+def get_workflow_repository() -> RepositoryAdapter[Any]:
+    """Get a WorkflowTemplateAggregate repository."""
     global _workflow_repository
-
     if _workflow_repository is not None:
         return _workflow_repository
 
@@ -130,34 +121,12 @@ def get_workflow_repository() -> (
         aggregate_type="WorkflowTemplate",
     )
     _workflow_repository = RepositoryAdapter(sdk_repo)
-
-    logger.debug("Created WorkflowTemplateAggregate repository (SDK wrapped)")
     return _workflow_repository
 
 
-def get_workflow_execution_repository() -> (
-    Any
-):  # RepositoryAdapter[WorkflowExecutionAggregate] or in-memory
-    """Get a WorkflowExecutionAggregate repository.
-
-    For TEST: Returns in-memory repository
-    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
-
-    Returns:
-        Repository for WorkflowExecutionAggregate with get_by_id/save/exists interface.
-    """
-    settings = get_settings()
-
-    if settings.is_test:
-        # For tests, use in-memory (needs to be implemented if not exists)
-        from syn_adapters.storage.in_memory import (
-            get_workflow_execution_repository as get_inmem_exec_repo,
-        )
-
-        return get_inmem_exec_repo()
-
+def get_workflow_execution_repository() -> RepositoryAdapter[Any]:
+    """Get a WorkflowExecutionAggregate repository."""
     global _workflow_execution_repository
-
     if _workflow_execution_repository is not None:
         return _workflow_execution_repository
 
@@ -171,33 +140,12 @@ def get_workflow_execution_repository() -> (
         aggregate_type="WorkflowExecution",
     )
     _workflow_execution_repository = RepositoryAdapter(sdk_repo)
-
-    logger.debug("Created WorkflowExecutionAggregate repository (SDK wrapped)")
     return _workflow_execution_repository
 
 
-def get_session_repository() -> (
-    Any
-):  # RepositoryAdapter[AgentSessionAggregate] or InMemorySessionRepository
-    """Get an AgentSessionAggregate repository.
-
-    For TEST: Returns InMemorySessionRepository (synchronous API)
-    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository (async SDK-based)
-
-    Returns:
-        Repository for AgentSessionAggregate with get_by_id/save/exists interface.
-    """
-    settings = get_settings()
-
-    if settings.is_test:
-        from syn_adapters.storage.in_memory import (
-            get_session_repository as get_inmem_session_repo,
-        )
-
-        return get_inmem_session_repo()
-
+def get_session_repository() -> RepositoryAdapter[Any]:
+    """Get an AgentSessionAggregate repository."""
     global _session_repository
-
     if _session_repository is not None:
         return _session_repository
 
@@ -211,33 +159,12 @@ def get_session_repository() -> (
         aggregate_type="AgentSession",
     )
     _session_repository = RepositoryAdapter(sdk_repo)
-
-    logger.debug("Created AgentSessionAggregate repository (SDK wrapped)")
     return _session_repository
 
 
-def get_artifact_repository() -> (
-    Any
-):  # RepositoryAdapter[ArtifactAggregate] or InMemoryArtifactRepository
-    """Get an ArtifactAggregate repository.
-
-    For TEST: Returns InMemoryArtifactRepository (synchronous API)
-    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository (async SDK-based)
-
-    Returns:
-        Repository for ArtifactAggregate with get_by_id/save/exists interface.
-    """
-    settings = get_settings()
-
-    if settings.is_test:
-        from syn_adapters.storage.in_memory import (
-            get_artifact_repository as get_inmem_artifact_repo,
-        )
-
-        return get_inmem_artifact_repo()
-
+def get_artifact_repository() -> RepositoryAdapter[Any]:
+    """Get an ArtifactAggregate repository."""
     global _artifact_repository
-
     if _artifact_repository is not None:
         return _artifact_repository
 
@@ -251,22 +178,19 @@ def get_artifact_repository() -> (
         aggregate_type="Artifact",
     )
     _artifact_repository = RepositoryAdapter(sdk_repo)
-
-    logger.debug("Created ArtifactAggregate repository (SDK wrapped)")
     return _artifact_repository
 
 
 def get_trigger_repository() -> Any:
     """Get a TriggerRuleAggregate repository.
 
-    For TEST: Returns in-memory query store (backward-compatible)
-    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
-
-    Returns:
-        Repository for TriggerRuleAggregate with get_by_id/save interface.
+    NOTE: In test mode, returns InMemoryTriggerQueryStore (a query store
+    with a different interface). This is a special case because the trigger
+    system uses a query store pattern, not the standard repository pattern.
     """
-    settings = get_settings()
+    from syn_shared.settings import get_settings
 
+    settings = get_settings()
     if settings.is_test:
         from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
             InMemoryTriggerQueryStore,
@@ -275,7 +199,6 @@ def get_trigger_repository() -> Any:
         return InMemoryTriggerQueryStore()
 
     global _trigger_repository
-
     if _trigger_repository is not None:
         return _trigger_repository
 
@@ -289,31 +212,12 @@ def get_trigger_repository() -> Any:
         aggregate_type="TriggerRule",
     )
     _trigger_repository = RepositoryAdapter(sdk_repo)
-
-    logger.debug("Created TriggerRuleAggregate repository (SDK wrapped)")
     return _trigger_repository
 
 
-def get_organization_repository() -> Any:
-    """Get an OrganizationAggregate repository.
-
-    For TEST: Returns in-memory repository
-    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
-
-    Returns:
-        Repository for OrganizationAggregate with get_by_id/save/exists interface.
-    """
-    settings = get_settings()
-
-    if settings.is_test:
-        from syn_adapters.storage.in_memory import (
-            get_organization_repository as get_inmem_org_repo,
-        )
-
-        return get_inmem_org_repo()
-
+def get_organization_repository() -> RepositoryAdapter[Any]:
+    """Get an OrganizationAggregate repository."""
     global _organization_repository
-
     if _organization_repository is not None:
         return _organization_repository
 
@@ -327,31 +231,12 @@ def get_organization_repository() -> Any:
         aggregate_type="Organization",
     )
     _organization_repository = RepositoryAdapter(sdk_repo)
-
-    logger.debug("Created OrganizationAggregate repository (SDK wrapped)")
     return _organization_repository
 
 
-def get_system_repository() -> Any:
-    """Get a SystemAggregate repository.
-
-    For TEST: Returns in-memory repository
-    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
-
-    Returns:
-        Repository for SystemAggregate with get_by_id/save/exists interface.
-    """
-    settings = get_settings()
-
-    if settings.is_test:
-        from syn_adapters.storage.in_memory import (
-            get_system_repository as get_inmem_sys_repo,
-        )
-
-        return get_inmem_sys_repo()
-
+def get_system_repository() -> RepositoryAdapter[Any]:
+    """Get a SystemAggregate repository."""
     global _system_repository
-
     if _system_repository is not None:
         return _system_repository
 
@@ -365,31 +250,12 @@ def get_system_repository() -> Any:
         aggregate_type="System",
     )
     _system_repository = RepositoryAdapter(sdk_repo)
-
-    logger.debug("Created SystemAggregate repository (SDK wrapped)")
     return _system_repository
 
 
-def get_repo_repository() -> Any:
-    """Get a RepoAggregate repository.
-
-    For TEST: Returns in-memory repository
-    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
-
-    Returns:
-        Repository for RepoAggregate with get_by_id/save/exists interface.
-    """
-    settings = get_settings()
-
-    if settings.is_test:
-        from syn_adapters.storage.in_memory import (
-            get_repo_repository as get_inmem_repo_repo,
-        )
-
-        return get_inmem_repo_repo()
-
+def get_repo_repository() -> RepositoryAdapter[Any]:
+    """Get a RepoAggregate repository."""
     global _repo_repository
-
     if _repo_repository is not None:
         return _repo_repository
 
@@ -403,31 +269,12 @@ def get_repo_repository() -> Any:
         aggregate_type="Repo",
     )
     _repo_repository = RepositoryAdapter(sdk_repo)
-
-    logger.debug("Created RepoAggregate repository (SDK wrapped)")
     return _repo_repository
 
 
-def get_repo_claim_repository() -> Any:
-    """Get a RepoClaimAggregate repository.
-
-    For TEST: Returns in-memory repository
-    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
-
-    Returns:
-        Repository for RepoClaimAggregate with get_by_id/save/save_new/exists interface.
-    """
-    settings = get_settings()
-
-    if settings.is_test:
-        from syn_adapters.storage.in_memory import (
-            get_repo_claim_repository as get_inmem_claim_repo,
-        )
-
-        return get_inmem_claim_repo()
-
+def get_repo_claim_repository() -> RepositoryAdapter[Any]:
+    """Get a RepoClaimAggregate repository."""
     global _repo_claim_repository
-
     if _repo_claim_repository is not None:
         return _repo_claim_repository
 
@@ -441,16 +288,16 @@ def get_repo_claim_repository() -> Any:
         aggregate_type="RepoClaim",
     )
     _repo_claim_repository = RepositoryAdapter(sdk_repo)
-
-    logger.debug("Created RepoClaimAggregate repository (SDK wrapped)")
     return _repo_claim_repository
 
 
 def reset_repositories() -> None:
-    """Reset all cached repositories (for testing).
+    """Reset all cached repository instances.
 
-    Clears all cached repository instances. Call this along with
-    reset_event_store_client() for a clean state.
+    After reset, the next call to any factory function creates a fresh
+    RepositoryAdapter backed by a new EventStoreRepository. Combined with
+    reset_event_store_client() (which replaces the MemoryEventStoreClient),
+    this gives each test a clean slate.
     """
     global \
         _workflow_repository, \
@@ -471,12 +318,3 @@ def reset_repositories() -> None:
     _system_repository = None
     _repo_repository = None
     _repo_claim_repository = None
-
-    # Also reset in-memory repos if we're in test mode
-    settings = get_settings()
-    if settings.is_test:
-        from syn_adapters.storage.in_memory import reset_storage
-
-        reset_storage()
-
-    logger.debug("Reset all repository caches")
