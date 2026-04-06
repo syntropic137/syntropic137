@@ -12,14 +12,16 @@ key produced for the same check_run delivered via webhook.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key
 from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
     EventSource,
     NormalizedEvent,
 )
-from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
 
 _FAILURE_CONCLUSIONS: frozenset[str] = frozenset({"failure"})
 

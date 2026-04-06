@@ -8,8 +8,10 @@ all check runs complete, synthesizing check_run.completed events for failures.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from datetime import datetime, timedelta
 
 
 @dataclass(frozen=True, slots=True)

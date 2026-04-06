@@ -27,7 +27,6 @@ from syn_domain.contexts.github.slices.event_pipeline.normalized_event import Ev
 from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — realistic Checks API response matching production shape
 # ---------------------------------------------------------------------------

@@ -7,8 +7,10 @@ lost on restart, but the next PR event re-registers them.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
-from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
+if TYPE_CHECKING:
+    from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
 
 
 class InMemoryPendingSHAStore:

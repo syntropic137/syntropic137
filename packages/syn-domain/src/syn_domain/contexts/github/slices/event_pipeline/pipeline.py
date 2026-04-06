@@ -58,6 +58,7 @@ class EventPipeline:
         self._dedup = dedup
         self._evaluator = evaluator
         self._observers: list[_ObserverCallback] = []
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     def add_observer(self, callback: _ObserverCallback) -> None:
         """Register a callback notified after each non-deduplicated event.
@@ -107,10 +108,12 @@ class EventPipeline:
 
         # 4. Notify observers — best-effort, non-blocking (#602)
         for observer in self._observers:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 _safe_observer_call(observer, event),
                 name=f"observer-{event.dedup_key}",
             )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
         fired, deferred, blocked = _classify_results(results)
         return PipelineResult(
