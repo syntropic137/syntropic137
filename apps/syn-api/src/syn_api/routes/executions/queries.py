@@ -105,7 +105,7 @@ async def _map_phase_detail(
     agent_model: str | None = None
     cost_by_model: dict[str, Decimal] = {}
     if phase.session_id:
-        with contextlib.suppress(Exception):
+        try:
             sc = await manager.session_cost.get_session_cost(phase.session_id)
             if sc is not None:
                 if cache_creation == 0 and cache_read == 0:
@@ -113,6 +113,8 @@ async def _map_phase_detail(
                     cache_read = sc.cache_read_tokens
                 agent_model = sc.agent_model
                 cost_by_model = dict(sc.cost_by_model)
+        except Exception:
+            logger.debug("Failed to load session cost for %s", phase.session_id, exc_info=True)
 
     return PhaseExecution(
         phase_id=phase.workflow_phase_id,
@@ -300,11 +302,13 @@ async def get_detail(
     total_tokens = detail.total_input_tokens + detail.total_output_tokens
     total_cost = detail.total_cost_usd
 
-    with contextlib.suppress(Exception):
+    try:
         exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
         if exec_cost is not None and exec_cost.total_tokens > 0:
             total_tokens = exec_cost.total_tokens
             total_cost = exec_cost.total_cost_usd
+    except Exception:
+        logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
 
     return Ok(
         ExecutionDetailFull(
@@ -423,7 +427,10 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         total_output_tokens=total_output,
         cache_creation_tokens=total_cache_creation,
         cache_read_tokens=total_cache_read,
-        total_tokens=detail.total_tokens,
+        total_tokens=max(
+            detail.total_tokens,
+            total_input + total_output + total_cache_creation + total_cache_read,
+        ),
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
         artifact_ids=artifact_ids,
         error_message=detail.error_message,

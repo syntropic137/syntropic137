@@ -44,6 +44,8 @@ const _DEV_SESSION_DATA: Record<string, _DevSessionData> = {
   '38bcc2ae-b7be-4887-b274-31f2aefdcd43': { cache: [0, 0], model: 'claude-sonnet-4-20250514', costByModel: { 'claude-sonnet-4-20250514': '0.0003' } },
 }
 
+const _ENABLE_DEV_ENRICHMENT = import.meta.env.DEV
+
 function _enrichPhase(phase: ExecutionDetailResponse['phases'][number], dev: _DevSessionData): void {
   if (!phase.cache_creation_tokens && !phase.cache_read_tokens) {
     phase.cache_creation_tokens = dev.cache[0]
@@ -56,7 +58,7 @@ function _enrichPhase(phase: ExecutionDetailResponse['phases'][number], dev: _De
 }
 
 function _enrichSessionData(data: ExecutionDetailResponse): ExecutionDetailResponse {
-  if (!data.phases) return data
+  if (!_ENABLE_DEV_ENRICHMENT || !data.phases) return data
   for (const phase of data.phases) {
     const dev = phase.session_id ? _DEV_SESSION_DATA[phase.session_id] : undefined
     if (dev) _enrichPhase(phase, dev)

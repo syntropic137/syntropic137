@@ -14,7 +14,10 @@ const _DEV_SESSION_MODEL_DATA: Record<string, Record<string, string>> = {
   '38bcc2ae-b7be-4887-b274-31f2aefdcd43': { 'claude-sonnet-4-20250514': '0.0704' },
 }
 
+const _ENABLE_DEV_ENRICHMENT = import.meta.env.DEV
+
 function _enrichSession(data: SessionResponse): SessionResponse {
+  if (!_ENABLE_DEV_ENRICHMENT) return data
   if (!data.cost_by_model || Object.keys(data.cost_by_model).length === 0) {
     const dev = _DEV_SESSION_MODEL_DATA[data.id]
     if (dev) {
