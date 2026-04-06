@@ -36,3 +36,5 @@ class TriggerHistoryEntry:
     fired_at: datetime | None = None
     status: str = "dispatched"
     cost_usd: float | None = None
+    guard_name: str = ""
+    block_reason: str = ""
