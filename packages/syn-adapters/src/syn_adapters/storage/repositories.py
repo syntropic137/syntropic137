@@ -105,7 +105,7 @@ def _get_repository_factory() -> Any:
     return RepositoryFactory(client)
 
 
-def get_workflow_repository() -> RepositoryAdapter[Any]:
+def get_workflow_repository() -> Any:
     """Get a WorkflowTemplateAggregate repository."""
     global _workflow_repository
     if _workflow_repository is not None:
@@ -124,7 +124,7 @@ def get_workflow_repository() -> RepositoryAdapter[Any]:
     return _workflow_repository
 
 
-def get_workflow_execution_repository() -> RepositoryAdapter[Any]:
+def get_workflow_execution_repository() -> Any:
     """Get a WorkflowExecutionAggregate repository."""
     global _workflow_execution_repository
     if _workflow_execution_repository is not None:
@@ -143,7 +143,7 @@ def get_workflow_execution_repository() -> RepositoryAdapter[Any]:
     return _workflow_execution_repository
 
 
-def get_session_repository() -> RepositoryAdapter[Any]:
+def get_session_repository() -> Any:
     """Get an AgentSessionAggregate repository."""
     global _session_repository
     if _session_repository is not None:
@@ -162,7 +162,7 @@ def get_session_repository() -> RepositoryAdapter[Any]:
     return _session_repository
 
 
-def get_artifact_repository() -> RepositoryAdapter[Any]:
+def get_artifact_repository() -> Any:
     """Get an ArtifactAggregate repository."""
     global _artifact_repository
     if _artifact_repository is not None:
@@ -215,7 +215,7 @@ def get_trigger_repository() -> Any:
     return _trigger_repository
 
 
-def get_organization_repository() -> RepositoryAdapter[Any]:
+def get_organization_repository() -> Any:
     """Get an OrganizationAggregate repository."""
     global _organization_repository
     if _organization_repository is not None:
@@ -234,7 +234,7 @@ def get_organization_repository() -> RepositoryAdapter[Any]:
     return _organization_repository
 
 
-def get_system_repository() -> RepositoryAdapter[Any]:
+def get_system_repository() -> Any:
     """Get a SystemAggregate repository."""
     global _system_repository
     if _system_repository is not None:
@@ -253,7 +253,7 @@ def get_system_repository() -> RepositoryAdapter[Any]:
     return _system_repository
 
 
-def get_repo_repository() -> RepositoryAdapter[Any]:
+def get_repo_repository() -> Any:
     """Get a RepoAggregate repository."""
     global _repo_repository
     if _repo_repository is not None:
@@ -272,7 +272,7 @@ def get_repo_repository() -> RepositoryAdapter[Any]:
     return _repo_repository
 
 
-def get_repo_claim_repository() -> RepositoryAdapter[Any]:
+def get_repo_claim_repository() -> Any:
     """Get a RepoClaimAggregate repository."""
     global _repo_claim_repository
     if _repo_claim_repository is not None:
