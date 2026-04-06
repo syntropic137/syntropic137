@@ -18,6 +18,7 @@ from syn_api._wiring import (
     ensure_connected,
     get_execution_processor,
     get_projection_mgr,
+    get_workflow_repo,
 )
 from syn_api.types import (
     Err,
@@ -31,6 +32,68 @@ if TYPE_CHECKING:
     from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
+
+
+# -- Repo Access Validation ---------------------------------------------------
+
+
+def _parse_repo_from_url(repo_url: str | None) -> str | None:
+    """Extract owner/repo from a GitHub URL, or None if not applicable."""
+    if not repo_url:
+        return None
+    normalized = repo_url.rstrip("/")
+    # Skip non-GitHub URLs (e.g., "skip", "none")
+    if "/" not in normalized:
+        return None
+    parts = normalized.split("/")
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    return None
+
+
+async def _validate_repo_access(repo_url: str | None) -> None:
+    """Pre-validate that the GitHub App can access the target repository.
+
+    Raises:
+        HTTPException(422): If the GitHub App is not installed on the repo.
+
+    Non-fatal for:
+        - No repo URL (non-GitHub workflows)
+        - GitHub App not configured
+        - Network/transient errors (log warning, proceed)
+    """
+    repo_full_name = _parse_repo_from_url(repo_url)
+    if not repo_full_name:
+        return
+
+    from syn_shared.settings.github import GitHubAppSettings
+
+    settings = GitHubAppSettings()
+    if not settings.is_configured:
+        return
+
+    from syn_adapters.github.client import GitHubAuthError, get_github_client
+
+    try:
+        client = get_github_client()
+        await client.get_installation_for_repo(repo_full_name)
+    except GitHubAuthError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"GitHub App not installed on repository: {repo_full_name}. "
+                "Install the GitHub App on this repository before running workflows."
+            ),
+        ) from exc
+    except Exception as exc:
+        # Transient errors (network, rate limit) — log and proceed
+        logger.warning(
+            "Could not pre-validate GitHub App access for %s: %s",
+            repo_full_name,
+            exc,
+        )
+
+
 router = APIRouter(prefix="/workflows", tags=["execution"])
 
 
@@ -167,9 +230,9 @@ async def execute(
         result = await handler.handle(cmd)
     except WorkflowNotFoundError:
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
-    except Exception:
+    except Exception as e:
         logger.exception("Workflow execution error for %s", workflow_id)
-        return Err(WorkflowError.EXECUTION_FAILED, message="internal error")
+        return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
     return Ok(
         ExecutionSummary(
@@ -196,6 +259,20 @@ async def execute_workflow_endpoint(
     background_tasks: BackgroundTasks,
 ) -> ExecuteWorkflowResponse:
     """Start workflow execution in background."""
+    # Pre-validate GitHub App access before creating the execution (#598)
+    await ensure_connected()
+    workflow_repo = get_workflow_repo()
+    workflow = await workflow_repo.get_by_id(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+    repo_url: str | None = workflow._repository_url
+    if repo_url:
+        # Resolve input placeholders in repo URL
+        for key, value in request.inputs.items():
+            repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
+    await _validate_repo_access(repo_url)
+
     execution_id = f"exec-{uuid4().hex[:12]}"
 
     async def _run() -> None:
