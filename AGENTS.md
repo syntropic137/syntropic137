@@ -85,9 +85,8 @@ Pydantic models (syn-api/types.py)
 **Workflow — adding/changing an endpoint:**
 1. Define Pydantic response model in `apps/syn-api/src/syn_api/types.py`
 2. Use it as the route return type: `async def list_foos() -> FooListResponse:`
-3. Regenerate OpenAPI spec: start API, fetch `/openapi.json` → `apps/syn-docs/openapi.json`
-4. Regenerate CLI types: `pnpm --filter @syntropic137/cli generate:types`
-5. Use the typed client in CLI commands: `import { api } from "../client/typed.js";`
+3. Run `just codegen` — regenerates OpenAPI spec, API docs, CLI types, and CLI docs in one step
+4. Use the typed client in CLI commands: `import { api } from "../client/typed.js";`
 
 **Rules:**
 - CLI field names MUST match API response model field names exactly — never use legacy/alias names
@@ -113,7 +112,7 @@ Pydantic models (syn-api/types.py)
 |---------|------------|----------------|---------|
 | `orchestration` | Workspace, Workflow, WorkflowExecution | Create, archive (soft-delete), execute, pause/resume/cancel | Workflow execution and workspace management |
 | `agent_sessions` | AgentSession | Start, record operations, complete | Agent sessions and observability |
-| `github` | Installation, TriggerRule | Register, configure, fire triggers | GitHub App integration, webhook trigger rules, hybrid event pipeline (webhook + polling with dedup) |
+| `github` | Installation, TriggerRule | Register, configure, fire triggers | GitHub App integration, trigger rules, hybrid event pipeline (webhooks + Events API + Checks API polling with dedup) |
 | `artifacts` | Artifact | Create, upload, retrieve | Artifact storage |
 | `organization` | Organization, System, Repo | CRUD, assign/unassign repos to systems | Organization hierarchy, system/repo management, insights |
 
@@ -138,25 +137,35 @@ Claude CLI runs INSIDE Docker containers, not on the host. `WorkspaceService` cr
 
 `WorkflowExecutionEngine` is the single owner of event recording. It parses Claude CLI JSONL output and records token usage, tool lifecycle, and subagent lifecycle events. All events keyed by `session_id`.
 
-### Hybrid Event Ingestion (ADR-050)
+### Hybrid Event Ingestion (ADR-050, #602)
 
-GitHub events enter the system through a unified `EventPipeline` that accepts events from two sources:
+GitHub events enter the system through a unified `EventPipeline` that accepts events from three sources:
 
-1. **Webhooks** — Real-time delivery from GitHub. Primary path when the App is configured with a reachable URL.
-2. **Events API polling** — Background `asyncio.Task` in syn-api that polls GitHub's Events API. Enabled by default for zero-config onboarding (no tunnel setup required).
+1. **Webhooks** — Real-time delivery (~1s) from GitHub. Primary path when the App is configured with a reachable URL.
+2. **Events API polling** — Background `asyncio.Task` that polls GitHub's Events API for 17 event types (PR, push, etc.). Enabled by default for zero-config onboarding.
+3. **Checks API polling** — Background `asyncio.Task` that polls `GET /repos/{o}/{r}/commits/{sha}/check-runs` for CI results. Triggered when a `pull_request` event registers a head SHA. Enables self-healing without webhooks (#602).
 
-Both sources normalize payloads into `NormalizedEvent` and feed `EventPipeline.ingest()`. Content-based dedup keys (commit SHA, PR number, check run ID — not delivery IDs) ensure the same logical event is processed exactly once regardless of source.
+All three sources normalize payloads into `NormalizedEvent` and feed `EventPipeline.ingest()`. Content-based dedup keys (commit SHA, PR number, check run ID — not delivery IDs) ensure the same logical event is processed exactly once regardless of source.
 
-**Mode switching:** The poller adapts its interval based on webhook health:
-- **ACTIVE_POLLING** (60s) — No webhooks received in 30 minutes; poll aggressively
-- **SAFETY_NET** (300s) — Webhooks healthy; poll infrequently as a catch-up net
+| Source | API | What it gets | Config |
+|--------|-----|-------------|--------|
+| Events API poller | `GET /repos/{o}/{r}/events` | 17 event types (PR, push, etc.) | Always on |
+| Webhooks | Push-based | All 60+ event types including `check_run` | Needs tunnel/public URL |
+| Checks API poller | `GET /repos/{o}/{r}/commits/{sha}/check-runs` | CI results for specific SHAs | Auto when `check_run` triggers exist |
+
+**Mode switching:** Both pollers adapt their interval based on webhook health:
+- **ACTIVE_POLLING** (60s / 30s) — No webhooks received in 30 minutes; poll aggressively
+- **SAFETY_NET** (300s / 120s) — Webhooks healthy; poll infrequently as a catch-up net
 
 **Fail-open dedup:** If Redis is unavailable, events are processed anyway. Trigger safety guards (fire counts, cooldowns) provide second-layer protection against duplicates.
 
 **Key files:**
 - `packages/syn-domain/.../event_pipeline/pipeline.py` — Unified pipeline with dedup
 - `packages/syn-domain/.../event_pipeline/dedup_keys.py` — Content-based dedup key extractors
-- `apps/syn-api/src/syn_api/services/github_event_poller.py` — Background poller
+- `packages/syn-domain/.../event_pipeline/check_run_synthesizer.py` — Synthesizes check_run events from Checks API
+- `packages/syn-domain/.../event_pipeline/pending_sha_port.py` — PendingSHA domain port
+- `apps/syn-api/src/syn_api/services/github_event_poller.py` — Events API poller
+- `apps/syn-api/src/syn_api/services/check_run_poller.py` — Checks API poller (#602)
 - `packages/syn-shared/src/syn_shared/settings/polling.py` — `SYN_POLLING_*` configuration
 
 ### Testing

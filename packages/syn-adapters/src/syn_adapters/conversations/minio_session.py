@@ -61,6 +61,11 @@ async def get_session_metadata(
         await storage.initialize()
 
     if storage._pool is None:
+        logger.warning(
+            "Conversation storage database pool not available "
+            "— cannot query metadata for session %s",
+            session_id,
+        )
         return None
 
     from syn_adapters.conversations.minio_index import get_session_metadata as _get_metadata
@@ -85,6 +90,11 @@ async def list_sessions_for_execution(
         await storage.initialize()
 
     if storage._pool is None:
+        logger.warning(
+            "Conversation storage database pool not available "
+            "— cannot list sessions for execution %s",
+            execution_id,
+        )
         return []
 
     from syn_adapters.conversations.minio_index import (

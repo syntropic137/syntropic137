@@ -6,7 +6,7 @@ Provides listing, starting, completing, and retrieving agent sessions.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import (
     datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
 )
@@ -110,6 +110,7 @@ class SessionResponse(BaseModel):
     cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
     operations: list[OperationInfo] = Field(default_factory=list)
     started_at: str | None = None
     completed_at: str | None = None
@@ -259,6 +260,7 @@ class _CostData:
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     agent_model: str | None = None
+    cost_by_model: dict[str, Decimal] = field(default_factory=dict)
     duration_seconds: float | None = None
 
 
@@ -294,6 +296,7 @@ async def _load_cost_data(
         total_tokens=cost.total_tokens or fallback_tokens,
         total_cost_usd=cost.total_cost_usd,
         agent_model=cost.agent_model,
+        cost_by_model=cost.cost_by_model,
         duration_seconds=(cost.duration_ms / 1000.0) if cost.duration_ms else None,
     )
 
@@ -339,6 +342,7 @@ async def get_session(
             total_tokens=cd.total_tokens,
             total_cost_usd=cd.total_cost_usd,
             agent_model=cd.agent_model,
+            cost_by_model=dict(cd.cost_by_model),
             operations=operations,
             started_at=session.started_at,
             completed_at=session.completed_at,

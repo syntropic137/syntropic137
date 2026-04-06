@@ -68,11 +68,6 @@ const metadataCommand: CommandDef = {
       params: { path: { session_id: sessionId } },
     }), "Fetch conversation metadata");
 
-    if (!m || !m.session_id) {
-      printError("Session not found or no metadata available.");
-      throw new CLIError("Not found", 1);
-    }
-
     print(`${style("Metadata:", BOLD)} ${m.session_id}`);
 
     if (m.model != null) print(`  Model:            ${m.model}`);
@@ -82,6 +77,10 @@ const metadataCommand: CommandDef = {
     if (m.started_at != null) print(`  Started:          ${formatTimestamp(m.started_at)}`);
     if (m.completed_at != null) print(`  Completed:        ${formatTimestamp(m.completed_at)}`);
     if (m.size_bytes != null) print(`  Log size:         ${m.size_bytes.toLocaleString()} bytes`);
+    if (m.execution_id != null) print(`  Execution:        ${m.execution_id}`);
+    if (m.workflow_id != null) print(`  Workflow:         ${m.workflow_id}`);
+    if (m.phase_id != null) print(`  Phase:            ${m.phase_id}`);
+    if (m.success != null) print(`  Success:          ${m.success}`);
 
     if (m.tool_counts) {
       print("  Tool counts:");

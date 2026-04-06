@@ -127,6 +127,7 @@ EVENT_HANDLERS = {
 | `list_sessions` | sessions | List session summaries |
 | `list_artifacts` | artifacts | List artifact summaries |
 | `get_metrics` | metrics | Dashboard aggregate metrics |
+| `list_accessible_repos` | github | List repositories accessible to GitHub App installation |
 
 ## Consequences
 

@@ -28,7 +28,7 @@ def log_analytics(event: dict[str, Any]) -> None:
         pass  # Never block on analytics failure
 
 
-def extract_output_preview(tool_result: Any, max_length: int = 200) -> str:
+def extract_output_preview(tool_result: Any, max_length: int = 200) -> str:  # noqa: ANN401
     """Extract a preview of the tool output for logging."""
     if tool_result is None:
         return ""

@@ -160,6 +160,7 @@ from syn_adapters.storage.in_memory_factories import (  # noqa: E402
     get_event_publisher,
     get_event_store,
     get_organization_repository,
+    get_repo_claim_repository,
     get_repo_repository,
     get_session_repository,
     get_system_repository,
@@ -170,6 +171,7 @@ from syn_adapters.storage.in_memory_factories import (  # noqa: E402
 from syn_adapters.storage.in_memory_repositories import (  # noqa: E402
     InMemoryArtifactRepository,
     InMemoryOrganizationRepository,
+    InMemoryRepoClaimRepository,
     InMemoryRepoRepository,
     InMemorySessionRepository,
     InMemorySystemRepository,
@@ -182,6 +184,7 @@ __all__ = [
     "InMemoryEventPublisher",
     "InMemoryEventStore",
     "InMemoryOrganizationRepository",
+    "InMemoryRepoClaimRepository",
     "InMemoryRepoRepository",
     "InMemorySessionRepository",
     # Core (defined here)
@@ -197,6 +200,7 @@ __all__ = [
     # Re-exported factories
     "get_event_store",
     "get_organization_repository",
+    "get_repo_claim_repository",
     "get_repo_repository",
     "get_session_repository",
     "get_system_repository",

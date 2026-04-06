@@ -31,32 +31,56 @@ function CompactSessionCost({ cost }: { cost: SessionCost }) {
   )
 }
 
+function TokenSegment({ label, total, fresh, freshLabel, cached, cachedLabel, accentColor, cacheColor }: {
+  label: string; total: number; fresh: number; freshLabel: string
+  cached: number; cachedLabel: string; accentColor: string; cacheColor: string
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--color-border)] overflow-hidden">
+      <div className={`flex items-center justify-between px-3 py-1.5 ${accentColor}`}>
+        <span className="text-xs font-medium">{label}</span>
+        <span className="text-sm font-semibold text-[var(--color-text-primary)]">{formatTokens(total)}</span>
+      </div>
+      <div className="px-3 py-1.5 space-y-0.5 text-xs">
+        <div className="flex justify-between">
+          <span className="text-[var(--color-text-muted)]">{freshLabel}</span>
+          <span className="text-[var(--color-text-secondary)]">{formatTokens(fresh)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className={cacheColor}>{cachedLabel}</span>
+          <span className={cacheColor}>{formatTokens(cached)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SessionMetricsGrid({ cost }: { cost: SessionCost }) {
   return (
-    <div className="grid grid-cols-4 gap-2 py-3 border-t border-[var(--color-border)]">
-      <div className="text-center">
-        <p className="text-lg font-semibold text-[var(--color-text-primary)]">
-          {formatTokens(cost.input_tokens)}
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">Input</p>
+    <div className="py-3 border-t border-[var(--color-border)] space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <TokenSegment
+          label="In" total={cost.input_tokens + (cost.cache_read_tokens ?? 0)}
+          fresh={cost.input_tokens} freshLabel="Fresh"
+          cached={cost.cache_read_tokens ?? 0} cachedLabel="Cache read"
+          accentColor="bg-indigo-500/10 text-indigo-400" cacheColor="text-emerald-400"
+        />
+        <TokenSegment
+          label="Out" total={cost.output_tokens + (cost.cache_creation_tokens ?? 0)}
+          fresh={cost.output_tokens} freshLabel="Output"
+          cached={cost.cache_creation_tokens ?? 0} cachedLabel="Cache write"
+          accentColor="bg-violet-500/10 text-violet-400" cacheColor="text-amber-400"
+        />
       </div>
-      <div className="text-center">
-        <p className="text-lg font-semibold text-[var(--color-text-primary)]">
-          {formatTokens(cost.output_tokens)}
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">Output</p>
-      </div>
-      <div className="text-center">
-        <p className="text-lg font-semibold text-[var(--color-text-primary)]">
-          {cost.tool_calls}
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">Tools</p>
-      </div>
-      <div className="text-center">
-        <p className="text-lg font-semibold text-[var(--color-text-primary)]">
-          {cost.turns}
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">Turns</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-[var(--color-text-primary)]">{cost.tool_calls}</p>
+          <p className="text-xs text-[var(--color-text-muted)]">Tools</p>
+        </div>
+        <div className="text-center">
+          <p className="text-lg font-semibold text-[var(--color-text-primary)]">{cost.turns}</p>
+          <p className="text-xs text-[var(--color-text-muted)]">Turns</p>
+        </div>
       </div>
     </div>
   )

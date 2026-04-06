@@ -40,8 +40,8 @@ function CostBreakdownRow({ cost }: { cost: ExecutionCost }) {
   return (
     <div className="grid grid-cols-2 gap-4 p-4 border-b border-[var(--color-border)]">
       <div className="flex items-center gap-3">
-        <div className="p-1.5 rounded bg-indigo-500/10">
-          <MessageSquare className="h-4 w-4 text-indigo-400" />
+        <div className="p-1.5 rounded bg-blue-500/10">
+          <MessageSquare className="h-4 w-4 text-blue-400" />
         </div>
         <div>
           <p className="text-xs text-[var(--color-text-muted)]">Token Cost</p>
@@ -65,32 +65,56 @@ function CostBreakdownRow({ cost }: { cost: ExecutionCost }) {
   )
 }
 
+function TokenSegment({ label, total, fresh, freshLabel, cached, cachedLabel, accentColor, cacheColor }: {
+  label: string; total: number; fresh: number; freshLabel: string
+  cached: number; cachedLabel: string; accentColor: string; cacheColor: string
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--color-border)] overflow-hidden">
+      <div className={`flex items-center justify-between px-3 py-1.5 ${accentColor}`}>
+        <span className="text-xs font-medium">{label}</span>
+        <span className="text-sm font-semibold text-[var(--color-text-primary)]">{formatTokens(total)}</span>
+      </div>
+      <div className="px-3 py-1.5 space-y-0.5 text-xs">
+        <div className="flex justify-between">
+          <span className="text-[var(--color-text-muted)]">{freshLabel}</span>
+          <span className="text-[var(--color-text-secondary)]">{formatTokens(fresh)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className={cacheColor}>{cachedLabel}</span>
+          <span className={cacheColor}>{formatTokens(cached)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function MetricsGrid({ cost }: { cost: ExecutionCost }) {
   return (
-    <div className="grid grid-cols-4 gap-2 p-4 border-b border-[var(--color-border)]">
-      <div className="text-center">
-        <p className="text-lg font-semibold text-[var(--color-text-primary)]">
-          {formatTokens(cost.input_tokens)}
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">Input Tokens</p>
+    <div className="p-4 border-b border-[var(--color-border)] space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <TokenSegment
+          label="In" total={cost.input_tokens + (cost.cache_read_tokens ?? 0)}
+          fresh={cost.input_tokens} freshLabel="Fresh"
+          cached={cost.cache_read_tokens ?? 0} cachedLabel="Cache read"
+          accentColor="bg-indigo-500/10 text-indigo-400" cacheColor="text-emerald-400"
+        />
+        <TokenSegment
+          label="Out" total={cost.output_tokens + (cost.cache_creation_tokens ?? 0)}
+          fresh={cost.output_tokens} freshLabel="Output"
+          cached={cost.cache_creation_tokens ?? 0} cachedLabel="Cache write"
+          accentColor="bg-violet-500/10 text-violet-400" cacheColor="text-amber-400"
+        />
       </div>
-      <div className="text-center">
-        <p className="text-lg font-semibold text-[var(--color-text-primary)]">
-          {formatTokens(cost.output_tokens)}
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">Output Tokens</p>
-      </div>
-      <div className="text-center">
-        <p className="text-lg font-semibold text-[var(--color-text-primary)]">
-          {cost.tool_calls}
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">Tool Calls</p>
-      </div>
-      <div className="text-center">
-        <p className="text-lg font-semibold text-[var(--color-text-primary)]">
-          {cost.turns}
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">Turns</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-[var(--color-text-primary)]">{cost.tool_calls}</p>
+          <p className="text-xs text-[var(--color-text-muted)]">Tool Calls</p>
+        </div>
+        <div className="text-center">
+          <p className="text-lg font-semibold text-[var(--color-text-primary)]">{cost.turns}</p>
+          <p className="text-xs text-[var(--color-text-muted)]">Turns</p>
+        </div>
       </div>
     </div>
   )
@@ -122,7 +146,7 @@ function PhaseBreakdown({ costByPhase, totalCostUsd }: { costByPhase: Record<str
               </div>
               <div className="h-1.5 bg-[var(--color-surface-elevated)] rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-indigo-500 rounded-full transition-all"
+                  className="h-full bg-blue-500 rounded-full transition-all"
                   style={{ width: `${percentage}%` }}
                 />
               </div>

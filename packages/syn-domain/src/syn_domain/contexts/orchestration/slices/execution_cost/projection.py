@@ -17,12 +17,7 @@ from typing import Any
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
-
-# Prices per 1M tokens (Claude 3.5 Sonnet pricing)
-_INPUT_PRICE_PER_MILLION = Decimal("3.00")
-_OUTPUT_PRICE_PER_MILLION = Decimal("15.00")
-_CACHE_WRITE_PER_MILLION = Decimal("3.75")
-_CACHE_READ_PER_MILLION = Decimal("0.30")
+from syn_shared.pricing import get_model_pricing
 
 
 def _get_or_create(existing: dict[str, Any] | None, execution_id: str) -> ExecutionCost:
@@ -54,14 +49,11 @@ def _calculate_token_cost(
     output_tokens: int,
     cache_creation: int,
     cache_read: int,
+    model: str | None = None,
 ) -> Decimal:
-    """Calculate token cost from counts using default pricing."""
-    return (
-        (Decimal(input_tokens) / 1_000_000) * _INPUT_PRICE_PER_MILLION
-        + (Decimal(output_tokens) / 1_000_000) * _OUTPUT_PRICE_PER_MILLION
-        + (Decimal(cache_creation) / 1_000_000) * _CACHE_WRITE_PER_MILLION
-        + (Decimal(cache_read) / 1_000_000) * _CACHE_READ_PER_MILLION
-    )
+    """Calculate token cost from counts using model-specific pricing."""
+    pricing = get_model_pricing(model or "")
+    return pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
 
 
 def _apply_token_usage(
@@ -80,11 +72,12 @@ def _apply_token_usage(
     execution_cost.cache_creation_tokens += cache_creation
     execution_cost.cache_read_tokens += cache_read
 
-    token_cost = _calculate_token_cost(input_tokens, output_tokens, cache_creation, cache_read)
+    model = data.get("model")
+    token_cost = _calculate_token_cost(
+        input_tokens, output_tokens, cache_creation, cache_read, model=model
+    )
     execution_cost.token_cost_usd += token_cost
     execution_cost.total_cost_usd += token_cost
-
-    model = data.get("model")
     if model:
         current = execution_cost.cost_by_model.get(model, Decimal("0"))
         execution_cost.cost_by_model[model] = current + token_cost

@@ -69,18 +69,18 @@ function ContentPreview({
 
   if (isMarkdown(artifact) && viewMode === 'rendered') {
     return (
-      <div className="p-4 max-h-[800px] overflow-auto">
+      <div className="p-4 max-h-[800px] overflow-auto min-w-0">
         <MarkdownViewer content={artifact.content} />
       </div>
     )
   }
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0 overflow-hidden">
       <pre
         className={clsx(
           'overflow-auto p-4 text-sm text-[var(--color-text-secondary)]',
-          'max-h-[600px] font-mono'
+          'max-h-[600px] font-mono whitespace-pre-wrap break-words'
         )}
       >
         <code>{artifact.content}</code>

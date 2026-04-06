@@ -10,6 +10,9 @@ from __future__ import annotations
 from typing import Any
 
 from syn_adapters.storage.in_memory import _assert_test_environment
+from syn_adapters.storage.in_memory_claim_repo import (
+    InMemoryRepoClaimRepository as InMemoryRepoClaimRepository,
+)
 from syn_adapters.storage.in_memory_repo_repo import (
     InMemoryRepoRepository as InMemoryRepoRepository,
 )

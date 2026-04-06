@@ -56,6 +56,10 @@ class RepositoryAdapter[TAggregate]:
         """Save an aggregate."""
         await self._repo.save(aggregate)
 
+    async def save_new(self, aggregate: TAggregate) -> None:
+        """Save a new aggregate (raises StreamAlreadyExistsError if stream exists)."""
+        await self._repo.save_new(aggregate)
+
     async def exists(self, aggregate_id: str) -> bool:
         """Check if aggregate exists."""
         return await self._repo.exists(aggregate_id)
@@ -76,6 +80,7 @@ _trigger_repository: RepositoryAdapter[Any] | None = None
 _organization_repository: RepositoryAdapter[Any] | None = None
 _system_repository: RepositoryAdapter[Any] | None = None
 _repo_repository: RepositoryAdapter[Any] | None = None
+_repo_claim_repository: RepositoryAdapter[Any] | None = None
 
 
 def _get_repository_factory() -> Any:  # noqa: ANN401
@@ -403,6 +408,44 @@ def get_repo_repository() -> Any:  # noqa: ANN401
     return _repo_repository
 
 
+def get_repo_claim_repository() -> Any:  # noqa: ANN401
+    """Get a RepoClaimAggregate repository.
+
+    For TEST: Returns in-memory repository
+    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
+
+    Returns:
+        Repository for RepoClaimAggregate with get_by_id/save/save_new/exists interface.
+    """
+    settings = get_settings()
+
+    if settings.is_test:
+        from syn_adapters.storage.in_memory import (
+            get_repo_claim_repository as get_inmem_claim_repo,
+        )
+
+        return get_inmem_claim_repo()
+
+    global _repo_claim_repository
+
+    if _repo_claim_repository is not None:
+        return _repo_claim_repository
+
+    from syn_domain.contexts.organization.domain.aggregate_repo_claim.RepoClaimAggregate import (
+        RepoClaimAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        RepoClaimAggregate,
+        aggregate_type="RepoClaim",
+    )
+    _repo_claim_repository = RepositoryAdapter(sdk_repo)
+
+    logger.debug("Created RepoClaimAggregate repository (SDK wrapped)")
+    return _repo_claim_repository
+
+
 def reset_repositories() -> None:
     """Reset all cached repositories (for testing).
 
@@ -417,7 +460,8 @@ def reset_repositories() -> None:
         _trigger_repository, \
         _organization_repository, \
         _system_repository, \
-        _repo_repository
+        _repo_repository, \
+        _repo_claim_repository
     _workflow_repository = None
     _workflow_execution_repository = None
     _session_repository = None
@@ -426,6 +470,7 @@ def reset_repositories() -> None:
     _organization_repository = None
     _system_repository = None
     _repo_repository = None
+    _repo_claim_repository = None
 
     # Also reset in-memory repos if we're in test mode
     settings = get_settings()
