@@ -28,13 +28,13 @@ export function Layout() {
       {/* Sidebar */}
       <aside className="fixed inset-y-0 left-0 z-10 flex w-56 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
         {/* Logo */}
-        <div className="flex h-14 items-center gap-2 border-b border-[var(--color-border)] px-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600">
-            <Zap className="h-4 w-4 text-white" />
-          </div>
-          <div>
-            <span className="text-sm font-bold text-[var(--color-text-primary)]">syn137</span>
-            <span className="ml-1 text-xs text-[var(--color-text-secondary)]">Dashboard</span>
+        <div className="flex h-14 items-center gap-3 border-b border-[var(--color-border)] px-4">
+          <img src="/logo_syntropic137.png" alt="Syntropic137" className="h-7 w-7" />
+          <div className="flex flex-col">
+            <span className="text-sm font-bold tracking-wide leading-tight text-[var(--color-accent)]" style={{ fontFamily: 'var(--font-brand)' }}>
+              Syntropic137
+            </span>
+            <span className="text-[10px] text-[var(--color-text-muted)]">Dashboard</span>
           </div>
         </div>
 
