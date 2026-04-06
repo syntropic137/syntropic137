@@ -51,3 +51,4 @@ async def test_get_env_template():
     template = result.value
     assert "APP_ENVIRONMENT" in template
     assert "EVENT_STORE_HOST" in template
+    assert "ANTHROPIC_API_KEY" in template or "CLAUDE_CODE_OAUTH_TOKEN" in template

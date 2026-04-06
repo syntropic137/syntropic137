@@ -39,6 +39,10 @@ EVENT_STORE_TENANT_ID=syn
 ESP_EVENT_STORE_DB_URL=              # PostgreSQL connection string
 SYN_OBSERVABILITY_DB_URL=           # Observability database URL
 
+# LLM Credentials (injected into agent containers)
+ANTHROPIC_API_KEY=                   # Required for Claude agent execution
+CLAUDE_CODE_OAUTH_TOKEN=            # Alternative to API key (OAuth)
+
 # Workspace
 SYN_WORKSPACE_CONTAINER_DIR=        # Container workspace directory
 SYN_WORKSPACE_HOST_DIR=             # Host workspace directory
