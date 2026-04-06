@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from syn_api.routes.executions.commands import _parse_repo_from_url, _validate_repo_access
+from syn_api.routes.executions.commands import (
+    _parse_repo_from_url,
+    _resolve_target_repo,
+    _validate_repo_access,
+)
 
 # -- _parse_repo_from_url tests -----------------------------------------------
 
@@ -31,13 +35,43 @@ class TestParseRepoFromUrl:
         assert _parse_repo_from_url("owner/repo") == "owner/repo"
 
 
+# -- _resolve_target_repo tests ------------------------------------------------
+
+
+class TestResolveTargetRepo:
+    @staticmethod
+    def _make_workflow(
+        repo_url: str | None = None,
+        input_declarations: list[object] | None = None,
+    ) -> MagicMock:
+        wf = MagicMock()
+        wf._repository_url = repo_url
+        wf.input_declarations = input_declarations or []
+        return wf
+
+    def test_returns_none_when_no_repo_url(self) -> None:
+        wf = self._make_workflow(repo_url=None)
+        assert _resolve_target_repo(wf, {}, None) is None
+
+    def test_resolves_simple_url(self) -> None:
+        wf = self._make_workflow(repo_url="https://github.com/org/myrepo")
+        assert _resolve_target_repo(wf, {}, None) == "org/myrepo"
+
+    def test_resolves_placeholders_from_inputs(self) -> None:
+        wf = self._make_workflow(repo_url="https://github.com/{{owner}}/{{repo}}")
+        result = _resolve_target_repo(wf, {"owner": "acme", "repo": "app"}, None)
+        assert result == "acme/app"
+
+    def test_returns_none_when_placeholders_unresolved(self) -> None:
+        wf = self._make_workflow(repo_url="https://github.com/{{owner}}/repo")
+        assert _resolve_target_repo(wf, {}, None) is None
+
+    def test_merges_task_into_placeholders(self) -> None:
+        wf = self._make_workflow(repo_url="https://github.com/org/{{task}}")
+        assert _resolve_target_repo(wf, {}, "myrepo") == "org/myrepo"
+
+
 # -- _validate_repo_access tests -----------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_validate_skips_when_no_repo_url() -> None:
-    """No-op when repo URL is None (non-GitHub workflow)."""
-    await _validate_repo_access(None)  # Should not raise
 
 
 @pytest.mark.asyncio
@@ -50,7 +84,7 @@ async def test_validate_skips_when_github_app_not_configured() -> None:
         "syn_shared.settings.github.GitHubAppSettings",
         return_value=mock_settings,
     ):
-        await _validate_repo_access("https://github.com/owner/repo")
+        await _validate_repo_access("owner/repo")
 
 
 @pytest.mark.asyncio
@@ -79,11 +113,44 @@ async def test_validate_raises_422_when_app_not_installed() -> None:
         ),
         pytest.raises(HTTPException) as exc_info,
     ):
-        await _validate_repo_access("https://github.com/owner/repo")
+        await _validate_repo_access("owner/repo")
 
     assert exc_info.value.status_code == 422
     assert "GitHub App not installed" in str(exc_info.value.detail)
     assert "owner/repo" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_validate_raises_422_with_generic_auth_error() -> None:
+    """Other GitHubAuthErrors surface the original message."""
+    from fastapi import HTTPException
+
+    from syn_adapters.github.client import GitHubAuthError
+
+    mock_settings = MagicMock()
+    mock_settings.is_configured = True
+
+    mock_client = MagicMock()
+    mock_client.get_installation_for_repo = AsyncMock(
+        side_effect=GitHubAuthError("Invalid private key")
+    )
+
+    with (
+        patch(
+            "syn_shared.settings.github.GitHubAppSettings",
+            return_value=mock_settings,
+        ),
+        patch(
+            "syn_adapters.github.client.get_github_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await _validate_repo_access("owner/repo")
+
+    assert exc_info.value.status_code == 422
+    assert "authentication failed" in str(exc_info.value.detail).lower()
+    assert "Invalid private key" in str(exc_info.value.detail)
 
 
 @pytest.mark.asyncio
@@ -107,8 +174,7 @@ async def test_validate_proceeds_on_transient_error() -> None:
             return_value=mock_client,
         ),
     ):
-        # Should not raise — transient errors are non-fatal
-        await _validate_repo_access("https://github.com/owner/repo")
+        await _validate_repo_access("owner/repo")
 
 
 @pytest.mark.asyncio
@@ -130,4 +196,4 @@ async def test_validate_succeeds_when_app_installed() -> None:
             return_value=mock_client,
         ),
     ):
-        await _validate_repo_access("https://github.com/owner/repo")
+        await _validate_repo_access("owner/repo")

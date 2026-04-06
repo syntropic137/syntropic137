@@ -42,7 +42,6 @@ def _parse_repo_from_url(repo_url: str | None) -> str | None:
     if not repo_url:
         return None
     normalized = repo_url.rstrip("/")
-    # Skip non-GitHub URLs (e.g., "skip", "none")
     if "/" not in normalized:
         return None
     parts = normalized.split("/")
@@ -51,51 +50,73 @@ def _parse_repo_from_url(repo_url: str | None) -> str | None:
     return None
 
 
-async def _validate_repo_access(repo_url: str | None) -> None:
+def _resolve_target_repo(
+    workflow: object,
+    inputs: dict[str, str],
+    task: str | None,
+) -> str | None:
+    """Resolve the target owner/repo from a workflow's repository URL.
+
+    Merges input defaults and task into placeholders, then extracts
+    owner/repo. Returns None if no repo URL, unresolved placeholders
+    remain, or the URL doesn't parse to a repo name.
+    """
+    repo_url: str | None = getattr(workflow, "_repository_url", None)
+    if not repo_url:
+        return None
+
+    # Merge input declaration defaults + request inputs + task
+    merged: dict[str, str] = {}
+    for decl in getattr(workflow, "input_declarations", []):
+        if decl.default is not None and decl.name not in merged:
+            merged[decl.name] = str(decl.default)
+    merged.update(inputs)
+    if task is not None:
+        merged["task"] = task
+
+    for key, value in merged.items():
+        repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
+
+    # Unresolved placeholders — handler will raise later with proper error
+    if "{{" in repo_url:
+        return None
+
+    return _parse_repo_from_url(repo_url)
+
+
+def _build_auth_error_detail(repo_full_name: str, exc: Exception) -> str:
+    """Build a user-facing error detail for GitHub App auth failures."""
+    exc_message = str(exc)
+    if "not installed" in exc_message.lower():
+        return (
+            f"GitHub App not installed on repository: {repo_full_name}. "
+            "Install the GitHub App on this repository before running workflows."
+        )
+    return f"GitHub App authentication failed for {repo_full_name}: {exc_message}"
+
+
+async def _validate_repo_access(repo_full_name: str) -> None:
     """Pre-validate that the GitHub App can access the target repository.
 
-    Raises:
-        HTTPException(422): If the GitHub App is not installed on the repo.
-
-    Non-fatal for:
-        - No repo URL (non-GitHub workflows)
-        - GitHub App not configured
-        - Network/transient errors (log warning, proceed)
+    Raises HTTPException(422) if the App is not installed. Logs and
+    proceeds on transient errors (network, rate limit).
     """
-    repo_full_name = _parse_repo_from_url(repo_url)
-    if not repo_full_name:
-        return
-
     from syn_shared.settings.github import GitHubAppSettings
 
-    settings = GitHubAppSettings()
-    if not settings.is_configured:
+    if not GitHubAppSettings().is_configured:
         return
 
     from syn_adapters.github.client import GitHubAuthError, get_github_client
 
     try:
-        client = get_github_client()
-        await client.get_installation_for_repo(repo_full_name)
+        await get_github_client().get_installation_for_repo(repo_full_name)
     except GitHubAuthError as exc:
-        exc_message = str(exc)
-        if "not installed" in exc_message.lower():
-            detail = (
-                f"GitHub App not installed on repository: {repo_full_name}. "
-                "Install the GitHub App on this repository before running workflows."
-            )
-        else:
-            detail = (
-                f"GitHub App authentication failed for {repo_full_name}: {exc_message}"
-            )
-        raise HTTPException(status_code=422, detail=detail) from exc
+        raise HTTPException(
+            status_code=422,
+            detail=_build_auth_error_detail(repo_full_name, exc),
+        ) from exc
     except Exception as exc:
-        # Transient errors (network, rate limit) — log and proceed
-        logger.warning(
-            "Could not pre-validate GitHub App access for %s: %s",
-            repo_full_name,
-            exc,
-        )
+        logger.warning("Could not pre-validate repo access for %s: %s", repo_full_name, exc)
 
 
 router = APIRouter(prefix="/workflows", tags=["execution"])
@@ -270,25 +291,9 @@ async def execute_workflow_endpoint(
     if workflow is None:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-    repo_url: str | None = workflow._repository_url
-    if repo_url:
-        # Merge input defaults + task, matching ExecuteWorkflowHandler._merge_inputs
-        merged: dict[str, str] = {}
-        for decl in workflow.input_declarations:
-            if decl.default is not None and decl.name not in merged:
-                merged[decl.name] = str(decl.default)
-        merged.update(request.inputs)
-        if request.task is not None:
-            merged["task"] = request.task
-
-        for key, value in merged.items():
-            repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
-
-        # Skip pre-validation if placeholders remain (handler will raise later)
-        if "{{" in repo_url:
-            repo_url = None
-
-    await _validate_repo_access(repo_url)
+    repo_full_name = _resolve_target_repo(workflow, request.inputs, request.task)
+    if repo_full_name:
+        await _validate_repo_access(repo_full_name)
 
     execution_id = f"exec-{uuid4().hex[:12]}"
 
