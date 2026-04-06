@@ -20,6 +20,10 @@ from syn_domain.contexts.github.domain.commands.PauseTriggerCommand import (
 from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
     RegisterTriggerCommand,
 )
+from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+    TriggerBlockedResult,
+    TriggerMatchResult,
+)
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
 )
@@ -163,8 +167,10 @@ class TestE2ERegisterAndFire:
 
         # Verify: one trigger fired
         assert len(results) == 1
-        assert results[0].trigger_id == trigger_id
-        assert results[0].execution_id.startswith("exec-")
+        result = results[0]
+        assert isinstance(result, TriggerMatchResult)
+        assert result.trigger_id == trigger_id
+        assert result.execution_id.startswith("exec-")
 
 
 @pytest.mark.integration
@@ -225,11 +231,12 @@ class TestE2ESafetyGuards:
             payload=_ci_failure_payload(repo="org/repo", delivery_id="del-1"),
         )
         assert len(r1) == 1
-        # Simulate projection recording the fire
-        await store.record_fire(agg.trigger_id, 42, r1[0].execution_id)
+        assert isinstance(r1[0], TriggerMatchResult)
+        # Handler calls record_fire() internally; simulate delivery tracking + completion
         await store.record_delivery("del-1", agg.trigger_id)
+        await store.complete_execution(r1[0].execution_id)
 
-        # Fire 2 - should succeed
+        # Fire 2 - should succeed (max_attempts=2, this is attempt 2)
         r2 = await eval_handler.evaluate(
             event="check_run.completed",
             repository="org/repo",
@@ -237,8 +244,9 @@ class TestE2ESafetyGuards:
             payload=_ci_failure_payload(repo="org/repo", delivery_id="del-2"),
         )
         assert len(r2) == 1
-        await store.record_fire(agg.trigger_id, 42, r2[0].execution_id)
+        assert isinstance(r2[0], TriggerMatchResult)
         await store.record_delivery("del-2", agg.trigger_id)
+        await store.complete_execution(r2[0].execution_id)
 
         # Fire 3 - should be blocked (max_attempts=2)
         r3 = await eval_handler.evaluate(
@@ -247,7 +255,9 @@ class TestE2ESafetyGuards:
             installation_id="inst-1",
             payload=_ci_failure_payload(repo="org/repo", delivery_id="del-3"),
         )
-        assert r3 == []
+        assert len(r3) == 1
+        assert isinstance(r3[0], TriggerBlockedResult)
+        assert r3[0].guard_name == "max_attempts"
 
     @pytest.mark.asyncio
     async def test_duplicate_delivery_prevented(self) -> None:
@@ -276,8 +286,10 @@ class TestE2ESafetyGuards:
             payload=_ci_failure_payload(repo="org/repo", delivery_id="same-delivery"),
         )
         assert len(r1) == 1
-        # Simulate projection recording the delivery
+        assert isinstance(r1[0], TriggerMatchResult)
+        # Simulate projection recording the delivery + execution completing
         await store.record_delivery("same-delivery", agg.trigger_id)
+        await store.complete_execution(r1[0].execution_id)
 
         # Same delivery ID - rejected
         r2 = await eval_handler.evaluate(
@@ -286,7 +298,9 @@ class TestE2ESafetyGuards:
             installation_id="inst-1",
             payload=_ci_failure_payload(repo="org/repo", delivery_id="same-delivery"),
         )
-        assert r2 == []
+        assert len(r2) == 1
+        assert isinstance(r2[0], TriggerBlockedResult)
+        assert r2[0].guard_name == "idempotency"
 
 
 @pytest.mark.integration
@@ -372,7 +386,9 @@ class TestE2EPresets:
             payload=payload,
         )
 
-        assert results == []
+        assert len(results) == 1
+        assert isinstance(results[0], TriggerBlockedResult)
+        assert results[0].guard_name == "conditions_not_met"
 
 
 @pytest.mark.integration

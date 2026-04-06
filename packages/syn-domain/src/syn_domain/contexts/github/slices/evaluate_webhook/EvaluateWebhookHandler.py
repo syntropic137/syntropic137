@@ -188,6 +188,9 @@ class EvaluateWebhookHandler:
             aggregate.record_fired(cmd)
             await self._repository.save(aggregate)
 
+        # Mark execution as running for concurrency guard (Guard 6)
+        await self._store.record_fire(rule.trigger_id, pr_number, execution_id)
+
         result = TriggerMatchResult(trigger_id=rule.trigger_id, execution_id=execution_id)
         logger.info(
             f"Trigger {rule.trigger_id} fired for {event} on {repository} "
