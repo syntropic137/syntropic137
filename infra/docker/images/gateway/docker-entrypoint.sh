@@ -35,7 +35,7 @@ location = /api/v1/webhooks/github {
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_read_timeout 30s;
 
-    limit_req zone=api burst=10 nodelay;
+    limit_req zone=webhooks burst=30 nodelay;
     limit_req_status 429;
 }
 
