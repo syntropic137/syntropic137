@@ -11,7 +11,6 @@ Tests cover:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -31,12 +30,9 @@ from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
     TriggerBlockedEvent,
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
-    GuardResult,
     SafetyGuards,
     _check_concurrency,
-    _extract_pr_number,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
