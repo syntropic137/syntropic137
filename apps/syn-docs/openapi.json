@@ -9199,6 +9199,16 @@
               }
             ],
             "title": "Cost Usd"
+          },
+          "guard_name": {
+            "type": "string",
+            "title": "Guard Name",
+            "default": ""
+          },
+          "block_reason": {
+            "type": "string",
+            "title": "Block Reason",
+            "default": ""
           }
         },
         "type": "object",
@@ -9247,6 +9257,16 @@
             "type": "string",
             "title": "Status",
             "default": "dispatched"
+          },
+          "guard_name": {
+            "type": "string",
+            "title": "Guard Name",
+            "default": ""
+          },
+          "block_reason": {
+            "type": "string",
+            "title": "Block Reason",
+            "default": ""
           }
         },
         "type": "object",

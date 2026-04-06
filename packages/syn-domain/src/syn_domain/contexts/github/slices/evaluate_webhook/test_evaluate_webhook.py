@@ -30,6 +30,7 @@ from syn_domain.contexts.github.slices.evaluate_webhook.debouncer import (
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
+    TriggerBlockedResult,
     TriggerDeferredResult,
     TriggerMatchResult,
 )
@@ -176,9 +177,12 @@ class TestSafetyGuards:
         agg.register(cmd)
         await _index_aggregate(store, agg)
 
-        # Record 2 fires for PR #42
+        # Record 2 fires for PR #42 and mark them completed
+        # so the concurrency guard (Guard 6) doesn't block before max_attempts
         await store.record_fire(agg.trigger_id, 42, "exec-1")
+        await store.complete_execution("exec-1")
         await store.record_fire(agg.trigger_id, 42, "exec-2")
+        await store.complete_execution("exec-2")
 
         guards = SafetyGuards()
         payload = {
@@ -269,7 +273,9 @@ class TestEvaluateWebhookHandler:
         )
 
         assert len(results) == 1
-        assert results[0].execution_id.startswith("exec-")
+        result = results[0]
+        assert isinstance(result, TriggerMatchResult)
+        assert result.execution_id.startswith("exec-")
 
     @pytest.mark.asyncio
     async def test_no_matching_rules_returns_empty(self) -> None:
@@ -287,8 +293,8 @@ class TestEvaluateWebhookHandler:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_conditions_not_met_skips(self) -> None:
-        """Test that conditions not met skips the trigger."""
+    async def test_conditions_not_met_returns_blocked(self) -> None:
+        """Test that conditions not met returns a TriggerBlockedResult."""
         store = InMemoryTriggerQueryStore()
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -314,7 +320,9 @@ class TestEvaluateWebhookHandler:
             payload=payload,
         )
 
-        assert results == []
+        assert len(results) == 1
+        assert isinstance(results[0], TriggerBlockedResult)
+        assert results[0].guard_name == "conditions_not_met"
 
     @pytest.mark.asyncio
     async def test_bot_sender_allowed(self) -> None:
@@ -441,9 +449,11 @@ class TestDebounceAndRetry:
         await _register_trigger(store, cooldown_seconds=300)
 
         # Simulate a recent fire so cooldown blocks
+        # Must complete the execution so the concurrency guard passes first
         rules = await store.list_by_event_and_repo("check_run.completed", "org/repo")
         trigger_id = rules[0].trigger_id
         await store.record_fire(trigger_id, 1, "exec-old")
+        await store.complete_execution("exec-old")
 
         handler = EvaluateWebhookHandler(
             store=store, repository=NullRepository(), debouncer=debouncer
@@ -463,7 +473,7 @@ class TestDebounceAndRetry:
 
     @pytest.mark.asyncio
     async def test_permanent_guard_does_not_retry(self) -> None:
-        """Max-attempts guard blocks → no retry scheduled, pending_count == 0."""
+        """Max-attempts guard blocks → TriggerBlockedResult, no retry scheduled."""
         store = InMemoryTriggerQueryStore()
         debouncer = TriggerDebouncer()
         await _register_trigger(store, max_attempts=1)
@@ -471,6 +481,7 @@ class TestDebounceAndRetry:
         rules = await store.list_by_event_and_repo("check_run.completed", "org/repo")
         rule = rules[0]
         await store.record_fire(rule.trigger_id, 1, "exec-old")
+        await store.complete_execution("exec-old")
 
         handler = EvaluateWebhookHandler(
             store=store, repository=NullRepository(), debouncer=debouncer
@@ -484,7 +495,9 @@ class TestDebounceAndRetry:
             payload=payload,
         )
 
-        assert results == []
+        assert len(results) == 1
+        assert isinstance(results[0], TriggerBlockedResult)
+        assert results[0].guard_name == "max_attempts"
         assert debouncer.pending_count == 0
         debouncer.cancel_all()
 
@@ -519,6 +532,7 @@ class TestDebounceAndRetry:
         rules = await store.list_by_event_and_repo("check_run.completed", "org/repo")
         rule = rules[0]
         await store.record_fire(rule.trigger_id, 1, "exec-old")
+        await store.complete_execution("exec-old")
 
         guards = SafetyGuards()
         result = await guards.check_all(rule, _make_payload(), store)

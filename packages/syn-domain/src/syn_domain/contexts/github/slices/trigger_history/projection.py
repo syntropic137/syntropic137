@@ -16,6 +16,9 @@ from syn_domain.contexts.github.domain.read_models.trigger_history_entry import 
 
 if TYPE_CHECKING:
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
+        TriggerBlockedEvent,
+    )
     from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
         TriggerFiredEvent,
     )
@@ -37,6 +40,8 @@ def _entry_to_dict(entry: TriggerHistoryEntry) -> dict[str, Any]:
         "fired_at": entry.fired_at.isoformat() if entry.fired_at else None,
         "status": entry.status,
         "cost_usd": entry.cost_usd,
+        "guard_name": entry.guard_name,
+        "block_reason": entry.block_reason,
     }
 
 
@@ -52,6 +57,8 @@ def _entry_from_dict(data: dict[str, Any]) -> TriggerHistoryEntry:
         fired_at=datetime.fromisoformat(data["fired_at"]) if data.get("fired_at") else None,
         status=data.get("status", "dispatched"),
         cost_usd=data.get("cost_usd"),
+        guard_name=data.get("guard_name", ""),
+        block_reason=data.get("block_reason", ""),
     )
 
 
@@ -82,8 +89,51 @@ class TriggerHistoryProjection:
             fired_at=datetime.now(UTC),
         )
         key = _entry_key(entry)
-        await self._store.save(PROJECTION_NAME, key, _entry_to_dict(entry))
+        data = _entry_to_dict(entry)
+        data["_projection_key"] = key
+        await self._store.save(PROJECTION_NAME, key, data)
         logger.info(f"Projected TriggerFired: {event.trigger_id} -> {event.execution_id}")
+        return entry
+
+    async def handle_trigger_blocked(
+        self,
+        event: TriggerBlockedEvent,
+        global_nonce: int | None = None,
+    ) -> TriggerHistoryEntry:
+        """Handle a TriggerBlocked event.
+
+        Args:
+            event: The blocked event data.
+            global_nonce: Stream position for deterministic, replay-safe keys.
+        """
+        entry = TriggerHistoryEntry(
+            trigger_id=event.trigger_id,
+            execution_id="",
+            webhook_delivery_id=event.webhook_delivery_id,
+            github_event_type=event.github_event_type,
+            repository=event.repository,
+            pr_number=event.pr_number,
+            payload_summary=dict(event.payload_summary),
+            fired_at=datetime.now(UTC),
+            status="blocked",
+            guard_name=event.guard_name,
+            block_reason=event.reason,
+        )
+        # Deterministic, replay-safe key namespaced by trigger_id.
+        # Use global_nonce (stream position) when available for collision-free keys.
+        if global_nonce is not None:
+            key = f"{entry.trigger_id}_blocked_{global_nonce}"
+        elif entry.webhook_delivery_id:
+            key = f"{entry.trigger_id}_blocked_{entry.webhook_delivery_id}"
+        else:
+            pr_part = str(entry.pr_number) if entry.pr_number is not None else "no_pr"
+            key = (
+                f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
+            )
+        data = _entry_to_dict(entry)
+        data["_projection_key"] = key
+        await self._store.save(PROJECTION_NAME, key, data)
+        logger.info(f"Projected TriggerBlocked: {event.trigger_id} ({event.guard_name})")
         return entry
 
     async def get_history(self, trigger_id: str, limit: int = 50) -> list[TriggerHistoryEntry]:
@@ -104,8 +154,12 @@ class TriggerHistoryProjection:
         """Clear all projection data (for rebuild)."""
         records = await self._store.get_all(PROJECTION_NAME)
         for record in records:
-            entry = _entry_from_dict(record)
-            key = _entry_key(entry)
+            # Use stored key if available (handles blocked entries whose keys
+            # can't be reconstructed from entry fields alone).
+            key = record.get("_projection_key")
+            if key is None:
+                entry = _entry_from_dict(record)
+                key = _entry_key(entry)
             await self._store.delete(PROJECTION_NAME, key)
 
 
