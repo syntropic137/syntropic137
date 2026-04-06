@@ -3894,6 +3894,16 @@ export interface components {
             status: string;
             /** Cost Usd */
             cost_usd?: number | null;
+            /**
+             * Guard Name
+             * @default
+             */
+            guard_name: string;
+            /**
+             * Block Reason
+             * @default
+             */
+            block_reason: string;
         };
         /**
          * TriggerHistoryListEntry
@@ -3921,6 +3931,16 @@ export interface components {
              * @default dispatched
              */
             status: string;
+            /**
+             * Guard Name
+             * @default
+             */
+            guard_name: string;
+            /**
+             * Block Reason
+             * @default
+             */
+            block_reason: string;
         };
         /**
          * TriggerHistoryListResponse

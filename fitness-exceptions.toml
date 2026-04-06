@@ -29,13 +29,6 @@ issue = "#316"
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --- syn-adapters subscriptions ---
-
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.subscriptions.coordinator_service::create_coordinator_service"]
-value = 135
-issue = "#504"
-# Central projection registry — 20 projections with local imports. Inherently high complexity.
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum LOC (function-level, threshold: 100)
 # ═══════════════════════════════════════════════════════════════════════════════

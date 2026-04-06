@@ -9,6 +9,8 @@ import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from syn_domain.contexts.github.domain.aggregate_trigger.TriggerCondition import (
         TriggerCondition,
     )
@@ -77,7 +79,7 @@ def _unpack_condition(condition: TriggerCondition | dict) -> tuple[str, str, Any
 
 
 def evaluate_conditions(
-    conditions: list[TriggerCondition | dict],
+    conditions: Sequence[TriggerCondition | dict[str, Any]],
     payload: dict[str, Any],
 ) -> bool:
     for condition in conditions:

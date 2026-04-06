@@ -117,6 +117,9 @@ services:
     - syn-internal
     image: ghcr.io/syntropic137/event-store:${SYN_VERSION:-latest}
   collector:
+    networks:
+    - syn-internal
+    - agent-net
     environment:
       EVENT_COLLECTOR_PORT: "8080"
       SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
@@ -169,9 +172,6 @@ services:
       options:
         max-size: 10m
         max-file: "3"
-    networks:
-    - syn-internal
-    - agent-net  # Workspace containers push OTLP metrics here (receive-only, no secrets)
     image: ghcr.io/syntropic137/syn-collector:${SYN_VERSION:-latest}
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
@@ -245,6 +245,8 @@ services:
         condition: service_healthy
       docker-socket-proxy:
         condition: service_started
+      minio:
+        condition: service_healthy
     healthcheck:
       test:
       - CMD-SHELL
@@ -393,8 +395,6 @@ services:
     - export MINIO_ROOT_PASSWORD="$(cat /run/secrets/minio_password)" && exec minio server /data --console-address ':9001'
     secrets:
     - minio_password
-    ports:
-    - 127.0.0.1:9000:9000
     volumes:
     - minio_data:/data
     restart: always

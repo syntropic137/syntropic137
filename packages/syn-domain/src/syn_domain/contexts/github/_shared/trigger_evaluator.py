@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+        TriggerBlockedResult,
         TriggerDeferredResult,
         TriggerMatchResult,
     )
@@ -20,4 +21,4 @@ class TriggerEvaluator(Protocol):
         repository: str,
         installation_id: str,
         payload: dict[str, Any],
-    ) -> list[TriggerMatchResult | TriggerDeferredResult]: ...
+    ) -> list[TriggerMatchResult | TriggerDeferredResult | TriggerBlockedResult]: ...
