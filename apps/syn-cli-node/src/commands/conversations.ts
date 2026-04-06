@@ -65,12 +65,9 @@ const metadataCommand: CommandDef = {
     const sessionId = parsed.positionals[0];
     if (!sessionId) { printError("Missing session-id"); throw new CLIError("Missing argument", 1); }
 
+    // API returns 404 if metadata not found, 500 on service error.
+    // apiGet throws CLIError for non-200 responses (see client/api.ts).
     const m = await apiGet<ConversationMetadataResponse>(`/conversations/${sessionId}/metadata`);
-
-    if (!m || !m.session_id) {
-      printError("Session not found or no metadata available.");
-      throw new CLIError("Not found", 1);
-    }
 
     print(`${style("Metadata:", BOLD)} ${m.session_id}`);
 
@@ -81,6 +78,10 @@ const metadataCommand: CommandDef = {
     if (m.started_at != null) print(`  Started:          ${formatTimestamp(m.started_at)}`);
     if (m.completed_at != null) print(`  Completed:        ${formatTimestamp(m.completed_at)}`);
     if (m.size_bytes != null) print(`  Log size:         ${m.size_bytes.toLocaleString()} bytes`);
+    if (m.execution_id != null) print(`  Execution:        ${m.execution_id}`);
+    if (m.workflow_id != null) print(`  Workflow:         ${m.workflow_id}`);
+    if (m.phase_id != null) print(`  Phase:            ${m.phase_id}`);
+    if (m.success != null) print(`  Success:          ${m.success}`);
 
     if (m.tool_counts) {
       print("  Tool counts:");

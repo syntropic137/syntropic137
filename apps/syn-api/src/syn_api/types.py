@@ -747,6 +747,11 @@ class ConversationMeta(BaseModel):
     tool_counts: dict = Field(default_factory=dict)
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    size_bytes: int | None = None
+    execution_id: str | None = None
+    workflow_id: str | None = None
+    phase_id: str | None = None
+    success: bool | None = None
 
 
 # ---------------------------------------------------------------------------

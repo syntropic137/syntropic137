@@ -5662,7 +5662,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConversationMetadataResponse"] | null;
+                    "application/json": components["schemas"]["ConversationMetadataResponse"];
                 };
             };
             /** @description Validation Error */

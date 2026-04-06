@@ -2369,15 +2369,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/ConversationMetadataResponse"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Get Conversation Metadata Endpoint Conversations  Session Id  Metadata Get"
+                  "$ref": "#/components/schemas/ConversationMetadataResponse"
                 }
               }
             }

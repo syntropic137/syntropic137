@@ -118,7 +118,9 @@ describe("conversations commands", () => {
     });
 
     it("throws when session not found", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(
+        jsonResponse({ detail: "No metadata found for session: nonexistent" }, 404),
+      );
       await expect(
         handler({ positionals: ["nonexistent"], values: {} }),
       ).rejects.toThrow(CLIError);
