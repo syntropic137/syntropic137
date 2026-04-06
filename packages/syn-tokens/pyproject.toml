@@ -1,6 +1,6 @@
 [project]
 name = "syn-tokens"
-version = "0.21.4"
+version = "0.21.5"
 description = "Token vending and spend tracking for Syntropic137"
 requires-python = ">=3.12"
 
