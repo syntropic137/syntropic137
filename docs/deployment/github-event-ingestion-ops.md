@@ -104,3 +104,5 @@ With many repositories, consider:
 | Poller stuck in Active Polling | Webhooks not reaching the health tracker | Verify webhook route calls `health_tracker.record_received()`; check GitHub App webhook URL |
 | `event_poller` in degraded reasons | Poller failed to start (GitHub not configured, import error) | Check logs for the specific startup exception |
 | Events arriving with ~5min delay | Normal Events API behavior | This is expected; use webhooks for real-time delivery |
+| Many triggers blocked after restart | Concurrency guard preventing catch-up storm | Expected behavior — `syn triggers history <id>` shows blocked entries with reason. Only 1 execution per (trigger, PR) runs at a time |
+| Trigger didn't fire but event was received | Guard blocked or conditions not met | Check `syn triggers history <id>` for blocked entries with `guard_name` and `block_reason` |

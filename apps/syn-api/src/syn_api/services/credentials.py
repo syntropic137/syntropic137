@@ -25,7 +25,6 @@ def validate_credentials(degraded_reasons: list[DegradedReason]) -> None:
         degraded_reasons: Mutable list — appended to when credentials are missing.
     """
     from syn_api.services.lifecycle import DegradedReason
-
     from syn_shared.settings import get_settings
 
     settings = get_settings()

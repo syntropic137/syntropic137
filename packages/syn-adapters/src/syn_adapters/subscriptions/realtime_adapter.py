@@ -203,13 +203,21 @@ class RepoCorrelationAdapter(_NamespacedProjectionAdapter):
 class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
     """Adapter for TriggerHistoryProjection.
 
-    Maps github.TriggerFired → handle_trigger_fired (projection uses
-    ``handle_`` prefix instead of ``on_``).
+    Maps github.TriggerFired → handle_trigger_fired and
+    github.TriggerBlocked → handle_trigger_blocked.
+    Also subscribes to WorkflowCompleted/WorkflowFailed to clear
+    the concurrency guard's running-execution tracking.
+    Projection uses ``handle_`` prefix instead of ``on_``.
     """
 
     PROJECTION_NAME: ClassVar[str] = "trigger_history"
-    VERSION: ClassVar[int] = 1
-    _SUBSCRIBED: ClassVar[set[str]] = {"github.TriggerFired"}
+    VERSION: ClassVar[int] = 3
+    _SUBSCRIBED: ClassVar[set[str]] = {
+        "github.TriggerFired",
+        "github.TriggerBlocked",
+        "WorkflowCompleted",
+        "WorkflowFailed",
+    }
 
     async def handle_event(
         self,
@@ -217,13 +225,10 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         checkpoint_store: Any,
     ) -> ProjectionResult:
         event_data = envelope.event.model_dump()
+        event_type = envelope.event.event_type
         global_nonce = envelope.metadata.global_nonce or 0
         try:
-            # handle_trigger_fired uses attribute access (event.trigger_id),
-            # so wrap the dict in a SimpleNamespace for duck-typed access.
-            from types import SimpleNamespace
-
-            await self._projection.handle_trigger_fired(SimpleNamespace(**event_data))
+            await self._dispatch(event_data, event_type, global_nonce)
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
                     projection_name=self.PROJECTION_NAME,
@@ -235,7 +240,68 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
             return ProjectionResult.SUCCESS
         except Exception:
             logger.exception(
-                "TriggerHistoryAdapter handler failed for event in %s",
+                "TriggerHistoryAdapter handler failed for event %s in %s",
+                event_type,
                 self.PROJECTION_NAME,
             )
             return ProjectionResult.FAILURE
+
+    async def _dispatch(
+        self,
+        event_data: dict[str, Any],
+        event_type: str,
+        global_nonce: int,
+    ) -> None:
+        """Route events to the appropriate handler."""
+        if event_type in ("WorkflowCompleted", "WorkflowFailed"):
+            await self._handle_execution_terminal(event_data, event_type)
+            return
+        from types import SimpleNamespace
+
+        ns = SimpleNamespace(**event_data)
+        if event_type == "github.TriggerBlocked":
+            await self._projection.handle_trigger_blocked(ns, global_nonce=global_nonce)
+        else:
+            await self._projection.handle_trigger_fired(ns)
+
+    @staticmethod
+    async def _handle_execution_terminal(
+        event_data: dict[str, Any],
+        event_type: str,
+    ) -> None:
+        """Clear concurrency guard tracking when a workflow execution finishes.
+
+        Cross-context subscription: this adapter (github context) listens to
+        WorkflowCompleted/WorkflowFailed (orchestration context) to clear the
+        in-memory running-execution set used by the concurrency guard (Guard 6).
+
+        Fail-open: if the store is unavailable, we log and move on rather than
+        blocking the projection. Worst case: one (trigger, PR) pair stays blocked
+        until the next process restart (which clears the in-memory set anyway).
+        """
+        execution_id = event_data.get("execution_id", "")
+        if not execution_id:
+            return
+        try:
+            from syn_domain.contexts.github._shared.trigger_query_store import (
+                get_trigger_query_store,
+            )
+
+            store = get_trigger_query_store()
+            await store.complete_execution(execution_id)
+            logger.debug(
+                "Cleared running execution %s on %s",
+                execution_id,
+                event_type,
+            )
+        except Exception:
+            # Fail-open: don't block the projection checkpoint over a cleanup
+            # failure. The running-execution set is in-memory and resets on
+            # restart, so a missed clear is self-healing.
+            logger.warning(
+                "Failed to clear running execution %s on %s — "
+                "concurrency guard may block until restart",
+                execution_id,
+                event_type,
+                exc_info=True,
+            )

@@ -50,10 +50,12 @@ class DegradedReason(StrEnum):
 
 # Subsystems that can be recovered by retrying after transient failures
 # (e.g. MinIO not yet DNS-resolvable at startup).
-_RECOVERABLE_REASONS: frozenset[DegradedReason] = frozenset({
-    DegradedReason.ARTIFACT_STORAGE,
-    DegradedReason.SUBSCRIPTION_COORDINATOR,
-})
+_RECOVERABLE_REASONS: frozenset[DegradedReason] = frozenset(
+    {
+        DegradedReason.ARTIFACT_STORAGE,
+        DegradedReason.SUBSCRIPTION_COORDINATOR,
+    }
+)
 
 
 @dataclass
@@ -98,6 +100,7 @@ async def startup(
         Ok({"mode": "full"|"degraded", ...}) on success,
         Err(LifecycleError) on critical failure.
     """
+    _state._shutting_down = False
     _state.degraded_reasons = []
 
     from syn_shared.settings import get_settings
@@ -241,7 +244,9 @@ def _enrich_subscription_health(response: dict, mode: str) -> None:
             "status": "healthy" if sub_healthy else "degraded",
         }
         if not sub_healthy:
-            response.setdefault("degraded_reasons", []).append(DegradedReason.SUBSCRIPTION_COORDINATOR)
+            response.setdefault("degraded_reasons", []).append(
+                DegradedReason.SUBSCRIPTION_COORDINATOR
+            )
             if mode == "full":
                 response["mode"] = "degraded"
     except Exception:
@@ -265,12 +270,15 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     """Start subscription coordinator (degraded on failure)."""
     try:
         realtime = get_realtime()
-        state.workflow_dispatcher = await get_workflow_dispatcher()
+        workflow_dispatcher = await get_workflow_dispatcher()
         coordinator = get_subscription_coordinator(
             realtime_projection=realtime,
-            execution_service=state.workflow_dispatcher,
+            execution_service=workflow_dispatcher,
         )
         await coordinator.start()
+        # Only assign to state after coordinator starts successfully,
+        # so a partial failure doesn't orphan the dispatcher.
+        state.workflow_dispatcher = workflow_dispatcher
         state.subscription_service = coordinator
     except Exception:
         logger.exception("Failed to start subscription coordinator (degraded mode)")
@@ -316,6 +324,38 @@ async def _init_event_poller(state: LifecycleState) -> None:
         state.degraded_reasons.append(DegradedReason.EVENT_POLLER)
 
 
+def _get_recoverable(state: LifecycleState) -> list[DegradedReason]:
+    """Return the subset of degraded reasons that can be recovered by retrying."""
+    return [r for r in state.degraded_reasons if r in _RECOVERABLE_REASONS]
+
+
+def _all_recovered(state: LifecycleState) -> bool:
+    """Check whether all recoverable subsystems have been restored."""
+    return not any(r in _RECOVERABLE_REASONS for r in state.degraded_reasons)
+
+
+async def _try_recover_reason(state: LifecycleState, reason: DegradedReason) -> None:
+    """Attempt recovery for a single degraded reason. Raises on failure."""
+    if reason is DegradedReason.ARTIFACT_STORAGE:
+        await _try_recover_artifact_storage()
+    elif reason is DegradedReason.SUBSCRIPTION_COORDINATOR:
+        await _try_recover_subscriptions(state)
+    state.degraded_reasons.remove(reason)
+    logger.info("Recovered: %s", reason)
+
+
+async def _attempt_recovery_pass(state: LifecycleState, delay: float) -> None:
+    """Try recovering each degraded subsystem once. Failures are logged, not raised."""
+    for reason in _get_recoverable(state):
+        if state._shutting_down:
+            return
+        try:
+            await _try_recover_reason(state, reason)
+        except Exception:
+            logger.debug("Recovery retry failed for %s, will retry in %.0fs", reason, delay)
+
+
+
 async def _recovery_loop(state: LifecycleState) -> None:
     """Background task: retry degraded subsystems with exponential backoff.
 
@@ -326,33 +366,14 @@ async def _recovery_loop(state: LifecycleState) -> None:
     delay = 10.0
     max_delay = 60.0
 
-    # Initial grace period — give dependent services time to stabilize.
     await asyncio.sleep(delay)
 
-    while not state._shutting_down:
-        recoverable = [r for r in state.degraded_reasons if r in _RECOVERABLE_REASONS]
-        if not recoverable:
-            break
+    while not state._shutting_down and _get_recoverable(state):
+        await _attempt_recovery_pass(state, delay)
 
-        for reason in recoverable:
-            if state._shutting_down:
-                return
-            try:
-                if reason is DegradedReason.ARTIFACT_STORAGE:
-                    await _try_recover_artifact_storage()
-                    state.degraded_reasons.remove(reason)
-                    logger.info("Recovered: %s", reason)
-                elif reason is DegradedReason.SUBSCRIPTION_COORDINATOR:
-                    await _try_recover_subscriptions(state)
-                    state.degraded_reasons.remove(reason)
-                    logger.info("Recovered: %s", reason)
-            except Exception:
-                logger.debug("Recovery retry failed for %s, will retry in %.0fs", reason, delay)
-
-        # Check if all recoverable subsystems are back.
-        if not any(r in _RECOVERABLE_REASONS for r in state.degraded_reasons):
+        if _all_recovered(state):
             logger.info("All recoverable subsystems healthy — recovery loop exiting")
-            break
+            return
 
         await asyncio.sleep(delay)
         delay = min(delay * 2, max_delay)
@@ -372,13 +393,19 @@ async def _try_recover_subscriptions(state: LifecycleState) -> None:
 
     Unlike _init_subscriptions, does NOT append to degraded_reasons on
     failure — the caller handles retry logic.
+
+    Reuses the existing workflow dispatcher when present to avoid
+    orphaning a running dispatcher on each recovery attempt.
     """
     realtime = get_realtime()
-    state.workflow_dispatcher = await get_workflow_dispatcher()
+    workflow_dispatcher = state.workflow_dispatcher
+    if workflow_dispatcher is None:
+        workflow_dispatcher = await get_workflow_dispatcher()
     coordinator = get_subscription_coordinator(
         realtime_projection=realtime,
-        execution_service=state.workflow_dispatcher,
+        execution_service=workflow_dispatcher,
     )
     await coordinator.start()
+    state.workflow_dispatcher = workflow_dispatcher
     state.subscription_service = coordinator
     logger.info("Subscription coordinator started (recovered)")

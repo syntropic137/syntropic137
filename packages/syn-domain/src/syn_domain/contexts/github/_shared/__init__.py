@@ -2,7 +2,7 @@
 
 Contains:
 - Value objects: InstallationId, InstallationToken
-- Trigger evaluation types: TriggerMatchResult, TriggerDeferredResult
+- Trigger evaluation types: TriggerMatchResult, TriggerDeferredResult, TriggerBlockedResult
 - Trigger evaluator protocol
 - GitHub API client
 - Trigger query store port and in-memory adapter
@@ -18,6 +18,7 @@ from syn_domain.contexts.github._shared.github_client import (
     reset_github_client,
 )
 from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+    TriggerBlockedResult,
     TriggerDeferredResult,
     TriggerMatchResult,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "RepositoryPermission",
     "TokenFetchError",
     "TokenResponse",
+    "TriggerBlockedResult",
     "TriggerDeferredResult",
     "TriggerEvaluator",
     "TriggerMatchResult",
