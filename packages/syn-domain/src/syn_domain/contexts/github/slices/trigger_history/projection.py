@@ -93,24 +93,32 @@ class TriggerHistoryProjection:
         logger.info(f"Projected TriggerFired: {event.trigger_id} -> {event.execution_id}")
         return entry
 
-    async def handle_trigger_blocked(self, event: TriggerBlockedEvent) -> TriggerHistoryEntry:
-        """Handle a TriggerBlocked event."""
+    async def handle_trigger_blocked(
+        self,
+        event: TriggerBlockedEvent,
+        global_nonce: int | None = None,
+    ) -> TriggerHistoryEntry:
+        """Handle a TriggerBlocked event.
+
+        Args:
+            event: The blocked event data.
+            global_nonce: Stream position for deterministic, replay-safe keys.
+        """
         entry = TriggerHistoryEntry(
             trigger_id=event.trigger_id,
             execution_id="",
-            webhook_delivery_id=getattr(event, "webhook_delivery_id", ""),
-            github_event_type=getattr(event, "github_event_type", ""),
-            repository=getattr(event, "repository", ""),
-            pr_number=getattr(event, "pr_number", None),
-            payload_summary=dict(getattr(event, "payload_summary", {})),
+            webhook_delivery_id=event.webhook_delivery_id,
+            github_event_type=event.github_event_type,
+            repository=event.repository,
+            pr_number=event.pr_number,
+            payload_summary=dict(event.payload_summary),
             fired_at=datetime.now(UTC),
             status="blocked",
             guard_name=event.guard_name,
-            block_reason=getattr(event, "reason", ""),
+            block_reason=event.reason,
         )
         # Deterministic, replay-safe key namespaced by trigger_id.
         # Use global_nonce (stream position) when available for collision-free keys.
-        global_nonce = getattr(event, "global_nonce", None)
         if global_nonce is not None:
             key = f"{entry.trigger_id}_blocked_{global_nonce}"
         elif entry.webhook_delivery_id:
