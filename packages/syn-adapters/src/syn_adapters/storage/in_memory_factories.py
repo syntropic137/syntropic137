@@ -13,6 +13,7 @@ from syn_adapters.storage.in_memory import InMemoryEventPublisher, InMemoryEvent
 from syn_adapters.storage.in_memory_repositories import (
     InMemoryArtifactRepository,
     InMemoryOrganizationRepository,
+    InMemoryRepoClaimRepository,
     InMemoryRepoRepository,
     InMemorySessionRepository,
     InMemorySystemRepository,
@@ -31,6 +32,7 @@ _artifact_repository: InMemoryArtifactRepository | None = None
 _organization_repository: InMemoryOrganizationRepository | None = None
 _system_repository: InMemorySystemRepository | None = None
 _repo_repository: InMemoryRepoRepository | None = None
+_repo_claim_repository: InMemoryRepoClaimRepository | None = None
 
 
 def get_event_store() -> InMemoryEventStore:
@@ -141,6 +143,18 @@ def get_repo_repository() -> InMemoryRepoRepository:
     return _repo_repository
 
 
+def get_repo_claim_repository() -> InMemoryRepoClaimRepository:
+    """Get the global in-memory repo claim repository.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _repo_claim_repository
+    if _repo_claim_repository is None:
+        _repo_claim_repository = InMemoryRepoClaimRepository()
+    return _repo_claim_repository
+
+
 def reset_storage() -> None:
     """Reset all storage (for testing between tests).
 
@@ -155,6 +169,7 @@ def reset_storage() -> None:
         _organization_repository,
         _system_repository,
         _repo_repository,
+        _repo_claim_repository,
     )
     for store in _stores:
         if store is not None:

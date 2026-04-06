@@ -60,7 +60,10 @@ async def register_repo(
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, RepoError]:
     """Register a new repo within an organization."""
-    from syn_adapters.storage.repositories import get_repo_repository
+    from syn_adapters.storage.repositories import (
+        get_repo_claim_repository,
+        get_repo_repository,
+    )
     from syn_domain.contexts.organization.domain.commands.RegisterRepoCommand import (
         RegisterRepoCommand,
     )
@@ -86,12 +89,16 @@ async def register_repo(
         return Err(RepoError.INVALID_INPUT, message=str(e))
 
     repo = get_repo_repository()
-    handler = RegisterRepoHandler(repository=repo)
+    claim_repo = get_repo_claim_repository()
+    handler = RegisterRepoHandler(repository=repo, claim_repository=claim_repo)
 
     try:
         aggregate = await handler.handle(command)
         await sync_published_events_to_projections()
         return Ok(aggregate.repo_id)
+    except ValueError as e:
+        error_enum = _classify_repo_error(str(e))
+        return Err(error_enum, message=str(e))
     except Exception as e:
         return Err(RepoError.INVALID_INPUT, message=str(e))
 
@@ -454,8 +461,12 @@ async def deregister_repo(
     """Deregister (soft-delete) a repo.
 
     Cross-context guard: rejects if active trigger rules reference this repo.
+    After successful deregister, releases the repo claim to allow re-registration.
     """
-    from syn_adapters.storage.repositories import get_repo_repository
+    from syn_adapters.storage.repositories import (
+        get_repo_claim_repository,
+        get_repo_repository,
+    )
     from syn_domain.contexts.organization.domain.commands.DeregisterRepoCommand import (
         DeregisterRepoCommand,
     )
@@ -467,8 +478,12 @@ async def deregister_repo(
 
     repo_result = await get_repo(repo_id)
     repo_full_name: str | None = None
+    repo_org_id: str | None = None
+    repo_provider: str | None = None
     if isinstance(repo_result, Ok):
         repo_full_name = repo_result.value.full_name
+        repo_org_id = repo_result.value.organization_id
+        repo_provider = repo_result.value.provider
 
     trigger_check = await _check_active_triggers(repo_id, repo_full_name)
     if isinstance(trigger_check, Err):
@@ -493,13 +508,60 @@ async def deregister_repo(
         error_enum = _classify_repo_error(result.error)
         return Err(error_enum, message=result.error)
 
+    # Release the repo claim to allow re-registration
+    if repo_org_id and repo_provider and repo_full_name:
+        try:
+            await _release_repo_claim(
+                repo_id=repo_id,
+                organization_id=repo_org_id,
+                provider=repo_provider,
+                full_name=repo_full_name,
+                claim_repository=get_repo_claim_repository(),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to release repo claim for %s — claim may be stale",
+                repo_id,
+                exc_info=True,
+            )
+
     await sync_published_events_to_projections()
     return Ok(None)
+
+
+async def _release_repo_claim(
+    repo_id: str,
+    organization_id: str,
+    provider: str,
+    full_name: str,
+    claim_repository: Any,
+) -> None:
+    """Release a repo claim after deregistration."""
+    from syn_domain.contexts.organization.domain.aggregate_repo_claim.claim_id import (
+        compute_repo_claim_id,
+    )
+    from syn_domain.contexts.organization.domain.commands.ReleaseRepoClaimCommand import (
+        ReleaseRepoClaimCommand,
+    )
+
+    claim_id = compute_repo_claim_id(organization_id, provider, full_name)
+    existing = await claim_repository.get_by_id(claim_id)
+    if existing is None or existing.is_released:
+        return
+
+    release_command = ReleaseRepoClaimCommand(
+        claim_id=claim_id,
+        repo_id=repo_id,
+    )
+    existing.release(release_command)
+    await claim_repository.save(existing)
 
 
 def _classify_repo_error(error_msg: str) -> RepoError:
     """Map a domain ValueError message to a specific RepoError."""
     lower = error_msg.lower()
+    if "already registered" in lower:
+        return RepoError.ALREADY_EXISTS
     if "already assigned" in lower:
         return RepoError.ALREADY_ASSIGNED
     if "not assigned" in lower:
@@ -533,7 +595,8 @@ async def register_repo_endpoint(body: dict[str, Any]) -> RepoCreatedResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
-        raise HTTPException(status_code=400, detail=result.message)
+        status = 409 if result.error == RepoError.ALREADY_EXISTS else 400
+        raise HTTPException(status_code=status, detail=result.message)
 
     return RepoCreatedResponse(repo_id=result.value, full_name=body["full_name"])
 

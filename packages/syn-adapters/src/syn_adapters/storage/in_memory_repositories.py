@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from syn_adapters.storage.in_memory import _assert_test_environment
 from syn_adapters.storage.in_memory_org_repos import (
     InMemoryOrganizationRepository,
+    InMemoryRepoClaimRepository,
     InMemoryRepoRepository,
     InMemorySystemRepository,
 )
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
 __all__ = [
     "InMemoryArtifactRepository",
     "InMemoryOrganizationRepository",
+    "InMemoryRepoClaimRepository",
     "InMemoryRepoRepository",
     "InMemorySessionRepository",
     "InMemorySystemRepository",
