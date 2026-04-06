@@ -40,6 +40,10 @@ syn trigger create \
   --cooldown 60
 ```
 
+### Conditions
+
+Triggers support fine-grained filtering with dot-notation field paths and comparison operators. Use conditions to whitelist specific contributors, exclude bots, filter by branch, skip draft PRs, and more. See [Trigger Conditions](/docs/guide/trigger-conditions) for the full reference.
+
 ### Safety Limits
 
 Every trigger has built-in guards to prevent runaway execution:

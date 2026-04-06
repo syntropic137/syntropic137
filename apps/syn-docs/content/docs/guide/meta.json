@@ -12,6 +12,7 @@
     "workflows",
     "claude-code-plugin",
     "github-integration",
+    "trigger-conditions",
     "---Operate---",
     "observability",
     "self-hosting",

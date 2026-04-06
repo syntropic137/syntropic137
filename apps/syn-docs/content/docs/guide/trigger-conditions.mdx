@@ -1,0 +1,255 @@
+---
+title: Trigger Conditions
+description: Filter GitHub events with dot-notation field matching, operators, and contributor whitelisting.
+---
+
+Trigger conditions let you control exactly which GitHub events fire a workflow.
+Every condition is evaluated against the raw webhook payload using dot-notation
+field paths and comparison operators. When a trigger has multiple conditions, all
+must match (AND logic) for the trigger to fire.
+
+## Anatomy of a Condition
+
+A condition has three parts:
+
+| Part | Description | Example |
+|------|-------------|---------|
+| **field** | Dot-notation path into the webhook payload | `sender.login` |
+| **operator** | Comparison to perform | `eq`, `in`, `not_empty` |
+| **value** | Expected value (omitted for unary operators) | `alice` |
+
+## Operators
+
+| Operator | Description | Value | Example |
+|----------|-------------|-------|---------|
+| `eq` | Equals (exact match) | Required | `sender.type eq User` |
+| `neq` | Not equals | Required | `action neq closed` |
+| `in` | Value is in a comma-separated list | Required | `sender.login in alice,bob` |
+| `not_in` | Value is not in a list | Required | `sender.login not_in dependabot[bot]` |
+| `contains` | Field value contains substring | Required | `comment.body contains /syn` |
+| `not_empty` | Field exists and is truthy | None | `check_run.pull_requests not_empty` |
+| `is_empty` | Field is missing, null, or empty | None | `pull_request.body is_empty` |
+
+Boolean coercion is automatic -- string values `"true"` and `"false"` are
+converted to native booleans before comparison, so `pull_request.draft eq false`
+works whether the payload sends a boolean or a string.
+
+## Dot-Notation Field Paths
+
+Fields use dot notation to traverse nested objects in the GitHub webhook payload.
+Array indexing is also supported:
+
+```
+sender.login              → payload["sender"]["login"]
+review.user.login         → payload["review"]["user"]["login"]
+pull_request.head.ref     → payload["pull_request"]["head"]["ref"]
+check_run.pull_requests[0].number → first PR's number
+```
+
+If any segment in the path is missing, the resolved value is `None` -- the
+condition fails gracefully rather than erroring.
+
+## Common Webhook Payload Fields
+
+GitHub webhook payloads vary by event type. Here are the most commonly used
+fields for conditions:
+
+### Sender (available on all events)
+
+| Field | Description | Example values |
+|-------|-------------|----------------|
+| `sender.login` | GitHub username of the actor | `alice`, `dependabot[bot]` |
+| `sender.type` | Account type | `User`, `Bot`, `Organization` |
+
+### Pull Request events
+
+| Field | Description |
+|-------|-------------|
+| `action` | `opened`, `synchronize`, `closed`, `reopened` |
+| `pull_request.draft` | `true` / `false` |
+| `pull_request.head.ref` | Source branch name |
+| `pull_request.base.ref` | Target branch name |
+| `pull_request.number` | PR number |
+| `pull_request.user.login` | PR author |
+
+### Pull Request Review events
+
+| Field | Description |
+|-------|-------------|
+| `action` | `submitted`, `edited`, `dismissed` |
+| `review.state` | `approved`, `changes_requested`, `commented` |
+| `review.user.login` | Reviewer username |
+| `review.body` | Review comment text |
+
+### Check Run events
+
+| Field | Description |
+|-------|-------------|
+| `action` | `created`, `completed`, `rerequested` |
+| `check_run.conclusion` | `success`, `failure`, `cancelled`, `timed_out` |
+| `check_run.name` | Check name (e.g. `CI / test`) |
+| `check_run.pull_requests` | Array of associated PRs |
+
+### Issue Comment events
+
+| Field | Description |
+|-------|-------------|
+| `action` | `created`, `edited`, `deleted` |
+| `comment.body` | Comment text |
+| `comment.user.login` | Comment author |
+| `issue.pull_request` | Present (truthy) if the comment is on a PR |
+
+## CLI Usage
+
+Conditions are passed with the `--condition` / `-c` flag when registering a
+trigger. The basic syntax is `field=value` which uses the `eq` operator:
+
+```bash
+syn triggers register \
+  --repo owner/my-repo \
+  --event check_run.completed \
+  --workflow self-heal-pr \
+  -c "check_run.conclusion=failure"
+```
+
+Multiple `-c` flags combine with AND logic -- all must match:
+
+```bash
+syn triggers register \
+  --repo owner/my-repo \
+  --event pull_request_review.submitted \
+  --workflow self-heal-pr \
+  -c "review.state=changes_requested" \
+  -c "pull_request.draft=false"
+```
+
+## Security: Contributor Whitelisting
+
+Conditions are the primary mechanism for restricting which users can trigger
+workflows. This is important because trigger rules fire automatically from
+external events -- without filtering, any GitHub user who opens a PR or leaves a
+comment could trigger an expensive agent execution.
+
+### Whitelist Specific Contributors
+
+Only fire for known, trusted contributors:
+
+```bash
+syn triggers register \
+  --repo owner/my-repo \
+  --event pull_request.opened \
+  --workflow pr-review-v1 \
+  -c "sender.login=alice"
+```
+
+To allow multiple users, use the API directly with the `in` operator:
+
+```json
+{
+  "conditions": [
+    { "field": "sender.login", "operator": "in", "value": "alice,bob,charlie" }
+  ]
+}
+```
+
+### Exclude Bots
+
+Prevent bot accounts from triggering workflows:
+
+```bash
+syn triggers register \
+  --repo owner/my-repo \
+  --event pull_request.opened \
+  --workflow pr-review-v1 \
+  -c "sender.type=User"
+```
+
+This filters out `dependabot[bot]`, `renovate[bot]`, GitHub Actions, and any
+other non-human sender.
+
+### Filter by Branch
+
+Only trigger on PRs targeting a specific branch:
+
+```bash
+syn triggers register \
+  --repo owner/my-repo \
+  --event pull_request.opened \
+  --workflow pr-review-v1 \
+  -c "pull_request.base.ref=main"
+```
+
+### Skip Draft PRs
+
+Avoid wasting agent time on work-in-progress:
+
+```bash
+syn triggers register \
+  --repo owner/my-repo \
+  --event pull_request.opened \
+  --workflow pr-review-v1 \
+  -c "pull_request.draft=false"
+```
+
+## Built-in Presets
+
+Syntropic137 ships with preset trigger configurations for common patterns.
+These include conditions by default:
+
+### Self-Healing
+
+Automatically fixes CI failures on pull requests.
+
+- **Event:** `check_run.completed`
+- **Conditions:** `check_run.conclusion eq failure` AND `check_run.pull_requests not_empty`
+
+```bash
+syn triggers enable self-healing --repo owner/my-repo
+```
+
+### Review Fix
+
+Responds to review comments requesting changes on PRs.
+
+- **Event:** `pull_request_review.submitted`
+- **Conditions:** `review.state in changes_requested,commented` AND `pull_request.draft eq false`
+
+```bash
+syn triggers enable review-fix --repo owner/my-repo
+```
+
+### Comment Command
+
+Dispatches a workflow when `/syn` appears in a PR comment.
+
+- **Event:** `issue_comment.created`
+- **Conditions:** `issue.pull_request not_empty` (only PR comments) AND `comment.body contains /syn`
+
+```bash
+syn triggers enable comment-command --repo owner/my-repo
+```
+
+## How Conditions Combine
+
+All conditions on a trigger are evaluated with **AND** logic. Every condition
+must pass for the trigger to fire. There is no OR support within a single
+trigger -- if you need OR behavior, create separate triggers for each case.
+
+```
+Condition 1: sender.type eq User         ← must match
+Condition 2: pull_request.draft eq false  ← must match
+Condition 3: pull_request.base.ref eq main ← must match
+                                          ─────────────
+                                          All three must pass
+```
+
+## Combining with Safety Limits
+
+Conditions work alongside the trigger safety limits (daily limit, cooldown,
+budget). The evaluation order is:
+
+1. **Event type match** -- does the webhook event match the trigger's event?
+2. **Condition evaluation** -- do all conditions pass against the payload?
+3. **Safety limits** -- has the trigger exceeded its daily limit, cooldown, or budget?
+
+Only if all three gates pass does the trigger fire a workflow execution.
