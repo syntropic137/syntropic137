@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api._wiring import BackgroundWorkflowDispatcher
     from syn_api.auth import AuthContext
+    from syn_api.services.check_run_poller import CheckRunPoller
     from syn_api.services.github_event_poller import GitHubEventPoller
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class DegradedReason(StrEnum):
     CONVERSATION_STORAGE = "conversation_storage"
     SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
     EVENT_POLLER = "event_poller"
+    CHECK_RUN_POLLER = "check_run_poller"
     ANTHROPIC_API_KEY = "anthropic_api_key"
     GITHUB_APP = "github_app"
 
@@ -64,6 +66,7 @@ class LifecycleState:
     subscription_service: CoordinatorSubscriptionService | None = None
     workflow_dispatcher: BackgroundWorkflowDispatcher | None = None
     event_poller: GitHubEventPoller | None = None
+    check_run_poller: CheckRunPoller | None = None
     conversation_storage: MinioConversationStorage | None = None
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
     _recovery_task: asyncio.Task[None] | None = None
@@ -405,6 +408,55 @@ async def _shutdown_event_poller(state: LifecycleState) -> None:
         state.event_poller = None
 
 
+async def _init_check_run_poller(state: LifecycleState) -> None:
+    """Start the check-run poller for poll-based self-healing (#602).
+
+    Polls the GitHub Checks API for CI failures on PR commits. Enables
+    self-healing without webhooks — zero-config onboarding.
+    """
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+
+    if not settings.github.is_configured:
+        logger.info("GitHub App not configured — check-run poller disabled")
+        return
+
+    if not settings.polling.enabled:
+        logger.info("Event polling disabled — check-run poller disabled")
+        return
+
+    from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
+    from syn_adapters.github.client import get_github_client
+    from syn_api._wiring import (
+        get_event_pipeline,
+        get_pending_sha_store,
+        get_trigger_store,
+        get_webhook_health_tracker,
+    )
+    from syn_api.services.check_run_poller import CheckRunPoller
+
+    poller = CheckRunPoller(
+        checks_client=GitHubChecksAPIClient(get_github_client()),
+        pipeline=get_event_pipeline(),
+        sha_store=get_pending_sha_store(),
+        health_tracker=get_webhook_health_tracker(),
+        trigger_store=get_trigger_store(),
+        settings=settings.polling,
+    )
+    get_event_pipeline().add_observer(poller.on_pr_event)
+    await poller.start()
+    state.check_run_poller = poller
+    logger.info("Check-run poller started")
+
+
+async def _shutdown_check_run_poller(state: LifecycleState) -> None:
+    """Stop the check-run poller."""
+    if state.check_run_poller is not None:
+        await state.check_run_poller.stop()
+        state.check_run_poller = None
+
+
 # ── Service Registry (ADR-057) ─────────────────────────────────────
 #
 # Single source of truth for all degradable services. To add a service:
@@ -439,6 +491,12 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
         init_fn=_init_event_poller,
         recoverable=False,
         shutdown_fn=_shutdown_event_poller,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.CHECK_RUN_POLLER,
+        init_fn=_init_check_run_poller,
+        recoverable=False,
+        shutdown_fn=_shutdown_check_run_poller,
     ),
 )
 
