@@ -21,7 +21,7 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Re-export from sub-modules for backwards compatibility
-from syn_shared.settings.git_identity import (
+from syn_shared.settings.git_identity import (  # noqa: F401
     GitCredentialType,
     GitIdentitySettings,
 )
@@ -29,7 +29,7 @@ from syn_shared.settings.git_identity_resolver import (
     GitIdentityResolver as GitIdentityResolver,
 )
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
-from syn_shared.settings.workspace_security import (
+from syn_shared.settings.workspace_security import (  # noqa: F401
     ContainerLoggingSettings,
     WorkspaceSecuritySettings,
 )

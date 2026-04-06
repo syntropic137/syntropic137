@@ -118,8 +118,8 @@ async def execute(
     inputs: dict[str, str] | None = None,
     execution_id: str | None = None,
     task: str | None = None,
-    tenant_id: str | None = None,
-    auth: AuthContext | None = None,
+    tenant_id: str | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 

@@ -482,7 +482,7 @@ class WorkflowExecutionProcessor:
     async def _handle_complete_phase(
         self,
         todo: TodoItem,
-        phase: ExecutablePhase,
+        phase: ExecutablePhase,  # noqa: ARG002
         aggregate: WorkflowExecutionAggregate,
         phase_results: list[PhaseResult],
         completed_phase_ids: list[str],

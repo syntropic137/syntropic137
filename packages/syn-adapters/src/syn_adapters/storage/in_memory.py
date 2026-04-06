@@ -155,7 +155,7 @@ class InMemoryEventPublisher:
 # everything so those imports continue to work without modification.
 # ---------------------------------------------------------------------------
 
-from syn_adapters.storage.in_memory_factories import (
+from syn_adapters.storage.in_memory_factories import (  # noqa: E402
     get_artifact_repository,
     get_event_publisher,
     get_event_store,
@@ -168,7 +168,7 @@ from syn_adapters.storage.in_memory_factories import (
     get_workflow_repository,
     reset_storage,
 )
-from syn_adapters.storage.in_memory_repositories import (
+from syn_adapters.storage.in_memory_repositories import (  # noqa: E402
     InMemoryArtifactRepository,
     InMemoryOrganizationRepository,
     InMemoryRepoClaimRepository,

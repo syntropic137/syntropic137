@@ -47,7 +47,7 @@ async def list_repos(
     installation_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[dict[str, Any]], GitHubError]:
     """List GitHub repositories accessible via the GitHub App."""
     await ensure_connected()
@@ -74,7 +74,7 @@ async def list_repos(
 
 async def get_installation(
     installation_id: str,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[dict[str, Any], GitHubError]:
     """Get details about a GitHub App installation."""
     await ensure_connected()

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class ListOrganizationsHandler:
-    async def handle(self, query: ListOrganizationsQuery) -> list[OrganizationSummary]:
+    async def handle(self, query: ListOrganizationsQuery) -> list[OrganizationSummary]:  # noqa: ARG002
         projection = get_organization_projection()
         return await projection.list_all()
 

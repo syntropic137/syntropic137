@@ -333,7 +333,7 @@ class MinioStorage:
         prefix: str = "",
         *,
         max_keys: int = 1000,
-        continuation_token: str | None = None,
+        continuation_token: str | None = None,  # noqa: ARG002 - not used for MinIO
     ) -> ListResult:
         """List objects matching a prefix in MinIO.
 
@@ -357,7 +357,7 @@ class MinioStorage:
         key: str,
         *,
         expires_in: int = 3600,
-        for_upload: bool = False,
+        for_upload: bool = False,  # noqa: ARG002 - not yet implemented
     ) -> str:
         """Get a presigned URL for direct access.
 

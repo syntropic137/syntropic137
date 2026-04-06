@@ -6,7 +6,7 @@ Represents a single trigger firing in the audit log.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 - needed for runtime type annotations
 
 
 @dataclass

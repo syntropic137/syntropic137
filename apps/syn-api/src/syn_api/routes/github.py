@@ -73,7 +73,7 @@ def _map_repo_dict(raw: dict, installation_id: str) -> GitHubRepoResponse | None
 async def list_accessible_repos(
     installation_id: str | None = None,
     include_private: bool = True,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[GitHubRepoResponse], GitHubError]:
     """List repositories accessible to the GitHub App (live query).
 

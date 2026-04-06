@@ -6,7 +6,7 @@ Defines immutable data structures used for artifact storage and querying.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from typing import Any
 
 

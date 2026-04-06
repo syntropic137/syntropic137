@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 from typing import Any
 
 from event_sourcing import DomainEvent, event
@@ -32,4 +32,4 @@ class SessionStartedEvent(DomainEvent):
     started_at: datetime
 
     # Metadata
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}  # noqa: RUF012

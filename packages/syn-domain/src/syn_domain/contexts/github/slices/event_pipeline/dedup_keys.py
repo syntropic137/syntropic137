@@ -38,7 +38,7 @@ def compute_dedup_key(event_type: str, action: str, payload: dict[str, Any]) -> 
 # ---------------------------------------------------------------------------
 
 
-def _dedup_push(action: str, payload: dict[str, Any]) -> str | None:
+def _dedup_push(action: str, payload: dict[str, Any]) -> str | None:  # noqa: ARG001
     repo = _repo_name(payload)
     after = payload.get("after") or payload.get("head_commit", {}).get("id", "")
     if not after:
@@ -90,14 +90,14 @@ def _dedup_issues(action: str, payload: dict[str, Any]) -> str | None:
     return f"issue:{repo}:{number}:{action}"
 
 
-def _dedup_create(action: str, payload: dict[str, Any]) -> str | None:
+def _dedup_create(action: str, payload: dict[str, Any]) -> str | None:  # noqa: ARG001
     repo = _repo_name(payload)
     ref_type = payload.get("ref_type", "")
     ref = payload.get("ref", "")
     return f"create:{repo}:{ref_type}:{ref}"
 
 
-def _dedup_delete(action: str, payload: dict[str, Any]) -> str | None:
+def _dedup_delete(action: str, payload: dict[str, Any]) -> str | None:  # noqa: ARG001
     repo = _repo_name(payload)
     ref_type = payload.get("ref_type", "")
     ref = payload.get("ref", "")

@@ -6,7 +6,7 @@ from typing import Any
 
 from event_sourcing import DomainEvent, event
 
-from syn_domain.contexts.artifacts._shared.value_objects import (
+from syn_domain.contexts.artifacts._shared.value_objects import (  # noqa: TC001
     ArtifactType,
     ContentType,
 )
@@ -46,7 +46,7 @@ class ArtifactCreatedEvent(DomainEvent):
     is_primary_deliverable: bool = True
 
     # Lineage
-    derived_from: list[str] = []
+    derived_from: list[str] = []  # noqa: RUF012
 
     # Metadata
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}  # noqa: RUF012

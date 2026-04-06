@@ -43,7 +43,7 @@ async def create_organization(
     name: str,
     slug: str,
     created_by: str = "",
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, OrganizationError]:
     """Create a new organization."""
     from syn_adapters.storage.repositories import get_organization_repository
@@ -77,7 +77,7 @@ async def create_organization(
 
 
 async def list_organizations(
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[OrganizationSummaryResponse], OrganizationError]:
     """List all organizations."""
     from syn_domain.contexts.organization.slices.list_organizations.projection import (
@@ -107,7 +107,7 @@ async def list_organizations(
 
 async def get_organization(
     organization_id: str,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[OrganizationSummaryResponse, OrganizationError]:
     """Get organization details."""
     from syn_domain.contexts.organization.slices.list_organizations.projection import (
@@ -139,7 +139,7 @@ async def update_organization(
     organization_id: str,
     name: str | None = None,
     slug: str | None = None,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[None, OrganizationError]:
     """Update an organization."""
     from syn_adapters.storage.repositories import get_organization_repository
@@ -179,7 +179,7 @@ async def update_organization(
 async def delete_organization(
     organization_id: str,
     deleted_by: str = "",
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[None, OrganizationError]:
     """Soft-delete an organization."""
     from syn_adapters.storage.repositories import get_organization_repository

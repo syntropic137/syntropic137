@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from syn_tokens.models import ScopedToken, TokenScope, TokenType
-from syn_tokens.singletons import configure_redis_token_vending as configure_redis
+from syn_tokens.singletons import configure_redis_token_vending as configure_redis  # noqa: F401
 from syn_tokens.singletons import (
     get_token_vending_service as get_token_vending_service,
 )

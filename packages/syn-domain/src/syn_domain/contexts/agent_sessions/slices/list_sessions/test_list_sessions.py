@@ -400,7 +400,7 @@ class TestSessionSummaryToDict:
 # Subagent tests — moved from syn_tests/integration/test_subagent_observability.py (#115)
 # ---------------------------------------------------------------------------
 
-from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (  # noqa: E402
     SubagentRecord,
 )
 

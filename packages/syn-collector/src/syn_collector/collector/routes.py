@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from fastapi import Request
+from fastapi import Request  # noqa: TC002 — FastAPI needs Request at runtime for DI
 from fastapi.responses import JSONResponse
 
 from syn_collector.collector.otlp import parse_otlp_logs, parse_otlp_metrics

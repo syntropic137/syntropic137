@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 from typing import Any
 
 from event_sourcing import DomainEvent, event
@@ -34,4 +34,4 @@ class WorkspaceCreatedEvent(DomainEvent):
 
     # Resource info
     workspace_path: str | None = None
-    security_settings: dict[str, Any] = {}
+    security_settings: dict[str, Any] = {}  # noqa: RUF012

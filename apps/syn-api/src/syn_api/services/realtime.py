@@ -26,7 +26,7 @@ def get_realtime_projection_ref() -> RealTimeProjection:
 
 
 async def get_realtime_health(
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[RealtimeHealth, ObservabilityError]:
     """Get health status of the realtime SSE projection.
 

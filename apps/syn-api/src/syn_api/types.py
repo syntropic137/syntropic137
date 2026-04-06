@@ -7,7 +7,7 @@ plus Pydantic response models used across all v1 modules.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
 from enum import StrEnum
 from typing import Generic, Literal, TypeVar
@@ -23,14 +23,14 @@ E = TypeVar("E")
 
 
 @dataclass(frozen=True, slots=True)
-class Ok(Generic[T]):
+class Ok(Generic[T]):  # noqa: UP046 — Generic required for @dataclass(slots=True)
     """Success variant of Result."""
 
     value: T
 
 
 @dataclass(frozen=True, slots=True)
-class Err(Generic[E]):
+class Err(Generic[E]):  # noqa: UP046 — Generic required for @dataclass(slots=True)
     """Error variant of Result."""
 
     error: E

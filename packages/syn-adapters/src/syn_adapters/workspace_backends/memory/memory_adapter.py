@@ -169,9 +169,9 @@ class MemoryIsolationAdapter:
         handle: IsolationHandle,
         command: list[str],
         *,
-        timeout_seconds: int | None = None,
-        working_directory: str | None = None,
-        environment: dict[str, str] | None = None,
+        timeout_seconds: int | None = None,  # noqa: ARG002
+        working_directory: str | None = None,  # noqa: ARG002
+        environment: dict[str, str] | None = None,  # noqa: ARG002
     ) -> ExecutionResult:
         """Simulate command execution in memory.
 
@@ -232,7 +232,7 @@ class MemoryIsolationAdapter:
         self,
         handle: IsolationHandle,
         files: list[tuple[str, bytes]],
-        base_path: str = "/workspace",
+        base_path: str = "/workspace",  # noqa: ARG002
     ) -> None:
         """Copy files into the mock isolation.
 
@@ -253,8 +253,8 @@ class MemoryIsolationAdapter:
     async def copy_from(
         self,
         handle: IsolationHandle,
-        patterns: list[str],
-        base_path: str = "/workspace",
+        patterns: list[str],  # noqa: ARG002
+        base_path: str = "/workspace",  # noqa: ARG002
     ) -> list[tuple[str, bytes]]:
         """Copy files out of the mock isolation.
 

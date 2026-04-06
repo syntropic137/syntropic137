@@ -7,7 +7,7 @@ from typing import Any
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
+from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType  # noqa: TC001
 
 
 @command("RecordOperation", "Records an operation in an agent session")

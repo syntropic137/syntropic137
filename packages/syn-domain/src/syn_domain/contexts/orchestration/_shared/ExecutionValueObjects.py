@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any

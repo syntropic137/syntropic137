@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from functools import partial
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 - used at runtime
 from typing import TYPE_CHECKING
 
 from syn_adapters.object_storage.local_helpers import (
@@ -142,8 +142,8 @@ class LocalStorage:
         key: str,
         content: bytes,
         *,
-        content_type: str | None = None,
-        metadata: dict[str, str] | None = None,
+        content_type: str | None = None,  # noqa: ARG002 - protocol signature
+        metadata: dict[str, str] | None = None,  # noqa: ARG002 - protocol signature
     ) -> UploadResult:
         """Upload content to local filesystem.
 
@@ -226,7 +226,7 @@ class LocalStorage:
         prefix: str = "",
         *,
         max_keys: int = 1000,
-        continuation_token: str | None = None,
+        continuation_token: str | None = None,  # noqa: ARG002 - not implemented for local
     ) -> ListResult:
         """List files matching a prefix.
 
@@ -249,8 +249,8 @@ class LocalStorage:
         self,
         key: str,
         *,
-        expires_in: int = 3600,
-        for_upload: bool = False,
+        expires_in: int = 3600,  # noqa: ARG002 - not applicable for local
+        for_upload: bool = False,  # noqa: ARG002 - not applicable for local
     ) -> str:
         """Get a file:// URL for local access.
 

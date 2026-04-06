@@ -55,7 +55,7 @@ async def create_system(
     name: str,
     description: str = "",
     created_by: str = "",
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, SystemErrorCode]:
     """Create a new system within an organization."""
     from syn_adapters.storage.repositories import get_system_repository
@@ -91,7 +91,7 @@ async def create_system(
 
 async def list_systems(
     organization_id: str | None = None,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[SystemSummaryResponse], SystemErrorCode]:
     """List systems with optional organization filter."""
     from syn_domain.contexts.organization.slices.list_systems.projection import (
@@ -121,7 +121,7 @@ async def list_systems(
 
 async def get_system(
     system_id: str,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[SystemSummaryResponse, SystemErrorCode]:
     """Get system details."""
     from syn_domain.contexts.organization.slices.list_systems.projection import (
@@ -153,7 +153,7 @@ async def update_system(
     system_id: str,
     name: str | None = None,
     description: str | None = None,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[None, SystemErrorCode]:
     """Update a system."""
     from syn_adapters.storage.repositories import get_system_repository
@@ -193,7 +193,7 @@ async def update_system(
 async def delete_system(
     system_id: str,
     deleted_by: str = "",
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[None, SystemErrorCode]:
     """Soft-delete a system."""
     from syn_adapters.storage.repositories import get_system_repository

@@ -6,7 +6,7 @@ from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
-from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
     WorkflowClassification,

@@ -68,7 +68,7 @@ class FakeProjectionStore:
             (key, data) for key, data in self._data[projection].items() if key.startswith(prefix)
         ][:10]
 
-    async def get_last_updated(self, projection: str) -> datetime | None:
+    async def get_last_updated(self, projection: str) -> datetime | None:  # noqa: ARG002
         return None
 
 

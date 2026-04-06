@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from decimal import Decimal
 from typing import Any
 

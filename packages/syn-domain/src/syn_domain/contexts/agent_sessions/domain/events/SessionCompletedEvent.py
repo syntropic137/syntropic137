@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from decimal import Decimal
+from datetime import datetime  # noqa: TC003
+from decimal import Decimal  # noqa: TC003
 
 from event_sourcing import DomainEvent, event
 
-from syn_domain.contexts.agent_sessions._shared.value_objects import SessionStatus
+from syn_domain.contexts.agent_sessions._shared.value_objects import SessionStatus  # noqa: TC001
 
 
 @event("SessionCompleted", "v1")

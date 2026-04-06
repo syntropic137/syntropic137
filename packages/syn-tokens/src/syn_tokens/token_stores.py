@@ -87,4 +87,4 @@ class InMemoryTokenStore:
         self._execution_tokens.clear()
 
 
-from syn_tokens.redis_token_store import RedisTokenStore as RedisTokenStore
+from syn_tokens.redis_token_store import RedisTokenStore as RedisTokenStore  # noqa: E402

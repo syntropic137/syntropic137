@@ -110,7 +110,7 @@ class CostSummaryResponse(BaseModel):
 async def list_session_costs(
     execution_id: str | None = None,
     limit: int = 100,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[SessionCostData], MetricsError]:
     """List cost data for sessions.
 
@@ -164,8 +164,8 @@ async def list_session_costs(
 
 async def get_session_cost(
     session_id: str,
-    include_breakdown: bool = False,
-    auth: AuthContext | None = None,
+    include_breakdown: bool = False,  # noqa: ARG001
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[SessionCostData, MetricsError]:
     """Get cost data for a single session.
 
@@ -213,7 +213,7 @@ async def get_session_cost(
 
 async def list_execution_costs(
     limit: int = 100,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ExecutionCostData], MetricsError]:
     """List cost data for executions.
 
@@ -255,8 +255,8 @@ async def list_execution_costs(
 
 async def get_execution_cost(
     execution_id: str,
-    include_breakdown: bool = False,
-    auth: AuthContext | None = None,
+    include_breakdown: bool = False,  # noqa: ARG001
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionCostData, MetricsError]:
     """Get cost data for a single execution.
 
@@ -298,7 +298,7 @@ async def get_execution_cost(
 
 
 async def get_cost_summary(
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[CostSummary, MetricsError]:
     """Get overall cost summary across all executions.
 

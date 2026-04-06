@@ -94,7 +94,7 @@ async def get_session_events(
     event_type: str | None = None,
     limit: int = 1000,
     offset: int = 0,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[EventRecord], ObservabilityError]:
     """Get raw events for a session from the event store.
 
@@ -135,7 +135,7 @@ async def get_session_events(
 async def get_session_timeline(
     session_id: str,
     limit: int = 1000,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[TimelineEntry], ObservabilityError]:
     """Get a timeline of tool operations for a session.
 
@@ -188,7 +188,7 @@ def _accumulate_tool_stats(operations: list[Any]) -> dict[str, dict[str, int | f
 
 async def get_session_tool_summary(
     session_id: str,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ToolUsageSummary], ObservabilityError]:
     """Get aggregated tool usage summary for a session.
 
@@ -221,7 +221,7 @@ async def get_session_tool_summary(
 async def get_recent_activity_events(
     limit: int = 50,
     event_type: str | None = None,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[dict[str, Any]], ObservabilityError]:
     """Get recent activity events for the global dashboard feed.
 
@@ -289,7 +289,7 @@ async def _get_execution_token_metrics(
 async def get_token_metrics(
     execution_id: str | None = None,
     session_id: str | None = None,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Get token usage metrics for an execution or session.
 

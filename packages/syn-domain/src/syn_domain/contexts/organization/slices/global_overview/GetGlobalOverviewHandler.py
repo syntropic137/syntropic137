@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 
 
-def _build_index(
+def _build_index(  # noqa: UP047 - PEP 695 conflicts with `from __future__ import annotations`
     records: list[dict[str, Any]],
     key_field: str,
     model_class: type[_T],
@@ -99,7 +99,7 @@ class GetGlobalOverviewHandler:
         self._system_projection = system_projection
         self._repo_projection = repo_projection
 
-    async def handle(self, query: GetGlobalOverviewQuery) -> GlobalOverview:
+    async def handle(self, query: GetGlobalOverviewQuery) -> GlobalOverview:  # noqa: ARG002
         """Handle GetGlobalOverviewQuery."""
         systems = await self._system_projection.list_all()
         all_repos = await self._repo_projection.list_all()

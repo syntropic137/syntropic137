@@ -174,7 +174,7 @@ async def list_workflows(
     limit: int = 100,
     offset: int = 0,
     include_archived: bool = False,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[WorkflowSummary], WorkflowError]:
     """List all workflow templates."""
     await ensure_connected()
@@ -204,7 +204,7 @@ async def list_workflows(
 
 async def get_workflow(
     workflow_id: str,
-    auth: AuthContext | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[WorkflowDetail, WorkflowError]:
     """Get detailed workflow template with fully-mapped phase/input objects."""
     await ensure_connected()

@@ -8,7 +8,7 @@ Defines the core event types used throughout the collection system:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 - used at runtime by Pydantic
 from enum import StrEnum
 from typing import Any
 

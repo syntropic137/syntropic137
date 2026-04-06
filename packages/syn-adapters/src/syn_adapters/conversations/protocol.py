@@ -7,7 +7,7 @@ See ADR-035: Agent Output Data Model and Storage.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 from typing import Any, Protocol, runtime_checkable
 
 
