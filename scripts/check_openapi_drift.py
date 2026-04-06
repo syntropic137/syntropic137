@@ -43,13 +43,12 @@ def main() -> None:
     committed_endpoints = _extract_endpoints(committed_spec)
 
     # Generate fresh spec from current code
-    from syn_api.main import create_app
-
     # Patch deferred annotations (same as extract_openapi.py)
     from datetime import datetime
 
     from pydantic import BaseModel
 
+    from syn_api.main import create_app
     from syn_api.routes import events
 
     ns = {"datetime": datetime}
