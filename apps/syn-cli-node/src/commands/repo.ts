@@ -29,8 +29,26 @@ const registerCommand: CommandDef = {
     const url = parsed.values["url"] as string | undefined;
     if (!url) { printError("Missing --url"); throw new CLIError("Missing option", 1); }
 
-    const org = parsed.values["org"] as string | undefined;
-    if (!org) { printError("Missing --org"); throw new CLIError("Missing option", 1); }
+    let org = parsed.values["org"] as string | undefined;
+    if (!org) {
+      // Auto-select if exactly one organization exists
+      const orgs = await apiGetPaginated<Record<string, unknown>>("/organizations", "organizations");
+      if (orgs.length === 1) {
+        const orgId = orgs[0]!["organization_id"];
+        if (typeof orgId !== "string" || orgId === "") {
+          printError("Organization found but has no valid ID");
+          throw new CLIError("Invalid organization data", 1);
+        }
+        org = orgId;
+        printDim(`Using organization: ${org}`);
+      } else if (orgs.length === 0) {
+        printError("No organizations found. Create one first with: syn org create");
+        throw new CLIError("No organizations", 1);
+      } else {
+        printError("Multiple organizations found. Specify one with --org");
+        throw new CLIError("Missing option", 1);
+      }
+    }
 
     const body: Record<string, unknown> = { full_name: url, organization_id: org };
     const system = parsed.values["system"] as string | undefined;

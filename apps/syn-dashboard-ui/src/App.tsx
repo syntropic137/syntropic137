@@ -8,6 +8,7 @@ import {
   Dashboard,
   ExecutionDetail,
   ExecutionList,
+  Insights,
   SessionDetail,
   SessionList,
   TriggerDetail,
@@ -48,6 +49,8 @@ export function App() {
             <Route path="artifacts/:artifactId" element={<ArtifactDetail />} />
             <Route path="triggers" element={<TriggerList />} />
             <Route path="triggers/:triggerId" element={<TriggerDetail />} />
+            <Route path="insights" element={<Insights />} />
+            <Route path="insights/*" element={<Insights />} />
           </Route>
         </Routes>
       </BrowserRouter>
