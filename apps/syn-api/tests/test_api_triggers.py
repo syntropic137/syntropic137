@@ -203,6 +203,7 @@ async def test_pause_already_paused():
     result = await pause_trigger(trigger_id)
     assert isinstance(result, Err)
     assert result.error == "already_paused"
+    assert result.message is not None
     assert "already paused" in result.message.lower()
 
 
@@ -219,6 +220,7 @@ async def test_pause_deleted_trigger():
     result = await pause_trigger(trigger_id)
     assert isinstance(result, Err)
     assert result.error == "already_deleted"
+    assert result.message is not None
     assert "deleted" in result.message.lower()
 
 
@@ -229,6 +231,7 @@ async def test_pause_not_found():
     result = await pause_trigger("nonexistent-id")
     assert isinstance(result, Err)
     assert result.error == "not_found"
+    assert result.message is not None
     assert "not found" in result.message.lower()
 
 
@@ -279,6 +282,7 @@ async def test_resume_active_trigger():
     result = await resume_trigger(trigger_id)
     assert isinstance(result, Err)
     assert result.error == "already_active"
+    assert result.message is not None
     assert "not paused" in result.message.lower()
 
 
@@ -295,6 +299,7 @@ async def test_resume_deleted_trigger():
     result = await resume_trigger(trigger_id)
     assert isinstance(result, Err)
     assert result.error == "already_deleted"
+    assert result.message is not None
     assert "deleted" in result.message.lower()
 
 
@@ -305,6 +310,7 @@ async def test_resume_not_found():
     result = await resume_trigger("nonexistent-id")
     assert isinstance(result, Err)
     assert result.error == "not_found"
+    assert result.message is not None
     assert "not found" in result.message.lower()
 
 
@@ -321,6 +327,7 @@ async def test_delete_already_deleted():
     result = await delete_trigger(trigger_id)
     assert isinstance(result, Err)
     assert result.error == "already_deleted"
+    assert result.message is not None
     assert "already been deleted" in result.message.lower()
 
 
@@ -331,6 +338,7 @@ async def test_delete_not_found():
     result = await delete_trigger("nonexistent-id")
     assert isinstance(result, Err)
     assert result.error == "not_found"
+    assert result.message is not None
     assert "not found" in result.message.lower()
 
 
