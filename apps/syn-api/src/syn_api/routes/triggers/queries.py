@@ -172,6 +172,8 @@ async def get_trigger_history(
                 fired_at=e.fired_at,
                 status=e.status,
                 cost_usd=e.cost_usd,
+                guard_name=e.guard_name,
+                block_reason=e.block_reason,
             )
             for e in entries
         ]
@@ -227,6 +229,8 @@ async def _collect_history_entries(
                 event_type=e.github_event_type,
                 pr_number=e.pr_number,
                 status=e.status,
+                guard_name=e.guard_name,
+                block_reason=e.block_reason,
             )
             for e in hist.value
         )
@@ -279,6 +283,8 @@ async def get_trigger_history_endpoint(
                 pr_number=e.pr_number,
                 status=e.status,
                 cost_usd=e.cost_usd,
+                guard_name=e.guard_name,
+                block_reason=e.block_reason,
             )
             for e in result.value
         ],

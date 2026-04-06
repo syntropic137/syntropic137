@@ -16,3 +16,12 @@ class TriggerDeferredResult:
     trigger_id: str
     reason: str
     defer_seconds: float
+
+
+@dataclass
+class TriggerBlockedResult:
+    """Result when a trigger evaluation is blocked by a guard or conditions."""
+
+    trigger_id: str
+    guard_name: str
+    reason: str

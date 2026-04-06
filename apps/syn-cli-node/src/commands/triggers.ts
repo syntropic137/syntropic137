@@ -173,19 +173,37 @@ const historyCommand: CommandDef = {
     const items = await apiGetPaginated<Record<string, unknown>>(`/triggers/${id}/history`, "entries", { params: { limit } });
     if (items.length === 0) { printDim("No trigger history."); return; }
 
+    const hasBlocked = items.some((h) => h["status"] === "blocked");
+
     const table = new Table({ title: `Trigger History: ${id.slice(0, 12)}` });
     table.addColumn("Time");
     table.addColumn("Execution", { style: DIM });
     table.addColumn("Status");
-    table.addColumn("Cost", { align: "right" });
+    if (hasBlocked) {
+      table.addColumn("Guard");
+      table.addColumn("Reason");
+    } else {
+      table.addColumn("Cost", { align: "right" });
+    }
 
     for (const h of items) {
-      table.addRow(
-        formatTimestamp(h["fired_at"] as string | undefined),
-        String(h["execution_id"] ?? "").slice(0, 12),
-        formatStatus(String(h["status"] ?? "")),
-        formatCost(String(h["cost_usd"] ?? "0")),
-      );
+      const status = String(h["status"] ?? "");
+      if (hasBlocked) {
+        table.addRow(
+          formatTimestamp(h["fired_at"] as string | undefined),
+          status === "blocked" ? "—" : String(h["execution_id"] ?? "").slice(0, 12),
+          formatStatus(status),
+          String(h["guard_name"] ?? ""),
+          String(h["block_reason"] ?? ""),
+        );
+      } else {
+        table.addRow(
+          formatTimestamp(h["fired_at"] as string | undefined),
+          String(h["execution_id"] ?? "").slice(0, 12),
+          formatStatus(status),
+          formatCost(String(h["cost_usd"] ?? "0")),
+        );
+      }
     }
     table.print();
   },

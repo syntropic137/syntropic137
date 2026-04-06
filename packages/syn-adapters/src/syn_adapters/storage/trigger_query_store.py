@@ -179,3 +179,19 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         execution_id: str,
     ) -> None:
         pass  # Writes come from TriggerQueryProjection
+
+    async def has_running_execution(
+        self,
+        trigger_id: str,
+        pr_number: int | None,
+    ) -> bool:
+        """Check for running executions via fire records that haven't been completed."""
+        pr_filter = str(pr_number) if pr_number is not None else None
+        filters: dict[str, str] = {"trigger_id": trigger_id}
+        if pr_filter is not None:
+            filters["pr_number"] = pr_filter
+        records = await self._store.query(NS_FIRE_RECORDS, filters=filters)
+        return any(r.get("status", "running") == "running" for r in records)
+
+    async def complete_execution(self, execution_id: str) -> None:
+        pass  # Writes come from TriggerQueryProjection

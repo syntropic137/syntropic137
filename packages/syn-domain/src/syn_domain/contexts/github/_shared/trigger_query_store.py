@@ -112,6 +112,20 @@ class TriggerQueryStore(ABC):
         """Record a trigger firing."""
         ...
 
+    @abstractmethod
+    async def has_running_execution(
+        self,
+        trigger_id: str,
+        pr_number: int | None,
+    ) -> bool:
+        """Check if there's an active (non-terminal) execution for this trigger+PR."""
+        ...
+
+    @abstractmethod
+    async def complete_execution(self, execution_id: str) -> None:
+        """Mark an execution as completed (no longer running)."""
+        ...
+
 
 class _IndexedTrigger:
     """Lightweight indexed trigger for query store."""
@@ -158,6 +172,8 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         self._triggers: dict[str, _IndexedTrigger] = {}
         self._fire_records: list[dict] = []
         self._processed_deliveries: set[str] = set()
+        # Track running executions: execution_id → (trigger_id, pr_number)
+        self._running_executions: dict[str, tuple[str, int | None]] = {}
 
     async def index_trigger(
         self,
@@ -278,6 +294,21 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         trigger = self._triggers.get(trigger_id)
         if trigger:
             trigger.fire_count += 1
+        # Track as running execution for concurrency guard
+        self._running_executions[execution_id] = (trigger_id, pr_number)
+
+    async def has_running_execution(
+        self,
+        trigger_id: str,
+        pr_number: int | None,
+    ) -> bool:
+        return any(
+            tid == trigger_id and pr == pr_number
+            for tid, pr in self._running_executions.values()
+        )
+
+    async def complete_execution(self, execution_id: str) -> None:
+        self._running_executions.pop(execution_id, None)
 
 
 # --- Backward-compatible aliases ---

@@ -16,6 +16,9 @@ from syn_domain.contexts.github.domain.read_models.trigger_history_entry import 
 
 if TYPE_CHECKING:
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
+        TriggerBlockedEvent,
+    )
     from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
         TriggerFiredEvent,
     )
@@ -37,6 +40,8 @@ def _entry_to_dict(entry: TriggerHistoryEntry) -> dict[str, Any]:
         "fired_at": entry.fired_at.isoformat() if entry.fired_at else None,
         "status": entry.status,
         "cost_usd": entry.cost_usd,
+        "guard_name": entry.guard_name,
+        "block_reason": entry.block_reason,
     }
 
 
@@ -52,6 +57,8 @@ def _entry_from_dict(data: dict[str, Any]) -> TriggerHistoryEntry:
         fired_at=datetime.fromisoformat(data["fired_at"]) if data.get("fired_at") else None,
         status=data.get("status", "dispatched"),
         cost_usd=data.get("cost_usd"),
+        guard_name=data.get("guard_name", ""),
+        block_reason=data.get("block_reason", ""),
     )
 
 
@@ -84,6 +91,30 @@ class TriggerHistoryProjection:
         key = _entry_key(entry)
         await self._store.save(PROJECTION_NAME, key, _entry_to_dict(entry))
         logger.info(f"Projected TriggerFired: {event.trigger_id} -> {event.execution_id}")
+        return entry
+
+    async def handle_trigger_blocked(self, event: TriggerBlockedEvent) -> TriggerHistoryEntry:
+        """Handle a TriggerBlocked event."""
+        entry = TriggerHistoryEntry(
+            trigger_id=event.trigger_id,
+            execution_id="",
+            webhook_delivery_id=getattr(event, "webhook_delivery_id", ""),
+            github_event_type=getattr(event, "github_event_type", ""),
+            repository=getattr(event, "repository", ""),
+            pr_number=getattr(event, "pr_number", None),
+            payload_summary=dict(getattr(event, "payload_summary", {})),
+            fired_at=datetime.now(UTC),
+            status="blocked",
+            guard_name=event.guard_name,
+            block_reason=getattr(event, "reason", ""),
+        )
+        # Use delivery_id if available, else generate a unique key
+        key = (
+            entry.webhook_delivery_id
+            or f"{entry.trigger_id}_blocked_{datetime.now(UTC).isoformat()}"
+        )
+        await self._store.save(PROJECTION_NAME, key, _entry_to_dict(entry))
+        logger.info(f"Projected TriggerBlocked: {event.trigger_id} ({event.guard_name})")
         return entry
 
     async def get_history(self, trigger_id: str, limit: int = 50) -> list[TriggerHistoryEntry]:
