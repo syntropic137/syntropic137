@@ -23,7 +23,7 @@ function highlightPromptTokens(content: string): string {
 function PhaseMetaBadges({ phase }: { phase: PhaseDefinition }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {phase.model && <span className="inline-flex items-center gap-1 rounded-md bg-indigo-500/15 px-2 py-0.5 text-xs text-indigo-300 ring-1 ring-inset ring-indigo-500/25"><Cpu className="h-3 w-3" />{phase.model}</span>}
+      {phase.model && <span className="inline-flex items-center gap-1 rounded-md bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300 ring-1 ring-inset ring-blue-500/25"><Cpu className="h-3 w-3" />{phase.model}</span>}
       {phase.timeout_seconds > 0 && <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-xs text-amber-300 ring-1 ring-inset ring-amber-500/25"><Clock className="h-3 w-3" />{phase.timeout_seconds}s</span>}
       {phase.allowed_tools?.length > 0 && <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-300 ring-1 ring-inset ring-emerald-500/25"><Wrench className="h-3 w-3" />{phase.allowed_tools.length} tools</span>}
       {phase.argument_hint && <span className="text-xs text-[var(--color-text-muted)]">{phase.argument_hint}</span>}

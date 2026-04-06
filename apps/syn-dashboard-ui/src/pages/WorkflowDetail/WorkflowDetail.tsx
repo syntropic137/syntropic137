@@ -19,7 +19,7 @@ const STATUS_COLORS: Record<string, string> = {
   completed: '#22c55e',
   failed: '#ef4444',
 }
-const DEFAULT_STATUS_COLOR = '#6366f1'
+const DEFAULT_STATUS_COLOR = '#4D80FF'
 
 function truncatePhaseName(name: string, maxLen: number = 15): string {
   return name.length > maxLen ? name.slice(0, maxLen - 3) + '...' : name
@@ -46,15 +46,15 @@ function WorkflowDetailHeader({ workflow, workflowId }: { workflow: WorkflowResp
       </Link>
       <div className="mt-4 flex items-start justify-between">
         <div className="flex items-start gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20">
-            <GitBranch className="h-6 w-6 text-indigo-400" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-400/20">
+            <GitBranch className="h-6 w-6 text-blue-400" />
           </div>
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
                 {workflow.name}
               </h1>
-              <span className="px-2 py-1 text-xs rounded-full bg-indigo-500/20 text-indigo-400 ring-1 ring-inset ring-indigo-500/30">
+              <span className="px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 ring-1 ring-inset ring-blue-500/30">
                 Template
               </span>
             </div>
