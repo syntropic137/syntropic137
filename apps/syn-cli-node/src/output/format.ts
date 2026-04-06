@@ -55,6 +55,7 @@ const STATUS_COLORS: Record<string, string> = {
   paused: YELLOW,
   deleted: RED,
   failed: RED,
+  blocked: YELLOW,
   running: BLUE,
   pending: DIM,
 };

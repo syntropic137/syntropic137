@@ -16,6 +16,9 @@ from syn_domain.contexts.github.domain.events.InstallationSuspendedEvent import 
 from syn_domain.contexts.github.domain.events.TokenRefreshedEvent import (
     TokenRefreshedEvent,
 )
+from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
+    TriggerBlockedEvent,
+)
 from syn_domain.contexts.github.domain.events.TriggerDeletedEvent import (
     TriggerDeletedEvent,
 )
@@ -37,6 +40,7 @@ __all__ = [
     "InstallationRevokedEvent",
     "InstallationSuspendedEvent",
     "TokenRefreshedEvent",
+    "TriggerBlockedEvent",
     "TriggerDeletedEvent",
     "TriggerFiredEvent",
     "TriggerPausedEvent",

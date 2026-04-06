@@ -28,11 +28,19 @@ A condition has three parts:
 | `not_in` | Value is not in a list | Required | `sender.login not_in dependabot[bot]` |
 | `contains` | Field value contains substring | Required | `comment.body contains /syn` |
 | `not_empty` | Field exists and is truthy | None | `check_run.pull_requests not_empty` |
-| `is_empty` | Field is missing, null, or empty | None | `pull_request.body is_empty` |
+| `is_empty` | Field is missing or resolves to a falsy value | None | `pull_request.body is_empty` |
 
-Boolean coercion is automatic -- string values `"true"` and `"false"` are
-converted to native booleans before comparison, so `pull_request.draft eq false`
-works whether the payload sends a boolean or a string.
+<Callout type="warn">
+`is_empty` uses Python truthiness — `None`, `""`, `0`, `false`, and `[]` all
+match. If you need to check specifically for `null` or missing fields, use
+`is_empty` and be aware that other falsy values will also pass.
+</Callout>
+
+Boolean coercion is automatic -- when a condition value is supplied as a string
+(e.g. `"false"` from a CLI flag or API request), it is converted to a native
+boolean before comparison. This means `pull_request.draft eq false` works
+whether the condition value was provided as a boolean or a string. Payload
+values are compared as-is and are not coerced.
 
 ## Dot-Notation Field Paths
 
@@ -46,8 +54,10 @@ pull_request.head.ref     → payload["pull_request"]["head"]["ref"]
 check_run.pull_requests[0].number → first PR's number
 ```
 
-If any segment in the path is missing, the resolved value is `None` -- the
-condition fails gracefully rather than erroring.
+If any segment in the path is missing, the resolved value is `None` (no
+exception is raised) and operators then evaluate that `None` value according to
+their normal semantics. For example, `is_empty` passes for `None` while `eq`
+does not.
 
 ## Common Webhook Payload Fields
 
@@ -102,7 +112,13 @@ fields for conditions:
 ## CLI Usage
 
 Conditions are passed with the `--condition` / `-c` flag when registering a
-trigger. The basic syntax is `field=value` which uses the `eq` operator:
+trigger. The basic syntax is `field=value` which uses the `eq` operator.
+
+<Callout type="info">
+The `-c` flag only supports `field=value` syntax (always the `eq` operator).
+For advanced operators like `in`, `contains`, `not_empty`, etc., use the API
+directly or built-in presets.
+</Callout>
 
 ```bash
 syn triggers register \
@@ -147,7 +163,7 @@ To allow multiple users, use the API directly with the `in` operator:
 ```json
 {
   "conditions": [
-    { "field": "sender.login", "operator": "in", "value": "alice,bob,charlie" }
+    { "field": "sender.login", "operator": "in", "value": ["alice", "bob", "charlie"] }
   ]
 }
 ```

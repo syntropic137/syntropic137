@@ -201,6 +201,8 @@ services:
     depends_on:
       docker-socket-proxy:
         condition: service_started
+      minio:
+        condition: service_healthy
     secrets:
       - db_password
       - redis_password
@@ -291,8 +293,8 @@ services:
     command: []
     secrets:
       - minio_password
-    ports:
-      - "127.0.0.1:9000:9000" # S3 API — localhost-only, required for bucket init script
+    # Port removed — bucket init happens inside the Docker network via API
+    # ensure_ready(). Use dev overlay for host-side MinIO access.
     volumes:
       - minio_data:/data
     restart: always
