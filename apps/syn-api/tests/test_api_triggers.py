@@ -14,12 +14,14 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 @pytest.fixture(autouse=True)
 def _reset_storage():
-    """Reset in-memory storage between tests."""
+    """Reset all storage between tests (SDK repos + trigger query store)."""
     import syn_api._wiring
+    from syn_adapters.storage import reset_storage
     from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
         reset_trigger_store,
     )
 
+    reset_storage()
     reset_trigger_store()
     syn_api._wiring._test_trigger_repo = None
     yield
