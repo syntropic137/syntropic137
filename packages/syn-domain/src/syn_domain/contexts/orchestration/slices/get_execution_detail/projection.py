@@ -247,12 +247,14 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 "started_at": event_data.get("started_at"),
                 "completed_at": event_data.get("failed_at"),
                 "phases": [],
-                "total_input_tokens": 0,
-                "total_output_tokens": 0,
-                "total_cost_usd": "0",
+                "total_input_tokens": event_data.get("total_input_tokens", 0),
+                "total_output_tokens": event_data.get("total_output_tokens", 0),
+                "total_cost_usd": event_data.get("total_cost_usd", "0"),
                 "total_duration_seconds": 0.0,
                 "artifact_ids": [],
                 "error_message": event_data.get("error_message"),
+                "completed_phases": event_data.get("completed_phases", 0),
+                "total_phases": event_data.get("total_phases", 0),
             }
         else:
             existing["status"] = "failed"

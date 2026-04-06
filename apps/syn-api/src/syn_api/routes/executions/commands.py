@@ -78,13 +78,17 @@ async def _validate_repo_access(repo_url: str | None) -> None:
         client = get_github_client()
         await client.get_installation_for_repo(repo_full_name)
     except GitHubAuthError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=(
+        exc_message = str(exc)
+        if "not installed" in exc_message.lower():
+            detail = (
                 f"GitHub App not installed on repository: {repo_full_name}. "
                 "Install the GitHub App on this repository before running workflows."
-            ),
-        ) from exc
+            )
+        else:
+            detail = (
+                f"GitHub App authentication failed for {repo_full_name}: {exc_message}"
+            )
+        raise HTTPException(status_code=422, detail=detail) from exc
     except Exception as exc:
         # Transient errors (network, rate limit) — log and proceed
         logger.warning(
@@ -268,9 +272,22 @@ async def execute_workflow_endpoint(
 
     repo_url: str | None = workflow._repository_url
     if repo_url:
-        # Resolve input placeholders in repo URL
-        for key, value in request.inputs.items():
-            repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
+        # Merge input defaults + task, matching ExecuteWorkflowHandler._merge_inputs
+        merged: dict[str, str] = {}
+        for decl in workflow.input_declarations:
+            if decl.default is not None and decl.name not in merged:
+                merged[decl.name] = str(decl.default)
+        merged.update(request.inputs)
+        if request.task is not None:
+            merged["task"] = request.task
+
+        for key, value in merged.items():
+            repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
+
+        # Skip pre-validation if placeholders remain (handler will raise later)
+        if "{{" in repo_url:
+            repo_url = None
+
     await _validate_repo_access(repo_url)
 
     execution_id = f"exec-{uuid4().hex[:12]}"

@@ -153,10 +153,10 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
                 status="failed",
                 started_at=event_data.get("started_at"),
                 completed_at=event_data.get("failed_at"),
-                completed_phases=0,
+                completed_phases=event_data.get("completed_phases", 0),
                 total_phases=event_data.get("total_phases", 0),
-                total_tokens=0,
-                total_cost_usd="0",
+                total_tokens=event_data.get("total_tokens", 0),
+                total_cost_usd=event_data.get("total_cost_usd", "0"),
                 tool_call_count=0,
                 error_message=event_data.get("error_message"),
             ).to_dict()
