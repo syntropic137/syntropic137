@@ -18,6 +18,7 @@ from syn_api.routes import (
     costs_router,
     events_router,
     executions_router,
+    github_router,
     insights_router,
     metrics_router,
     observability_router,
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(observability_router)
     app.include_router(costs_router)
     app.include_router(events_router)
+    app.include_router(github_router)
     app.include_router(conversations_router)
     app.include_router(triggers_router)
     app.include_router(webhooks_router)

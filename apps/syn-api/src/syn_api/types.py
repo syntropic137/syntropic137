@@ -110,6 +110,33 @@ class GitHubError(StrEnum):
     NOT_IMPLEMENTED = "not_implemented"
 
 
+# ---------------------------------------------------------------------------
+# GitHub accessible repo models
+# ---------------------------------------------------------------------------
+
+
+class GitHubRepoResponse(BaseModel):
+    """A repository accessible to the GitHub App installation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    github_id: int
+    name: str
+    full_name: str
+    private: bool
+    default_branch: str
+    owner: str
+    installation_id: str
+
+
+class GitHubRepoListResponse(BaseModel):
+    """List of repositories accessible to the GitHub App."""
+
+    repos: list[GitHubRepoResponse] = Field(default_factory=list)
+    total: int = 0
+    installation_id: str | None = None
+
+
 class ObservabilityError(StrEnum):
     """Errors returned by observability operations."""
 

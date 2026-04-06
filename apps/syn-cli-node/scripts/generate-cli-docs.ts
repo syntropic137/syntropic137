@@ -19,30 +19,11 @@ import type { ArgDef, CommandDef, OptionDef } from "../src/framework/command.js"
 import { CommandGroup } from "../src/framework/command.js";
 
 // ---------------------------------------------------------------------------
-// Import all command groups and root commands (mirrors src/index.ts)
+// Import from the shared registry — single source of truth.
+// Adding a new command group to registry.ts automatically includes it here.
 // ---------------------------------------------------------------------------
 
-import { healthCommand } from "../src/commands/health.js";
-import { versionCommand } from "../src/commands/version.js";
-import { runCommand } from "../src/commands/workflow/run.js";
-import { workflowGroup } from "../src/commands/workflow/index.js";
-import { marketplaceGroup } from "../src/commands/marketplace/index.js";
-import { artifactsGroup } from "../src/commands/artifacts.js";
-import { configGroup } from "../src/commands/config.js";
-import { controlGroup } from "../src/commands/control.js";
-import { conversationsGroup } from "../src/commands/conversations.js";
-import { costsGroup } from "../src/commands/costs.js";
-import { eventsGroup } from "../src/commands/events.js";
-import { executionGroup } from "../src/commands/execution.js";
-import { insightsGroup } from "../src/commands/insights.js";
-import { metricsGroup } from "../src/commands/metrics.js";
-import { observeGroup } from "../src/commands/observe.js";
-import { orgGroup } from "../src/commands/org.js";
-import { repoGroup } from "../src/commands/repo.js";
-import { sessionsGroup } from "../src/commands/sessions.js";
-import { systemGroup } from "../src/commands/system.js";
-import { triggersGroup } from "../src/commands/triggers.js";
-import { watchGroup } from "../src/commands/watch.js";
+import { commandGroups, rootCommands as registryRootCommands } from "../src/registry.js";
 
 // ---------------------------------------------------------------------------
 // Path setup
@@ -315,40 +296,10 @@ function renderMetaJson(groups: GrpInfo[]): string {
 function main(): void {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
-  // Collect all groups (sorted alphabetically)
-  const allGroups: CommandGroup[] = [
-    artifactsGroup,
-    configGroup,
-    controlGroup,
-    conversationsGroup,
-    costsGroup,
-    eventsGroup,
-    executionGroup,
-    insightsGroup,
-    marketplaceGroup,
-    metricsGroup,
-    observeGroup,
-    orgGroup,
-    repoGroup,
-    sessionsGroup,
-    systemGroup,
-    triggersGroup,
-    watchGroup,
-    workflowGroup,
-  ];
-
-  // Root commands (order: health, run, version)
-  const rootCommands: CommandDef[] = [
-    healthCommand,
-    {
-      ...runCommand,
-      description: "Execute a workflow (shortcut for 'syn workflow run')",
-    },
-    versionCommand,
-  ];
-
-  const groups = allGroups.map(extractGroup);
-  const topLevel = rootCommands.map(extractCommand);
+  // Command groups and root commands come from the shared registry —
+  // no manual list to maintain. See src/registry.ts.
+  const groups = [...commandGroups].map(extractGroup);
+  const topLevel = [...registryRootCommands].map(extractCommand);
 
   const totalCommands = groups.reduce((sum, g) => sum + g.commands.length, 0) + topLevel.length;
   console.log(
