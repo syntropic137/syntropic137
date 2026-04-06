@@ -17,7 +17,7 @@
 - **Artifact pipeline** — each workflow phase produces output artifacts (stored in MinIO), passed as inputs to the next phase. Research → plan → code → review, each building on the last.
 - **Claude Code as a primitive** — agents run Claude Code inside secure ephemeral containers, leveraging Claude Code standards like [skills, commands, and hooks](https://docs.anthropic.com/en/docs/claude-code)
 - **Full observability** — token usage, tool traces, costs, and errors captured via event sourcing. [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) capture agent tasks and tool calls; conversation logs are saved after each session for reviewability; git hooks capture all git-related events.
-- **GitHub-native triggers** — integrated webhook triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows — agents respond in minutes so developers stay out of the loop
+- **GitHub-native triggers** — integrated event triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows — zero-config, no tunnel required, agents respond in minutes so developers stay out of the loop
 - **Security as a first-class citizen** — isolated Docker workspaces, secret injection/clearing lifecycle, read-only containers, no-new-privileges
 - **Production-grade** — event-sourced state, crash recovery, idempotent handlers, Docker Compose single-machine deployment
 - **Workflow phases as Claude Code commands** — each phase is a prompt template using the `$ARGUMENTS` command standard, composable into multi-phase pipelines (research → plan → implement → review)

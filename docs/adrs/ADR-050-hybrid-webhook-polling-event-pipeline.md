@@ -108,6 +108,34 @@ The poller operates in two modes based on webhook health:
 - **Dedup key maintenance** — Each new event type needs a dedicated extractor or falls back to hash-based dedup (which doesn't guarantee cross-source key match for unknown types)
 - **5-minute delay** — Events API events appear with a delay; polling alone is not real-time
 
+## Addendum: Checks API Polling (#602) — 2026-04-06
+
+The original ADR describes two event sources (webhooks + Events API). Issue #602 adds a third: **Checks API polling** for `check_run` events.
+
+### Problem
+
+`check_run` events are not available through GitHub's Events API — they are webhook-only. This meant self-healing (CI fails → auto-fix workflow) required a tunnel or public URL, which is the biggest onboarding friction point.
+
+### Solution
+
+When a `pull_request` event arrives (already polled via Events API), register the head SHA. A background poller (`CheckRunPoller`) hits `GET /repos/{o}/{r}/commits/{sha}/check-runs` every 30s. When a check run completes with `conclusion: failure`, synthesize a `check_run.completed` NormalizedEvent and feed it through `EventPipeline.ingest()`. Content-based dedup handles overlap with webhooks automatically.
+
+### Three-source model
+
+| Source | API | Events | Latency |
+|--------|-----|--------|---------|
+| Events API poller | `GET /repos/{o}/{r}/events` | 17 types (PR, push, etc.) | ~5 min |
+| Webhooks | Push-based | All 60+ types | ~1s |
+| **Checks API poller** | `GET /repos/{o}/{r}/commits/{sha}/check-runs` | `check_run` only | ~30-90s |
+
+### Key design decisions
+
+- **Observer pattern** on `EventPipeline`: `CheckRunPoller.on_pr_event()` is registered as an observer, called after each non-deduplicated event. Simpler than adding a shared queue or making the pipeline aware of downstream consumers.
+- **Trigger gating**: Poller only runs when active `check_run` triggers exist. Zero API calls when self-healing is not configured.
+- **Webhook-adaptive intervals**: Reuses `PollerState` from the Events API poller — 30s when webhooks stale, 120s when healthy.
+- **PendingSHA lifecycle**: Register on PR event → poll → remove when all checks completed → cleanup stale after 2h TTL.
+- **`DeliveryChannel.CHECKS_API`**: New enum value in `event_availability.py`. `check_run` moves from `WEBHOOK` to `CHECKS_API` channel, meaning `requires_webhook("check_run")` returns `False` and `available_via_polling("check_run")` returns `True`.
+
 ## Related ADRs
 
 - **ADR-040** — GitHub Trigger Architecture (trigger rules that this pipeline feeds into)

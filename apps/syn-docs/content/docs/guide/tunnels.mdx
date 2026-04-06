@@ -8,13 +8,13 @@ By default, Syntropic137 binds to `127.0.0.1:8137` — localhost only. A tunnel 
 ## When You Need a Tunnel
 
 <Callout type="info">
-Syntropic137's event polling covers most GitHub events **without** a tunnel — PRs, pushes, issues, and more work out of the box. Tunnels are only required for two things:
+Syntropic137's event polling covers most GitHub events **without** a tunnel — PRs, pushes, issues, self-healing CI, and more work out of the box. Tunnels are only required for two things:
 </Callout>
 
-1. **GitHub Actions webhook events** — `workflow_run`, `check_run`, and other Actions events are not available via GitHub's Events API. Webhook delivery requires a reachable URL.
+1. **Real-time CI/CD events** — `workflow_run`, `check_suite`, and other Actions events require webhook delivery. (`check_run` events are available via Checks API polling for zero-config self-healing.)
 2. **Remote access** — accessing the dashboard or API from outside your local network.
 
-If you only use push/PR/issue triggers and access the dashboard locally, you don't need a tunnel.
+If you only use push/PR/issue/self-healing triggers and access the dashboard locally, you don't need a tunnel.
 
 ## Cloudflare Tunnels
 

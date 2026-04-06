@@ -52,6 +52,32 @@ class PollingSettings(BaseSettings):
         description="TTL for dedup keys in Redis (seconds).",
     )
 
+    # -- Check-run polling (poll-based self-healing, #602) -------------------
+
+    check_run_poll_interval_seconds: float = Field(
+        default=30.0,
+        ge=10.0,
+        description=(
+            "Check-run polling interval when webhooks are stale (seconds). "
+            "Controls how quickly CI failures are detected without webhooks."
+        ),
+    )
+
+    check_run_safety_interval_seconds: float = Field(
+        default=120.0,
+        ge=30.0,
+        description=(
+            "Check-run polling interval when webhooks are healthy (seconds). "
+            "Relaxed cadence since webhooks provide real-time check_run events."
+        ),
+    )
+
+    check_run_sha_ttl_seconds: int = Field(
+        default=7200,
+        ge=60,
+        description="Max age for pending SHAs before cleanup (seconds). Default 2h.",
+    )
+
     @property
     def enabled(self) -> bool:
         """Whether polling is enabled (inverse of ``disabled``)."""

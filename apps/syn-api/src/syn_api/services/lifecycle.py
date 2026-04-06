@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api._wiring import BackgroundWorkflowDispatcher
     from syn_api.auth import AuthContext
+    from syn_api.services.check_run_poller import CheckRunPoller
     from syn_api.services.github_event_poller import GitHubEventPoller
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class DegradedReason(StrEnum):
     EVENT_POLLER = "event_poller"
     ANTHROPIC_API_KEY = "anthropic_api_key"
     GITHUB_APP = "github_app"
+    CHECK_RUN_POLLER = "check_run_poller"
 
 
 # Subsystems that can be recovered by retrying after transient failures
@@ -65,6 +67,7 @@ class LifecycleState:
     subscription_service: CoordinatorSubscriptionService | None = None
     workflow_dispatcher: BackgroundWorkflowDispatcher | None = None
     event_poller: GitHubEventPoller | None = None
+    check_run_poller: CheckRunPoller | None = None
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
     _recovery_task: asyncio.Task[None] | None = None
     _shutting_down: bool = False
@@ -126,6 +129,7 @@ async def startup(
     await _init_artifact_storage(_state)
     await _init_subscriptions(_state)
     await _init_event_poller(_state)
+    await _init_check_run_poller(_state)
     await reconcile_orphaned_sessions()
     await cleanup_orphaned_containers()
 
@@ -161,20 +165,7 @@ async def shutdown(
                 await _state._recovery_task
             _state._recovery_task = None
 
-        if _state.event_poller is not None:
-            with contextlib.suppress(Exception):
-                await _state.event_poller.stop()
-            _state.event_poller = None
-
-        if _state.workflow_dispatcher is not None:
-            with contextlib.suppress(Exception):
-                await _state.workflow_dispatcher.shutdown()
-            _state.workflow_dispatcher = None
-
-        if _state.subscription_service is not None:
-            with contextlib.suppress(Exception):
-                await _state.subscription_service.stop()
-            _state.subscription_service = None
+        await _stop_services(_state)
 
         await disconnect()
         return Ok(None)
@@ -202,6 +193,29 @@ async def health_check(
     _enrich_subscription_health(response, mode)
 
     return Ok(response)
+
+
+async def _stop_services(state: LifecycleState) -> None:
+    """Stop all managed services during shutdown."""
+    if state.check_run_poller is not None:
+        with contextlib.suppress(Exception):
+            await state.check_run_poller.stop()
+        state.check_run_poller = None
+
+    if state.event_poller is not None:
+        with contextlib.suppress(Exception):
+            await state.event_poller.stop()
+        state.event_poller = None
+
+    if state.workflow_dispatcher is not None:
+        with contextlib.suppress(Exception):
+            await state.workflow_dispatcher.shutdown()
+        state.workflow_dispatcher = None
+
+    if state.subscription_service is not None:
+        with contextlib.suppress(Exception):
+            await state.subscription_service.stop()
+        state.subscription_service = None
 
 
 # ── Private helpers ─────────────────────────────────────────────────
@@ -322,6 +336,51 @@ async def _init_event_poller(state: LifecycleState) -> None:
     except Exception:
         logger.exception("Failed to start event poller (degraded mode)")
         state.degraded_reasons.append(DegradedReason.EVENT_POLLER)
+
+
+async def _init_check_run_poller(state: LifecycleState) -> None:
+    """Start the check-run poller for poll-based self-healing (#602).
+
+    Polls the GitHub Checks API for CI failures on PR commits. Enables
+    self-healing without webhooks — zero-config onboarding.
+    """
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+
+    if not settings.github.is_configured:
+        logger.info("GitHub App not configured — check-run poller disabled")
+        return
+
+    if not settings.polling.enabled:
+        logger.info("Event polling disabled — check-run poller disabled")
+        return
+
+    try:
+        from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
+        from syn_adapters.github.client import get_github_client
+        from syn_api._wiring import (
+            get_event_pipeline,
+            get_pending_sha_store,
+            get_trigger_store,
+            get_webhook_health_tracker,
+        )
+        from syn_api.services.check_run_poller import CheckRunPoller
+
+        poller = CheckRunPoller(
+            checks_client=GitHubChecksAPIClient(get_github_client()),
+            pipeline=get_event_pipeline(),
+            sha_store=get_pending_sha_store(),
+            health_tracker=get_webhook_health_tracker(),
+            trigger_store=get_trigger_store(),
+            settings=settings.polling,
+        )
+        get_event_pipeline().add_observer(poller.on_pr_event)
+        await poller.start()
+        state.check_run_poller = poller
+    except Exception:
+        logger.exception("Failed to start check-run poller (degraded mode)")
+        state.degraded_reasons.append(DegradedReason.CHECK_RUN_POLLER)
 
 
 def _get_recoverable(state: LifecycleState) -> list[DegradedReason]:
