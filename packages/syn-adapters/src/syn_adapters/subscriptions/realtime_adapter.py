@@ -269,18 +269,39 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         event_data: dict[str, Any],
         event_type: str,
     ) -> None:
-        """Clear concurrency guard tracking when a workflow execution finishes."""
+        """Clear concurrency guard tracking when a workflow execution finishes.
+
+        Cross-context subscription: this adapter (github context) listens to
+        WorkflowCompleted/WorkflowFailed (orchestration context) to clear the
+        in-memory running-execution set used by the concurrency guard (Guard 6).
+
+        Fail-open: if the store is unavailable, we log and move on rather than
+        blocking the projection. Worst case: one (trigger, PR) pair stays blocked
+        until the next process restart (which clears the in-memory set anyway).
+        """
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
             return
-        from syn_domain.contexts.github._shared.trigger_query_store import (
-            get_trigger_query_store,
-        )
+        try:
+            from syn_domain.contexts.github._shared.trigger_query_store import (
+                get_trigger_query_store,
+            )
 
-        store = get_trigger_query_store()
-        await store.complete_execution(execution_id)
-        logger.debug(
-            "Cleared running execution %s on %s",
-            execution_id,
-            event_type,
-        )
+            store = get_trigger_query_store()
+            await store.complete_execution(execution_id)
+            logger.debug(
+                "Cleared running execution %s on %s",
+                execution_id,
+                event_type,
+            )
+        except Exception:
+            # Fail-open: don't block the projection checkpoint over a cleanup
+            # failure. The running-execution set is in-memory and resets on
+            # restart, so a missed clear is self-healing.
+            logger.warning(
+                "Failed to clear running execution %s on %s — "
+                "concurrency guard may block until restart",
+                execution_id,
+                event_type,
+                exc_info=True,
+            )

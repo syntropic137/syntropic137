@@ -136,7 +136,16 @@ async def _check_concurrency(
     pr_number: int | None,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
-    """Guard 6: Block if execution already running for same trigger+PR."""
+    """Guard 6: Block if execution already running for same trigger+PR.
+
+    Coalescing key: (trigger_id, pr_number). Prevents catch-up storms after
+    restart — when the poller replays missed events, only one execution runs
+    per trigger+PR at a time.
+
+    Lifecycle: record_fire() → marks running, complete_execution() → clears.
+    Cleared by TriggerHistoryAdapter on WorkflowCompleted/WorkflowFailed.
+    In-memory only — resets on restart (correct: no containers survive).
+    """
     if await store.has_running_execution(rule.trigger_id, pr_number):
         return GuardResult(
             False,

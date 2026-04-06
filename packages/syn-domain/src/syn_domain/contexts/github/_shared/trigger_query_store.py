@@ -172,7 +172,10 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         self._triggers: dict[str, _IndexedTrigger] = {}
         self._fire_records: list[dict] = []
         self._processed_deliveries: set[str] = set()
-        # Track running executions: execution_id → (trigger_id, pr_number)
+        # Concurrency guard (Guard 6): in-memory running-execution tracking.
+        # Populated by record_fire(), cleared by complete_execution().
+        # Intentionally NOT persisted — on restart no containers survive,
+        # so an empty set is the correct initial state. See ADR-040 §4.
         self._running_executions: dict[str, tuple[str, int | None]] = {}
 
     async def index_trigger(
