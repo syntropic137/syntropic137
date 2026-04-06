@@ -94,7 +94,7 @@ class RepoClaimAggregate(AggregateRoot["RepoClaimedEvent"]):  # type: ignore[typ
         self._apply(event)
 
     @command_handler("ReleaseRepoClaimCommand")
-    def release(self, command: Any) -> None:  # noqa: ARG002
+    def release(self, command: Any) -> None:
         from syn_domain.contexts.organization.domain.events.RepoClaimReleasedEvent import (
             RepoClaimReleasedEvent,
         )
@@ -104,6 +104,12 @@ class RepoClaimAggregate(AggregateRoot["RepoClaimedEvent"]):  # type: ignore[typ
             raise ValueError(msg)
         if self._is_released:
             msg = "Claim is already released"
+            raise ValueError(msg)
+        if command.claim_id != str(self.id):
+            msg = f"claim_id mismatch: expected '{self.id}', got '{command.claim_id}'"
+            raise ValueError(msg)
+        if command.repo_id != self._repo_id:
+            msg = f"repo_id mismatch: expected '{self._repo_id}', got '{command.repo_id}'"
             raise ValueError(msg)
 
         event = RepoClaimReleasedEvent(

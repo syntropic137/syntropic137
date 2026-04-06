@@ -40,3 +40,5 @@ class ClaimRepoCommand:
             raise ValueError("provider is required")
         if not self.repo_id:
             raise ValueError("repo_id is required")
+        if not self.aggregate_id:
+            raise ValueError("aggregate_id is required")

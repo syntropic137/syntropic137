@@ -9,6 +9,7 @@ RepoAggregate is created. If it fails, the repo is already registered.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -25,6 +26,9 @@ from syn_domain.contexts.organization.domain.aggregate_repo_claim.RepoClaimAggre
 )
 from syn_domain.contexts.organization.domain.commands.ClaimRepoCommand import (
     ClaimRepoCommand,
+)
+from syn_domain.contexts.organization.domain.commands.ReleaseRepoClaimCommand import (
+    ReleaseRepoClaimCommand,
 )
 
 if TYPE_CHECKING:
@@ -80,9 +84,31 @@ class RegisterRepoHandler:
                 )
                 raise ValueError(msg) from None
 
-        # Create the actual repo aggregate with the pre-assigned ID
+        # Create the repo with the same pre-assigned ID used in the claim
+        repo_command = replace(command, aggregate_id=repo_id)
         aggregate = RepoAggregate()
-        aggregate.register(command)
-        await self._repository.save(aggregate)
+        try:
+            aggregate.register(repo_command)
+            await self._repository.save(aggregate)
+        except Exception:
+            # Compensate: release the claim so the name isn't permanently blocked
+            logger.warning(
+                "Repo save failed for '%s' — releasing claim %s",
+                command.full_name,
+                claim_id,
+            )
+            await self._release_claim(claim_id, repo_id)
+            raise
+
         logger.info("Registered repo '%s' (%s)", aggregate.full_name, aggregate.repo_id)
         return aggregate
+
+    async def _release_claim(self, claim_id: str, repo_id: str) -> None:
+        """Best-effort compensating release after repo save failure."""
+        try:
+            existing = await self._claim_repository.get_by_id(claim_id)
+            if existing is not None and not existing.is_released:
+                existing.release(ReleaseRepoClaimCommand(claim_id=claim_id, repo_id=repo_id))
+                await self._claim_repository.save(existing)
+        except Exception:
+            logger.error("Failed to release claim %s — may require manual cleanup", claim_id)
