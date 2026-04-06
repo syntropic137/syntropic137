@@ -16,8 +16,10 @@ from syn_api._wiring import (
     sync_published_events_to_projections,
 )
 from syn_api.types import (
+    AssignRepoToSystemRequest,
     Err,
     Ok,
+    RegisterRepoRequest,
     RepoActionResponse,
     RepoActivityEntryResponse,
     RepoActivityResponse,
@@ -32,6 +34,7 @@ from syn_api.types import (
     RepoSessionsResponse,
     RepoSummaryResponse,
     Result,
+    UpdateRepoRequest,
 )
 
 if TYPE_CHECKING:
@@ -515,27 +518,27 @@ def _classify_repo_error(error_msg: str) -> RepoError:
 
 
 @router.post("")
-async def register_repo_endpoint(body: dict[str, Any]) -> RepoCreatedResponse:
+async def register_repo_endpoint(body: RegisterRepoRequest) -> RepoCreatedResponse:
     """Register a new repo."""
     try:
         result = await register_repo(
-            organization_id=body["organization_id"],
-            provider=body.get("provider", "github"),
-            full_name=body["full_name"],
-            owner=body.get("owner", ""),
-            default_branch=body.get("default_branch", "main"),
-            provider_repo_id=body.get("provider_repo_id", ""),
-            installation_id=body.get("installation_id", ""),
-            is_private=body.get("is_private", False),
-            created_by=body.get("created_by", "api"),
+            organization_id=body.organization_id,
+            provider=body.provider,
+            full_name=body.full_name,
+            owner=body.owner,
+            default_branch=body.default_branch,
+            provider_repo_id=body.provider_repo_id,
+            installation_id=body.installation_id,
+            is_private=body.is_private,
+            created_by=body.created_by,
         )
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return RepoCreatedResponse(repo_id=result.value, full_name=body["full_name"])
+    return RepoCreatedResponse(repo_id=result.value, full_name=body.full_name)
 
 
 @router.get("")
@@ -576,14 +579,14 @@ async def get_repo_endpoint(repo_id: str) -> RepoSummaryResponse:
 
 
 @router.put("/{repo_id}")
-async def update_repo_endpoint(repo_id: str, body: dict[str, Any]) -> RepoActionResponse:
+async def update_repo_endpoint(repo_id: str, body: UpdateRepoRequest) -> RepoActionResponse:
     """Update mutable fields of a repo."""
     result = await update_repo(
         repo_id=repo_id,
-        default_branch=body.get("default_branch"),
-        is_private=body.get("is_private"),
-        installation_id=body.get("installation_id"),
-        updated_by=body.get("updated_by", "api"),
+        default_branch=body.default_branch,
+        is_private=body.is_private,
+        installation_id=body.installation_id,
+        updated_by=body.updated_by,
     )
 
     if isinstance(result, Err):
@@ -614,21 +617,21 @@ async def deregister_repo_endpoint(repo_id: str) -> RepoActionResponse:
 
 
 @router.post("/{repo_id}/assign")
-async def assign_repo_to_system_endpoint(repo_id: str, body: dict[str, Any]) -> RepoActionResponse:
+async def assign_repo_to_system_endpoint(repo_id: str, body: AssignRepoToSystemRequest) -> RepoActionResponse:
     """Assign a repo to a system."""
     try:
         result = await assign_repo_to_system(
             repo_id=repo_id,
-            system_id=body["system_id"],
+            system_id=body.system_id,
         )
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
         status = 404 if result.error == RepoError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
-    return RepoActionResponse(repo_id=repo_id, system_id=body["system_id"], status="assigned")
+    return RepoActionResponse(repo_id=repo_id, system_id=body.system_id, status="assigned")
 
 
 @router.post("/{repo_id}/unassign")

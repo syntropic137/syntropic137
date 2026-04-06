@@ -5,14 +5,16 @@ Provides agent provider listing, testing, and chat completion.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException
 
 from syn_api.types import (
+    AgentChatRequest,
     AgentError,
     AgentProviderInfo,
     AgentProviderListResponse,
+    AgentTestRequest,
     AgentTestResult,
     Err,
     Ok,
@@ -238,16 +240,13 @@ async def list_providers_endpoint() -> AgentProviderListResponse:
 
 
 @router.post("/test")
-async def test_agent_endpoint(body: dict[str, Any]) -> AgentTestResult:
+async def test_agent_endpoint(body: AgentTestRequest) -> AgentTestResult:
     """Test an agent provider with a simple prompt."""
-    try:
-        result = await test_agent(
-            provider=body["provider"],
-            prompt=body["prompt"],
-            model=body.get("model"),
-        )
-    except (KeyError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    result = await test_agent(
+        provider=body.provider,
+        prompt=body.prompt,
+        model=body.model,
+    )
 
     if isinstance(result, Err):
         status = 400 if result.error == AgentError.PROVIDER_NOT_FOUND else 502
@@ -257,16 +256,13 @@ async def test_agent_endpoint(body: dict[str, Any]) -> AgentTestResult:
 
 
 @router.post("/chat")
-async def chat_endpoint(body: dict[str, Any]) -> AgentTestResult:
+async def chat_endpoint(body: AgentChatRequest) -> AgentTestResult:
     """Send a stateless chat completion request."""
-    try:
-        result = await chat(
-            provider=body["provider"],
-            messages=body["messages"],
-            model=body.get("model"),
-        )
-    except (KeyError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    result = await chat(
+        provider=body.provider,
+        messages=[{"role": m.role, "content": m.content} for m in body.messages],
+        model=body.model,
+    )
 
     if isinstance(result, Err):
         status = 400 if result.error == AgentError.PROVIDER_NOT_FOUND else 502
