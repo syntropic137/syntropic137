@@ -8,15 +8,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol
 
-from syn_domain.contexts.github.domain.queries.list_accessible_repos import (
-    ListAccessibleReposQuery,
-)
 from syn_domain.contexts.github.domain.read_models.accessible_repository import (
     AccessibleRepository,
 )
 
 if TYPE_CHECKING:
-    pass
+    from syn_domain.contexts.github.domain.queries.list_accessible_repos import (
+        ListAccessibleReposQuery,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +23,7 @@ logger = logging.getLogger(__name__)
 class GitHubRepoClient(Protocol):
     """Protocol for the subset of GitHubAppClient we need."""
 
-    async def list_accessible_repos(
-        self, installation_id: str | None = None
-    ) -> list[dict]: ...
+    async def list_accessible_repos(self, installation_id: str | None = None) -> list[dict]: ...
 
 
 def _map_repo(raw: dict, installation_id: str) -> AccessibleRepository | None:
@@ -39,7 +36,10 @@ def _map_repo(raw: dict, installation_id: str) -> AccessibleRepository | None:
     full_name = raw.get("full_name")
 
     if github_id is None or name is None or full_name is None:
-        logger.warning("Skipping malformed repo entry: missing required fields in %s", raw.get("full_name", raw.get("id", "unknown")))
+        logger.warning(
+            "Skipping malformed repo entry: missing required fields in %s",
+            raw.get("full_name", raw.get("id", "unknown")),
+        )
         return None
 
     return AccessibleRepository(
@@ -67,9 +67,7 @@ class ListAccessibleReposHandler:
         Returns:
             List of AccessibleRepository read models.
         """
-        raw_repos = await self._client.list_accessible_repos(
-            installation_id=query.installation_id
-        )
+        raw_repos = await self._client.list_accessible_repos(installation_id=query.installation_id)
 
         repos: list[AccessibleRepository] = []
         for raw in raw_repos:

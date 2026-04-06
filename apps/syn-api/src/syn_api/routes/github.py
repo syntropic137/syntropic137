@@ -28,9 +28,8 @@ if TYPE_CHECKING:
 class _RepoLister(Protocol):
     """Protocol for listing accessible repos (subset of GitHubAppClient)."""
 
-    async def list_accessible_repos(
-        self, installation_id: str | None = None
-    ) -> list[dict]: ...
+    async def list_accessible_repos(self, installation_id: str | None = None) -> list[dict]: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -97,26 +96,26 @@ async def list_accessible_repos(
     await ensure_connected()
 
     try:
-        client = get_github_client()
-
-        if installation_id:
-            # Query a specific installation
-            raw_repos = await client.list_accessible_repos(
-                installation_id=installation_id
-            )
-            repos = _build_repo_list(raw_repos, installation_id, include_private)
-        else:
-            # Query all active installations, aggregate and dedup
-            repos = await _aggregate_all_installations(client, include_private)
-
+        repos = await _fetch_repos(get_github_client(), installation_id, include_private)
         return Ok(repos)
-
     except GitHubAuthError as e:
         return Err(GitHubError.AUTH_REQUIRED, message=str(e))
     except GitHubRateLimitError as e:
         return Err(GitHubError.RATE_LIMITED, message=str(e))
     except GitHubAppError as e:
         return Err(GitHubError.PROCESSING_FAILED, message=str(e))
+
+
+async def _fetch_repos(
+    client: _RepoLister,
+    installation_id: str | None,
+    include_private: bool,
+) -> list[GitHubRepoResponse]:
+    """Dispatch to single-installation or aggregate query."""
+    if installation_id:
+        raw_repos = await client.list_accessible_repos(installation_id=installation_id)
+        return _build_repo_list(raw_repos, installation_id, include_private)
+    return await _aggregate_all_installations(client, include_private)
 
 
 async def _aggregate_all_installations(
@@ -139,9 +138,7 @@ async def _aggregate_all_installations(
 
     for inst in installations:
         try:
-            raw_repos = await client.list_accessible_repos(
-                installation_id=inst.installation_id
-            )
+            raw_repos = await client.list_accessible_repos(installation_id=inst.installation_id)
         except Exception:
             logger.warning(
                 "Failed to list repos for installation %s, skipping",
@@ -150,9 +147,7 @@ async def _aggregate_all_installations(
             )
             continue
 
-        for repo in _build_repo_list(
-            raw_repos, inst.installation_id, include_private
-        ):
+        for repo in _build_repo_list(raw_repos, inst.installation_id, include_private):
             if repo.github_id not in seen_ids:
                 seen_ids.add(repo.github_id)
                 repos.append(repo)

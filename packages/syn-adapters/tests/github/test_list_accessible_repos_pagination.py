@@ -60,11 +60,13 @@ async def test_multiple_pages() -> None:
     page2 = [_make_repo(i) for i in range(100, 200)]
     page3 = [_make_repo(i) for i in range(200, 250)]
 
-    client = _make_client([
-        _make_response(page1, total_count=250),
-        _make_response(page2, total_count=250),
-        _make_response(page3, total_count=250),
-    ])
+    client = _make_client(
+        [
+            _make_response(page1, total_count=250),
+            _make_response(page2, total_count=250),
+            _make_response(page3, total_count=250),
+        ]
+    )
 
     result = await list_accessible_repos(client, installation_id="123")
 
@@ -96,10 +98,12 @@ async def test_rate_limit_on_second_page() -> None:
     rate_limit_resp.text = "API rate limit exceeded"
     rate_limit_resp.headers = {"X-RateLimit-Reset": "1700000000"}
 
-    client = _make_client([
-        _make_response(page1, total_count=200),
-        rate_limit_resp,
-    ])
+    client = _make_client(
+        [
+            _make_response(page1, total_count=200),
+            rate_limit_resp,
+        ]
+    )
 
     with pytest.raises(GitHubRateLimitError):
         await list_accessible_repos(client, installation_id="123")

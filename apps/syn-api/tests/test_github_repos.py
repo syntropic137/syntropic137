@@ -60,15 +60,15 @@ async def test_all_installations_aggregated() -> None:
     inst2_repos = [_make_repo(2), _make_repo(3)]  # repo-2 is a duplicate
 
     mock_client = MagicMock()
-    mock_client.list_accessible_repos = AsyncMock(
-        side_effect=[inst1_repos, inst2_repos]
-    )
+    mock_client.list_accessible_repos = AsyncMock(side_effect=[inst1_repos, inst2_repos])
 
     mock_projection = MagicMock()
-    mock_projection.get_all_active = AsyncMock(return_value=[
-        _make_installation("inst-1"),
-        _make_installation("inst-2"),
-    ])
+    mock_projection.get_all_active = AsyncMock(
+        return_value=[
+            _make_installation("inst-1"),
+            _make_installation("inst-2"),
+        ]
+    )
 
     with (
         patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
@@ -96,9 +96,7 @@ async def test_auth_error_maps_to_err() -> None:
     from syn_adapters.github.client import GitHubAuthError
 
     mock_client = MagicMock()
-    mock_client.list_accessible_repos = AsyncMock(
-        side_effect=GitHubAuthError("bad token")
-    )
+    mock_client.list_accessible_repos = AsyncMock(side_effect=GitHubAuthError("bad token"))
 
     with (
         patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
@@ -119,9 +117,7 @@ async def test_rate_limit_maps_to_err() -> None:
     from syn_adapters.github.client import GitHubRateLimitError
 
     mock_client = MagicMock()
-    mock_client.list_accessible_repos = AsyncMock(
-        side_effect=GitHubRateLimitError("rate limited")
-    )
+    mock_client.list_accessible_repos = AsyncMock(side_effect=GitHubRateLimitError("rate limited"))
 
     with (
         patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
@@ -151,9 +147,7 @@ async def test_include_private_false_filters() -> None:
             return_value=mock_client,
         ),
     ):
-        result = await list_accessible_repos(
-            installation_id="inst-1", include_private=False
-        )
+        result = await list_accessible_repos(installation_id="inst-1", include_private=False)
 
     assert isinstance(result, Ok)
     assert len(result.value) == 2

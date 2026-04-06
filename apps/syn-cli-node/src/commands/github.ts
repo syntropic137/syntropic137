@@ -26,7 +26,7 @@ const reposCommand: CommandDef = {
     if (items.length === 0) { printDim("No accessible repositories found."); return; }
 
     const table = new Table({ title: "Accessible Repositories" });
-    table.addColumn("Name", { style: CYAN });
+    table.addColumn("Repo", { style: CYAN });
     table.addColumn("Owner");
     table.addColumn("Branch", { style: DIM });
     table.addColumn("Private");

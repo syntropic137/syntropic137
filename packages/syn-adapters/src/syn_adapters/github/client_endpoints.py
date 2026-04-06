@@ -140,6 +140,7 @@ async def list_accessible_repos(
     all_repos: list[dict] = []
     page = 1
     max_pages = 50  # Safety cap: 50 pages * 100 = 5,000 repos
+    total_count = 0
 
     while page <= max_pages:
         response = await client._http.get(
@@ -158,6 +159,16 @@ async def list_accessible_repos(
             break
 
         page += 1
+
+    if page > max_pages and len(all_repos) < total_count:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Pagination safety cap reached (%d pages). Returned %d of %d repos.",
+            max_pages,
+            len(all_repos),
+            total_count,
+        )
 
     return all_repos
 
