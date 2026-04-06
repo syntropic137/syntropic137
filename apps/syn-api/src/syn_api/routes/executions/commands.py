@@ -30,6 +30,9 @@ from syn_api.types import (
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ def _parse_repo_from_url(repo_url: str | None) -> str | None:
 
 
 def _resolve_target_repo(
-    workflow: object,
+    workflow: WorkflowTemplateAggregate,
     inputs: dict[str, str],
     task: str | None,
 ) -> str | None:
@@ -61,13 +64,13 @@ def _resolve_target_repo(
     owner/repo. Returns None if no repo URL, unresolved placeholders
     remain, or the URL doesn't parse to a repo name.
     """
-    repo_url: str | None = getattr(workflow, "_repository_url", None)
+    repo_url: str | None = workflow._repository_url
     if not repo_url:
         return None
 
     # Merge input declaration defaults + request inputs + task
     merged: dict[str, str] = {}
-    for decl in getattr(workflow, "input_declarations", []):
+    for decl in workflow.input_declarations:
         if decl.default is not None and decl.name not in merged:
             merged[decl.name] = str(decl.default)
     merged.update(inputs)
