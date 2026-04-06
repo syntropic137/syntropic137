@@ -399,12 +399,8 @@ EOF
 ### Refresh API docs
 
 ```bash
-# Full regeneration (needs Python environment)
-just docs-site-gen
-
-# Or manually:
-uv run python scripts/extract_openapi.py
-cd apps/syn-docs && pnpm run generate:openapi
+# Full regeneration — CLI docs, OpenAPI spec, API docs, CLI types
+just codegen
 ```
 
 ### Edit on GitHub branch

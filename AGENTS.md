@@ -85,9 +85,8 @@ Pydantic models (syn-api/types.py)
 **Workflow — adding/changing an endpoint:**
 1. Define Pydantic response model in `apps/syn-api/src/syn_api/types.py`
 2. Use it as the route return type: `async def list_foos() -> FooListResponse:`
-3. Regenerate OpenAPI spec: start API, fetch `/openapi.json` → `apps/syn-docs/openapi.json`
-4. Regenerate CLI types: `pnpm --filter @syntropic137/cli generate:types`
-5. Use the typed client in CLI commands: `import { api } from "../client/typed.js";`
+3. Run `just codegen` — regenerates OpenAPI spec, API docs, CLI types, and CLI docs in one step
+4. Use the typed client in CLI commands: `import { api } from "../client/typed.js";`
 
 **Rules:**
 - CLI field names MUST match API response model field names exactly — never use legacy/alias names

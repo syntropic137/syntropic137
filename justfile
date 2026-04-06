@@ -551,9 +551,6 @@ dev-doctor: _env-check
 cli-node-build:
     cd apps/syn-cli-node && pnpm run build
 
-# Generate TypeScript types from OpenAPI spec
-cli-node-gen:
-    cd apps/syn-cli-node && pnpm run generate:types
 
 # Run CLI Node tests
 cli-node-test:
@@ -1391,7 +1388,7 @@ docs-sync:
         exit 1; \
     fi
     @echo "🔄 Syncing API reference docs + CLI types..."
-    @just sync-api > /dev/null 2>&1
+    @just codegen > /dev/null 2>&1
     @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
         echo "✅ API docs and CLI types are up-to-date"; \
     else \
@@ -1400,22 +1397,20 @@ docs-sync:
         exit 1; \
     fi
 
-# Regenerate all API-derived artifacts (OpenAPI spec + API docs MDX + CLI types)
-# Single entry point for the full pipeline: FastAPI -> openapi.json -> MDX + TS types
-sync-api:
+# Regenerate ALL derived artifacts: CLI docs, OpenAPI spec, API docs, CLI types.
+# Single command after changing any Pydantic model, API route, or CLI command.
+# Pipeline: CLI commands → CLI docs, FastAPI app → openapi.json → API docs MDX → CLI TS types
+codegen: docs-cli-gen
     @echo "📄 Extracting OpenAPI spec from FastAPI..."
     uv run python scripts/extract_openapi.py
     @echo "📄 Generating API reference docs..."
     cd apps/syn-docs && pnpm run generate:openapi
     @echo "📄 Generating CLI TypeScript types..."
     cd apps/syn-cli-node && pnpm run generate:types
-    @echo "✅ API artifacts synced (openapi.json, API docs, CLI types)"
+    @echo "✅ All generated artifacts up to date"
 
-# Regenerate docs site content (CLI reference + OpenAPI spec + API reference MDX + CLI types)
-docs-site-gen: docs-cli-gen sync-api
-
-# Build docs site (runs generation + next build)
-docs-site-build: docs-site-gen
+# Build docs site (codegen + Next.js build, for deployment)
+docs-site-build: codegen
     cd apps/syn-docs && pnpm run build
 
 # --- Utilities ---

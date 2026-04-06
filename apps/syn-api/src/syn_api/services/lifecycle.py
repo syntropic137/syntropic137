@@ -2,6 +2,11 @@
 
 Centralizes application lifecycle management so the dashboard
 can delegate to syn_api instead of importing adapters directly.
+
+Service registration uses a declarative registry (ADR-057) so that
+adding a new degradable service requires exactly one entry in
+_SERVICE_REGISTRY — initialization, recovery, and shutdown are all
+derived from that single declaration.
 """
 
 from __future__ import annotations
@@ -27,6 +32,9 @@ from syn_api.services.seeding import seed_offline_data
 from syn_api.types import Err, LifecycleError, Ok, Result
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api._wiring import BackgroundWorkflowDispatcher
     from syn_api.auth import AuthContext
@@ -42,20 +50,11 @@ class DegradedReason(StrEnum):
     """
 
     ARTIFACT_STORAGE = "artifact_storage"
+    CONVERSATION_STORAGE = "conversation_storage"
     SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
     EVENT_POLLER = "event_poller"
     ANTHROPIC_API_KEY = "anthropic_api_key"
     GITHUB_APP = "github_app"
-
-
-# Subsystems that can be recovered by retrying after transient failures
-# (e.g. MinIO not yet DNS-resolvable at startup).
-_RECOVERABLE_REASONS: frozenset[DegradedReason] = frozenset(
-    {
-        DegradedReason.ARTIFACT_STORAGE,
-        DegradedReason.SUBSCRIPTION_COORDINATOR,
-    }
-)
 
 
 @dataclass
@@ -65,9 +64,38 @@ class LifecycleState:
     subscription_service: CoordinatorSubscriptionService | None = None
     workflow_dispatcher: BackgroundWorkflowDispatcher | None = None
     event_poller: GitHubEventPoller | None = None
+    conversation_storage: MinioConversationStorage | None = None
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
     _recovery_task: asyncio.Task[None] | None = None
     _shutting_down: bool = False
+
+
+# ── Declarative Service Registry (ADR-057) ─────────────────────────
+#
+# Each degradable service is declared once in _SERVICE_REGISTRY.
+# The startup loop, recovery loop, and shutdown sequence all iterate
+# this registry — no manual if/elif dispatch or separate frozensets.
+#
+# To add a new service:
+#   1. Add a value to DegradedReason
+#   2. Write an _init_<service>(state) function (raises on failure)
+#   3. Optionally write a _shutdown_<service>(state) function
+#   4. Add a _ServiceEntry to _SERVICE_REGISTRY
+#
+# That's it. Recovery reuses init_fn, health is derived from state.
+
+
+@dataclass(frozen=True)
+class _ServiceEntry:
+    """One lifecycle-managed degradable service (ADR-057)."""
+
+    reason: DegradedReason
+    init_fn: Callable[[LifecycleState], Awaitable[None]]
+    recoverable: bool = False
+    shutdown_fn: Callable[[LifecycleState], Awaitable[None]] | None = None
+
+
+# Registry is defined after _init_* functions below — see _SERVICE_REGISTRY.
 
 
 _state = LifecycleState()
@@ -84,10 +112,8 @@ async def startup(
 
     Startup sequence (order matters):
       1. Event store connection (CRITICAL — abort on failure)
-      2. Artifact storage bucket (DEGRADED — warn and continue)
-      3. Subscription coordinator (DEGRADED — warn and continue)
-      4. GitHub event poller (DEGRADED — warn and continue)
-      5. Orphan reconciliation (always runs)
+      2. Degradable services via _SERVICE_REGISTRY (ADR-057)
+      3. Orphan reconciliation (always runs)
 
     Critical failures (event store, DB) abort startup.
     Degraded failures (GitHub, Anthropic, Redis, subscriptions) warn and continue.
@@ -122,15 +148,19 @@ async def startup(
     if isinstance(result, Err):
         return result
 
-    # Degraded path — warn and continue
-    await _init_artifact_storage(_state)
-    await _init_subscriptions(_state)
-    await _init_event_poller(_state)
+    # Degraded path — data-driven via service registry (ADR-057)
+    for entry in _SERVICE_REGISTRY:
+        try:
+            await entry.init_fn(_state)
+        except Exception:
+            logger.exception("%s initialization failed (degraded mode)", entry.reason)
+            _state.degraded_reasons.append(entry.reason)
+
     await reconcile_orphaned_sessions()
     await cleanup_orphaned_containers()
 
     # If any recoverable subsystem is degraded, start a background recovery loop.
-    recoverable = [r for r in _state.degraded_reasons if r in _RECOVERABLE_REASONS]
+    recoverable = [r for r in _state.degraded_reasons if _is_recoverable(r)]
     if recoverable:
         _state._recovery_task = asyncio.create_task(
             _recovery_loop(_state),
@@ -161,20 +191,11 @@ async def shutdown(
                 await _state._recovery_task
             _state._recovery_task = None
 
-        if _state.event_poller is not None:
-            with contextlib.suppress(Exception):
-                await _state.event_poller.stop()
-            _state.event_poller = None
-
-        if _state.workflow_dispatcher is not None:
-            with contextlib.suppress(Exception):
-                await _state.workflow_dispatcher.shutdown()
-            _state.workflow_dispatcher = None
-
-        if _state.subscription_service is not None:
-            with contextlib.suppress(Exception):
-                await _state.subscription_service.stop()
-            _state.subscription_service = None
+        # Shutdown services in reverse registration order (ADR-057).
+        for entry in reversed(_SERVICE_REGISTRY):
+            if entry.shutdown_fn is not None:
+                with contextlib.suppress(Exception):
+                    await entry.shutdown_fn(_state)
 
         await disconnect()
         return Ok(None)
@@ -208,7 +229,12 @@ async def health_check(
 
 
 async def _init_event_store() -> Result[None, LifecycleError]:
-    """Initialize event store and verify connection (critical)."""
+    """Initialize event store and verify connection (critical).
+
+    The event store is the only CRITICAL service — failure aborts startup.
+    It is NOT in the service registry because it uses a different error
+    contract (returns Result instead of raising).
+    """
     try:
         event_store = get_event_store_instance()
         await event_store.initialize()
@@ -253,40 +279,82 @@ def _enrich_subscription_health(response: dict, mode: str) -> None:
         response["subscription"] = {"status": "unknown"}
 
 
-async def _init_artifact_storage(state: LifecycleState) -> None:
-    """Ensure artifact storage bucket exists at startup (degraded on failure)."""
-    try:
-        from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
+# ── Service init functions ─────────────────────────────────────────
+#
+# Each function raises on failure (the registry loop catches).
+# Recovery reuses the same init_fn — no separate _try_recover_* needed
+# unless the recovery path differs from first-time init.
 
-        storage = await get_artifact_storage()
-        await storage.ensure_ready()
-        logger.info("Artifact storage bucket verified")
-    except Exception:
-        logger.exception("Failed to initialize artifact storage bucket (degraded mode)")
-        state.degraded_reasons.append(DegradedReason.ARTIFACT_STORAGE)
+
+async def _init_artifact_storage(state: LifecycleState) -> None:  # noqa: ARG001
+    """Ensure artifact storage bucket exists at startup."""
+    from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
+
+    storage = await get_artifact_storage()
+    await storage.ensure_ready()
+    logger.info("Artifact storage bucket verified")
+
+
+async def _init_conversation_storage(state: LifecycleState) -> None:
+    """Initialize conversation storage (MinIO + PostgreSQL pool).
+
+    On recovery, resets the singleton so a fresh instance is created.
+    """
+    from syn_adapters.conversations.minio import (
+        get_conversation_storage,
+        reset_conversation_storage,
+    )
+
+    # If retrying after a prior failure, reset so we get a fresh instance.
+    if DegradedReason.CONVERSATION_STORAGE in state.degraded_reasons:
+        reset_conversation_storage()
+
+    storage = await get_conversation_storage()
+    state.conversation_storage = storage
+    logger.info("Conversation storage initialized")
+
+
+async def _shutdown_conversation_storage(state: LifecycleState) -> None:
+    """Close conversation storage pool."""
+    if state.conversation_storage is not None:
+        await state.conversation_storage.close()
+        state.conversation_storage = None
 
 
 async def _init_subscriptions(state: LifecycleState) -> None:
-    """Start subscription coordinator (degraded on failure)."""
-    try:
-        realtime = get_realtime()
+    """Start subscription coordinator.
+
+    Reuses the existing workflow dispatcher when present to avoid
+    orphaning a running dispatcher on each recovery attempt.
+    """
+    realtime = get_realtime()
+    workflow_dispatcher = state.workflow_dispatcher
+    if workflow_dispatcher is None:
         workflow_dispatcher = await get_workflow_dispatcher()
-        coordinator = get_subscription_coordinator(
-            realtime_projection=realtime,
-            execution_service=workflow_dispatcher,
-        )
-        await coordinator.start()
-        # Only assign to state after coordinator starts successfully,
-        # so a partial failure doesn't orphan the dispatcher.
-        state.workflow_dispatcher = workflow_dispatcher
-        state.subscription_service = coordinator
-    except Exception:
-        logger.exception("Failed to start subscription coordinator (degraded mode)")
-        state.degraded_reasons.append(DegradedReason.SUBSCRIPTION_COORDINATOR)
+    coordinator = get_subscription_coordinator(
+        realtime_projection=realtime,
+        execution_service=workflow_dispatcher,
+    )
+    await coordinator.start()
+    # Only assign to state after coordinator starts successfully,
+    # so a partial failure doesn't orphan the dispatcher.
+    state.workflow_dispatcher = workflow_dispatcher
+    state.subscription_service = coordinator
+    logger.info("Subscription coordinator started")
+
+
+async def _shutdown_subscriptions(state: LifecycleState) -> None:
+    """Stop subscription coordinator and workflow dispatcher."""
+    if state.workflow_dispatcher is not None:
+        await state.workflow_dispatcher.shutdown()
+        state.workflow_dispatcher = None
+    if state.subscription_service is not None:
+        await state.subscription_service.stop()
+        state.subscription_service = None
 
 
 async def _init_event_poller(state: LifecycleState) -> None:
-    """Start the GitHub Events API poller (degraded on failure)."""
+    """Start the GitHub Events API poller."""
     from syn_shared.settings import get_settings
 
     settings = get_settings()
@@ -299,47 +367,97 @@ async def _init_event_poller(state: LifecycleState) -> None:
         logger.info("Event polling disabled by configuration")
         return
 
-    try:
-        from syn_adapters.github.client import get_github_client
-        from syn_adapters.github.events_api_client import GitHubEventsAPIClient
-        from syn_api._wiring import (
-            get_event_pipeline,
-            get_trigger_store,
-            get_webhook_health_tracker,
-        )
-        from syn_api.services.github_event_poller import GitHubEventPoller
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.events_api_client import GitHubEventsAPIClient
+    from syn_api._wiring import (
+        get_event_pipeline,
+        get_trigger_store,
+        get_webhook_health_tracker,
+    )
+    from syn_api.services.github_event_poller import GitHubEventPoller
 
-        events_client = GitHubEventsAPIClient(get_github_client())
-        poller = GitHubEventPoller(
-            events_client=events_client,
-            pipeline=get_event_pipeline(),
-            health_tracker=get_webhook_health_tracker(),
-            trigger_store=get_trigger_store(),
-            settings=settings.polling,
-        )
-        await poller.start()
-        state.event_poller = poller
-    except Exception:
-        logger.exception("Failed to start event poller (degraded mode)")
-        state.degraded_reasons.append(DegradedReason.EVENT_POLLER)
+    events_client = GitHubEventsAPIClient(get_github_client())
+    poller = GitHubEventPoller(
+        events_client=events_client,
+        pipeline=get_event_pipeline(),
+        health_tracker=get_webhook_health_tracker(),
+        trigger_store=get_trigger_store(),
+        settings=settings.polling,
+    )
+    await poller.start()
+    state.event_poller = poller
+    logger.info("GitHub event poller started")
+
+
+async def _shutdown_event_poller(state: LifecycleState) -> None:
+    """Stop the GitHub event poller."""
+    if state.event_poller is not None:
+        await state.event_poller.stop()
+        state.event_poller = None
+
+
+# ── Service Registry (ADR-057) ─────────────────────────────────────
+#
+# Single source of truth for all degradable services. To add a service:
+#   1. Add a DegradedReason enum value
+#   2. Write an _init_<name>(state) function that raises on failure
+#   3. Optionally write a _shutdown_<name>(state) function
+#   4. Add a _ServiceEntry here
+#
+# The startup loop, recovery loop, and shutdown sequence all derive
+# their behavior from this registry — no other bookkeeping needed.
+
+_SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
+    _ServiceEntry(
+        reason=DegradedReason.ARTIFACT_STORAGE,
+        init_fn=_init_artifact_storage,
+        recoverable=True,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.CONVERSATION_STORAGE,
+        init_fn=_init_conversation_storage,
+        recoverable=True,
+        shutdown_fn=_shutdown_conversation_storage,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.SUBSCRIPTION_COORDINATOR,
+        init_fn=_init_subscriptions,
+        recoverable=True,
+        shutdown_fn=_shutdown_subscriptions,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.EVENT_POLLER,
+        init_fn=_init_event_poller,
+        recoverable=False,
+        shutdown_fn=_shutdown_event_poller,
+    ),
+)
+
+
+# ── Recovery helpers (ADR-057) ─────────────────────────────────────
+
+
+def _is_recoverable(reason: DegradedReason) -> bool:
+    """Check if a degraded reason can be recovered by retrying."""
+    return any(e.reason == reason and e.recoverable for e in _SERVICE_REGISTRY)
 
 
 def _get_recoverable(state: LifecycleState) -> list[DegradedReason]:
     """Return the subset of degraded reasons that can be recovered by retrying."""
-    return [r for r in state.degraded_reasons if r in _RECOVERABLE_REASONS]
+    return [r for r in state.degraded_reasons if _is_recoverable(r)]
 
 
 def _all_recovered(state: LifecycleState) -> bool:
     """Check whether all recoverable subsystems have been restored."""
-    return not any(r in _RECOVERABLE_REASONS for r in state.degraded_reasons)
+    return not any(_is_recoverable(r) for r in state.degraded_reasons)
 
 
 async def _try_recover_reason(state: LifecycleState, reason: DegradedReason) -> None:
     """Attempt recovery for a single degraded reason. Raises on failure."""
-    if reason is DegradedReason.ARTIFACT_STORAGE:
-        await _try_recover_artifact_storage()
-    elif reason is DegradedReason.SUBSCRIPTION_COORDINATOR:
-        await _try_recover_subscriptions(state)
+    entry = next((e for e in _SERVICE_REGISTRY if e.reason == reason), None)
+    if entry is None:
+        return
+    await entry.init_fn(state)
     state.degraded_reasons.remove(reason)
     logger.info("Recovered: %s", reason)
 
@@ -358,9 +476,9 @@ async def _attempt_recovery_pass(state: LifecycleState, delay: float) -> None:
 async def _recovery_loop(state: LifecycleState) -> None:
     """Background task: retry degraded subsystems with exponential backoff.
 
-    Only retries subsystems in _RECOVERABLE_REASONS (artifact_storage,
-    subscription_coordinator). Credential-based degradation (missing API keys)
-    cannot be recovered without a restart.
+    Only retries subsystems marked as recoverable in _SERVICE_REGISTRY.
+    Credential-based degradation (missing API keys) cannot be recovered
+    without a restart.
     """
     delay = 10.0
     max_delay = 60.0
@@ -376,35 +494,3 @@ async def _recovery_loop(state: LifecycleState) -> None:
 
         await asyncio.sleep(delay)
         delay = min(delay * 2, max_delay)
-
-
-async def _try_recover_artifact_storage() -> None:
-    """Attempt to initialize artifact storage (raises on failure)."""
-    from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
-
-    storage = await get_artifact_storage()
-    await storage.ensure_ready()
-    logger.info("Artifact storage bucket verified (recovered)")
-
-
-async def _try_recover_subscriptions(state: LifecycleState) -> None:
-    """Attempt to start subscription coordinator (raises on failure).
-
-    Unlike _init_subscriptions, does NOT append to degraded_reasons on
-    failure — the caller handles retry logic.
-
-    Reuses the existing workflow dispatcher when present to avoid
-    orphaning a running dispatcher on each recovery attempt.
-    """
-    realtime = get_realtime()
-    workflow_dispatcher = state.workflow_dispatcher
-    if workflow_dispatcher is None:
-        workflow_dispatcher = await get_workflow_dispatcher()
-    coordinator = get_subscription_coordinator(
-        realtime_projection=realtime,
-        execution_service=workflow_dispatcher,
-    )
-    await coordinator.start()
-    state.workflow_dispatcher = workflow_dispatcher
-    state.subscription_service = coordinator
-    logger.info("Subscription coordinator started (recovered)")
