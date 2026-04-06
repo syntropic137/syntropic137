@@ -14,12 +14,14 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 @pytest.fixture(autouse=True)
 def _reset_storage():
-    """Reset in-memory storage between tests."""
+    """Reset all storage between tests (SDK repos + trigger query store)."""
     import syn_api._wiring
+    from syn_adapters.storage import reset_storage
     from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
         reset_trigger_store,
     )
 
+    reset_storage()
     reset_trigger_store()
     syn_api._wiring._test_trigger_repo = None
     yield
@@ -29,40 +31,48 @@ def _reset_storage():
 
 @pytest.fixture(autouse=True)
 async def _seed_test_workflows():
-    """Seed the in-memory workflow store with workflow IDs used by trigger tests.
+    """Seed workflow repository with workflow IDs used by trigger tests.
 
-    Trigger registration validates that the referenced workflow exists (via
-    InMemoryWorkflowRepository.exists), so we must create them first.
+    Trigger registration validates that the referenced workflow exists,
+    so we must create them first via the actual repository.
     """
     from syn_api._wiring import ensure_connected
 
     await ensure_connected()
 
-    from syn_adapters.storage.in_memory import get_event_store
+    from syn_adapters.storage.repositories import get_workflow_repository
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+        WorkflowClassification,
+        WorkflowType,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+        CreateWorkflowTemplateCommand,
+    )
 
-    store = get_event_store()
+    repo = get_workflow_repository()
     for wf_id in ("wf-1", "wf-2", "wf-3", "ci-fix-workflow", "wf-abc"):
-        store.append(
+        aggregate = WorkflowTemplateAggregate()
+        command = CreateWorkflowTemplateCommand(
             aggregate_id=wf_id,
-            aggregate_type="WorkflowTemplate",
-            event_type="WorkflowTemplateCreated",
-            event_data={
-                "workflow_id": wf_id,
-                "name": f"test-workflow-{wf_id}",
-                "workflow_type": "custom",
-                "classification": "simple",
-                "repository_url": "https://github.com/test/repo",
-                "repository_ref": "main",
-                "phases": [
-                    {
-                        "phase_id": "phase-1",
-                        "name": "phase1",
-                        "order": 1,
-                    }
-                ],
-            },
-            version=1,
+            name=f"test-workflow-{wf_id}",
+            workflow_type=WorkflowType.CUSTOM,
+            classification=WorkflowClassification.SIMPLE,
+            repository_url="https://github.com/test/repo",
+            repository_ref="main",
+            phases=[
+                PhaseDefinition(
+                    phase_id="phase-1",
+                    name="phase1",
+                    order=1,
+                ),
+            ],
         )
+        aggregate._handle_command(command)
+        await repo.save(aggregate)
 
 
 async def test_register_trigger():
