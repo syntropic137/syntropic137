@@ -2281,6 +2281,66 @@
         }
       }
     },
+    "/github/repos": {
+      "get": {
+        "tags": [
+          "github"
+        ],
+        "summary": "List Accessible Repos Endpoint",
+        "description": "List repositories accessible to the GitHub App.\n\nMakes a live query to the GitHub API. If no installation_id is provided,\nqueries all active installations and aggregates the results.",
+        "operationId": "list_accessible_repos_endpoint_github_repos_get",
+        "parameters": [
+          {
+            "name": "installation_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Installation Id"
+            }
+          },
+          {
+            "name": "include_private",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Private"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubRepoListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/conversations/{session_id}": {
       "get": {
         "tags": [
@@ -6233,6 +6293,80 @@
         "title": "FailurePatternResponse",
         "description": "A recurring failure pattern within a system."
       },
+      "GitHubRepoListResponse": {
+        "properties": {
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubRepoResponse"
+            },
+            "type": "array",
+            "title": "Repos"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "installation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Id"
+          }
+        },
+        "type": "object",
+        "title": "GitHubRepoListResponse",
+        "description": "List of repositories accessible to the GitHub App."
+      },
+      "GitHubRepoResponse": {
+        "properties": {
+          "github_id": {
+            "type": "integer",
+            "title": "Github Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "default_branch": {
+            "type": "string",
+            "title": "Default Branch"
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner"
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "github_id",
+          "name",
+          "full_name",
+          "private",
+          "default_branch",
+          "owner",
+          "installation_id"
+        ],
+        "title": "GitHubRepoResponse",
+        "description": "A repository accessible to the GitHub App installation."
+      },
       "GlobalCostResponse": {
         "properties": {
           "system_id": {
@@ -9732,6 +9866,10 @@
     {
       "name": "executions",
       "description": "Query execution records and details"
+    },
+    {
+      "name": "github",
+      "description": ""
     },
     {
       "name": "insights",

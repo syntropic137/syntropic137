@@ -82,3 +82,14 @@ After creating the GitHub App, install it on your repositories:
 2. Select the organization or personal account
 3. Choose **All repositories** or select specific ones
 4. Syntropic137 dynamically resolves installation IDs per repository — no reconfiguration needed when you add new repos
+
+## Discovering Accessible Repositories
+
+Once the GitHub App is installed, you can list all repositories it has access to:
+
+```bash
+syn github repos
+syn github repos --installation <id>    # filter by a specific installation
+```
+
+This queries the GitHub API through your App's installation tokens and returns repository metadata (name, owner, visibility, default branch). Use it to verify that the App can see the repos you expect before setting up trigger rules.

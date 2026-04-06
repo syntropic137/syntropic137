@@ -80,7 +80,7 @@ fi
 
 The TypeScript generator (`apps/syn-cli-node/scripts/generate-cli-docs.ts`) directly imports the same `CommandGroup` and `CommandDef` instances that the CLI registers at startup. It:
 
-1. Imports all 19 command groups + 3 root commands (same imports as `src/index.ts`)
+1. Imports all command groups + root commands from the shared registry (`src/registry.ts`) — the same single source of truth that `src/index.ts` uses. Adding a new command group to the registry automatically includes it in both the CLI and the generated docs (poka-yoke)
 2. Walks `CommandGroup.commands` (public `ReadonlyMap`) to extract metadata
 3. Renders MDX with identical format to the previous Python generator (frontmatter, usage blocks, argument/option tables)
 4. Writes to `apps/syn-docs/content/docs/cli/`

@@ -744,6 +744,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/github/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Accessible Repos Endpoint
+         * @description List repositories accessible to the GitHub App.
+         *
+         *     Makes a live query to the GitHub API. If no installation_id is provided,
+         *     queries all active installations and aggregates the results.
+         */
+        get: operations["list_accessible_repos_endpoint_github_repos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations/{session_id}": {
         parameters: {
             query?: never;
@@ -2263,6 +2286,41 @@ export interface components {
              * @default
              */
             last_seen: string;
+        };
+        /**
+         * GitHubRepoListResponse
+         * @description List of repositories accessible to the GitHub App.
+         */
+        GitHubRepoListResponse: {
+            /** Repos */
+            repos?: components["schemas"]["GitHubRepoResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /** Installation Id */
+            installation_id?: string | null;
+        };
+        /**
+         * GitHubRepoResponse
+         * @description A repository accessible to the GitHub App installation.
+         */
+        GitHubRepoResponse: {
+            /** Github Id */
+            github_id: number;
+            /** Name */
+            name: string;
+            /** Full Name */
+            full_name: string;
+            /** Private */
+            private: boolean;
+            /** Default Branch */
+            default_branch: string;
+            /** Owner */
+            owner: string;
+            /** Installation Id */
+            installation_id: string;
         };
         /**
          * GlobalCostResponse
@@ -5492,6 +5550,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ToolSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_accessible_repos_endpoint_github_repos_get: {
+        parameters: {
+            query?: {
+                installation_id?: string | null;
+                include_private?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubRepoListResponse"];
                 };
             };
             /** @description Validation Error */

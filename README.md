@@ -160,6 +160,13 @@ syn triggers enable <name> --repository owner/repo
 syn triggers pause <id> --reason "maintenance"
 ```
 
+### GitHub
+
+```bash
+syn github repos                              # list repositories accessible to the GitHub App
+syn github repos --installation <id>          # filter by installation
+```
+
 ### Config
 
 ```bash
