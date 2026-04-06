@@ -205,12 +205,19 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
 
     Maps github.TriggerFired → handle_trigger_fired and
     github.TriggerBlocked → handle_trigger_blocked.
+    Also subscribes to WorkflowCompleted/WorkflowFailed to clear
+    the concurrency guard's running-execution tracking.
     Projection uses ``handle_`` prefix instead of ``on_``.
     """
 
     PROJECTION_NAME: ClassVar[str] = "trigger_history"
-    VERSION: ClassVar[int] = 2
-    _SUBSCRIBED: ClassVar[set[str]] = {"github.TriggerFired", "github.TriggerBlocked"}
+    VERSION: ClassVar[int] = 3
+    _SUBSCRIBED: ClassVar[set[str]] = {
+        "github.TriggerFired",
+        "github.TriggerBlocked",
+        "WorkflowCompleted",
+        "WorkflowFailed",
+    }
 
     async def handle_event(
         self,
@@ -221,15 +228,18 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         event_type = envelope.event.event_type
         global_nonce = envelope.metadata.global_nonce or 0
         try:
-            # Projection methods use attribute access (event.trigger_id),
-            # so wrap the dict in a SimpleNamespace for duck-typed access.
-            from types import SimpleNamespace
-
-            ns = SimpleNamespace(**event_data)
-            if event_type == "github.TriggerBlocked":
-                await self._projection.handle_trigger_blocked(ns)
+            if event_type in ("WorkflowCompleted", "WorkflowFailed"):
+                await self._handle_execution_terminal(event_data, event_type)
             else:
-                await self._projection.handle_trigger_fired(ns)
+                # Projection methods use attribute access (event.trigger_id),
+                # so wrap the dict in a SimpleNamespace for duck-typed access.
+                from types import SimpleNamespace
+
+                ns = SimpleNamespace(**event_data)
+                if event_type == "github.TriggerBlocked":
+                    await self._projection.handle_trigger_blocked(ns)
+                else:
+                    await self._projection.handle_trigger_fired(ns)
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
                     projection_name=self.PROJECTION_NAME,
@@ -246,3 +256,24 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
                 self.PROJECTION_NAME,
             )
             return ProjectionResult.FAILURE
+
+    @staticmethod
+    async def _handle_execution_terminal(
+        event_data: dict[str, Any],
+        event_type: str,
+    ) -> None:
+        """Clear concurrency guard tracking when a workflow execution finishes."""
+        execution_id = event_data.get("execution_id", "")
+        if not execution_id:
+            return
+        from syn_domain.contexts.github._shared.trigger_query_store import (
+            get_trigger_query_store,
+        )
+
+        store = get_trigger_query_store()
+        await store.complete_execution(execution_id)
+        logger.debug(
+            "Cleared running execution %s on %s",
+            execution_id,
+            event_type,
+        )
