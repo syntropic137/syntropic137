@@ -70,11 +70,10 @@ fi
 
 | Recipe | Purpose |
 |--------|---------|
-| `just docs-cli-gen` | Generate CLI docs (standalone) |
+| **`just codegen`** | **Regenerate everything: CLI docs + OpenAPI spec + API docs + CLI types** |
 | `just docs` | Generate CLI docs + start dev server |
 | `just docs-sync` | Drift check: architecture + CLI + API docs |
-| `just docs-site-gen` | Generate CLI + API docs (full site content) |
-| `just docs-site-build` | Full site build with all generated content |
+| `just docs-site-build` | `codegen` + Next.js build (deployment) |
 | `just qa` | Includes `docs-sync` — catches all drift |
 
 ### CLI docs generator design
@@ -102,7 +101,7 @@ Handler functions are imported but never called — no side effects, no API conn
 ### Negative
 
 - **Generated files in git** — adds ~20 MDX files per doc type to the repository. Accepted tradeoff for reviewable diffs and avoiding build-time generation complexity.
-- **Two-step workflow** — developers must run `just docs-cli-gen` (or `just qa`) and commit the result when changing CLI commands. The drift check ensures this isn't forgotten.
+- **Two-step workflow** — developers must run `just codegen` (or `just qa`) and commit the result when changing CLI commands or API routes. The drift check ensures this isn't forgotten.
 
 ## References
 

@@ -17,7 +17,7 @@ interface TokenBreakdownChartProps {
 
 export function TokenBreakdownChart({ inputTokens, outputTokens }: TokenBreakdownChartProps) {
   const tokenChartData = [
-    { name: 'Input', tokens: inputTokens, fill: '#6366f1' },
+    { name: 'Input', tokens: inputTokens, fill: '#4D80FF' },
     { name: 'Output', tokens: outputTokens, fill: '#22c55e' },
   ]
 

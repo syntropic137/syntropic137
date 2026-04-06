@@ -194,14 +194,6 @@ class RepoError(StrEnum):
     TRIGGER_CHECK_FAILED = "trigger_check_failed"
 
 
-class AgentError(StrEnum):
-    """Errors returned by agent operations."""
-
-    PROVIDER_NOT_FOUND = "provider_not_found"
-    API_KEY_MISSING = "api_key_missing"
-    COMPLETION_FAILED = "completion_failed"
-
-
 class ConfigError(StrEnum):
     """Errors returned by config operations."""
 
@@ -445,30 +437,6 @@ class TriggerHistoryEntry(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Agent models
-# ---------------------------------------------------------------------------
-
-
-class AgentProviderInfo(BaseModel):
-    """Information about an available agent provider."""
-
-    provider: str
-    display_name: str
-    available: bool
-    default_model: str
-
-
-class AgentTestResult(BaseModel):
-    """Result of testing an agent provider."""
-
-    provider: str
-    model: str
-    response_text: str
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-
-# ---------------------------------------------------------------------------
 # Config models
 # ---------------------------------------------------------------------------
 
@@ -478,7 +446,6 @@ class ConfigSnapshot(BaseModel):
 
     app: dict = Field(default_factory=dict)
     database: dict = Field(default_factory=dict)
-    agents: dict = Field(default_factory=dict)
     storage: dict = Field(default_factory=dict)
 
 
@@ -774,6 +741,11 @@ class ConversationMeta(BaseModel):
     tool_counts: dict = Field(default_factory=dict)
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    size_bytes: int | None = None
+    execution_id: str | None = None
+    workflow_id: str | None = None
+    phase_id: str | None = None
+    success: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1193,17 +1165,6 @@ class ContributionHeatmapResponse(BaseModel):
     total: float = 0.0
     days: list[HeatmapDayBucketResponse] = Field(default_factory=list)
     filter: dict[str, str | None] = Field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# Agent response models
-# ---------------------------------------------------------------------------
-
-
-class AgentProviderListResponse(PaginatedResponse):
-    """Paginated list of agent providers."""
-
-    providers: list[AgentProviderInfo] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from syn_api.config import get_api_config
 from syn_api.routes import (
-    agents_router,
     artifacts_router,
     conversations_router,
     costs_router,
@@ -132,7 +131,6 @@ def create_app() -> FastAPI:
     app.include_router(systems_router)
     app.include_router(repos_router)
     app.include_router(insights_router)
-    app.include_router(agents_router)
 
     @app.get("/")
     async def root() -> dict[str, str]:

@@ -2429,15 +2429,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/ConversationMetadataResponse"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Get Conversation Metadata Endpoint Conversations  Session Id  Metadata Get"
+                  "$ref": "#/components/schemas/ConversationMetadataResponse"
                 }
               }
             }
@@ -4514,116 +4506,6 @@
         }
       }
     },
-    "/agents/providers": {
-      "get": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "List Providers Endpoint",
-        "description": "List available agent providers.",
-        "operationId": "list_providers_endpoint_agents_providers_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentProviderListResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/agents/test": {
-      "post": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "Test Agent Endpoint",
-        "description": "Test an agent provider with a simple prompt.",
-        "operationId": "test_agent_endpoint_agents_test_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentTestResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/agents/chat": {
-      "post": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "Chat Endpoint",
-        "description": "Send a stateless chat completion request.",
-        "operationId": "chat_endpoint_agents_chat_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentTestResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/": {
       "get": {
         "summary": "Root",
@@ -4671,90 +4553,6 @@
   },
   "components": {
     "schemas": {
-      "AgentProviderInfo": {
-        "properties": {
-          "provider": {
-            "type": "string",
-            "title": "Provider"
-          },
-          "display_name": {
-            "type": "string",
-            "title": "Display Name"
-          },
-          "available": {
-            "type": "boolean",
-            "title": "Available"
-          },
-          "default_model": {
-            "type": "string",
-            "title": "Default Model"
-          }
-        },
-        "type": "object",
-        "required": [
-          "provider",
-          "display_name",
-          "available",
-          "default_model"
-        ],
-        "title": "AgentProviderInfo",
-        "description": "Information about an available agent provider."
-      },
-      "AgentProviderListResponse": {
-        "properties": {
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "providers": {
-            "items": {
-              "$ref": "#/components/schemas/AgentProviderInfo"
-            },
-            "type": "array",
-            "title": "Providers"
-          }
-        },
-        "type": "object",
-        "required": [
-          "total"
-        ],
-        "title": "AgentProviderListResponse",
-        "description": "Paginated list of agent providers."
-      },
-      "AgentTestResult": {
-        "properties": {
-          "provider": {
-            "type": "string",
-            "title": "Provider"
-          },
-          "model": {
-            "type": "string",
-            "title": "Model"
-          },
-          "response_text": {
-            "type": "string",
-            "title": "Response Text"
-          },
-          "input_tokens": {
-            "type": "integer",
-            "title": "Input Tokens",
-            "default": 0
-          },
-          "output_tokens": {
-            "type": "integer",
-            "title": "Output Tokens",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "required": [
-          "provider",
-          "model",
-          "response_text"
-        ],
-        "title": "AgentTestResult",
-        "description": "Result of testing an agent provider."
-      },
       "ArtifactActionResponse": {
         "properties": {
           "artifact_id": {
@@ -10041,10 +9839,6 @@
     }
   },
   "tags": [
-    {
-      "name": "agents",
-      "description": ""
-    },
     {
       "name": "artifacts",
       "description": "Create, upload, and retrieve artifacts produced by agent sessions"

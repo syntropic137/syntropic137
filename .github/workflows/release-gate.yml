@@ -174,7 +174,7 @@ jobs:
           CHANGED=$(git diff --name-only apps/syn-docs/content/docs/cli/)
           UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)
           if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::CLI docs are out of sync. Run 'pnpm --filter @syntropic137/cli generate:docs' and commit."
+            echo "::error::CLI docs are out of sync. Run 'just codegen' and commit."
             [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
             [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
             exit 1
@@ -191,7 +191,7 @@ jobs:
           CHANGED=$(git diff --name-only apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/)
           UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)
           if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::API docs are out of sync. Run 'just docs-site-gen' and commit."
+            echo "::error::API docs are out of sync. Run 'just codegen' and commit."
             [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
             [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
             exit 1
@@ -236,7 +236,7 @@ jobs:
           UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-cli-node/src/generated/)
           if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
             echo "::error::CLI generated types are out of sync with OpenAPI spec."
-            echo "Run 'pnpm --filter @syntropic137/cli generate:types' and commit."
+            echo "Run 'just codegen' and commit."
             [[ -n "$CHANGED" ]] && echo "Changed files:" && echo "$CHANGED"
             [[ -n "$UNTRACKED" ]] && echo "Untracked files:" && echo "$UNTRACKED"
             exit 1
