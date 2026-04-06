@@ -5,14 +5,16 @@
 
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { apiGet, apiPost, apiDelete } from "../../client/api.js";
+import { api, unwrap } from "../../client/typed.js";
+import type { components } from "../../generated/api-types.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
-import type { WorkflowDetail } from "./models.js";
 import { detectFormat, resolvePackage } from "../../packages/resolver.js";
 import path from "node:path";
+
+type WorkflowResponse = components["schemas"]["WorkflowResponse"];
 
 // ---------------------------------------------------------------------------
 // create
@@ -40,17 +42,21 @@ export const createCommand: CommandDef = {
     const repoRef = (parsed.values["ref"] as string | undefined) ?? "main";
     const description = parsed.values["description"] as string | undefined;
 
-    const data = await apiPost<Record<string, unknown>>("/workflows", {
-      body: {
-        name,
-        workflow_type: workflowType,
-        repository_url: repoUrl,
-        repository_ref: repoRef,
-        description: description ?? null,
-      },
-    });
+    const data = unwrap(
+      await api.POST("/workflows", {
+        body: {
+          name,
+          workflow_type: workflowType,
+          classification: "standard",
+          repository_url: repoUrl,
+          repository_ref: repoRef,
+          description: description ?? null,
+        },
+      }),
+      "Failed to create workflow",
+    );
 
-    const workflowId = String(data["id"] ?? data["workflow_id"] ?? "unknown");
+    const workflowId = data.id;
     printSuccess(`Created workflow: ${style(name, CYAN)}`);
     print(`  ID: ${style(workflowId, DIM)}`);
     print(`  Type: ${style(workflowType, DIM)}`);
@@ -69,10 +75,13 @@ export const listCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const includeArchived = parsed.values["include-archived"] === true;
-    const params: Record<string, string> = {};
-    if (includeArchived) params["include_archived"] = "true";
 
-    const data = await apiGet<{ workflows: Record<string, unknown>[] }>("/workflows", { params });
+    const data = unwrap(
+      await api.GET("/workflows", {
+        params: { query: { include_archived: includeArchived } },
+      }),
+      "Failed to list workflows",
+    );
     const workflows = data.workflows ?? [];
 
     if (workflows.length === 0) {
@@ -89,10 +98,10 @@ export const listCommand: CommandDef = {
 
     for (const w of workflows) {
       table.addRow(
-        String(w["id"] ?? "").slice(0, 12) + "...",
-        String(w["name"] ?? ""),
-        String(w["workflow_type"] ?? ""),
-        String(w["phase_count"] ?? 0),
+        w.id.slice(0, 12) + "...",
+        w.name,
+        w.workflow_type,
+        String(w.phase_count),
       );
     }
     table.print();
@@ -103,17 +112,18 @@ export const listCommand: CommandDef = {
 // show
 // ---------------------------------------------------------------------------
 
-function renderWorkflowDetail(detail: WorkflowDetail): void {
+function renderWorkflowDetail(detail: WorkflowResponse): void {
   print("");
   print(style("Workflow Details", BOLD));
   print(`  ${style("ID:", DIM)} ${detail.id}`);
   print(`  ${style("Name:", DIM)} ${style(detail.name, CYAN)}`);
   print(`  ${style("Type:", DIM)} ${detail.workflow_type}`);
   print(`  ${style("Classification:", DIM)} ${detail.classification}`);
-  if (detail.phases.length > 0) {
-    print(`\n  ${style(`Phases (${detail.phases.length}):`, BOLD)}`);
-    for (const phase of detail.phases) {
-      print(`    - ${String((phase as Record<string, unknown>)["name"] ?? "unnamed")}`);
+  const phases = detail.phases ?? [];
+  if (phases.length > 0) {
+    print(`\n  ${style(`Phases (${phases.length}):`, BOLD)}`);
+    for (const phase of phases) {
+      print(`    - ${phase.name ?? "unnamed"}`);
     }
   } else {
     printDim("  No phases defined");
@@ -132,7 +142,12 @@ export const showCommand: CommandDef = {
     }
 
     const wf = await resolveWorkflow(partialId);
-    const data = await apiGet<WorkflowDetail>(`/workflows/${wf.id}`);
+    const data = unwrap(
+      await api.GET("/workflows/{workflow_id}", {
+        params: { path: { workflow_id: wf.id } },
+      }),
+      "Failed to get workflow",
+    );
     renderWorkflowDetail(data);
   },
 };
@@ -161,20 +176,22 @@ export const validateCommand: CommandDef = {
     }
 
     const content = fs.readFileSync(file, "utf-8");
-    const data = await apiPost<Record<string, unknown>>("/workflows/validate", {
-      body: { content, filename: path.basename(file) },
-    });
+    const data = unwrap(
+      await api.POST("/workflows/validate", {
+        body: { content, filename: path.basename(file) },
+      }),
+      "Failed to validate workflow",
+    );
 
-    if (data["valid"]) {
+    if (data.valid) {
       printSuccess("Valid workflow definition\n");
-      print(`  ${style("Name:", DIM)} ${String(data["name"] ?? "")}`);
-      print(`  ${style("Type:", DIM)} ${String(data["workflow_type"] ?? "")}`);
-      print(`  ${style("Phases:", DIM)} ${String(data["phase_count"] ?? 0)}`);
+      print(`  ${style("Name:", DIM)} ${data.name}`);
+      print(`  ${style("Type:", DIM)} ${data.workflow_type}`);
+      print(`  ${style("Phases:", DIM)} ${String(data.phase_count)}`);
     } else {
       printError("Invalid workflow definition");
-      const errors = data["errors"] as string[] | undefined;
-      if (errors) {
-        for (const error of errors) {
+      if (data.errors) {
+        for (const error of data.errors) {
           print(`  ${error}`);
         }
       }
@@ -229,7 +246,12 @@ export const deleteCommand: CommandDef = {
       throw new CLIError("Confirmation required", 1);
     }
 
-    await apiDelete(`/workflows/${wf.id}`);
+    unwrap(
+      await api.DELETE("/workflows/{workflow_id}", {
+        params: { path: { workflow_id: wf.id } },
+      }),
+      "Failed to archive workflow",
+    );
     printSuccess(`Archived workflow: ${style(wf.name, CYAN)}`);
     print(`  ID: ${style(wf.id, DIM)}`);
   },

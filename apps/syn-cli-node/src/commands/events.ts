@@ -5,17 +5,17 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList, buildParams } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
+import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED } from "../output/ansi.js";
 import { formatCost, formatDuration, formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
-import type {
-  EventListResponse,
-  EventsCostSummaryResponse,
-  TimelineEntryResponse,
-  ToolSummary,
-} from "../generated/types.js";
+
+type EventList = components["schemas"]["EventListResponse"];
+type CostSummary = components["schemas"]["syn_api__routes__events__CostSummaryResponse"];
+type TimelineEntry = components["schemas"]["TimelineEntryResponse"];
+type ToolSummaryItem = components["schemas"]["ToolSummary"];
 
 function reqSessionId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
@@ -31,12 +31,18 @@ const recentCommand: CommandDef = {
     type: { type: "string", short: "t", description: "Filter by event type" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const limit = (parsed.values["limit"] as string | undefined) ?? "50";
-    const params = buildParams({
-      limit,
-      event_type: (parsed.values["type"] as string | undefined) ?? null,
-    });
-    const data = await apiGet<EventListResponse>("/events/recent", { params });
+    const limitStr = (parsed.values["limit"] as string | undefined) ?? "50";
+    const eventType = parsed.values["type"] as string | undefined;
+
+    const data: EventList = unwrap(await api.GET("/events/recent", {
+      params: {
+        query: {
+          limit: parseInt(limitStr, 10),
+          event_type: eventType ?? null,
+        },
+      },
+    }), "Failed to fetch recent events");
+
     if (data.events.length === 0) { printDim("No recent events."); return; }
 
     const table = new Table({ title: "Recent Events" });
@@ -69,12 +75,21 @@ const sessionEventsCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const sid = reqSessionId(parsed);
-    const params = buildParams({
-      limit: (parsed.values["limit"] as string | undefined) ?? "100",
-      offset: (parsed.values["offset"] as string | undefined) ?? "0",
-      event_type: (parsed.values["type"] as string | undefined) ?? null,
-    });
-    const data = await apiGet<EventListResponse>(`/events/sessions/${sid}`, { params });
+    const limitStr = (parsed.values["limit"] as string | undefined) ?? "100";
+    const offsetStr = (parsed.values["offset"] as string | undefined) ?? "0";
+    const eventType = parsed.values["type"] as string | undefined;
+
+    const data: EventList = unwrap(await api.GET("/events/sessions/{session_id}", {
+      params: {
+        path: { session_id: sid },
+        query: {
+          limit: parseInt(limitStr, 10),
+          offset: parseInt(offsetStr, 10),
+          event_type: eventType ?? null,
+        },
+      },
+    }), "Failed to fetch session events");
+
     if (data.events.length === 0) { printDim(`No events for session ${sid}.`); return; }
 
     const table = new Table({ title: `Events: ${sid.slice(0, 12)}` });
@@ -90,8 +105,8 @@ const sessionEventsCommand: CommandDef = {
       );
     }
     table.print();
-    const offset = parseInt((parsed.values["offset"] as string) ?? "0", 10);
-    const limit = parseInt((parsed.values["limit"] as string) ?? "100", 10);
+    const offset = parseInt(offsetStr, 10);
+    const limit = parseInt(limitStr, 10);
     if (data.has_more) printDim(`More events available. Use --offset ${offset + limit}.`);
   },
 };
@@ -103,8 +118,15 @@ const timelineCommand: CommandDef = {
   options: { limit: { type: "string", description: "Max entries (max 500)", default: "100" } },
   handler: async (parsed: ParsedArgs) => {
     const sid = reqSessionId(parsed);
-    const limit = (parsed.values["limit"] as string | undefined) ?? "100";
-    const entries = await apiGetList<TimelineEntryResponse>(`/events/sessions/${sid}/timeline`, { params: { limit } });
+    const limitStr = (parsed.values["limit"] as string | undefined) ?? "100";
+
+    const entries: TimelineEntry[] = unwrap(await api.GET("/events/sessions/{session_id}/timeline", {
+      params: {
+        path: { session_id: sid },
+        query: { limit: parseInt(limitStr, 10) },
+      },
+    }), "Failed to fetch timeline");
+
     if (entries.length === 0) { printDim("No timeline entries."); return; }
 
     const table = new Table({ title: `Timeline: ${sid.slice(0, 12)}` });
@@ -133,7 +155,10 @@ const costsCommand: CommandDef = {
   args: [{ name: "session-id", description: "Session ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const sid = reqSessionId(parsed);
-    const d = await apiGet<EventsCostSummaryResponse>(`/events/sessions/${sid}/costs`);
+
+    const d: CostSummary = unwrap(await api.GET("/events/sessions/{session_id}/costs", {
+      params: { path: { session_id: sid } },
+    }), "Failed to fetch session costs");
 
     print(`${style("Session costs:", BOLD)} ${d.session_id}`);
     print(`  Input tokens:       ${d.input_tokens.toLocaleString()}`);
@@ -152,7 +177,11 @@ const toolsCommand: CommandDef = {
   args: [{ name: "session-id", description: "Session ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const sid = reqSessionId(parsed);
-    const tools = await apiGetList<ToolSummary>(`/events/sessions/${sid}/tools`);
+
+    const tools: ToolSummaryItem[] = unwrap(await api.GET("/events/sessions/{session_id}/tools", {
+      params: { path: { session_id: sid } },
+    }), "Failed to fetch tool summary");
+
     if (tools.length === 0) { printDim("No tool usage recorded."); return; }
 
     const table = new Table({ title: `Tool Usage: ${sid.slice(0, 12)}` });

@@ -5,11 +5,14 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiPost } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
+import type { components } from "../generated/api-types.js";
 import { print, printError } from "../output/console.js";
 import { style, GREEN, YELLOW } from "../output/ansi.js";
 import { formatStatus } from "../output/format.js";
-import type { ControlResponse, StateResponse } from "../generated/types.js";
+
+type ControlResponse = components["schemas"]["ControlResponse"];
+type StateResponse = components["schemas"]["StateResponse"];
 
 function reqId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
@@ -25,9 +28,13 @@ const pauseCommand: CommandDef = {
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
     const reason = parsed.values["reason"] as string | undefined;
-    const data = await apiPost<ControlResponse>(`/executions/${id}/pause`, {
-      ...(reason ? { body: { reason } } : {}),
-    });
+    const data = unwrap<ControlResponse>(
+      await api.POST("/executions/{execution_id}/pause", {
+        params: { path: { execution_id: id } },
+        ...(reason ? { body: { reason } } : {}),
+      }),
+      "Pause execution",
+    );
     print(style(`Pause signal sent for execution ${id}`, GREEN));
     print(`  State: ${data.state}`);
     if (data.message) print(`  Message: ${data.message}`);
@@ -40,7 +47,12 @@ const resumeCommand: CommandDef = {
   args: [{ name: "execution-id", description: "Execution ID to resume", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const data = await apiPost<ControlResponse>(`/executions/${id}/resume`);
+    const data = unwrap<ControlResponse>(
+      await api.POST("/executions/{execution_id}/resume", {
+        params: { path: { execution_id: id } },
+      }),
+      "Resume execution",
+    );
     print(style(`Resume signal sent for execution ${id}`, GREEN));
     print(`  State: ${data.state}`);
   },
@@ -61,9 +73,13 @@ const cancelCommand: CommandDef = {
       throw new CLIError("Confirmation required", 1);
     }
     const reason = parsed.values["reason"] as string | undefined;
-    const data = await apiPost<ControlResponse>(`/executions/${id}/cancel`, {
-      ...(reason ? { body: { reason } } : {}),
-    });
+    const data = unwrap<ControlResponse>(
+      await api.POST("/executions/{execution_id}/cancel", {
+        params: { path: { execution_id: id } },
+        ...(reason ? { body: { reason } } : {}),
+      }),
+      "Cancel execution",
+    );
     print(style(`Cancel signal sent for execution ${id}`, GREEN));
     print(`  State: ${data.state}`);
   },
@@ -75,7 +91,12 @@ const statusCommand: CommandDef = {
   args: [{ name: "execution-id", description: "Execution ID to check", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const data = await apiGet<StateResponse>(`/executions/${id}/state`);
+    const data = unwrap<StateResponse>(
+      await api.GET("/executions/{execution_id}/state", {
+        params: { path: { execution_id: id } },
+      }),
+      "Get execution state",
+    );
     print(`Execution: ${id}`);
     print(`State: ${formatStatus(data.state)}`);
   },
@@ -92,7 +113,13 @@ const injectCommand: CommandDef = {
     const id = reqId(parsed);
     const message = parsed.values["message"] as string | undefined;
     if (!message) { printError("Missing --message"); throw new CLIError("Missing option", 1); }
-    await apiPost(`/executions/${id}/inject`, { body: { message } });
+    unwrap(
+      await api.POST("/executions/{execution_id}/inject", {
+        params: { path: { execution_id: id } },
+        body: { message, role: "user" },
+      }),
+      "Inject message",
+    );
     print(style(`Message injected into execution ${id}`, GREEN));
   },
 };
@@ -112,9 +139,13 @@ const stopCommand: CommandDef = {
       throw new CLIError("Confirmation required", 1);
     }
     const reason = (parsed.values["reason"] as string | undefined) ?? "Stopped by user via syn stop";
-    const data = await apiPost<ControlResponse>(`/executions/${id}/cancel`, {
-      body: { reason },
-    });
+    const data = unwrap<ControlResponse>(
+      await api.POST("/executions/{execution_id}/cancel", {
+        params: { path: { execution_id: id } },
+        body: { reason },
+      }),
+      "Stop execution",
+    );
     print(style(`Stop signal sent for execution ${id}`, YELLOW));
     print(`  State: ${data.state}`);
     if (data.message) print(`  Message: ${data.message}`);

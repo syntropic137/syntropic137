@@ -84,7 +84,15 @@ describe("triggers commands", () => {
   });
 
   it("pause sends request", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({}));
+    mockFetch.mockResolvedValue(jsonResponse({
+      trigger_id: "trig-1",
+      name: "test",
+      event: "push",
+      repository: "r1",
+      workflow_id: "w1",
+      status: "paused",
+      fire_count: 0,
+    }));
     await triggersGroup.getCommand("pause")!.handler({ positionals: ["trig-1"], values: {} });
     expect(stdout()).toContain("paused");
   });

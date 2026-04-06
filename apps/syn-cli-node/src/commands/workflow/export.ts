@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { apiGet } from "../../client/api.js";
+import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 
@@ -34,12 +34,17 @@ export const exportCommand: CommandDef = {
 
     const outputDir = (parsed.values["output"] as string | undefined) ?? ".";
 
-    const data = await apiGet<{ files: Record<string, string>; workflow_name?: string }>(
-      `/workflows/${workflowId}/export`,
-      { params: { format: fmt } },
+    const data = unwrap(
+      await api.GET("/workflows/{workflow_id}/export", {
+        params: {
+          path: { workflow_id: workflowId },
+          query: { format: fmt },
+        },
+      }),
+      "Failed to export workflow",
     );
 
-    const files = data.files ?? {};
+    const files = data.files;
     if (Object.keys(files).length === 0) {
       printError("Export returned no files");
       throw new CLIError("Export empty", 1);
@@ -71,7 +76,7 @@ export const exportCommand: CommandDef = {
       fs.writeFileSync(filePath, content, "utf-8");
     }
 
-    const workflowName = data.workflow_name ?? workflowId;
+    const workflowName = data.workflow_name;
 
     // Summary
     print("");

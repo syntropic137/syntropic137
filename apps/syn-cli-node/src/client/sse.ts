@@ -1,4 +1,6 @@
-import { SynClient } from "./http.js";
+import { SSE_CONNECT_TIMEOUT_MS, getApiUrl, getAuthHeaders } from "../config.js";
+
+const API_PREFIX = (process.env["SYN_NO_PREFIX"] === "1" || process.env["SYN_NO_PREFIX"] === "true") ? "" : "/api/v1";
 
 export interface SSEEvent {
   type: string;
@@ -18,9 +20,33 @@ export function parseSseLine(line: string): SSEEvent | null {
   }
 }
 
+async function fetchStream(path: string): Promise<ReadableStream<Uint8Array>> {
+  const base = new URL(getApiUrl());
+  const basePath = base.pathname.replace(/\/+$/, "");
+  const prefix = basePath.endsWith(API_PREFIX) ? "" : API_PREFIX;
+  const reqPath = path.startsWith("/") ? path : `/${path}`;
+  const url = new URL(`${basePath}${prefix}${reqPath}`, base);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SSE_CONNECT_TIMEOUT_MS);
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: getAuthHeaders(),
+    signal: controller.signal,
+  });
+
+  clearTimeout(timer);
+
+  if (!response.body) {
+    throw new Error("Response body is null");
+  }
+
+  return response.body;
+}
+
 export async function* streamSSE(path: string): AsyncGenerator<SSEEvent, void, void> {
-  const client = new SynClient();
-  const body = await client.stream(path);
+  const body = await fetchStream(path);
   const reader = body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
 

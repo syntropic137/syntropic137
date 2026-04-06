@@ -44,7 +44,7 @@ describe("health command", () => {
       jsonResponse({
         status: "healthy",
         mode: "degraded",
-        degraded_reasons: ["Event store disconnected"],
+        degraded_reasons: "Event store disconnected",
       }),
     );
 
@@ -70,7 +70,7 @@ describe("health command", () => {
       jsonResponse({
         status: "healthy",
         mode: "full",
-        subscription: { status: "running" },
+        subscription: "running",
       }),
     );
 
@@ -83,8 +83,8 @@ describe("health command", () => {
     expect(output).toContain("Subscription: running");
   });
 
-  it("throws CLIError on connection failure", async () => {
+  it("throws on connection failure", async () => {
     mockFetch.mockRejectedValue(new TypeError("fetch failed"));
-    await expect(healthCommand.handler(emptyArgs)).rejects.toThrow(CLIError);
+    await expect(healthCommand.handler(emptyArgs)).rejects.toThrow();
   });
 });

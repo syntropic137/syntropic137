@@ -852,6 +852,10 @@ export interface paths {
         /**
          * Update Trigger Endpoint
          * @description Update trigger (pause/resume).
+         *
+         *     Returns the full trigger detail with the authoritative status from the
+         *     command result, not the projection. This avoids eventual consistency
+         *     staleness — the caller sees the correct status immediately.
          */
         patch: operations["update_trigger_endpoint_triggers__trigger_id__patch"];
         trace?: never;
@@ -1547,6 +1551,18 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AgentChatRequest
+         * @description Request body for a stateless chat completion.
+         */
+        AgentChatRequest: {
+            /** Provider */
+            provider: string;
+            /** Messages */
+            messages: components["schemas"]["ChatMessage"][];
+            /** Model */
+            model?: string | null;
+        };
+        /**
          * AgentProviderInfo
          * @description Information about an available agent provider.
          */
@@ -1569,6 +1585,18 @@ export interface components {
             total: number;
             /** Providers */
             providers?: components["schemas"]["AgentProviderInfo"][];
+        };
+        /**
+         * AgentTestRequest
+         * @description Request body for testing an agent provider.
+         */
+        AgentTestRequest: {
+            /** Provider */
+            provider: string;
+            /** Prompt */
+            prompt: string;
+            /** Model */
+            model?: string | null;
         };
         /**
          * AgentTestResult
@@ -1683,6 +1711,14 @@ export interface components {
             /** Created At */
             created_at?: string | null;
         };
+        /**
+         * AssignRepoToSystemRequest
+         * @description Request body for assigning a repo to a system.
+         */
+        AssignRepoToSystemRequest: {
+            /** System Id */
+            system_id: string;
+        };
         /** Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post */
         Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post: {
             /** File */
@@ -1695,6 +1731,16 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * ChatMessage
+         * @description A single message in a chat conversation.
+         */
+        ChatMessage: {
+            /** Role */
+            role: string;
+            /** Content */
+            content: string;
         };
         /**
          * ContributionHeatmapResponse
@@ -1877,6 +1923,41 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * CreateOrganizationRequest
+         * @description Request body for creating a new organization.
+         */
+        CreateOrganizationRequest: {
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
+        /**
+         * CreateSystemRequest
+         * @description Request body for creating a new system.
+         */
+        CreateSystemRequest: {
+            /** Organization Id */
+            organization_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
         /** CreateWorkflowRequest */
         CreateWorkflowRequest: {
             /** Id */
@@ -1933,6 +2014,29 @@ export interface components {
             workflow_id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * EnablePresetRequest
+         * @description Request body for enabling a trigger preset.
+         */
+        EnablePresetRequest: {
+            /** Repository */
+            repository: string;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+            /**
+             * Workflow Id
+             * @default
+             */
+            workflow_id: string;
         };
         /**
          * EventListResponse
@@ -2816,6 +2920,93 @@ export interface components {
              * @default true
              */
             success: boolean;
+        };
+        /**
+         * RegisterRepoRequest
+         * @description Request body for registering a new repo.
+         */
+        RegisterRepoRequest: {
+            /** Organization Id */
+            organization_id: string;
+            /** Full Name */
+            full_name: string;
+            /**
+             * Provider
+             * @default github
+             */
+            provider: string;
+            /**
+             * Owner
+             * @default
+             */
+            owner: string;
+            /**
+             * Default Branch
+             * @default main
+             */
+            default_branch: string;
+            /**
+             * Provider Repo Id
+             * @default
+             */
+            provider_repo_id: string;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /**
+             * Is Private
+             * @default false
+             */
+            is_private: boolean;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
+        /**
+         * RegisterTriggerRequest
+         * @description Request body for registering a new trigger rule.
+         */
+        RegisterTriggerRequest: {
+            /** Name */
+            name: string;
+            /** Event */
+            event: string;
+            /**
+             * Repository
+             * @default
+             */
+            repository: string;
+            /**
+             * Workflow Id
+             * @default
+             */
+            workflow_id: string;
+            /** Conditions */
+            conditions?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /** Input Mapping */
+            input_mapping?: {
+                [key: string]: string;
+            } | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
         };
         /**
          * RepoActionResponse
@@ -4008,6 +4199,16 @@ export interface components {
             /** Is Primary Deliverable */
             is_primary_deliverable?: boolean | null;
         };
+        /**
+         * UpdateOrganizationRequest
+         * @description Request body for updating an organization.
+         */
+        UpdateOrganizationRequest: {
+            /** Name */
+            name?: string | null;
+            /** Slug */
+            slug?: string | null;
+        };
         /** UpdatePhasePromptRequest */
         UpdatePhasePromptRequest: {
             /** Prompt Template */
@@ -4027,6 +4228,56 @@ export interface components {
             phase_id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * UpdateRepoRequest
+         * @description Request body for updating a repo.
+         */
+        UpdateRepoRequest: {
+            /** Default Branch */
+            default_branch?: string | null;
+            /** Is Private */
+            is_private?: boolean | null;
+            /** Installation Id */
+            installation_id?: string | null;
+            /**
+             * Updated By
+             * @default api
+             */
+            updated_by: string;
+        };
+        /**
+         * UpdateSystemRequest
+         * @description Request body for updating a system.
+         */
+        UpdateSystemRequest: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+        };
+        /**
+         * UpdateTriggerRequest
+         * @description Request body for updating (pause/resume) a trigger.
+         */
+        UpdateTriggerRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "pause" | "resume";
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Paused By
+             * @default api
+             */
+            paused_by: string;
+            /**
+             * Resumed By
+             * @default api
+             */
+            resumed_by: string;
         };
         /** UploadArtifactResponse */
         UploadArtifactResponse: {
@@ -5717,9 +5968,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["RegisterTriggerRequest"];
             };
         };
         responses: {
@@ -5847,9 +6096,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["UpdateTriggerRequest"];
             };
         };
         responses: {
@@ -5859,7 +6106,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TriggerActionResponse"];
+                    "application/json": components["schemas"]["TriggerDetail"];
                 };
             };
             /** @description Validation Error */
@@ -5917,9 +6164,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["EnablePresetRequest"];
             };
         };
         responses: {
@@ -6078,9 +6323,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["CreateOrganizationRequest"];
             };
         };
         responses: {
@@ -6146,9 +6389,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["UpdateOrganizationRequest"];
             };
         };
         responses: {
@@ -6243,9 +6484,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["CreateSystemRequest"];
             };
         };
         responses: {
@@ -6311,9 +6550,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["UpdateSystemRequest"];
             };
         };
         responses: {
@@ -6572,9 +6809,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["RegisterRepoRequest"];
             };
         };
         responses: {
@@ -6640,9 +6875,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["UpdateRepoRequest"];
             };
         };
         responses: {
@@ -6708,9 +6941,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["AssignRepoToSystemRequest"];
             };
         };
         responses: {
@@ -7044,9 +7275,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["AgentTestRequest"];
             };
         };
         responses: {
@@ -7079,9 +7308,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["AgentChatRequest"];
             };
         };
         responses: {

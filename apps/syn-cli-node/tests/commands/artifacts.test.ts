@@ -145,7 +145,7 @@ describe("artifacts commands", () => {
 
       await handler({
         positionals: [],
-        values: { type: "code", title: "New Artifact", content: "some code" },
+        values: { workflow: "wf-1", type: "code", title: "New Artifact", content: "some code" },
       });
       const out = stdout();
       expect(out).toContain("Created artifact");

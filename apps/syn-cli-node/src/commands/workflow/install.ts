@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { apiPost } from "../../client/api.js";
+import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 import { formatTimestamp } from "../../output/format.js";
@@ -120,21 +120,23 @@ export async function installWorkflowsViaApi(
     const wf = workflows[i]!;
     process.stdout.write(`  [${i + 1}/${workflows.length}] Creating ${style(wf.name, BOLD)}... `);
     try {
-      const data = await apiPost<Record<string, unknown>>("/workflows", {
-        body: {
-          name: wf.name,
-          workflow_type: wf.workflow_type,
-          classification: wf.classification,
-          repository_url: wf.repository_url,
-          repository_ref: wf.repository_ref,
-          description: wf.description,
-          project_name: wf.project_name,
-          phases: wf.phases,
-          input_declarations: wf.input_declarations,
-        },
-        expected: [201],
-      });
-      const wfId = String(data["id"] ?? "unknown");
+      const data = unwrap(
+        await api.POST("/workflows", {
+          body: {
+            name: wf.name,
+            workflow_type: wf.workflow_type,
+            classification: wf.classification ?? "standard",
+            repository_url: wf.repository_url,
+            repository_ref: wf.repository_ref,
+            description: wf.description ?? null,
+            project_name: wf.project_name ?? null,
+            phases: wf.phases,
+            input_declarations: wf.input_declarations,
+          },
+        }),
+        "Failed to create workflow",
+      );
+      const wfId = data.id;
       print(`${style("done", GREEN)} (id: ${wfId})`);
       installed.push({ id: wfId, name: wf.name });
     } catch (err) {

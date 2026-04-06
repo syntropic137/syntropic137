@@ -5,11 +5,16 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetPaginated } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
+import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED } from "../output/ansi.js";
 import { formatCost, formatDuration, formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
+
+type ToolTimeline = components["schemas"]["ToolTimelineResponse"];
+type ToolTimelineEntry = components["schemas"]["ToolTimelineEntry"];
+type TokenMetrics = components["schemas"]["SessionTokenMetrics"];
 
 function reqSessionId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
@@ -26,8 +31,16 @@ const toolTimelineCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const sid = reqSessionId(parsed);
-    const limit = (parsed.values["limit"] as string | undefined) ?? "100";
-    const entries = await apiGetPaginated<Record<string, unknown>>(`/observability/sessions/${sid}/tools`, "executions", { params: { limit } });
+    const limitStr = (parsed.values["limit"] as string | undefined) ?? "100";
+
+    const data: ToolTimeline = unwrap(await api.GET("/observability/sessions/{session_id}/tools", {
+      params: {
+        path: { session_id: sid },
+        query: { limit: parseInt(limitStr, 10) },
+      },
+    }), "Failed to fetch tool timeline");
+
+    const entries: ToolTimelineEntry[] = data.executions ?? [];
     if (entries.length === 0) { printDim("No tool timeline entries."); return; }
 
     const table = new Table({ title: `Tool Timeline: ${sid.slice(0, 12)}` });
@@ -37,13 +50,11 @@ const toolTimelineCommand: CommandDef = {
     table.addColumn("Status");
 
     for (const e of entries) {
-      const dur = e["duration_ms"];
-      const success = e["success"];
       table.addRow(
-        formatTimestamp(String(e["time"] ?? "")),
-        String(e["tool_name"] ?? ""),
-        dur !== null && dur !== undefined ? formatDuration(Number(dur)) : "\u2014",
-        success === true ? style("ok", GREEN) : success === false ? style("error", RED) : style("\u2014", DIM),
+        formatTimestamp(String(e.timestamp ?? "")),
+        e.tool_name ?? "",
+        e.duration_ms != null ? formatDuration(e.duration_ms) : "\u2014",
+        e.success === true ? style("ok", GREEN) : e.success === false ? style("error", RED) : style("\u2014", DIM),
       );
     }
     table.print();
@@ -56,16 +67,19 @@ const tokenMetricsCommand: CommandDef = {
   args: [{ name: "session-id", description: "Session ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const sid = reqSessionId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/observability/sessions/${sid}/tokens`);
 
-    print(`${style("Token Metrics:", BOLD)} ${d["session_id"] ?? sid}`);
-    print(`  Input tokens:       ${Number(d["input_tokens"] ?? 0).toLocaleString()}`);
-    print(`  Output tokens:      ${Number(d["output_tokens"] ?? 0).toLocaleString()}`);
-    print(`  Total tokens:       ${Number(d["total_tokens"] ?? 0).toLocaleString()}`);
-    if (d["cache_creation_tokens"]) print(`  Cache creation:     ${Number(d["cache_creation_tokens"]).toLocaleString()}`);
-    if (d["cache_read_tokens"]) print(`  Cache read:         ${Number(d["cache_read_tokens"]).toLocaleString()}`);
-    if (d["estimated_cost_usd"] !== null && d["estimated_cost_usd"] !== undefined)
-      print(`  Estimated cost:     ${formatCost(String(d["estimated_cost_usd"]))}`);
+    const d: TokenMetrics = unwrap(await api.GET("/observability/sessions/{session_id}/tokens", {
+      params: { path: { session_id: sid } },
+    }), "Failed to fetch token metrics");
+
+    print(`${style("Token Metrics:", BOLD)} ${d.session_id}`);
+    print(`  Input tokens:       ${d.input_tokens.toLocaleString()}`);
+    print(`  Output tokens:      ${d.output_tokens.toLocaleString()}`);
+    print(`  Total tokens:       ${d.total_tokens.toLocaleString()}`);
+    if (d.cache_creation_tokens) print(`  Cache creation:     ${d.cache_creation_tokens.toLocaleString()}`);
+    if (d.cache_read_tokens) print(`  Cache read:         ${d.cache_read_tokens.toLocaleString()}`);
+    if (d.total_cost_usd !== "0")
+      print(`  Estimated cost:     ${formatCost(d.total_cost_usd)}`);
   },
 };
 
