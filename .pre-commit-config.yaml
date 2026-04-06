@@ -23,3 +23,13 @@ repos:
         always_run: true
         stages: [commit]
         verbose: true
+
+      # POKA-YOKE: Detect OpenAPI endpoint drift (structural check)
+      - id: openapi-drift-check
+        name: Check for OpenAPI endpoint drift
+        entry: uv run python scripts/check_openapi_drift.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [commit]
+        verbose: true
