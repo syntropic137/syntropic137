@@ -106,15 +106,17 @@ class MinioConversationStorage:
             logger.info("Created bucket: %s", self.BUCKET_NAME)
 
         # Create database pool for metadata queries (session_conversations table).
-        # If this fails, MinIO file storage still works but metadata queries
-        # will be unavailable. The lifecycle recovery loop will retry (ADR-057).
+        # If this fails, the exception propagates to the lifecycle startup loop
+        # which marks conversation_storage as degraded and retries via the
+        # recovery loop (ADR-057). _client is reset so retry re-initializes fully.
         try:
             self._pool = await asyncpg.create_pool(self._db_url, min_size=1, max_size=5)
         except Exception:
             self._client = None  # Reset so next initialize() attempt retries fully
             logger.warning(
                 "Failed to create database pool for conversation storage "
-                "— metadata queries will be unavailable until recovery"
+                "— metadata queries will be unavailable until recovery",
+                exc_info=True,
             )
             raise
 

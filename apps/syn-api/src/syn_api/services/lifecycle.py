@@ -315,10 +315,19 @@ async def _init_conversation_storage(state: LifecycleState) -> None:
 
 
 async def _shutdown_conversation_storage(state: LifecycleState) -> None:
-    """Close conversation storage pool."""
-    if state.conversation_storage is not None:
-        await state.conversation_storage.close()
+    """Close conversation storage pool and reset the singleton.
+
+    Resetting the singleton ensures a fresh instance on next startup,
+    which matters for tests and lifespan restarts in the same process.
+    """
+    from syn_adapters.conversations.minio import reset_conversation_storage
+
+    try:
+        if state.conversation_storage is not None:
+            await state.conversation_storage.close()
+    finally:
         state.conversation_storage = None
+        reset_conversation_storage()
 
 
 async def _init_subscriptions(state: LifecycleState) -> None:

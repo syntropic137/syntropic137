@@ -1367,9 +1367,10 @@ docs-regen: diagram docs-gen
     @echo "   • docs/architecture/docker-workspace-lifecycle.md"
     @echo "   • docs/architecture/infrastructure-data-flow.md"
 
-# Regenerate docs and fail if uncommitted changes (enforces docs are committed)
+# Regenerate all derived artifacts and fail if any are uncommitted.
+# Runs `just codegen` once, then checks architecture docs, CLI docs, and API artifacts.
 docs-sync:
-    @echo "🔄 Syncing architecture documentation..."
+    @echo "🔄 Regenerating architecture documentation..."
     @uv run python scripts/generate-architecture-docs.py > /tmp/docs-gen.txt 2>&1
     @if git diff --quiet docs/architecture/projection-subscriptions.md docs/architecture/event-flows/README.md README.md 2>/dev/null; then \
         echo "✅ Architecture docs are up-to-date"; \
@@ -1378,22 +1379,20 @@ docs-sync:
         echo "   git add docs/architecture/ README.md && git commit -m 'docs: update generated architecture docs'"; \
         exit 1; \
     fi
-    @echo "🔄 Syncing CLI reference docs..."
-    @cd apps/syn-cli-node && pnpm run generate:docs > /dev/null 2>&1
+    @echo "🔄 Running codegen (CLI docs + OpenAPI spec + API docs + CLI types)..."
+    @just codegen > /dev/null 2>&1
     @if git diff --quiet apps/syn-docs/content/docs/cli/ 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)" ]; then \
         echo "✅ CLI docs are up-to-date"; \
     else \
         echo "❌ CLI docs need to be committed:"; \
-        echo "   git add apps/syn-docs/content/docs/cli/ && git commit -m 'docs: regenerate CLI docs'"; \
+        echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
-    @echo "🔄 Syncing API reference docs + CLI types..."
-    @just codegen > /dev/null 2>&1
     @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
         echo "✅ API docs and CLI types are up-to-date"; \
     else \
         echo "❌ API artifacts need to be committed:"; \
-        echo "   git add apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts && git commit -m 'chore: regenerate API artifacts'"; \
+        echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
 
