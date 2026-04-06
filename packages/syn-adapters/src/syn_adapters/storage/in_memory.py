@@ -1,8 +1,9 @@
 """In-memory storage utilities for TESTING ONLY.
 
-Contains InMemoryEventStore, InMemoryEventPublisher, and test-environment
-guards. All repositories now go through the SDK's EventStoreRepository
-backed by MemoryEventStoreClient — see repositories.py.
+Contains InMemoryEventStore, InMemoryEventPublisher, test-environment
+guards, and singleton factory functions. All repositories now go through
+the SDK's EventStoreRepository backed by MemoryEventStoreClient — see
+repositories.py.
 
 WARNING: These utilities are for unit/integration tests only.
 """
@@ -128,12 +129,37 @@ class InMemoryEventPublisher:
         self._published_events = []
 
 
-# Re-exports from factories for backwards compatibility
-from syn_adapters.storage.in_memory_factories import (  # noqa: E402
-    get_event_publisher,
-    get_event_store,
-    reset_storage,
-)
+# ---------------------------------------------------------------------------
+# Singleton factory functions (lazy-loaded globals)
+# ---------------------------------------------------------------------------
+
+_event_store: InMemoryEventStore | None = None
+_event_publisher: InMemoryEventPublisher | None = None
+
+
+def get_event_store() -> InMemoryEventStore:
+    """Get the global in-memory event store (TESTING ONLY)."""
+    global _event_store
+    if _event_store is None:
+        _event_store = InMemoryEventStore()
+    return _event_store
+
+
+def get_event_publisher() -> InMemoryEventPublisher:
+    """Get the global in-memory event publisher (TESTING ONLY)."""
+    global _event_publisher
+    if _event_publisher is None:
+        _event_publisher = InMemoryEventPublisher()
+    return _event_publisher
+
+
+def reset_storage() -> None:
+    """Reset test utilities (InMemoryEventStore and InMemoryEventPublisher)."""
+    if _event_store is not None:
+        _event_store.clear()
+    if _event_publisher is not None:
+        _event_publisher.clear()
+
 
 __all__ = [
     "InMemoryEventPublisher",
