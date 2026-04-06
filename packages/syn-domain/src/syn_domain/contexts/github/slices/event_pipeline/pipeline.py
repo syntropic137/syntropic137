@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_evaluator import TriggerEvaluator
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
+
+type _ObserverCallback = Callable[[NormalizedEvent], Coroutine[object, object, None]]
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,18 @@ class EventPipeline:
     ) -> None:
         self._dedup = dedup
         self._evaluator = evaluator
+        self._observers: list[_ObserverCallback] = []
+
+    def add_observer(self, callback: _ObserverCallback) -> None:
+        """Register a callback notified after each non-deduplicated event.
+
+        Used by CheckRunPoller to learn about PR events and register
+        pending SHAs for check-run polling (#602).
+
+        Note: observers should be registered during startup, before the
+        first ``ingest()`` call. This is safe in asyncio (single-threaded).
+        """
+        self._observers.append(callback)
 
     async def ingest(self, event: NormalizedEvent) -> PipelineResult:
         """Process a normalized event through dedup and trigger evaluation.
@@ -88,6 +103,17 @@ class EventPipeline:
             installation_id=event.installation_id,
             payload=payload,
         )
+
+        # 4. Notify observers (fire-and-forget, #602)
+        for observer in self._observers:
+            try:
+                await observer(event)
+            except Exception:
+                logger.warning(
+                    "Observer failed for %s",
+                    event.dedup_key,
+                    exc_info=True,
+                )
 
         fired, deferred, blocked = _classify_results(results)
         return PipelineResult(

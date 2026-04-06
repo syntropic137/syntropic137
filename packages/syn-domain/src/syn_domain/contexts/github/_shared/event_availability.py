@@ -49,8 +49,19 @@ class DeliveryChannel(StrEnum):
     See: https://docs.github.com/en/rest/activity/events#list-repository-events
     """
 
+    CHECKS_API = "checks_api"
+    """Synthesized via GET /repos/{owner}/{repo}/commits/{ref}/check-runs.
+
+    GitHub's Events API does not include check_run events. Instead, when a
+    pull_request event arrives (via Events API or webhook), we poll the Checks
+    API for that commit's check runs and synthesize check_run.completed events.
+    Zero-config — no public URL needed. (#602)
+
+    See: https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference
+    """
+
     BOTH = "both"
-    """Available through both channels."""
+    """Available through both webhook and Events API channels."""
 
 
 class EventInfo(NamedTuple):
@@ -102,12 +113,20 @@ EVENTS: tuple[EventInfo, ...] = (
     EventInfo("sponsorship",                   "SponsorshipEvent",                   DeliveryChannel.BOTH, "social",  "Sponsorship activity"),                              # https://docs.github.com/en/webhooks/webhook-events-and-payloads#sponsorship
 
     # -------------------------------------------------------------------------
-    # Webhook-only: CI/CD surface.
-    # None of these are returned by the Events API — self-healing and CI
-    # monitoring require a webhook URL (e.g., Cloudflare tunnel). (ISS-409)
-    # https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_run
+    # CI/CD surface: check_run available via Checks API polling (#602).
+    # GitHub's Events API does not return any CI/CD events, but check_run
+    # results can be polled via the Checks API for PR commit SHAs. This
+    # enables zero-config self-healing (no tunnel required).
+    # https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference
     # -------------------------------------------------------------------------
-    EventInfo("check_run",                     None,                                 DeliveryChannel.WEBHOOK, "ci_cd", "CI check result (e.g., each Actions job)"),          # https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_run
+    EventInfo("check_run",                     None,                                 DeliveryChannel.CHECKS_API, "ci_cd", "CI check result — via webhook or Checks API polling (#602)"),  # https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_run
+
+    # -------------------------------------------------------------------------
+    # Webhook-only: remaining CI/CD events.
+    # These are NOT available via Events API or Checks API — they require
+    # a webhook URL (e.g., Cloudflare tunnel).
+    # https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_suite
+    # -------------------------------------------------------------------------
     EventInfo("check_suite",                   None,                                 DeliveryChannel.WEBHOOK, "ci_cd", "CI check suite lifecycle"),                          # https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_suite
     EventInfo("workflow_run",                  None,                                 DeliveryChannel.WEBHOOK, "ci_cd", "GitHub Actions workflow run lifecycle"),              # https://docs.github.com/en/webhooks/webhook-events-and-payloads#workflow_run
     EventInfo("workflow_job",                  None,                                 DeliveryChannel.WEBHOOK, "ci_cd", "GitHub Actions individual job lifecycle"),            # https://docs.github.com/en/webhooks/webhook-events-and-payloads#workflow_job
@@ -161,11 +180,18 @@ def requires_webhook(webhook_event_name: str) -> bool:
 
 
 def available_via_polling(webhook_event_name: str) -> bool:
-    """Return True if this event type can be received via Events API polling."""
+    """Return True if this event type can be received without webhooks.
+
+    Includes Events API polling and Checks API polling (#602).
+    """
     info = get_event_info(webhook_event_name)
     if info is None:
         return False
-    return info.channel in (DeliveryChannel.EVENTS_API, DeliveryChannel.BOTH)
+    return info.channel in (
+        DeliveryChannel.EVENTS_API,
+        DeliveryChannel.BOTH,
+        DeliveryChannel.CHECKS_API,
+    )
 
 
 def build_events_api_type_map() -> dict[str, str]:
@@ -183,8 +209,13 @@ def build_events_api_type_map() -> dict[str, str]:
 
 
 def polling_supported_events() -> list[EventInfo]:
-    """All events available via Events API polling."""
-    return [e for e in EVENTS if e.channel in (DeliveryChannel.EVENTS_API, DeliveryChannel.BOTH)]
+    """All events available without webhooks (Events API + Checks API polling)."""
+    return [
+        e
+        for e in EVENTS
+        if e.channel
+        in (DeliveryChannel.EVENTS_API, DeliveryChannel.BOTH, DeliveryChannel.CHECKS_API)
+    ]
 
 
 def webhook_only_events() -> list[EventInfo]:
