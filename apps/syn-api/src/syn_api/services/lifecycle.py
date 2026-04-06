@@ -355,7 +355,6 @@ async def _attempt_recovery_pass(state: LifecycleState, delay: float) -> None:
             logger.debug("Recovery retry failed for %s, will retry in %.0fs", reason, delay)
 
 
-
 async def _recovery_loop(state: LifecycleState) -> None:
     """Background task: retry degraded subsystems with exponential backoff.
 
