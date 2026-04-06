@@ -157,7 +157,10 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         output_tokens=phase.output_tokens,
         cache_creation_tokens=phase.cache_creation_tokens,
         cache_read_tokens=phase.cache_read_tokens,
-        total_tokens=phase.input_tokens + phase.output_tokens + phase.cache_creation_tokens + phase.cache_read_tokens,
+        total_tokens=phase.input_tokens
+        + phase.output_tokens
+        + phase.cache_creation_tokens
+        + phase.cache_read_tokens,
         duration_seconds=phase.duration_seconds or 0.0,
         cost_usd=Decimal(str(phase.cost_usd)),
         started_at=str(phase.started_at) if phase.started_at else None,

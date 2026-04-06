@@ -44,22 +44,22 @@ const _DEV_SESSION_DATA: Record<string, _DevSessionData> = {
   '38bcc2ae-b7be-4887-b274-31f2aefdcd43': { cache: [0, 0], model: 'claude-sonnet-4-20250514', costByModel: { 'claude-sonnet-4-20250514': '0.0003' } },
 }
 
+function _enrichPhase(phase: ExecutionDetailResponse['phases'][number], dev: _DevSessionData): void {
+  if (!phase.cache_creation_tokens && !phase.cache_read_tokens) {
+    phase.cache_creation_tokens = dev.cache[0]
+    phase.cache_read_tokens = dev.cache[1]
+  }
+  if (!phase.model) phase.model = dev.model
+  if (!phase.cost_by_model || Object.keys(phase.cost_by_model).length === 0) {
+    phase.cost_by_model = dev.costByModel
+  }
+}
+
 function _enrichSessionData(data: ExecutionDetailResponse): ExecutionDetailResponse {
   if (!data.phases) return data
   for (const phase of data.phases) {
-    if (!phase.session_id) continue
-    const dev = _DEV_SESSION_DATA[phase.session_id]
-    if (!dev) continue
-    if (!phase.cache_creation_tokens && !phase.cache_read_tokens) {
-      phase.cache_creation_tokens = dev.cache[0]
-      phase.cache_read_tokens = dev.cache[1]
-    }
-    if (!phase.model) {
-      phase.model = dev.model
-    }
-    if (!phase.cost_by_model || Object.keys(phase.cost_by_model).length === 0) {
-      phase.cost_by_model = dev.costByModel
-    }
+    const dev = phase.session_id ? _DEV_SESSION_DATA[phase.session_id] : undefined
+    if (dev) _enrichPhase(phase, dev)
   }
   if (!data.cache_creation_tokens) {
     data.cache_creation_tokens = data.phases.reduce((s, p) => s + (p.cache_creation_tokens ?? 0), 0)

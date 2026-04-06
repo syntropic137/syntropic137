@@ -74,5 +74,7 @@ class TestCostCalculator:
 
     def test_all_models_have_cache_pricing(self) -> None:
         for model_id, pricing in MODEL_PRICING_TABLE.items():
-            assert pricing.cache_creation_per_million > 0, f"{model_id} missing cache creation pricing"
+            assert pricing.cache_creation_per_million > 0, (
+                f"{model_id} missing cache creation pricing"
+            )
             assert pricing.cache_read_per_million > 0, f"{model_id} missing cache read pricing"
