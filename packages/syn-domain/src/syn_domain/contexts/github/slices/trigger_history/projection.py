@@ -89,7 +89,9 @@ class TriggerHistoryProjection:
             fired_at=datetime.now(UTC),
         )
         key = _entry_key(entry)
-        await self._store.save(PROJECTION_NAME, key, _entry_to_dict(entry))
+        data = _entry_to_dict(entry)
+        data["_projection_key"] = key
+        await self._store.save(PROJECTION_NAME, key, data)
         logger.info(f"Projected TriggerFired: {event.trigger_id} -> {event.execution_id}")
         return entry
 
@@ -128,7 +130,9 @@ class TriggerHistoryProjection:
             key = (
                 f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
             )
-        await self._store.save(PROJECTION_NAME, key, _entry_to_dict(entry))
+        data = _entry_to_dict(entry)
+        data["_projection_key"] = key
+        await self._store.save(PROJECTION_NAME, key, data)
         logger.info(f"Projected TriggerBlocked: {event.trigger_id} ({event.guard_name})")
         return entry
 
@@ -150,8 +154,12 @@ class TriggerHistoryProjection:
         """Clear all projection data (for rebuild)."""
         records = await self._store.get_all(PROJECTION_NAME)
         for record in records:
-            entry = _entry_from_dict(record)
-            key = _entry_key(entry)
+            # Use stored key if available (handles blocked entries whose keys
+            # can't be reconstructed from entry fields alone).
+            key = record.get("_projection_key")
+            if key is None:
+                entry = _entry_from_dict(record)
+                key = _entry_key(entry)
             await self._store.delete(PROJECTION_NAME, key)
 
 

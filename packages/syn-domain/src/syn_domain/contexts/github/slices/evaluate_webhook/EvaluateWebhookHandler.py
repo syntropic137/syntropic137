@@ -5,6 +5,7 @@ Core dispatch logic: evaluates registered trigger rules against incoming webhook
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 from collections.abc import Callable, Coroutine
@@ -62,6 +63,10 @@ class EvaluateWebhookHandler:
         self._debouncer = debouncer
         self._on_fire = on_fire
         self._guards = SafetyGuards()
+        # Per-(trigger, pr) lock: ensures the concurrency guard check and
+        # record_fire are atomic — prevents two concurrent webhook handlers
+        # from both passing the guard before either records.
+        self._fire_locks: dict[tuple[str, int | None], asyncio.Lock] = {}
 
     async def evaluate(
         self,
@@ -104,6 +109,26 @@ class EvaluateWebhookHandler:
                 payload=payload,
             )
 
+        # Acquire per-(trigger, pr) lock so the guard check and record_fire
+        # are atomic.  Without this, two concurrent webhook handlers could
+        # both pass the concurrency guard before either records its fire.
+        pr_number = _extract_pr_number(payload)
+        lock_key = (rule.trigger_id, pr_number)
+        lock = self._fire_locks.setdefault(lock_key, asyncio.Lock())
+        async with lock:
+            return await self._guarded_evaluate(
+                rule, event, repository, installation_id, payload,
+            )
+
+    async def _guarded_evaluate(
+        self,
+        rule: Any,
+        event: str,
+        repository: str,
+        installation_id: str,
+        payload: dict[str, Any],
+    ) -> TriggerMatchResult | TriggerDeferredResult | TriggerBlockedResult | None:
+        """Guard check → debounce → fire, called under the per-(trigger, pr) lock."""
         guard_result = await self._guards.check_all(rule, payload, self._store)
         if not guard_result.passed:
             return await self._handle_guard_block(

@@ -99,7 +99,7 @@ When the event poller catches up after a restart, it may deliver many events for
 
 The concurrency guard uses a **coalescing key** of `(trigger_id, pr_number)`. If an execution is already RUNNING for that key, new triggers are blocked. For non-PR events, the key is just `trigger_id`.
 
-Execution tracking piggybacks on `record_fire()` — when a trigger fires, the execution is marked as running in an **in-memory** set. When the workflow completes (via `WorkflowExecutionCompletedEvent` or `WorkflowFailedEvent`), it's cleared via `complete_execution()`.
+Execution tracking piggybacks on `record_fire()` — when a trigger fires, the execution is marked as running in an **in-memory** set. When the workflow completes (via `WorkflowCompletedEvent` or `WorkflowFailedEvent`), it's cleared via `complete_execution()`.
 
 Running-execution state is intentionally **not persisted**. On restart, no executions survive because containers are ephemeral (see AGENTS.md crash recovery). The in-memory set starts empty, so the poller catch-up after restart won't be blocked by stale running-execution entries. Fire records (persisted via projection) track *history* only — they are never used to infer running state.
 

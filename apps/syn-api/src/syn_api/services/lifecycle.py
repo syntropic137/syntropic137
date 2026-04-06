@@ -100,6 +100,7 @@ async def startup(
         Ok({"mode": "full"|"degraded", ...}) on success,
         Err(LifecycleError) on critical failure.
     """
+    _state._shutting_down = False
     _state.degraded_reasons = []
 
     from syn_shared.settings import get_settings

@@ -179,31 +179,27 @@ const historyCommand: CommandDef = {
     table.addColumn("Time");
     table.addColumn("Execution", { style: DIM });
     table.addColumn("Status");
+    table.addColumn("Cost", { align: "right" });
     if (hasBlocked) {
       table.addColumn("Guard");
       table.addColumn("Reason");
-    } else {
-      table.addColumn("Cost", { align: "right" });
     }
 
     for (const h of items) {
       const status = String(h["status"] ?? "");
+      const baseColumns = [
+        formatTimestamp(h["fired_at"] as string | undefined),
+        status === "blocked" ? "—" : String(h["execution_id"] ?? "").slice(0, 12),
+        formatStatus(status),
+        status === "blocked" ? "—" : formatCost(String(h["cost_usd"] ?? "0")),
+      ];
       if (hasBlocked) {
-        table.addRow(
-          formatTimestamp(h["fired_at"] as string | undefined),
-          status === "blocked" ? "—" : String(h["execution_id"] ?? "").slice(0, 12),
-          formatStatus(status),
-          String(h["guard_name"] ?? ""),
-          String(h["block_reason"] ?? ""),
-        );
-      } else {
-        table.addRow(
-          formatTimestamp(h["fired_at"] as string | undefined),
-          String(h["execution_id"] ?? "").slice(0, 12),
-          formatStatus(status),
-          formatCost(String(h["cost_usd"] ?? "0")),
+        baseColumns.push(
+          status === "blocked" ? String(h["guard_name"] ?? "") : "—",
+          status === "blocked" ? String(h["block_reason"] ?? "") : "—",
         );
       }
+      table.addRow(...baseColumns);
     }
     table.print();
   },
