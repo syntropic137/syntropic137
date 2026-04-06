@@ -108,6 +108,8 @@ const sessionDetailCommand: CommandDef = {
     print(`  ${style("Session:", BOLD)} ${s.session_id}`);
     print(`  ${style("Cost:", BOLD)} ${formatCost(s.total_cost_usd)}`);
     print(`  ${style("Tokens:", BOLD)} ${formatTokens(s.total_tokens)} (in: ${formatTokens(s.input_tokens)}, out: ${formatTokens(s.output_tokens)})`);
+    if (s.cache_creation_tokens) print(`  ${style("Cache Write:", BOLD)} ${formatTokens(s.cache_creation_tokens)}`);
+    if (s.cache_read_tokens) print(`  ${style("Cache Read:", BOLD)}  ${formatTokens(s.cache_read_tokens)}`);
     print(`  ${style("Tool Calls:", BOLD)} ${s.tool_calls}  ${style("Turns:", BOLD)} ${s.turns}`);
     print(`  ${style("Duration:", BOLD)} ${formatDuration(s.duration_ms)}`);
     print(`  ${style("Started:", BOLD)} ${formatTimestamp(s.started_at)}`);
@@ -161,6 +163,8 @@ const executionDetailCommand: CommandDef = {
     print(`  ${style("Cost:", BOLD)} ${formatCost(e.total_cost_usd)}`);
     print(`  ${style("Sessions:", BOLD)} ${e.session_count}`);
     print(`  ${style("Tokens:", BOLD)} ${formatTokens(e.total_tokens)} (in: ${formatTokens(e.input_tokens)}, out: ${formatTokens(e.output_tokens)})`);
+    if (e.cache_creation_tokens) print(`  ${style("Cache Write:", BOLD)} ${formatTokens(e.cache_creation_tokens)}`);
+    if (e.cache_read_tokens) print(`  ${style("Cache Read:", BOLD)}  ${formatTokens(e.cache_read_tokens)}`);
     print(`  ${style("Duration:", BOLD)} ${formatDuration(e.duration_ms)}`);
     print(`  ${style("Started:", BOLD)} ${formatTimestamp(e.started_at)}`);
 

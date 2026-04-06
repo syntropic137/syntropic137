@@ -146,6 +146,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         phase["artifact_id"] = event_data.get("artifact_id")
         phase["input_tokens"] = event_data.get("input_tokens", 0)
         phase["output_tokens"] = event_data.get("output_tokens", 0)
+        phase["cache_creation_tokens"] = event_data.get("cache_creation_tokens", 0)
+        phase["cache_read_tokens"] = event_data.get("cache_read_tokens", 0)
         phase["total_tokens"] = event_data.get("total_tokens", 0)
         phase["duration_seconds"] = event_data.get("duration_seconds", 0.0)
         phase["cost_usd"] = str(event_data.get("cost_usd", "0"))

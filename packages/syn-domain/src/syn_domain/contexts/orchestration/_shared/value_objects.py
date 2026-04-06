@@ -114,7 +114,9 @@ class TokenCount:
 class ModelPricing:
     """Pricing information for an LLM model.
 
-    Prices are in USD per million tokens.
+    Wraps the shared pricing module with the ``TokenCount`` → ``CostAmount``
+    interface used by the orchestration domain.  Pricing data is sourced from
+    ``syn_shared.pricing``.
     """
 
     model_id: str
@@ -137,42 +139,40 @@ class ModelPricing:
         )
         return CostAmount(input_cost + output_cost + cache_creation_cost + cache_read_cost)
 
+    @classmethod
+    def from_shared(cls, shared: "SharedModelPricing") -> "ModelPricing":
+        """Create from a ``syn_shared.pricing.ModelPricing`` instance."""
+        return cls(
+            model_id=shared.model_id,
+            input_price_per_million=shared.input_per_million,
+            output_price_per_million=shared.output_per_million,
+            cache_creation_price_per_million=shared.cache_creation_per_million,
+            cache_read_price_per_million=shared.cache_read_per_million,
+        )
 
-# Default pricing for common models (prices in USD per million tokens)
+
+# Re-export pricing table and lookup from centralized module.
+# All pricing data is maintained in syn_shared.pricing — single source of truth.
+from syn_shared.pricing import (  # noqa: E402
+    MODEL_PRICING_TABLE as _SHARED_TABLE,
+)
+from syn_shared.pricing import (  # noqa: E402
+    ModelPricing as SharedModelPricing,
+)
+from syn_shared.pricing import (  # noqa: E402
+    get_model_pricing as _get_shared_pricing,
+)
+
 DEFAULT_MODEL_PRICING: dict[str, ModelPricing] = {
-    "claude-sonnet-4-20250514": ModelPricing(
-        model_id="claude-sonnet-4-20250514",
-        input_price_per_million=Decimal("3.00"),
-        output_price_per_million=Decimal("15.00"),
-        cache_creation_price_per_million=Decimal("3.75"),
-        cache_read_price_per_million=Decimal("0.30"),
-    ),
-    "claude-3-5-sonnet-20241022": ModelPricing(
-        model_id="claude-3-5-sonnet-20241022",
-        input_price_per_million=Decimal("3.00"),
-        output_price_per_million=Decimal("15.00"),
-        cache_creation_price_per_million=Decimal("3.75"),
-        cache_read_price_per_million=Decimal("0.30"),
-    ),
-    "claude-3-opus-20240229": ModelPricing(
-        model_id="claude-3-opus-20240229",
-        input_price_per_million=Decimal("15.00"),
-        output_price_per_million=Decimal("75.00"),
-        cache_creation_price_per_million=Decimal("18.75"),
-        cache_read_price_per_million=Decimal("1.50"),
-    ),
-    "claude-3-haiku-20240307": ModelPricing(
-        model_id="claude-3-haiku-20240307",
-        input_price_per_million=Decimal("0.25"),
-        output_price_per_million=Decimal("1.25"),
-        cache_creation_price_per_million=Decimal("0.30"),
-        cache_read_price_per_million=Decimal("0.03"),
-    ),
+    k: ModelPricing.from_shared(v) for k, v in _SHARED_TABLE.items()
 }
 
 
 def get_model_pricing(model_id: str) -> ModelPricing:
     """Get pricing for a model, with fallback to Sonnet pricing.
+
+    Delegates to ``syn_shared.pricing.get_model_pricing()`` and wraps
+    the result in the domain ``ModelPricing`` type.
 
     Args:
         model_id: The model identifier.
@@ -180,13 +180,4 @@ def get_model_pricing(model_id: str) -> ModelPricing:
     Returns:
         ModelPricing for the model.
     """
-    if model_id in DEFAULT_MODEL_PRICING:
-        return DEFAULT_MODEL_PRICING[model_id]
-
-    # Fallback: try to match by prefix
-    for key, pricing in DEFAULT_MODEL_PRICING.items():
-        if model_id.startswith(key.rsplit("-", 1)[0]):
-            return pricing
-
-    # Default to Sonnet pricing
-    return DEFAULT_MODEL_PRICING["claude-sonnet-4-20250514"]
+    return ModelPricing.from_shared(_get_shared_pricing(model_id))
