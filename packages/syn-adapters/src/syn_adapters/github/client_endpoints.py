@@ -122,24 +122,55 @@ async def list_accessible_repos(
 ) -> list[dict]:
     """List repositories accessible to an installation.
 
+    Paginates through all pages of the GitHub API response.
+    GitHub returns max 100 items per page with ``per_page=100``.
+
     Args:
         client: GitHubAppClient instance.
         installation_id: The installation to list repos for. Must be provided explicitly.
 
     Returns:
-        List of repository metadata.
+        List of repository metadata dicts.
     """
     from syn_adapters.github.client_api import check_response
 
     token = await client.get_installation_token(installation_id)
+    headers = {"Authorization": f"Bearer {token}"}
 
-    response = await client._http.get(
-        "/installation/repositories",
-        headers={"Authorization": f"Bearer {token}"},
-    )
+    all_repos: list[dict] = []
+    page = 1
+    max_pages = 50  # Safety cap: 50 pages * 100 = 5,000 repos
+    total_count = 0
 
-    check_response(response)
-    return response.json().get("repositories", [])
+    while page <= max_pages:
+        response = await client._http.get(
+            "/installation/repositories",
+            headers=headers,
+            params={"per_page": 100, "page": page},
+        )
+        check_response(response)
+
+        data = response.json()
+        repos: list[dict] = data.get("repositories", [])
+        all_repos.extend(repos)
+
+        total_count: int = data.get("total_count", 0)
+        if len(all_repos) >= total_count:
+            break
+
+        page += 1
+
+    if page > max_pages and len(all_repos) < total_count:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Pagination safety cap reached (%d pages). Returned %d of %d repos.",
+            max_pages,
+            len(all_repos),
+            total_count,
+        )
+
+    return all_repos
 
 
 async def get_installation_for_repo(client: GitHubAppClient, repo_full_name: str) -> str:

@@ -15,6 +15,7 @@ class EventSource(StrEnum):
 
     WEBHOOK = "webhook"
     EVENTS_API = "events_api"
+    CHECKS_API = "checks_api"  # Synthesized from Checks API polling (#602)
 
 
 @dataclass(frozen=True, slots=True)

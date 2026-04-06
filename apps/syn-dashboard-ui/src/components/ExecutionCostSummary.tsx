@@ -40,8 +40,8 @@ function CostBreakdownRow({ cost }: { cost: ExecutionCost }) {
   return (
     <div className="grid grid-cols-2 gap-4 p-4 border-b border-[var(--color-border)]">
       <div className="flex items-center gap-3">
-        <div className="p-1.5 rounded bg-indigo-500/10">
-          <MessageSquare className="h-4 w-4 text-indigo-400" />
+        <div className="p-1.5 rounded bg-blue-500/10">
+          <MessageSquare className="h-4 w-4 text-blue-400" />
         </div>
         <div>
           <p className="text-xs text-[var(--color-text-muted)]">Token Cost</p>
@@ -146,7 +146,7 @@ function PhaseBreakdown({ costByPhase, totalCostUsd }: { costByPhase: Record<str
               </div>
               <div className="h-1.5 bg-[var(--color-surface-elevated)] rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-indigo-500 rounded-full transition-all"
+                  className="h-full bg-blue-500 rounded-full transition-all"
                   style={{ width: `${percentage}%` }}
                 />
               </div>

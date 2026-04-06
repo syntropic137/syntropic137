@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from syn_api.services.webhook_health_tracker import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
+    from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
@@ -388,6 +389,27 @@ def get_webhook_health_tracker() -> WebhookHealthTracker:
     tracker = WebhookHealthTracker(stale_threshold=threshold)
     _webhook_health_tracker_singleton = tracker
     return tracker
+
+
+# ---------------------------------------------------------------------------
+# Pending SHA store (poll-based self-healing, #602)
+# ---------------------------------------------------------------------------
+
+_pending_sha_store_singleton: object | None = None
+
+
+def get_pending_sha_store() -> PendingSHAStore:
+    """Return the singleton PendingSHAStore for check-run polling."""
+    from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
+
+    global _pending_sha_store_singleton
+    if _pending_sha_store_singleton is not None:
+        assert isinstance(_pending_sha_store_singleton, InMemoryPendingSHAStore)
+        return _pending_sha_store_singleton
+
+    store = InMemoryPendingSHAStore()
+    _pending_sha_store_singleton = store
+    return store
 
 
 async def sync_published_events_to_projections() -> None:

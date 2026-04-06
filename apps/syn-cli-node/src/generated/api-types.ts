@@ -744,6 +744,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/github/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Accessible Repos Endpoint
+         * @description List repositories accessible to the GitHub App.
+         *
+         *     Makes a live query to the GitHub API. If no installation_id is provided,
+         *     queries all active installations and aggregates the results.
+         */
+        get: operations["list_accessible_repos_endpoint_github_repos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations/{session_id}": {
         parameters: {
             query?: never;
@@ -1442,66 +1465,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agents/providers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Providers Endpoint
-         * @description List available agent providers.
-         */
-        get: operations["list_providers_endpoint_agents_providers_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/agents/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test Agent Endpoint
-         * @description Test an agent provider with a simple prompt.
-         */
-        post: operations["test_agent_endpoint_agents_test_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/agents/chat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Chat Endpoint
-         * @description Send a stateless chat completion request.
-         */
-        post: operations["chat_endpoint_agents_chat_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/": {
         parameters: {
             query?: never;
@@ -1546,52 +1509,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /**
-         * AgentProviderInfo
-         * @description Information about an available agent provider.
-         */
-        AgentProviderInfo: {
-            /** Provider */
-            provider: string;
-            /** Display Name */
-            display_name: string;
-            /** Available */
-            available: boolean;
-            /** Default Model */
-            default_model: string;
-        };
-        /**
-         * AgentProviderListResponse
-         * @description Paginated list of agent providers.
-         */
-        AgentProviderListResponse: {
-            /** Total */
-            total: number;
-            /** Providers */
-            providers?: components["schemas"]["AgentProviderInfo"][];
-        };
-        /**
-         * AgentTestResult
-         * @description Result of testing an agent provider.
-         */
-        AgentTestResult: {
-            /** Provider */
-            provider: string;
-            /** Model */
-            model: string;
-            /** Response Text */
-            response_text: string;
-            /**
-             * Input Tokens
-             * @default 0
-             */
-            input_tokens: number;
-            /**
-             * Output Tokens
-             * @default 0
-             */
-            output_tokens: number;
-        };
         /**
          * ArtifactActionResponse
          * @description Response for artifact update/delete actions.
@@ -2369,6 +2286,41 @@ export interface components {
              * @default
              */
             last_seen: string;
+        };
+        /**
+         * GitHubRepoListResponse
+         * @description List of repositories accessible to the GitHub App.
+         */
+        GitHubRepoListResponse: {
+            /** Repos */
+            repos?: components["schemas"]["GitHubRepoResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /** Installation Id */
+            installation_id?: string | null;
+        };
+        /**
+         * GitHubRepoResponse
+         * @description A repository accessible to the GitHub App installation.
+         */
+        GitHubRepoResponse: {
+            /** Github Id */
+            github_id: number;
+            /** Name */
+            name: string;
+            /** Full Name */
+            full_name: string;
+            /** Private */
+            private: boolean;
+            /** Default Branch */
+            default_branch: string;
+            /** Owner */
+            owner: string;
+            /** Installation Id */
+            installation_id: string;
         };
         /**
          * GlobalCostResponse
@@ -5611,6 +5563,38 @@ export interface operations {
             };
         };
     };
+    list_accessible_repos_endpoint_github_repos_get: {
+        parameters: {
+            query?: {
+                installation_id?: string | null;
+                include_private?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubRepoListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_conversation_log_endpoint_conversations__session_id__get: {
         parameters: {
             query?: {
@@ -5662,7 +5646,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConversationMetadataResponse"] | null;
+                    "application/json": components["schemas"]["ConversationMetadataResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7002,96 +6986,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContributionHeatmapResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_providers_endpoint_agents_providers_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentProviderListResponse"];
-                };
-            };
-        };
-    };
-    test_agent_endpoint_agents_test_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentTestResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    chat_endpoint_agents_chat_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentTestResult"];
                 };
             };
             /** @description Validation Error */
