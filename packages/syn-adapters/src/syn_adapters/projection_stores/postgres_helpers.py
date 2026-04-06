@@ -23,7 +23,7 @@ def deserialize(data: str | dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def json_serializer(obj: Any) -> Any:
+def json_serializer(obj: Any) -> Any:  # noqa: ANN401
     """JSON serializer for objects not serializable by default."""
     if isinstance(obj, datetime):
         return obj.isoformat()
@@ -83,7 +83,7 @@ async def ensure_state_table(
 async def fetch_get_all(
     pool: asyncpg.Pool,
     table_name: str,
-    deserialize_fn: Any,
+    deserialize_fn: Any,  # noqa: ANN401
 ) -> list[dict[str, Any]]:
     """Fetch all records from a projection table ordered by updated_at."""
     async with pool.acquire() as conn:

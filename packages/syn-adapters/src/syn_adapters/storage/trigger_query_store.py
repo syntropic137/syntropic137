@@ -37,7 +37,7 @@ def _build_optional_filters(**kwargs: str | None) -> dict[str, Any] | None:
     return filters or None
 
 
-def _parse_trigger_config(config_data: Any) -> TriggerConfig:
+def _parse_trigger_config(config_data: Any) -> TriggerConfig:  # noqa: ANN401
     """Parse a TriggerConfig from raw projection store data."""
     if isinstance(config_data, dict):
         return TriggerConfig(**config_data) if config_data else TriggerConfig()
@@ -64,7 +64,7 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
     recovery section.
     """
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: Any) -> None:  # noqa: ANN401
         self._store = store
         # In-memory running execution tracking: execution_id → (trigger_id, pr_number)
         # Mirrors InMemoryTriggerQueryStore._running_executions.
@@ -171,7 +171,7 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         workflow_id: str,
         conditions: list[Any],
         input_mapping: dict[str, str],
-        config: Any,
+        config: Any,  # noqa: ANN401
         installation_id: str,
         created_by: str,
         status: str,

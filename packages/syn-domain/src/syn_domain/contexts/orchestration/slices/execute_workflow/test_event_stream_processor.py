@@ -34,7 +34,7 @@ class MockObservability:
     async def record_observation(
         self,
         session_id: str,
-        observation_type: Any,
+        observation_type: Any,  # noqa: ANN401
         data: dict[str, Any],
         execution_id: str | None = None,
         phase_id: str | None = None,

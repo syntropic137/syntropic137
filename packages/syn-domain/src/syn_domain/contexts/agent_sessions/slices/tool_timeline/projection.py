@@ -29,7 +29,7 @@ class ToolTimelineProjection:
 
     PROJECTION_NAME = "tool_timelines"
 
-    def __init__(self, store: Any):
+    def __init__(self, store: Any):  # noqa: ANN401
         """Initialize with a projection store.
 
         Args:

@@ -126,7 +126,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
     # --- Command handlers ---
 
     @command_handler("RegisterTriggerCommand")
-    def register(self, command: Any) -> None:
+    def register(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.github.domain.events.TriggerRegisteredEvent import (
             TriggerRegisteredEvent,
         )
@@ -157,7 +157,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("PauseTriggerCommand")
-    def pause(self, command: Any) -> None:
+    def pause(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.github.domain.events.TriggerPausedEvent import (
             TriggerPausedEvent,
         )
@@ -174,7 +174,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("ResumeTriggerCommand")
-    def resume(self, command: Any) -> None:
+    def resume(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.github.domain.events.TriggerResumedEvent import (
             TriggerResumedEvent,
         )
@@ -190,7 +190,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("DeleteTriggerCommand")
-    def delete(self, command: Any) -> None:
+    def delete(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.github.domain.events.TriggerDeletedEvent import (
             TriggerDeletedEvent,
         )
@@ -283,7 +283,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         )
 
     @staticmethod
-    def _parse_trigger_config(config_raw: Any) -> TriggerConfig:
+    def _parse_trigger_config(config_raw: Any) -> TriggerConfig:  # noqa: ANN401
         """Parse a config dict into a TriggerConfig, ignoring unknown keys."""
         config_dict = config_raw if isinstance(config_raw, dict) else {}
         if not config_dict:

@@ -28,7 +28,7 @@ class WorkflowListProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workflow_summaries"
     VERSION = 3  # Bumped: added archive support with is_archived field
 
-    def __init__(self, store: Any):
+    def __init__(self, store: Any):  # noqa: ANN401
         """Initialize with a projection store."""
         self._store = store
 

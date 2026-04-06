@@ -41,7 +41,7 @@ def _classify_and_raise(exc: Exception) -> NoReturn:
 
 
 async def complete_request(
-    client: Any,
+    client: Any,  # noqa: ANN401
     messages: list[AgentMessage],
     config: AgentConfig,
     default_model: str,

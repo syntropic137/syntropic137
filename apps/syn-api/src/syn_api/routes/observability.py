@@ -72,7 +72,7 @@ async def get_tool_timeline(
 
 
 async def _get_session_token_metrics(
-    manager: Any, session_id: str
+    manager: Any, session_id: str  # noqa: ANN401
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single session."""
     cost = await manager.session_cost.get_session_cost(session_id)
@@ -92,7 +92,7 @@ async def _get_session_token_metrics(
 
 
 async def _get_execution_token_metrics(
-    manager: Any, execution_id: str
+    manager: Any, execution_id: str  # noqa: ANN401
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single execution."""
     exec_cost = await manager.execution_cost.get_execution_cost(execution_id)

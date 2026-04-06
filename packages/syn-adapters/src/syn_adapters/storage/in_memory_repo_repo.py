@@ -25,7 +25,7 @@ class InMemoryRepoRepository:
         _assert_test_environment()
         self._repos: dict[str, Any] = {}
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: Any) -> None:  # noqa: ANN401
         """Save the repo aggregate and publish uncommitted events."""
         if aggregate.id:
             self._repos[str(aggregate.id)] = aggregate
@@ -40,7 +40,7 @@ class InMemoryRepoRepository:
             publisher = get_event_publisher()
             await publisher.publish(events)
 
-    async def get_by_id(self, repo_id: str) -> Any:
+    async def get_by_id(self, repo_id: str) -> Any:  # noqa: ANN401
         """Get repo by ID."""
         return self._repos.get(repo_id)
 

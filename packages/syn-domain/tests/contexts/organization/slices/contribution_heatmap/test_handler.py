@@ -26,10 +26,10 @@ class _FakeRow:
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> Any:  # noqa: ANN401
         return self._data[key]
 
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:  # noqa: ANN401
         return self._data.get(key, default)
 
 

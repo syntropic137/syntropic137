@@ -45,7 +45,7 @@ class GuardResult:
 
 
 async def _check_max_attempts(
-    rule: Any,
+    rule: Any,  # noqa: ANN401
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -61,7 +61,7 @@ async def _check_max_attempts(
 
 
 async def _check_cooldown(
-    rule: Any,
+    rule: Any,  # noqa: ANN401
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -84,7 +84,7 @@ async def _check_cooldown(
     return None
 
 
-async def _check_daily_limit(rule: Any, store: TriggerQueryStore) -> GuardResult | None:
+async def _check_daily_limit(rule: Any, store: TriggerQueryStore) -> GuardResult | None:  # noqa: ANN401
     """Guard 3: Daily fire limit."""
     today_count = await store.get_daily_fire_count(rule.trigger_id)
     if today_count >= rule.config.daily_limit:
@@ -111,7 +111,7 @@ async def _check_idempotency(
 
 
 async def _check_cross_trigger_cooldown(
-    rule: Any,
+    rule: Any,  # noqa: ANN401
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -132,7 +132,7 @@ async def _check_cross_trigger_cooldown(
 
 
 async def _check_concurrency(
-    rule: Any,
+    rule: Any,  # noqa: ANN401
     pr_number: int | None,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -161,7 +161,7 @@ class SafetyGuards:
 
     async def check_all(
         self,
-        rule: Any,
+        rule: Any,  # noqa: ANN401
         payload: dict[str, Any],
         store: TriggerQueryStore,
     ) -> GuardResult:

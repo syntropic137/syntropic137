@@ -37,7 +37,7 @@ class TriggerQueryStore(ABC):
         workflow_id: str,
         conditions: list[Any],
         input_mapping: dict[str, str],
-        config: Any,
+        config: Any,  # noqa: ANN401
         installation_id: str,
         created_by: str,
         status: str,
@@ -52,7 +52,7 @@ class TriggerQueryStore(ABC):
         ...
 
     @abstractmethod
-    async def get(self, trigger_id: str) -> Any | None:
+    async def get(self, trigger_id: str) -> Any | None:  # noqa: ANN401
         """Get a trigger by ID from the index."""
         ...
 
@@ -139,7 +139,7 @@ class _IndexedTrigger:
         workflow_id: str,
         conditions: list[Any],
         input_mapping: dict[str, str],
-        config: Any,
+        config: Any,  # noqa: ANN401
         installation_id: str,
         created_by: str,
         status: str,
@@ -187,7 +187,7 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         workflow_id: str,
         conditions: list[Any],
         input_mapping: dict[str, str],
-        config: Any,
+        config: Any,  # noqa: ANN401
         installation_id: str,
         created_by: str,
         status: str,

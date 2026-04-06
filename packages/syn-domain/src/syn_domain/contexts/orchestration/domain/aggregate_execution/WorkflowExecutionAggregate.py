@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     )
 
 
-def _evt(event: Any, field: str, default: Any = None) -> Any:
+def _evt(event: Any, field: str, default: Any = None) -> Any:  # noqa: ANN401
     """Get field from event, handling both typed and GenericDomainEvent formats."""
     if hasattr(event, field):
         return getattr(event, field)
@@ -447,51 +447,51 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._status = ExecutionStatus.FAILED
 
     @event_sourcing_handler("PhaseStarted")
-    def on_phase_started(self, event: Any) -> None:
+    def on_phase_started(self, event: Any) -> None:  # noqa: ANN401
         """Apply PhaseStartedEvent."""
         self._current_phase_order = _evt(event, "phase_order", 0)
 
     @event_sourcing_handler("PhaseCompleted")
-    def on_phase_completed(self, _event: Any) -> None:
+    def on_phase_completed(self, _event: Any) -> None:  # noqa: ANN401
         """Apply PhaseCompletedEvent."""
         self._completed_phases += 1
 
     @event_sourcing_handler("WorkspaceProvisionedForPhase")
-    def on_workspace_provisioned_for_phase(self, event: Any) -> None:
+    def on_workspace_provisioned_for_phase(self, event: Any) -> None:  # noqa: ANN401
         """Apply WorkspaceProvisionedForPhaseEvent."""
         self._current_phase_workspace_id = _evt(event, "workspace_id")
 
     @event_sourcing_handler("AgentExecutionCompleted")
-    def on_agent_execution_completed(self, _event: Any) -> None:
+    def on_agent_execution_completed(self, _event: Any) -> None:  # noqa: ANN401
         """Apply AgentExecutionCompletedEvent — no state change needed."""
 
     @event_sourcing_handler("ArtifactsCollectedForPhase")
-    def on_artifacts_collected_for_phase(self, event: Any) -> None:
+    def on_artifacts_collected_for_phase(self, event: Any) -> None:  # noqa: ANN401
         """Apply ArtifactsCollectedForPhaseEvent."""
         self._artifact_ids.extend(_evt(event, "artifact_ids", []))
 
     @event_sourcing_handler("NextPhaseReady")
-    def on_next_phase_ready(self, _event: Any) -> None:
+    def on_next_phase_ready(self, _event: Any) -> None:  # noqa: ANN401
         """Apply NextPhaseReadyEvent — to-do list projection reacts, not aggregate."""
 
     @event_sourcing_handler("ExecutionPaused")
-    def on_execution_paused(self, _event: Any) -> None:
+    def on_execution_paused(self, _event: Any) -> None:  # noqa: ANN401
         """Apply ExecutionPausedEvent."""
         self._status = ExecutionStatus.PAUSED
 
     @event_sourcing_handler("ExecutionResumed")
-    def on_execution_resumed(self, _event: Any) -> None:
+    def on_execution_resumed(self, _event: Any) -> None:  # noqa: ANN401
         """Apply ExecutionResumedEvent."""
         self._status = ExecutionStatus.RUNNING
 
     @event_sourcing_handler("ExecutionCancelled")
-    def on_execution_cancelled(self, event: Any) -> None:
+    def on_execution_cancelled(self, event: Any) -> None:  # noqa: ANN401
         """Apply ExecutionCancelledEvent."""
         self._completed_at = _evt(event, "cancelled_at")
         self._status = ExecutionStatus.CANCELLED
 
     @event_sourcing_handler("WorkflowInterrupted")
-    def on_execution_interrupted(self, event: Any) -> None:
+    def on_execution_interrupted(self, event: Any) -> None:  # noqa: ANN401
         """Apply WorkflowInterruptedEvent."""
         self._completed_at = _evt(event, "interrupted_at")
         self._status = ExecutionStatus.INTERRUPTED

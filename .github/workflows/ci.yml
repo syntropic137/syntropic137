@@ -375,6 +375,10 @@ jobs:
         working-directory: apps/syn-cli-node
         run: pnpm run check:api-drift
 
+      - name: Typed API enforcement
+        working-directory: apps/syn-cli-node
+        run: pnpm run check:untyped-api
+
   #############################################################################
   # SUBMODULE VALIDATION - Ensure submodules are properly referenced
   #############################################################################

@@ -74,7 +74,7 @@ class ProjectionManager:
         self._projections = build_projection_registry(self._store)
         self._initialized = True
 
-    def get_projection(self, name: str) -> Any:
+    def get_projection(self, name: str) -> Any:  # noqa: ANN401
         """Get a projection by name.
 
         Args:
@@ -89,7 +89,7 @@ class ProjectionManager:
         self._ensure_initialized()
         return self._projections[name]
 
-    async def process_event_envelope(self, envelope: Any) -> EventProvenance:
+    async def process_event_envelope(self, envelope: Any) -> EventProvenance:  # noqa: ANN401
         """Process an event envelope from the event store.
 
         This is the ONLY correct way to dispatch events to projections.
@@ -149,7 +149,7 @@ class ProjectionManager:
             await self.dispatch_event(event_type, event)
 
     @property
-    def store(self) -> Any:
+    def store(self) -> Any:  # noqa: ANN401
         """Access the underlying projection store (ProjectionStoreProtocol)."""
         return self._store
 
@@ -220,7 +220,7 @@ class ProjectionManager:
         return self._projections["tool_timeline"]
 
     @property
-    def realtime(self) -> Any:
+    def realtime(self) -> Any:  # noqa: ANN401
         """Get the real-time projection for SSE push."""
         self._ensure_initialized()
         return self._projections["realtime"]

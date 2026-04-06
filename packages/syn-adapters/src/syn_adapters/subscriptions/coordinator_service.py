@@ -55,7 +55,7 @@ class CoordinatorSubscriptionService:
 
     def __init__(
         self,
-        event_store: Any,
+        event_store: Any,  # noqa: ANN401
         projections: list[CheckpointedProjection],
         realtime_projection: RealTimeProjection | None = None,
         checkpoint_store: ProjectionCheckpointStore | None = None,
@@ -166,10 +166,10 @@ class CoordinatorSubscriptionService:
 
 
 def create_coordinator_service(
-    event_store: Any,
-    projection_store: Any,
+    event_store: Any,  # noqa: ANN401
+    projection_store: Any,  # noqa: ANN401
     realtime_projection: RealTimeProjection | None = None,
-    execution_service: Any = None,
+    execution_service: Any = None,  # noqa: ANN401
     checkpoint_store: ProjectionCheckpointStore | None = None,
     pool: asyncpg.Pool | None = None,
 ) -> CoordinatorSubscriptionService:

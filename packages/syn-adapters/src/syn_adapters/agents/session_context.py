@@ -55,7 +55,7 @@ class SessionContext:
             data["metadata"] = self.metadata
         return data
 
-    def with_metadata(self, **kwargs: Any) -> SessionContext:
+    def with_metadata(self, **kwargs: Any) -> SessionContext:  # noqa: ANN401
         """Create new context with additional metadata.
 
         Args:

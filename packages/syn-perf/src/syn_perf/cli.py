@@ -22,7 +22,7 @@ def get_reporter() -> ConsoleReporter:
     return ConsoleReporter()
 
 
-def save_json_if_requested(result: Any, output: Path | None, reporter_type: str) -> None:
+def save_json_if_requested(result: Any, output: Path | None, reporter_type: str) -> None:  # noqa: ANN401
     """Save JSON report if output path provided."""
     if output:
         json_reporter = JSONReporter()

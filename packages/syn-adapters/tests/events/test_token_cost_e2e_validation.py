@@ -293,7 +293,7 @@ class TestCollectorIntegration:
     """
 
     @pytest.fixture
-    def collector_url(self, test_infrastructure: Any) -> str | None:
+    def collector_url(self, test_infrastructure: Any) -> str | None:  # noqa: ANN401
         """Get collector URL from test infrastructure, with reachability check."""
         from urllib.parse import urlparse
 

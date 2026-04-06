@@ -21,7 +21,7 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query impo
 )
 
 
-def _parse_timestamp(value: Any) -> datetime | None:
+def _parse_timestamp(value: Any) -> datetime | None:  # noqa: ANN401
     """Parse a timestamp from string or datetime, returning None on failure."""
     if isinstance(value, datetime):
         return value
@@ -107,7 +107,7 @@ class SessionCostProjection:
     PROJECTION_NAME = "session_cost"
 
     def __init__(
-        self, store: Any, pool: Any | None = None, cost_calculator: CostCalculator | None = None
+        self, store: Any, pool: Any | None = None, cost_calculator: CostCalculator | None = None  # noqa: ANN401
     ):
         """Initialize with a projection store and optional DB pool.
 

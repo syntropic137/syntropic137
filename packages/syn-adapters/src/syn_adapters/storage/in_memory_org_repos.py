@@ -28,7 +28,7 @@ class InMemoryOrganizationRepository:
         _assert_test_environment()
         self._organizations: dict[str, Any] = {}
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: Any) -> None:  # noqa: ANN401
         """Save the organization aggregate and publish uncommitted events.
 
         Publishes events to InMemoryEventPublisher so that
@@ -48,7 +48,7 @@ class InMemoryOrganizationRepository:
             publisher = get_event_publisher()
             await publisher.publish(events)
 
-    async def get_by_id(self, organization_id: str) -> Any:
+    async def get_by_id(self, organization_id: str) -> Any:  # noqa: ANN401
         """Get organization by ID."""
         return self._organizations.get(organization_id)
 
@@ -78,7 +78,7 @@ class InMemorySystemRepository:
         _assert_test_environment()
         self._systems: dict[str, Any] = {}
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: Any) -> None:  # noqa: ANN401
         """Save the system aggregate and publish uncommitted events."""
         if aggregate.id:
             self._systems[str(aggregate.id)] = aggregate
@@ -93,7 +93,7 @@ class InMemorySystemRepository:
             publisher = get_event_publisher()
             await publisher.publish(events)
 
-    async def get_by_id(self, system_id: str) -> Any:
+    async def get_by_id(self, system_id: str) -> Any:  # noqa: ANN401
         """Get system by ID."""
         return self._systems.get(system_id)
 

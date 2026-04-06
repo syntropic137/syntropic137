@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _get_repos_for_installation(
-    projection: Any, installation_id: str
+    projection: Any, installation_id: str  # noqa: ANN401
 ) -> Result[list[Any], GitHubError]:
     """Get repositories for a specific installation."""
     inst = await projection.get(installation_id)
@@ -28,7 +28,7 @@ async def _get_repos_for_installation(
     return Ok(repos)
 
 
-async def _collect_all_repos(projection: Any) -> list[Any]:
+async def _collect_all_repos(projection: Any) -> list[Any]:  # noqa: ANN401
     """Collect all repositories from all active installations."""
     active = await projection.get_all_active()
     repos: list[Any] = []

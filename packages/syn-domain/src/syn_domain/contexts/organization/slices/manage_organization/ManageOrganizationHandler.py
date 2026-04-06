@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class ManageOrganizationHandler:
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Any) -> None:  # noqa: ANN401
         self._repository = repository
 
     async def update(self, command: UpdateOrganizationCommand) -> HandlerResult | None:

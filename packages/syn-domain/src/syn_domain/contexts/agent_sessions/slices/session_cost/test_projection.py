@@ -33,7 +33,7 @@ class MockProjectionStore:
         self,
         projection_name: str,
         filters: dict[str, Any] | None = None,
-        **_kwargs: Any,
+        **_kwargs: Any,  # noqa: ANN401
     ) -> list[dict[str, Any]]:
         """Query data from the store."""
         results = list(self._data.get(projection_name, {}).values())

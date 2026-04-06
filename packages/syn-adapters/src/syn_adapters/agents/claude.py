@@ -139,7 +139,7 @@ class ClaudeAgent(AgentProtocol):
         self._workflow_id = workflow_id
         self._phase_id = phase_id
 
-    def _get_client(self) -> Any:
+    def _get_client(self) -> Any:  # noqa: ANN401
         """Get or create the Anthropic client.
 
         Lazy initialization to avoid import errors when anthropic isn't installed.

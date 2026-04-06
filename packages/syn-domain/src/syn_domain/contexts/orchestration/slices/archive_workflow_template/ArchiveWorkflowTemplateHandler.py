@@ -35,9 +35,9 @@ class ArchiveWorkflowTemplateHandler:
 
     def __init__(
         self,
-        repository: Any,
-        execution_projection: Any,
-        event_publisher: Any = None,
+        repository: Any,  # noqa: ANN401
+        execution_projection: Any,  # noqa: ANN401
+        event_publisher: Any = None,  # noqa: ANN401
     ) -> None:
         self._repository = repository
         self._execution_projection = execution_projection

@@ -47,7 +47,7 @@ class EventProvenance:
     event_type: str
 
     @classmethod
-    def from_envelope(cls, envelope: Any) -> EventProvenance:
+    def from_envelope(cls, envelope: Any) -> EventProvenance:  # noqa: ANN401
         """Extract provenance from an event store envelope."""
         metadata = getattr(envelope, "metadata", None)
         if metadata is None:

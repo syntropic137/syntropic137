@@ -91,7 +91,7 @@ class BaseBenchmark(ABC):
         )
 
     @abstractmethod
-    async def run(self, **kwargs: Any) -> BenchmarkResult:
+    async def run(self, **kwargs: Any) -> BenchmarkResult:  # noqa: ANN401
         """Run the benchmark.
 
         Returns:

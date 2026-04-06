@@ -215,7 +215,7 @@ async def get_state(
 # =============================================================================
 
 
-async def _handle_control_result(result: Any, _action: str = "") -> ControlResponse:
+async def _handle_control_result(result: Any, _action: str = "") -> ControlResponse:  # noqa: ANN401
     """Convert control result to HTTP response."""
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)

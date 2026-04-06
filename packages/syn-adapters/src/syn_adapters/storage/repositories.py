@@ -44,7 +44,7 @@ class RepositoryAdapter[TAggregate]:
     but our domain expects `get_by_id()`. This adapter provides the mapping.
     """
 
-    def __init__(self, sdk_repository: Any) -> None:
+    def __init__(self, sdk_repository: Any) -> None:  # noqa: ANN401
         """Initialize with an SDK EventStoreRepository."""
         self._repo = sdk_repository
 
@@ -62,7 +62,7 @@ class RepositoryAdapter[TAggregate]:
 
     # Allow access to underlying repository if needed
     @property
-    def sdk_repository(self) -> Any:
+    def sdk_repository(self) -> Any:  # noqa: ANN401
         """Get the underlying SDK repository."""
         return self._repo
 
@@ -78,7 +78,7 @@ _system_repository: RepositoryAdapter[Any] | None = None
 _repo_repository: RepositoryAdapter[Any] | None = None
 
 
-def _get_repository_factory() -> Any:
+def _get_repository_factory() -> Any:  # noqa: ANN401
     """Get a RepositoryFactory with the appropriate EventStoreClient."""
     from event_sourcing import RepositoryFactory
 
@@ -89,7 +89,7 @@ def _get_repository_factory() -> Any:
 
 
 def get_workflow_repository() -> (
-    Any
+    Any  # noqa: ANN401
 ):  # RepositoryAdapter[WorkflowTemplateAggregate] or InMemoryWorkflowRepository
     """Get a WorkflowTemplateAggregate repository.
 
@@ -131,7 +131,7 @@ def get_workflow_repository() -> (
 
 
 def get_workflow_execution_repository() -> (
-    Any
+    Any  # noqa: ANN401
 ):  # RepositoryAdapter[WorkflowExecutionAggregate] or in-memory
     """Get a WorkflowExecutionAggregate repository.
 
@@ -172,7 +172,7 @@ def get_workflow_execution_repository() -> (
 
 
 def get_session_repository() -> (
-    Any
+    Any  # noqa: ANN401
 ):  # RepositoryAdapter[AgentSessionAggregate] or InMemorySessionRepository
     """Get an AgentSessionAggregate repository.
 
@@ -212,7 +212,7 @@ def get_session_repository() -> (
 
 
 def get_artifact_repository() -> (
-    Any
+    Any  # noqa: ANN401
 ):  # RepositoryAdapter[ArtifactAggregate] or InMemoryArtifactRepository
     """Get an ArtifactAggregate repository.
 
@@ -251,7 +251,7 @@ def get_artifact_repository() -> (
     return _artifact_repository
 
 
-def get_trigger_repository() -> Any:
+def get_trigger_repository() -> Any:  # noqa: ANN401
     """Get a TriggerRuleAggregate repository.
 
     For TEST: Returns in-memory query store (backward-compatible)
@@ -289,7 +289,7 @@ def get_trigger_repository() -> Any:
     return _trigger_repository
 
 
-def get_organization_repository() -> Any:
+def get_organization_repository() -> Any:  # noqa: ANN401
     """Get an OrganizationAggregate repository.
 
     For TEST: Returns in-memory repository
@@ -327,7 +327,7 @@ def get_organization_repository() -> Any:
     return _organization_repository
 
 
-def get_system_repository() -> Any:
+def get_system_repository() -> Any:  # noqa: ANN401
     """Get a SystemAggregate repository.
 
     For TEST: Returns in-memory repository
@@ -365,7 +365,7 @@ def get_system_repository() -> Any:
     return _system_repository
 
 
-def get_repo_repository() -> Any:
+def get_repo_repository() -> Any:  # noqa: ANN401
     """Get a RepoAggregate repository.
 
     For TEST: Returns in-memory repository

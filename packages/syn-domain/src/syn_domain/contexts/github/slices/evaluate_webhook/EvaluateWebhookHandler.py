@@ -54,7 +54,7 @@ class EvaluateWebhookHandler:
     def __init__(
         self,
         store: TriggerQueryStore,
-        repository: Any,
+        repository: Any,  # noqa: ANN401
         debouncer: TriggerDebouncer | None = None,
         on_fire: OnFireCallback | None = None,
     ) -> None:
@@ -89,7 +89,7 @@ class EvaluateWebhookHandler:
 
     async def _evaluate_rule(
         self,
-        rule: Any,
+        rule: Any,  # noqa: ANN401
         event: str,
         repository: str,
         installation_id: str,
@@ -126,7 +126,7 @@ class EvaluateWebhookHandler:
 
     async def _guarded_evaluate(
         self,
-        rule: Any,
+        rule: Any,  # noqa: ANN401
         event: str,
         repository: str,
         installation_id: str,
@@ -160,8 +160,8 @@ class EvaluateWebhookHandler:
 
     async def _handle_guard_block(
         self,
-        rule: Any,
-        guard_result: Any,
+        rule: Any,  # noqa: ANN401
+        guard_result: Any,  # noqa: ANN401
         event: str,
         repository: str,
         installation_id: str,
@@ -190,7 +190,7 @@ class EvaluateWebhookHandler:
 
     async def _fire_trigger(
         self,
-        rule: Any,
+        rule: Any,  # noqa: ANN401
         event: str,
         repository: str,
         payload: dict[str, Any],
@@ -231,7 +231,7 @@ class EvaluateWebhookHandler:
 
     async def _record_block(
         self,
-        rule: Any,
+        rule: Any,  # noqa: ANN401
         guard_name: str,
         reason: str,
         event: str,
@@ -262,7 +262,7 @@ class EvaluateWebhookHandler:
 
     async def _schedule_deferred(
         self,
-        rule: Any,
+        rule: Any,  # noqa: ANN401
         event: str,
         repository: str,
         installation_id: str,

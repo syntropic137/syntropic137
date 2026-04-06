@@ -118,7 +118,7 @@ def list_models(
 
 def list_aliases(
     aliases: dict[str, str],
-    resolve_fn: Any,
+    resolve_fn: Any,  # noqa: ANN401
 ) -> dict[str, str]:
     """Get all registered aliases and their resolved API names.
 

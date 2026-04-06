@@ -23,7 +23,7 @@ from syn_shared.events import (
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
 
 
-def _parse_row_data(row: Any) -> dict[str, Any]:
+def _parse_row_data(row: Any) -> dict[str, Any]:  # noqa: ANN401
     """Extract and decode the data field from a database row."""
     data = row["data"]
     if isinstance(data, str):
@@ -41,7 +41,7 @@ def _is_subagent_tool_event(
     return tool_name in subagent_tool_names
 
 
-def _build_standard_operation(row: Any, data: dict[str, Any], event_type: str) -> Any:
+def _build_standard_operation(row: Any, data: dict[str, Any], event_type: str) -> Any:  # noqa: ANN401
     """Build a ToolOperation for a standard tool event."""
     from syn_adapters.projections.session_tools import ToolOperation
 
@@ -63,10 +63,10 @@ def _build_standard_operation(row: Any, data: dict[str, Any], event_type: str) -
 
 
 def row_to_operation(
-    row: Any,
+    row: Any,  # noqa: ANN401
     subagent_tool_names: set[str],
     git_event_types: tuple[str, ...],
-) -> Any | None:
+) -> Any | None:  # noqa: ANN401
     """Convert a database row to a ToolOperation.
 
     Dispatches to specialized handlers based on event type.

@@ -12,7 +12,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser i
 )
 
 
-def _hook_jsonl(event_type: str = "tool_execution_started", **extra: Any) -> str:
+def _hook_jsonl(event_type: str = "tool_execution_started", **extra: Any) -> str:  # noqa: ANN401
     """Build a valid hook JSONL line."""
     event: dict[str, Any] = {"event_type": event_type, "session_id": "s-1", "timestamp": "t1"}
     event.update(extra)

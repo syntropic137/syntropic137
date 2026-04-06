@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class ManageRepoHandler:
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Any) -> None:  # noqa: ANN401
         self._repository = repository
 
     async def assign_to_system(self, command: AssignRepoToSystemCommand) -> HandlerResult | None:

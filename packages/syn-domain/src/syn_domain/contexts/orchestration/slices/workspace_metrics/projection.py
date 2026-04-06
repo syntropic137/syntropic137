@@ -85,7 +85,7 @@ class WorkspaceMetricsProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workspace_metrics"
     VERSION = 2  # Bumped: migrated to AutoDispatchProjection, renamed on_command_executed
 
-    def __init__(self, store: Any):  # Using Any to avoid circular import
+    def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
 
         Args:

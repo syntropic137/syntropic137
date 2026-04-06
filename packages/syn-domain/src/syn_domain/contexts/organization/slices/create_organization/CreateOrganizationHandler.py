@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class CreateOrganizationHandler:
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Any) -> None:  # noqa: ANN401
         self._repository = repository
 
     async def handle(self, command: CreateOrganizationCommand) -> OrganizationAggregate:

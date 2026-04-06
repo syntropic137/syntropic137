@@ -27,7 +27,7 @@ class RegisterTriggerHandler:
     def __init__(
         self,
         store: TriggerQueryStore,
-        repository: Any,
+        repository: Any,  # noqa: ANN401
     ) -> None:
         self._store = store
         self._repository = repository

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class RegisterRepoHandler:
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Any) -> None:  # noqa: ANN401
         self._repository = repository
 
     async def handle(self, command: RegisterRepoCommand) -> RepoAggregate:
