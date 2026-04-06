@@ -463,10 +463,7 @@ async def deregister_repo(
     Cross-context guard: rejects if active trigger rules reference this repo.
     After successful deregister, releases the repo claim to allow re-registration.
     """
-    from syn_adapters.storage.repositories import (
-        get_repo_claim_repository,
-        get_repo_repository,
-    )
+    from syn_adapters.storage.repositories import get_repo_repository
     from syn_domain.contexts.organization.domain.commands.DeregisterRepoCommand import (
         DeregisterRepoCommand,
     )
@@ -508,35 +505,28 @@ async def deregister_repo(
         error_enum = _classify_repo_error(result.error)
         return Err(error_enum, message=result.error)
 
-    # Release the repo claim to allow re-registration
-    if repo_org_id and repo_provider and repo_full_name:
-        try:
-            await _release_repo_claim(
-                repo_id=repo_id,
-                organization_id=repo_org_id,
-                provider=repo_provider,
-                full_name=repo_full_name,
-                claim_repository=get_repo_claim_repository(),
-            )
-        except Exception:
-            logger.warning(
-                "Failed to release repo claim for %s — claim may be stale",
-                repo_id,
-                exc_info=True,
-            )
+    # Release the repo claim to allow re-registration (best-effort)
+    await _try_release_repo_claim(repo_id, repo_org_id, repo_provider, repo_full_name)
 
     await sync_published_events_to_projections()
     return Ok(None)
 
 
-async def _release_repo_claim(
+async def _try_release_repo_claim(
     repo_id: str,
-    organization_id: str,
-    provider: str,
-    full_name: str,
-    claim_repository: Any,
+    organization_id: str | None,
+    provider: str | None,
+    full_name: str | None,
 ) -> None:
-    """Release a repo claim after deregistration."""
+    """Best-effort release of a repo claim after deregistration.
+
+    Silently handles missing repo details and any errors — deregister
+    should not fail because claim release failed.
+    """
+    if not (organization_id and provider and full_name):
+        return
+
+    from syn_adapters.storage.repositories import get_repo_claim_repository
     from syn_domain.contexts.organization.domain.aggregate_repo_claim.claim_id import (
         compute_repo_claim_id,
     )
@@ -544,17 +534,20 @@ async def _release_repo_claim(
         ReleaseRepoClaimCommand,
     )
 
-    claim_id = compute_repo_claim_id(organization_id, provider, full_name)
-    existing = await claim_repository.get_by_id(claim_id)
-    if existing is None or existing.is_released:
-        return
-
-    release_command = ReleaseRepoClaimCommand(
-        claim_id=claim_id,
-        repo_id=repo_id,
-    )
-    existing.release(release_command)
-    await claim_repository.save(existing)
+    try:
+        claim_repo = get_repo_claim_repository()
+        claim_id = compute_repo_claim_id(organization_id, provider, full_name)
+        existing = await claim_repo.get_by_id(claim_id)
+        if existing is None or existing.is_released:
+            return
+        existing.release(ReleaseRepoClaimCommand(claim_id=claim_id, repo_id=repo_id))
+        await claim_repo.save(existing)
+    except Exception:
+        logger.warning(
+            "Failed to release repo claim for %s — claim may be stale",
+            repo_id,
+            exc_info=True,
+        )
 
 
 def _classify_repo_error(error_msg: str) -> RepoError:
