@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
 from enum import StrEnum
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -179,6 +179,152 @@ class ConfigError(StrEnum):
     """Errors returned by config operations."""
 
     LOAD_FAILED = "load_failed"
+
+
+# ---------------------------------------------------------------------------
+# Request models — Pydantic schemas for API request bodies
+# ---------------------------------------------------------------------------
+
+
+class CreateOrganizationRequest(BaseModel):
+    """Request body for creating a new organization."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    slug: str
+    created_by: str = "api"
+
+
+class UpdateOrganizationRequest(BaseModel):
+    """Request body for updating an organization."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str | None = None
+    slug: str | None = None
+
+
+class RegisterRepoRequest(BaseModel):
+    """Request body for registering a new repo."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    organization_id: str
+    full_name: str
+    provider: str = "github"
+    owner: str = ""
+    default_branch: str = "main"
+    provider_repo_id: str = ""
+    installation_id: str = ""
+    is_private: bool = False
+    created_by: str = "api"
+
+
+class UpdateRepoRequest(BaseModel):
+    """Request body for updating a repo."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    default_branch: str | None = None
+    is_private: bool | None = None
+    installation_id: str | None = None
+    updated_by: str = "api"
+
+
+class AssignRepoToSystemRequest(BaseModel):
+    """Request body for assigning a repo to a system."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    system_id: str
+
+
+class CreateSystemRequest(BaseModel):
+    """Request body for creating a new system."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    organization_id: str
+    name: str
+    description: str = ""
+    created_by: str = "api"
+
+
+class UpdateSystemRequest(BaseModel):
+    """Request body for updating a system."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str | None = None
+    description: str | None = None
+
+
+class RegisterTriggerRequest(BaseModel):
+    """Request body for registering a new trigger rule."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    event: str
+    repository: str = ""
+    workflow_id: str = ""
+    conditions: list[dict[str, object]] | None = None
+    installation_id: str = ""
+    input_mapping: dict[str, str] | None = None
+    config: dict[str, object] | None = None
+    created_by: str = "api"
+
+
+class EnablePresetRequest(BaseModel):
+    """Request body for enabling a trigger preset."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repository: str
+    installation_id: str = ""
+    created_by: str = "api"
+    workflow_id: str = ""
+
+
+class UpdateTriggerRequest(BaseModel):
+    """Request body for updating (pause/resume) a trigger."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    action: Literal["pause", "resume"]
+    reason: str | None = None
+    paused_by: str = "api"
+    resumed_by: str = "api"
+
+
+class ChatMessage(BaseModel):
+    """A single message in a chat conversation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    role: str
+    content: str
+
+
+class AgentTestRequest(BaseModel):
+    """Request body for testing an agent provider."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: str
+    prompt: str
+    model: str | None = None
+
+
+class AgentChatRequest(BaseModel):
+    """Request body for a stateless chat completion."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: str
+    messages: list[ChatMessage]
+    model: str | None = None
 
 
 # ---------------------------------------------------------------------------

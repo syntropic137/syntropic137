@@ -2472,9 +2472,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/RegisterTriggerRequest"
               }
             }
           }
@@ -2594,7 +2592,7 @@
           "triggers"
         ],
         "summary": "Update Trigger Endpoint",
-        "description": "Update trigger (pause/resume).",
+        "description": "Update trigger (pause/resume).\n\nReturns the full trigger detail with the authoritative status from the\ncommand result, not the projection. This avoids eventual consistency\nstaleness \u2014 the caller sees the correct status immediately.",
         "operationId": "update_trigger_endpoint_triggers__trigger_id__patch",
         "parameters": [
           {
@@ -2612,9 +2610,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/UpdateTriggerRequest"
               }
             }
           }
@@ -2625,7 +2621,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TriggerActionResponse"
+                  "$ref": "#/components/schemas/TriggerDetail"
                 }
               }
             }
@@ -2761,9 +2757,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/EnablePresetRequest"
               }
             }
           }
@@ -2977,9 +2971,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
+                "$ref": "#/components/schemas/CreateOrganizationRequest"
               }
             }
           },
@@ -3074,9 +3066,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/UpdateOrganizationRequest"
               }
             }
           }
@@ -3159,9 +3149,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/CreateSystemRequest"
               }
             }
           }
@@ -3303,9 +3291,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/UpdateSystemRequest"
               }
             }
           }
@@ -3643,9 +3629,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/RegisterRepoRequest"
               }
             }
           }
@@ -3829,9 +3813,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/UpdateRepoRequest"
               }
             }
           }
@@ -3925,9 +3907,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/AssignRepoToSystemRequest"
               }
             }
           }
@@ -4488,9 +4468,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
+                "$ref": "#/components/schemas/AgentTestRequest"
               }
             }
           },
@@ -4532,9 +4510,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
+                "$ref": "#/components/schemas/AgentChatRequest"
               }
             }
           },
@@ -4611,6 +4587,40 @@
   },
   "components": {
     "schemas": {
+      "AgentChatRequest": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "messages"
+        ],
+        "title": "AgentChatRequest",
+        "description": "Request body for a stateless chat completion."
+      },
       "AgentProviderInfo": {
         "properties": {
           "provider": {
@@ -4660,6 +4670,37 @@
         ],
         "title": "AgentProviderListResponse",
         "description": "Paginated list of agent providers."
+      },
+      "AgentTestRequest": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "prompt"
+        ],
+        "title": "AgentTestRequest",
+        "description": "Request body for testing an agent provider."
       },
       "AgentTestResult": {
         "properties": {
@@ -4963,6 +5004,21 @@
         "title": "ArtifactSummaryResponse",
         "description": "Summary of an artifact."
       },
+      "AssignRepoToSystemRequest": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "system_id"
+        ],
+        "title": "AssignRepoToSystemRequest",
+        "description": "Request body for assigning a repo to a system."
+      },
       "Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post": {
         "properties": {
           "file": {
@@ -4994,6 +5050,26 @@
         "type": "object",
         "title": "CancelRequest",
         "description": "Request to cancel an execution."
+      },
+      "ChatMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "description": "A single message in a chat conversation."
       },
       "ContributionHeatmapResponse": {
         "properties": {
@@ -5469,6 +5545,61 @@
         ],
         "title": "CreateArtifactResponse"
       },
+      "CreateOrganizationRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "slug"
+        ],
+        "title": "CreateOrganizationRequest",
+        "description": "Request body for creating a new organization."
+      },
+      "CreateSystemRequest": {
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "organization_id",
+          "name"
+        ],
+        "title": "CreateSystemRequest",
+        "description": "Request body for creating a new system."
+      },
       "CreateWorkflowRequest": {
         "properties": {
           "id": {
@@ -5614,6 +5745,36 @@
           "status"
         ],
         "title": "DeleteWorkflowResponse"
+      },
+      "EnablePresetRequest": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id",
+            "default": ""
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repository"
+        ],
+        "title": "EnablePresetRequest",
+        "description": "Request body for enabling a trigger preset."
       },
       "EventListResponse": {
         "properties": {
@@ -7350,6 +7511,142 @@
           "operation_type"
         ],
         "title": "PhaseOperationInfo"
+      },
+      "RegisterRepoRequest": {
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "default": "github"
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner",
+            "default": ""
+          },
+          "default_branch": {
+            "type": "string",
+            "title": "Default Branch",
+            "default": "main"
+          },
+          "provider_repo_id": {
+            "type": "string",
+            "title": "Provider Repo Id",
+            "default": ""
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id",
+            "default": ""
+          },
+          "is_private": {
+            "type": "boolean",
+            "title": "Is Private",
+            "default": false
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "organization_id",
+          "full_name"
+        ],
+        "title": "RegisterRepoRequest",
+        "description": "Request body for registering a new repo."
+      },
+      "RegisterTriggerRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository",
+            "default": ""
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id",
+            "default": ""
+          },
+          "conditions": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions"
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id",
+            "default": ""
+          },
+          "input_mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Mapping"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "event"
+        ],
+        "title": "RegisterTriggerRequest",
+        "description": "Request body for registering a new trigger rule."
       },
       "RepoActionResponse": {
         "properties": {
@@ -9436,6 +9733,36 @@
         "type": "object",
         "title": "UpdateArtifactRequest"
       },
+      "UpdateOrganizationRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateOrganizationRequest",
+        "description": "Request body for updating an organization."
+      },
       "UpdatePhasePromptRequest": {
         "properties": {
           "prompt_template": {
@@ -9509,6 +9836,122 @@
           "status"
         ],
         "title": "UpdatePhaseResponse"
+      },
+      "UpdateRepoRequest": {
+        "properties": {
+          "default_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Branch"
+          },
+          "is_private": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Private"
+          },
+          "installation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Id"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateRepoRequest",
+        "description": "Request body for updating a repo."
+      },
+      "UpdateSystemRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateSystemRequest",
+        "description": "Request body for updating a system."
+      },
+      "UpdateTriggerRequest": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "pause",
+              "resume"
+            ],
+            "title": "Action"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "paused_by": {
+            "type": "string",
+            "title": "Paused By",
+            "default": "api"
+          },
+          "resumed_by": {
+            "type": "string",
+            "title": "Resumed By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "UpdateTriggerRequest",
+        "description": "Request body for updating (pause/resume) a trigger."
       },
       "UploadArtifactResponse": {
         "properties": {
@@ -9905,83 +10348,5 @@
         "description": "Cost summary for a session."
       }
     }
-  },
-  "tags": [
-    {
-      "name": "agents",
-      "description": ""
-    },
-    {
-      "name": "artifacts",
-      "description": "Create, upload, and retrieve artifacts produced by agent sessions"
-    },
-    {
-      "name": "control",
-      "description": "Pause, resume, cancel, and inject context into running executions"
-    },
-    {
-      "name": "conversations",
-      "description": "Retrieve conversation logs and metadata"
-    },
-    {
-      "name": "costs",
-      "description": "Track token costs per session and execution"
-    },
-    {
-      "name": "events",
-      "description": "Query session events, timelines, and tool usage"
-    },
-    {
-      "name": "execution",
-      "description": "Execute workflows and monitor active executions"
-    },
-    {
-      "name": "executions",
-      "description": "Query execution records and details"
-    },
-    {
-      "name": "insights",
-      "description": ""
-    },
-    {
-      "name": "metrics",
-      "description": "System-wide metrics and health data"
-    },
-    {
-      "name": "observability",
-      "description": "Token metrics and tool timelines for sessions"
-    },
-    {
-      "name": "organizations",
-      "description": ""
-    },
-    {
-      "name": "repos",
-      "description": ""
-    },
-    {
-      "name": "sessions",
-      "description": "List and inspect agent sessions"
-    },
-    {
-      "name": "sse",
-      "description": ""
-    },
-    {
-      "name": "systems",
-      "description": ""
-    },
-    {
-      "name": "triggers",
-      "description": "Manage GitHub and webhook triggers for workflow automation"
-    },
-    {
-      "name": "webhooks",
-      "description": "Incoming webhook endpoints (GitHub events)"
-    },
-    {
-      "name": "workflows",
-      "description": "Manage workflow definitions and view run history"
-    }
-  ]
+  }
 }
