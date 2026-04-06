@@ -83,7 +83,7 @@ async def list_artifacts(
     session_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[ArtifactSummary], ArtifactError]:
     """List artifacts, optionally filtered by workflow or session.
 
@@ -160,7 +160,7 @@ def _parse_artifact_created_at(created_at: str | datetime | None) -> datetime | 
 async def get_artifact(
     artifact_id: str,
     include_content: bool = False,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ArtifactDetail, ArtifactError]:
     """Get detailed artifact information, optionally with content.
 
@@ -216,9 +216,9 @@ async def create_artifact(
     title: str,
     content: str,
     phase_id: str | None = None,
-    session_id: str | None = None,  # noqa: ARG001
-    content_type: str = "text/markdown",  # noqa: ARG001
-    auth: AuthContext | None = None,  # noqa: ARG001
+    session_id: str | None = None,
+    content_type: str = "text/markdown",
+    auth: AuthContext | None = None,
 ) -> Result[str, ArtifactError]:
     """Create a new artifact.
 
@@ -280,9 +280,9 @@ async def create_artifact(
 async def upload_artifact(
     artifact_id: str,
     data: bytes,
-    filename: str,  # noqa: ARG001
+    filename: str,
     content_type: str = "application/octet-stream",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[str, ArtifactError]:
     """Upload binary content for an existing artifact.
 
@@ -321,7 +321,7 @@ async def update_artifact(
     title: str | None = None,
     metadata: dict[str, Any] | None = None,
     is_primary_deliverable: bool | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, ArtifactError]:
     """Update mutable metadata of an artifact."""
     await ensure_connected()
@@ -358,7 +358,7 @@ async def update_artifact(
 async def delete_artifact(
     artifact_id: str,
     deleted_by: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, ArtifactError]:
     """Soft-delete an artifact."""
     await ensure_connected()

@@ -182,7 +182,7 @@ async def copy_files_to_workspace(
     provider: WorkspaceDockerProvider,
     handle: IsolationHandle,
     files: list[tuple[str, bytes]],
-    base_path: str = "/workspace",  # noqa: ARG001 - interface param
+    base_path: str = "/workspace",
 ) -> None:
     """Copy files into workspace.
 
@@ -203,7 +203,7 @@ async def copy_files_to_workspace(
 async def copy_files_from_workspace(
     handle: IsolationHandle,
     patterns: list[str],
-    base_path: str = "/workspace",  # noqa: ARG001 - used for container path mapping
+    base_path: str = "/workspace",
 ) -> list[tuple[str, bytes]]:
     """Copy files from workspace via mounted volume.
 

@@ -158,7 +158,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("UnassignRepoFromSystemCommand")
-    def unassign_from_system(self, command: Any) -> None:  # noqa: ANN401, ARG002
+    def unassign_from_system(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.organization.domain.events.RepoUnassignedFromSystemEvent import (
             RepoUnassignedFromSystemEvent,
         )

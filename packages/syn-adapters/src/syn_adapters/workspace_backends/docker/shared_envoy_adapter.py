@@ -57,8 +57,8 @@ class SharedEnvoyAdapter:
 
     async def start(
         self,
-        config: SidecarConfig,  # noqa: ARG002
-        isolation_handle: IsolationHandle,  # noqa: ARG002
+        config: SidecarConfig,
+        isolation_handle: IsolationHandle,
     ) -> SidecarHandle:
         """Return a handle pointing to the shared Envoy proxy.
 
@@ -99,7 +99,7 @@ class SharedEnvoyAdapter:
         Phase 2: Will register per-execution credentials in Redis with TTL.
         """
 
-    async def health_check(self, handle: SidecarHandle) -> bool:  # noqa: ARG002
+    async def health_check(self, handle: SidecarHandle) -> bool:
         """Check Envoy admin /ready endpoint."""
         try:
             proc = await asyncio.create_subprocess_exec(

@@ -221,7 +221,7 @@ async def list_(
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
@@ -262,7 +262,7 @@ async def list_(
 
 async def get(
     execution_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ExecutionDetail, ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
@@ -305,7 +305,7 @@ async def get(
 
 async def get_detail(
     execution_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ExecutionDetailFull, ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
@@ -344,7 +344,7 @@ async def get_detail(
 
 async def list_active(
     limit: int = 50,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     """List currently running or paused executions."""
     await ensure_connected()

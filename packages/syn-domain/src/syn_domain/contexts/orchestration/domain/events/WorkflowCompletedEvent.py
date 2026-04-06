@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
-from decimal import Decimal  # noqa: TC003 - needed at runtime for Pydantic
+from datetime import datetime
+from decimal import Decimal
 
 from event_sourcing import DomainEvent, event
 

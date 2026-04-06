@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator  # noqa: TC003 - used at runtime
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003 - used at runtime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:

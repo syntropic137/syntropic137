@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
+from datetime import datetime
 from typing import Any
 
 from event_sourcing import DomainEvent, event
@@ -36,4 +36,4 @@ class WorkspaceCommandExecutedEvent(DomainEvent):
     executed_at: datetime
 
     # Metadata
-    metadata: dict[str, Any] = {}  # noqa: RUF012
+    metadata: dict[str, Any] = {}

@@ -5,7 +5,7 @@ from __future__ import annotations
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.agent_sessions._shared.value_objects import SessionStatus  # noqa: TC001
+from syn_domain.contexts.agent_sessions._shared.value_objects import SessionStatus
 
 
 @command("CompleteSession", "Marks an agent session as completed")

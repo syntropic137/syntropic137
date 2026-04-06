@@ -36,7 +36,7 @@ import syn_domain.contexts.orchestration.slices.workflow_phase_metrics.projectio
 import syn_domain.contexts.orchestration.slices.workspace_metrics.projection
 import syn_domain.contexts.organization.slices.repo_correlation.projection
 import syn_domain.contexts.organization.slices.repo_cost.projection
-import syn_domain.contexts.organization.slices.repo_health.projection  # noqa: F401
+import syn_domain.contexts.organization.slices.repo_health.projection
 
 
 def _camel_to_snake(name: str) -> str:

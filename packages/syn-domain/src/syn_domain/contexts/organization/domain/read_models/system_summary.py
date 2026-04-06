@@ -6,7 +6,7 @@ Represents the current state of a system, projected from events.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime  # noqa: TC003 - needed for runtime type annotations
+from datetime import datetime
 
 
 @dataclass

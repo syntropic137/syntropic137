@@ -29,7 +29,7 @@ class GetGlobalCostHandler:
         self._store = store
         self._repo_projection = repo_projection
 
-    async def handle(self, query: GetGlobalCostQuery) -> SystemCost:  # noqa: ARG002
+    async def handle(self, query: GetGlobalCostQuery) -> SystemCost:
         """Handle GetGlobalCostQuery."""
         repos = await self._repo_projection.list_all()
 

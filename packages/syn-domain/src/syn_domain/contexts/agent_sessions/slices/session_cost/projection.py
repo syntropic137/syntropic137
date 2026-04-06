@@ -108,9 +108,9 @@ class SessionCostProjection:
 
     def __init__(
         self,
-        store: Any,
-        pool: Any | None = None,
-        cost_calculator: CostCalculator | None = None,  # noqa: ANN401
+        store: Any,  # noqa: ANN401
+        pool: Any | None = None,  # noqa: ANN401
+        cost_calculator: CostCalculator | None = None,
     ):
         """Initialize with a projection store and optional DB pool.
 

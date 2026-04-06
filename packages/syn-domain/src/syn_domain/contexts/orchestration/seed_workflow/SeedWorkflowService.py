@@ -17,7 +17,7 @@ becomes ``prompt_template``) via ``WorkflowDefinition.from_file()``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path  # noqa: TC003 - needed at runtime for file operations
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import (

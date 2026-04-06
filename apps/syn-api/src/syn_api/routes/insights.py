@@ -6,7 +6,7 @@ Provides global overview, cost breakdown, and contribution heatmap queries.
 from __future__ import annotations
 
 import logging
-from datetime import date  # noqa: TC003 — needed at runtime for FastAPI Query params
+from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Query
@@ -35,7 +35,7 @@ router = APIRouter(prefix="/insights", tags=["insights"])
 
 
 async def get_global_overview(
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> dict[str, Any]:
     """Get global overview of all systems and repos."""
     from syn_adapters.projection_stores import get_projection_store
@@ -114,7 +114,7 @@ def _aggregate_costs(costs: list[Any]) -> dict[str, Any]:
 
 async def get_global_cost(
     system_id: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> dict[str, Any]:
     """Get global cost breakdown across all executions.
 
@@ -156,7 +156,7 @@ async def get_contribution_heatmap(
     start_date: date | None = None,
     end_date: date | None = None,
     metric: str = "sessions",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> dict[str, Any]:
     """Get daily contribution heatmap data."""
     from syn_adapters.projection_stores import get_projection_store

@@ -9,7 +9,7 @@ Event IDs are generated from content hashes to enable:
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime  # noqa: TC003 - used in function signatures
+from datetime import datetime
 
 
 def generate_event_id(

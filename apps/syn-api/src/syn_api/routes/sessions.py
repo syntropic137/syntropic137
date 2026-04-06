@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import (
-    datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
+    datetime,
 )
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -129,7 +129,7 @@ async def list_sessions(
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[SessionSummary], SessionError]:
     """List agent sessions, optionally filtered.
 
@@ -176,7 +176,7 @@ async def start_session(
     phase_id: str | None = None,
     execution_id: str | None = None,
     agent_type: str = "claude",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[str, SessionError]:
     """Start a new agent session.
 
@@ -218,7 +218,7 @@ async def start_session(
 
 async def complete_session(
     session_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, SessionError]:
     """Complete an agent session.
 
@@ -275,10 +275,10 @@ async def _load_tool_operations(manager: Any, session_id: str) -> list[ToolOpera
 
 
 async def _load_cost_data(
-    manager: Any,
+    manager: Any,  # noqa: ANN401
     session_id: str,
     fallback_tokens: int,
-    fallback_cost: Decimal,  # noqa: ANN401
+    fallback_cost: Decimal,
 ) -> _CostData:
     """Load cost data for a session from the projection."""
     try:
@@ -306,7 +306,7 @@ async def _load_cost_data(
 
 async def get_session(
     session_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[SessionDetail, SessionError]:
     """Get detailed information about a session, including tool operations and costs.
 

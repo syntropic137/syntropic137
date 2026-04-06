@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path  # noqa: TC003 - used at runtime in fixtures
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient

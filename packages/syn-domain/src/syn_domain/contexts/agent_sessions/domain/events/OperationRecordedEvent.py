@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
+from datetime import datetime
 from typing import Any
 
 from event_sourcing import DomainEvent, event
 
-from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType  # noqa: TC001
+from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
 
 
 @event("OperationRecorded", "v2")
@@ -54,4 +54,4 @@ class OperationRecordedEvent(DomainEvent):
     thinking_content: str | None = None  # Extended thinking (truncated)
 
     # Generic metadata
-    metadata: dict[str, Any] = {}  # noqa: RUF012
+    metadata: dict[str, Any] = {}

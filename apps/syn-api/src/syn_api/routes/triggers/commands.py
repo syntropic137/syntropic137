@@ -66,7 +66,7 @@ async def register_trigger(
     input_mapping: dict[str, str] | None = None,
     config: dict | None = None,
     created_by: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[str, TriggerError]:
     """Register a new GitHub event trigger for a workflow."""
     from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
@@ -164,7 +164,7 @@ async def enable_preset(
     installation_id: str = "",
     created_by: str = "system",
     workflow_id: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[str, TriggerError]:
     """Enable a built-in trigger preset for a repository."""
     from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
@@ -213,7 +213,7 @@ async def pause_trigger(
     trigger_id: str,
     reason: str | None = None,
     paused_by: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, TriggerError]:
     """Pause an active trigger."""
     from syn_domain.contexts.github.domain.commands.PauseTriggerCommand import PauseTriggerCommand
@@ -248,7 +248,7 @@ async def pause_trigger(
 async def resume_trigger(
     trigger_id: str,
     resumed_by: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, TriggerError]:
     """Resume a paused trigger."""
     from syn_domain.contexts.github.domain.commands.ResumeTriggerCommand import ResumeTriggerCommand
@@ -283,7 +283,7 @@ async def resume_trigger(
 async def delete_trigger(
     trigger_id: str,
     deleted_by: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, TriggerError]:
     """Soft-delete a trigger rule."""
     from syn_domain.contexts.github.domain.commands.DeleteTriggerCommand import DeleteTriggerCommand

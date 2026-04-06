@@ -5,7 +5,7 @@ Emitted when an installation token is successfully refreshed.
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003 - Required at runtime for Pydantic
+from datetime import datetime
 
 from event_sourcing import DomainEvent, event
 from pydantic import Field, field_validator

@@ -70,8 +70,8 @@ class MetricsResponse(BaseModel):
 
 
 async def get_dashboard_metrics(
-    workflow_id: str | None = None,  # noqa: ARG001
-    auth: AuthContext | None = None,  # noqa: ARG001
+    workflow_id: str | None = None,
+    auth: AuthContext | None = None,
 ) -> Result[DashboardMetrics, MetricsError]:
     """Get aggregated dashboard metrics.
 

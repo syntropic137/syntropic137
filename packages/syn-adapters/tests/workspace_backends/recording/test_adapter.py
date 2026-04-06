@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path  # noqa: TC003 - used at runtime in fixture
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest

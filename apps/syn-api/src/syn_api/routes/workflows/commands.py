@@ -135,7 +135,7 @@ async def create_workflow(
     phases: list[dict[str, Any]] | None = None,
     input_declarations: list[dict[str, Any]] | None = None,
     workflow_id: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[str, WorkflowError]:
     """Create a new workflow template.
 
@@ -193,7 +193,7 @@ async def create_workflow(
 
 async def validate_yaml(
     yaml_content: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[WorkflowValidation, WorkflowError]:
     """Validate workflow YAML content.
 
@@ -244,7 +244,7 @@ def _classify_workflow_error(error_msg: str) -> WorkflowError:
 
 async def delete_workflow(
     workflow_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, WorkflowError]:
     """Archive (soft-delete) a workflow template.
 
@@ -466,7 +466,7 @@ async def update_phase_prompt(
     model: str | None = None,
     timeout_seconds: int | None = None,
     allowed_tools: list[str] | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[str, WorkflowError]:
     """Update a workflow phase's prompt template and optional config.
 

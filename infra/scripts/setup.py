@@ -373,7 +373,7 @@ def _prompt_environment_choice() -> str:
         warn(f"Please enter 1-{len(choices)} or a name")
 
 
-def check_prerequisites(ctx: SetupContext) -> bool:  # noqa: ARG001
+def check_prerequisites(ctx: SetupContext) -> bool:
     """Validate that required tools are installed."""
     banner("Stage: Check Prerequisites")
     all_ok = True
@@ -469,7 +469,7 @@ def check_prerequisites(ctx: SetupContext) -> bool:  # noqa: ARG001
     return all_ok
 
 
-def init_submodules(ctx: SetupContext) -> bool:  # noqa: ARG001
+def init_submodules(ctx: SetupContext) -> bool:
     """Initialize git submodules."""
     banner("Stage: Initialize Submodules")
     result = run(
@@ -483,7 +483,7 @@ def init_submodules(ctx: SetupContext) -> bool:  # noqa: ARG001
     return False
 
 
-def generate_secrets(ctx: SetupContext) -> bool:  # noqa: ARG001
+def generate_secrets(ctx: SetupContext) -> bool:
     """Generate deployment secrets via secrets_setup.py."""
     banner("Stage: Generate Secrets")
     secrets_script = SCRIPTS_DIR / "secrets_setup.py"
@@ -2012,7 +2012,7 @@ def build_and_start(ctx: SetupContext) -> bool:
     return False
 
 
-def wait_for_health(ctx: SetupContext) -> bool:  # noqa: ARG001
+def wait_for_health(ctx: SetupContext) -> bool:
     """Wait for all services to become healthy."""
     banner("Stage: Health Check")
 

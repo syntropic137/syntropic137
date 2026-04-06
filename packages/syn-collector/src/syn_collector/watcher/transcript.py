@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator  # noqa: TC003 - used at runtime
+from collections.abc import AsyncIterator
 from functools import partial
-from pathlib import Path  # noqa: TC003 - used at runtime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from syn_collector.watcher.base import BaseWatcher, FileState, detect_rotation, read_jsonl_lines

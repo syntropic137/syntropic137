@@ -11,17 +11,17 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from syn_tokens.budget_stores import (  # noqa: F401 - re-export for backwards compat
+from syn_tokens.budget_stores import (
     InMemoryBudgetStore,
     RedisBudgetStore,
 )
 from syn_tokens.models import DEFAULT_BUDGETS, SpendBudget, WorkflowType
-from syn_tokens.pricing import (  # noqa: F401 - re-export for backwards compat
+from syn_tokens.pricing import (
     CLAUDE_PRICING,
     DEFAULT_MODEL,
     calculate_cost,
 )
-from syn_tokens.singletons import (  # noqa: F401 - re-export for backwards compat
+from syn_tokens.singletons import (
     configure_redis_spend_tracker,
     get_spend_tracker,
     reset_spend_tracker,

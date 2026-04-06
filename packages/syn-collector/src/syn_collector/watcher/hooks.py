@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator  # noqa: TC003 - used at runtime
+from collections.abc import AsyncIterator
 from functools import partial
-from pathlib import Path  # noqa: TC003 - used at runtime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from syn_collector.watcher.base import BaseWatcher, detect_rotation, read_jsonl_lines
-from syn_collector.watcher.hook_parser import HOOK_EVENT_MAP, parse_hook_event  # noqa: F401
+from syn_collector.watcher.hook_parser import HOOK_EVENT_MAP, parse_hook_event
 from syn_collector.watcher.parsing import parse_jsonl_events
 
 if TYPE_CHECKING:

@@ -74,8 +74,8 @@ class TimescaleRepoCostQuery:
 
     async def _query_summary_costs(
         self,
-        conn: Any,
-        execution_ids: list[str],  # noqa: ANN401
+        conn: Any,  # noqa: ANN401
+        execution_ids: list[str],
     ) -> dict[str, _ExecutionCostEntry]:
         """Query session_summary costs grouped by execution_id."""
         rows = await conn.fetch(_EXECUTION_COSTS_QUERY, SESSION_SUMMARY, execution_ids)
@@ -93,8 +93,8 @@ class TimescaleRepoCostQuery:
 
     async def _query_fallback_costs(
         self,
-        conn: Any,
-        execution_ids: list[str],  # noqa: ANN401
+        conn: Any,  # noqa: ANN401
+        execution_ids: list[str],
     ) -> dict[str, _ExecutionCostEntry]:
         """Query token_usage costs as fallback for missing summary data."""
         rows = await conn.fetch(_EXECUTION_COSTS_FALLBACK_QUERY, TOKEN_USAGE, execution_ids)
@@ -177,8 +177,8 @@ class TimescaleRepoCostQuery:
 
     async def _query_all_exec_costs(
         self,
-        conn: Any,
-        all_execution_ids: list[str],  # noqa: ANN401
+        conn: Any,  # noqa: ANN401
+        all_execution_ids: list[str],
     ) -> dict[str, _ExecutionCostEntry]:
         """Query costs for all executions, with fallback for missing summaries."""
         exec_costs = await self._query_summary_costs(conn, all_execution_ids)

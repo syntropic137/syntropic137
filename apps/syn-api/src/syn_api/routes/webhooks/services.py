@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _get_repos_for_installation(
-    projection: Any,
-    installation_id: str,  # noqa: ANN401
+    projection: Any,  # noqa: ANN401
+    installation_id: str,
 ) -> Result[list[Any], GitHubError]:
     """Get repositories for a specific installation."""
     inst = await projection.get(installation_id)
@@ -47,7 +47,7 @@ async def list_repos(
     installation_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[dict[str, Any]], GitHubError]:
     """List GitHub repositories accessible via the GitHub App."""
     await ensure_connected()
@@ -74,7 +74,7 @@ async def list_repos(
 
 async def get_installation(
     installation_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[dict[str, Any], GitHubError]:
     """Get details about a GitHub App installation."""
     await ensure_connected()

@@ -28,11 +28,11 @@ if TYPE_CHECKING:
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 
-from syn_shared.settings.config import Settings  # noqa: E402
-from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
-from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
-from syn_shared.settings.infra import InfraSettings  # noqa: E402
-from syn_shared.settings.workspace import (  # noqa: E402
+from syn_shared.settings.config import Settings
+from syn_shared.settings.dev_tooling import DevToolingSettings
+from syn_shared.settings.github import GitHubAppSettings
+from syn_shared.settings.infra import InfraSettings
+from syn_shared.settings.workspace import (
     ContainerLoggingSettings,
     GitIdentitySettings,
     WorkspaceSecuritySettings,

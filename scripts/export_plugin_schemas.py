@@ -47,9 +47,9 @@ sys.path.insert(0, str(REPO_ROOT))
 # These imports must come after sys.path.insert above, hence the E402 noqa.
 # ---------------------------------------------------------------------------
 
-from schemas.plugin.trigger_file_schema import TriggerFileSchema  # noqa: E402
+from schemas.plugin.trigger_file_schema import TriggerFileSchema
 
-from syn_domain.contexts.orchestration._shared.workflow_definition import (  # noqa: E402
+from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PhaseFrontmatterSchema,
     WorkflowDefinition,
 )

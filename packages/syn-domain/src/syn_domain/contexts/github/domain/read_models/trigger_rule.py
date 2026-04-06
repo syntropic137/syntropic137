@@ -6,7 +6,7 @@ Represents the current state of a trigger rule, projected from events.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime  # noqa: TC003 - needed for runtime type annotations
+from datetime import datetime
 
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
     TriggerStatus,

@@ -131,7 +131,7 @@ def _build_storage_section(settings: object) -> dict[str, object]:
 
 async def get_config(
     show_secrets: bool = False,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ConfigSnapshot, ConfigError]:
     """Get the current application configuration.
 
@@ -185,7 +185,7 @@ def _validate_environment(settings: object) -> list[ConfigIssue]:
 
 
 async def validate_config(
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[ConfigIssue], ConfigError]:
     """Validate the current configuration and report issues.
 
@@ -213,7 +213,7 @@ async def validate_config(
 
 
 async def get_env_template(
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[str, ConfigError]:
     """Get the .env template for configuring Syntropic137.
 

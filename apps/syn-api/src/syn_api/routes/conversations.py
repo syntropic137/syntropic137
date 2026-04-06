@@ -156,7 +156,7 @@ async def get_conversation_log(
     session_id: str,
     offset: int = 0,
     limit: int = 1000,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ConversationLog, ObservabilityError]:
     """Retrieve a session's conversation log.
 
@@ -197,7 +197,7 @@ async def get_conversation_log(
 
 async def get_conversation_metadata(
     session_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ConversationMeta | None, ObservabilityError]:
     """Get metadata for a conversation without the full log.
 

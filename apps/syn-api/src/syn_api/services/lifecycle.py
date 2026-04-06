@@ -135,7 +135,7 @@ async def _init_degradable_services(state: LifecycleState) -> None:
 
 async def startup(
     skip_validation: bool = False,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[dict, LifecycleError]:
     """Initialize the application: connect to event store, start subscriptions.
 
@@ -184,7 +184,7 @@ async def startup(
 
 
 async def shutdown(
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, LifecycleError]:
     """Gracefully shut down: stop subscriptions, disconnect from event store.
 
@@ -216,7 +216,7 @@ async def shutdown(
 
 
 async def health_check(
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[dict, LifecycleError]:
     """Check application health.
 
@@ -298,7 +298,7 @@ def _enrich_subscription_health(response: dict, mode: str) -> None:
 # unless the recovery path differs from first-time init.
 
 
-async def _init_artifact_storage(state: LifecycleState) -> None:  # noqa: ARG001
+async def _init_artifact_storage(state: LifecycleState) -> None:
     """Ensure artifact storage bucket exists at startup."""
     from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
 

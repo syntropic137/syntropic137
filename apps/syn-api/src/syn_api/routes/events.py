@@ -94,7 +94,7 @@ async def get_session_events(
     event_type: str | None = None,
     limit: int = 1000,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[EventRecord], ObservabilityError]:
     """Get raw events for a session from the event store.
 
@@ -135,7 +135,7 @@ async def get_session_events(
 async def get_session_timeline(
     session_id: str,
     limit: int = 1000,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[TimelineEntry], ObservabilityError]:
     """Get a timeline of tool operations for a session.
 
@@ -188,7 +188,7 @@ def _accumulate_tool_stats(operations: list[Any]) -> dict[str, dict[str, int | f
 
 async def get_session_tool_summary(
     session_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[ToolUsageSummary], ObservabilityError]:
     """Get aggregated tool usage summary for a session.
 
@@ -221,7 +221,7 @@ async def get_session_tool_summary(
 async def get_recent_activity_events(
     limit: int = 50,
     event_type: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[dict[str, Any]], ObservabilityError]:
     """Get recent activity events for the global dashboard feed.
 
@@ -247,8 +247,8 @@ async def get_recent_activity_events(
 
 
 async def _get_session_token_metrics(
-    manager: Any,
-    session_id: str,  # noqa: ANN401
+    manager: Any,  # noqa: ANN401
+    session_id: str,
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single session."""
     cost = await manager.session_cost.get_session_cost(session_id)
@@ -268,8 +268,8 @@ async def _get_session_token_metrics(
 
 
 async def _get_execution_token_metrics(
-    manager: Any,
-    execution_id: str,  # noqa: ANN401
+    manager: Any,  # noqa: ANN401
+    execution_id: str,
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single execution."""
     exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
@@ -289,7 +289,7 @@ async def _get_execution_token_metrics(
 async def get_token_metrics(
     execution_id: str | None = None,
     session_id: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Get token usage metrics for an execution or session.
 

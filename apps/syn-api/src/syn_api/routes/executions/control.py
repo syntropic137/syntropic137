@@ -88,7 +88,7 @@ class StateResponse(BaseModel):
 async def pause(
     execution_id: str,
     reason: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ControlResult, ExecutionError]:
     """Pause a running execution at the next yield point."""
     from syn_adapters.control.commands import PauseExecution
@@ -113,7 +113,7 @@ async def pause(
 
 async def resume(
     execution_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ControlResult, ExecutionError]:
     """Resume a paused execution."""
     from syn_adapters.control.commands import ResumeExecution
@@ -137,7 +137,7 @@ async def resume(
 async def cancel(
     execution_id: str,
     reason: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ControlResult, ExecutionError]:
     """Cancel a running or paused execution."""
     from syn_adapters.control.commands import CancelExecution
@@ -164,7 +164,7 @@ async def inject(
     execution_id: str,
     message: str,
     role: Literal["user", "system"] = "user",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[ControlResult, ExecutionError]:
     """Inject a message into an execution's agent context."""
     from syn_adapters.control.commands import InjectContext
@@ -189,7 +189,7 @@ async def inject(
 
 async def get_state(
     execution_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[dict[str, str], ExecutionError]:
     """Get the current control state of an execution."""
     try:

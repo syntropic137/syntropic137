@@ -29,7 +29,7 @@ async def verify_and_process_webhook(
     event_type: str,
     delivery_id: str,
     signature: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[WebhookResult, GitHubError]:
     """Verify a GitHub webhook signature and process the event.
 

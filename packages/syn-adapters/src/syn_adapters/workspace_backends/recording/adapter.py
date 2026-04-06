@@ -169,12 +169,12 @@ class RecordingEventStreamAdapter:
 
     async def stream(
         self,
-        handle: IsolationHandle,  # noqa: ARG002
-        command: list[str],  # noqa: ARG002
+        handle: IsolationHandle,
+        command: list[str],
         *,
-        timeout_seconds: int | None = None,  # noqa: ARG002
-        working_directory: str | None = None,  # noqa: ARG002
-        environment: dict[str, str] | None = None,  # noqa: ARG002
+        timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
     ) -> AsyncIterator[str]:
         """Stream events from recording.
 

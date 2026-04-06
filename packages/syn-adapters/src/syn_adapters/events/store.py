@@ -20,7 +20,7 @@ from typing import Any
 
 import asyncpg
 
-from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError  # noqa: F401
+from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError
 from syn_adapters.events.store_helpers import (
     RESERVED_OBSERVATION_KEYS,
 )

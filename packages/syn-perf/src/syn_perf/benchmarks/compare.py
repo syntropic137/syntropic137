@@ -19,7 +19,7 @@ class BackendComparison:
     """
 
     # All backends to try
-    ALL_BACKENDS: list[str] = [  # noqa: RUF012
+    ALL_BACKENDS: list[str] = [
         "firecracker",
         "gvisor",
         "docker_hardened",

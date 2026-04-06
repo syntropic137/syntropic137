@@ -60,7 +60,7 @@ async def register_repo(
     installation_id: str = "",
     is_private: bool = False,
     created_by: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[str, RepoError]:
     """Register a new repo within an organization."""
     from syn_adapters.storage.repositories import (
@@ -111,7 +111,7 @@ async def list_repos(
     system_id: str | None = None,
     provider: str | None = None,
     unassigned: bool = False,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[list[RepoSummaryResponse], RepoError]:
     """List repos with optional filters."""
     from syn_domain.contexts.organization.slices.list_repos.projection import (
@@ -150,7 +150,7 @@ async def list_repos(
 
 async def get_repo(
     repo_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[RepoSummaryResponse, RepoError]:
     """Get repo details."""
     from syn_domain.contexts.organization.slices.list_repos.projection import (
@@ -185,7 +185,7 @@ async def get_repo(
 async def assign_repo_to_system(
     repo_id: str,
     system_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, RepoError]:
     """Assign a repo to a system."""
     from syn_adapters.storage.repositories import get_repo_repository
@@ -223,7 +223,7 @@ async def assign_repo_to_system(
 
 async def unassign_repo_from_system(
     repo_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, RepoError]:
     """Unassign a repo from its system."""
     from syn_adapters.storage.repositories import get_repo_repository
@@ -390,7 +390,7 @@ async def update_repo(
     is_private: bool | None = None,
     installation_id: str | None = None,
     updated_by: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, RepoError]:
     """Update mutable fields of a repo."""
     from syn_adapters.storage.repositories import get_repo_repository
@@ -459,7 +459,7 @@ async def _check_active_triggers(repo_id: str, full_name: str | None) -> Result[
 async def deregister_repo(
     repo_id: str,
     deregistered_by: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,
 ) -> Result[None, RepoError]:
     """Deregister (soft-delete) a repo.
 

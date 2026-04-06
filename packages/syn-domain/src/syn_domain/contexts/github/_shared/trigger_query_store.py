@@ -277,7 +277,7 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
     async def was_delivery_processed(self, delivery_id: str) -> bool:
         return delivery_id in self._processed_deliveries
 
-    async def record_delivery(self, delivery_id: str, trigger_id: str) -> None:  # noqa: ARG002
+    async def record_delivery(self, delivery_id: str, trigger_id: str) -> None:
         self._processed_deliveries.add(delivery_id)
 
     async def record_fire(

@@ -207,7 +207,7 @@ def sidecar(
     )
 
 
-from syn_collector.watcher_runner import run_watcher as _run_watcher  # noqa: E402
+from syn_collector.watcher_runner import run_watcher as _run_watcher
 
 if __name__ == "__main__":
     main()
