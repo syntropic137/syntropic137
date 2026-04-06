@@ -107,6 +107,32 @@ _state = LifecycleState()
 # ── Public API ──────────────────────────────────────────────────────
 
 
+async def _init_degradable_services(state: LifecycleState) -> None:
+    """Initialize all degradable services and start recovery if needed (ADR-057).
+
+    Each service in the registry is attempted; failures are logged and the
+    service is marked as degraded. A background recovery loop is spawned
+    for any recoverable failures.
+    """
+    for entry in _SERVICE_REGISTRY:
+        try:
+            await entry.init_fn(state)
+        except Exception:
+            logger.exception("%s initialization failed (degraded mode)", entry.reason)
+            state.degraded_reasons.append(entry.reason)
+
+    await reconcile_orphaned_sessions()
+    await cleanup_orphaned_containers()
+
+    # Spawn a background recovery loop for any recoverable degradations.
+    recoverable = [r for r in state.degraded_reasons if _is_recoverable(r)]
+    if recoverable:
+        state._recovery_task = asyncio.create_task(
+            _recovery_loop(state),
+            name="lifecycle-recovery",
+        )
+
+
 async def startup(
     skip_validation: bool = False,
     auth: AuthContext | None = None,  # noqa: ARG001
@@ -151,24 +177,7 @@ async def startup(
     if isinstance(result, Err):
         return result
 
-    # Degraded path — data-driven via service registry (ADR-057)
-    for entry in _SERVICE_REGISTRY:
-        try:
-            await entry.init_fn(_state)
-        except Exception:
-            logger.exception("%s initialization failed (degraded mode)", entry.reason)
-            _state.degraded_reasons.append(entry.reason)
-
-    await reconcile_orphaned_sessions()
-    await cleanup_orphaned_containers()
-
-    # If any recoverable subsystem is degraded, start a background recovery loop.
-    recoverable = [r for r in _state.degraded_reasons if _is_recoverable(r)]
-    if recoverable:
-        _state._recovery_task = asyncio.create_task(
-            _recovery_loop(_state),
-            name="lifecycle-recovery",
-        )
+    await _init_degradable_services(_state)
 
     mode = "degraded" if _state.degraded_reasons else "full"
     return Ok({"mode": mode, "degraded_reasons": _state.degraded_reasons})
