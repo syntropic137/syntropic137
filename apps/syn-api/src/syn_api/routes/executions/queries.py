@@ -98,6 +98,22 @@ async def _map_phase_detail(
 ) -> PhaseExecution:
     """Map a domain phase to an API PhaseExecution."""
     ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else []
+
+    # Enrich from session cost (cache tokens, model info)
+    cache_creation = phase.cache_creation_tokens
+    cache_read = phase.cache_read_tokens
+    agent_model: str | None = None
+    cost_by_model: dict[str, Decimal] = {}
+    if phase.session_id:
+        with contextlib.suppress(Exception):
+            sc = await manager.session_cost.get_session_cost(phase.session_id)
+            if sc is not None:
+                if cache_creation == 0 and cache_read == 0:
+                    cache_creation = sc.cache_creation_tokens
+                    cache_read = sc.cache_read_tokens
+                agent_model = sc.agent_model
+                cost_by_model = dict(sc.cost_by_model)
+
     return PhaseExecution(
         phase_id=phase.workflow_phase_id,
         name=phase.name,
@@ -106,10 +122,14 @@ async def _map_phase_detail(
         artifact_id=phase.artifact_id,
         input_tokens=phase.input_tokens,
         output_tokens=phase.output_tokens,
+        cache_creation_tokens=cache_creation,
+        cache_read_tokens=cache_read,
         cost_usd=Decimal(str(phase.cost_usd)),
         duration_seconds=phase.duration_seconds,
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
+        model=agent_model,
+        cost_by_model=cost_by_model,
         operations=ops,
     )
 
@@ -135,11 +155,15 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         artifact_id=phase.artifact_id,
         input_tokens=phase.input_tokens,
         output_tokens=phase.output_tokens,
-        total_tokens=phase.input_tokens + phase.output_tokens,
+        cache_creation_tokens=phase.cache_creation_tokens,
+        cache_read_tokens=phase.cache_read_tokens,
+        total_tokens=phase.input_tokens + phase.output_tokens + phase.cache_creation_tokens + phase.cache_read_tokens,
         duration_seconds=phase.duration_seconds or 0.0,
         cost_usd=Decimal(str(phase.cost_usd)),
         started_at=str(phase.started_at) if phase.started_at else None,
         completed_at=str(phase.completed_at) if phase.completed_at else None,
+        model=phase.model,
+        cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
         operations=operations,
     )
 
@@ -381,6 +405,8 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     phases = [_map_phase_to_response(p) for p in detail.phases or []]
     total_input = sum(p.input_tokens for p in detail.phases or [])
     total_output = sum(p.output_tokens for p in detail.phases or [])
+    total_cache_creation = sum(p.cache_creation_tokens for p in phases)
+    total_cache_read = sum(p.cache_read_tokens for p in phases)
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
     return ExecutionDetailResponse(
         workflow_execution_id=detail.workflow_execution_id,
@@ -392,6 +418,8 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         phases=phases,
         total_input_tokens=total_input,
         total_output_tokens=total_output,
+        cache_creation_tokens=total_cache_creation,
+        cache_read_tokens=total_cache_read,
         total_tokens=detail.total_tokens,
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
         artifact_ids=artifact_ids,

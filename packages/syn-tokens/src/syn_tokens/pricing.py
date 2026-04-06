@@ -1,49 +1,40 @@
 """Claude model pricing and cost calculation.
 
-Extracted from spend.py to reduce module complexity.
+Re-exports from ``syn_shared.pricing`` — the single source of truth
+for model pricing across the platform.
+
+Backward-compatible: ``CLAUDE_PRICING``, ``DEFAULT_MODEL``, and
+``calculate_cost()`` are preserved for existing importers.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
 
-# Claude pricing (per 1M tokens)
-CLAUDE_PRICING = {
-    "claude-3-5-sonnet-20241022": {
-        "input": Decimal("3.00"),
-        "output": Decimal("15.00"),
-    },
-    "claude-3-opus-20240229": {
-        "input": Decimal("15.00"),
-        "output": Decimal("75.00"),
-    },
-    "claude-3-haiku-20240307": {
-        "input": Decimal("0.25"),
-        "output": Decimal("1.25"),
-    },
+from syn_shared.pricing import (
+    MODEL_PRICING_TABLE,
+    ModelPricing,
+    calculate_cost,
+    get_model_pricing,
+)
+
+# Backward-compatible aliases
+DEFAULT_MODEL = "claude-sonnet-4-20250514"
+
+# Backward-compatible dict for code that reads CLAUDE_PRICING directly
+CLAUDE_PRICING: dict[str, dict[str, Decimal]] = {
+    model_id: {
+        "input": p.input_per_million,
+        "output": p.output_per_million,
+    }
+    for model_id, p in MODEL_PRICING_TABLE.items()
 }
 
-DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
-
-
-def calculate_cost(
-    input_tokens: int,
-    output_tokens: int,
-    model: str = DEFAULT_MODEL,
-) -> Decimal:
-    """Calculate cost for token usage.
-
-    Args:
-        input_tokens: Number of input tokens
-        output_tokens: Number of output tokens
-        model: Claude model name
-
-    Returns:
-        Cost in USD
-    """
-    pricing = CLAUDE_PRICING.get(model, CLAUDE_PRICING[DEFAULT_MODEL])
-
-    input_cost = Decimal(input_tokens) * pricing["input"] / Decimal("1000000")
-    output_cost = Decimal(output_tokens) * pricing["output"] / Decimal("1000000")
-
-    return input_cost + output_cost
+__all__ = [
+    "CLAUDE_PRICING",
+    "DEFAULT_MODEL",
+    "MODEL_PRICING_TABLE",
+    "ModelPricing",
+    "calculate_cost",
+    "get_model_pricing",
+]

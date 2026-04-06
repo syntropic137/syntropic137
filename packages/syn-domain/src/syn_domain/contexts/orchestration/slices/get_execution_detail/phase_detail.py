@@ -17,6 +17,8 @@ class PhaseDetail:
     artifact_id: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
     total_tokens: int = 0
     duration_seconds: float = 0.0
     cost_usd: str = "0"
@@ -53,6 +55,8 @@ class PhaseDetail:
             artifact_id=event_data.get("artifact_id"),
             input_tokens=event_data.get("input_tokens", 0),
             output_tokens=event_data.get("output_tokens", 0),
+            cache_creation_tokens=event_data.get("cache_creation_tokens", 0),
+            cache_read_tokens=event_data.get("cache_read_tokens", 0),
             total_tokens=event_data.get("total_tokens", 0),
             duration_seconds=event_data.get("duration_seconds", 0.0),
             cost_usd=str(event_data.get("cost_usd", "0")),
@@ -69,6 +73,8 @@ class PhaseDetail:
             "artifact_id": self.artifact_id,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
             "total_tokens": self.total_tokens,
             "duration_seconds": self.duration_seconds,
             "cost_usd": self.cost_usd,
@@ -88,6 +94,8 @@ class PhaseDetail:
             artifact_id=data.get("artifact_id"),
             input_tokens=data.get("input_tokens", 0),
             output_tokens=data.get("output_tokens", 0),
+            cache_creation_tokens=data.get("cache_creation_tokens", 0),
+            cache_read_tokens=data.get("cache_read_tokens", 0),
             total_tokens=data.get("total_tokens", 0),
             duration_seconds=data.get("duration_seconds", 0.0),
             cost_usd=data.get("cost_usd", "0"),

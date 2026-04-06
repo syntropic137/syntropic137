@@ -1,10 +1,40 @@
 import { clsx } from 'clsx'
-import { Clock } from 'lucide-react'
+import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { Card, CardContent, CardHeader } from '../../components'
 import type { ExecutionDetailResponse } from '../../types'
+import { formatTokens } from '../../utils/formatters'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
+
+function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, string> }) {
+  const entries = Object.entries(costByModel)
+    .map(([model, cost]) => ({ model, cost: parseFloat(cost) }))
+    .sort((a, b) => b.cost - a.cost)
+  const totalCost = entries.reduce((s, e) => s + e.cost, 0)
+
+  return (
+    <div className="mt-2 space-y-1">
+      {entries.map(({ model, cost }) => {
+        const pct = totalCost > 0 ? (cost / totalCost) * 100 : 0
+        const shortName = model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+        return (
+          <div key={model} className="space-y-0.5">
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="font-mono text-[var(--color-text-muted)]">{shortName}</span>
+              <span className="text-[var(--color-text-secondary)]">
+                ${cost.toFixed(4)} &middot; {pct.toFixed(0)}%
+              </span>
+            </div>
+            <div className="h-1 bg-[var(--color-surface-elevated)] rounded-full overflow-hidden">
+              <div className="h-full bg-indigo-500 rounded-full transition-all" style={{ width: `${Math.max(pct, 1)}%` }} />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 interface PhaseTimelineProps {
   phases: ExecutionDetailResponse['phases']
@@ -12,20 +42,45 @@ interface PhaseTimelineProps {
 }
 
 export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
+  const totalTokens = phases.reduce((s, p) => s + p.input_tokens + p.output_tokens + (p.cache_creation_tokens ?? 0) + (p.cache_read_tokens ?? 0), 0)
+  const totalCost = phases.reduce((s, p) => s + Number(p.cost_usd), 0)
+  const totalDuration = phases.reduce((s, p) => s + p.duration_seconds, 0)
+
   return (
     <Card>
       <CardHeader title="Phase Pipeline" subtitle="Execution phases with per-phase metrics" />
       <CardContent>
-        <div className="flex items-center gap-2 overflow-x-auto pb-2">
+        <div className="flex items-center gap-4 mb-4 text-sm text-[var(--color-text-secondary)]">
+          <div className="flex items-center gap-1.5">
+            <Layers className="h-4 w-4 text-[var(--color-text-muted)]" />
+            <span className="font-medium">{phases.length} phases</span>
+          </div>
+          <span className="text-[var(--color-border)]">|</span>
+          <div className="flex items-center gap-1.5">
+            <Zap className="h-4 w-4 text-[var(--color-text-muted)]" />
+            <span>{formatTokens(totalTokens)} tokens</span>
+          </div>
+          <span className="text-[var(--color-border)]">|</span>
+          <div className="flex items-center gap-1.5">
+            <DollarSign className="h-4 w-4 text-[var(--color-text-muted)]" />
+            <span>${totalCost.toFixed(4)}</span>
+          </div>
+          <span className="text-[var(--color-border)]">|</span>
+          <div className="flex items-center gap-1.5">
+            <Clock className="h-4 w-4 text-[var(--color-text-muted)]" />
+            <span>{totalDuration.toFixed(1)}s</span>
+          </div>
+        </div>
+        <div className="flex items-stretch gap-2 overflow-x-auto pb-2">
           {phases.map((phase, idx) => {
             const Icon = phaseStatusIcons[phase.status] ?? Clock
             const phaseTokens = phase.input_tokens + phase.output_tokens
 
             return (
-              <div key={phase.workflow_phase_id} className="flex items-center">
+              <div key={phase.workflow_phase_id} className="flex items-stretch">
                 <div
                   className={clsx(
-                    'flex min-w-[200px] flex-col rounded-lg border p-4 transition-all',
+                    'flex min-w-[200px] flex-1 flex-col rounded-lg border p-4 transition-all',
                     phaseStatusColors[phase.status] ?? phaseStatusColors.pending
                   )}
                 >
@@ -41,43 +96,79 @@ export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
                       {phase.name}
                     </span>
                   </div>
-                  <div className="mt-3 space-y-1 text-xs text-[var(--color-text-muted)]">
-                    <div className="flex justify-between">
-                      <span>Tokens:</span>
-                      <span className="text-[var(--color-text-secondary)]">{phaseTokens.toLocaleString()}</span>
+                  {phase.cost_by_model && Object.keys(phase.cost_by_model).length > 0 && (
+                    <PhaseModelBreakdown costByModel={phase.cost_by_model} />
+                  )}
+                  {/* Summary stats */}
+                  <div className="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
+                    <span>{formatTokens(phaseTokens + (phase.cache_creation_tokens ?? 0) + (phase.cache_read_tokens ?? 0))}</span>
+                    <span className="text-[var(--color-border)]">&middot;</span>
+                    <span>${Number(phase.cost_usd).toFixed(4)}</span>
+                    <span className="text-[var(--color-border)]">&middot;</span>
+                    <span>
+                      {phase.status === 'running' && phase.started_at
+                        ? `${((now - new Date(phase.started_at).getTime()) / 1000).toFixed(1)}s`
+                        : `${phase.duration_seconds.toFixed(1)}s`
+                      }
+                    </span>
+                  </div>
+                  {/* Token breakdown */}
+                  <div className="mt-2 space-y-1.5 text-xs text-[var(--color-text-muted)]">
+                    {/* In segment: fresh input + cache read */}
+                    <div className="rounded-md border border-[var(--color-border)] overflow-hidden">
+                      <div className="flex items-center justify-between bg-indigo-500/10 px-2 py-1">
+                        <span className="font-medium text-indigo-400">In</span>
+                        <span className="text-[var(--color-text-secondary)]">{(phase.input_tokens + (phase.cache_read_tokens ?? 0)).toLocaleString()}</span>
+                      </div>
+                      <div className="px-2 py-1 space-y-0.5">
+                        <div className="flex justify-between">
+                          <span>Fresh</span>
+                          <span className="text-[var(--color-text-secondary)]">{phase.input_tokens.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-emerald-400">Cache read</span>
+                          <span className="text-emerald-400">{(phase.cache_read_tokens ?? 0).toLocaleString()}</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Cost:</span>
-                      <span className="text-[var(--color-text-secondary)]">${Number(phase.cost_usd).toFixed(4)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Duration:</span>
-                      <span className="text-[var(--color-text-secondary)]">
-                        {phase.status === 'running' && phase.started_at
-                          ? `${((now - new Date(phase.started_at).getTime()) / 1000).toFixed(1)}s`
-                          : `${phase.duration_seconds.toFixed(1)}s`
-                        }
-                      </span>
+                    {/* Out segment: output + cache write */}
+                    <div className="rounded-md border border-[var(--color-border)] overflow-hidden">
+                      <div className="flex items-center justify-between bg-violet-500/10 px-2 py-1">
+                        <span className="font-medium text-violet-400">Out</span>
+                        <span className="text-[var(--color-text-secondary)]">{(phase.output_tokens + (phase.cache_creation_tokens ?? 0)).toLocaleString()}</span>
+                      </div>
+                      <div className="px-2 py-1 space-y-0.5">
+                        <div className="flex justify-between">
+                          <span>Output</span>
+                          <span className="text-[var(--color-text-secondary)]">{phase.output_tokens.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-amber-400">Cache write</span>
+                          <span className="text-amber-400">{(phase.cache_creation_tokens ?? 0).toLocaleString()}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  {phase.session_id && (
-                    <Link
-                      to={`/sessions/${phase.session_id}`}
-                      className="mt-3 text-xs text-[var(--color-accent)] hover:underline"
-                    >
-                      View Session →
-                    </Link>
-                  )}
-                  {phase.agent_session_id && (
-                    <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-                      <span title="Claude CLI session ID for OTel correlation">
-                        OTel: {phase.agent_session_id.slice(0, 8)}...
-                      </span>
-                    </div>
-                  )}
+                  <div className="mt-auto pt-2">
+                    {phase.session_id && (
+                      <Link
+                        to={`/sessions/${phase.session_id}`}
+                        className="text-xs text-[var(--color-accent)] hover:underline"
+                      >
+                        View Session →
+                      </Link>
+                    )}
+                    {phase.agent_session_id && (
+                      <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+                        <span title="Claude CLI session ID for OTel correlation">
+                          OTel: {phase.agent_session_id.slice(0, 8)}...
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 {idx < phases.length - 1 && (
-                  <div className="mx-2 h-px w-8 bg-[var(--color-border)]" />
+                  <div className="mx-2 h-px w-8 self-center bg-[var(--color-border)]" />
                 )}
               </div>
             )

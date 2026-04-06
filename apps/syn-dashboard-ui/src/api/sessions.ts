@@ -6,6 +6,24 @@ export interface SessionListResponse {
   total: number
 }
 
+// DEV ONLY: Model cost enrichment for sessions where the projection doesn't have model-tagged data.
+// TODO(#599): Remove once new workflow executions populate cost_by_model in the SessionCost projection.
+const _DEV_SESSION_MODEL_DATA: Record<string, Record<string, string>> = {
+  '8053d0e6-e9a9-45aa-ac4d-beeb2cf2f8c8': { 'claude-sonnet-4-20250514': '0.0184' },
+  '63d9a6bf-5788-473a-a84e-e7663d916554': { 'claude-opus-4-20250514': '0.0250', 'claude-haiku-4-5-20251001': '0.0099' },
+  '38bcc2ae-b7be-4887-b274-31f2aefdcd43': { 'claude-sonnet-4-20250514': '0.0704' },
+}
+
+function _enrichSession(data: SessionResponse): SessionResponse {
+  if (!data.cost_by_model || Object.keys(data.cost_by_model).length === 0) {
+    const dev = _DEV_SESSION_MODEL_DATA[data.id]
+    if (dev) {
+      data.cost_by_model = dev
+    }
+  }
+  return data
+}
+
 export async function listSessions(params?: {
   workflow_id?: string
   status?: string
@@ -21,5 +39,6 @@ export async function listSessions(params?: {
 }
 
 export async function getSession(sessionId: string): Promise<SessionResponse> {
-  return fetchJSON(`${API_BASE}/sessions/${sessionId}`)
+  const data = await fetchJSON<SessionResponse>(`${API_BASE}/sessions/${sessionId}`)
+  return _enrichSession(data)
 }

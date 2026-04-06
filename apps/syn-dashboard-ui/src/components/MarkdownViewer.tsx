@@ -122,7 +122,7 @@ const markdownComponents: Components = {
         const isInline = !className;
         if (isInline) {
             return (
-                <code className="bg-zinc-800 text-cyan-300 px-1.5 py-0.5 rounded text-sm font-mono">
+                <code className="bg-zinc-800 text-cyan-300 px-1.5 py-0.5 rounded text-sm font-mono break-all">
                     {children}
                 </code>
             );
@@ -180,7 +180,7 @@ const markdownComponents: Components = {
 
 export function MarkdownViewer({ content, className = '' }: MarkdownViewerProps) {
     return (
-        <div className={`markdown-viewer prose prose-invert max-w-none ${className}`}>
+        <div className={`markdown-viewer prose prose-invert max-w-none overflow-hidden [overflow-wrap:anywhere] ${className}`}>
             <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={markdownComponents}

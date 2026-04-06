@@ -70,6 +70,8 @@ const showCommand: CommandDef = {
     if (d.completed_at) print(`  Completed:   ${formatTimestamp(d.completed_at)}`);
     if (d.duration_seconds != null) print(`  Duration:    ${formatDuration(d.duration_seconds * 1000)}`);
     print(`  Tokens:      ${formatTokens(d.total_tokens)} (in: ${formatTokens(d.input_tokens)}, out: ${formatTokens(d.output_tokens)})`);
+    if (d.cache_creation_tokens) print(`  Cache Write: ${formatTokens(d.cache_creation_tokens)}`);
+    if (d.cache_read_tokens) print(`  Cache Read:  ${formatTokens(d.cache_read_tokens)}`);
     print(`  Cost:        ${formatCost(d.total_cost_usd)}`);
     if (d.error_message) print(`  Error:       ${d.error_message}`);
 
