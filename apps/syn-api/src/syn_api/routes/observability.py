@@ -171,11 +171,6 @@ async def get_tool_timeline_endpoint(
         )
 
     timeline = result.value
-    if not timeline:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No tool executions found for session {session_id}",
-        )
 
     return ToolTimelineResponse(
         session_id=session_id,
