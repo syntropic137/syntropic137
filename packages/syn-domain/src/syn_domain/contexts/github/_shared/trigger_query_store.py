@@ -303,8 +303,7 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         pr_number: int | None,
     ) -> bool:
         return any(
-            tid == trigger_id and pr == pr_number
-            for tid, pr in self._running_executions.values()
+            tid == trigger_id and pr == pr_number for tid, pr in self._running_executions.values()
         )
 
     async def complete_execution(self, execution_id: str) -> None:

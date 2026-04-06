@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+    TriggerBlockedResult,
     TriggerDeferredResult,
     TriggerMatchResult,
 )
@@ -29,6 +30,7 @@ class PipelineResult:
     event_type: str
     triggers_fired: list[str] = field(default_factory=list)
     deferred: list[str] = field(default_factory=list)
+    blocked: list[str] = field(default_factory=list)
 
 
 class EventPipeline:
@@ -87,24 +89,34 @@ class EventPipeline:
             payload=payload,
         )
 
-        fired, deferred = _classify_results(results)
+        fired, deferred, blocked = _classify_results(results)
         return PipelineResult(
             status="processed",
             event_type=event.event_type,
             triggers_fired=fired,
             deferred=deferred,
+            blocked=blocked,
         )
 
 
 def _classify_results(
-    results: list[TriggerMatchResult | TriggerDeferredResult],
-) -> tuple[list[str], list[str]]:
-    """Separate trigger evaluation results into (fired, deferred) ID lists."""
+    results: list[TriggerMatchResult | TriggerDeferredResult | TriggerBlockedResult],
+) -> tuple[list[str], list[str], list[str]]:
+    """Separate trigger evaluation results into (fired, deferred, blocked) ID lists."""
     fired: list[str] = []
     deferred: list[str] = []
+    blocked: list[str] = []
     for r in results:
         if isinstance(r, TriggerMatchResult):
             fired.append(r.trigger_id)
         elif isinstance(r, TriggerDeferredResult):
             deferred.append(r.trigger_id)
-    return fired, deferred
+        elif isinstance(r, TriggerBlockedResult):
+            logger.info(
+                "Trigger %s blocked by %s: %s",
+                r.trigger_id,
+                r.guard_name,
+                r.reason,
+            )
+            blocked.append(r.trigger_id)
+    return fired, deferred, blocked

@@ -50,10 +50,12 @@ class DegradedReason(StrEnum):
 
 # Subsystems that can be recovered by retrying after transient failures
 # (e.g. MinIO not yet DNS-resolvable at startup).
-_RECOVERABLE_REASONS: frozenset[DegradedReason] = frozenset({
-    DegradedReason.ARTIFACT_STORAGE,
-    DegradedReason.SUBSCRIPTION_COORDINATOR,
-})
+_RECOVERABLE_REASONS: frozenset[DegradedReason] = frozenset(
+    {
+        DegradedReason.ARTIFACT_STORAGE,
+        DegradedReason.SUBSCRIPTION_COORDINATOR,
+    }
+)
 
 
 @dataclass
@@ -241,7 +243,9 @@ def _enrich_subscription_health(response: dict, mode: str) -> None:
             "status": "healthy" if sub_healthy else "degraded",
         }
         if not sub_healthy:
-            response.setdefault("degraded_reasons", []).append(DegradedReason.SUBSCRIPTION_COORDINATOR)
+            response.setdefault("degraded_reasons", []).append(
+                DegradedReason.SUBSCRIPTION_COORDINATOR
+            )
             if mode == "full":
                 response["mode"] = "degraded"
     except Exception:
@@ -316,6 +320,26 @@ async def _init_event_poller(state: LifecycleState) -> None:
         state.degraded_reasons.append(DegradedReason.EVENT_POLLER)
 
 
+def _get_recoverable(state: LifecycleState) -> list[DegradedReason]:
+    """Return the subset of degraded reasons that can be recovered by retrying."""
+    return [r for r in state.degraded_reasons if r in _RECOVERABLE_REASONS]
+
+
+def _all_recovered(state: LifecycleState) -> bool:
+    """Check whether all recoverable subsystems have been restored."""
+    return not any(r in _RECOVERABLE_REASONS for r in state.degraded_reasons)
+
+
+async def _try_recover_reason(state: LifecycleState, reason: DegradedReason) -> None:
+    """Attempt recovery for a single degraded reason. Raises on failure."""
+    if reason is DegradedReason.ARTIFACT_STORAGE:
+        await _try_recover_artifact_storage()
+    elif reason is DegradedReason.SUBSCRIPTION_COORDINATOR:
+        await _try_recover_subscriptions(state)
+    state.degraded_reasons.remove(reason)
+    logger.info("Recovered: %s", reason)
+
+
 async def _recovery_loop(state: LifecycleState) -> None:
     """Background task: retry degraded subsystems with exponential backoff.
 
@@ -330,7 +354,7 @@ async def _recovery_loop(state: LifecycleState) -> None:
     await asyncio.sleep(delay)
 
     while not state._shutting_down:
-        recoverable = [r for r in state.degraded_reasons if r in _RECOVERABLE_REASONS]
+        recoverable = _get_recoverable(state)
         if not recoverable:
             break
 
@@ -338,19 +362,11 @@ async def _recovery_loop(state: LifecycleState) -> None:
             if state._shutting_down:
                 return
             try:
-                if reason is DegradedReason.ARTIFACT_STORAGE:
-                    await _try_recover_artifact_storage()
-                    state.degraded_reasons.remove(reason)
-                    logger.info("Recovered: %s", reason)
-                elif reason is DegradedReason.SUBSCRIPTION_COORDINATOR:
-                    await _try_recover_subscriptions(state)
-                    state.degraded_reasons.remove(reason)
-                    logger.info("Recovered: %s", reason)
+                await _try_recover_reason(state, reason)
             except Exception:
                 logger.debug("Recovery retry failed for %s, will retry in %.0fs", reason, delay)
 
-        # Check if all recoverable subsystems are back.
-        if not any(r in _RECOVERABLE_REASONS for r in state.degraded_reasons):
+        if _all_recovered(state):
             logger.info("All recoverable subsystems healthy — recovery loop exiting")
             break
 

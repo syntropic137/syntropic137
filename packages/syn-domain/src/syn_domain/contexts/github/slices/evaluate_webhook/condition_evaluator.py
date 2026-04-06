@@ -6,6 +6,7 @@ Evaluates trigger conditions against GitHub webhook payloads.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -77,7 +78,7 @@ def _unpack_condition(condition: TriggerCondition | dict) -> tuple[str, str, Any
 
 
 def evaluate_conditions(
-    conditions: list[TriggerCondition | dict],
+    conditions: Sequence[TriggerCondition | dict[str, Any]],
     payload: dict[str, Any],
 ) -> bool:
     for condition in conditions:

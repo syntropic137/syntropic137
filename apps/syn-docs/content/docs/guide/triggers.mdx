@@ -90,7 +90,13 @@ Triggers can include conditions that filter which events match. Conditions use d
 | `not_empty` | Value is present | `pull_request.number` |
 | `is_empty` | Value is absent | `pull_request.draft` |
 
-All conditions must match (AND logic). Register conditions via CLI:
+All conditions must match (AND logic).
+
+<Callout type="warn">
+The CLI `--condition` flag only supports equality checks (`field=value`), which maps to the `eq` operator. For advanced operators like `neq`, `in`, `contains`, etc., use the [Triggers API](/docs/api/triggers) directly.
+</Callout>
+
+Register conditions via CLI:
 
 ```bash
 syn triggers register \
@@ -98,7 +104,7 @@ syn triggers register \
   --event check_run.completed \
   --workflow ci-fix-v1 \
   --condition "check_run.conclusion=failure" \
-  --condition "sender.type!=Bot"
+  --condition "sender.type=User"
 ```
 
 ### Field Paths

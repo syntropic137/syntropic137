@@ -108,11 +108,12 @@ class TriggerHistoryProjection:
             guard_name=event.guard_name,
             block_reason=getattr(event, "reason", ""),
         )
-        # Use delivery_id if available, else generate a unique key
-        key = (
-            entry.webhook_delivery_id
-            or f"{entry.trigger_id}_blocked_{datetime.now(UTC).isoformat()}"
-        )
+        # Deterministic, replay-safe key namespaced by trigger_id
+        if entry.webhook_delivery_id:
+            key = f"{entry.trigger_id}_blocked_{entry.webhook_delivery_id}"
+        else:
+            pr_part = str(entry.pr_number) if entry.pr_number else "no_pr"
+            key = f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
         await self._store.save(PROJECTION_NAME, key, _entry_to_dict(entry))
         logger.info(f"Projected TriggerBlocked: {event.trigger_id} ({event.guard_name})")
         return entry

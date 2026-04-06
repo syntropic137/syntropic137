@@ -1,8 +1,13 @@
 """Persistent TriggerQueryStore backed by ProjectionStoreProtocol.
 
 Reads from the same projection tables that TriggerQueryProjection writes to.
-All write methods are no-ops — writes come exclusively from the projection
+Most write methods are no-ops — writes come exclusively from the projection
 processing domain events.
+
+Running-execution tracking is in-memory: populated by record_fire(), cleared
+by complete_execution().  This is correct because on restart no executions
+survive (containers are ephemeral) — the in-memory set starts empty and the
+poller catch-up won't be blocked.
 """
 
 from __future__ import annotations
@@ -51,11 +56,19 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
     """TriggerQueryStore backed by PostgreSQL via ProjectionStoreProtocol.
 
     Reads from projection tables populated by TriggerQueryProjection.
-    Write methods are no-ops since all mutations flow through events.
+    Most write methods are no-ops since all mutations flow through events.
+
+    Running-execution tracking is in-memory (not persisted).  On restart,
+    no executions are running (containers are ephemeral), so starting with
+    an empty set is correct by design — see ADR-040 and AGENTS.md crash
+    recovery section.
     """
 
     def __init__(self, store: Any) -> None:
         self._store = store
+        # In-memory running execution tracking: execution_id → (trigger_id, pr_number)
+        # Mirrors InMemoryTriggerQueryStore._running_executions.
+        self._running_executions: dict[str, tuple[str, int | None]] = {}
 
     def _to_indexed_trigger(self, data: dict[str, Any]) -> _IndexedTrigger:
         """Reconstruct an _IndexedTrigger from projection store data."""
@@ -178,20 +191,20 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         pr_number: int | None,
         execution_id: str,
     ) -> None:
-        pass  # Writes come from TriggerQueryProjection
+        # Fire record persistence comes from TriggerQueryProjection.
+        # Running-execution tracking is in-memory for the concurrency guard.
+        self._running_executions[execution_id] = (trigger_id, pr_number)
 
     async def has_running_execution(
         self,
         trigger_id: str,
         pr_number: int | None,
     ) -> bool:
-        """Check for running executions via fire records that haven't been completed."""
-        pr_filter = str(pr_number) if pr_number is not None else None
-        filters: dict[str, str] = {"trigger_id": trigger_id}
-        if pr_filter is not None:
-            filters["pr_number"] = pr_filter
-        records = await self._store.query(NS_FIRE_RECORDS, filters=filters)
-        return any(r.get("status", "running") == "running" for r in records)
+        """Check the in-memory running-execution set for this (trigger, PR) pair."""
+        return any(
+            tid == trigger_id and pr == pr_number for tid, pr in self._running_executions.values()
+        )
 
     async def complete_execution(self, execution_id: str) -> None:
-        pass  # Writes come from TriggerQueryProjection
+        """Clear the running state for a completed/failed execution."""
+        self._running_executions.pop(execution_id, None)
