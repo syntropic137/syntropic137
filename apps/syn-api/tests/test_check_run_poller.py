@@ -179,7 +179,12 @@ class TestOnPrEvent:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
             checks_client=MockChecksClient(),
-            pipeline=EventPipeline(dedup=InMemoryDedup(), evaluator=EvaluateWebhookHandler(store=InMemoryTriggerQueryStore(), repository=NullRepository())),
+            pipeline=EventPipeline(
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(
+                    store=InMemoryTriggerQueryStore(), repository=NullRepository()
+                ),
+            ),
             sha_store=sha_store,
             health_tracker=WebhookHealthTracker(),
             trigger_store=InMemoryTriggerQueryStore(),
@@ -198,7 +203,12 @@ class TestOnPrEvent:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
             checks_client=MockChecksClient(),
-            pipeline=EventPipeline(dedup=InMemoryDedup(), evaluator=EvaluateWebhookHandler(store=InMemoryTriggerQueryStore(), repository=NullRepository())),
+            pipeline=EventPipeline(
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(
+                    store=InMemoryTriggerQueryStore(), repository=NullRepository()
+                ),
+            ),
             sha_store=sha_store,
             health_tracker=WebhookHealthTracker(),
             trigger_store=InMemoryTriggerQueryStore(),
@@ -215,7 +225,12 @@ class TestOnPrEvent:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
             checks_client=MockChecksClient(),
-            pipeline=EventPipeline(dedup=InMemoryDedup(), evaluator=EvaluateWebhookHandler(store=InMemoryTriggerQueryStore(), repository=NullRepository())),
+            pipeline=EventPipeline(
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(
+                    store=InMemoryTriggerQueryStore(), repository=NullRepository()
+                ),
+            ),
             sha_store=sha_store,
             health_tracker=WebhookHealthTracker(),
             trigger_store=InMemoryTriggerQueryStore(),
@@ -232,7 +247,12 @@ class TestOnPrEvent:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
             checks_client=MockChecksClient(),
-            pipeline=EventPipeline(dedup=InMemoryDedup(), evaluator=EvaluateWebhookHandler(store=InMemoryTriggerQueryStore(), repository=NullRepository())),
+            pipeline=EventPipeline(
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(
+                    store=InMemoryTriggerQueryStore(), repository=NullRepository()
+                ),
+            ),
             sha_store=sha_store,
             health_tracker=WebhookHealthTracker(),
             trigger_store=InMemoryTriggerQueryStore(),
@@ -262,14 +282,16 @@ class TestPollLoop:
         await _index_check_run_trigger(store)
 
         sha_store = InMemoryPendingSHAStore()
-        await sha_store.register(PendingSHA(
-            repository="owner/repo",
-            sha="abc123",
-            pr_number=42,
-            branch="feat/test",
-            installation_id="inst-1",
-            registered_at=datetime.now(UTC),
-        ))
+        await sha_store.register(
+            PendingSHA(
+                repository="owner/repo",
+                sha="abc123",
+                pr_number=42,
+                branch="feat/test",
+                installation_id="inst-1",
+                registered_at=datetime.now(UTC),
+            )
+        )
 
         failed_check = {
             "id": 789,
@@ -325,20 +347,25 @@ class TestPollLoop:
         )
 
         sha_store = InMemoryPendingSHAStore()
-        await sha_store.register(PendingSHA(
-            repository="owner/repo",
-            sha="abc123",
-            pr_number=42,
-            branch="feat/test",
-            installation_id="inst-1",
-            registered_at=datetime.now(UTC),
-        ))
+        await sha_store.register(
+            PendingSHA(
+                repository="owner/repo",
+                sha="abc123",
+                pr_number=42,
+                branch="feat/test",
+                installation_id="inst-1",
+                registered_at=datetime.now(UTC),
+            )
+        )
 
         mock_client = MockChecksClient()
 
         poller = CheckRunPoller(
             checks_client=mock_client,
-            pipeline=EventPipeline(dedup=InMemoryDedup(), evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository())),
+            pipeline=EventPipeline(
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
+            ),
             sha_store=sha_store,
             health_tracker=WebhookHealthTracker(),
             trigger_store=store,
@@ -383,7 +410,9 @@ class TestDedup:
                     "conclusion": "failure",
                     "html_url": "https://github.com/owner/repo/runs/789",
                     "output": {"title": "Lint failed", "summary": "2 errors"},
-                    "pull_requests": [{"number": 42, "head": {"ref": "feat/test", "sha": "abc123"}}],
+                    "pull_requests": [
+                        {"number": 42, "head": {"ref": "feat/test", "sha": "abc123"}}
+                    ],
                 },
                 "repository": {"full_name": "owner/repo"},
             },

@@ -73,6 +73,9 @@ class CheckRunPoller:
 
     async def start(self) -> None:
         """Start the check-run polling background task."""
+        if self.is_running:
+            logger.info("Check-run poller already running; start() ignored")
+            return
         self._task = asyncio.create_task(self._poll_loop(), name="check-run-poller")
         logger.info("Check-run poller started")
 
@@ -138,7 +141,7 @@ class CheckRunPoller:
             try:
                 if await self._has_check_run_triggers():
                     await self._poll_pending_shas()
-                    await self._cleanup_stale_shas()
+                await self._cleanup_stale_shas()
                 self._state.record_success()
             except asyncio.CancelledError:
                 raise
@@ -190,30 +193,35 @@ class CheckRunPoller:
             if raw_check_run.get("status") != "completed":
                 all_completed = False
                 continue
+            await self._ingest_synthesized_event(raw_check_run, pending)
 
-            event = synthesize_check_run_event(raw_check_run, pending)
-            if event is not None:
-                try:
-                    result = await self._pipeline.ingest(event)
-                    if result.status == "processed" and result.triggers_fired:
-                        logger.info(
-                            "Synthesized check_run.completed for %s@%s — fired %s",
-                            pending.repository,
-                            pending.sha[:8],
-                            result.triggers_fired,
-                        )
-                except Exception:
-                    logger.exception(
-                        "Failed to ingest synthesized check_run event for %s@%s",
-                        pending.repository,
-                        pending.sha[:8],
-                    )
-
-        # Remove SHA when all check runs have completed (any conclusion)
         if all_completed and response.check_runs:
             await self._sha_store.remove(pending.repository, pending.sha)
             logger.debug(
                 "All check runs completed for %s@%s, removed from pending",
+                pending.repository,
+                pending.sha[:8],
+            )
+
+    async def _ingest_synthesized_event(
+        self, raw_check_run: dict[str, object], pending: PendingSHA
+    ) -> None:
+        """Synthesize a check_run event and feed it through the pipeline."""
+        event = synthesize_check_run_event(raw_check_run, pending)
+        if event is None:
+            return
+        try:
+            result = await self._pipeline.ingest(event)
+            if result.status == "processed" and result.triggers_fired:
+                logger.info(
+                    "Synthesized check_run.completed for %s@%s — fired %s",
+                    pending.repository,
+                    pending.sha[:8],
+                    result.triggers_fired,
+                )
+        except Exception:
+            logger.exception(
+                "Failed to ingest synthesized check_run event for %s@%s",
                 pending.repository,
                 pending.sha[:8],
             )

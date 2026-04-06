@@ -62,10 +62,20 @@ class TestSynthesizeCheckRunEvent:
         assert event.installation_id == "inst-1"
         assert event.source.value == "checks_api"
 
-    def test_returns_normalized_event_for_timed_out(self) -> None:
+    def test_returns_none_for_timed_out(self) -> None:
+        """timed_out doesn't match SELF_HEALING_PRESET (conclusion == 'failure')."""
         raw = _make_raw_check_run(conclusion="timed_out")
-        event = synthesize_check_run_event(raw, _make_pending())
-        assert event is not None
+        assert synthesize_check_run_event(raw, _make_pending()) is None
+
+    def test_returns_none_for_missing_id(self) -> None:
+        raw = _make_raw_check_run(conclusion="failure")
+        del raw["id"]
+        assert synthesize_check_run_event(raw, _make_pending()) is None
+
+    def test_returns_none_for_zero_id(self) -> None:
+        raw = _make_raw_check_run(conclusion="failure")
+        raw["id"] = 0
+        assert synthesize_check_run_event(raw, _make_pending()) is None
 
     def test_returns_none_for_success(self) -> None:
         raw = _make_raw_check_run(conclusion="success")

@@ -165,25 +165,7 @@ async def shutdown(
                 await _state._recovery_task
             _state._recovery_task = None
 
-        if _state.check_run_poller is not None:
-            with contextlib.suppress(Exception):
-                await _state.check_run_poller.stop()
-            _state.check_run_poller = None
-
-        if _state.event_poller is not None:
-            with contextlib.suppress(Exception):
-                await _state.event_poller.stop()
-            _state.event_poller = None
-
-        if _state.workflow_dispatcher is not None:
-            with contextlib.suppress(Exception):
-                await _state.workflow_dispatcher.shutdown()
-            _state.workflow_dispatcher = None
-
-        if _state.subscription_service is not None:
-            with contextlib.suppress(Exception):
-                await _state.subscription_service.stop()
-            _state.subscription_service = None
+        await _stop_services(_state)
 
         await disconnect()
         return Ok(None)
@@ -211,6 +193,29 @@ async def health_check(
     _enrich_subscription_health(response, mode)
 
     return Ok(response)
+
+
+async def _stop_services(state: LifecycleState) -> None:
+    """Stop all managed services during shutdown."""
+    if state.check_run_poller is not None:
+        with contextlib.suppress(Exception):
+            await state.check_run_poller.stop()
+        state.check_run_poller = None
+
+    if state.event_poller is not None:
+        with contextlib.suppress(Exception):
+            await state.event_poller.stop()
+        state.event_poller = None
+
+    if state.workflow_dispatcher is not None:
+        with contextlib.suppress(Exception):
+            await state.workflow_dispatcher.shutdown()
+        state.workflow_dispatcher = None
+
+    if state.subscription_service is not None:
+        with contextlib.suppress(Exception):
+            await state.subscription_service.stop()
+        state.subscription_service = None
 
 
 # ── Private helpers ─────────────────────────────────────────────────

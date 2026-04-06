@@ -21,7 +21,7 @@ from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
 )
 from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
 
-_FAILURE_CONCLUSIONS: frozenset[str] = frozenset({"failure", "timed_out"})
+_FAILURE_CONCLUSIONS: frozenset[str] = frozenset({"failure"})
 
 
 def synthesize_check_run_event(
@@ -30,7 +30,8 @@ def synthesize_check_run_event(
 ) -> NormalizedEvent | None:
     """Synthesize a ``check_run.completed`` NormalizedEvent from a Checks API response.
 
-    Returns ``None`` if the check run is not completed or did not fail.
+    Returns ``None`` if the check run is not completed, did not fail
+    (``conclusion != "failure"``), or is missing a check-run ID.
 
     Args:
         raw_check_run: A single check-run object from the GitHub Checks API
@@ -48,6 +49,10 @@ def synthesize_check_run_event(
     if conclusion not in _FAILURE_CONCLUSIONS:
         return None
 
+    check_run_id = raw_check_run.get("id")
+    if not check_run_id:
+        return None
+
     output = raw_check_run.get("output") or {}
 
     # Build payload matching webhook check_run.completed format exactly.
@@ -61,7 +66,7 @@ def synthesize_check_run_event(
     payload: dict[str, Any] = {
         "action": "completed",
         "check_run": {
-            "id": raw_check_run.get("id", 0),
+            "id": check_run_id,
             "name": raw_check_run.get("name", ""),
             "status": "completed",
             "conclusion": conclusion,

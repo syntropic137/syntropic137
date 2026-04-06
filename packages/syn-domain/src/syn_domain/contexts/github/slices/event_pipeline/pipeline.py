@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
@@ -104,16 +105,12 @@ class EventPipeline:
             payload=payload,
         )
 
-        # 4. Notify observers (fire-and-forget, #602)
+        # 4. Notify observers — best-effort, non-blocking (#602)
         for observer in self._observers:
-            try:
-                await observer(event)
-            except Exception:
-                logger.warning(
-                    "Observer failed for %s",
-                    event.dedup_key,
-                    exc_info=True,
-                )
+            asyncio.create_task(
+                _safe_observer_call(observer, event),
+                name=f"observer-{event.dedup_key}",
+            )
 
         fired, deferred, blocked = _classify_results(results)
         return PipelineResult(
@@ -122,6 +119,21 @@ class EventPipeline:
             triggers_fired=fired,
             deferred=deferred,
             blocked=blocked,
+        )
+
+
+async def _safe_observer_call(
+    observer: _ObserverCallback,
+    event: NormalizedEvent,
+) -> None:
+    """Call an observer, logging any exception without propagating."""
+    try:
+        await observer(event)
+    except Exception:
+        logger.warning(
+            "Observer failed for %s",
+            event.dedup_key,
+            exc_info=True,
         )
 
 

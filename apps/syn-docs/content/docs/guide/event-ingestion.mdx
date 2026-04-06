@@ -69,8 +69,8 @@ failures without requiring a webhook URL or tunnel setup.
    webhooks), the pipeline registers the PR's head commit SHA
 2. The Checks API poller periodically calls
    `GET /repos/{owner}/{repo}/commits/{sha}/check-runs` for each registered SHA
-3. When a check run completes with `conclusion: failure` or `timed_out`, the
-   poller synthesizes a `check_run.completed` event identical to what a webhook
+3. When a check run completes with `conclusion: failure`, the poller
+   synthesizes a `check_run.completed` event identical to what a webhook
    would deliver
 4. The synthesized event flows through the same `EventPipeline.ingest()` path,
    triggering self-healing workflows

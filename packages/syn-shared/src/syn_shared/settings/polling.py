@@ -74,6 +74,7 @@ class PollingSettings(BaseSettings):
 
     check_run_sha_ttl_seconds: int = Field(
         default=7200,
+        ge=60,
         description="Max age for pending SHAs before cleanup (seconds). Default 2h.",
     )
 
