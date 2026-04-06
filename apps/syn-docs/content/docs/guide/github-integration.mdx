@@ -28,29 +28,20 @@ If you already ran `npx @syntropic137/setup init`, the GitHub App step was offer
 
 ## Trigger Rules
 
-A **trigger rule** connects a GitHub event to a workflow. When a matching event arrives, Syntropic137 starts a workflow execution automatically.
+A **trigger rule** connects a GitHub event to a workflow. When a matching event arrives, Syntropic137 evaluates conditions and safety guards, then either fires the workflow or records a block with the reason.
 
 ```bash
 # Create a trigger via CLI
-syn trigger create \
+syn triggers register \
   --repo owner/my-repo \
   --event pull_request.opened \
   --workflow pr-review-v1 \
-  --daily-limit 20 \
   --cooldown 60
 ```
 
-### Safety Limits
+Triggers include safety guards (concurrency, cooldown, daily limits, idempotency), condition operators for filtering events, built-in presets, and full observability — every fire and block is recorded and queryable.
 
-Every trigger has built-in guards to prevent runaway execution:
-
-| Guard | Default | Purpose |
-|-------|---------|---------|
-| `daily_limit` | 50 | Maximum executions per day per trigger |
-| `cooldown` | 30s | Minimum seconds between executions |
-| `budget` | — | Maximum spend before pausing (optional) |
-
-These are enforced server-side and cannot be bypassed by webhook payloads.
+For the complete guide on triggers, conditions, guards, and observability, see [Triggers](/docs/guide/triggers).
 
 ### Supported Events
 

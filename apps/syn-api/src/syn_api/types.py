@@ -413,6 +413,8 @@ class TriggerHistoryEntry(BaseModel):
     fired_at: datetime | None = None
     status: str = "dispatched"
     cost_usd: float | None = None
+    guard_name: str = ""
+    block_reason: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -1051,6 +1053,8 @@ class TriggerHistoryListEntry(BaseModel):
     event_type: str = ""
     pr_number: int | None = None
     status: str = "dispatched"
+    guard_name: str = ""
+    block_reason: str = ""
 
 
 class TriggerHistoryListResponse(PaginatedResponse):
@@ -1069,6 +1073,8 @@ class TriggerHistoryEntryResponse(BaseModel):
     pr_number: int | None = None
     status: str = "dispatched"
     cost_usd: float | None = None
+    guard_name: str = ""
+    block_reason: str = ""
 
 
 class TriggerHistoryResponse(BaseModel):

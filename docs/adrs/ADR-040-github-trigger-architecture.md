@@ -81,14 +81,27 @@ Trigger rules are event-sourced for full audit trail. Each state transition emit
 
 Every trigger evaluation passes through safety guards before dispatching:
 
-| Guard | Purpose |
-|-------|---------|
-| **Bot Sender Check** | Prevent infinite loops - don't trigger on the bot's own commits |
-| **Max Attempts** | Cap retries per (PR, check_name) combination |
-| **Cooldown** | Minimum time between fires for the same PR |
-| **Daily Limit** | Maximum triggers per day per rule |
-| **Idempotency** | Don't process the same `X-GitHub-Delivery` twice |
-| **Budget** | Maximum cost per triggered workflow execution |
+| Guard | `guard_name` | Purpose |
+|-------|-------------|---------|
+| **Concurrency** | `concurrency` | Block if execution already running for same (trigger, PR) — prevents catch-up storms |
+| **Bot Sender Check** | — | Prevent infinite loops — don't trigger on the bot's own commits |
+| **Max Attempts** | `max_attempts` | Cap retries per (PR, trigger) combination |
+| **Cooldown** | `cooldown` | Minimum time between fires for the same PR (retryable) |
+| **Daily Limit** | `daily_limit` | Maximum triggers per day per rule |
+| **Idempotency** | `idempotency` | Don't process the same `X-GitHub-Delivery` twice |
+| **Budget** | — | Maximum cost per triggered workflow execution |
+
+Guards are evaluated in order. The concurrency guard runs first as the cheapest check and the most common block during event catch-up after restarts.
+
+#### Concurrency Guard (Coalescing Key)
+
+When the event poller catches up after a restart, it may deliver many events for the same PR simultaneously. Without coalescing, each event fires a separate execution — wasteful and potentially conflicting.
+
+The concurrency guard uses a **coalescing key** of `(trigger_id, pr_number)`. If an execution is already RUNNING for that key, new triggers are blocked. For non-PR events, the key is just `trigger_id`.
+
+Execution tracking piggybacks on `record_fire()` — when a trigger fires, the execution is marked as running in an **in-memory** set. When the workflow completes (via `WorkflowExecutionCompletedEvent` or `WorkflowFailedEvent`), it's cleared via `complete_execution()`.
+
+Running-execution state is intentionally **not persisted**. On restart, no executions survive because containers are ephemeral (see AGENTS.md crash recovery). The in-memory set starts empty, so the poller catch-up after restart won't be blocked by stale running-execution entries. Fire records (persisted via projection) track *history* only — they are never used to infer running state.
 
 ### 5. Debounce for Review Comments
 
@@ -123,6 +136,30 @@ Trigger rules include an `input_mapping` that extracts workflow inputs from the 
 ```
 
 This keeps trigger rules declarative and avoids custom code per trigger type.
+
+### 8. Trigger Observability — TriggerBlockedEvent
+
+When a trigger is blocked (by a safety guard, conditions not met, or concurrency), the system emits a `TriggerBlockedEvent` into the event store. This provides a complete audit trail for trigger decisions — not just fires, but blocks too.
+
+```
+github.TriggerBlocked (v1)
+├── trigger_id        # Which trigger was blocked
+├── guard_name        # "concurrency", "max_attempts", "cooldown", "daily_limit",
+│                     #  "idempotency", "conditions_not_met"
+├── reason            # Human-readable explanation
+├── webhook_delivery_id
+├── github_event_type
+├── repository
+├── pr_number
+└── payload_summary   # Same shape as TriggerFiredEvent
+```
+
+The `TriggerHistoryProjection` projects both `TriggerFiredEvent` and `TriggerBlockedEvent` into a unified history view. Entries have a `status` field: `dispatched`, `completed`, `failed`, or `blocked`.
+
+This enables:
+- `syn triggers history <id>` shows blocked entries alongside fires
+- Operators can answer "why didn't this trigger fire?" without grepping logs
+- Future guards (#580 contributor allowlist) emit `TriggerBlockedEvent` automatically
 
 ## Consequences
 
