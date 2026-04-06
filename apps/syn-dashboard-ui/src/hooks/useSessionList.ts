@@ -31,7 +31,7 @@ export function useSessionList(): UseSessionListResult {
     })
       .then((data) => {
         if (!cancelled) {
-          setSessions(data)
+          setSessions(data.sessions)
           setLoading(false)
         }
       })
