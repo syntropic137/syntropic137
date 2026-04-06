@@ -41,6 +41,10 @@ syn triggers register \
 
 Triggers include safety guards (concurrency, cooldown, daily limits, idempotency), condition operators for filtering events, built-in presets, and full observability — every fire and block is recorded and queryable.
 
+### Conditions
+
+Triggers support fine-grained filtering with dot-notation field paths and comparison operators. Use conditions to whitelist specific contributors, exclude bots, filter by branch, skip draft PRs, and more. See [Trigger Conditions](/docs/guide/trigger-conditions) for the full reference.
+
 For the complete guide on triggers, conditions, guards, and observability, see [Triggers](/docs/guide/triggers).
 
 ### Supported Events
