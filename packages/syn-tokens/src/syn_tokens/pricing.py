@@ -9,7 +9,10 @@ Backward-compatible: ``CLAUDE_PRICING``, ``DEFAULT_MODEL``, and
 
 from __future__ import annotations
 
-from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from decimal import Decimal
 
 from syn_shared.pricing import (
     MODEL_PRICING_TABLE,

@@ -153,9 +153,13 @@ class ModelPricing:
 
 # Re-export pricing table and lookup from centralized module.
 # All pricing data is maintained in syn_shared.pricing — single source of truth.
-from syn_shared.pricing import ModelPricing as SharedModelPricing  # noqa: E402
 from syn_shared.pricing import (  # noqa: E402
     MODEL_PRICING_TABLE as _SHARED_TABLE,
+)
+from syn_shared.pricing import (  # noqa: E402
+    ModelPricing as SharedModelPricing,
+)
+from syn_shared.pricing import (  # noqa: E402
     get_model_pricing as _get_shared_pricing,
 )
 

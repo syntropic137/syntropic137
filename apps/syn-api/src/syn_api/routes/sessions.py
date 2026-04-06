@@ -342,7 +342,7 @@ async def get_session(
             total_tokens=cd.total_tokens,
             total_cost_usd=cd.total_cost_usd,
             agent_model=cd.agent_model,
-            cost_by_model={k: v for k, v in cd.cost_by_model.items()},
+            cost_by_model=dict(cd.cost_by_model),
             operations=operations,
             started_at=session.started_at,
             completed_at=session.completed_at,

@@ -6,7 +6,7 @@ import contextlib
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -92,6 +92,34 @@ async def _load_phase_operations(
         return []
 
 
+class _SessionCostData(NamedTuple):
+    cache_creation: int
+    cache_read: int
+    agent_model: str | None
+    cost_by_model: dict[str, Decimal]
+
+
+async def _load_session_cost(
+    manager: ProjectionManager, session_id: str, phase: PhaseExecutionDetail
+) -> _SessionCostData:
+    """Load session cost enrichment data (cache tokens, model info)."""
+    cache_creation = phase.cache_creation_tokens
+    cache_read = phase.cache_read_tokens
+    agent_model: str | None = None
+    cost_by_model: dict[str, Decimal] = {}
+    try:
+        sc = await manager.session_cost.get_session_cost(session_id)
+        if sc is not None:
+            if cache_creation == 0 and cache_read == 0:
+                cache_creation = sc.cache_creation_tokens
+                cache_read = sc.cache_read_tokens
+            agent_model = sc.agent_model
+            cost_by_model = dict(sc.cost_by_model)
+    except Exception:
+        logger.debug("Failed to load session cost for %s", session_id, exc_info=True)
+    return _SessionCostData(cache_creation, cache_read, agent_model, cost_by_model)
+
+
 async def _map_phase_detail(
     phase: PhaseExecutionDetail,
     manager: ProjectionManager,
@@ -99,22 +127,10 @@ async def _map_phase_detail(
     """Map a domain phase to an API PhaseExecution."""
     ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else []
 
-    # Enrich from session cost (cache tokens, model info)
-    cache_creation = phase.cache_creation_tokens
-    cache_read = phase.cache_read_tokens
-    agent_model: str | None = None
-    cost_by_model: dict[str, Decimal] = {}
     if phase.session_id:
-        try:
-            sc = await manager.session_cost.get_session_cost(phase.session_id)
-            if sc is not None:
-                if cache_creation == 0 and cache_read == 0:
-                    cache_creation = sc.cache_creation_tokens
-                    cache_read = sc.cache_read_tokens
-                agent_model = sc.agent_model
-                cost_by_model = dict(sc.cost_by_model)
-        except Exception:
-            logger.debug("Failed to load session cost for %s", phase.session_id, exc_info=True)
+        sc = await _load_session_cost(manager, phase.session_id, phase)
+    else:
+        sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, {})
 
     return PhaseExecution(
         phase_id=phase.workflow_phase_id,
@@ -124,14 +140,14 @@ async def _map_phase_detail(
         artifact_id=phase.artifact_id,
         input_tokens=phase.input_tokens,
         output_tokens=phase.output_tokens,
-        cache_creation_tokens=cache_creation,
-        cache_read_tokens=cache_read,
+        cache_creation_tokens=sc.cache_creation,
+        cache_read_tokens=sc.cache_read,
         cost_usd=Decimal(str(phase.cost_usd)),
         duration_seconds=phase.duration_seconds,
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
-        model=agent_model,
-        cost_by_model=cost_by_model,
+        model=sc.agent_model,
+        cost_by_model=sc.cost_by_model,
         operations=ops,
     )
 
