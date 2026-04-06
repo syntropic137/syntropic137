@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _get_repos_for_installation(
-    projection: Any, installation_id: str  # noqa: ANN401
+    projection: Any,
+    installation_id: str,  # noqa: ANN401
 ) -> Result[list[Any], GitHubError]:
     """Get repositories for a specific installation."""
     inst = await projection.get(installation_id)

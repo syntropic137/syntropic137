@@ -673,7 +673,9 @@ async def deregister_repo_endpoint(repo_id: str) -> RepoActionResponse:
 
 
 @router.post("/{repo_id}/assign")
-async def assign_repo_to_system_endpoint(repo_id: str, body: AssignRepoToSystemRequest) -> RepoActionResponse:
+async def assign_repo_to_system_endpoint(
+    repo_id: str, body: AssignRepoToSystemRequest
+) -> RepoActionResponse:
     """Assign a repo to a system."""
     try:
         result = await assign_repo_to_system(

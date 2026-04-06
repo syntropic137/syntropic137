@@ -275,7 +275,10 @@ async def _load_tool_operations(manager: Any, session_id: str) -> list[ToolOpera
 
 
 async def _load_cost_data(
-    manager: Any, session_id: str, fallback_tokens: int, fallback_cost: Decimal  # noqa: ANN401
+    manager: Any,
+    session_id: str,
+    fallback_tokens: int,
+    fallback_cost: Decimal,  # noqa: ANN401
 ) -> _CostData:
     """Load cost data for a session from the projection."""
     try:

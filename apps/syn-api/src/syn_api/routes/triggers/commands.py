@@ -361,7 +361,9 @@ async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActi
 
 
 @router.post("/presets/{preset_name}", response_model=TriggerActionResponse)
-async def enable_preset_endpoint(preset_name: str, body: EnablePresetRequest) -> TriggerActionResponse:
+async def enable_preset_endpoint(
+    preset_name: str, body: EnablePresetRequest
+) -> TriggerActionResponse:
     """Enable a preset for a repository."""
     result = await enable_preset(
         preset_name=preset_name,
@@ -380,9 +382,7 @@ async def enable_preset_endpoint(preset_name: str, body: EnablePresetRequest) ->
     )
 
 
-@router.patch(
-    "/{trigger_id}", response_model=TriggerDetail, response_model_exclude_none=True
-)
+@router.patch("/{trigger_id}", response_model=TriggerDetail, response_model_exclude_none=True)
 async def update_trigger_endpoint(trigger_id: str, body: UpdateTriggerRequest) -> TriggerDetail:
     """Update trigger (pause/resume).
 
@@ -416,7 +416,14 @@ async def update_trigger_endpoint(trigger_id: str, body: UpdateTriggerRequest) -
     detail_result = await get_trigger(trigger_id)
     if isinstance(detail_result, Err):
         # Projection hasn't indexed this trigger — return minimal response
-        return TriggerDetail(trigger_id=trigger_id, name="", event="", repository="", workflow_id="", status=body.action + "d")
+        return TriggerDetail(
+            trigger_id=trigger_id,
+            name="",
+            event="",
+            repository="",
+            workflow_id="",
+            status=body.action + "d",
+        )
 
     detail = detail_result.value
     detail.status = body.action + "d"

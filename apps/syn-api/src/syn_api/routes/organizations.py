@@ -236,7 +236,9 @@ def _classify_org_error(error_msg: str) -> OrganizationError:
 
 
 @router.post("", response_model=OrganizationActionResponse)
-async def create_organization_endpoint(body: CreateOrganizationRequest) -> OrganizationActionResponse:
+async def create_organization_endpoint(
+    body: CreateOrganizationRequest,
+) -> OrganizationActionResponse:
     """Create a new organization."""
     try:
         result = await create_organization(

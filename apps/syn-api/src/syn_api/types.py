@@ -317,7 +317,6 @@ class UpdateTriggerRequest(BaseModel):
     resumed_by: str = "api"
 
 
-
 # ---------------------------------------------------------------------------
 # Response models — Pydantic schemas for API consumers
 # ---------------------------------------------------------------------------
