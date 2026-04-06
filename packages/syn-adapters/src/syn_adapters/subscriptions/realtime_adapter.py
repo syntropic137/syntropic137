@@ -228,18 +228,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         event_type = envelope.event.event_type
         global_nonce = envelope.metadata.global_nonce or 0
         try:
-            if event_type in ("WorkflowCompleted", "WorkflowFailed"):
-                await self._handle_execution_terminal(event_data, event_type)
-            else:
-                # Projection methods use attribute access (event.trigger_id),
-                # so wrap the dict in a SimpleNamespace for duck-typed access.
-                from types import SimpleNamespace
-
-                ns = SimpleNamespace(**event_data)
-                if event_type == "github.TriggerBlocked":
-                    await self._projection.handle_trigger_blocked(ns, global_nonce=global_nonce)
-                else:
-                    await self._projection.handle_trigger_fired(ns)
+            await self._dispatch(event_data, event_type, global_nonce)
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
                     projection_name=self.PROJECTION_NAME,
@@ -256,6 +245,24 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
                 self.PROJECTION_NAME,
             )
             return ProjectionResult.FAILURE
+
+    async def _dispatch(
+        self,
+        event_data: dict[str, Any],
+        event_type: str,
+        global_nonce: int,
+    ) -> None:
+        """Route events to the appropriate handler."""
+        if event_type in ("WorkflowCompleted", "WorkflowFailed"):
+            await self._handle_execution_terminal(event_data, event_type)
+            return
+        from types import SimpleNamespace
+
+        ns = SimpleNamespace(**event_data)
+        if event_type == "github.TriggerBlocked":
+            await self._projection.handle_trigger_blocked(ns, global_nonce=global_nonce)
+        else:
+            await self._projection.handle_trigger_fired(ns)
 
     @staticmethod
     async def _handle_execution_terminal(
