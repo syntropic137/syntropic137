@@ -109,7 +109,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
     # --- Command handlers ---
 
     @command_handler("RegisterRepoCommand")
-    def register(self, command: Any) -> None:
+    def register(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.organization.domain.events.RepoRegisteredEvent import (
             RepoRegisteredEvent,
         )
@@ -136,7 +136,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("AssignRepoToSystemCommand")
-    def assign_to_system(self, command: Any) -> None:
+    def assign_to_system(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
             RepoAssignedToSystemEvent,
         )
@@ -158,7 +158,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("UnassignRepoFromSystemCommand")
-    def unassign_from_system(self, command: Any) -> None:  # noqa: ARG002
+    def unassign_from_system(self, command: Any) -> None:  # noqa: ANN401, ARG002
         from syn_domain.contexts.organization.domain.events.RepoUnassignedFromSystemEvent import (
             RepoUnassignedFromSystemEvent,
         )
@@ -187,7 +187,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         return new
 
     @command_handler("UpdateRepoCommand")
-    def update(self, command: Any) -> None:
+    def update(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.organization.domain.events.RepoUpdatedEvent import (
             RepoUpdatedEvent,
         )
@@ -218,7 +218,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("DeregisterRepoCommand")
-    def deregister(self, command: Any) -> None:
+    def deregister(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.organization.domain.events.RepoDeregisteredEvent import (
             RepoDeregisteredEvent,
         )

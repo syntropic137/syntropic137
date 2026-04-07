@@ -68,7 +68,7 @@ class GetContributionHeatmapHandler:
 
     def __init__(
         self,
-        pool: Any,
+        pool: Any,  # noqa: ANN401
         store: ProjectionStoreProtocol,
         repo_projection: RepoProjection,
     ) -> None:

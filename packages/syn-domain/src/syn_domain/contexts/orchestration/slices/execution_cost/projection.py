@@ -120,7 +120,7 @@ class ExecutionCostProjection:
 
     PROJECTION_NAME = "execution_cost"
 
-    def __init__(self, store: Any, pool: Any | None = None):
+    def __init__(self, store: Any, pool: Any | None = None):  # noqa: ANN401
         """Initialize with a projection store and optional TimescaleDB pool.
 
         Args:

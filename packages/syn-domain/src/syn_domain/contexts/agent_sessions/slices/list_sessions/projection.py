@@ -115,7 +115,7 @@ class SessionListProjection(AutoDispatchProjection):
     PROJECTION_NAME = "session_summaries"
     VERSION = 2  # Bumped: migrated to AutoDispatchProjection
 
-    def __init__(self, store: Any):  # Using Any to avoid circular import
+    def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
 
         Args:

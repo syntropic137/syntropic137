@@ -87,7 +87,7 @@ class PostgresProjectionStore:
         return deserialize(data)
 
     @staticmethod
-    def _json_serializer(obj: Any) -> Any:
+    def _json_serializer(obj: Any) -> Any:  # noqa: ANN401
         """JSON serializer for objects not serializable by default."""
         from syn_adapters.projection_stores.postgres_helpers import json_serializer
 

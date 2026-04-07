@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,8 +27,8 @@ class CreateWorkflowTemplateCommand(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    # Target aggregate (generated if not provided for new aggregates)
-    aggregate_id: str | None = None
+    # Target aggregate (auto-generated UUID if not provided)
+    aggregate_id: str = Field(default_factory=lambda: str(uuid4()))
 
     # Required workflow data
     name: str = Field(..., min_length=1, max_length=255)

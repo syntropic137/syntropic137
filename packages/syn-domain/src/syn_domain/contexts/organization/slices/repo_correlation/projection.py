@@ -31,7 +31,7 @@ class RepoCorrelationProjection(AutoDispatchProjection):
     PROJECTION_NAME = REPO_CORRELATION
     VERSION = 1
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: Any) -> None:  # noqa: ANN401
         """Initialize with a projection store.
 
         Args:

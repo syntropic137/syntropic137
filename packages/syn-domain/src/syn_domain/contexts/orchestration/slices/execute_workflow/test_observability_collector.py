@@ -19,7 +19,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityColl
 
 
 def _make_collector(
-    writer: Any = None,
+    writer: Any = None,  # noqa: ANN401
 ) -> ObservabilityCollector:
     """Create a collector with default test values."""
     return ObservabilityCollector(

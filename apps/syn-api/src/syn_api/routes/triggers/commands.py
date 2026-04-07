@@ -15,7 +15,17 @@ from syn_api._wiring import (
     get_workflow_repo,
     sync_published_events_to_projections,
 )
-from syn_api.types import Err, Ok, Result, TriggerActionResponse, TriggerError
+from syn_api.types import (
+    EnablePresetRequest,
+    Err,
+    Ok,
+    RegisterTriggerRequest,
+    Result,
+    TriggerActionResponse,
+    TriggerDetail,
+    TriggerError,
+    UpdateTriggerRequest,
+)
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
 
 if TYPE_CHECKING:
@@ -103,7 +113,7 @@ async def register_trigger(
         return Err(TriggerError.INVALID_INPUT, message=str(e))
 
 
-async def _index_and_sync_trigger(store: Any, aggregate: Any) -> None:
+async def _index_and_sync_trigger(store: Any, aggregate: Any) -> None:  # noqa: ANN401
     """Index a trigger aggregate in the store and sync projections."""
     await store.index_trigger(
         trigger_id=aggregate.trigger_id,
@@ -331,41 +341,36 @@ async def disable_triggers(
 
 
 @router.post("", response_model=TriggerActionResponse)
-async def register_trigger_endpoint(body: dict[str, Any]) -> TriggerActionResponse:
+async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActionResponse:
     """Register a new trigger rule."""
-    try:
-        result = await register_trigger(
-            name=body["name"],
-            event=body["event"],
-            repository=body.get("repository", ""),
-            workflow_id=body.get("workflow_id", ""),
-            conditions=body.get("conditions"),
-            installation_id=body.get("installation_id", ""),
-            input_mapping=body.get("input_mapping"),
-            config=body.get("config"),
-            created_by=body.get("created_by", "api"),
-        )
-    except (KeyError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    result = await register_trigger(
+        name=body.name,
+        event=body.event,
+        repository=body.repository,
+        workflow_id=body.workflow_id,
+        conditions=body.conditions,
+        installation_id=body.installation_id,
+        input_mapping=body.input_mapping,
+        config=body.config,
+        created_by=body.created_by,
+    )
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
-    return TriggerActionResponse(trigger_id=result.value, name=body["name"], status="active")
+    return TriggerActionResponse(trigger_id=result.value, name=body.name, status="active")
 
 
 @router.post("/presets/{preset_name}", response_model=TriggerActionResponse)
-async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> TriggerActionResponse:
+async def enable_preset_endpoint(
+    preset_name: str, body: EnablePresetRequest
+) -> TriggerActionResponse:
     """Enable a preset for a repository."""
-    repository = body.get("repository", "")
-    if not repository:
-        raise HTTPException(status_code=400, detail="repository is required")
-
     result = await enable_preset(
         preset_name=preset_name,
-        repository=repository,
-        installation_id=body.get("installation_id", ""),
-        created_by=body.get("created_by", "api"),
-        workflow_id=body.get("workflow_id", ""),
+        repository=body.repository,
+        installation_id=body.installation_id,
+        created_by=body.created_by,
+        workflow_id=body.workflow_id,
     )
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
@@ -377,35 +382,56 @@ async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> Trig
     )
 
 
-@router.patch(
-    "/{trigger_id}", response_model=TriggerActionResponse, response_model_exclude_none=True
-)
-async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> TriggerActionResponse:
-    """Update trigger (pause/resume)."""
-    from .queries import _resolve_trigger_id
+@router.patch("/{trigger_id}", response_model=TriggerDetail, response_model_exclude_none=True)
+async def update_trigger_endpoint(trigger_id: str, body: UpdateTriggerRequest) -> TriggerDetail:
+    """Update trigger (pause/resume).
+
+    Returns the full trigger detail with the authoritative status from the
+    command result, not the projection. This avoids eventual consistency
+    staleness — the caller sees the correct status immediately.
+    """
+    from .queries import _resolve_trigger_id, get_trigger
 
     trigger_id = await _resolve_trigger_id(trigger_id)
-    action = body.get("action", "")
-    if action == "pause":
+    if body.action == "pause":
         result = await pause_trigger(
             trigger_id=trigger_id,
-            reason=body.get("reason"),
-            paused_by=body.get("paused_by", "api"),
-        )
-    elif action == "resume":
-        result = await resume_trigger(
-            trigger_id=trigger_id,
-            resumed_by=body.get("resumed_by", "api"),
+            reason=body.reason,
+            paused_by=body.paused_by,
         )
     else:
-        raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+        result = await resume_trigger(
+            trigger_id=trigger_id,
+            resumed_by=body.resumed_by,
+        )
 
     if isinstance(result, Err):
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot {action} trigger {trigger_id}: {result.message}",
+            detail=f"Cannot {body.action} trigger {trigger_id}: {result.message}",
         )
-    return TriggerActionResponse(trigger_id=trigger_id, status=action + "d", action=action)
+
+    # Map action to authoritative status (projection may not have caught up yet).
+    status_map = {"pause": "paused", "resume": "active"}
+    authoritative_status = status_map[body.action]
+
+    # Read trigger detail from projection, then override status with the
+    # authoritative command result.
+    detail_result = await get_trigger(trigger_id)
+    if isinstance(detail_result, Err):
+        # Projection hasn't indexed this trigger — return minimal response
+        return TriggerDetail(
+            trigger_id=trigger_id,
+            name="",
+            event="",
+            repository="",
+            workflow_id="",
+            status=authoritative_status,
+        )
+
+    detail = detail_result.value
+    detail.status = authoritative_status
+    return detail
 
 
 @router.delete(

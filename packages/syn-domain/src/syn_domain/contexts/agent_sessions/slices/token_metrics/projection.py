@@ -27,7 +27,7 @@ class TokenMetricsProjection:
 
     PROJECTION_NAME = "token_metrics"
 
-    def __init__(self, store: Any):
+    def __init__(self, store: Any):  # noqa: ANN401
         """Initialize with a projection store.
 
         Args:

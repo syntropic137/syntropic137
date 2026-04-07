@@ -43,7 +43,7 @@ class WorkflowDispatchProjection(CheckpointedProjection):
     PROJECTION_NAME = WORKFLOW_DISPATCH
     VERSION = 1
 
-    def __init__(self, execution_service: Any = None, store: Any = None) -> None:
+    def __init__(self, execution_service: Any = None, store: Any = None) -> None:  # noqa: ANN401
         self._execution_service = execution_service
         self._store = store
 

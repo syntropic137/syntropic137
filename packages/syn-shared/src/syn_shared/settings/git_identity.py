@@ -35,7 +35,7 @@ class GitIdentitySettings(BaseSettings):
 
     _skip_env_file: bool = False
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize settings, tracking env file configuration."""
         super().__init__(**kwargs)
         if kwargs.get("_env_file") is None:

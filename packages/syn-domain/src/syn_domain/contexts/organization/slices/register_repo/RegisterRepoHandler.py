@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 class RegisterRepoHandler:
-    def __init__(self, repository: Any, claim_repository: Any) -> None:
+    def __init__(self, repository: Any, claim_repository: Any) -> None:  # noqa: ANN401
         self._repository = repository
         self._claim_repository = claim_repository
 

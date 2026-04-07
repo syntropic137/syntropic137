@@ -76,7 +76,7 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
     # --- Command handlers ---
 
     @command_handler("CreateSystemCommand")
-    def create(self, command: Any) -> None:
+    def create(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.organization.domain.events.SystemCreatedEvent import (
             SystemCreatedEvent,
         )
@@ -98,7 +98,7 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
         self._apply(event)
 
     @command_handler("UpdateSystemCommand")
-    def update(self, command: Any) -> None:
+    def update(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.organization.domain.events.SystemUpdatedEvent import (
             SystemUpdatedEvent,
         )
@@ -120,7 +120,7 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
         self._apply(event)
 
     @command_handler("DeleteSystemCommand")
-    def delete(self, command: Any) -> None:
+    def delete(self, command: Any) -> None:  # noqa: ANN401
         from syn_domain.contexts.organization.domain.events.SystemDeletedEvent import (
             SystemDeletedEvent,
         )

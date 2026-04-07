@@ -89,7 +89,7 @@ describe("observe commands", () => {
           total_tokens: 10000,
           cache_creation_tokens: 500,
           cache_read_tokens: 300,
-          estimated_cost_usd: "0.12",
+          total_cost_usd: "0.12",
         }),
       );
 

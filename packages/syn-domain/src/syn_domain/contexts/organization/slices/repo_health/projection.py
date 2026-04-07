@@ -74,7 +74,7 @@ class RepoHealthProjection(AutoDispatchProjection):
     PROJECTION_NAME = REPO_HEALTH
     VERSION = 1
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: Any) -> None:  # noqa: ANN401
         self._store = store
         self._events_since_snapshot = 0
 

@@ -38,7 +38,7 @@ class RepoCostProjection(AutoDispatchProjection):
     PROJECTION_NAME = REPO_COST
     VERSION = 1
 
-    def __init__(self, store: Any, pool: Any | None = None) -> None:
+    def __init__(self, store: Any, pool: Any | None = None) -> None:  # noqa: ANN401
         self._store = store
         self._pool = pool
         self._events_since_snapshot = 0

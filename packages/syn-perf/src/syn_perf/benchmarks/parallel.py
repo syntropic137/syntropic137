@@ -27,7 +27,7 @@ class ParallelBenchmark(BaseBenchmark):
 
     benchmark_type = "parallel"
 
-    async def run(self, count: int = 10, **_kwargs: Any) -> BenchmarkResult:
+    async def run(self, count: int = 10, **_kwargs: Any) -> BenchmarkResult:  # noqa: ANN401
         """Run parallel workspace benchmark.
 
         Args:

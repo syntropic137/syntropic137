@@ -74,7 +74,7 @@ class MockChecksClient:
         repo: str,
         ref: str,
         installation_id: str,
-    ) -> Any:
+    ) -> Any:  # noqa: ANN401
         self.poll_count += 1
         return self._response
 
@@ -108,7 +108,7 @@ class InMemoryPendingSHAStore:
     async def remove(self, repository: str, sha: str) -> None:
         self._pending.pop((repository, sha), None)
 
-    async def cleanup_stale(self, max_age: Any) -> int:
+    async def cleanup_stale(self, max_age: Any) -> int:  # noqa: ANN401
         return 0
 
 

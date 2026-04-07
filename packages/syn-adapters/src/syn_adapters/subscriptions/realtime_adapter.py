@@ -99,7 +99,7 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
     VERSION: ClassVar[int]
     _SUBSCRIBED: ClassVar[set[str]]
 
-    def __init__(self, projection: Any) -> None:
+    def __init__(self, projection: Any) -> None:  # noqa: ANN401
         self._projection = projection
 
     def get_name(self) -> str:
@@ -116,8 +116,8 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
 
     async def handle_event(
         self,
-        envelope: Any,
-        checkpoint_store: Any,
+        envelope: Any,  # noqa: ANN401
+        checkpoint_store: Any,  # noqa: ANN401
     ) -> ProjectionResult:
         event_type = envelope.event.event_type
         event_data = envelope.event.model_dump()
@@ -221,8 +221,8 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
 
     async def handle_event(
         self,
-        envelope: Any,
-        checkpoint_store: Any,
+        envelope: Any,  # noqa: ANN401
+        checkpoint_store: Any,  # noqa: ANN401
     ) -> ProjectionResult:
         event_data = envelope.event.model_dump()
         event_type = envelope.event.event_type

@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ManageArtifactHandler:
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Any) -> None:  # noqa: ANN401
         self._repository = repository
 
     async def update(self, command: UpdateArtifactCommand) -> bool:

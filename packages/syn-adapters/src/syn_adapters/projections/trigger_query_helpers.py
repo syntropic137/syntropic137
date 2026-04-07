@@ -90,7 +90,7 @@ async def record_fire(
     proj: TriggerQueryProjection,
     trigger_id: str,
     execution_id: str,
-    pr_number: Any,
+    pr_number: Any,  # noqa: ANN401
     fired_at: str,
 ) -> None:
     """Record a fire event in the fire records namespace."""

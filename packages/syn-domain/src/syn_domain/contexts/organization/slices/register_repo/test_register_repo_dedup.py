@@ -28,11 +28,11 @@ class SimpleRepoRepository:
     def __init__(self) -> None:
         self._repos: dict[str, Any] = {}
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: Any) -> None:  # noqa: ANN401
         if aggregate.id:
             self._repos[str(aggregate.id)] = aggregate
 
-    async def get_by_id(self, repo_id: str) -> Any:
+    async def get_by_id(self, repo_id: str) -> Any:  # noqa: ANN401
         return self._repos.get(repo_id)
 
 
@@ -42,11 +42,11 @@ class SimpleClaimRepository:
     def __init__(self) -> None:
         self._claims: dict[str, Any] = {}
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: Any) -> None:  # noqa: ANN401
         if aggregate.id:
             self._claims[str(aggregate.id)] = aggregate
 
-    async def save_new(self, aggregate: Any) -> None:
+    async def save_new(self, aggregate: Any) -> None:  # noqa: ANN401
         claim_id = str(aggregate.id) if aggregate.id else ""
         if claim_id and claim_id in self._claims:
             existing = self._claims[claim_id]
@@ -57,7 +57,7 @@ class SimpleClaimRepository:
                 )
         await self.save(aggregate)
 
-    async def get_by_id(self, claim_id: str) -> Any:
+    async def get_by_id(self, claim_id: str) -> Any:  # noqa: ANN401
         return self._claims.get(claim_id)
 
 

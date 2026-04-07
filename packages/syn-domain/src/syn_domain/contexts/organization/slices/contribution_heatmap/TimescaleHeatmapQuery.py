@@ -49,7 +49,7 @@ _EMPTY_BREAKDOWN: dict[str, float] = {
 class TimescaleHeatmapQuery:
     """Queries agent_events with time_bucket aggregation for heatmap data."""
 
-    def __init__(self, pool: Any) -> None:
+    def __init__(self, pool: Any) -> None:  # noqa: ANN401
         self._pool = pool
         self._cost_calculator = CostCalculator()
 

@@ -62,7 +62,7 @@ WHERE session_id = $1 AND event_type = $2
 """
 
 
-def _extract_tokens(token_result: Any) -> tuple[int, int, int, int]:
+def _extract_tokens(token_result: Any) -> tuple[int, int, int, int]:  # noqa: ANN401
     """Extract token counts from a DB result row."""
     return (
         token_result["total_input"] or 0,
@@ -72,7 +72,7 @@ def _extract_tokens(token_result: Any) -> tuple[int, int, int, int]:
     )
 
 
-def _resolve_agent_model(exec_result: Any, token_result: Any) -> str | None:
+def _resolve_agent_model(exec_result: Any, token_result: Any) -> str | None:  # noqa: ANN401
     """Resolve agent model from session_summary or token_usage results."""
     if exec_result and exec_result["agent_model"]:
         return exec_result["agent_model"]
@@ -82,9 +82,9 @@ def _resolve_agent_model(exec_result: Any, token_result: Any) -> str | None:
 
 
 def _resolve_duration(
-    exec_result: Any,
-    token_result: Any,
-    started_at: Any,
+    exec_result: Any,  # noqa: ANN401
+    token_result: Any,  # noqa: ANN401
+    started_at: Any,  # noqa: ANN401
 ) -> tuple[Any, int | None]:
     """Resolve completed_at and duration_ms from available data."""
     completed_at = (
@@ -102,11 +102,11 @@ def _resolve_duration(
 class TimescaleSessionCostQuery:
     """Calculates session cost directly from TimescaleDB observations."""
 
-    def __init__(self, pool: Any, cost_calculator: CostCalculator | None = None) -> None:
+    def __init__(self, pool: Any, cost_calculator: CostCalculator | None = None) -> None:  # noqa: ANN401
         self._pool = pool
         self._cost_calculator = cost_calculator or CostCalculator()
 
-    async def _query_token_data(self, conn: Any, session_id: str) -> tuple[Any, Any]:
+    async def _query_token_data(self, conn: Any, session_id: str) -> tuple[Any, Any]:  # noqa: ANN401
         """Query session_summary or fall back to token_usage aggregation.
 
         Returns (exec_result, token_result) tuple.
@@ -122,7 +122,7 @@ class TimescaleSessionCostQuery:
 
     def _calculate_cost(
         self,
-        exec_result: Any,
+        exec_result: Any,  # noqa: ANN401
         input_tokens: int,
         output_tokens: int,
         cache_creation: int,
@@ -142,16 +142,16 @@ class TimescaleSessionCostQuery:
     @staticmethod
     def _build_session_cost(
         session_id: str,
-        exec_result: Any,
-        token_result: Any,
+        exec_result: Any,  # noqa: ANN401
+        token_result: Any,  # noqa: ANN401
         total_cost: Decimal,
         input_tokens: int,
         output_tokens: int,
         cache_creation: int,
         cache_read: int,
         tool_count: int,
-        started_at: Any,
-        completed_at: Any,
+        started_at: Any,  # noqa: ANN401
+        completed_at: Any,  # noqa: ANN401
         duration_ms: int | None,
     ) -> SessionCost:
         """Assemble a SessionCost from resolved query fields."""

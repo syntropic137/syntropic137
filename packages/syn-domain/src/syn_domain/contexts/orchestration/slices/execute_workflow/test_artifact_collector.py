@@ -45,7 +45,7 @@ class MockWorkspace:
 class MockArtifactRepo:
     saved: list[Any] = field(default_factory=list)
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: Any) -> None:  # noqa: ANN401
         self.saved.append(aggregate)
 
     async def get_by_id(self, artifact_id: str) -> None:

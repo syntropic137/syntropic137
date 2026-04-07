@@ -6,7 +6,7 @@ Extracted from postgres_helpers.py to reduce module cognitive complexity.
 from typing import Any
 
 
-def _serialize_filter_value(value: Any) -> str:
+def _serialize_filter_value(value: Any) -> str:  # noqa: ANN401
     """Serialize a Python value to match PostgreSQL's JSONB ->> text extraction.
 
     JSONB ->> extracts booleans as 'true'/'false' (lowercase JSON literals),

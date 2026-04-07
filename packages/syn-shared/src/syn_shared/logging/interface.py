@@ -6,27 +6,27 @@ from typing import Any, Protocol
 class LoggerProtocol(Protocol):
     """Protocol for logger implementations."""
 
-    def debug(self, message: str, **kwargs: Any) -> None:
+    def debug(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log debug message."""
         ...
 
-    def info(self, message: str, **kwargs: Any) -> None:
+    def info(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log info message."""
         ...
 
-    def warning(self, message: str, **kwargs: Any) -> None:
+    def warning(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log warning message."""
         ...
 
-    def error(self, message: str, **kwargs: Any) -> None:
+    def error(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log error message."""
         ...
 
-    def critical(self, message: str, **kwargs: Any) -> None:
+    def critical(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log critical message."""
         ...
 
-    def bind(self, **kwargs: Any) -> "LoggerProtocol":
+    def bind(self, **kwargs: Any) -> "LoggerProtocol":  # noqa: ANN401
         """Return a new logger with bound context."""
         ...
 
@@ -34,30 +34,30 @@ class LoggerProtocol(Protocol):
 class Logger:
     """Wrapper around structlog logger implementing LoggerProtocol."""
 
-    def __init__(self, logger: Any) -> None:
+    def __init__(self, logger: Any) -> None:  # noqa: ANN401
         """Initialize with a structlog logger."""
         self._logger = logger
 
-    def debug(self, message: str, **kwargs: Any) -> None:
+    def debug(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log debug message."""
         self._logger.debug(message, **kwargs)
 
-    def info(self, message: str, **kwargs: Any) -> None:
+    def info(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log info message."""
         self._logger.info(message, **kwargs)
 
-    def warning(self, message: str, **kwargs: Any) -> None:
+    def warning(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log warning message."""
         self._logger.warning(message, **kwargs)
 
-    def error(self, message: str, **kwargs: Any) -> None:
+    def error(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log error message."""
         self._logger.error(message, **kwargs)
 
-    def critical(self, message: str, **kwargs: Any) -> None:
+    def critical(self, message: str, **kwargs: Any) -> None:  # noqa: ANN401
         """Log critical message."""
         self._logger.critical(message, **kwargs)
 
-    def bind(self, **kwargs: Any) -> "Logger":
+    def bind(self, **kwargs: Any) -> "Logger":  # noqa: ANN401
         """Return a new logger with bound context."""
         return Logger(self._logger.bind(**kwargs))

@@ -5,7 +5,7 @@
 
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { apiDelete } from "../../client/api.js";
+import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, GREEN, RED } from "../../output/ansi.js";
 import type { InstallationRecord, PluginManifest, ResolvedWorkflow } from "../../packages/models.js";
@@ -47,7 +47,12 @@ async function deleteWorkflowsViaApi(record: InstallationRecord): Promise<number
   for (const wfRef of record.workflows) {
     process.stdout.write(`  Removing ${style(wfRef.name, BOLD)}... `);
     try {
-      await apiDelete(`/workflows/${wfRef.id}`, { expected: [200, 204, 404] });
+      unwrap(
+        await api.DELETE("/workflows/{workflow_id}", {
+          params: { path: { workflow_id: wfRef.id } },
+        }),
+        "Failed to delete workflow",
+      );
       print(style("done", GREEN));
       deleted++;
     } catch {

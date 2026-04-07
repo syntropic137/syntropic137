@@ -50,7 +50,7 @@ class TriggerQueryProjection(CheckpointedProjection):
     PROJECTION_NAME = "trigger_query"
     VERSION = 1
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: Any) -> None:  # noqa: ANN401
         self._store = store
 
     def get_name(self) -> str:

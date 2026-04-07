@@ -245,7 +245,7 @@ class _ManifestCallbackHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body.encode())
         _installation_event.set()
 
-    def log_message(self, format: str, *args: Any) -> None:
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: ANN401
         """Suppress default request logging."""
 
 
@@ -579,7 +579,7 @@ class _FormPageHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(self._html.encode())
 
-    def log_message(self, format: str, *args: Any) -> None:
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: ANN401
         pass
 
 

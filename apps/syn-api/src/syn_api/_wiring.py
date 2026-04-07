@@ -266,10 +266,10 @@ class _InMemoryAggregateRepository:
     def __init__(self) -> None:
         self._aggregates: dict[str, Any] = {}
 
-    async def get_by_id(self, aggregate_id: str) -> Any:
+    async def get_by_id(self, aggregate_id: str) -> Any:  # noqa: ANN401
         return self._aggregates.get(aggregate_id)
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: Any) -> None:  # noqa: ANN401
         agg_id = str(aggregate.id) if hasattr(aggregate, "id") else str(aggregate.trigger_id)
         self._aggregates[agg_id] = aggregate
 
@@ -444,7 +444,7 @@ async def sync_published_events_to_projections() -> None:
 _controller_singleton: Any = None
 
 
-def get_controller() -> Any:
+def get_controller() -> Any:  # noqa: ANN401
     """Return a singleton ExecutionController for pause/resume/cancel/inject.
 
     Returns the same instance on every call so the execution engine and API
@@ -581,7 +581,7 @@ class _NullSignalQueueAdapter:
         return None
 
 
-def get_event_store_instance() -> Any:
+def get_event_store_instance() -> Any:  # noqa: ANN401
     """Return the AgentEventStore for TimescaleDB queries."""
     return get_event_store()
 
@@ -628,12 +628,12 @@ def get_execution_cost_query():
     return ExecutionCostQueryService(pool=pool)
 
 
-async def get_conversation_store() -> Any:
+async def get_conversation_store() -> Any:  # noqa: ANN401
     """Return the conversation storage (MinIO-backed)."""
     return await get_conversation_storage()
 
 
-def get_realtime() -> Any:
+def get_realtime() -> Any:  # noqa: ANN401
     """Return the RealTimeProjection singleton."""
     from syn_adapters.projections.realtime import get_realtime_projection
 
@@ -641,9 +641,9 @@ def get_realtime() -> Any:
 
 
 def get_subscription_coordinator(
-    realtime_projection: Any = None,
-    execution_service: Any = None,
-) -> Any:
+    realtime_projection: Any = None,  # noqa: ANN401
+    execution_service: Any = None,  # noqa: ANN401
+) -> Any:  # noqa: ANN401
     """Create the CoordinatorSubscriptionService.
 
     Wraps: create_coordinator_service(event_store, projection_store, ...)
@@ -665,7 +665,7 @@ def get_subscription_coordinator(
     )
 
 
-def get_github_settings() -> Any:
+def get_github_settings() -> Any:  # noqa: ANN401
     """Return the GitHubAppSettings instance."""
     from syn_shared.settings.github import get_github_settings as _get
 

@@ -27,7 +27,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
     METRICS_KEY = "global"  # Single record for global metrics
     VERSION = 2  # Bumped: migrated to AutoDispatchProjection, renamed on_workflow_created
 
-    def __init__(self, store: Any):  # Using Any to avoid circular import
+    def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
 
         Args:

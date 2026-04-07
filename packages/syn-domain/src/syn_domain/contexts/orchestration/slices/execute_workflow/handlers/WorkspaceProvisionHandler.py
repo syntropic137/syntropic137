@@ -53,7 +53,7 @@ PromptBuilder = Callable[
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 
 
-def _build_agent_env(workspace: Any, session_id: str) -> dict[str, str]:
+def _build_agent_env(workspace: Any, session_id: str) -> dict[str, str]:  # noqa: ANN401
     """Build agent environment with proxy-based auth (ISS-43).
 
     Validates proxy is available (credentials live on the proxy container,

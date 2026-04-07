@@ -32,7 +32,7 @@ class RepositoryAdapter[TAggregate]:
     projections in test mode. In production the publisher is a no-op.
     """
 
-    def __init__(self, sdk_repository: Any) -> None:
+    def __init__(self, sdk_repository: Any) -> None:  # noqa: ANN401
         """Initialize with an SDK EventStoreRepository."""
         self._repo = sdk_repository
 
@@ -58,12 +58,12 @@ class RepositoryAdapter[TAggregate]:
 
     # Allow access to underlying repository if needed
     @property
-    def sdk_repository(self) -> Any:
+    def sdk_repository(self) -> Any:  # noqa: ANN401
         """Get the underlying SDK repository."""
         return self._repo
 
     @staticmethod
-    def _capture_uncommitted(aggregate: Any) -> list[Any]:
+    def _capture_uncommitted(aggregate: Any) -> list[Any]:  # noqa: ANN401
         """Capture uncommitted events before the SDK marks them as committed."""
         if hasattr(aggregate, "get_uncommitted_events"):
             return list(aggregate.get_uncommitted_events())
@@ -91,7 +91,7 @@ _repo_repository: RepositoryAdapter[Any] | None = None
 _repo_claim_repository: RepositoryAdapter[Any] | None = None
 
 
-def _get_repository_factory() -> Any:
+def _get_repository_factory() -> Any:  # noqa: ANN401
     """Get a RepositoryFactory with the appropriate EventStoreClient.
 
     The client is the single decision point: MemoryEventStoreClient for
@@ -105,7 +105,7 @@ def _get_repository_factory() -> Any:
     return RepositoryFactory(client)
 
 
-def get_workflow_repository() -> Any:
+def get_workflow_repository() -> Any:  # noqa: ANN401
     """Get a WorkflowTemplateAggregate repository."""
     global _workflow_repository
     if _workflow_repository is not None:
@@ -124,7 +124,7 @@ def get_workflow_repository() -> Any:
     return _workflow_repository
 
 
-def get_workflow_execution_repository() -> Any:
+def get_workflow_execution_repository() -> Any:  # noqa: ANN401
     """Get a WorkflowExecutionAggregate repository."""
     global _workflow_execution_repository
     if _workflow_execution_repository is not None:
@@ -143,7 +143,7 @@ def get_workflow_execution_repository() -> Any:
     return _workflow_execution_repository
 
 
-def get_session_repository() -> Any:
+def get_session_repository() -> Any:  # noqa: ANN401
     """Get an AgentSessionAggregate repository."""
     global _session_repository
     if _session_repository is not None:
@@ -162,7 +162,7 @@ def get_session_repository() -> Any:
     return _session_repository
 
 
-def get_artifact_repository() -> Any:
+def get_artifact_repository() -> Any:  # noqa: ANN401
     """Get an ArtifactAggregate repository."""
     global _artifact_repository
     if _artifact_repository is not None:
@@ -181,7 +181,7 @@ def get_artifact_repository() -> Any:
     return _artifact_repository
 
 
-def get_trigger_repository() -> Any:
+def get_trigger_repository() -> Any:  # noqa: ANN401
     """Get a TriggerRuleAggregate repository.
 
     NOTE: In test mode, returns InMemoryTriggerQueryStore (a query store
@@ -215,7 +215,7 @@ def get_trigger_repository() -> Any:
     return _trigger_repository
 
 
-def get_organization_repository() -> Any:
+def get_organization_repository() -> Any:  # noqa: ANN401
     """Get an OrganizationAggregate repository."""
     global _organization_repository
     if _organization_repository is not None:
@@ -234,7 +234,7 @@ def get_organization_repository() -> Any:
     return _organization_repository
 
 
-def get_system_repository() -> Any:
+def get_system_repository() -> Any:  # noqa: ANN401
     """Get a SystemAggregate repository."""
     global _system_repository
     if _system_repository is not None:
@@ -253,7 +253,7 @@ def get_system_repository() -> Any:
     return _system_repository
 
 
-def get_repo_repository() -> Any:
+def get_repo_repository() -> Any:  # noqa: ANN401
     """Get a RepoAggregate repository."""
     global _repo_repository
     if _repo_repository is not None:
@@ -272,7 +272,7 @@ def get_repo_repository() -> Any:
     return _repo_repository
 
 
-def get_repo_claim_repository() -> Any:
+def get_repo_claim_repository() -> Any:  # noqa: ANN401
     """Get a RepoClaimAggregate repository."""
     global _repo_claim_repository
     if _repo_claim_repository is not None:

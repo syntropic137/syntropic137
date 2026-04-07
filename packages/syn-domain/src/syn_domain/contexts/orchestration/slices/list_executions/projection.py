@@ -29,7 +29,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workflow_executions"
     VERSION = 4  # Bumped: resilient on_workflow_failed for orphaned failure events (#598)
 
-    def __init__(self, store: Any):  # Using Any to avoid circular import
+    def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
 
         Args:

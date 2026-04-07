@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 def _detect_exit_code(
     stream_result: StreamResult,
-    workspace: Any,
+    workspace: Any,  # noqa: ANN401
     phase_id: str,
     tokens: TokenAccumulator,
 ) -> int:
@@ -97,7 +97,7 @@ class AgentExecutionHandler:
     async def handle(
         self,
         todo: TodoItem,
-        workspace: Any,
+        workspace: Any,  # noqa: ANN401
         agent_env: dict[str, str],
         claude_cmd: list[str],
         session_id: str,

@@ -5,12 +5,15 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetPaginated, buildParams } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
+import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { formatCost, formatDuration, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
-import type { SessionSummaryResponse, SessionResponse } from "../generated/types.js";
+
+type SessionSummary = components["schemas"]["SessionSummaryResponse"];
+type SessionDetail = components["schemas"]["SessionResponse"];
 
 const listCommand: CommandDef = {
   name: "list",
@@ -21,12 +24,21 @@ const listCommand: CommandDef = {
     limit: { type: "string", short: "n", description: "Max results", default: "50" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const params = buildParams({
-      workflow_id: (parsed.values["workflow"] as string | undefined) ?? null,
-      status: (parsed.values["status"] as string | undefined) ?? null,
-      limit: (parsed.values["limit"] as string | undefined) ?? "50",
-    });
-    const items = await apiGetPaginated<SessionSummaryResponse>("/sessions", "sessions", { params });
+    const workflow = parsed.values["workflow"] as string | undefined;
+    const status = parsed.values["status"] as string | undefined;
+    const limitStr = (parsed.values["limit"] as string | undefined) ?? "50";
+
+    const data = unwrap(await api.GET("/sessions", {
+      params: {
+        query: {
+          workflow_id: workflow ?? null,
+          status: status ?? null,
+          limit: parseInt(limitStr, 10),
+        },
+      },
+    }), "Failed to list sessions");
+
+    const items: SessionSummary[] = data.sessions ?? [];
     if (items.length === 0) { printDim("No sessions found."); return; }
 
     const table = new Table({ title: "Sessions" });
@@ -59,7 +71,9 @@ const showCommand: CommandDef = {
     const id = parsed.positionals[0];
     if (!id) { printError("Missing session-id"); throw new CLIError("Missing argument", 1); }
 
-    const d = await apiGet<SessionResponse>(`/sessions/${id}`);
+    const d: SessionDetail = unwrap(await api.GET("/sessions/{session_id}", {
+      params: { path: { session_id: id } },
+    }), "Failed to get session");
 
     print(`${style("Session:", BOLD)} ${d.id}`);
     print(`  Workflow:    ${d.workflow_name ?? d.workflow_id ?? "\u2014"}`);

@@ -53,7 +53,7 @@ class ArtifactCollectionHandler:
     async def handle(
         self,
         todo: TodoItem,
-        workspace: Any,
+        workspace: Any,  # noqa: ANN401
         workflow_id: str,
         session_id: str,
         phase_name: str,

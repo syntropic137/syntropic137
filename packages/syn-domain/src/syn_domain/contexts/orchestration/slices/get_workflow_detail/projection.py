@@ -58,7 +58,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workflow_details"
     VERSION = 5  # Bumped: ISS-400 add execution_type, max_tokens, artifact types to phase detail
 
-    def __init__(self, store: Any):
+    def __init__(self, store: Any):  # noqa: ANN401
         """Initialize with a projection store."""
         self._store = store
 

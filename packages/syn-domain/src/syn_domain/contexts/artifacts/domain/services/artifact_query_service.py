@@ -64,7 +64,7 @@ class ArtifactQueryService:
     Replaces in-memory phase_outputs dict with DB-backed queries.
     """
 
-    def __init__(self, projection: Any) -> None:
+    def __init__(self, projection: Any) -> None:  # noqa: ANN401
         """Initialize with an artifact projection.
 
         Args:

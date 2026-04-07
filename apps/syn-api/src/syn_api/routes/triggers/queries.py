@@ -100,7 +100,7 @@ async def list_triggers(
     )
 
 
-def _resolve_config(config: Any) -> dict[str, Any]:
+def _resolve_config(config: Any) -> dict[str, Any]:  # noqa: ANN401
     """Convert a config value (dataclass, dict, or other) to a plain dict."""
     if dataclasses.is_dataclass(config) and not isinstance(config, type):
         return dataclasses.asdict(config)  # type: ignore[arg-type]  # guarded by is_dataclass

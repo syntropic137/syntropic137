@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     )
 
 
-def _coerce_bool(value: Any) -> Any:
+def _coerce_bool(value: Any) -> Any:  # noqa: ANN401
     """Coerce string-encoded booleans to native Python bools.
 
     Conditions may arrive with string values from CLI or raw API calls
@@ -32,7 +32,7 @@ def _coerce_bool(value: Any) -> Any:
     return value
 
 
-def _coerce_to_list(value: Any) -> list:
+def _coerce_to_list(value: Any) -> list:  # noqa: ANN401
     """Coerce a value to a list for membership operators (in/not_in).
 
     Handles comma-separated strings from CLI (``"a,b"`` → ``["a", "b"]``),
@@ -47,7 +47,7 @@ def _coerce_to_list(value: Any) -> list:
     return [value]
 
 
-def _check_operator(operator: str, resolved: Any, value: Any) -> bool:
+def _check_operator(operator: str, resolved: Any, value: Any) -> bool:  # noqa: ANN401
     """Evaluate a single operator against resolved and expected values.
 
     Returns True if the condition passes, False if it fails.
@@ -94,7 +94,7 @@ def evaluate_conditions(
 _ARRAY_INDEX_RE = re.compile(r"^(.+)\[(\d+)\]$")
 
 
-def _resolve_array_index(current: Any, key: str, index_str: str) -> Any:
+def _resolve_array_index(current: Any, key: str, index_str: str) -> Any:  # noqa: ANN401
     """Resolve an array-indexed access like ``items[0]`` on *current*."""
     if not isinstance(current, dict):
         return None
@@ -105,7 +105,7 @@ def _resolve_array_index(current: Any, key: str, index_str: str) -> Any:
     return current[idx] if idx < len(current) else None
 
 
-def _resolve_one_part(current: Any, part: str) -> Any:
+def _resolve_one_part(current: Any, part: str) -> Any:  # noqa: ANN401
     """Resolve a single path segment (plain key or array-indexed) from *current*."""
     if current is None:
         return None
@@ -118,7 +118,7 @@ def _resolve_one_part(current: Any, part: str) -> Any:
     return None
 
 
-def _resolve_field(payload: dict, field_path: str) -> Any:
+def _resolve_field(payload: dict, field_path: str) -> Any:  # noqa: ANN401
     """Resolve a dot-notation field path from a payload dict.
 
     Supports array indexing: "check_run.pull_requests[0].number"

@@ -59,7 +59,7 @@ class _ObservationProjectionAdapter(CheckpointedProjection):
     VERSION: ClassVar[int]
     _SUBSCRIBED: ClassVar[set[str]]
 
-    def __init__(self, projection: Any) -> None:
+    def __init__(self, projection: Any) -> None:  # noqa: ANN401
         self._projection = projection
 
     def get_name(self) -> str:

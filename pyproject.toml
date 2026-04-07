@@ -93,6 +93,9 @@ select = [
     "TCH",    # flake8-type-checking
     "PTH",    # flake8-use-pathlib
     "RUF",    # Ruff-specific rules
+    "ANN401", # Ban `Any` in type annotations (#593). The OpenAPI→TypeScript pipeline
+              # generates `{ [key: string]: unknown }` for `Any`-typed fields, breaking
+              # end-to-end type safety. Use `object`, concrete types, or generics instead.
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)

@@ -5,7 +5,7 @@
  */
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
-import { apiGetPaginated, buildParams } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
 import { printDim } from "../output/console.js";
 import { style, CYAN, DIM, GREEN, RED } from "../output/ansi.js";
 import { Table } from "../output/table.js";
@@ -18,11 +18,19 @@ const reposCommand: CommandDef = {
     "include-private": { type: "boolean", description: "Include private repos (default: true)" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const params = buildParams({
-      installation_id: (parsed.values["installation"] as string | undefined) ?? null,
-      include_private: (parsed.values["include-private"] as boolean | undefined) ?? null,
-    });
-    const items = await apiGetPaginated<Record<string, unknown>>("/github/repos", "repos", { params });
+    const installationId = (parsed.values["installation"] as string | undefined) ?? null;
+    const includePrivate = parsed.values["include-private"] as boolean | undefined;
+
+    const query: { installation_id?: string | null; include_private?: boolean } = {
+      installation_id: installationId,
+    };
+    if (includePrivate !== undefined) query.include_private = includePrivate;
+
+    const data = unwrap(await api.GET("/github/repos", {
+      params: { query },
+    }), "List GitHub repos");
+
+    const items = data.repos ?? [];
     if (items.length === 0) { printDim("No accessible repositories found."); return; }
 
     const table = new Table({ title: "Accessible Repositories" });
@@ -33,13 +41,12 @@ const reposCommand: CommandDef = {
     table.addColumn("Installation", { style: DIM });
 
     for (const r of items) {
-      const isPrivate = r["private"] === true;
       table.addRow(
-        String(r["full_name"] ?? ""),
-        String(r["owner"] ?? ""),
-        String(r["default_branch"] ?? ""),
-        isPrivate ? style("yes", RED) : style("no", GREEN),
-        String(r["installation_id"] ?? ""),
+        r.full_name,
+        r.owner,
+        r.default_branch,
+        r.private ? style("yes", RED) : style("no", GREEN),
+        r.installation_id,
       );
     }
     table.print();
