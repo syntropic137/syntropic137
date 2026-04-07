@@ -1201,48 +1201,69 @@ Map each fix to the Docker image it ships in:
 | Gateway / nginx config | `syntropic137_development-gateway` |
 | Collector | `syntropic137_development-collector` |
 
-### Rebuild affected images locally
+### Initialize submodules
 
-Build only the images that changed. Use the same image names and `latest` tag that
-the selfhost stack expects:
+The Docker build context requires submodule contents (event-sourcing-platform,
+agentic-primitives). If working in a worktree or fresh clone:
 
 ```bash
-# From the repository root — build only the image(s) you need
-# API (includes domain packages)
-docker compose -f docker-compose.yaml build api
-
-# Gateway (nginx + security headers)
-docker compose -f docker-compose.yaml build gateway
-
-# Dashboard
-docker compose -f docker-compose.yaml build dashboard
+git submodule update --init --recursive
 ```
 
-> **Tip:** Check `docker-compose.yaml` for the correct service names and build
-> contexts. The local build produces `syntropic137_development-<service>:latest`,
-> which is the same tag the selfhost stack references.
+### Rebuild affected images locally
+
+Build only the images that changed. The build uses the base compose file plus the
+selfhost overlay (which adds build args, entrypoints, etc.):
+
+```bash
+# From docker/ directory — build only the image(s) you need
+cd docker
+
+# API (includes domain packages + adapters)
+docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml build api
+
+# Gateway (nginx + security headers)
+docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml build gateway
+
+# Dashboard
+docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml build dashboard
+```
+
+This produces local images named `syntropic137_development-<service>:latest`.
 
 ### Swap images into the selfhost stack
 
-Recreate only the affected containers — no need to tear down the entire stack:
+The selfhost stack at `~/.syntropic137/docker-compose.syntropic137.yaml` uses
+pinned GHCR image digests. To use local builds, temporarily replace the image
+references for affected services:
 
 ```bash
-# Recreate specific services with locally-built images
-docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps <service>
+# 1. Find the current image lines
+grep 'image:.*syn-api\|image:.*syn-gateway' ~/.syntropic137/docker-compose.syntropic137.yaml
 
-# Examples:
+# 2. Replace GHCR digest with local image name
+#    Before: image: ghcr.io/syntropic137/syn-api@sha256:a4751f91...
+#    After:  image: syntropic137_development-api:latest
+#
+#    Before: image: ghcr.io/syntropic137/syn-gateway@sha256:fbaaecad...
+#    After:  image: syntropic137_development-gateway:latest
+```
+
+Then recreate only the affected containers:
+
+```bash
 docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps api
 docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps gateway
 ```
 
-Verify the container restarted with the new image:
+Verify the containers restarted with the local images:
 
 ```bash
 docker ps --filter "name=syn137-" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
 ```
 
-- [ ] Affected container(s) restarted with fresh image
-- [ ] Other containers unchanged
+- [ ] Affected container(s) show `syntropic137_development-<service>:latest` image
+- [ ] Other containers unchanged (still on GHCR digests)
 - [ ] `syn health` returns healthy after restart
 
 ### Re-run targeted validation
@@ -1286,13 +1307,39 @@ Append a "Post-Fix Re-Validation" section to the report in `docs/testing/output/
 | P1-2: ... | FIXED | ... |
 ```
 
+### Restore GHCR images
+
+After validation, restore the selfhost compose file to its original GHCR digests:
+
+```bash
+# Revert the image lines back to their original GHCR digests
+# Before: image: syntropic137_development-api:latest
+# After:  image: ghcr.io/syntropic137/syn-api@sha256:<original-digest>
+```
+
+> **Important:** Do NOT leave the selfhost compose pointing at local images.
+> The next `npx @syntropic137/setup update` will overwrite the file anyway,
+> but restoring avoids confusion if someone inspects the stack before then.
+
 ### Iterate if needed
 
 If re-validation reveals new issues or regressions:
 
 1. Fix locally
 2. Rebuild the affected image
-3. Swap into selfhost stack
+3. Swap into selfhost stack (edit image reference + `up -d --no-deps`)
 4. Re-validate
 
-Repeat until all findings are resolved. Only then proceed to commit, push, and PR.
+Repeat until all findings are resolved.
+
+### Cut a patch release
+
+Once all findings pass re-validation:
+
+1. Commit, push, and create a PR for all fixes
+2. Merge to `main`
+3. Bump version: `just bump-version <next-patch>`
+4. PR `main` → `release` — triggers the full release pipeline
+5. After release publishes, run `npx @syntropic137/setup update` on the selfhost
+   stack to pull the new GHCR images with the fixes baked in
+6. Run a final smoke test (Sections 2-5) against the updated selfhost stack
