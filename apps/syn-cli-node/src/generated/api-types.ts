@@ -3899,6 +3899,11 @@ export interface components {
             repository: string;
             /** Workflow Id */
             workflow_id: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
             /** Status */
             status: string;
             /**
@@ -4057,6 +4062,11 @@ export interface components {
             repository: string;
             /** Workflow Id */
             workflow_id: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
             /** Status */
             status: string;
             /**
