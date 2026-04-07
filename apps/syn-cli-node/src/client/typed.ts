@@ -30,13 +30,14 @@ export function createTypedClient() {
 /** Singleton typed client — use this in command handlers. */
 export const api = createTypedClient();
 
-/** Extract data from a typed API response, throwing CLIError on failure. */
+/** Extract data from a typed API response, throwing CLIError on failure.
+ *  Handles 204 No Content (data=undefined, error=undefined) gracefully. */
 export function unwrap<T>(result: { data?: T; error?: unknown }, context: string): T {
-  if (result.error || !result.data) {
+  if (result.error) {
     const detail = typeof result.error === "object" && result.error !== null && "detail" in result.error
       ? String((result.error as { detail: unknown }).detail)
-      : String(result.error ?? "Unknown error");
+      : String(result.error);
     throw new CLIError(`${context}: ${detail}`);
   }
-  return result.data;
+  return result.data as T;
 }

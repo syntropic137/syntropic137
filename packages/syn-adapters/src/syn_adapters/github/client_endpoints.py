@@ -154,8 +154,10 @@ async def list_accessible_repos(
         repos: list[dict] = data.get("repositories", [])
         all_repos.extend(repos)
 
-        total_count: int = data.get("total_count", 0)
-        if len(all_repos) >= total_count:
+        total_count: int | None = data.get("total_count")
+        if total_count is not None and len(all_repos) >= total_count:
+            break
+        if len(repos) < 100:
             break
 
         page += 1

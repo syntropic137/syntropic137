@@ -26,7 +26,7 @@ class AccessibleRepository:
     full_name: str
     private: bool
     default_branch: str
-    installation_id: str
+    installation_id: str | None = None
 
     @property
     def owner(self) -> str:

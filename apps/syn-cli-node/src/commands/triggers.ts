@@ -243,7 +243,7 @@ const pauseCommand: CommandDef = {
   args: [{ name: "trigger-id", description: "Trigger ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const d = unwrap(
+    unwrap(
       await api.PATCH("/triggers/{trigger_id}", {
         params: { path: { trigger_id: id } },
         body: { action: "pause", paused_by: "cli", resumed_by: "" },
@@ -251,7 +251,11 @@ const pauseCommand: CommandDef = {
       "Pause trigger",
     );
     printSuccess(`Trigger ${id} paused.`);
-    renderTriggerDetail(d, id);
+    const detail = unwrap(
+      await api.GET("/triggers/{trigger_id}", { params: { path: { trigger_id: id } } }),
+      "Get trigger",
+    );
+    renderTriggerDetail(detail, id);
   },
 };
 
@@ -261,7 +265,7 @@ const resumeCommand: CommandDef = {
   args: [{ name: "trigger-id", description: "Trigger ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const d = unwrap(
+    unwrap(
       await api.PATCH("/triggers/{trigger_id}", {
         params: { path: { trigger_id: id } },
         body: { action: "resume", paused_by: "", resumed_by: "cli" },
@@ -269,7 +273,11 @@ const resumeCommand: CommandDef = {
       "Resume trigger",
     );
     printSuccess(`Trigger ${id} resumed.`);
-    renderTriggerDetail(d, id);
+    const detail = unwrap(
+      await api.GET("/triggers/{trigger_id}", { params: { path: { trigger_id: id } } }),
+      "Get trigger",
+    );
+    renderTriggerDetail(detail, id);
   },
 };
 

@@ -26,7 +26,7 @@ class GitHubRepoClient(Protocol):
     async def list_accessible_repos(self, installation_id: str | None = None) -> list[dict]: ...
 
 
-def _map_repo(raw: dict, installation_id: str) -> AccessibleRepository | None:
+def _map_repo(raw: dict, installation_id: str | None) -> AccessibleRepository | None:
     """Map a raw GitHub API repo dict to an AccessibleRepository.
 
     Returns None if required fields are missing.

@@ -158,7 +158,8 @@ class MinioConversationStorage:
         size_bytes = len(content_bytes)
 
         # Upload to MinIO
-        assert self._client is not None, "Storage not initialized"
+        if self._client is None:
+            raise RuntimeError("Conversation storage not initialized — call ensure_ready() first")
         self._client.put_object(
             self.BUCKET_NAME,
             object_key,

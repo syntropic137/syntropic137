@@ -89,7 +89,7 @@ function ExecutionMetricsGrid({ execution }: { execution: ExecutionDetailRespons
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <MetricCard title="Phases" value={`${completedPhases}/${execution.phases.length}`} icon={CheckCircle2} color="success" subtitle={`${completedPhases} completed, ${execution.artifact_ids.length} artifact${execution.artifact_ids.length !== 1 ? 's' : ''}`} />
-      <MetricCard title="Total Tokens" value={totalTokens.toLocaleString()} icon={FileText} subtitle={`In: ${(execution.total_input_tokens + cacheRead).toLocaleString()} / Out: ${(execution.total_output_tokens + cacheCreation).toLocaleString()}`} />
+      <MetricCard title="Total Tokens" value={totalTokens.toLocaleString()} icon={FileText} subtitle={`In: ${(execution.total_input_tokens + cacheCreation + cacheRead).toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`} />
       <MetricCard title="Total Cost" value={`$${Number(execution.total_cost_usd).toFixed(4)}`} icon={DollarSign} color="warning" />
     </div>
   )
