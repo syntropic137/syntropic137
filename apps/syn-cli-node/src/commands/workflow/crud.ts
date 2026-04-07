@@ -8,7 +8,7 @@ import { CLIError } from "../../framework/errors.js";
 import { api, unwrap } from "../../client/typed.js";
 import type { components } from "../../generated/api-types.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
-import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
+import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
 import { detectFormat, resolvePackage } from "../../packages/resolver.js";
@@ -127,6 +127,17 @@ function renderWorkflowDetail(detail: WorkflowResponse): void {
     }
   } else {
     printDim("  No phases defined");
+  }
+
+  const declarations = detail.input_declarations ?? [];
+  if (declarations.length > 0) {
+    print(`\n  ${style("Inputs:", BOLD)}`);
+    for (const d of declarations) {
+      const req = d.required ? style("required", YELLOW) : style("optional", DIM);
+      const desc = d.description ? ` — ${d.description}` : "";
+      const def = d.default != null ? ` (default: ${d.default})` : "";
+      print(`    ${style(d.name, GREEN)} [${req}]${desc}${def}`);
+    }
   }
 }
 

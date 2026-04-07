@@ -32,7 +32,7 @@ describe("workflow run commands", () => {
 
   describe("run", () => {
     it("starts a workflow execution", async () => {
-      // First call resolves the workflow, second call triggers execution
+      // First call resolves the workflow, second fetches detail, third triggers execution
       mockFetch
         .mockResolvedValueOnce(
           jsonResponse({
@@ -44,6 +44,16 @@ describe("workflow run commands", () => {
                 phase_count: 2,
               },
             ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-run-123456789",
+            name: "Build Pipeline",
+            workflow_type: "implementation",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
           }),
         )
         .mockResolvedValueOnce(
@@ -65,18 +75,29 @@ describe("workflow run commands", () => {
     });
 
     it("supports dry-run mode", async () => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({
-          workflows: [
-            {
-              id: "wf-dry-123456789",
-              name: "Test WF",
-              workflow_type: "custom",
-              phase_count: 1,
-            },
-          ],
-        }),
-      );
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              {
+                id: "wf-dry-123456789",
+                name: "Test WF",
+                workflow_type: "custom",
+                phase_count: 1,
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-dry-123456789",
+            name: "Test WF",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        );
 
       await runCommand.handler({
         positionals: ["wf-dry"],
@@ -85,8 +106,48 @@ describe("workflow run commands", () => {
 
       const out = stdout();
       expect(out).toContain("DRY RUN");
-      // Should not have made a second fetch call (no execution)
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      // Should not have made a third fetch call (no execution) — 2 calls: list + detail
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("rejects execution when required inputs are missing", async () => {
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              {
+                id: "wf-inp-123456789",
+                name: "Marketplace WF",
+                workflow_type: "custom",
+                phase_count: 1,
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-inp-123456789",
+            name: "Marketplace WF",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [
+              { name: "repository", description: "Target repo (owner/repo)", required: true, default: null },
+            ],
+          }),
+        );
+
+      await expect(
+        runCommand.handler({
+          positionals: ["wf-inp"],
+          values: {},
+        }),
+      ).rejects.toThrow(CLIError);
+
+      const errOut = (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .join("");
+      expect(errOut).toContain("Missing required inputs");
     });
 
     it("throws CLIError when workflow-id is missing", async () => {
