@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -21,6 +21,9 @@ from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
 )
 from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+
+if TYPE_CHECKING:
+    from syn_adapters.github.checks_api_client import CheckRunsResponse
 
 # -- Test doubles ------------------------------------------------------------
 
@@ -74,7 +77,7 @@ class MockChecksClient:
         repo: str,
         ref: str,
         installation_id: str,
-    ) -> Any:
+    ) -> CheckRunsResponse:
         self.poll_count += 1
         return self._response
 
@@ -108,7 +111,7 @@ class InMemoryPendingSHAStore:
     async def remove(self, repository: str, sha: str) -> None:
         self._pending.pop((repository, sha), None)
 
-    async def cleanup_stale(self, max_age: Any) -> int:
+    async def cleanup_stale(self, max_age: timedelta) -> int:
         return 0
 
 

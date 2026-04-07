@@ -6,7 +6,7 @@ Pause, resume, cancel, inject, and state inspection for running executions.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -215,7 +215,9 @@ async def get_state(
 # =============================================================================
 
 
-async def _handle_control_result(result: Any, _action: str = "") -> ControlResponse:
+async def _handle_control_result(
+    result: Result[ControlResult, ExecutionError], _action: str = ""
+) -> ControlResponse:
     """Convert control result to HTTP response."""
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)

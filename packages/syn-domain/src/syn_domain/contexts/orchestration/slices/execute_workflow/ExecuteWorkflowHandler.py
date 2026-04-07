@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class WorkflowRepository(Protocol):
     """Repository protocol for Workflow aggregates."""
 
-    async def get_by_id(self, workflow_id: str) -> WorkflowTemplateAggregate | None: ...
+    async def get_by_id(self, aggregate_id: str) -> WorkflowTemplateAggregate | None: ...
 
 
 class ExecuteWorkflowHandler:

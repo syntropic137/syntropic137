@@ -8,7 +8,7 @@ for compatibility with EventStoreRepository.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import uuid4
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
@@ -16,6 +16,21 @@ from event_sourcing import AggregateRoot, aggregate, command_handler, event_sour
 _T = TypeVar("_T")
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.organization.domain.commands.AssignRepoToSystemCommand import (
+        AssignRepoToSystemCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.DeregisterRepoCommand import (
+        DeregisterRepoCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.RegisterRepoCommand import (
+        RegisterRepoCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.UnassignRepoFromSystemCommand import (
+        UnassignRepoFromSystemCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.UpdateRepoCommand import (
+        UpdateRepoCommand,
+    )
     from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
         RepoAssignedToSystemEvent,
     )
@@ -109,7 +124,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
     # --- Command handlers ---
 
     @command_handler("RegisterRepoCommand")
-    def register(self, command: Any) -> None:
+    def register(self, command: RegisterRepoCommand) -> None:
         from syn_domain.contexts.organization.domain.events.RepoRegisteredEvent import (
             RepoRegisteredEvent,
         )
@@ -136,7 +151,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("AssignRepoToSystemCommand")
-    def assign_to_system(self, command: Any) -> None:
+    def assign_to_system(self, command: AssignRepoToSystemCommand) -> None:
         from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
             RepoAssignedToSystemEvent,
         )
@@ -158,7 +173,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("UnassignRepoFromSystemCommand")
-    def unassign_from_system(self, command: Any) -> None:  # noqa: ARG002
+    def unassign_from_system(self, command: UnassignRepoFromSystemCommand) -> None:  # noqa: ARG002
         from syn_domain.contexts.organization.domain.events.RepoUnassignedFromSystemEvent import (
             RepoUnassignedFromSystemEvent,
         )
@@ -187,7 +202,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         return new
 
     @command_handler("UpdateRepoCommand")
-    def update(self, command: Any) -> None:
+    def update(self, command: UpdateRepoCommand) -> None:
         from syn_domain.contexts.organization.domain.events.RepoUpdatedEvent import (
             RepoUpdatedEvent,
         )
@@ -218,7 +233,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("DeregisterRepoCommand")
-    def deregister(self, command: Any) -> None:
+    def deregister(self, command: DeregisterRepoCommand) -> None:
         from syn_domain.contexts.organization.domain.events.RepoDeregisteredEvent import (
             RepoDeregisteredEvent,
         )

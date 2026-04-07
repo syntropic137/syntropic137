@@ -191,7 +191,7 @@ class AgentEvent(BaseModel):
 
     @field_validator("data", mode="before")
     @classmethod
-    def ensure_dict(cls, v: Any) -> dict[str, Any]:
+    def ensure_dict(cls, v: object) -> dict[str, Any]:
         """Ensure data is always a dict."""
         if v is None:
             return {}

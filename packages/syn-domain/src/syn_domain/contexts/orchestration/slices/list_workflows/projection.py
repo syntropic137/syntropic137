@@ -8,7 +8,12 @@ For execution status, see WorkflowExecutionListProjection.
 Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import AutoDispatchProjection
 
@@ -28,7 +33,7 @@ class WorkflowListProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workflow_summaries"
     VERSION = 3  # Bumped: added archive support with is_archived field
 
-    def __init__(self, store: Any):
+    def __init__(self, store: ProjectionStoreProtocol):
         """Initialize with a projection store."""
         self._store = store
 

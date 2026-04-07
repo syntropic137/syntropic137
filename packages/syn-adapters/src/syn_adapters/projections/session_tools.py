@@ -172,7 +172,7 @@ class SessionToolsProjection:
             limit=limit,
         )
 
-    def _row_to_operation(self, row: Any) -> ToolOperation | None:
+    def _row_to_operation(self, row: asyncpg.Record) -> ToolOperation | None:
         """Convert a database row to a ToolOperation.
 
         Dispatches to specialized handlers based on event type.

@@ -5,7 +5,6 @@ Uses FastAPI TestClient with InMemoryObservabilityStore.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -227,7 +226,7 @@ class TestDedupWriteFailureSafety:
             data={"source": "otlp", "metric_name": "test", "value": 1},
         )
 
-        mock_store: Any = AsyncMock()
+        mock_store = AsyncMock()
         mock_store.write_event = AsyncMock()
         dedup = DeduplicationFilter()
 

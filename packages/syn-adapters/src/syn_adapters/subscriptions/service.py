@@ -35,7 +35,7 @@ from syn_adapters.subscriptions.service_live import (
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from event_sourcing import EventStoreClient
+    from event_sourcing import DomainEvent, EventEnvelope, EventStoreClient
 
     from syn_adapters.projection_stores import ProjectionStoreProtocol
     from syn_adapters.projections import ProjectionManager
@@ -223,7 +223,7 @@ class EventSubscriptionService:
         """Run live subscription for real-time events."""
         await run_live_subscription(self)
 
-    async def _dispatch_event(self, envelope: object) -> bool:
+    async def _dispatch_event(self, envelope: EventEnvelope[DomainEvent]) -> bool:
         """Dispatch an event to projections via validated envelope."""
         return await dispatch_event(self, envelope)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from event_sourcing import Repository
+    from syn_domain.repository import Repository
 
     from .CompleteSessionCommand import CompleteSessionCommand
 

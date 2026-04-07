@@ -100,7 +100,7 @@ async def list_triggers(
     )
 
 
-def _resolve_config(config: Any) -> dict[str, Any]:
+def _resolve_config(config: object) -> dict[str, Any]:
     """Convert a config value (dataclass, dict, or other) to a plain dict."""
     if dataclasses.is_dataclass(config) and not isinstance(config, type):
         return dataclasses.asdict(config)  # type: ignore[arg-type]  # guarded by is_dataclass
@@ -131,7 +131,12 @@ async def get_trigger(
             status=indexed.status,
             fire_count=indexed.fire_count,
             created_at=indexed.created_at if hasattr(indexed, "created_at") else None,
-            conditions=list(indexed.conditions) if indexed.conditions else [],
+            conditions=[
+                dataclasses.asdict(c) if dataclasses.is_dataclass(c) else dict(c)
+                for c in indexed.conditions
+            ]
+            if indexed.conditions
+            else [],
             input_mapping=dict(indexed.input_mapping) if indexed.input_mapping else {},
             config=_resolve_config(indexed.config),
             installation_id=indexed.installation_id or "",

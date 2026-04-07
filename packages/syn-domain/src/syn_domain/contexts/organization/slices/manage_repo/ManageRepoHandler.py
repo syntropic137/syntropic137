@@ -6,11 +6,14 @@ Handles assign and unassign commands for repos.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from syn_domain.contexts.organization.domain import HandlerResult
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.organization.domain.aggregate_repo.RepoAggregate import (
+        RepoAggregate,
+    )
     from syn_domain.contexts.organization.domain.commands.AssignRepoToSystemCommand import (
         AssignRepoToSystemCommand,
     )
@@ -23,12 +26,13 @@ if TYPE_CHECKING:
     from syn_domain.contexts.organization.domain.commands.UpdateRepoCommand import (
         UpdateRepoCommand,
     )
+    from syn_domain.repository import Repository
 
 logger = logging.getLogger(__name__)
 
 
 class ManageRepoHandler:
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Repository[RepoAggregate]) -> None:
         self._repository = repository
 
     async def assign_to_system(self, command: AssignRepoToSystemCommand) -> HandlerResult | None:

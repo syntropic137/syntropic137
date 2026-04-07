@@ -19,6 +19,8 @@ from syn_shared.events import (
 )
 
 if TYPE_CHECKING:
+    import asyncpg
+
     from syn_adapters.projections.session_tools import ToolOperation
 
 _logger = logging.getLogger(__name__)
@@ -41,7 +43,9 @@ def extract_agent_label(data: dict[str, Any]) -> str:
     return str(data.get("tool_name", ""))
 
 
-def row_to_subagent_operation(row: Any, data: dict[str, Any], event_type: str) -> ToolOperation:
+def row_to_subagent_operation(
+    row: asyncpg.Record, data: dict[str, Any], event_type: str
+) -> ToolOperation:
     """Convert a tool event row for an Agent/Task tool into a subagent operation."""
     from syn_adapters.projections.session_tools import ToolOperation
 
@@ -83,7 +87,9 @@ def _resolve_git_message(data: dict[str, Any]) -> str | None:
     return data.get("message") or data.get("message_preview") or data.get("commit_message") or None
 
 
-def row_to_git_operation(row: Any, data: dict[str, Any], event_type: str) -> ToolOperation:
+def row_to_git_operation(
+    row: asyncpg.Record, data: dict[str, Any], event_type: str
+) -> ToolOperation:
     """Convert a git event row into a ToolOperation."""
     from syn_adapters.projections.session_tools import ToolOperation
 

@@ -6,7 +6,7 @@ flow without requiring the event store.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 from event_sourcing import StreamAlreadyExistsError
@@ -21,18 +21,26 @@ from syn_domain.contexts.organization.slices.register_repo.RegisterRepoHandler i
     RegisterRepoHandler,
 )
 
+if TYPE_CHECKING:
+    from syn_domain.contexts.organization.domain.aggregate_repo.RepoAggregate import (
+        RepoAggregate,
+    )
+    from syn_domain.contexts.organization.domain.aggregate_repo_claim.RepoClaimAggregate import (
+        RepoClaimAggregate,
+    )
+
 
 class SimpleRepoRepository:
     """Minimal repo repository for testing."""
 
     def __init__(self) -> None:
-        self._repos: dict[str, Any] = {}
+        self._repos: dict[str, RepoAggregate] = {}
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: RepoAggregate) -> None:
         if aggregate.id:
             self._repos[str(aggregate.id)] = aggregate
 
-    async def get_by_id(self, repo_id: str) -> Any:
+    async def get_by_id(self, repo_id: str) -> RepoAggregate | None:
         return self._repos.get(repo_id)
 
 
@@ -40,13 +48,13 @@ class SimpleClaimRepository:
     """Minimal claim repository with save_new() semantics."""
 
     def __init__(self) -> None:
-        self._claims: dict[str, Any] = {}
+        self._claims: dict[str, RepoClaimAggregate] = {}
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: RepoClaimAggregate) -> None:
         if aggregate.id:
             self._claims[str(aggregate.id)] = aggregate
 
-    async def save_new(self, aggregate: Any) -> None:
+    async def save_new(self, aggregate: RepoClaimAggregate) -> None:
         claim_id = str(aggregate.id) if aggregate.id else ""
         if claim_id and claim_id in self._claims:
             existing = self._claims[claim_id]
@@ -57,7 +65,7 @@ class SimpleClaimRepository:
                 )
         await self.save(aggregate)
 
-    async def get_by_id(self, claim_id: str) -> Any:
+    async def get_by_id(self, claim_id: str) -> RepoClaimAggregate | None:
         return self._claims.get(claim_id)
 
 

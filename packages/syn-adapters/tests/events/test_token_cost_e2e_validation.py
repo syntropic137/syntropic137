@@ -14,7 +14,10 @@ import hashlib
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from syn_tests.fixtures.infrastructure import TestInfrastructure
 
 import httpx
 import pytest
@@ -293,7 +296,7 @@ class TestCollectorIntegration:
     """
 
     @pytest.fixture
-    def collector_url(self, test_infrastructure: Any) -> str | None:
+    def collector_url(self, test_infrastructure: TestInfrastructure) -> str | None:
         """Get collector URL from test infrastructure, with reachability check."""
         from urllib.parse import urlparse
 

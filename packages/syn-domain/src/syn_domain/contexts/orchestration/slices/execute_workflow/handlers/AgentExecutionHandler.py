@@ -9,7 +9,7 @@ Reports AgentExecutionCompletedCommand to the aggregate.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
     )
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 def _detect_exit_code(
     stream_result: StreamResult,
-    workspace: Any,
+    workspace: ManagedWorkspace,
     phase_id: str,
     tokens: TokenAccumulator,
 ) -> int:
@@ -97,7 +98,7 @@ class AgentExecutionHandler:
     async def handle(
         self,
         todo: TodoItem,
-        workspace: Any,
+        workspace: ManagedWorkspace,
         agent_env: dict[str, str],
         claude_cmd: list[str],
         session_id: str,

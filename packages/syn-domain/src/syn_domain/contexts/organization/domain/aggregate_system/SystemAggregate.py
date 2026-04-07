@@ -8,12 +8,21 @@ for compatibility with EventStoreRepository.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.organization.domain.commands.CreateSystemCommand import (
+        CreateSystemCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.DeleteSystemCommand import (
+        DeleteSystemCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.UpdateSystemCommand import (
+        UpdateSystemCommand,
+    )
     from syn_domain.contexts.organization.domain.events.SystemCreatedEvent import (
         SystemCreatedEvent,
     )
@@ -76,7 +85,7 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
     # --- Command handlers ---
 
     @command_handler("CreateSystemCommand")
-    def create(self, command: Any) -> None:
+    def create(self, command: CreateSystemCommand) -> None:
         from syn_domain.contexts.organization.domain.events.SystemCreatedEvent import (
             SystemCreatedEvent,
         )
@@ -98,7 +107,7 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
         self._apply(event)
 
     @command_handler("UpdateSystemCommand")
-    def update(self, command: Any) -> None:
+    def update(self, command: UpdateSystemCommand) -> None:
         from syn_domain.contexts.organization.domain.events.SystemUpdatedEvent import (
             SystemUpdatedEvent,
         )
@@ -120,7 +129,7 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
         self._apply(event)
 
     @command_handler("DeleteSystemCommand")
-    def delete(self, command: Any) -> None:
+    def delete(self, command: DeleteSystemCommand) -> None:
         from syn_domain.contexts.organization.domain.events.SystemDeletedEvent import (
             SystemDeletedEvent,
         )

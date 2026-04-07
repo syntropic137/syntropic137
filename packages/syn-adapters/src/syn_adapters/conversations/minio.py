@@ -24,6 +24,8 @@ from syn_adapters.conversations.minio_session import (
 from syn_adapters.conversations.minio_session import retrieve_session as _retrieve_session
 
 if TYPE_CHECKING:
+    from minio import Minio
+
     from syn_adapters.conversations.protocol import SessionContext
 
 logger = logging.getLogger(__name__)
@@ -80,7 +82,7 @@ class MinioConversationStorage:
         self._db_url = db_url
         self._secure = secure
 
-        self._client: Any = None
+        self._client: Minio | None = None
         self._pool: asyncpg.Pool | None = None
         self._initialized = False
 
@@ -156,6 +158,7 @@ class MinioConversationStorage:
         size_bytes = len(content_bytes)
 
         # Upload to MinIO
+        assert self._client is not None, "Storage not initialized"
         self._client.put_object(
             self.BUCKET_NAME,
             object_key,

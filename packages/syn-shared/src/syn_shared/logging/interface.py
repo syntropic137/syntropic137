@@ -1,5 +1,7 @@
 """Logger interface for dependency injection."""
 
+from __future__ import annotations
+
 from typing import Any, Protocol
 
 
@@ -26,7 +28,7 @@ class LoggerProtocol(Protocol):
         """Log critical message."""
         ...
 
-    def bind(self, **kwargs: Any) -> "LoggerProtocol":
+    def bind(self, **kwargs: Any) -> LoggerProtocol:
         """Return a new logger with bound context."""
         ...
 
@@ -34,7 +36,7 @@ class LoggerProtocol(Protocol):
 class Logger:
     """Wrapper around structlog logger implementing LoggerProtocol."""
 
-    def __init__(self, logger: Any) -> None:
+    def __init__(self, logger: LoggerProtocol) -> None:
         """Initialize with a structlog logger."""
         self._logger = logger
 
@@ -58,6 +60,6 @@ class Logger:
         """Log critical message."""
         self._logger.critical(message, **kwargs)
 
-    def bind(self, **kwargs: Any) -> "Logger":
+    def bind(self, **kwargs: Any) -> Logger:
         """Return a new logger with bound context."""
         return Logger(self._logger.bind(**kwargs))

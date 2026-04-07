@@ -125,6 +125,14 @@ class ProjectionStoreProtocol(Protocol):
         """
         ...
 
+    async def delete_all(self, projection: str) -> None:
+        """Delete all records for a projection.
+
+        Args:
+            projection: Name of the projection
+        """
+        ...
+
     async def get_last_updated(self, projection: str) -> datetime | None:
         """Get the last update timestamp for a projection.
 
