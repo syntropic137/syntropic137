@@ -14,7 +14,7 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import asyncpg
 from agentic_logging import get_logger
@@ -30,9 +30,14 @@ from syn_adapters.subscriptions.realtime_adapter import (
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
+    from event_sourcing import EventStoreClient
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
 
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.realtime import RealTimeProjection
+    from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
+        _ExecutionService,
+    )
 
 logger = get_logger(__name__)
 
@@ -55,7 +60,7 @@ class CoordinatorSubscriptionService:
 
     def __init__(
         self,
-        event_store: Any,
+        event_store: EventStoreClient,
         projections: list[CheckpointedProjection],
         realtime_projection: RealTimeProjection | None = None,
         checkpoint_store: ProjectionCheckpointStore | None = None,
@@ -123,7 +128,7 @@ class CoordinatorSubscriptionService:
             logger.info("Database pool created for checkpoint store")
 
             # Create checkpoint store (table is created on first operation)
-            self._checkpoint_store = PostgresCheckpointStore(self._db_pool)
+            self._checkpoint_store = PostgresCheckpointStore(self._db_pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
             logger.info("Checkpoint store initialized")
 
         # Build projection list (add realtime adapter if configured)
@@ -166,10 +171,10 @@ class CoordinatorSubscriptionService:
 
 
 def create_coordinator_service(
-    event_store: Any,
-    projection_store: Any,
+    event_store: EventStoreClient,
+    projection_store: ProjectionStoreProtocol,
     realtime_projection: RealTimeProjection | None = None,
-    execution_service: Any = None,
+    execution_service: object | None = None,
     checkpoint_store: ProjectionCheckpointStore | None = None,
     pool: asyncpg.Pool | None = None,
 ) -> CoordinatorSubscriptionService:
@@ -273,7 +278,10 @@ def create_coordinator_service(
         DashboardMetricsProjection(projection_store),
         WorkflowPhaseMetricsProjection(projection_store),
         ExecutionTodoProjection(store=projection_store),
-        WorkflowDispatchProjection(execution_service=execution_service, store=projection_store),
+        WorkflowDispatchProjection(
+            execution_service=cast("_ExecutionService | None", execution_service),
+            store=projection_store,
+        ),
         TriggerQueryProjection(projection_store),
         # --- Agent sessions context ---
         SessionListProjection(projection_store),

@@ -5,8 +5,6 @@ Emitted each time a trigger dispatches a workflow execution. Provides audit trai
 
 from __future__ import annotations
 
-from typing import Any
-
 from event_sourcing import DomainEvent, event
 from pydantic import Field, field_validator
 
@@ -30,10 +28,10 @@ class TriggerFiredEvent(DomainEvent):
     webhook_delivery_id: str = ""
     github_event_type: str = ""
     repository: str = ""
-    pr_number: Any = None
-    payload_summary: dict = Field(default_factory=dict)
+    pr_number: int | None = None
+    payload_summary: dict[str, object] = Field(default_factory=dict)
     workflow_id: str = ""
-    workflow_inputs: dict[str, Any] = Field(default_factory=dict)
+    workflow_inputs: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("trigger_id")
     @classmethod

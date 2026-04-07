@@ -21,8 +21,8 @@ const colorClasses = {
     iconBg: 'bg-[var(--color-surface-elevated)]',
   },
   accent: {
-    icon: 'text-indigo-400',
-    iconBg: 'bg-indigo-500/10',
+    icon: 'text-blue-400',
+    iconBg: 'bg-blue-500/10',
   },
   success: {
     icon: 'text-emerald-400',

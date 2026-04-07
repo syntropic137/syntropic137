@@ -5,7 +5,6 @@ Tests Lane 2 telemetry recording — never touches domain aggregates.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -19,7 +18,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityColl
 
 
 def _make_collector(
-    writer: Any = None,
+    writer: AsyncMock | None = None,
 ) -> ObservabilityCollector:
     """Create a collector with default test values."""
     return ObservabilityCollector(

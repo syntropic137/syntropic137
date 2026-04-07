@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import asyncpg
+
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import AutoDispatchProjection
 
@@ -38,7 +43,7 @@ class RepoCostProjection(AutoDispatchProjection):
     PROJECTION_NAME = REPO_COST
     VERSION = 1
 
-    def __init__(self, store: Any, pool: Any | None = None) -> None:
+    def __init__(self, store: ProjectionStoreProtocol, pool: asyncpg.Pool | None = None) -> None:
         self._store = store
         self._pool = pool
         self._events_since_snapshot = 0

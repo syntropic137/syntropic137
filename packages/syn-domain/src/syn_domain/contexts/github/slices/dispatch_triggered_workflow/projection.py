@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import (
     CheckpointedProjection,
@@ -21,6 +24,18 @@ from event_sourcing import (
 )
 
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
+
+
+class _ExecutionService(Protocol):
+    """Protocol for the execution service dependency."""
+
+    async def run_workflow(
+        self,
+        workflow_id: str,
+        inputs: dict[str, Any],
+        execution_id: str,
+    ) -> object: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +58,11 @@ class WorkflowDispatchProjection(CheckpointedProjection):
     PROJECTION_NAME = WORKFLOW_DISPATCH
     VERSION = 1
 
-    def __init__(self, execution_service: Any = None, store: Any = None) -> None:
+    def __init__(
+        self,
+        execution_service: _ExecutionService | None = None,
+        store: ProjectionStoreProtocol | None = None,
+    ) -> None:
         self._execution_service = execution_service
         self._store = store
 

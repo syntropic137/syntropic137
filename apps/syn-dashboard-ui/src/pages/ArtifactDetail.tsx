@@ -52,7 +52,7 @@ export function ArtifactDetail() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 overflow-hidden">
       <Breadcrumbs items={buildBreadcrumbs(artifact)} />
       <ArtifactHeader
         artifact={artifact}

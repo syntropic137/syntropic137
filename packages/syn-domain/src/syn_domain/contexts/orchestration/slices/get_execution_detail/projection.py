@@ -7,8 +7,13 @@ WorkflowCompleted, and WorkflowFailed events.
 Uses AutoDispatchProjection (ADR-014) for reliable position tracking.
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import AutoDispatchProjection
 
@@ -33,9 +38,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 3  # Bumped: migrated to AutoDispatchProjection, removed dead handlers
+    VERSION = 4  # Bumped: resilient on_workflow_failed for orphaned failure events (#598)
 
-    def __init__(self, store: Any):  # Using Any to avoid circular import
+    def __init__(self, store: ProjectionStoreProtocol):
         """Initialize with a projection store.
 
         Args:
@@ -146,6 +151,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         phase["artifact_id"] = event_data.get("artifact_id")
         phase["input_tokens"] = event_data.get("input_tokens", 0)
         phase["output_tokens"] = event_data.get("output_tokens", 0)
+        phase["cache_creation_tokens"] = event_data.get("cache_creation_tokens", 0)
+        phase["cache_read_tokens"] = event_data.get("cache_read_tokens", 0)
         phase["total_tokens"] = event_data.get("total_tokens", 0)
         phase["duration_seconds"] = event_data.get("duration_seconds", 0.0)
         phase["cost_usd"] = str(event_data.get("cost_usd", "0"))
@@ -238,20 +245,37 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not existing:
-            return
+            # Create minimal entry for orphaned failure events (#598)
+            existing = {
+                "execution_id": execution_id,
+                "workflow_id": event_data.get("workflow_id", ""),
+                "workflow_name": event_data.get("workflow_name", ""),
+                "status": "failed",
+                "started_at": event_data.get("started_at"),
+                "completed_at": event_data.get("failed_at"),
+                "phases": [],
+                "total_input_tokens": event_data.get("total_input_tokens", 0),
+                "total_output_tokens": event_data.get("total_output_tokens", 0),
+                "total_cost_usd": event_data.get("total_cost_usd", "0"),
+                "total_duration_seconds": 0.0,
+                "artifact_ids": [],
+                "error_message": event_data.get("error_message"),
+                "completed_phases": event_data.get("completed_phases", 0),
+                "total_phases": event_data.get("total_phases", 0),
+            }
+        else:
+            existing["status"] = "failed"
+            existing["completed_at"] = event_data.get("failed_at")
+            existing["error_message"] = event_data.get("error_message")
 
-        existing["status"] = "failed"
-        existing["completed_at"] = event_data.get("failed_at")
-        existing["error_message"] = event_data.get("error_message")
-
-        # Mark failed phase if specified
-        failed_phase_id = event_data.get("failed_phase_id")
-        if failed_phase_id:
-            found = self._find_phase(existing.get("phases", []), failed_phase_id)
-            if found:
-                _, phase = found
-                phase["status"] = "failed"
-                phase["error_message"] = event_data.get("error_message")
+            # Mark failed phase if specified
+            failed_phase_id = event_data.get("failed_phase_id")
+            if failed_phase_id:
+                found = self._find_phase(existing.get("phases", []), failed_phase_id)
+                if found:
+                    _, phase = found
+                    phase["status"] = "failed"
+                    phase["error_message"] = event_data.get("error_message")
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 

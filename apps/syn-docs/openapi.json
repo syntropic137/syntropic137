@@ -2281,6 +2281,66 @@
         }
       }
     },
+    "/github/repos": {
+      "get": {
+        "tags": [
+          "github"
+        ],
+        "summary": "List Accessible Repos Endpoint",
+        "description": "List repositories accessible to the GitHub App.\n\nMakes a live query to the GitHub API. If no installation_id is provided,\nqueries all active installations and aggregates the results.",
+        "operationId": "list_accessible_repos_endpoint_github_repos_get",
+        "parameters": [
+          {
+            "name": "installation_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Installation Id"
+            }
+          },
+          {
+            "name": "include_private",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Private"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubRepoListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/conversations/{session_id}": {
       "get": {
         "tags": [
@@ -2369,15 +2429,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/ConversationMetadataResponse"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Get Conversation Metadata Endpoint Conversations  Session Id  Metadata Get"
+                  "$ref": "#/components/schemas/ConversationMetadataResponse"
                 }
               }
             }
@@ -2977,9 +3029,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
+                "$ref": "#/components/schemas/CreateOrganizationRequest"
               }
             }
           },
@@ -3074,9 +3124,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/UpdateOrganizationRequest"
               }
             }
           }
@@ -3159,9 +3207,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/CreateSystemRequest"
               }
             }
           }
@@ -3303,9 +3349,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/UpdateSystemRequest"
               }
             }
           }
@@ -3643,9 +3687,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/RegisterRepoRequest"
               }
             }
           }
@@ -3829,9 +3871,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/UpdateRepoRequest"
               }
             }
           }
@@ -3925,9 +3965,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/AssignRepoToSystemRequest"
               }
             }
           }
@@ -4454,116 +4492,6 @@
         }
       }
     },
-    "/agents/providers": {
-      "get": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "List Providers Endpoint",
-        "description": "List available agent providers.",
-        "operationId": "list_providers_endpoint_agents_providers_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentProviderListResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/agents/test": {
-      "post": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "Test Agent Endpoint",
-        "description": "Test an agent provider with a simple prompt.",
-        "operationId": "test_agent_endpoint_agents_test_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentTestResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/agents/chat": {
-      "post": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "Chat Endpoint",
-        "description": "Send a stateless chat completion request.",
-        "operationId": "chat_endpoint_agents_chat_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Body"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentTestResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/": {
       "get": {
         "summary": "Root",
@@ -4611,90 +4539,6 @@
   },
   "components": {
     "schemas": {
-      "AgentProviderInfo": {
-        "properties": {
-          "provider": {
-            "type": "string",
-            "title": "Provider"
-          },
-          "display_name": {
-            "type": "string",
-            "title": "Display Name"
-          },
-          "available": {
-            "type": "boolean",
-            "title": "Available"
-          },
-          "default_model": {
-            "type": "string",
-            "title": "Default Model"
-          }
-        },
-        "type": "object",
-        "required": [
-          "provider",
-          "display_name",
-          "available",
-          "default_model"
-        ],
-        "title": "AgentProviderInfo",
-        "description": "Information about an available agent provider."
-      },
-      "AgentProviderListResponse": {
-        "properties": {
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "providers": {
-            "items": {
-              "$ref": "#/components/schemas/AgentProviderInfo"
-            },
-            "type": "array",
-            "title": "Providers"
-          }
-        },
-        "type": "object",
-        "required": [
-          "total"
-        ],
-        "title": "AgentProviderListResponse",
-        "description": "Paginated list of agent providers."
-      },
-      "AgentTestResult": {
-        "properties": {
-          "provider": {
-            "type": "string",
-            "title": "Provider"
-          },
-          "model": {
-            "type": "string",
-            "title": "Model"
-          },
-          "response_text": {
-            "type": "string",
-            "title": "Response Text"
-          },
-          "input_tokens": {
-            "type": "integer",
-            "title": "Input Tokens",
-            "default": 0
-          },
-          "output_tokens": {
-            "type": "integer",
-            "title": "Output Tokens",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "required": [
-          "provider",
-          "model",
-          "response_text"
-        ],
-        "title": "AgentTestResult",
-        "description": "Result of testing an agent provider."
-      },
       "ArtifactActionResponse": {
         "properties": {
           "artifact_id": {
@@ -4962,6 +4806,21 @@
         ],
         "title": "ArtifactSummaryResponse",
         "description": "Summary of an artifact."
+      },
+      "AssignRepoToSystemRequest": {
+        "properties": {
+          "system_id": {
+            "type": "string",
+            "title": "System Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "system_id"
+        ],
+        "title": "AssignRepoToSystemRequest",
+        "description": "Request body for assigning a repo to a system."
       },
       "Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post": {
         "properties": {
@@ -5469,6 +5328,61 @@
         ],
         "title": "CreateArtifactResponse"
       },
+      "CreateOrganizationRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "slug"
+        ],
+        "title": "CreateOrganizationRequest",
+        "description": "Request body for creating a new organization."
+      },
+      "CreateSystemRequest": {
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "organization_id",
+          "name"
+        ],
+        "title": "CreateSystemRequest",
+        "description": "Request body for creating a new system."
+      },
       "CreateWorkflowRequest": {
         "properties": {
           "id": {
@@ -5645,6 +5559,18 @@
       "EventResponse": {
         "properties": {
           "time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Time"
           },
           "event_type": {
@@ -5693,7 +5619,6 @@
         },
         "type": "object",
         "required": [
-          "time",
           "event_type"
         ],
         "title": "EventResponse",
@@ -5974,6 +5899,16 @@
           "total_output_tokens": {
             "type": "integer",
             "title": "Total Output Tokens",
+            "default": 0
+          },
+          "cache_creation_tokens": {
+            "type": "integer",
+            "title": "Cache Creation Tokens",
+            "default": 0
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens",
             "default": 0
           },
           "total_tokens": {
@@ -6434,6 +6369,80 @@
         "type": "object",
         "title": "FailurePatternResponse",
         "description": "A recurring failure pattern within a system."
+      },
+      "GitHubRepoListResponse": {
+        "properties": {
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubRepoResponse"
+            },
+            "type": "array",
+            "title": "Repos"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "installation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Id"
+          }
+        },
+        "type": "object",
+        "title": "GitHubRepoListResponse",
+        "description": "List of repositories accessible to the GitHub App."
+      },
+      "GitHubRepoResponse": {
+        "properties": {
+          "github_id": {
+            "type": "integer",
+            "title": "Github Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "default_branch": {
+            "type": "string",
+            "title": "Default Branch"
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner"
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "github_id",
+          "name",
+          "full_name",
+          "private",
+          "default_branch",
+          "owner",
+          "installation_id"
+        ],
+        "title": "GitHubRepoResponse",
+        "description": "A repository accessible to the GitHub App installation."
       },
       "GlobalCostResponse": {
         "properties": {
@@ -7175,6 +7184,16 @@
             "title": "Output Tokens",
             "default": 0
           },
+          "cache_creation_tokens": {
+            "type": "integer",
+            "title": "Cache Creation Tokens",
+            "default": 0
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens",
+            "default": 0
+          },
           "total_tokens": {
             "type": "integer",
             "title": "Total Tokens",
@@ -7223,6 +7242,24 @@
               }
             ],
             "title": "Error Message"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "cost_by_model": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Model"
           },
           "operations": {
             "items": {
@@ -7350,6 +7387,61 @@
           "operation_type"
         ],
         "title": "PhaseOperationInfo"
+      },
+      "RegisterRepoRequest": {
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "default": "github"
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner",
+            "default": ""
+          },
+          "default_branch": {
+            "type": "string",
+            "title": "Default Branch",
+            "default": "main"
+          },
+          "provider_repo_id": {
+            "type": "string",
+            "title": "Provider Repo Id",
+            "default": ""
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id",
+            "default": ""
+          },
+          "is_private": {
+            "type": "boolean",
+            "title": "Is Private",
+            "default": false
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "organization_id",
+          "full_name"
+        ],
+        "title": "RegisterRepoRequest",
+        "description": "Request body for registering a new repo."
       },
       "RepoActionResponse": {
         "properties": {
@@ -8234,6 +8326,14 @@
             "title": "Total Cost Usd",
             "default": "0"
           },
+          "cost_by_model": {
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+            },
+            "type": "object",
+            "title": "Cost By Model"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/OperationInfo"
@@ -8820,6 +8920,18 @@
       "TimelineEntryResponse": {
         "properties": {
           "time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Time"
           },
           "event_type": {
@@ -8862,7 +8974,6 @@
         },
         "type": "object",
         "required": [
-          "time",
           "event_type"
         ],
         "title": "TimelineEntryResponse",
@@ -9436,6 +9547,36 @@
         "type": "object",
         "title": "UpdateArtifactRequest"
       },
+      "UpdateOrganizationRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateOrganizationRequest",
+        "description": "Request body for updating an organization."
+      },
       "UpdatePhasePromptRequest": {
         "properties": {
           "prompt_template": {
@@ -9509,6 +9650,82 @@
           "status"
         ],
         "title": "UpdatePhaseResponse"
+      },
+      "UpdateRepoRequest": {
+        "properties": {
+          "default_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Branch"
+          },
+          "is_private": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Private"
+          },
+          "installation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Id"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateRepoRequest",
+        "description": "Request body for updating a repo."
+      },
+      "UpdateSystemRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateSystemRequest",
+        "description": "Request body for updating a system."
       },
       "UploadArtifactResponse": {
         "properties": {
@@ -9908,10 +10125,6 @@
   },
   "tags": [
     {
-      "name": "agents",
-      "description": ""
-    },
-    {
       "name": "artifacts",
       "description": "Create, upload, and retrieve artifacts produced by agent sessions"
     },
@@ -9938,6 +10151,10 @@
     {
       "name": "executions",
       "description": "Query execution records and details"
+    },
+    {
+      "name": "github",
+      "description": ""
     },
     {
       "name": "insights",

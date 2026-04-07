@@ -37,7 +37,7 @@ describe("system commands", () => {
 
   it("create succeeds", async () => {
     mockFetch.mockResolvedValue(jsonResponse({ system_id: "sys-1", name: "Backend" }));
-    await systemGroup.getCommand("create")!.handler({ positionals: [], values: { name: "Backend" } });
+    await systemGroup.getCommand("create")!.handler({ positionals: [], values: { name: "Backend", org: "org-1" } });
     expect(stdout()).toContain("System created");
   });
 
@@ -52,10 +52,11 @@ describe("system commands", () => {
   it("status shows health", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
-        name: "Backend",
-        health_status: "healthy",
-        repo_count: 3,
-        active_executions: 1,
+        system_id: "sys-1",
+        system_name: "Backend",
+        organization_id: "org-1",
+        overall_status: "healthy",
+        total_repos: 3,
         repos: [],
       }),
     );
@@ -74,7 +75,9 @@ describe("system commands", () => {
   it("patterns shows failure patterns", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
-        failure_patterns: [{ pattern: "timeout in phase-2", count: 5 }],
+        system_id: "sys-1",
+        system_name: "Backend",
+        failure_patterns: [{ error_type: "TimeoutError", error_message: "timeout in phase-2", occurrence_count: 5, last_seen: "2026-01-01T00:00:00Z" }],
         cost_outliers: [],
       }),
     );

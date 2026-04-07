@@ -21,6 +21,7 @@ from syn_api.types import (
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.projections.manager import ProjectionManager
     from syn_api.auth import AuthContext
 
 router = APIRouter(prefix="/observability", tags=["observability"])
@@ -72,7 +73,7 @@ async def get_tool_timeline(
 
 
 async def _get_session_token_metrics(
-    manager: Any, session_id: str
+    manager: ProjectionManager, session_id: str
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single session."""
     cost = await manager.session_cost.get_session_cost(session_id)
@@ -92,7 +93,7 @@ async def _get_session_token_metrics(
 
 
 async def _get_execution_token_metrics(
-    manager: Any, execution_id: str
+    manager: ProjectionManager, execution_id: str
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single execution."""
     exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
@@ -171,11 +172,6 @@ async def get_tool_timeline_endpoint(
         )
 
     timeline = result.value
-    if not timeline:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No tool executions found for session {session_id}",
-        )
 
     return ToolTimelineResponse(
         session_id=session_id,

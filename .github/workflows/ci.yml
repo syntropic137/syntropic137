@@ -72,19 +72,16 @@ jobs:
       - name: Check test debt
         run: uv run python scripts/check_test_debt.py
 
-      # POKA-YOKE: Detect OpenAPI spec drift.
-      # Regenerates from the FastAPI app and diffs against the committed file.
-      # Catches endpoint additions/changes that forgot to update openapi.json.
-      # Uses continue-on-error because minor Python patch version differences
-      # (e.g. 3.12.8 vs 3.12.13) can produce equivalent but textually different
-      # Pydantic schemas. Endpoint-level drift still shows in the diff output.
+      # POKA-YOKE: Detect OpenAPI spec drift (endpoint-level).
+      # Regenerates from the FastAPI app and compares endpoint paths + methods
+      # against the committed spec. This is BLOCKING — missing endpoints fail CI.
+      # We compare paths (not full JSON) because minor Python patch version
+      # differences can produce equivalent but textually different Pydantic
+      # schemas. Path-level comparison catches the real issue: endpoints added
+      # or removed without regenerating the spec.
       - name: OpenAPI spec drift check
-        continue-on-error: true
         run: |
-          uv run python scripts/extract_openapi.py
-          if ! git diff --exit-code apps/syn-docs/openapi.json; then
-            echo "::warning::OpenAPI spec drift detected. Run 'uv run python scripts/extract_openapi.py' and commit."
-          fi
+          uv run python scripts/check_openapi_drift.py
 
   #############################################################################
   # ARCHITECTURAL FITNESS - Structural invariant enforcement
@@ -374,6 +371,10 @@ jobs:
       - name: API drift check
         working-directory: apps/syn-cli-node
         run: pnpm run check:api-drift
+
+      - name: Typed API enforcement
+        working-directory: apps/syn-cli-node
+        run: pnpm run check:untyped-api
 
   #############################################################################
   # SUBMODULE VALIDATION - Ensure submodules are properly referenced

@@ -20,6 +20,17 @@ class NullRepository:
         return None
 
 
+class NullClaimRepository:
+    async def save(self, aggregate):
+        pass
+
+    async def save_new(self, aggregate):
+        pass
+
+    async def get_by_id(self, id):
+        return None
+
+
 def _make_command(**overrides) -> RegisterRepoCommand:
     defaults = {
         "organization_id": "org-abc12345",
@@ -37,7 +48,9 @@ def _make_command(**overrides) -> RegisterRepoCommand:
 class TestRegisterRepoHandler:
     @pytest.mark.asyncio
     async def test_register_repo(self) -> None:
-        handler = RegisterRepoHandler(repository=NullRepository())
+        handler = RegisterRepoHandler(
+            repository=NullRepository(), claim_repository=NullClaimRepository()
+        )
         aggregate = await handler.handle(_make_command())
 
         assert aggregate.repo_id.startswith("repo-")
@@ -48,7 +61,9 @@ class TestRegisterRepoHandler:
 
     @pytest.mark.asyncio
     async def test_register_multiple_repos(self) -> None:
-        handler = RegisterRepoHandler(repository=NullRepository())
+        handler = RegisterRepoHandler(
+            repository=NullRepository(), claim_repository=NullClaimRepository()
+        )
         r1 = await handler.handle(_make_command(full_name="acme/repo-1"))
         r2 = await handler.handle(_make_command(full_name="acme/repo-2"))
         assert r1.repo_id != r2.repo_id

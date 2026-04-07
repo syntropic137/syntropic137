@@ -1,15 +1,3 @@
-export { SynClient } from "./http.js";
-export type { ApiResponse, SynClientOptions } from "./http.js";
-export {
-  apiGet,
-  apiGetList,
-  apiGetPaginated,
-  apiPost,
-  apiPut,
-  apiPatch,
-  apiDelete,
-  buildParams,
-} from "./api.js";
 export { streamSSE, parseSseLine } from "./sse.js";
 export type { SSEEvent } from "./sse.js";
-export { api, createTypedClient } from "./typed.js";
+export { api, createTypedClient, unwrap } from "./typed.js";

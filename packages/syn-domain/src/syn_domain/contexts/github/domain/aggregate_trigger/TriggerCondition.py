@@ -6,7 +6,6 @@ Represents a single condition that must be met for a trigger to fire.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 ALLOWED_OPERATORS = ("eq", "neq", "in", "not_in", "not_empty", "is_empty", "contains")
 
@@ -30,7 +29,7 @@ class TriggerCondition:
 
     field: str
     operator: str
-    value: Any = None
+    value: str | int | bool | list[str] | None = None
 
     def __post_init__(self) -> None:
         """Validate the condition."""

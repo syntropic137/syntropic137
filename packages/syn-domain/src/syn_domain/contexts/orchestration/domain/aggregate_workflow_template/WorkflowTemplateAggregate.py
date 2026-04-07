@@ -9,7 +9,13 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
+from event_sourcing import (
+    AggregateRoot,
+    DomainEvent,
+    aggregate,
+    command_handler,
+    event_sourcing_handler,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
@@ -49,7 +55,7 @@ _EVENT_FIELDS = [
 ]
 
 
-def _normalize_event_data(event: Any) -> dict[str, Any]:
+def _normalize_event_data(event: DomainEvent) -> dict[str, Any]:
     """Extract a flat dict from a typed event or GenericDomainEvent.
 
     Handles both Pydantic-style events (with attributes) and dict-like
@@ -62,7 +68,7 @@ def _normalize_event_data(event: Any) -> dict[str, Any]:
     return data
 
 
-def _parse_enum(value: Any, enum_type: type) -> Any:
+def _parse_enum(value: str | StrEnum, enum_type: type[StrEnum]) -> StrEnum:
     """Convert a string to an enum, or return as-is if already typed."""
     return enum_type(value) if isinstance(value, str) else value
 
@@ -77,7 +83,7 @@ _PHASE_UPDATE_FIELDS = [
 ]
 
 
-def _normalize_phase_update_data(event: Any) -> dict[str, Any]:
+def _normalize_phase_update_data(event: DomainEvent) -> dict[str, Any]:
     """Extract a flat dict from a WorkflowPhaseUpdated event.
 
     Handles both Pydantic-style events and dict-like events from gRPC.
@@ -88,7 +94,7 @@ def _normalize_phase_update_data(event: Any) -> dict[str, Any]:
     return data
 
 
-def _coalesce(new: Any, existing: Any) -> Any:
+def _coalesce[T](new: T | None, existing: T) -> T:
     """Return new if not None, else existing."""
     return new if new is not None else existing
 

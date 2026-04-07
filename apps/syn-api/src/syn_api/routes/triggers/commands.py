@@ -20,6 +20,10 @@ from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import Tr
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
+    from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
+    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
+        TriggerRuleAggregate,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +107,9 @@ async def register_trigger(
         return Err(TriggerError.INVALID_INPUT, message=str(e))
 
 
-async def _index_and_sync_trigger(store: Any, aggregate: Any) -> None:
+async def _index_and_sync_trigger(
+    store: TriggerQueryStore, aggregate: TriggerRuleAggregate
+) -> None:
     """Index a trigger aggregate in the store and sync projections."""
     await store.index_trigger(
         trigger_id=aggregate.trigger_id,

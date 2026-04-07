@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
 from enum import StrEnum
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -110,6 +110,33 @@ class GitHubError(StrEnum):
     NOT_IMPLEMENTED = "not_implemented"
 
 
+# ---------------------------------------------------------------------------
+# GitHub accessible repo models
+# ---------------------------------------------------------------------------
+
+
+class GitHubRepoResponse(BaseModel):
+    """A repository accessible to the GitHub App installation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    github_id: int
+    name: str
+    full_name: str
+    private: bool
+    default_branch: str
+    owner: str
+    installation_id: str
+
+
+class GitHubRepoListResponse(BaseModel):
+    """List of repositories accessible to the GitHub App."""
+
+    repos: list[GitHubRepoResponse] = Field(default_factory=list)
+    total: int = 0
+    installation_id: str | None = None
+
+
 class ObservabilityError(StrEnum):
     """Errors returned by observability operations."""
 
@@ -167,18 +194,127 @@ class RepoError(StrEnum):
     TRIGGER_CHECK_FAILED = "trigger_check_failed"
 
 
-class AgentError(StrEnum):
-    """Errors returned by agent operations."""
-
-    PROVIDER_NOT_FOUND = "provider_not_found"
-    API_KEY_MISSING = "api_key_missing"
-    COMPLETION_FAILED = "completion_failed"
-
-
 class ConfigError(StrEnum):
     """Errors returned by config operations."""
 
     LOAD_FAILED = "load_failed"
+
+
+# ---------------------------------------------------------------------------
+# Request models — Pydantic schemas for API request bodies
+# ---------------------------------------------------------------------------
+
+
+class CreateOrganizationRequest(BaseModel):
+    """Request body for creating a new organization."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    slug: str
+    created_by: str = "api"
+
+
+class UpdateOrganizationRequest(BaseModel):
+    """Request body for updating an organization."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str | None = None
+    slug: str | None = None
+
+
+class RegisterRepoRequest(BaseModel):
+    """Request body for registering a new repo."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    organization_id: str
+    full_name: str
+    provider: str = "github"
+    owner: str = ""
+    default_branch: str = "main"
+    provider_repo_id: str = ""
+    installation_id: str = ""
+    is_private: bool = False
+    created_by: str = "api"
+
+
+class UpdateRepoRequest(BaseModel):
+    """Request body for updating a repo."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    default_branch: str | None = None
+    is_private: bool | None = None
+    installation_id: str | None = None
+    updated_by: str = "api"
+
+
+class AssignRepoToSystemRequest(BaseModel):
+    """Request body for assigning a repo to a system."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    system_id: str
+
+
+class CreateSystemRequest(BaseModel):
+    """Request body for creating a new system."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    organization_id: str
+    name: str
+    description: str = ""
+    created_by: str = "api"
+
+
+class UpdateSystemRequest(BaseModel):
+    """Request body for updating a system."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str | None = None
+    description: str | None = None
+
+
+class RegisterTriggerRequest(BaseModel):
+    """Request body for registering a new trigger rule."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    event: str
+    repository: str = ""
+    workflow_id: str = ""
+    conditions: list[dict[str, object]] | None = None
+    installation_id: str = ""
+    input_mapping: dict[str, str] | None = None
+    config: dict[str, object] | None = None
+    created_by: str = "api"
+
+
+class EnablePresetRequest(BaseModel):
+    """Request body for enabling a trigger preset."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repository: str
+    installation_id: str = ""
+    created_by: str = "api"
+    workflow_id: str = ""
+
+
+class UpdateTriggerRequest(BaseModel):
+    """Request body for updating (pause/resume) a trigger."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    action: Literal["pause", "resume"]
+    reason: str | None = None
+    paused_by: str = "api"
+    resumed_by: str = "api"
 
 
 # ---------------------------------------------------------------------------
@@ -418,30 +554,6 @@ class TriggerHistoryEntry(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Agent models
-# ---------------------------------------------------------------------------
-
-
-class AgentProviderInfo(BaseModel):
-    """Information about an available agent provider."""
-
-    provider: str
-    display_name: str
-    available: bool
-    default_model: str
-
-
-class AgentTestResult(BaseModel):
-    """Result of testing an agent provider."""
-
-    provider: str
-    model: str
-    response_text: str
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-
-# ---------------------------------------------------------------------------
 # Config models
 # ---------------------------------------------------------------------------
 
@@ -451,7 +563,6 @@ class ConfigSnapshot(BaseModel):
 
     app: dict = Field(default_factory=dict)
     database: dict = Field(default_factory=dict)
-    agents: dict = Field(default_factory=dict)
     storage: dict = Field(default_factory=dict)
 
 
@@ -519,10 +630,14 @@ class PhaseExecution(BaseModel):
     artifact_id: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
     cost_usd: Decimal = Decimal("0")
     duration_seconds: float | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    model: str | None = None
+    cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
     operations: list[ToolOperation] = Field(default_factory=list)
 
 
@@ -574,6 +689,7 @@ class SessionDetail(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     agent_model: str | None = None
+    cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
     operations: list[ToolOperation] = Field(default_factory=list)
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -747,6 +863,11 @@ class ConversationMeta(BaseModel):
     tool_counts: dict = Field(default_factory=dict)
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    size_bytes: int | None = None
+    execution_id: str | None = None
+    workflow_id: str | None = None
+    phase_id: str | None = None
+    success: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1166,17 +1287,6 @@ class ContributionHeatmapResponse(BaseModel):
     total: float = 0.0
     days: list[HeatmapDayBucketResponse] = Field(default_factory=list)
     filter: dict[str, str | None] = Field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# Agent response models
-# ---------------------------------------------------------------------------
-
-
-class AgentProviderListResponse(PaginatedResponse):
-    """Paginated list of agent providers."""
-
-    providers: list[AgentProviderInfo] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

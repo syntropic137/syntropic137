@@ -13,6 +13,8 @@ import logging
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from syn_adapters.events.buffer import EventBuffer
+    from syn_adapters.events.store import AgentEventStore
     from syn_collector.events.types import CollectedEvent
 
 logger = logging.getLogger(__name__)
@@ -62,8 +64,8 @@ class TimescaleDBObservabilityStore:
 
     def __init__(self, db_url: str) -> None:
         self._db_url = db_url
-        self._store: Any = None  # AgentEventStore, set in initialize()
-        self._buffer: Any = None  # EventBuffer, set in initialize()
+        self._store: AgentEventStore | None = None
+        self._buffer: EventBuffer | None = None
 
     async def initialize(self) -> None:
         """Create store and buffer, connect to DB."""

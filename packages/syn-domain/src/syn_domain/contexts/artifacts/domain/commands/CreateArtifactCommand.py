@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,8 +23,8 @@ class CreateArtifactCommand(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    # Target aggregate (generated if not provided)
-    aggregate_id: str | None = None
+    # Target aggregate (auto-generated UUID if not provided)
+    aggregate_id: str = Field(default_factory=lambda: str(uuid4()))
 
     # Context - links artifact to workflow execution
     workflow_id: str = Field(..., description="Workflow this artifact belongs to")

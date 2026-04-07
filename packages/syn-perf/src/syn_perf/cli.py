@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path  # noqa: TC003 - needed at runtime for typer
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 
+from syn_perf.benchmarks.compare_result import BackendComparisonResult
+from syn_perf.metrics import BenchmarkResult
 from syn_perf.reporters import ConsoleReporter, JSONReporter
 
 app = typer.Typer(
@@ -22,14 +24,18 @@ def get_reporter() -> ConsoleReporter:
     return ConsoleReporter()
 
 
-def save_json_if_requested(result: Any, output: Path | None, reporter_type: str) -> None:
+def save_json_if_requested(
+    result: BenchmarkResult | BackendComparisonResult, output: Path | None, reporter_type: str
+) -> None:
     """Save JSON report if output path provided."""
     if output:
         json_reporter = JSONReporter()
-        if reporter_type == "comparison":
+        if reporter_type == "comparison" and isinstance(result, BackendComparisonResult):
             report = json_reporter.generate_comparison_report(result)
-        else:
+        elif isinstance(result, BenchmarkResult):
             report = json_reporter.generate_report(result)
+        else:
+            return
         json_reporter.save(report, output)
         typer.echo(f"Report saved to: {output}")
 

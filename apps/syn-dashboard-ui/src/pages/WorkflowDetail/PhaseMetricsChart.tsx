@@ -9,6 +9,7 @@ import {
 } from 'recharts'
 
 import { Card, CardContent, CardHeader } from '../../components'
+import { formatTokens } from '../../utils/formatters'
 
 interface PhaseChartDatum {
   name: string
@@ -29,21 +30,31 @@ export function PhaseMetricsChart({ phaseChartData }: PhaseMetricsChartProps) {
         {phaseChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={phaseChartData} layout="vertical">
-              <XAxis type="number" tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }} />
+              <XAxis
+                type="number"
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tickFormatter={(v: number) => formatTokens(v)}
+              />
               <YAxis
                 type="category"
                 dataKey="name"
-                tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
                 width={100}
               />
               <Tooltip
+                cursor={{ fill: 'rgba(148, 163, 184, 0.08)' }}
+                position={{ x: 0 }}
+                offset={20}
                 contentStyle={{
-                  backgroundColor: 'var(--color-surface-elevated)',
-                  border: '1px solid var(--color-border)',
+                  backgroundColor: '#1e293b',
+                  border: '1px solid #334155',
                   borderRadius: '8px',
                   fontSize: '12px',
+                  color: '#e2e8f0',
                 }}
-                formatter={(value) => [Number(Array.isArray(value) ? value[0] : value ?? 0).toLocaleString(), 'tokens']}
+                labelStyle={{ color: '#e2e8f0', fontWeight: 600, marginBottom: 4 }}
+                itemStyle={{ color: '#cbd5e1' }}
+                formatter={(value: number) => [formatTokens(value), 'tokens']}
               />
               <Bar dataKey="tokens" radius={[0, 4, 4, 0]}>
                 {phaseChartData.map((entry, index) => (

@@ -4,6 +4,7 @@ Extracted from postgres_store.py to reduce module complexity.
 """
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,7 +24,7 @@ def deserialize(data: str | dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def json_serializer(obj: Any) -> Any:
+def json_serializer(obj: object) -> str:
     """JSON serializer for objects not serializable by default."""
     if isinstance(obj, datetime):
         return obj.isoformat()
@@ -83,7 +84,7 @@ async def ensure_state_table(
 async def fetch_get_all(
     pool: asyncpg.Pool,
     table_name: str,
-    deserialize_fn: Any,
+    deserialize_fn: Callable[[str | dict[str, Any]], dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Fetch all records from a projection table ordered by updated_at."""
     async with pool.acquire() as conn:

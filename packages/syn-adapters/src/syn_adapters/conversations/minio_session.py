@@ -34,6 +34,8 @@ async def retrieve_session(
     object_key = f"sessions/{session_id}/conversation.jsonl"
 
     try:
+        if storage._client is None:
+            raise RuntimeError("Session storage not initialized — call initialize() first")
         response = storage._client.get_object(storage.BUCKET_NAME, object_key)
         content = response.read().decode("utf-8")
         response.close()
@@ -61,6 +63,11 @@ async def get_session_metadata(
         await storage.initialize()
 
     if storage._pool is None:
+        logger.warning(
+            "Conversation storage database pool not available "
+            "— cannot query metadata for session %s",
+            session_id,
+        )
         return None
 
     from syn_adapters.conversations.minio_index import get_session_metadata as _get_metadata
@@ -85,6 +92,11 @@ async def list_sessions_for_execution(
         await storage.initialize()
 
     if storage._pool is None:
+        logger.warning(
+            "Conversation storage database pool not available "
+            "— cannot list sessions for execution %s",
+            execution_id,
+        )
         return []
 
     from syn_adapters.conversations.minio_index import (

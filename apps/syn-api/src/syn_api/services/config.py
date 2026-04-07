@@ -39,8 +39,9 @@ EVENT_STORE_TENANT_ID=syn
 ESP_EVENT_STORE_DB_URL=              # PostgreSQL connection string
 SYN_OBSERVABILITY_DB_URL=           # Observability database URL
 
-# Agent API Keys
-ANTHROPIC_API_KEY=                   # Required for Claude provider
+# LLM Credentials (injected into agent containers)
+ANTHROPIC_API_KEY=                   # Required for Claude agent execution
+CLAUDE_CODE_OAUTH_TOKEN=            # Alternative to API key (OAuth)
 
 # Workspace
 SYN_WORKSPACE_CONTAINER_DIR=        # Container workspace directory
@@ -118,18 +119,6 @@ def _build_database_section(settings: object, *, show_secrets: bool) -> dict[str
     }
 
 
-def _build_agents_section(settings: object, *, show_secrets: bool) -> dict[str, object]:
-    """Build the 'agents' config section."""
-    return {
-        "anthropic_api_key": _mask_optional(
-            settings.anthropic_api_key,  # type: ignore[attr-defined]
-            show=show_secrets,
-        ),
-        "default_agent_timeout_seconds": settings.default_agent_timeout_seconds,  # type: ignore[attr-defined]
-        "default_max_tokens": settings.default_max_tokens,  # type: ignore[attr-defined]
-    }
-
-
 def _build_storage_section(settings: object) -> dict[str, object]:
     """Build the 'storage' config section."""
     return {
@@ -164,24 +153,9 @@ async def get_config(
         ConfigSnapshot(
             app=_build_app_section(settings),
             database=_build_database_section(settings, show_secrets=show_secrets),
-            agents=_build_agents_section(settings, show_secrets=show_secrets),
             storage=_build_storage_section(settings),
         )
     )
-
-
-def _validate_agent_keys(settings: object) -> list[ConfigIssue]:
-    """Check agent API key configuration."""
-    api_key: SecretStr | None = settings.anthropic_api_key  # type: ignore[attr-defined]
-    if not api_key or not api_key.get_secret_value():
-        return [
-            ConfigIssue(
-                level="warning",
-                category="agents",
-                message="ANTHROPIC_API_KEY not set — Claude provider unavailable",
-            )
-        ]
-    return []
 
 
 def _validate_database(settings: object) -> list[ConfigIssue]:
@@ -210,38 +184,6 @@ def _validate_environment(settings: object) -> list[ConfigIssue]:
     return []
 
 
-def _validate_agent_availability() -> list[ConfigIssue]:
-    """Check which agent providers are available."""
-    try:
-        from syn_adapters.agents import get_available_agents
-
-        available = get_available_agents()
-    except Exception:
-        return [
-            ConfigIssue(
-                level="warning",
-                category="agents",
-                message="Could not check agent provider availability",
-            )
-        ]
-
-    if not available:
-        return [
-            ConfigIssue(
-                level="error",
-                category="agents",
-                message="No agent providers available — at least one API key required",
-            )
-        ]
-    return [
-        ConfigIssue(
-            level="info",
-            category="agents",
-            message=f"Available providers: {', '.join(p.value for p in available)}",
-        )
-    ]
-
-
 async def validate_config(
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ConfigIssue], ConfigError]:
@@ -263,10 +205,8 @@ async def validate_config(
         return Err(ConfigError.LOAD_FAILED, message=str(e))
 
     issues: list[ConfigIssue] = [
-        *_validate_agent_keys(settings),
         *_validate_database(settings),
         *_validate_environment(settings),
-        *_validate_agent_availability(),
     ]
 
     return Ok(issues)

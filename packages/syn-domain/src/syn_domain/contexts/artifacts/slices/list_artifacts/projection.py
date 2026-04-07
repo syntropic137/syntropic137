@@ -30,7 +30,7 @@ class ArtifactListProjection(AutoDispatchProjection):
     PROJECTION_NAME = "artifact_summaries"
     VERSION = 3  # Added execution_id field
 
-    def __init__(self, store: Any):  # Using Any to avoid circular import
+    def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
 
         Args:

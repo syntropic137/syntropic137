@@ -48,8 +48,11 @@ def get_projection_store() -> ProjectionStoreProtocol:
         return _store_instance
 
     settings = get_settings()
-    _store_instance = InMemoryProjectionStore() if settings.is_test else PostgresProjectionStore()
-    return _store_instance
+    store: ProjectionStoreProtocol = (
+        InMemoryProjectionStore() if settings.is_test else PostgresProjectionStore()
+    )
+    _store_instance = store
+    return store
 
 
 def reset_projection_store() -> None:

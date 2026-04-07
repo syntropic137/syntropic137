@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -16,6 +18,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_evaluator import TriggerEvaluator
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
+
+type _ObserverCallback = Callable[[NormalizedEvent], Coroutine[object, object, None]]
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,19 @@ class EventPipeline:
     ) -> None:
         self._dedup = dedup
         self._evaluator = evaluator
+        self._observers: list[_ObserverCallback] = []
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
+    def add_observer(self, callback: _ObserverCallback) -> None:
+        """Register a callback notified after each non-deduplicated event.
+
+        Used by CheckRunPoller to learn about PR events and register
+        pending SHAs for check-run polling (#602).
+
+        Note: observers should be registered during startup, before the
+        first ``ingest()`` call. This is safe in asyncio (single-threaded).
+        """
+        self._observers.append(callback)
 
     async def ingest(self, event: NormalizedEvent) -> PipelineResult:
         """Process a normalized event through dedup and trigger evaluation.
@@ -89,6 +106,15 @@ class EventPipeline:
             payload=payload,
         )
 
+        # 4. Notify observers — best-effort, non-blocking (#602)
+        for observer in self._observers:
+            task = asyncio.create_task(
+                _safe_observer_call(observer, event),
+                name=f"observer-{event.dedup_key}",
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+
         fired, deferred, blocked = _classify_results(results)
         return PipelineResult(
             status="processed",
@@ -96,6 +122,21 @@ class EventPipeline:
             triggers_fired=fired,
             deferred=deferred,
             blocked=blocked,
+        )
+
+
+async def _safe_observer_call(
+    observer: _ObserverCallback,
+    event: NormalizedEvent,
+) -> None:
+    """Call an observer, logging any exception without propagating."""
+    try:
+        await observer(event)
+    except Exception:
+        logger.warning(
+            "Observer failed for %s",
+            event.dedup_key,
+            exc_info=True,
         )
 
 

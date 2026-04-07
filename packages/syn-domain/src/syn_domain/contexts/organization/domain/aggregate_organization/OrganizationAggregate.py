@@ -8,12 +8,21 @@ for compatibility with EventStoreRepository.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.organization.domain.commands.CreateOrganizationCommand import (
+        CreateOrganizationCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.DeleteOrganizationCommand import (
+        DeleteOrganizationCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.UpdateOrganizationCommand import (
+        UpdateOrganizationCommand,
+    )
     from syn_domain.contexts.organization.domain.events.OrganizationCreatedEvent import (
         OrganizationCreatedEvent,
     )
@@ -71,7 +80,7 @@ class OrganizationAggregate(AggregateRoot["OrganizationCreatedEvent"]):
     # --- Command handlers ---
 
     @command_handler("CreateOrganizationCommand")
-    def create(self, command: Any) -> None:
+    def create(self, command: CreateOrganizationCommand) -> None:
         from syn_domain.contexts.organization.domain.events.OrganizationCreatedEvent import (
             OrganizationCreatedEvent,
         )
@@ -92,7 +101,7 @@ class OrganizationAggregate(AggregateRoot["OrganizationCreatedEvent"]):
         self._apply(event)
 
     @command_handler("UpdateOrganizationCommand")
-    def update(self, command: Any) -> None:
+    def update(self, command: UpdateOrganizationCommand) -> None:
         from syn_domain.contexts.organization.domain.events.OrganizationUpdatedEvent import (
             OrganizationUpdatedEvent,
         )
@@ -112,7 +121,7 @@ class OrganizationAggregate(AggregateRoot["OrganizationCreatedEvent"]):
         self._apply(event)
 
     @command_handler("DeleteOrganizationCommand")
-    def delete(self, command: Any) -> None:
+    def delete(self, command: DeleteOrganizationCommand) -> None:
         from syn_domain.contexts.organization.domain.events.OrganizationDeletedEvent import (
             OrganizationDeletedEvent,
         )

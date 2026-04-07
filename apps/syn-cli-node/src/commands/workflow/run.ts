@@ -5,13 +5,13 @@
 
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { apiGet, apiPost } from "../../client/api.js";
+import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { formatCost, formatTokens } from "../../output/format.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
-import { parseInputs, type ExecutionRunResponse } from "./models.js";
+import { parseInputs } from "./models.js";
 
 // ---------------------------------------------------------------------------
 // run
@@ -79,16 +79,18 @@ export const runCommand: CommandDef = {
       return;
     }
 
-    const body: Record<string, unknown> = {
-      inputs: Object.fromEntries(
-        Object.entries(parsedInputs).map(([k, v]) => [k, String(v)]),
-      ),
-    };
-    if (task) body["task"] = task;
-
-    const result = await apiPost<ExecutionRunResponse>(
-      `/workflows/${wf.id}/execute`,
-      { body, timeoutMs: 300_000 },
+    const result = unwrap(
+      await api.POST("/workflows/{workflow_id}/execute", {
+        params: { path: { workflow_id: wf.id } },
+        body: {
+          inputs: Object.fromEntries(
+            Object.entries(parsedInputs).map(([k, v]) => [k, String(v)]),
+          ),
+          task: task ?? null,
+          provider: "claude",
+        },
+      }),
+      "Failed to execute workflow",
     );
 
     if (result.status === "started") {
@@ -103,15 +105,6 @@ export const runCommand: CommandDef = {
 // ---------------------------------------------------------------------------
 // status
 // ---------------------------------------------------------------------------
-
-interface RunEntry {
-  workflow_execution_id?: string;
-  status?: string;
-  completed_phases?: number;
-  total_phases?: number;
-  total_tokens?: number;
-  total_cost_usd?: string | number;
-}
 
 export const statusCommand: CommandDef = {
   name: "status",
@@ -131,7 +124,12 @@ export const statusCommand: CommandDef = {
     print(`  ${style(wf.name, BOLD)}`);
     print(`  ${style(`ID: ${wf.id}`, DIM)}`);
 
-    const data = await apiGet<{ runs: RunEntry[] }>(`/workflows/${wf.id}/runs`);
+    const data = unwrap(
+      await api.GET("/workflows/{workflow_id}/runs", {
+        params: { path: { workflow_id: wf.id } },
+      }),
+      "Failed to list workflow runs",
+    );
     const runs = data.runs ?? [];
 
     if (runs.length === 0) {
@@ -149,11 +147,11 @@ export const statusCommand: CommandDef = {
 
     for (const run of runs) {
       table.addRow(
-        String(run.workflow_execution_id ?? "").slice(0, 12) + "...",
-        String(run.status ?? ""),
-        `${run.completed_phases ?? 0}/${run.total_phases ?? 0}`,
-        formatTokens(Number(run.total_tokens ?? 0)),
-        formatCost(String(run.total_cost_usd ?? "0")),
+        run.workflow_execution_id.slice(0, 12) + "...",
+        run.status,
+        `${run.completed_phases}/${run.total_phases}`,
+        formatTokens(run.total_tokens),
+        formatCost(run.total_cost_usd),
       );
     }
     table.print();

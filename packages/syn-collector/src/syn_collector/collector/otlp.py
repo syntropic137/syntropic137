@@ -140,7 +140,7 @@ def _datapoint_to_event(
     )
 
 
-def _get(d: dict[str, Any], snake: str, camel: str) -> Any:
+def _get(d: dict[str, Any], snake: str, camel: str) -> Any:  # noqa: ANN401
     """Get a value by snake_case key, falling back to camelCase."""
     return d.get(snake, d.get(camel, []))
 

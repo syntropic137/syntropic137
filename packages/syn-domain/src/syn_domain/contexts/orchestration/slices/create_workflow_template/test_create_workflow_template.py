@@ -37,8 +37,11 @@ def create_test_command(
     name: str = "Test Workflow",
 ) -> CreateWorkflowTemplateCommand:
     """Create a test command with default values."""
+    kwargs: dict[str, object] = {}
+    if aggregate_id is not None:
+        kwargs["aggregate_id"] = aggregate_id
     return CreateWorkflowTemplateCommand(
-        aggregate_id=aggregate_id,
+        **kwargs,  # type: ignore[arg-type]
         name=name,
         workflow_type=WorkflowType.RESEARCH,
         classification=WorkflowClassification.SIMPLE,
@@ -129,7 +132,7 @@ class TestWorkflowTemplateAggregate:
         """Creating a workflow without ID should generate one."""
         # Arrange
         aggregate = WorkflowTemplateAggregate()
-        command = create_test_command(aggregate_id=None)
+        command = create_test_command()
 
         # Act
         aggregate._handle_command(command)

@@ -2,11 +2,13 @@
 
 GitHub App integration — repositories, installations, and triggers.
 
-**Status:** Stub — all functions return `Err(GitHubError.NOT_IMPLEMENTED)`.
+**Status:** Partially implemented — `list_repos()` is live; remaining functions return `Err(GitHubError.NOT_IMPLEMENTED)`.
 
 ## list_repos()
 
-List GitHub repositories accessible via the GitHub App.
+List GitHub repositories accessible via the GitHub App. Returns repository metadata (name, owner, visibility, default branch, URL) for all installations, optionally filtered by `installation_id`.
+
+**Route:** `GET /api/v1/github/repos`
 
 **Signature:**
 

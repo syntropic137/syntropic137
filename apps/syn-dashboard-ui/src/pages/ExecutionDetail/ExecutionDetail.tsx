@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { CheckCircle2, FileText, Play, XCircle, Zap } from 'lucide-react'
+import { CheckCircle2, DollarSign, FileText, Play, XCircle } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { Breadcrumbs, Card, EmptyState, MetricCard, PageLoader, StatusBadge } from '../../components'
@@ -81,14 +81,16 @@ function ExecutionHeader({ execution, executionId, isConnected, now, refreshExec
 }
 
 function ExecutionMetricsGrid({ execution }: { execution: ExecutionDetailResponse }) {
-  const totalTokens = execution.total_input_tokens + execution.total_output_tokens
   const completedPhases = execution.phases.filter(p => p.status === 'completed').length
+  const cacheCreation = execution.cache_creation_tokens ?? 0
+  const cacheRead = execution.cache_read_tokens ?? 0
+  const totalTokens = execution.total_input_tokens + execution.total_output_tokens + cacheCreation + cacheRead
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <MetricCard title="Phases" value={`${completedPhases}/${execution.phases.length}`} icon={CheckCircle2} color="success" subtitle={`${completedPhases} completed`} />
-      <MetricCard title="Total Tokens" value={totalTokens.toLocaleString()} icon={Zap} subtitle={`In: ${execution.total_input_tokens.toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`} />
-      <MetricCard title="Total Cost" value={`$${Number(execution.total_cost_usd).toFixed(4)}`} icon={Zap} color="warning" />
-      <MetricCard title="Artifacts" value={execution.artifact_ids.length} icon={FileText} color="accent" href="/artifacts" />
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <MetricCard title="Phases" value={`${completedPhases}/${execution.phases.length}`} icon={CheckCircle2} color="success" subtitle={`${completedPhases} completed, ${execution.artifact_ids.length} artifact${execution.artifact_ids.length !== 1 ? 's' : ''}`} />
+      <MetricCard title="Total Tokens" value={totalTokens.toLocaleString()} icon={FileText} subtitle={`In: ${(execution.total_input_tokens + cacheCreation + cacheRead).toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`} />
+      <MetricCard title="Total Cost" value={`$${Number(execution.total_cost_usd).toFixed(4)}`} icon={DollarSign} color="warning" />
     </div>
   )
 }
@@ -125,11 +127,17 @@ export function ExecutionDetail() {
       <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} now={now} refreshExecution={refreshExecution} />
       {execution.error_message && <ExecutionErrorCard message={execution.error_message} />}
       <ExecutionMetricsGrid execution={execution} />
+      <TokenBreakdownChart
+        inputTokens={execution.total_input_tokens}
+        outputTokens={execution.total_output_tokens}
+        cacheCreationTokens={execution.cache_creation_tokens ?? 0}
+        cacheReadTokens={execution.cache_read_tokens ?? 0}
+        phases={execution.phases}
+      />
       <PhaseTimeline phases={execution.phases} now={now} />
       {execution.artifact_ids.length > 0 && (
         <ArtifactSection phases={execution.phases} artifactDetails={artifactDetails} />
       )}
-      <TokenBreakdownChart inputTokens={execution.total_input_tokens} outputTokens={execution.total_output_tokens} />
     </div>
   )
 }

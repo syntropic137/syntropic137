@@ -9,7 +9,10 @@ import warnings
 from functools import lru_cache
 from typing import Any
 
+from event_sourcing import DomainEvent, EventEnvelope
+
 from syn_adapters.projection_stores import get_projection_store
+from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_adapters.projections.manager_event_map import (
     EVENT_HANDLERS as EVENT_HANDLERS,
 )
@@ -63,7 +66,7 @@ class ProjectionManager:
     def __init__(self) -> None:
         """Initialize the projection manager."""
         self._store = get_projection_store()
-        self._projections: dict[str, Any] = {}
+        self._projections: dict[str, Any] = {}  # heterogeneous projection registry
         self._initialized = False
 
     def _ensure_initialized(self) -> None:
@@ -74,7 +77,7 @@ class ProjectionManager:
         self._projections = build_projection_registry(self._store)
         self._initialized = True
 
-    def get_projection(self, name: str) -> Any:
+    def get_projection(self, name: str) -> Any:  # noqa: ANN401  # heterogeneous registry
         """Get a projection by name.
 
         Args:
@@ -89,7 +92,7 @@ class ProjectionManager:
         self._ensure_initialized()
         return self._projections[name]
 
-    async def process_event_envelope(self, envelope: Any) -> EventProvenance:
+    async def process_event_envelope(self, envelope: EventEnvelope[DomainEvent]) -> EventProvenance:
         """Process an event envelope from the event store.
 
         This is the ONLY correct way to dispatch events to projections.
@@ -149,7 +152,7 @@ class ProjectionManager:
             await self.dispatch_event(event_type, event)
 
     @property
-    def store(self) -> Any:
+    def store(self) -> ProjectionStoreProtocol:
         """Access the underlying projection store (ProjectionStoreProtocol)."""
         return self._store
 
@@ -220,7 +223,7 @@ class ProjectionManager:
         return self._projections["tool_timeline"]
 
     @property
-    def realtime(self) -> Any:
+    def realtime(self) -> object:
         """Get the real-time projection for SSE push."""
         self._ensure_initialized()
         return self._projections["realtime"]
