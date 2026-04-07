@@ -82,7 +82,7 @@ export const runCommand: CommandDef = {
 
     const declarations: InputDeclaration[] = detail.input_declarations ?? [];
     const missingRequired = declarations.filter(
-      (d) => d.required && d.default == null && !(d.name in parsedInputs),
+      (d) => d.required && d.default == null && !Object.hasOwn(parsedInputs, d.name),
     );
     if (missingRequired.length > 0) {
       printError("Missing required inputs:");

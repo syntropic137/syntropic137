@@ -45,6 +45,16 @@ class RepoRegisteredEvent(DomainEvent):
             raise ValueError("repo_id is required")
         return v
 
+    @field_validator("organization_id")
+    @classmethod
+    def validate_organization_id(cls, v: str) -> str:
+        """Reject empty string — use _unaffiliated for org-less repos."""
+        if v == "":
+            raise ValueError(
+                "organization_id cannot be empty; use '_unaffiliated' for org-less repos"
+            )
+        return v
+
     @field_validator("full_name")
     @classmethod
     def validate_full_name(cls, v: str) -> str:

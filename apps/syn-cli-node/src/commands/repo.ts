@@ -51,7 +51,7 @@ const registerCommand: CommandDef = {
 
     const body = {
       full_name: url,
-      ...(org ? { organization_id: org } : {}),
+      organization_id: org ?? "_unaffiliated",
       provider: "github",
       owner: "",
       default_branch: "main",

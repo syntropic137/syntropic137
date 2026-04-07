@@ -153,13 +153,13 @@ def _validate_required_inputs(
         repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
 
     if "{{" in repo_url:
-        unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
+        unresolved = sorted(set(re.findall(r"\{\{(\w+)\}\}", repo_url)))
         if unresolved:
             hints = [f"--input {name}=<value>" for name in unresolved]
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Missing required inputs: {unresolved}. "
+                    f"Missing required inputs: {', '.join(unresolved)}. "
                     f"Provide them via: {', '.join(hints)}"
                 ),
             )

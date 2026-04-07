@@ -8,10 +8,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from syn_shared.pricing import get_model_pricing
-
-# Default model used when no model is specified
-_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+from syn_shared.pricing import DEFAULT_MODEL_ID, get_model_pricing
 
 
 class TokenAccumulator:
@@ -21,7 +18,7 @@ class TokenAccumulator:
     cache token pricing.
     """
 
-    def __init__(self, model: str = _DEFAULT_MODEL) -> None:
+    def __init__(self, model: str = DEFAULT_MODEL_ID) -> None:
         self._model = model
         self._input_tokens: int = 0
         self._output_tokens: int = 0

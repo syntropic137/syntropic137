@@ -40,3 +40,7 @@ class ClaimRepoCommand:
             raise ValueError("repo_id is required")
         if not self.aggregate_id:
             raise ValueError("aggregate_id is required")
+        if self.organization_id == "":
+            raise ValueError(
+                "organization_id cannot be empty; use '_unaffiliated' for org-less repos"
+            )

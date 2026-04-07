@@ -47,3 +47,7 @@ class RegisterRepoCommand:
             raise ValueError("provider is required")
         if self.provider not in ("github", "gitea", "gitlab"):
             raise ValueError("provider must be one of: github, gitea, gitlab")
+        if self.organization_id == "":
+            raise ValueError(
+                "organization_id cannot be empty; use '_unaffiliated' for org-less repos"
+            )
