@@ -14,7 +14,7 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import asyncpg
 from agentic_logging import get_logger
@@ -31,6 +31,7 @@ from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
+    from event_sourcing.stores.postgres_checkpoint import AsyncConnectionPool
 
     from syn_adapters.projections.realtime import RealTimeProjection
 
@@ -123,7 +124,11 @@ class CoordinatorSubscriptionService:
             logger.info("Database pool created for checkpoint store")
 
             # Create checkpoint store (table is created on first operation)
-            self._checkpoint_store = PostgresCheckpointStore(self._db_pool)
+            # asyncpg.Pool satisfies AsyncConnectionPool at runtime (duck typing)
+            # but pyright can't verify the structural match due to acquire() signature
+            self._checkpoint_store = PostgresCheckpointStore(
+                cast("AsyncConnectionPool", self._db_pool)
+            )
             logger.info("Checkpoint store initialized")
 
         # Build projection list (add realtime adapter if configured)
