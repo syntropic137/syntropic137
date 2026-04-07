@@ -12,9 +12,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING
 
 from syn_domain.contexts.organization.domain.read_models.repo_cost import RepoCost
+
+if TYPE_CHECKING:
+    import asyncpg
+
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
 
 # Aggregate cost per execution from session_summary (authoritative)
@@ -59,7 +64,7 @@ class TimescaleRepoCostQuery:
     belong to which repos (repo_correlation projection).
     """
 
-    def __init__(self, pool: Any, projection_store: Any) -> None:  # noqa: ANN401
+    def __init__(self, pool: asyncpg.Pool, projection_store: ProjectionStoreProtocol) -> None:
         self._pool = pool
         self._store = projection_store
 
@@ -73,9 +78,7 @@ class TimescaleRepoCostQuery:
         return [c["execution_id"] for c in correlations if c.get("execution_id")]
 
     async def _query_summary_costs(
-        self,
-        conn: Any,  # noqa: ANN401
-        execution_ids: list[str],
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_ids: list[str]
     ) -> dict[str, _ExecutionCostEntry]:
         """Query session_summary costs grouped by execution_id."""
         rows = await conn.fetch(_EXECUTION_COSTS_QUERY, SESSION_SUMMARY, execution_ids)
@@ -92,9 +95,7 @@ class TimescaleRepoCostQuery:
         return result
 
     async def _query_fallback_costs(
-        self,
-        conn: Any,  # noqa: ANN401
-        execution_ids: list[str],
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_ids: list[str]
     ) -> dict[str, _ExecutionCostEntry]:
         """Query token_usage costs as fallback for missing summary data."""
         rows = await conn.fetch(_EXECUTION_COSTS_FALLBACK_QUERY, TOKEN_USAGE, execution_ids)
@@ -176,9 +177,7 @@ class TimescaleRepoCostQuery:
         return repo_executions
 
     async def _query_all_exec_costs(
-        self,
-        conn: Any,  # noqa: ANN401
-        all_execution_ids: list[str],
+        self, conn: asyncpg.pool.PoolConnectionProxy, all_execution_ids: list[str]
     ) -> dict[str, _ExecutionCostEntry]:
         """Query costs for all executions, with fallback for missing summaries."""
         exec_costs = await self._query_summary_costs(conn, all_execution_ids)

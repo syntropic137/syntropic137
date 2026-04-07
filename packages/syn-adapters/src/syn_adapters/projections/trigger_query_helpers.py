@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from event_sourcing import EventEnvelope
+    from event_sourcing import EventEnvelope, GenericDomainEvent
 
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
 
@@ -25,7 +25,7 @@ _STATUS_UPDATES: dict[str, str] = {
 
 
 async def dispatch_trigger_event(
-    proj: TriggerQueryProjection, event_type: str, envelope: EventEnvelope[Any]
+    proj: TriggerQueryProjection, event_type: str, envelope: EventEnvelope[GenericDomainEvent]
 ) -> None:
     """Route an event to the appropriate handler."""
     event_data = envelope.event.model_dump()
@@ -72,7 +72,7 @@ async def update_trigger_status(
 
 
 async def on_trigger_fired(
-    proj: TriggerQueryProjection, data: dict[str, Any], envelope: EventEnvelope[Any]
+    proj: TriggerQueryProjection, data: dict[str, Any], envelope: EventEnvelope[GenericDomainEvent]
 ) -> None:
     """Handle TriggerFired event."""
     trigger_id = data.get("trigger_id", "")
@@ -90,7 +90,7 @@ async def record_fire(
     proj: TriggerQueryProjection,
     trigger_id: str,
     execution_id: str,
-    pr_number: Any,  # noqa: ANN401
+    pr_number: int | str | None,
     fired_at: str,
 ) -> None:
     """Record a fire event in the fire records namespace."""

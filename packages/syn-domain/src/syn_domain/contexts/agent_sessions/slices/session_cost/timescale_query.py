@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    import asyncpg
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_shared.events import (
     SESSION_STARTED,
@@ -62,7 +67,7 @@ WHERE session_id = $1 AND event_type = $2
 """
 
 
-def _extract_tokens(token_result: Any) -> tuple[int, int, int, int]:  # noqa: ANN401
+def _extract_tokens(token_result: asyncpg.Record) -> tuple[int, int, int, int]:
     """Extract token counts from a DB result row."""
     return (
         token_result["total_input"] or 0,
@@ -72,7 +77,9 @@ def _extract_tokens(token_result: Any) -> tuple[int, int, int, int]:  # noqa: AN
     )
 
 
-def _resolve_agent_model(exec_result: Any, token_result: Any) -> str | None:  # noqa: ANN401
+def _resolve_agent_model(
+    exec_result: asyncpg.Record | None, token_result: asyncpg.Record
+) -> str | None:
     """Resolve agent model from session_summary or token_usage results."""
     if exec_result and exec_result["agent_model"]:
         return exec_result["agent_model"]
@@ -82,10 +89,10 @@ def _resolve_agent_model(exec_result: Any, token_result: Any) -> str | None:  # 
 
 
 def _resolve_duration(
-    exec_result: Any,  # noqa: ANN401
-    token_result: Any,  # noqa: ANN401
-    started_at: Any,  # noqa: ANN401
-) -> tuple[Any, int | None]:
+    exec_result: asyncpg.Record | None,
+    token_result: asyncpg.Record,
+    started_at: datetime | None,
+) -> tuple[datetime | None, int | None]:
     """Resolve completed_at and duration_ms from available data."""
     completed_at = (
         exec_result["completed_at"] if exec_result else token_result.get("last_observation")
@@ -102,11 +109,13 @@ def _resolve_duration(
 class TimescaleSessionCostQuery:
     """Calculates session cost directly from TimescaleDB observations."""
 
-    def __init__(self, pool: Any, cost_calculator: CostCalculator | None = None) -> None:  # noqa: ANN401
+    def __init__(self, pool: asyncpg.Pool, cost_calculator: CostCalculator | None = None) -> None:
         self._pool = pool
         self._cost_calculator = cost_calculator or CostCalculator()
 
-    async def _query_token_data(self, conn: Any, session_id: str) -> tuple[Any, Any]:  # noqa: ANN401
+    async def _query_token_data(
+        self, conn: asyncpg.pool.PoolConnectionProxy, session_id: str
+    ) -> tuple[asyncpg.Record | None, asyncpg.Record | None]:
         """Query session_summary or fall back to token_usage aggregation.
 
         Returns (exec_result, token_result) tuple.
@@ -122,7 +131,7 @@ class TimescaleSessionCostQuery:
 
     def _calculate_cost(
         self,
-        exec_result: Any,  # noqa: ANN401
+        exec_result: asyncpg.Record | None,
         input_tokens: int,
         output_tokens: int,
         cache_creation: int,
@@ -142,16 +151,16 @@ class TimescaleSessionCostQuery:
     @staticmethod
     def _build_session_cost(
         session_id: str,
-        exec_result: Any,  # noqa: ANN401
-        token_result: Any,  # noqa: ANN401
+        exec_result: asyncpg.Record | None,
+        token_result: asyncpg.Record,
         total_cost: Decimal,
         input_tokens: int,
         output_tokens: int,
         cache_creation: int,
         cache_read: int,
         tool_count: int,
-        started_at: Any,  # noqa: ANN401
-        completed_at: Any,  # noqa: ANN401
+        started_at: datetime | None,
+        completed_at: datetime | None,
         duration_ms: int | None,
     ) -> SessionCost:
         """Assemble a SessionCost from resolved query fields."""

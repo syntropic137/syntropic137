@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+        ObservationType,
+    )
 
 import pytest
 
@@ -29,13 +33,13 @@ async def _lines_to_stream(*lines: str) -> AsyncIterator[str]:
 
 @dataclass
 class MockObservability:
-    recordings: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
+    recordings: list[tuple[str, str, dict[str, object]]] = field(default_factory=list)
 
     async def record_observation(
         self,
         session_id: str,
-        observation_type: Any,  # noqa: ANN401
-        data: dict[str, Any],
+        observation_type: ObservationType | str,
+        data: dict[str, object],
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,

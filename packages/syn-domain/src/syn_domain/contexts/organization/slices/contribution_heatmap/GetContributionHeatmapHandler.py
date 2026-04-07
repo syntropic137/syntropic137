@@ -7,7 +7,7 @@ then queries TimescaleDB for daily activity buckets.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
@@ -19,6 +19,8 @@ from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatm
 )
 
 if TYPE_CHECKING:
+    import asyncpg
+
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
         GetContributionHeatmapQuery,
@@ -68,7 +70,7 @@ class GetContributionHeatmapHandler:
 
     def __init__(
         self,
-        pool: Any,  # noqa: ANN401
+        pool: asyncpg.Pool,
         store: ProjectionStoreProtocol,
         repo_projection: RepoProjection,
     ) -> None:

@@ -9,9 +9,23 @@ See ADR-021 in the event-sourcing-platform for pattern documentation.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.organization.domain.commands.ClaimRepoCommand import (
+        ClaimRepoCommand,
+    )
+    from syn_domain.contexts.organization.domain.commands.ReleaseRepoClaimCommand import (
+        ReleaseRepoClaimCommand,
+    )
+    from syn_domain.contexts.organization.domain.events.RepoClaimedEvent import (
+        RepoClaimedEvent,
+    )
+    from syn_domain.contexts.organization.domain.events.RepoClaimReleasedEvent import (
+        RepoClaimReleasedEvent,
+    )
 
 
 @aggregate("RepoClaim")
@@ -61,7 +75,7 @@ class RepoClaimAggregate(AggregateRoot["RepoClaimedEvent"]):  # type: ignore[typ
     # --- Command handlers ---
 
     @command_handler("ClaimRepoCommand")
-    def claim(self, command: Any) -> None:  # noqa: ANN401
+    def claim(self, command: ClaimRepoCommand) -> None:
         from syn_domain.contexts.organization.domain.events.RepoClaimedEvent import (
             RepoClaimedEvent,
         )
@@ -94,7 +108,7 @@ class RepoClaimAggregate(AggregateRoot["RepoClaimedEvent"]):  # type: ignore[typ
         self._apply(event)
 
     @command_handler("ReleaseRepoClaimCommand")
-    def release(self, command: Any) -> None:  # noqa: ANN401
+    def release(self, command: ReleaseRepoClaimCommand) -> None:
         from syn_domain.contexts.organization.domain.events.RepoClaimReleasedEvent import (
             RepoClaimReleasedEvent,
         )
@@ -121,7 +135,7 @@ class RepoClaimAggregate(AggregateRoot["RepoClaimedEvent"]):  # type: ignore[typ
     # --- Event sourcing handlers ---
 
     @event_sourcing_handler("organization.RepoClaimed")
-    def on_claimed(self, event: Any) -> None:  # noqa: ANN401
+    def on_claimed(self, event: RepoClaimedEvent) -> None:
         if hasattr(event, "organization_id"):
             self._organization_id = event.organization_id
             self._provider = event.provider
@@ -136,5 +150,5 @@ class RepoClaimAggregate(AggregateRoot["RepoClaimedEvent"]):  # type: ignore[typ
         self._is_released = False
 
     @event_sourcing_handler("organization.RepoClaimReleased")
-    def on_released(self, event: Any) -> None:  # noqa: ANN401, ARG002
+    def on_released(self, _event: RepoClaimReleasedEvent) -> None:
         self._is_released = True

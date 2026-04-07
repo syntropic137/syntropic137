@@ -8,12 +8,18 @@ See ADR-012: Artifact Storage Architecture
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
         ArtifactSummary,
     )
+
+
+class _ArtifactProjection(Protocol):
+    """Protocol for the artifact projection dependency."""
+
+    async def get_by_execution(self, execution_id: str) -> list[ArtifactSummary]: ...
 
 
 @runtime_checkable
@@ -64,7 +70,7 @@ class ArtifactQueryService:
     Replaces in-memory phase_outputs dict with DB-backed queries.
     """
 
-    def __init__(self, projection: Any) -> None:  # noqa: ANN401
+    def __init__(self, projection: _ArtifactProjection) -> None:
         """Initialize with an artifact projection.
 
         Args:

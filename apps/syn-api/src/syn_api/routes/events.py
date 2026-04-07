@@ -5,6 +5,9 @@ Provides session event queries, timelines, cost summaries, and tool summaries.
 
 from __future__ import annotations
 
+from datetime import (
+    datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
+)
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -22,6 +25,8 @@ from syn_api.types import (
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.projections.manager import ProjectionManager
+    from syn_adapters.projections.session_tools import ToolOperation as AdapterToolOperation
     from syn_api.auth import AuthContext
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -35,7 +40,7 @@ router = APIRouter(prefix="/events", tags=["events"])
 class EventResponse(BaseModel):
     """Single event response."""
 
-    time: Any
+    time: datetime | str | None = None
     event_type: str
     session_id: str | None = None
     execution_id: str | None = None
@@ -54,7 +59,7 @@ class EventListResponse(BaseModel):
 class TimelineEntryResponse(BaseModel):
     """Timeline entry for visualization."""
 
-    time: Any
+    time: datetime | str | None = None
     event_type: str
     tool_name: str | None = None
     duration_ms: int | None = None
@@ -165,7 +170,9 @@ async def get_session_timeline(
         return Err(ObservabilityError.QUERY_FAILED, message=str(e))
 
 
-def _accumulate_tool_stats(operations: list[Any]) -> dict[str, dict[str, int | float]]:
+def _accumulate_tool_stats(
+    operations: list[AdapterToolOperation],
+) -> dict[str, dict[str, int | float]]:
     """Aggregate tool operation stats by tool name."""
     tool_stats: dict[str, dict[str, int | float]] = {}
     for op in operations:
@@ -247,8 +254,7 @@ async def get_recent_activity_events(
 
 
 async def _get_session_token_metrics(
-    manager: Any,  # noqa: ANN401
-    session_id: str,
+    manager: ProjectionManager, session_id: str
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single session."""
     cost = await manager.session_cost.get_session_cost(session_id)
@@ -268,8 +274,7 @@ async def _get_session_token_metrics(
 
 
 async def _get_execution_token_metrics(
-    manager: Any,  # noqa: ANN401
-    execution_id: str,
+    manager: ProjectionManager, execution_id: str
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single execution."""
     exec_cost = await manager.execution_cost.get_execution_cost(execution_id)

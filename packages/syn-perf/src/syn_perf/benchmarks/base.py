@@ -46,7 +46,7 @@ class BaseBenchmark(ABC):
         """Get backend identifier."""
         return self.backend
 
-    def create_config(self, session_id: str | None = None) -> dict[str, Any]:
+    def create_config(self, session_id: str | None = None) -> dict[str, object]:
         """Create workspace config for benchmark."""
         session_id = session_id or f"perf-{uuid.uuid4().hex[:8]}"
 

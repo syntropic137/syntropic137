@@ -8,7 +8,12 @@ Subscribes to observation events from syn-collector:
 - tool_blocked
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from syn_domain.contexts.agent_sessions.domain.read_models.tool_execution import (
     ToolExecution,
@@ -29,7 +34,7 @@ class ToolTimelineProjection:
 
     PROJECTION_NAME = "tool_timelines"
 
-    def __init__(self, store: Any):  # noqa: ANN401
+    def __init__(self, store: ProjectionStoreProtocol):
         """Initialize with a projection store.
 
         Args:

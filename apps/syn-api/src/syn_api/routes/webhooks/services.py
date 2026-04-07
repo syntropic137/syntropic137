@@ -9,15 +9,19 @@ from syn_api._wiring import ensure_connected
 from syn_api.types import Err, GitHubError, Ok, Result
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from syn_api.auth import AuthContext
+    from syn_domain.contexts.github.slices.get_installation.projection import (
+        InstallationProjection,
+    )
 
 logger = logging.getLogger(__name__)
 
 
 async def _get_repos_for_installation(
-    projection: Any,  # noqa: ANN401
-    installation_id: str,
-) -> Result[list[Any], GitHubError]:
+    projection: InstallationProjection, installation_id: str
+) -> Result[list[str], GitHubError]:
     """Get repositories for a specific installation."""
     inst = await projection.get(installation_id)
     if inst is None:
@@ -29,16 +33,16 @@ async def _get_repos_for_installation(
     return Ok(repos)
 
 
-async def _collect_all_repos(projection: Any) -> list[Any]:  # noqa: ANN401
+async def _collect_all_repos(projection: InstallationProjection) -> list[str]:
     """Collect all repositories from all active installations."""
     active = await projection.get_all_active()
-    repos: list[Any] = []
+    repos: list[str] = []
     for inst in active:
         repos.extend(inst.repositories)
     return repos
 
 
-def _normalize_repos(repos: list[Any]) -> list[dict[str, Any]]:
+def _normalize_repos(repos: Sequence[str | dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize repo entries to dict format."""
     return [{"full_name": r} if isinstance(r, str) else r for r in repos]
 

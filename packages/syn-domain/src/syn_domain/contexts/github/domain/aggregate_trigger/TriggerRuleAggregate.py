@@ -24,11 +24,23 @@ from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
+        DeleteTriggerCommand,
+    )
+    from syn_domain.contexts.github.domain.commands.PauseTriggerCommand import (
+        PauseTriggerCommand,
+    )
     from syn_domain.contexts.github.domain.commands.RecordTriggerBlockedCommand import (
         RecordTriggerBlockedCommand,
     )
     from syn_domain.contexts.github.domain.commands.RecordTriggerFiredCommand import (
         RecordTriggerFiredCommand,
+    )
+    from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
+        RegisterTriggerCommand,
+    )
+    from syn_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
+        ResumeTriggerCommand,
     )
     from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
         TriggerBlockedEvent,
@@ -126,7 +138,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
     # --- Command handlers ---
 
     @command_handler("RegisterTriggerCommand")
-    def register(self, command: Any) -> None:  # noqa: ANN401
+    def register(self, command: RegisterTriggerCommand) -> None:
         from syn_domain.contexts.github.domain.events.TriggerRegisteredEvent import (
             TriggerRegisteredEvent,
         )
@@ -157,7 +169,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("PauseTriggerCommand")
-    def pause(self, command: Any) -> None:  # noqa: ANN401
+    def pause(self, command: PauseTriggerCommand) -> None:
         from syn_domain.contexts.github.domain.events.TriggerPausedEvent import (
             TriggerPausedEvent,
         )
@@ -174,7 +186,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("ResumeTriggerCommand")
-    def resume(self, command: Any) -> None:  # noqa: ANN401
+    def resume(self, command: ResumeTriggerCommand) -> None:
         from syn_domain.contexts.github.domain.events.TriggerResumedEvent import (
             TriggerResumedEvent,
         )
@@ -190,7 +202,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("DeleteTriggerCommand")
-    def delete(self, command: Any) -> None:  # noqa: ANN401
+    def delete(self, command: DeleteTriggerCommand) -> None:
         from syn_domain.contexts.github.domain.events.TriggerDeletedEvent import (
             TriggerDeletedEvent,
         )
@@ -251,7 +263,17 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
     @staticmethod
     def _extract_trigger_fields(
         event: TriggerRegisteredEvent,
-    ) -> tuple[str, str, str, str, str, str, dict[str, str], Any, Any]:
+    ) -> tuple[
+        str,
+        str,
+        str,
+        str,
+        str,
+        str,
+        dict[str, str],
+        tuple[dict[str, Any], ...] | list[dict[str, Any]],
+        dict[str, Any],
+    ]:
         """Extract core trigger fields from a typed or dict-based event.
 
         Returns (name, event_type, repository, installation_id, workflow_id,
@@ -283,7 +305,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         )
 
     @staticmethod
-    def _parse_trigger_config(config_raw: Any) -> TriggerConfig:  # noqa: ANN401
+    def _parse_trigger_config(config_raw: dict[str, Any]) -> TriggerConfig:
         """Parse a config dict into a TriggerConfig, ignoring unknown keys."""
         config_dict = config_raw if isinstance(config_raw, dict) else {}
         if not config_dict:

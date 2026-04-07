@@ -16,6 +16,8 @@ from syn_adapters.subscriptions.service_dispatch import dispatch_event as dispat
 from syn_adapters.subscriptions.service_loop import subscription_loop
 
 if TYPE_CHECKING:
+    from event_sourcing import DomainEvent, EventEnvelope
+
     from syn_adapters.subscriptions.service import EventSubscriptionService
 
 logger = get_logger(__name__)
@@ -25,14 +27,14 @@ __all__ = ["dispatch_event", "run_live_subscription", "subscription_loop"]
 
 async def _handle_live_event(
     svc: EventSubscriptionService,
-    envelope: object,
+    envelope: EventEnvelope[DomainEvent],
 ) -> None:
     """Dispatch a single live event, advancing position or raising on failure."""
     dispatch_success = await svc._dispatch_event(envelope)
 
     if dispatch_success:
-        if envelope.metadata.global_nonce is not None:  # type: ignore[union-attr]
-            svc._last_position = envelope.metadata.global_nonce  # type: ignore[union-attr]
+        if envelope.metadata.global_nonce is not None:
+            svc._last_position = envelope.metadata.global_nonce
     else:
         nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
         raise RuntimeError(f"Event dispatch failed at position {nonce}. Triggering reconnect.")

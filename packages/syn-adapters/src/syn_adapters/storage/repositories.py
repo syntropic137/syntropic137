@@ -16,12 +16,49 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from event_sourcing import (
+        BaseAggregate,
+        DomainEvent,
+        EventEnvelope,
+        EventStoreRepository,
+        RepositoryFactory,
+    )
+
+    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+        AgentSessionAggregate,
+    )
+    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
+    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
+        TriggerRuleAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
+    from syn_domain.contexts.organization.domain.aggregate_organization.OrganizationAggregate import (
+        OrganizationAggregate,
+    )
+    from syn_domain.contexts.organization.domain.aggregate_repo.RepoAggregate import (
+        RepoAggregate,
+    )
+    from syn_domain.contexts.organization.domain.aggregate_repo_claim.RepoClaimAggregate import (
+        RepoClaimAggregate,
+    )
+    from syn_domain.contexts.organization.domain.aggregate_system.SystemAggregate import (
+        SystemAggregate,
+    )
 
 logger = logging.getLogger(__name__)
 
 
-class RepositoryAdapter[TAggregate]:
+class RepositoryAdapter[TAggregate: BaseAggregate[Any]]:
     """Adapter that wraps EventStoreRepository to provide get_by_id interface.
 
     The SDK's EventStoreRepository uses `load()` for fetching aggregates,
@@ -32,7 +69,7 @@ class RepositoryAdapter[TAggregate]:
     projections in test mode. In production the publisher is a no-op.
     """
 
-    def __init__(self, sdk_repository: Any) -> None:  # noqa: ANN401
+    def __init__(self, sdk_repository: EventStoreRepository[TAggregate]) -> None:
         """Initialize with an SDK EventStoreRepository."""
         self._repo = sdk_repository
 
@@ -58,19 +95,19 @@ class RepositoryAdapter[TAggregate]:
 
     # Allow access to underlying repository if needed
     @property
-    def sdk_repository(self) -> Any:  # noqa: ANN401
+    def sdk_repository(self) -> EventStoreRepository[TAggregate]:
         """Get the underlying SDK repository."""
         return self._repo
 
     @staticmethod
-    def _capture_uncommitted(aggregate: Any) -> list[Any]:  # noqa: ANN401
+    def _capture_uncommitted(aggregate: TAggregate) -> list[EventEnvelope[DomainEvent]]:
         """Capture uncommitted events before the SDK marks them as committed."""
         if hasattr(aggregate, "get_uncommitted_events"):
-            return list(aggregate.get_uncommitted_events())
+            return list(aggregate.get_uncommitted_events())  # type: ignore[union-attr]
         return []
 
     @staticmethod
-    async def _publish_events(events: list[Any]) -> None:
+    async def _publish_events(events: list[EventEnvelope[DomainEvent]]) -> None:
         """Publish events to the event publisher (no-op in production)."""
         if events:
             from syn_adapters.storage import get_event_publisher
@@ -80,18 +117,18 @@ class RepositoryAdapter[TAggregate]:
 
 
 # Cached repository instances (RepositoryAdapter wrapping SDK repos)
-_workflow_repository: RepositoryAdapter[Any] | None = None
-_workflow_execution_repository: RepositoryAdapter[Any] | None = None
-_session_repository: RepositoryAdapter[Any] | None = None
-_artifact_repository: RepositoryAdapter[Any] | None = None
-_trigger_repository: RepositoryAdapter[Any] | None = None
-_organization_repository: RepositoryAdapter[Any] | None = None
-_system_repository: RepositoryAdapter[Any] | None = None
-_repo_repository: RepositoryAdapter[Any] | None = None
-_repo_claim_repository: RepositoryAdapter[Any] | None = None
+_workflow_repository: RepositoryAdapter[WorkflowTemplateAggregate] | None = None
+_workflow_execution_repository: RepositoryAdapter[WorkflowExecutionAggregate] | None = None
+_session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None
+_artifact_repository: RepositoryAdapter[ArtifactAggregate] | None = None
+_trigger_repository: RepositoryAdapter[TriggerRuleAggregate] | None = None
+_organization_repository: RepositoryAdapter[OrganizationAggregate] | None = None
+_system_repository: RepositoryAdapter[SystemAggregate] | None = None
+_repo_repository: RepositoryAdapter[RepoAggregate] | None = None
+_repo_claim_repository: RepositoryAdapter[RepoClaimAggregate] | None = None
 
 
-def _get_repository_factory() -> Any:  # noqa: ANN401
+def _get_repository_factory() -> RepositoryFactory:
     """Get a RepositoryFactory with the appropriate EventStoreClient.
 
     The client is the single decision point: MemoryEventStoreClient for
@@ -105,7 +142,7 @@ def _get_repository_factory() -> Any:  # noqa: ANN401
     return RepositoryFactory(client)
 
 
-def get_workflow_repository() -> Any:  # noqa: ANN401
+def get_workflow_repository() -> RepositoryAdapter[WorkflowTemplateAggregate]:
     """Get a WorkflowTemplateAggregate repository."""
     global _workflow_repository
     if _workflow_repository is not None:
@@ -117,14 +154,14 @@ def get_workflow_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        WorkflowTemplateAggregate,
+        WorkflowTemplateAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="WorkflowTemplate",
     )
     _workflow_repository = RepositoryAdapter(sdk_repo)
     return _workflow_repository
 
 
-def get_workflow_execution_repository() -> Any:  # noqa: ANN401
+def get_workflow_execution_repository() -> RepositoryAdapter[WorkflowExecutionAggregate]:
     """Get a WorkflowExecutionAggregate repository."""
     global _workflow_execution_repository
     if _workflow_execution_repository is not None:
@@ -136,14 +173,14 @@ def get_workflow_execution_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        WorkflowExecutionAggregate,
+        WorkflowExecutionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="WorkflowExecution",
     )
     _workflow_execution_repository = RepositoryAdapter(sdk_repo)
     return _workflow_execution_repository
 
 
-def get_session_repository() -> Any:  # noqa: ANN401
+def get_session_repository() -> RepositoryAdapter[AgentSessionAggregate]:
     """Get an AgentSessionAggregate repository."""
     global _session_repository
     if _session_repository is not None:
@@ -155,14 +192,14 @@ def get_session_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        AgentSessionAggregate,
+        AgentSessionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="AgentSession",
     )
     _session_repository = RepositoryAdapter(sdk_repo)
     return _session_repository
 
 
-def get_artifact_repository() -> Any:  # noqa: ANN401
+def get_artifact_repository() -> RepositoryAdapter[ArtifactAggregate]:
     """Get an ArtifactAggregate repository."""
     global _artifact_repository
     if _artifact_repository is not None:
@@ -174,7 +211,7 @@ def get_artifact_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        ArtifactAggregate,
+        ArtifactAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="Artifact",
     )
     _artifact_repository = RepositoryAdapter(sdk_repo)
@@ -208,14 +245,14 @@ def get_trigger_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        TriggerRuleAggregate,
+        TriggerRuleAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="TriggerRule",
     )
     _trigger_repository = RepositoryAdapter(sdk_repo)
     return _trigger_repository
 
 
-def get_organization_repository() -> Any:  # noqa: ANN401
+def get_organization_repository() -> RepositoryAdapter[OrganizationAggregate]:
     """Get an OrganizationAggregate repository."""
     global _organization_repository
     if _organization_repository is not None:
@@ -227,14 +264,14 @@ def get_organization_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        OrganizationAggregate,
+        OrganizationAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="Organization",
     )
     _organization_repository = RepositoryAdapter(sdk_repo)
     return _organization_repository
 
 
-def get_system_repository() -> Any:  # noqa: ANN401
+def get_system_repository() -> RepositoryAdapter[SystemAggregate]:
     """Get a SystemAggregate repository."""
     global _system_repository
     if _system_repository is not None:
@@ -246,14 +283,14 @@ def get_system_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        SystemAggregate,
+        SystemAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="System",
     )
     _system_repository = RepositoryAdapter(sdk_repo)
     return _system_repository
 
 
-def get_repo_repository() -> Any:  # noqa: ANN401
+def get_repo_repository() -> RepositoryAdapter[RepoAggregate]:
     """Get a RepoAggregate repository."""
     global _repo_repository
     if _repo_repository is not None:
@@ -265,14 +302,14 @@ def get_repo_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        RepoAggregate,
+        RepoAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="Repo",
     )
     _repo_repository = RepositoryAdapter(sdk_repo)
     return _repo_repository
 
 
-def get_repo_claim_repository() -> Any:  # noqa: ANN401
+def get_repo_claim_repository() -> RepositoryAdapter[RepoClaimAggregate]:
     """Get a RepoClaimAggregate repository."""
     global _repo_claim_repository
     if _repo_claim_repository is not None:
@@ -284,7 +321,7 @@ def get_repo_claim_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        RepoClaimAggregate,
+        RepoClaimAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="RepoClaim",
     )
     _repo_claim_repository = RepositoryAdapter(sdk_repo)

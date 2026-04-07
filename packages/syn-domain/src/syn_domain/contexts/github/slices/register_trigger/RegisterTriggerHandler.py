@@ -6,7 +6,7 @@ Handles the RegisterTriggerCommand by creating a new TriggerRuleAggregate.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
     TriggerRuleAggregate,
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
         RegisterTriggerCommand,
     )
+    from syn_domain.repository import Repository
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class RegisterTriggerHandler:
     def __init__(
         self,
         store: TriggerQueryStore,
-        repository: Any,  # noqa: ANN401
+        repository: Repository[TriggerRuleAggregate],
     ) -> None:
         self._store = store
         self._repository = repository

@@ -14,7 +14,13 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerCondition import (
+        TriggerCondition,
+    )
 
 from syn_domain.contexts.github._shared.trigger_query_store import (
     TriggerQueryStore,
@@ -31,13 +37,13 @@ NS_FIRE_RECORDS = "trigger_fire_records"
 NS_DELIVERIES = "trigger_deliveries"
 
 
-def _build_optional_filters(**kwargs: str | None) -> dict[str, Any] | None:
+def _build_optional_filters(**kwargs: str | None) -> dict[str, str] | None:
     """Build a filters dict from non-None keyword arguments, or None if empty."""
     filters = {k: v for k, v in kwargs.items() if v is not None}
     return filters or None
 
 
-def _parse_trigger_config(config_data: Any) -> TriggerConfig:  # noqa: ANN401
+def _parse_trigger_config(config_data: dict[str, Any] | TriggerConfig) -> TriggerConfig:
     """Parse a TriggerConfig from raw projection store data."""
     if isinstance(config_data, dict):
         return TriggerConfig(**config_data) if config_data else TriggerConfig()
@@ -64,7 +70,7 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
     recovery section.
     """
 
-    def __init__(self, store: Any) -> None:  # noqa: ANN401
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
         self._store = store
         # In-memory running execution tracking: execution_id → (trigger_id, pr_number)
         # Mirrors InMemoryTriggerQueryStore._running_executions.
@@ -169,9 +175,9 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         event: str,
         repository: str,
         workflow_id: str,
-        conditions: list[Any],
+        conditions: list[TriggerCondition | dict[str, object]],
         input_mapping: dict[str, str],
-        config: Any,  # noqa: ANN401
+        config: TriggerConfig,
         installation_id: str,
         created_by: str,
         status: str,

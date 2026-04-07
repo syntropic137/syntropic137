@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import AutoDispatchProjection
 
@@ -74,7 +77,7 @@ class RepoHealthProjection(AutoDispatchProjection):
     PROJECTION_NAME = REPO_HEALTH
     VERSION = 1
 
-    def __init__(self, store: Any) -> None:  # noqa: ANN401
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
         self._store = store
         self._events_since_snapshot = 0
 

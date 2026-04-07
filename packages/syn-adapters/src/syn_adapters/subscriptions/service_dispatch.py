@@ -10,12 +10,16 @@ from typing import TYPE_CHECKING
 from agentic_logging import get_logger
 
 if TYPE_CHECKING:
+    from event_sourcing import DomainEvent, EventEnvelope
+
     from syn_adapters.subscriptions.service import EventSubscriptionService
 
 logger = get_logger(__name__)
 
 
-async def dispatch_event(svc: EventSubscriptionService, envelope: object) -> bool:
+async def dispatch_event(
+    svc: EventSubscriptionService, envelope: EventEnvelope[DomainEvent]
+) -> bool:
     """Dispatch an event to projections via validated envelope.
 
     This uses process_event_envelope() which validates that events

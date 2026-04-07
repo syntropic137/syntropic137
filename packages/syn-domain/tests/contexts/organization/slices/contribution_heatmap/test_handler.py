@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,17 +22,17 @@ from syn_domain.contexts.organization.slices.contribution_heatmap.GetContributio
 class _FakeRow:
     """Fake asyncpg Record that supports both attribute and bracket access."""
 
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(self, data: dict[str, object]) -> None:
         self._data = data
 
-    def __getitem__(self, key: str) -> Any:  # noqa: ANN401
+    def __getitem__(self, key: str) -> object:
         return self._data[key]
 
-    def get(self, key: str, default: Any = None) -> Any:  # noqa: ANN401
+    def get(self, key: str, default: object = None) -> object:
         return self._data.get(key, default)
 
 
-def _make_mock_pool(rows: list[dict[str, Any]]) -> MagicMock:
+def _make_mock_pool(rows: list[dict[str, object]]) -> MagicMock:
     """Create a mock asyncpg pool that returns the given rows."""
     conn = AsyncMock()
     conn.fetch = AsyncMock(return_value=[_FakeRow(r) for r in rows])
@@ -56,7 +55,7 @@ def _make_row(
     output_tokens: int = 0,
     cache_creation_tokens: int = 0,
     cache_read_tokens: int = 0,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Create a mock DB row matching the TimescaleDB query columns."""
     return {
         "day": day,

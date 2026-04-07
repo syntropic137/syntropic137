@@ -20,6 +20,9 @@ from event_sourcing import (
 
 if TYPE_CHECKING:
     from syn_adapters.projections.realtime import RealTimeProjection
+    from syn_domain.contexts.github.slices.trigger_history.projection import (
+        TriggerHistoryProjection,
+    )
 
 logger = get_logger(__name__)
 
@@ -99,7 +102,7 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
     VERSION: ClassVar[int]
     _SUBSCRIBED: ClassVar[set[str]]
 
-    def __init__(self, projection: Any) -> None:  # noqa: ANN401
+    def __init__(self, projection: object) -> None:
         self._projection = projection
 
     def get_name(self) -> str:
@@ -112,12 +115,14 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
         return self._SUBSCRIBED
 
     async def clear_all_data(self) -> None:
-        await self._projection.clear_all_data()
+        clear_fn = getattr(self._projection, "clear_all_data", None)
+        if clear_fn is not None:
+            await clear_fn()
 
     async def handle_event(
         self,
-        envelope: Any,  # noqa: ANN401
-        checkpoint_store: Any,  # noqa: ANN401
+        envelope: EventEnvelope[Any],
+        checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
         event_type = envelope.event.event_type
         event_data = envelope.event.model_dump()
@@ -219,10 +224,15 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         "WorkflowFailed",
     }
 
+    _projection: TriggerHistoryProjection  # narrow from base class
+
+    def __init__(self, projection: TriggerHistoryProjection) -> None:
+        super().__init__(projection)
+
     async def handle_event(
         self,
-        envelope: Any,  # noqa: ANN401
-        checkpoint_store: Any,  # noqa: ANN401
+        envelope: EventEnvelope[Any],
+        checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
         event_data = envelope.event.model_dump()
         event_type = envelope.event.event_type
@@ -256,13 +266,19 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         if event_type in ("WorkflowCompleted", "WorkflowFailed"):
             await self._handle_execution_terminal(event_data, event_type)
             return
-        from types import SimpleNamespace
+        from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
+            TriggerBlockedEvent,
+        )
+        from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
+            TriggerFiredEvent,
+        )
 
-        ns = SimpleNamespace(**event_data)
         if event_type == "github.TriggerBlocked":
-            await self._projection.handle_trigger_blocked(ns, global_nonce=global_nonce)
+            blocked = TriggerBlockedEvent.model_validate(event_data)
+            await self._projection.handle_trigger_blocked(blocked, global_nonce=global_nonce)
         else:
-            await self._projection.handle_trigger_fired(ns)
+            fired = TriggerFiredEvent.model_validate(event_data)
+            await self._projection.handle_trigger_fired(fired)
 
     @staticmethod
     async def _handle_execution_terminal(

@@ -13,6 +13,13 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from syn_adapters.control import ExecutionController
+    from syn_adapters.control.commands import ControlSignal
+    from syn_adapters.control.ports import SignalQueuePort
+    from syn_adapters.conversations.minio import MinioConversationStorage
+    from syn_adapters.events.store import AgentEventStore
+    from syn_adapters.projections.realtime import RealTimeProjection
+    from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api.services.webhook_health_tracker import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
@@ -23,6 +30,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
         ExecuteWorkflowHandler,
     )
+    from syn_shared.settings.github import GitHubAppSettings
 
 from syn_adapters.conversations import get_conversation_storage
 from syn_adapters.events import get_event_store
@@ -261,6 +269,9 @@ class _InMemoryAggregateRepository:
 
     InMemoryTriggerQueryStore from the domain layer lacks the save()/get_by_id()
     interface required by domain handlers, so we provide a minimal implementation.
+
+    Uses ``Any`` deliberately: this is a generic test double that stores
+    arbitrary aggregates — concrete types are only known at call sites.
     """
 
     def __init__(self) -> None:
@@ -272,6 +283,10 @@ class _InMemoryAggregateRepository:
     async def save(self, aggregate: Any) -> None:  # noqa: ANN401
         agg_id = str(aggregate.id) if hasattr(aggregate, "id") else str(aggregate.trigger_id)
         self._aggregates[agg_id] = aggregate
+
+    async def save_new(self, aggregate: Any) -> None:  # noqa: ANN401
+        """Persist a brand-new aggregate (mirrors Repository protocol)."""
+        await self.save(aggregate)
 
     async def exists(self, aggregate_id: str) -> bool:
         return aggregate_id in self._aggregates
@@ -441,10 +456,10 @@ async def sync_published_events_to_projections() -> None:
 # ---------------------------------------------------------------------------
 
 
-_controller_singleton: Any = None
+_controller_singleton: ExecutionController | None = None
 
 
-def get_controller() -> Any:  # noqa: ANN401
+def get_controller() -> ExecutionController:
     """Return a singleton ExecutionController for pause/resume/cancel/inject.
 
     Returns the same instance on every call so the execution engine and API
@@ -476,7 +491,7 @@ def get_controller() -> Any:  # noqa: ANN401
         from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
 
         redis_client = aioredis.from_url(redis_url, decode_responses=True)
-        signal_adapter: Any = RedisSignalQueueAdapter(redis_client)
+        signal_adapter: SignalQueuePort = RedisSignalQueueAdapter(redis_client)
         logger.info("ExecutionController using Redis signal queue (%s)", redis_url)
     except Exception:
         logger.warning(
@@ -571,17 +586,17 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
 class _NullSignalQueueAdapter:
     """No-op signal adapter when Redis is not available."""
 
-    async def enqueue(self, _execution_id: str, _signal: object) -> None:
+    async def enqueue(self, execution_id: str, signal: ControlSignal) -> None:
         pass
 
-    async def dequeue(self, _execution_id: str) -> None:
+    async def dequeue(self, execution_id: str) -> ControlSignal | None:  # noqa: ARG002
         return None
 
-    async def get_signal(self, _execution_id: str) -> None:
+    async def get_signal(self, execution_id: str) -> ControlSignal | None:  # noqa: ARG002
         return None
 
 
-def get_event_store_instance() -> Any:  # noqa: ANN401
+def get_event_store_instance() -> AgentEventStore:
     """Return the AgentEventStore for TimescaleDB queries."""
     return get_event_store()
 
@@ -628,12 +643,12 @@ def get_execution_cost_query():
     return ExecutionCostQueryService(pool=pool)
 
 
-async def get_conversation_store() -> Any:  # noqa: ANN401
+async def get_conversation_store() -> MinioConversationStorage:
     """Return the conversation storage (MinIO-backed)."""
     return await get_conversation_storage()
 
 
-def get_realtime() -> Any:  # noqa: ANN401
+def get_realtime() -> RealTimeProjection:
     """Return the RealTimeProjection singleton."""
     from syn_adapters.projections.realtime import get_realtime_projection
 
@@ -641,9 +656,9 @@ def get_realtime() -> Any:  # noqa: ANN401
 
 
 def get_subscription_coordinator(
-    realtime_projection: Any = None,  # noqa: ANN401
-    execution_service: Any = None,  # noqa: ANN401
-) -> Any:  # noqa: ANN401
+    realtime_projection: RealTimeProjection | None = None,
+    execution_service: object | None = None,
+) -> CoordinatorSubscriptionService:
     """Create the CoordinatorSubscriptionService.
 
     Wraps: create_coordinator_service(event_store, projection_store, ...)
@@ -665,7 +680,7 @@ def get_subscription_coordinator(
     )
 
 
-def get_github_settings() -> Any:  # noqa: ANN401
+def get_github_settings() -> GitHubAppSettings:
     """Return the GitHubAppSettings instance."""
     from syn_shared.settings.github import get_github_settings as _get
 

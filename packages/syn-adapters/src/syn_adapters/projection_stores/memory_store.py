@@ -122,6 +122,11 @@ class InMemoryProjectionStore:
         state.last_position = position
         state.last_updated = datetime.now(UTC)
 
+    async def delete_all(self, projection: str) -> None:
+        """Delete all records for a projection."""
+        self._data.pop(projection, None)
+        self._state.pop(projection, None)
+
     async def get_last_updated(self, projection: str) -> datetime | None:
         """Get the last update timestamp for a projection."""
         state = self._state.get(projection)

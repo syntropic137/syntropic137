@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import asyncpg
 
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import (
     CostCalculator,
@@ -49,7 +52,7 @@ _EMPTY_BREAKDOWN: dict[str, float] = {
 class TimescaleHeatmapQuery:
     """Queries agent_events with time_bucket aggregation for heatmap data."""
 
-    def __init__(self, pool: Any) -> None:  # noqa: ANN401
+    def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
         self._cost_calculator = CostCalculator()
 

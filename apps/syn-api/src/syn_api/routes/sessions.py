@@ -33,6 +33,7 @@ from syn_api.types import (
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.projections.manager import ProjectionManager
     from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
@@ -264,7 +265,7 @@ class _CostData:
     duration_seconds: float | None = None
 
 
-async def _load_tool_operations(manager: Any, session_id: str) -> list[ToolOperation]:  # noqa: ANN401
+async def _load_tool_operations(manager: ProjectionManager, session_id: str) -> list[ToolOperation]:
     """Load tool operations for a session from the projection."""
     try:
         tool_data = await manager.session_tools.get(session_id)
@@ -275,10 +276,7 @@ async def _load_tool_operations(manager: Any, session_id: str) -> list[ToolOpera
 
 
 async def _load_cost_data(
-    manager: Any,  # noqa: ANN401
-    session_id: str,
-    fallback_tokens: int,
-    fallback_cost: Decimal,
+    manager: ProjectionManager, session_id: str, fallback_tokens: int, fallback_cost: Decimal
 ) -> _CostData:
     """Load cost data for a session from the projection."""
     try:

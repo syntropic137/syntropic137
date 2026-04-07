@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -47,13 +47,13 @@ _SKIP_URLS = frozenset(
 
 # Callable types for dependency injection
 PromptBuilder = Callable[
-    [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, Any]],
+    [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, object]],
     Awaitable[str],
 ]
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 
 
-def _build_agent_env(workspace: Any, session_id: str) -> dict[str, str]:  # noqa: ANN401
+def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
     """Build agent environment with proxy-based auth (ISS-43).
 
     Validates proxy is available (credentials live on the proxy container,
@@ -120,7 +120,7 @@ class WorkspaceProvisionHandler:
         artifacts: ArtifactCollector,
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
-        inputs: dict[str, Any] | None = None,
+        inputs: dict[str, object] | None = None,
     ) -> ProvisionResult:
         """Provision workspace for a phase."""
         from syn_adapters.workspace_backends.service import SetupPhaseSecrets

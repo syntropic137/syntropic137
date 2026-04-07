@@ -68,6 +68,9 @@ class FakeProjectionStore:
             (key, data) for key, data in self._data[projection].items() if key.startswith(prefix)
         ][:10]
 
+    async def delete_all(self, projection: str) -> None:
+        self._data.pop(projection, None)
+
     async def get_last_updated(self, projection: str) -> datetime | None:  # noqa: ARG002
         return None
 

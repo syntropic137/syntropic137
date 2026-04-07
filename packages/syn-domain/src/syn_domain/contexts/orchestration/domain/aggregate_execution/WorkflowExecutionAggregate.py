@@ -9,7 +9,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
+from event_sourcing import (
+    AggregateRoot,
+    DomainEvent,
+    aggregate,
+    command_handler,
+    event_sourcing_handler,
+)
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
@@ -31,6 +37,30 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
+        AgentExecutionCompletedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
+        ArtifactsCollectedForPhaseEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+        ExecutionCancelledEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionPausedEvent import (
+        ExecutionPausedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+        ExecutionResumedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
+        NextPhaseReadyEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+        PhaseCompletedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
+        PhaseStartedEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
     )
@@ -40,10 +70,19 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
         WorkflowFailedEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowInterruptedEvent import (
+        WorkflowInterruptedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+        WorkspaceProvisionedForPhaseEvent,
+    )
 
 
-def _evt(event: Any, field: str, default: Any = None) -> Any:  # noqa: ANN401
-    """Get field from event, handling both typed and GenericDomainEvent formats."""
+def _evt(event: DomainEvent, field: str, default: Any = None) -> Any:  # noqa: ANN401
+    """Get field from event, handling both typed and GenericDomainEvent formats.
+
+    Returns Any because the caller knows the concrete type based on the field name.
+    """
     if hasattr(event, field):
         return getattr(event, field)
     data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
@@ -447,51 +486,51 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._status = ExecutionStatus.FAILED
 
     @event_sourcing_handler("PhaseStarted")
-    def on_phase_started(self, event: Any) -> None:  # noqa: ANN401
+    def on_phase_started(self, event: PhaseStartedEvent) -> None:
         """Apply PhaseStartedEvent."""
         self._current_phase_order = _evt(event, "phase_order", 0)
 
     @event_sourcing_handler("PhaseCompleted")
-    def on_phase_completed(self, _event: Any) -> None:  # noqa: ANN401
+    def on_phase_completed(self, _event: PhaseCompletedEvent) -> None:
         """Apply PhaseCompletedEvent."""
         self._completed_phases += 1
 
     @event_sourcing_handler("WorkspaceProvisionedForPhase")
-    def on_workspace_provisioned_for_phase(self, event: Any) -> None:  # noqa: ANN401
+    def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:
         """Apply WorkspaceProvisionedForPhaseEvent."""
         self._current_phase_workspace_id = _evt(event, "workspace_id")
 
     @event_sourcing_handler("AgentExecutionCompleted")
-    def on_agent_execution_completed(self, _event: Any) -> None:  # noqa: ANN401
+    def on_agent_execution_completed(self, _event: AgentExecutionCompletedEvent) -> None:
         """Apply AgentExecutionCompletedEvent — no state change needed."""
 
     @event_sourcing_handler("ArtifactsCollectedForPhase")
-    def on_artifacts_collected_for_phase(self, event: Any) -> None:  # noqa: ANN401
+    def on_artifacts_collected_for_phase(self, event: ArtifactsCollectedForPhaseEvent) -> None:
         """Apply ArtifactsCollectedForPhaseEvent."""
         self._artifact_ids.extend(_evt(event, "artifact_ids", []))
 
     @event_sourcing_handler("NextPhaseReady")
-    def on_next_phase_ready(self, _event: Any) -> None:  # noqa: ANN401
+    def on_next_phase_ready(self, _event: NextPhaseReadyEvent) -> None:
         """Apply NextPhaseReadyEvent — to-do list projection reacts, not aggregate."""
 
     @event_sourcing_handler("ExecutionPaused")
-    def on_execution_paused(self, _event: Any) -> None:  # noqa: ANN401
+    def on_execution_paused(self, _event: ExecutionPausedEvent) -> None:
         """Apply ExecutionPausedEvent."""
         self._status = ExecutionStatus.PAUSED
 
     @event_sourcing_handler("ExecutionResumed")
-    def on_execution_resumed(self, _event: Any) -> None:  # noqa: ANN401
+    def on_execution_resumed(self, _event: ExecutionResumedEvent) -> None:
         """Apply ExecutionResumedEvent."""
         self._status = ExecutionStatus.RUNNING
 
     @event_sourcing_handler("ExecutionCancelled")
-    def on_execution_cancelled(self, event: Any) -> None:  # noqa: ANN401
+    def on_execution_cancelled(self, event: ExecutionCancelledEvent) -> None:
         """Apply ExecutionCancelledEvent."""
         self._completed_at = _evt(event, "cancelled_at")
         self._status = ExecutionStatus.CANCELLED
 
     @event_sourcing_handler("WorkflowInterrupted")
-    def on_execution_interrupted(self, event: Any) -> None:  # noqa: ANN401
+    def on_execution_interrupted(self, event: WorkflowInterruptedEvent) -> None:
         """Apply WorkflowInterruptedEvent."""
         self._completed_at = _evt(event, "interrupted_at")
         self._status = ExecutionStatus.INTERRUPTED

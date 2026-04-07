@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-03-30T17:48:52Z"
+exclude-newer = "2026-03-31T00:32:22Z"
 
 [manifest]
 members = [
@@ -504,7 +504,7 @@ wheels = [
 
 [[package]]
 name = "event-sourcing-python"
-version = "0.7.3b0"
+version = "0.11.1"
 source = { editable = "lib/event-sourcing-platform/event-sourcing/python" }
 dependencies = [
     { name = "protobuf" },

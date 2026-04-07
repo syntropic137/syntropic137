@@ -12,7 +12,7 @@ See ADR-033: Recording-Based Integration Testing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 from agentic_events import Recording
@@ -32,6 +32,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
     TokenAccumulator,
 )
 
+if TYPE_CHECKING:
+    from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+        ObservationType,
+    )
+
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
 
 
@@ -42,13 +47,13 @@ pytestmark = [pytest.mark.unit, pytest.mark.integration]
 
 @dataclass
 class MockObservability:
-    recordings: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
+    recordings: list[tuple[str, str, dict[str, object]]] = field(default_factory=list)
 
     async def record_observation(
         self,
         session_id: str,
-        observation_type: Any,  # noqa: ANN401
-        data: dict[str, Any],
+        observation_type: ObservationType | str,
+        data: dict[str, object],
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,

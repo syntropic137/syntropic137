@@ -5,7 +5,7 @@ Extracted from manager.py to reduce module complexity.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from syn_adapters.projections.manager_event_map import (
     EventProvenance,
@@ -13,13 +13,17 @@ from syn_adapters.projections.manager_event_map import (
 )
 
 if TYPE_CHECKING:
+    from event_sourcing import DomainEvent, EventEnvelope
+
     from syn_adapters.projections.manager import ProjectionManager
 
 # Re-exported for consumers that import dispatch_to_handlers from here
 __all__ = ["dispatch_to_handlers", "process_event_envelope"]
 
 
-async def process_event_envelope(mgr: ProjectionManager, envelope: Any) -> EventProvenance:  # noqa: ANN401
+async def process_event_envelope(
+    mgr: ProjectionManager, envelope: EventEnvelope[DomainEvent]
+) -> EventProvenance:
     """Process an event envelope from the event store.
 
     This is the ONLY correct way to dispatch events to projections.
@@ -40,10 +44,11 @@ async def process_event_envelope(mgr: ProjectionManager, envelope: Any) -> Event
     # O(1) check, ~50ns overhead - NOT a performance concern
     provenance = EventProvenance.from_envelope(envelope)
 
-    # Extract event data
+    # Extract event data — events may use to_dict() (legacy) or model_dump() (Pydantic)
     event = envelope.event
-    if hasattr(event, "to_dict"):
-        event_data = event.to_dict()
+    to_dict = getattr(event, "to_dict", None)
+    if to_dict is not None:
+        event_data = to_dict()
     elif hasattr(event, "model_dump"):
         event_data = event.model_dump()
     else:

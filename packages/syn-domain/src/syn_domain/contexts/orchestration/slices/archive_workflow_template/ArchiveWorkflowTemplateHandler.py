@@ -7,19 +7,53 @@ the archive command to the WorkflowTemplateAggregate.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol
 
 from syn_domain.contexts.orchestration.domain import HandlerResult
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from event_sourcing import EventEnvelope
+
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
     from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
         ArchiveWorkflowTemplateCommand,
     )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+        WorkflowTemplateArchivedEvent,
+    )
+    from syn_domain.repository import Repository
 
 logger = logging.getLogger(__name__)
 
 # Execution statuses that indicate an active (in-progress) execution
 _ACTIVE_STATUSES = frozenset({"running", "paused", "not_started"})
+
+
+class _ExecutionSummary(Protocol):
+    """Minimal protocol for execution summary objects used in the archive guard."""
+
+    @property
+    def status(self) -> str: ...
+
+
+class ExecutionProjection(Protocol):
+    """Protocol for querying executions by workflow ID."""
+
+    async def get_by_workflow_id(self, workflow_id: str) -> Sequence[_ExecutionSummary]:
+        """Return execution summaries for the given workflow."""
+        ...
+
+
+class EventPublisher(Protocol):
+    """Protocol for publishing domain events."""
+
+    async def publish(self, events: list[EventEnvelope[WorkflowTemplateArchivedEvent]]) -> None:
+        """Publish domain events for integration."""
+        ...
 
 
 class ArchiveWorkflowTemplateHandler:
@@ -35,9 +69,9 @@ class ArchiveWorkflowTemplateHandler:
 
     def __init__(
         self,
-        repository: Any,  # noqa: ANN401
-        execution_projection: Any,  # noqa: ANN401
-        event_publisher: Any = None,  # noqa: ANN401
+        repository: Repository[WorkflowTemplateAggregate],
+        execution_projection: ExecutionProjection,
+        event_publisher: EventPublisher | None = None,
     ) -> None:
         self._repository = repository
         self._execution_projection = execution_projection

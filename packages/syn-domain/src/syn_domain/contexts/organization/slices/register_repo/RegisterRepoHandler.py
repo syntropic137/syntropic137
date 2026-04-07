@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from event_sourcing import StreamAlreadyExistsError
@@ -35,12 +35,17 @@ if TYPE_CHECKING:
     from syn_domain.contexts.organization.domain.commands.RegisterRepoCommand import (
         RegisterRepoCommand,
     )
+    from syn_domain.repository import Repository
 
 logger = logging.getLogger(__name__)
 
 
 class RegisterRepoHandler:
-    def __init__(self, repository: Any, claim_repository: Any) -> None:  # noqa: ANN401
+    def __init__(
+        self,
+        repository: Repository[RepoAggregate],
+        claim_repository: Repository[RepoClaimAggregate],
+    ) -> None:
         self._repository = repository
         self._claim_repository = claim_repository
 

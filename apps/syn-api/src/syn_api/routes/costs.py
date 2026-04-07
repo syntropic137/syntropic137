@@ -337,7 +337,7 @@ async def get_cost_summary(
 # =============================================================================
 
 
-def _session_cost_to_api(c: Any) -> SessionCostResponse:  # noqa: ANN401
+def _session_cost_to_api(c: SessionCostData) -> SessionCostResponse:
     """Convert syn_api SessionCostData to SessionCostResponse."""
     return SessionCostResponse(
         session_id=c.session_id,
@@ -362,7 +362,7 @@ def _session_cost_to_api(c: Any) -> SessionCostResponse:  # noqa: ANN401
     )
 
 
-def _execution_cost_to_api(c: Any) -> ExecutionCostResponse:  # noqa: ANN401
+def _execution_cost_to_api(c: ExecutionCostData) -> ExecutionCostResponse:
     """Convert syn_api ExecutionCostData to ExecutionCostResponse."""
     return ExecutionCostResponse(
         execution_id=c.execution_id,

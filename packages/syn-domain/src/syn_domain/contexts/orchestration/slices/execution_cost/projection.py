@@ -13,7 +13,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import asyncpg
+
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
@@ -120,7 +125,7 @@ class ExecutionCostProjection:
 
     PROJECTION_NAME = "execution_cost"
 
-    def __init__(self, store: Any, pool: Any | None = None):  # noqa: ANN401
+    def __init__(self, store: ProjectionStoreProtocol, pool: asyncpg.Pool | None = None):
         """Initialize with a projection store and optional TimescaleDB pool.
 
         Args:

@@ -6,11 +6,14 @@ Handles pause, resume, and delete commands for trigger rules.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import (
         TriggerQueryStore,
+    )
+    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
+        TriggerRuleAggregate,
     )
     from syn_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
         DeleteTriggerCommand,
@@ -21,6 +24,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
         ResumeTriggerCommand,
     )
+    from syn_domain.repository import Repository
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +33,7 @@ class ManageTriggerHandler:
     def __init__(
         self,
         store: TriggerQueryStore,
-        repository: Any,  # noqa: ANN401
+        repository: Repository[TriggerRuleAggregate],
     ) -> None:
         self._store = store
         self._repository = repository

@@ -13,6 +13,8 @@ from agentic_logging import get_logger
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from event_sourcing import DomainEvent, EventEnvelope
+
     from syn_adapters.subscriptions.service import EventSubscriptionService
 
 logger = get_logger(__name__)
@@ -36,7 +38,7 @@ def _raise_dispatch_failure(envelope: object) -> None:
 
 async def process_catchup_batch(
     svc: EventSubscriptionService,
-    events: Sequence[object],
+    events: Sequence[EventEnvelope[DomainEvent]],
     events_in_batch: int,
 ) -> int:
     """Process a batch of catch-up events, advancing position on success.

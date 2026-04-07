@@ -175,6 +175,8 @@ async def get_contribution_heatmap(
 
     event_store = get_event_store_instance()
     pool = event_store.pool
+    if pool is None:
+        return {}
 
     query_kwargs: dict[str, Any] = {
         "organization_id": organization_id,

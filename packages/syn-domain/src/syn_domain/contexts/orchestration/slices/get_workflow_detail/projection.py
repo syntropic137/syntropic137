@@ -6,7 +6,12 @@ For execution details, see WorkflowExecutionDetailProjection.
 Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import AutoDispatchProjection
 
@@ -58,7 +63,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workflow_details"
     VERSION = 5  # Bumped: ISS-400 add execution_type, max_tokens, artifact types to phase detail
 
-    def __init__(self, store: Any):  # noqa: ANN401
+    def __init__(self, store: ProjectionStoreProtocol):
         """Initialize with a projection store."""
         self._store = store
 

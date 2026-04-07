@@ -3,8 +3,13 @@
 Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import AutoDispatchProjection
 
@@ -27,7 +32,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
     METRICS_KEY = "global"  # Single record for global metrics
     VERSION = 2  # Bumped: migrated to AutoDispatchProjection, renamed on_workflow_created
 
-    def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
+    def __init__(self, store: ProjectionStoreProtocol):
         """Initialize with a projection store.
 
         Args:

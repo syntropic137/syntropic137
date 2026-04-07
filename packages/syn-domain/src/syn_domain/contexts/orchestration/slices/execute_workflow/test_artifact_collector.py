@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -12,6 +12,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
     ArtifactCollector,
     map_artifact_type,
 )
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
 
 
 class TestMapArtifactType:
@@ -43,9 +48,9 @@ class MockWorkspace:
 
 @dataclass
 class MockArtifactRepo:
-    saved: list[Any] = field(default_factory=list)
+    saved: list[ArtifactAggregate] = field(default_factory=list)
 
-    async def save(self, aggregate: Any) -> None:  # noqa: ANN401
+    async def save(self, aggregate: ArtifactAggregate) -> None:
         self.saved.append(aggregate)
 
     async def get_by_id(self, artifact_id: str) -> None:

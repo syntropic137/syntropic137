@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from datetime import datetime
 
+    import asyncpg
+
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_shared.events import (
@@ -122,19 +124,23 @@ class TimescaleExecutionCostQuery:
     producing an ExecutionCost read model.
     """
 
-    def __init__(self, pool: Any, cost_calculator: CostCalculator | None = None) -> None:  # noqa: ANN401
+    def __init__(self, pool: asyncpg.Pool, cost_calculator: CostCalculator | None = None) -> None:
         self._pool = pool
         self._cost_calculator = cost_calculator or CostCalculator()
 
-    async def _query_session_summaries(self, conn: Any, execution_id: str) -> Any:  # noqa: ANN401
+    async def _query_session_summaries(
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
+    ) -> asyncpg.Record | None:
         """Query session_summary events for authoritative totals."""
         return await conn.fetchrow(_SESSION_SUMMARY_QUERY, execution_id, SESSION_SUMMARY)
 
-    async def _query_token_usage(self, conn: Any, execution_id: str) -> Any:  # noqa: ANN401
+    async def _query_token_usage(
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
+    ) -> asyncpg.Record | None:
         """Query token_usage events as fallback for in-progress executions."""
         return await conn.fetchrow(_TOKEN_USAGE_FALLBACK_QUERY, execution_id, TOKEN_USAGE)
 
-    def _extract_common_fields(self, row: Any) -> dict[str, Any]:  # noqa: ANN401
+    def _extract_common_fields(self, row: asyncpg.Record) -> dict[str, Any]:
         """Extract common token fields shared by both query types."""
         return {
             "input_tokens": row["total_input"] or 0,
@@ -146,7 +152,7 @@ class TimescaleExecutionCostQuery:
             "started_at": row.get("started_at"),
         }
 
-    def _extract_token_data(self, row: Any, from_summary: bool) -> _TokenData:  # noqa: ANN401
+    def _extract_token_data(self, row: asyncpg.Record, from_summary: bool) -> _TokenData:
         """Extract token counts and metadata from a query row."""
         common = self._extract_common_fields(row)
         sdk_cost = Decimal(str(row["sdk_cost"])) if row.get("sdk_cost") is not None else None
@@ -178,13 +184,17 @@ class TimescaleExecutionCostQuery:
             return (data.end_at - data.started_at).total_seconds() * 1000
         return 0
 
-    async def _query_turn_count(self, conn: Any, execution_id: str, data: _TokenData) -> int:  # noqa: ANN401
+    async def _query_turn_count(
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, data: _TokenData
+    ) -> int:
         """Get turn count from summary data or token_usage event count."""
         if data.from_summary:
             return data.total_turns
         return await conn.fetchval(_TURN_COUNT_QUERY, execution_id, TOKEN_USAGE) or 0
 
-    async def _query_cost_by_phase(self, conn: Any, execution_id: str) -> dict[str, Decimal]:  # noqa: ANN401
+    async def _query_cost_by_phase(
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
+    ) -> dict[str, Decimal]:
         """Query per-phase cost breakdown from session_summary events."""
         phase_rows = await conn.fetch(_COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY)
         return {
@@ -193,7 +203,9 @@ class TimescaleExecutionCostQuery:
             if row["phase_id"] and row["phase_cost"] is not None
         }
 
-    async def _query_cost_by_model(self, conn: Any, execution_id: str) -> dict[str, Decimal]:  # noqa: ANN401
+    async def _query_cost_by_model(
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
+    ) -> dict[str, Decimal]:
         """Query per-model cost breakdown from session_summary events."""
         model_rows = await conn.fetch(_COST_BY_MODEL_QUERY, execution_id, SESSION_SUMMARY)
         return {
@@ -202,7 +214,9 @@ class TimescaleExecutionCostQuery:
             if row["model"] and row["model_cost"] is not None
         }
 
-    async def _resolve_token_row(self, conn: Any, execution_id: str) -> tuple[Any, bool]:  # noqa: ANN401
+    async def _resolve_token_row(
+        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
+    ) -> tuple[asyncpg.Record | None, bool]:
         """Get the best available token data row and whether it's from session_summary."""
         summary_row = await self._query_session_summaries(conn, execution_id)
         if summary_row is not None and summary_row["total_input"] is not None:
