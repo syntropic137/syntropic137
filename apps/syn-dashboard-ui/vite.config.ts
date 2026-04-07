@@ -48,8 +48,7 @@ export default defineConfig({
       '/api/v1': {
         target: 'http://localhost:9137',
         changeOrigin: true,
-        // Selfhost gateway expects /api/v1 prefix; dev stack doesn't.
-        // Keep prefix for selfhost compatibility.
+        rewrite: (path) => path.replace(/^\/api\/v1/, ''),
         configure: (proxy) => quietProxy(proxy, 'api'),
       },
       // SSE streams go through the /api/v1 proxy above (rewritten to /sse/* on the backend).

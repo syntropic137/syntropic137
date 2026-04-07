@@ -413,7 +413,6 @@ dev: _workspace-check
     echo "✅ Full development stack ready!"
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
-    echo "   📈 Pulse:        http://localhost:5174"
     echo "   🚀 Backend API:  http://localhost:9137"
     echo "   📊 API Docs:     http://localhost:9137/docs"
     echo "   💾 Database:     localhost:5432"

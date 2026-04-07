@@ -358,7 +358,7 @@ syn triggers show <trigger-id>
 syn triggers history <trigger-id>
 ```
 
-- [ ] Trigger rules listed with safety guards (max_fires, cooldown, budget)
+- [ ] Trigger rules listed with safety guards (max_fires, cooldown)
 - [ ] `--all` flag shows triggers across all repos
 - [ ] Trigger detail shows event type and conditions
 - [ ] Trigger history shows past firings
@@ -702,8 +702,7 @@ syn triggers register \
   --repo owner/repo \
   --workflow <workflow-id> \
   --max-fires 5 \
-  --cooldown 300 \
-  --budget 1.00
+  --cooldown 300
 ```
 
 - [ ] Preset enabled successfully
