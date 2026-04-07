@@ -39,6 +39,8 @@ function TeaserBanner() {
           setDismissed(true)
           localStorage.setItem(TEASER_DISMISSED_KEY, 'true')
         }}
+        type="button"
+        aria-label="Dismiss banner"
         className="absolute right-1.5 top-1.5 rounded p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
       >
         <X className="h-3 w-3" />

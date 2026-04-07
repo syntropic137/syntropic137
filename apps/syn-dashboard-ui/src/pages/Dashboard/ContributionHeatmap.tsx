@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 // TODO(#624): Dashboard uses recharts elsewhere — consolidate on one charting
 // library during the redesign (migrate recharts→nivo or rebuild heatmap in recharts).
 import { ResponsiveCalendar } from '@nivo/calendar'
@@ -291,15 +291,13 @@ export function ContributionHeatmap() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const loadData = useCallback(() => {
+  useEffect(() => {
     setLoading(true)
     getContributionHeatmap({})
       .then((result) => { setData(result); setError(null) })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
-
-  useEffect(() => { loadData() }, [loadData])
 
   return (
     <Card>

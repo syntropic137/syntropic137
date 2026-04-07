@@ -1,14 +1,9 @@
-import path from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { readFileSync } from 'fs'
 
 const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }
-
-// TODO(#624): FeedbackWidget removed from App.tsx — clean up these ui-feedback
-// references (alias, fs.allow, optimizeDeps) once the submodule is fully deprecated.
-const uiFeedbackPath = path.resolve(__dirname, '../../lib/ui-feedback/packages/ui-feedback-react/src')
 
 // Suppress noisy EPIPE/ECONNRESET proxy errors with a single-line log.
 // These fire when the backend closes before Vite's proxy finishes relaying.
@@ -59,26 +54,9 @@ export default defineConfig({
       },
       // SSE streams go through the /api/v1 proxy above (rewritten to /sse/* on the backend).
     },
-    fs: {
-      // Allow serving files from the ui-feedback package
-      allow: ['.', uiFeedbackPath, path.resolve(__dirname, '../../lib/ui-feedback')],
-    },
   },
   resolve: {
-    alias: {
-      // Resolve the linked ui-feedback-react package
-      '@syn137/ui-feedback-react': uiFeedbackPath,
-    },
     // Dedupe these packages to use the dashboard's node_modules
-    dedupe: ['react', 'react-dom', 'html2canvas', 'clsx'],
-  },
-  optimizeDeps: {
-    // Include linked package dependencies for pre-bundling
-    include: ['html2canvas', 'clsx'],
-    // Force Vite to treat files from this directory as source
-    entries: [
-      'src/**/*.{ts,tsx}',
-      `${uiFeedbackPath}/**/*.{ts,tsx}`,
-    ],
+    dedupe: ['react', 'react-dom'],
   },
 })
