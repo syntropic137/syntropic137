@@ -292,11 +292,12 @@ export function ContributionHeatmap() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setLoading(true)
+    let cancelled = false
     getContributionHeatmap({})
-      .then((result) => { setData(result); setError(null) })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+      .then((result) => { if (!cancelled) { setData(result); setError(null) } })
+      .catch((e: Error) => { if (!cancelled) setError(e.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [])
 
   return (
