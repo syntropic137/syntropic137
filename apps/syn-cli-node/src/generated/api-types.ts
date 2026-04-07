@@ -875,10 +875,6 @@ export interface paths {
         /**
          * Update Trigger Endpoint
          * @description Update trigger (pause/resume).
-         *
-         *     Returns the full trigger detail with the authoritative status from the
-         *     command result, not the projection. This avoids eventual consistency
-         *     staleness — the caller sees the correct status immediately.
          */
         patch: operations["update_trigger_endpoint_triggers__trigger_id__patch"];
         trace?: never;
@@ -1899,29 +1895,6 @@ export interface components {
             status: string;
         };
         /**
-         * EnablePresetRequest
-         * @description Request body for enabling a trigger preset.
-         */
-        EnablePresetRequest: {
-            /** Repository */
-            repository: string;
-            /**
-             * Installation Id
-             * @default
-             */
-            installation_id: string;
-            /**
-             * Created By
-             * @default api
-             */
-            created_by: string;
-            /**
-             * Workflow Id
-             * @default
-             */
-            workflow_id: string;
-        };
-        /**
          * EventListResponse
          * @description List of events response.
          */
@@ -1942,7 +1915,7 @@ export interface components {
          */
         EventResponse: {
             /** Time */
-            time: unknown;
+            time?: string | null;
             /** Event Type */
             event_type: string;
             /** Session Id */
@@ -2911,48 +2884,6 @@ export interface components {
             created_by: string;
         };
         /**
-         * RegisterTriggerRequest
-         * @description Request body for registering a new trigger rule.
-         */
-        RegisterTriggerRequest: {
-            /** Name */
-            name: string;
-            /** Event */
-            event: string;
-            /**
-             * Repository
-             * @default
-             */
-            repository: string;
-            /**
-             * Workflow Id
-             * @default
-             */
-            workflow_id: string;
-            /** Conditions */
-            conditions?: {
-                [key: string]: unknown;
-            }[] | null;
-            /**
-             * Installation Id
-             * @default
-             */
-            installation_id: string;
-            /** Input Mapping */
-            input_mapping?: {
-                [key: string]: string;
-            } | null;
-            /** Config */
-            config?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Created By
-             * @default api
-             */
-            created_by: string;
-        };
-        /**
          * RepoActionResponse
          * @description Response for repo mutation actions (update, deregister, assign, unassign).
          */
@@ -3870,7 +3801,7 @@ export interface components {
          */
         TimelineEntryResponse: {
             /** Time */
-            time: unknown;
+            time?: string | null;
             /** Event Type */
             event_type: string;
             /** Tool Name */
@@ -4203,29 +4134,6 @@ export interface components {
             name?: string | null;
             /** Description */
             description?: string | null;
-        };
-        /**
-         * UpdateTriggerRequest
-         * @description Request body for updating (pause/resume) a trigger.
-         */
-        UpdateTriggerRequest: {
-            /**
-             * Action
-             * @enum {string}
-             */
-            action: "pause" | "resume";
-            /** Reason */
-            reason?: string | null;
-            /**
-             * Paused By
-             * @default api
-             */
-            paused_by: string;
-            /**
-             * Resumed By
-             * @default api
-             */
-            resumed_by: string;
         };
         /** UploadArtifactResponse */
         UploadArtifactResponse: {
@@ -5948,7 +5856,9 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RegisterTriggerRequest"];
+                "application/json": {
+                    [key: string]: unknown;
+                };
             };
         };
         responses: {
@@ -6076,7 +5986,9 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateTriggerRequest"];
+                "application/json": {
+                    [key: string]: unknown;
+                };
             };
         };
         responses: {
@@ -6086,7 +5998,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TriggerDetail"];
+                    "application/json": components["schemas"]["TriggerActionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6144,7 +6056,9 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["EnablePresetRequest"];
+                "application/json": {
+                    [key: string]: unknown;
+                };
             };
         };
         responses: {

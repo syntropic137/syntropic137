@@ -2524,7 +2524,9 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RegisterTriggerRequest"
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
               }
             }
           }
@@ -2644,7 +2646,7 @@
           "triggers"
         ],
         "summary": "Update Trigger Endpoint",
-        "description": "Update trigger (pause/resume).\n\nReturns the full trigger detail with the authoritative status from the\ncommand result, not the projection. This avoids eventual consistency\nstaleness \u2014 the caller sees the correct status immediately.",
+        "description": "Update trigger (pause/resume).",
         "operationId": "update_trigger_endpoint_triggers__trigger_id__patch",
         "parameters": [
           {
@@ -2662,7 +2664,9 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateTriggerRequest"
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
               }
             }
           }
@@ -2673,7 +2677,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TriggerDetail"
+                  "$ref": "#/components/schemas/TriggerActionResponse"
                 }
               }
             }
@@ -2809,7 +2813,9 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EnablePresetRequest"
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
               }
             }
           }
@@ -5523,36 +5529,6 @@
         ],
         "title": "DeleteWorkflowResponse"
       },
-      "EnablePresetRequest": {
-        "properties": {
-          "repository": {
-            "type": "string",
-            "title": "Repository"
-          },
-          "installation_id": {
-            "type": "string",
-            "title": "Installation Id",
-            "default": ""
-          },
-          "created_by": {
-            "type": "string",
-            "title": "Created By",
-            "default": "api"
-          },
-          "workflow_id": {
-            "type": "string",
-            "title": "Workflow Id",
-            "default": ""
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "repository"
-        ],
-        "title": "EnablePresetRequest",
-        "description": "Request body for enabling a trigger preset."
-      },
       "EventListResponse": {
         "properties": {
           "events": {
@@ -5583,6 +5559,18 @@
       "EventResponse": {
         "properties": {
           "time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Time"
           },
           "event_type": {
@@ -5631,7 +5619,6 @@
         },
         "type": "object",
         "required": [
-          "time",
           "event_type"
         ],
         "title": "EventResponse",
@@ -7456,87 +7443,6 @@
         "title": "RegisterRepoRequest",
         "description": "Request body for registering a new repo."
       },
-      "RegisterTriggerRequest": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "event": {
-            "type": "string",
-            "title": "Event"
-          },
-          "repository": {
-            "type": "string",
-            "title": "Repository",
-            "default": ""
-          },
-          "workflow_id": {
-            "type": "string",
-            "title": "Workflow Id",
-            "default": ""
-          },
-          "conditions": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conditions"
-          },
-          "installation_id": {
-            "type": "string",
-            "title": "Installation Id",
-            "default": ""
-          },
-          "input_mapping": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Input Mapping"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config"
-          },
-          "created_by": {
-            "type": "string",
-            "title": "Created By",
-            "default": "api"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "name",
-          "event"
-        ],
-        "title": "RegisterTriggerRequest",
-        "description": "Request body for registering a new trigger rule."
-      },
       "RepoActionResponse": {
         "properties": {
           "repo_id": {
@@ -9014,6 +8920,18 @@
       "TimelineEntryResponse": {
         "properties": {
           "time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Time"
           },
           "event_type": {
@@ -9056,7 +8974,6 @@
         },
         "type": "object",
         "required": [
-          "time",
           "event_type"
         ],
         "title": "TimelineEntryResponse",
@@ -9810,46 +9727,6 @@
         "title": "UpdateSystemRequest",
         "description": "Request body for updating a system."
       },
-      "UpdateTriggerRequest": {
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "pause",
-              "resume"
-            ],
-            "title": "Action"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "paused_by": {
-            "type": "string",
-            "title": "Paused By",
-            "default": "api"
-          },
-          "resumed_by": {
-            "type": "string",
-            "title": "Resumed By",
-            "default": "api"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "action"
-        ],
-        "title": "UpdateTriggerRequest",
-        "description": "Request body for updating (pause/resume) a trigger."
-      },
       "UploadArtifactResponse": {
         "properties": {
           "artifact_id": {
@@ -10245,5 +10122,83 @@
         "description": "Cost summary for a session."
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "artifacts",
+      "description": "Create, upload, and retrieve artifacts produced by agent sessions"
+    },
+    {
+      "name": "control",
+      "description": "Pause, resume, cancel, and inject context into running executions"
+    },
+    {
+      "name": "conversations",
+      "description": "Retrieve conversation logs and metadata"
+    },
+    {
+      "name": "costs",
+      "description": "Track token costs per session and execution"
+    },
+    {
+      "name": "events",
+      "description": "Query session events, timelines, and tool usage"
+    },
+    {
+      "name": "execution",
+      "description": "Execute workflows and monitor active executions"
+    },
+    {
+      "name": "executions",
+      "description": "Query execution records and details"
+    },
+    {
+      "name": "github",
+      "description": ""
+    },
+    {
+      "name": "insights",
+      "description": ""
+    },
+    {
+      "name": "metrics",
+      "description": "System-wide metrics and health data"
+    },
+    {
+      "name": "observability",
+      "description": "Token metrics and tool timelines for sessions"
+    },
+    {
+      "name": "organizations",
+      "description": ""
+    },
+    {
+      "name": "repos",
+      "description": ""
+    },
+    {
+      "name": "sessions",
+      "description": "List and inspect agent sessions"
+    },
+    {
+      "name": "sse",
+      "description": ""
+    },
+    {
+      "name": "systems",
+      "description": ""
+    },
+    {
+      "name": "triggers",
+      "description": "Manage GitHub and webhook triggers for workflow automation"
+    },
+    {
+      "name": "webhooks",
+      "description": "Incoming webhook endpoints (GitHub events)"
+    },
+    {
+      "name": "workflows",
+      "description": "Manage workflow definitions and view run history"
+    }
+  ]
 }
