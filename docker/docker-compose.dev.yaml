@@ -61,7 +61,7 @@ services:
       args:
         INCLUDE_DOCKER_CLI: "1"
     ports:
-      - "8137:8000"
+      - "9137:8000"
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000}"]

@@ -4,10 +4,11 @@ Step-by-step validation of a new Syntropic137 release on a **selfhost stack**.
 Run this after every release to catch regressions before users hit them.
 
 > **This runbook validates the published release artifacts (GHCR images, npm CLI
-> package) running on the selfhost compose overlay — NOT the local dev stack.**
-> The dev stack (`syn-dev-*` images, `just dev`) uses different compose files,
-> different port mappings, and no `/api/v1` prefix routing. Results from a dev
-> stack do not validate release quality.
+> package) running on the selfhost compose project (`syntropic137_selfhost`).**
+> The selfhost stack is completely independent of the local dev stack — different
+> compose project, different container names (`syn137-*` vs `syn-dev-*`), different
+> port mappings, and different routing. They do not collide and can run side by side.
+> Results from the dev stack do not validate release quality.
 
 Designed to be executed by a developer or by Claude Code following the steps sequentially.
 
@@ -81,13 +82,9 @@ npx @syntropic137/setup init
 - [ ] Setup completes without errors
 - [ ] All services start and report healthy
 
-**If `syn-dev-*` containers are running instead**, you are on the dev stack.
-Stop it first, then start the selfhost stack:
-
-```bash
-just dev-down
-npx @syntropic137/setup init
-```
+> The dev stack (`syn-dev-*` containers) may also be running — that's fine.
+> The selfhost stack (`syn137-*` containers, compose project `syntropic137_selfhost`)
+> is fully isolated and does not collide with the dev stack.
 
 ---
 
@@ -348,8 +345,9 @@ syn marketplace list
 syn marketplace refresh
 ```
 
-- [ ] Registered marketplaces listed
+- [ ] Registered marketplaces listed (should show `syntropic137-marketplace`)
 - [ ] Refresh completes without errors
+- [ ] If no marketplace registered, add one: `syn marketplace add syntropic137-marketplace syntropic137/syntropic137-marketplace`
 
 ### Triggers
 
@@ -433,6 +431,7 @@ syn costs execution <execution-id>
 - [ ] Aggregated cost summary renders
 - [ ] Per-session cost breakdown loads
 - [ ] Per-execution cost breakdown loads
+- [ ] `cost_by_model` is populated (not `{}`) on session and execution cost responses
 
 ### Metrics
 
@@ -516,19 +515,65 @@ syn workflow validate <path-to-workflow.yaml>
 - [ ] Validation passes for a valid workflow file
 - [ ] Reports errors for malformed files
 
-### Install a workflow
+### Marketplace → Install → Running Stack (critical onboarding path)
+
+> **This is the primary onboarding flow for new users.** A user's first experience
+> is: search the marketplace, pick a workflow, install it, run it. If any step in
+> this chain has friction, the onboarding story fails. Test this from a clean state
+> (no workflows on the stack) to validate the real first-run experience.
+
+**Clean slate** — delete existing workflows first (if any):
+
+```bash
+syn workflow list
+syn workflow delete <id> --force  # for each existing workflow
+```
+
+- [ ] Stack has no workflows before starting
+
+**Search the marketplace:**
 
 ```bash
 syn workflow search
-syn workflow info <plugin-name>
-syn workflow install <plugin-name>
 ```
 
-- [ ] Marketplace search returns results
-- [ ] Plugin info shows details (phases, model, description)
-- [ ] Workflow installed successfully
-- [ ] `syn workflow list` shows the new workflow
-- [ ] `syn workflow installed` shows the package
+- [ ] Returns plugins from the registered marketplace
+- [ ] Output includes name, version, category, description, registry source
+- [ ] Helpful install prompt shown (e.g., "Install with: syn workflow install <name>")
+
+**Inspect a plugin before installing:**
+
+```bash
+syn workflow info code-review
+syn workflow info sdlc-trunk
+```
+
+- [ ] Shows version, description, category, tags
+- [ ] Shows source (marketplace repo + path)
+- [ ] Shows install command
+
+**Install plugins from marketplace to the running stack:**
+
+```bash
+syn workflow install code-review
+syn workflow install sdlc-trunk
+```
+
+- [ ] Each install clones the marketplace repo, parses plugin, creates workflow(s)
+- [ ] `code-review` installs 1 workflow (2 phases)
+- [ ] `sdlc-trunk` installs 3 workflows (9 phases total)
+- [ ] Each workflow gets a unique ID assigned by the API
+
+**Verify workflows are on the running stack:**
+
+```bash
+syn workflow list
+syn workflow show <workflow-id>
+```
+
+- [ ] All installed workflows appear in list
+- [ ] Workflow detail shows correct phases, type, classification
+- [ ] `syn workflow installed` shows the packages with version and source
 
 ### Run a workflow (costs tokens)
 
@@ -587,6 +632,7 @@ syn events timeline <session-id>
 
 - [ ] New session appears for the execution
 - [ ] Token usage and cost recorded
+- [ ] `cost_by_model` populated with model name and cost (e.g., `{"sonnet": "0.35"}`)
 - [ ] Tool executions captured in timeline
 
 ### Verify artifacts
@@ -782,7 +828,6 @@ syn triggers show <trigger-id>
 
 - [ ] `max_fires` — trigger stops firing after limit reached
 - [ ] `cooldown` — trigger respects cooldown period between fires
-- [ ] `budget` — trigger respects cost budget cap
 
 ### Trigger cleanup
 
@@ -814,7 +859,11 @@ Open `http://localhost:8137` via Playwright.
 
 - [ ] Session list renders with data
 - [ ] Session detail view shows tool timeline and token breakdown
+- [ ] Session detail shows `cost_by_model` breakdown (model name + cost, not empty)
 - [ ] Execution detail view loads with phase progression
+- [ ] Execution phases show `cost_by_model` breakdown per session
+- [ ] Trigger detail shows human-readable repo name (`owner/repo`), not internal ID
+- [ ] Trigger detail shows workflow name (e.g., "Code Review"), not UUID
 - [ ] Trigger history visible and matches CLI output
 - [ ] Cost/token metrics display correctly
 
@@ -833,32 +882,119 @@ Open `http://localhost:8137` via Playwright.
 
 ## 10. Validation Report
 
-Copy and fill in after completing the runbook.
+### Where to save
+
+Save the report to `docs/testing/output/` using the naming convention:
 
 ```
-## Post-Release Validation Report
+docs/testing/output/v<VERSION>-post-release-validation.md
+```
+
+Example: `docs/testing/output/v0.22.0-post-release-validation.md`
+
+This directory is **gitignored** (`docs/testing/output/.gitignore` excludes `*.md`), so
+reports never pollute the commit history. They persist locally as reference artifacts
+for closing gaps, planning hotfixes, and tracking launch readiness across versions.
+
+### What to capture
+
+The report is the primary context artifact for follow-up work. It should be
+**self-contained** — a future Claude Code agent or developer should be able to read
+this single file and understand exactly what works, what's broken, what's friction,
+and what to do next.
+
+The goal of Syntropic137 is frictionless onboarding for both users and agents. Every
+finding should be evaluated through that lens: would a new user or a Claude Code agent
+hit this? How bad is the experience?
+
+### Report template
+
+Copy and fill in after completing the runbook.
+
+```markdown
+# v<VERSION> Post-Release Validation
 
 **Release version:** v_.__._
 **Date:** YYYY-MM-DD
 **Validated by:** <name or agent>
-**Stack environment:** selfhost / dev
+**Stack environment:** selfhost (`syntropic137_selfhost`)
 **Webhook mode:** polling-only / webhook active
+**Runbook:** [docs/testing/post-release-validation.md](../post-release-validation.md)
 
-### Summary
+## What Passed
 
-| Area                     | Status              |
-|--------------------------|---------------------|
-| Stack update             | pass / fail         |
-| CLI update               | pass / fail         |
-| Release artifacts        | pass / fail         |
-| Core CLI (read-only)     | pass / fail         |
-| Repo/system management   | pass / fail         |
-| Workflow lifecycle        | pass / fail / skip  |
-| Trigger round-trip (poll)| pass / fail / skip  |
-| Trigger round-trip (wh)  | pass / fail / skip  |
-| Dashboard UI             | pass / fail         |
+Summarize areas that work cleanly. Include counts (e.g., "24/24 CLI read-only
+commands pass"). This builds confidence in what's solid.
 
-### Feature Matrix
+## Findings (Ranked by Severity)
+
+Every finding gets a severity, a clear description, root cause, fix suggestion,
+and impact on the user/agent onboarding experience.
+
+### P0 — Critical (blocks core functionality)
+
+Release-blocking issues. The product cannot deliver its core value with these present.
+Requires a hotfix release.
+
+| # | Title | Root Cause | Fix | Impact |
+|---|-------|------------|-----|--------|
+|   |       |            |     |        |
+
+### P1 — High (significant friction or breakage)
+
+Not release-blocking but causes real pain. Should be fixed in the next release.
+
+| # | Title | Root Cause | Fix | Impact |
+|---|-------|------------|-----|--------|
+|   |       |            |     |        |
+
+### P2 — Medium (UX issues, incorrect behavior)
+
+Works but the experience is wrong or confusing. Fix when convenient.
+
+| # | Title | Root Cause | Fix | Impact |
+|---|-------|------------|-----|--------|
+|   |       |            |     |        |
+
+### P3 — Low (cosmetic, minor inconsistencies)
+
+Polish items. Address in a cleanup pass.
+
+| # | Title | Root Cause | Fix | Impact |
+|---|-------|------------|-----|--------|
+|   |       |            |     |        |
+
+### Info — Enhancements & Observations
+
+Not bugs — ideas for improvement discovered during validation. Things that would
+make the onboarding smoother, the DX better, or the product more self-explanatory.
+
+| # | Title | Description | Value |
+|---|-------|-------------|-------|
+|   |       |             |       |
+
+## Friction Log
+
+Items that work but create friction for new users or agents getting started.
+Evaluate each through the lens: "Would someone running `npx @syntropic137/setup`
+for the first time hit this? How confused would they be?"
+
+| Step | Friction | Severity | Suggestion |
+|------|----------|----------|------------|
+|      |          |          |            |
+
+## Untested Areas
+
+Items that could not be validated (e.g., blocked by a bug) and must be re-run
+after fixes are applied. Include which runbook section(s) to re-run.
+
+| Area | Blocked By | Runbook Section |
+|------|------------|-----------------|
+|      |            |                 |
+
+## Feature Matrix
+
+Full pass/fail/skip for every command and feature tested.
 
 | Command / Feature                  | Status | Notes |
 |------------------------------------|--------|-------|
@@ -931,25 +1067,20 @@ Copy and fill in after completing the runbook.
 | Real-time updates (WebSocket)      |        |       |
 | Insights pages                     |        |       |
 
-### Issues Found
-
-| Severity | Description | Repro steps | Issue # |
-|----------|-------------|-------------|---------|
-|          |             |             |         |
-
-### Gaps / Friction
-
-Items that work but could be smoother for launch readiness:
+## Performance / Reliability Notes
 
 -
 
-### Change Failures (Bugs)
+## Recommended Actions
 
-Regressions from the release that need immediate attention:
+Ordered by priority. Link to GitHub issues when filed.
 
--
+1.
+2.
+3.
 
-### Performance / Reliability Notes
+## Launch Readiness Assessment
 
--
+One paragraph: based on this validation, what is the state of the release relative
+to open source launch? What must be fixed first, what can ship as-is?
 ```

@@ -33,7 +33,6 @@ SELF_HEALING_PRESET = {
     ),
     "config": (
         ("max_attempts", 3),
-        ("budget_per_trigger_usd", 5.00),
         ("daily_limit", 20),
         ("cooldown_seconds", 300),
     ),
@@ -58,7 +57,6 @@ REVIEW_FIX_PRESET = {
     ),
     "config": (
         ("max_attempts", 2),
-        ("budget_per_trigger_usd", 5.00),
         ("daily_limit", 10),
         ("debounce_seconds", 60),
         ("cooldown_seconds", 600),
@@ -87,7 +85,6 @@ COMMENT_COMMAND_PRESET = {
     ),
     "config": (
         ("max_attempts", 5),
-        ("budget_per_trigger_usd", 10.00),
         ("daily_limit", 30),
         ("cooldown_seconds", 60),
     ),

@@ -184,6 +184,7 @@ class SessionCostQueryService:
         sc.is_finalized = True
         if row["agent_model"]:  # type: ignore[index]
             sc.agent_model = row["agent_model"]  # type: ignore[index]
+            sc.cost_by_model = {row["agent_model"]: cost}  # type: ignore[index]
         return sc
 
     def _build_from_token_usage(
@@ -217,4 +218,5 @@ class SessionCostQueryService:
         sc.started_at = started_map.get(sid) or row["started_at"]  # type: ignore[index,arg-type]
         if row["agent_model"]:  # type: ignore[index]
             sc.agent_model = row["agent_model"]  # type: ignore[index]
+            sc.cost_by_model = {row["agent_model"]: cost}  # type: ignore[index]
         return sc

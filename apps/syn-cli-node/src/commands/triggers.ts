@@ -38,9 +38,8 @@ const registerCommand: CommandDef = {
     workflow: { type: "string", short: "w", description: "Workflow ID to execute" },
     event: { type: "string", short: "e", description: "GitHub event type (e.g. check_run.completed)" },
     condition: { type: "string", short: "c", multiple: true, description: "Condition as field=value (repeatable, uses 'eq' operator)" },
-    "max-fires": { type: "string", description: "Maximum fires per period", default: "5" },
+    "max-fires": { type: "string", description: "Maximum fire attempts per PR/trigger combination", default: "5" },
     cooldown: { type: "string", description: "Cooldown in seconds", default: "300" },
-    budget: { type: "string", description: "Budget limit in USD" },
   },
   handler: async (parsed: ParsedArgs) => {
     const repo = parsed.values["repo"] as string | undefined;
@@ -53,12 +52,10 @@ const registerCommand: CommandDef = {
     const conditionStrs = (parsed.values["condition"] as string[] | undefined) ?? [];
     const conditions = conditionStrs.length > 0 ? parseConditions(conditionStrs) : [];
 
-    const budget = parsed.values["budget"] as string | undefined;
     const config: Record<string, unknown> = {
-      max_fires_per_period: parseInt((parsed.values["max-fires"] as string | undefined) ?? "5", 10),
+      max_attempts: parseInt((parsed.values["max-fires"] as string | undefined) ?? "5", 10),
       cooldown_seconds: parseInt((parsed.values["cooldown"] as string | undefined) ?? "300", 10),
     };
-    if (budget) config["budget_usd"] = parseFloat(budget);
 
     const d = unwrap(await api.POST("/triggers", {
       body: {
