@@ -27,7 +27,6 @@ syntropic137/
 │   ├── syn-cli-node/          # CLI tool ("syn") — Node.js, HTTP client for syn-api
 │   ├── syn-dashboard-ui/      # Dashboard frontend (Vite + React) — operational UI
 │   ├── syn-docs/              # Public-facing documentation site (Next.js + Fumadocs)
-│   └── syn-pulse-ui/          # Pulse/heatmap UI
 ├── packages/
 │   ├── syn-domain/            # Domain events, aggregates, ports
 │   ├── syn-adapters/          # Orchestration + observability adapters

@@ -94,11 +94,6 @@ jobs:
             # UI containers serve static JS/CSS via nginx — no ARM64 users in practice.
             # QEMU cross-compilation adds ~40 min of build time for zero benefit.
             platforms: linux/amd64
-          - image: syn-pulse-ui
-            dockerfile: apps/syn-pulse-ui/Dockerfile
-            context: "."
-            # Same rationale as syn-dashboard-ui above.
-            platforms: linux/amd64
           # event-store is built and published by the event-sourcing-platform repo
           # (ghcr.io/syntropic137/event-store). Digest is resolved in release-assets.
           - image: sidecar-proxy
@@ -444,7 +439,7 @@ jobs:
           echo "### Published Images" >> "$GITHUB_STEP_SUMMARY"
           echo "| Image | Digest |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
-          for IMAGE_NAME in syn-api syn-gateway syn-collector syn-dashboard-ui syn-pulse-ui event-store sidecar-proxy token-injector; do
+          for IMAGE_NAME in syn-api syn-gateway syn-collector syn-dashboard-ui event-store sidecar-proxy token-injector; do
             DIGEST_FILE="/tmp/digests/${IMAGE_NAME}"
             if [[ -f "$DIGEST_FILE" ]]; then
               DIGEST=$(cat "$DIGEST_FILE")

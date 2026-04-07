@@ -264,7 +264,6 @@ jobs:
               - '**/Dockerfile*'
               - 'apps/syn-api/**'
               - 'apps/syn-dashboard-ui/**'
-              - 'apps/syn-pulse-ui/**'
               - 'packages/syn-collector/**'
               - 'packages/syn-domain/**'
               - 'packages/syn-adapters/**'
@@ -300,9 +299,6 @@ jobs:
             context: "."
           - image: syn-dashboard-ui
             dockerfile: apps/syn-dashboard-ui/Dockerfile
-            context: "."
-          - image: syn-pulse-ui
-            dockerfile: apps/syn-pulse-ui/Dockerfile
             context: "."
           - image: sidecar-proxy
             dockerfile: docker/sidecar-proxy/Dockerfile
