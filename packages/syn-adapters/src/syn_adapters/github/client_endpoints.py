@@ -162,7 +162,7 @@ async def list_accessible_repos(
 
         page += 1
 
-    if page > max_pages and len(all_repos) < total_count:
+    if page > max_pages and total_count is not None and len(all_repos) < total_count:
         import logging
 
         logging.getLogger(__name__).warning(

@@ -84,7 +84,7 @@ describe("triggers commands", () => {
   });
 
   it("pause sends request", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({
+    const detail = {
       trigger_id: "trig-1",
       name: "test",
       event: "push",
@@ -92,7 +92,13 @@ describe("triggers commands", () => {
       workflow_id: "w1",
       status: "paused",
       fire_count: 0,
-    }));
+      installation_id: "inst-1",
+      created_by: "cli",
+    };
+    // PATCH (action) then GET (re-fetch detail)
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ trigger_id: "trig-1", status: "paused" }))
+      .mockResolvedValueOnce(jsonResponse(detail));
     await triggersGroup.getCommand("pause")!.handler({ positionals: ["trig-1"], values: {} });
     expect(stdout()).toContain("paused");
   });
