@@ -248,11 +248,6 @@ const pauseCommand: CommandDef = {
       "Pause trigger",
     );
     printSuccess(`Trigger ${id} paused.`);
-    const detail = unwrap(
-      await api.GET("/triggers/{trigger_id}", { params: { path: { trigger_id: id } } }),
-      "Get trigger",
-    );
-    renderTriggerDetail(detail, id);
   },
 };
 
@@ -270,11 +265,6 @@ const resumeCommand: CommandDef = {
       "Resume trigger",
     );
     printSuccess(`Trigger ${id} resumed.`);
-    const detail = unwrap(
-      await api.GET("/triggers/{trigger_id}", { params: { path: { trigger_id: id } } }),
-      "Get trigger",
-    );
-    renderTriggerDetail(detail, id);
   },
 };
 
