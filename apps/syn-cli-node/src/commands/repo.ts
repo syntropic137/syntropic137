@@ -32,7 +32,7 @@ const registerCommand: CommandDef = {
 
     let org = parsed.values["org"] as string | undefined;
     if (!org) {
-      // Auto-select if exactly one organization exists
+      // Auto-select if exactly one organization exists, otherwise register unaffiliated
       const orgsData = unwrap(await api.GET("/organizations"), "List organizations");
       const orgs = orgsData.organizations ?? [];
       if (orgs.length === 1) {
@@ -42,18 +42,16 @@ const registerCommand: CommandDef = {
           throw new CLIError("Invalid organization data", 1);
         }
         printDim(`Using organization: ${org}`);
-      } else if (orgs.length === 0) {
-        printError("No organizations found. Create one first with: syn org create");
-        throw new CLIError("No organizations", 1);
-      } else {
+      } else if (orgs.length > 1) {
         printError("Multiple organizations found. Specify one with --org");
         throw new CLIError("Missing option", 1);
       }
+      // orgs.length === 0: proceed without org (API defaults to _unaffiliated)
     }
 
     const body = {
       full_name: url,
-      organization_id: org,
+      ...(org ? { organization_id: org } : {}),
       provider: "github",
       owner: "",
       default_branch: "main",

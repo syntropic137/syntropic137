@@ -101,17 +101,22 @@ describe("repo commands", () => {
       expect(out).toContain("Repository registered");
     });
 
-    it("errors when no organizations exist", async () => {
+    it("registers without org when no organizations exist", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({ organizations: [], total: 0 }),
       );
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ repo_id: "repo-99", full_name: "owner/repo" }),
+      );
 
-      await expect(
-        repoGroup.getCommand("register")!.handler({
-          positionals: [],
-          values: { url: "owner/repo" },
-        }),
-      ).rejects.toThrow(CLIError);
+      await repoGroup.getCommand("register")!.handler({
+        positionals: [],
+        values: { url: "owner/repo" },
+      });
+      const out = stdout();
+      expect(out).toContain("Repository registered: repo-99");
+      // Should NOT contain org selection message
+      expect(out).not.toContain("Using organization:");
     });
 
     it("errors when multiple organizations exist without --org", async () => {

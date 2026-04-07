@@ -51,9 +51,9 @@ router = APIRouter(prefix="/repos", tags=["repos"])
 
 
 async def register_repo(
-    organization_id: str,
-    provider: str,
-    full_name: str,
+    organization_id: str = "_unaffiliated",
+    provider: str = "github",
+    full_name: str = "",
     owner: str = "",
     default_branch: str = "main",
     provider_repo_id: str = "",
