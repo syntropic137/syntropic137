@@ -33,6 +33,68 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/triggers", tags=["triggers"])
 
 
+async def _resolve_workflow_names(workflow_ids: set[str]) -> dict[str, str]:
+    """Best-effort batch lookup of workflow names from projection store.
+
+    Reuses the pattern from ``routes/webhooks/acknowledgments.py``.
+    Returns a mapping of ``{workflow_id: name}``. Missing IDs are omitted.
+    """
+    from syn_adapters.projection_stores import get_projection_store
+
+    proj_store = get_projection_store()
+    names: dict[str, str] = {}
+    for wf_id in workflow_ids:
+        try:
+            data = await proj_store.get("workflow_details", wf_id)
+            if data:
+                name = data.get("name", "")
+                if name:
+                    names[wf_id] = name
+        except Exception:
+            logger.debug("Could not resolve workflow name for %s", wf_id)
+    return names
+
+
+async def _resolve_repo_names(repo_values: set[str]) -> dict[str, str]:
+    """Best-effort resolve repo IDs to ``owner/repo`` display names.
+
+    If a value already looks like ``owner/repo`` (contains ``/``), it is
+    kept as-is.  Internal repo IDs (e.g. ``repo-91408957``) are resolved
+    via the repo projection.
+
+    Returns ``{original_value: display_name}`` for every input.
+    """
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        get_repo_projection,
+    )
+
+    result: dict[str, str] = {}
+    ids_to_resolve: set[str] = set()
+    for val in repo_values:
+        if "/" in val:
+            result[val] = val  # already owner/repo
+        else:
+            ids_to_resolve.add(val)
+
+    if not ids_to_resolve:
+        return result
+
+    try:
+        projection = get_repo_projection()
+        for repo_id in ids_to_resolve:
+            repo = await projection.get(repo_id)
+            if repo and repo.full_name:
+                result[repo_id] = repo.full_name
+            else:
+                result[repo_id] = repo_id  # fallback to raw ID
+    except Exception:
+        logger.debug("Could not resolve repo names", exc_info=True)
+        for repo_id in ids_to_resolve:
+            result.setdefault(repo_id, repo_id)
+
+    return result
+
+
 async def _resolve_trigger_id(trigger_id: str) -> str:
     """Resolve a (possibly partial) trigger ID against the trigger store.
 
@@ -83,14 +145,20 @@ async def list_triggers(
     except Exception as e:
         return Err(TriggerError.INVALID_INPUT, message=str(e))
 
+    wf_ids = {t.workflow_id for t in triggers if t.workflow_id}
+    repo_vals = {t.repository for t in triggers if t.repository}
+    wf_names = await _resolve_workflow_names(wf_ids) if wf_ids else {}
+    repo_names = await _resolve_repo_names(repo_vals) if repo_vals else {}
+
     return Ok(
         [
             TriggerSummary(
                 trigger_id=t.trigger_id,
                 name=t.name,
                 event=t.event,
-                repository=t.repository,
+                repository=repo_names.get(t.repository, t.repository),
                 workflow_id=t.workflow_id,
+                workflow_name=wf_names.get(t.workflow_id, ""),
                 status=t.status,
                 fire_count=t.fire_count,
                 created_at=t.created_at if hasattr(t, "created_at") else None,
@@ -131,13 +199,19 @@ async def get_trigger(
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
 
+    wf_names = await _resolve_workflow_names({indexed.workflow_id}) if indexed.workflow_id else {}
+    repo_names = await _resolve_repo_names({indexed.repository}) if indexed.repository else {}
+    workflow_name = wf_names.get(indexed.workflow_id, "")
+    display_repo = repo_names.get(indexed.repository, indexed.repository)
+
     return Ok(
         TriggerDetail(
             trigger_id=indexed.trigger_id,
             name=indexed.name,
             event=indexed.event,
-            repository=indexed.repository,
+            repository=display_repo,
             workflow_id=indexed.workflow_id,
+            workflow_name=workflow_name,
             status=indexed.status,
             fire_count=indexed.fire_count,
             created_at=indexed.created_at if hasattr(indexed, "created_at") else None,
@@ -213,6 +287,7 @@ async def list_triggers_endpoint(
                 event=t.event,
                 repository=t.repository,
                 workflow_id=t.workflow_id,
+                workflow_name=t.workflow_name,
                 status=str(t.status),
                 fire_count=t.fire_count,
             )

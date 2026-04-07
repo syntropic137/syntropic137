@@ -34,7 +34,7 @@ export function TriggerCard({ trigger, isBusy, onToggle, onDelete }: TriggerCard
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                {trigger.name}
+                {trigger.workflow_name ? `${trigger.event} → ${trigger.workflow_name}` : trigger.name}
               </span>
               <span
                 className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${

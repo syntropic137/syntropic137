@@ -6,6 +6,7 @@ export interface TriggerSummary {
   event: string
   repository: string
   workflow_id: string
+  workflow_name?: string
   status: string
   fire_count: number
 }

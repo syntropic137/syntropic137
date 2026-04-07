@@ -43,7 +43,7 @@ export function TriggerDetail() {
       <Breadcrumbs
         items={[
           { label: 'Triggers', href: '/triggers' },
-          { label: trigger.name },
+          { label: trigger.workflow_name ? `${trigger.event} → ${trigger.workflow_name}` : trigger.name },
         ]}
       />
 
@@ -56,7 +56,7 @@ export function TriggerDetail() {
         <MetricCard title="Repository" value={trigger.repository || '\u2014'} icon={GitBranch} />
         <MetricCard
           title="Workflow"
-          value={trigger.workflow_id.slice(0, 12) + '...'}
+          value={trigger.workflow_name || trigger.workflow_id.slice(0, 12) + '...'}
           icon={ExternalLink}
           href={`/workflows/${trigger.workflow_id}`}
           subtitle="View workflow \u2192"
