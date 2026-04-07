@@ -128,7 +128,7 @@ class CoordinatorSubscriptionService:
             logger.info("Database pool created for checkpoint store")
 
             # Create checkpoint store (table is created on first operation)
-            self._checkpoint_store = PostgresCheckpointStore(self._db_pool)
+            self._checkpoint_store = PostgresCheckpointStore(self._db_pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
             logger.info("Checkpoint store initialized")
 
         # Build projection list (add realtime adapter if configured)

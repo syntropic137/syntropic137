@@ -154,7 +154,7 @@ def get_workflow_repository() -> RepositoryAdapter[WorkflowTemplateAggregate]:
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        WorkflowTemplateAggregate,
+        WorkflowTemplateAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="WorkflowTemplate",
     )
     _workflow_repository = RepositoryAdapter(sdk_repo)
@@ -173,7 +173,7 @@ def get_workflow_execution_repository() -> RepositoryAdapter[WorkflowExecutionAg
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        WorkflowExecutionAggregate,
+        WorkflowExecutionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="WorkflowExecution",
     )
     _workflow_execution_repository = RepositoryAdapter(sdk_repo)
@@ -192,7 +192,7 @@ def get_session_repository() -> RepositoryAdapter[AgentSessionAggregate]:
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        AgentSessionAggregate,
+        AgentSessionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="AgentSession",
     )
     _session_repository = RepositoryAdapter(sdk_repo)
@@ -211,7 +211,7 @@ def get_artifact_repository() -> RepositoryAdapter[ArtifactAggregate]:
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        ArtifactAggregate,
+        ArtifactAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="Artifact",
     )
     _artifact_repository = RepositoryAdapter(sdk_repo)
@@ -245,7 +245,7 @@ def get_trigger_repository() -> Any:  # noqa: ANN401
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        TriggerRuleAggregate,
+        TriggerRuleAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="TriggerRule",
     )
     _trigger_repository = RepositoryAdapter(sdk_repo)
@@ -264,7 +264,7 @@ def get_organization_repository() -> RepositoryAdapter[OrganizationAggregate]:
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        OrganizationAggregate,
+        OrganizationAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="Organization",
     )
     _organization_repository = RepositoryAdapter(sdk_repo)
@@ -283,7 +283,7 @@ def get_system_repository() -> RepositoryAdapter[SystemAggregate]:
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        SystemAggregate,
+        SystemAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="System",
     )
     _system_repository = RepositoryAdapter(sdk_repo)
@@ -302,7 +302,7 @@ def get_repo_repository() -> RepositoryAdapter[RepoAggregate]:
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        RepoAggregate,
+        RepoAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="Repo",
     )
     _repo_repository = RepositoryAdapter(sdk_repo)
@@ -321,7 +321,7 @@ def get_repo_claim_repository() -> RepositoryAdapter[RepoClaimAggregate]:
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        RepoClaimAggregate,
+        RepoClaimAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
         aggregate_type="RepoClaim",
     )
     _repo_claim_repository = RepositoryAdapter(sdk_repo)

@@ -88,7 +88,7 @@ class TriggerQueryProjection(CheckpointedProjection):
             handler = getattr(self, handler_name)
             await handler(event_data, envelope)
 
-    async def handle_event(
+    async def handle_event(  # type: ignore[override]  # ESP SDK EventEnvelope invariance
         self,
         envelope: EventEnvelope[GenericDomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
