@@ -73,7 +73,7 @@ export function EventFeed() {
         <div className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-[var(--color-text-secondary)]" />
           <span className="text-sm font-medium text-[var(--color-text-primary)]">
-            Live Events
+            Live Commits
           </span>
         </div>
         <div className="flex items-center gap-1.5">
