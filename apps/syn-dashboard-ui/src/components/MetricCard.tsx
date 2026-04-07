@@ -55,11 +55,17 @@ export function MetricCard({
       href && 'cursor-pointer hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-elevated)] transition-colors'
     )}>
       <div className="flex items-start justify-between">
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <p className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
             {title}
           </p>
-          <p className="mt-2 text-2xl font-bold text-[var(--color-text-primary)] truncate" title={String(value)}>
+          <p
+            className={clsx(
+              'mt-2 font-bold text-[var(--color-text-primary)] truncate',
+              typeof value === 'number' ? 'text-2xl' : 'text-base',
+            )}
+            title={String(value)}
+          >
             {typeof value === 'number' ? value.toLocaleString() : value}
           </p>
           {subtitle && (
