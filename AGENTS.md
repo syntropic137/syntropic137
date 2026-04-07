@@ -332,7 +332,7 @@ The canonical release process lives in [docs/release-process.md](docs/release-pr
 - **`main`** — development trunk. All PRs target `main`.
 - **`release`** — deployment branch. PRs from `main` only. Merge triggers the full release pipeline.
 - **Beta releases** bypass `release`: `gh release create v0.20.0-beta.1 --prerelease --target main`
-- **Version management:** `just bump-version 0.20.0` updates all 13 files. `just check-version` validates consistency.
+- **Version management:** `just bump-version 0.20.0` updates all 11 files. `just check-version` validates consistency.
 - **Docs:** `release` → Vercel production, `main` → preview only.
 
 Submodules (agentic-primitives, event-sourcing-platform) have independent versioning — never bumped by the release script.

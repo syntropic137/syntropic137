@@ -125,7 +125,7 @@ Open a PR from `main` to `release`. The PR body becomes the GitHub Release notes
 
 The following checks run automatically on the PR:
 
-- **Version consistency** — all 13 files match, version > current release
+- **Version consistency** — all 11 files match, version > current release
 - **Release notes** — PR body has content (minimum 20 characters)
 - **Docker dry-run** — all 7 container images build successfully (single-arch, no push)
 - **Full CI** — tests, lint, typecheck, security scans (same as any PR)
@@ -187,7 +187,7 @@ just bump-version 0.19.1
 
 ## Version Files Reference
 
-The `scripts/bump_version.py` script updates exactly these 12 files:
+The `scripts/bump_version.py` script updates exactly these 11 files:
 
 **Python (pyproject.toml):**
 1. `pyproject.toml` (root)
@@ -203,7 +203,6 @@ The `scripts/bump_version.py` script updates exactly these 12 files:
 9. `apps/syn-cli-node/package.json`
 10. `apps/syn-dashboard-ui/package.json`
 11. `apps/syn-docs/package.json`
-12. `apps/syn-pulse-ui/package.json`
 
 **Not included** (independent versioning):
 - `lib/agentic-primitives/` — separate project

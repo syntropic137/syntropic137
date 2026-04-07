@@ -1751,11 +1751,11 @@ _workspace-check:
 # Build and push container images to GHCR from your local machine.
 # Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
 
-# Bump version across all 13 package files
+# Bump version across all 11 package files
 bump-version version:
     python3 scripts/bump_version.py {{version}}
 
-# Validate all 13 package files have the same version
+# Validate all 11 package files have the same version
 check-version:
     python3 scripts/bump_version.py --check
 
