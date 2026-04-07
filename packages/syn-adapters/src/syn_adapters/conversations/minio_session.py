@@ -34,7 +34,8 @@ async def retrieve_session(
     object_key = f"sessions/{session_id}/conversation.jsonl"
 
     try:
-        assert storage._client is not None, "Storage not initialized"
+        if storage._client is None:
+            raise RuntimeError("Session storage not initialized — call initialize() first")
         response = storage._client.get_object(storage.BUCKET_NAME, object_key)
         content = response.read().decode("utf-8")
         response.close()
