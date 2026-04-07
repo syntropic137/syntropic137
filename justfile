@@ -408,13 +408,6 @@ dev: _workspace-check
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
-    echo "8️⃣ Starting Pulse metrics frontend..."
-    lsof -ti:5174 | xargs kill 2>/dev/null || true
-    sleep 1
-    (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
-    (cd apps/syn-pulse-ui && pnpm run dev > /tmp/syn-pulse.log 2>&1 &)
-    sleep 3
-    echo ""
     just _webhook-start
     echo ""
     echo "✅ Full development stack ready!"
@@ -491,19 +484,11 @@ dev-fresh: _workspace-check
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
-    echo "1️⃣1️⃣ Starting Pulse metrics frontend..."
-    lsof -ti:5174 | xargs kill 2>/dev/null || true
-    sleep 1
-    (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
-    (cd apps/syn-pulse-ui && pnpm run dev > /tmp/syn-pulse.log 2>&1 &)
-    sleep 3
-    echo ""
     just _webhook-start
     echo ""
     echo "✅ Fresh development environment ready!"
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
-    echo "   📈 Pulse:        http://localhost:5174"
     echo "   🚀 Backend API:  http://localhost:9137"
     echo "   📊 API Docs:     http://localhost:9137/docs"
     echo "   💾 Database:     localhost:5432"
@@ -594,26 +579,6 @@ dashboard-qa: dashboard-lint dashboard-build
     @echo "✅ Dashboard UI checks passed!"
 
 # --- Pulse UI ---
-
-# Start the Pulse metrics frontend (Vite dev server)
-pulse-frontend:
-    cd apps/syn-pulse-ui && pnpm run dev
-
-# Install Pulse frontend dependencies
-pulse-install:
-    cd apps/syn-pulse-ui && pnpm install
-
-# Build Pulse frontend for production
-pulse-build:
-    cd apps/syn-pulse-ui && pnpm run build
-
-# Lint Pulse frontend
-pulse-lint:
-    cd apps/syn-pulse-ui && pnpm run lint
-
-# Full Pulse QA (lint + build)
-pulse-qa: pulse-lint pulse-build
-    @echo "✅ Pulse UI checks passed!"
 
 # --- Feedback ---
 
@@ -1563,7 +1528,7 @@ deps-tree:
     echo "  $(grep -c '^\[\[package\]\]' uv.lock) packages in uv.lock"
     echo ""
     echo "=== Node.js: package counts ==="
-    for dir in apps/syn-dashboard-ui apps/syn-pulse-ui apps/syn-docs; do
+    for dir in apps/syn-dashboard-ui apps/syn-docs; do
         if [ -f "$dir/pnpm-lock.yaml" ]; then
             count=$(grep -c 'resolution:' "$dir/pnpm-lock.yaml" 2>/dev/null || echo "?")
             echo "  $dir: ~$count packages (pnpm)"
@@ -1786,11 +1751,11 @@ _workspace-check:
 # Build and push container images to GHCR from your local machine.
 # Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
 
-# Bump version across all 13 package files
+# Bump version across all 11 package files
 bump-version version:
     python3 scripts/bump_version.py {{version}}
 
-# Validate all 13 package files have the same version
+# Validate all 11 package files have the same version
 check-version:
     python3 scripts/bump_version.py --check
 
@@ -1813,12 +1778,11 @@ release-local version:
 
     # Images to build (order: fast first)
     FAILED=()
-    for image in token-injector sidecar-proxy syn-collector syn-pulse-ui syn-dashboard-ui syn-api syn-gateway; do
+    for image in token-injector sidecar-proxy syn-collector syn-dashboard-ui syn-api syn-gateway; do
         case "$image" in
             token-injector)   dockerfile="docker/token-injector/Dockerfile"; context="docker/token-injector" ;;
             sidecar-proxy)    dockerfile="docker/sidecar-proxy/Dockerfile"; context="docker/sidecar-proxy" ;;
             syn-collector)    dockerfile="packages/syn-collector/Dockerfile"; context="." ;;
-            syn-pulse-ui)     dockerfile="apps/syn-pulse-ui/Dockerfile"; context="." ;;
             syn-dashboard-ui) dockerfile="apps/syn-dashboard-ui/Dockerfile"; context="." ;;
             syn-api)          dockerfile="infra/docker/images/syn-api/Dockerfile"; context="." ;;
             syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;
