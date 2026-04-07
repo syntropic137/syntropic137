@@ -24,6 +24,12 @@ issue = "#316"
 value = 20
 issue = "#316"
 
+# --- dashboard-ui ---
+
+[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/Dashboard/ContributionHeatmap::ContributionHeatmap"]
+value = 20
+issue = "#624"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)

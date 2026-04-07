@@ -26,10 +26,7 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true,
-    "paths": {
-      "@syn137/ui-feedback-react": ["../../lib/ui-feedback/packages/ui-feedback-react/index.d.ts"]
-    }
+    "noUncheckedSideEffectImports": true
   },
   "include": [
     "src"
