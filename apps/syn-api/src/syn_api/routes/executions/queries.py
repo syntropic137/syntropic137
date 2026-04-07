@@ -323,6 +323,13 @@ async def get_detail(
         if exec_cost is not None and exec_cost.total_tokens > 0:
             total_tokens = exec_cost.total_tokens
             total_cost = exec_cost.total_cost_usd
+
+            # Enrich per-phase costs from TimescaleDB when available
+            if exec_cost.cost_by_phase:
+                for phase in phases:
+                    phase_cost = exec_cost.cost_by_phase.get(phase.phase_id)
+                    if phase_cost is not None:
+                        phase.cost_usd = phase_cost
     except Exception:
         logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
 

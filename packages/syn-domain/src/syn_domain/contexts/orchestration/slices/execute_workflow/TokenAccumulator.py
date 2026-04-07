@@ -8,31 +8,47 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from syn_shared.pricing import get_model_pricing
+
+# Default model used when no model is specified
+_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+
 
 class TokenAccumulator:
     """Accumulates token usage across streaming events and estimates cost.
 
-    Pure state machine with no external dependencies.
+    Uses ``syn_shared.pricing`` for model-aware cost estimation including
+    cache token pricing.
     """
 
-    # Claude Sonnet 4 pricing (per million tokens)
-    _INPUT_PRICE = Decimal("3.00") / Decimal("1000000")
-    _OUTPUT_PRICE = Decimal("15.00") / Decimal("1000000")
-
-    def __init__(self) -> None:
+    def __init__(self, model: str = _DEFAULT_MODEL) -> None:
+        self._model = model
         self._input_tokens: int = 0
         self._output_tokens: int = 0
+        self._cache_creation_tokens: int = 0
+        self._cache_read_tokens: int = 0
 
-    def record(self, input_tokens: int, output_tokens: int) -> None:
+    def record(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation_tokens: int = 0,
+        cache_read_tokens: int = 0,
+    ) -> None:
         """Record token usage from a streaming event."""
         self._input_tokens += input_tokens
         self._output_tokens += output_tokens
+        self._cache_creation_tokens += cache_creation_tokens
+        self._cache_read_tokens += cache_read_tokens
 
     def estimate_cost(self) -> Decimal:
         """Estimate cost based on accumulated token usage."""
-        return (
-            Decimal(self._input_tokens) * self._INPUT_PRICE
-            + Decimal(self._output_tokens) * self._OUTPUT_PRICE
+        pricing = get_model_pricing(self._model)
+        return pricing.calculate_cost(
+            self._input_tokens,
+            self._output_tokens,
+            self._cache_creation_tokens,
+            self._cache_read_tokens,
         )
 
     @property
@@ -42,6 +58,14 @@ class TokenAccumulator:
     @property
     def output_tokens(self) -> int:
         return self._output_tokens
+
+    @property
+    def cache_creation_tokens(self) -> int:
+        return self._cache_creation_tokens
+
+    @property
+    def cache_read_tokens(self) -> int:
+        return self._cache_read_tokens
 
     @property
     def total_tokens(self) -> int:

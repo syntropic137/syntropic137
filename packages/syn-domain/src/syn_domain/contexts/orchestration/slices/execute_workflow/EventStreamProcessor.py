@@ -402,10 +402,11 @@ class EventStreamProcessor:
             output_tokens = usage.get("output_tokens", 0)
 
             if input_tokens > 0 or output_tokens > 0:
-                self._tokens.record(input_tokens, output_tokens)
-
                 cache_creation = usage.get("cache_creation_input_tokens", 0)
                 cache_read = usage.get("cache_read_input_tokens", 0)
+                self._tokens.record(
+                    input_tokens, output_tokens, cache_creation, cache_read
+                )
                 await self._collector.record_token_usage(
                     input_tokens,
                     output_tokens,
