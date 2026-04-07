@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-03-30T17:48:51Z"
+exclude-newer = "2026-03-30T17:48:52Z"
 
 [manifest]
 members = [
@@ -525,7 +525,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "protobuf", specifier = ">=4.25.0" },
     { name = "pydantic", specifier = ">=2.5" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1" },
