@@ -6,9 +6,12 @@ and cost estimation concerns.
 
 from __future__ import annotations
 
-from decimal import Decimal
+from typing import TYPE_CHECKING
 
-from syn_shared.pricing import DEFAULT_MODEL_ID, get_model_pricing
+import syn_shared.pricing as _pricing
+
+if TYPE_CHECKING:
+    from decimal import Decimal
 
 
 class TokenAccumulator:
@@ -18,7 +21,7 @@ class TokenAccumulator:
     cache token pricing.
     """
 
-    def __init__(self, model: str = DEFAULT_MODEL_ID) -> None:
+    def __init__(self, model: str = _pricing.DEFAULT_MODEL_ID) -> None:
         self._model = model
         self._input_tokens: int = 0
         self._output_tokens: int = 0
@@ -40,7 +43,7 @@ class TokenAccumulator:
 
     def estimate_cost(self) -> Decimal:
         """Estimate cost based on accumulated token usage."""
-        pricing = get_model_pricing(self._model)
+        pricing = _pricing.get_model_pricing(self._model)
         return pricing.calculate_cost(
             self._input_tokens,
             self._output_tokens,

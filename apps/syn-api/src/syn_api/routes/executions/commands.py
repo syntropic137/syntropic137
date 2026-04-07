@@ -123,6 +123,23 @@ async def _validate_repo_access(repo_full_name: str) -> None:
         logger.warning("Could not pre-validate repo access for %s: %s", repo_full_name, exc)
 
 
+def _merge_inputs(
+    workflow: WorkflowTemplateAggregate,
+    inputs: dict[str, str],
+    task: str | None,
+) -> dict[str, str]:
+    """Merge declaration defaults, provided inputs, and task."""
+    merged: dict[str, str] = {
+        decl.name: str(decl.default)
+        for decl in workflow.input_declarations
+        if decl.default is not None
+    }
+    merged.update(inputs)
+    if task is not None:
+        merged["task"] = task
+    return merged
+
+
 def _validate_required_inputs(
     workflow: WorkflowTemplateAggregate,
     inputs: dict[str, str],
@@ -140,29 +157,15 @@ def _validate_required_inputs(
     if not repo_url:
         return
 
-    # Merge defaults + provided inputs + task
-    merged: dict[str, str] = {}
-    for decl in workflow.input_declarations:
-        if decl.default is not None and decl.name not in merged:
-            merged[decl.name] = str(decl.default)
-    merged.update(inputs)
-    if task is not None:
-        merged["task"] = task
-
+    merged = _merge_inputs(workflow, inputs, task)
     for key, value in merged.items():
         repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
 
-    if "{{" in repo_url:
-        unresolved = sorted(set(re.findall(r"\{\{(\w+)\}\}", repo_url)))
-        if unresolved:
-            hints = [f"--input {name}=<value>" for name in unresolved]
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Missing required inputs: {', '.join(unresolved)}. "
-                    f"Provide them via: {', '.join(hints)}"
-                ),
-            )
+    if "{{" not in repo_url:
+        return
+
+    unresolved = sorted(set(re.findall(r"\{\{(\w+)\}\}", repo_url)))
+    if not unresolved:
         raise HTTPException(
             status_code=422,
             detail=(
@@ -170,6 +173,14 @@ def _validate_required_inputs(
                 "Use the format {{name}} with alphanumeric/underscore characters."
             ),
         )
+    hints = [f"--input {name}=<value>" for name in unresolved]
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"Missing required inputs: {', '.join(unresolved)}. "
+            f"Provide them via: {', '.join(hints)}"
+        ),
+    )
 
 
 router = APIRouter(prefix="/workflows", tags=["execution"])
