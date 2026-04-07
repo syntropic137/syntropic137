@@ -175,6 +175,7 @@ class TimescaleSessionCostQuery:
         agent_model = _resolve_agent_model(exec_result, token_result)
         if agent_model:
             sc.agent_model = agent_model
+            sc.cost_by_model = {agent_model: total_cost}
         sc.started_at = started_at
         sc.execution_id = token_result.get("execution_id")
         sc.phase_id = token_result.get("phase_id")

@@ -414,8 +414,8 @@ dev: _workspace-check
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
     echo "   📈 Pulse:        http://localhost:5174"
-    echo "   🚀 Backend API:  http://localhost:8137"
-    echo "   📊 API Docs:     http://localhost:8137/docs"
+    echo "   🚀 Backend API:  http://localhost:9137"
+    echo "   📊 API Docs:     http://localhost:9137/docs"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -489,8 +489,8 @@ dev-fresh: _workspace-check
     echo "✅ Fresh development environment ready!"
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
-    echo "   🚀 Backend API:  http://localhost:8137"
-    echo "   📊 API Docs:     http://localhost:8137/docs"
+    echo "   🚀 Backend API:  http://localhost:9137"
+    echo "   📊 API Docs:     http://localhost:9137/docs"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -616,11 +616,11 @@ dev-webhooks:
     fi
     echo "🔗 Starting webhook proxy..."
     echo "   Source: $DEV__SMEE_URL"
-    echo "   Target: http://localhost:8137/webhooks/github"
+    echo "   Target: http://localhost:9137/webhooks/github"
     echo ""
     echo "   Press Ctrl+C to stop"
     echo ""
-    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8137/webhooks/github --path /webhooks/github
+    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:9137/webhooks/github --path /webhooks/github
 
 # View smee proxy logs
 dev-webhooks-logs:
@@ -698,7 +698,7 @@ e2e-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    API_URL="http://localhost:8137"
+    API_URL="http://localhost:9137"
 
     # 1. Check if the dev stack is already running; start it if not
     if ! curl -sf "${API_URL}/health" > /dev/null 2>&1; then
@@ -1687,9 +1687,9 @@ _webhook-start:
     if [ -n "${DEV__SMEE_URL:-}" ]; then
         uv run python scripts/manage_webhook_url.py --mode dev || true
         pkill -f "smee-client.*${DEV__SMEE_URL}" 2>/dev/null || true
-        echo "5️⃣  Starting webhook proxy (smee.io → localhost:8137)..."
-        npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8137/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
-        echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:8137/webhooks/github"
+        echo "5️⃣  Starting webhook proxy (smee.io → localhost:9137)..."
+        npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:9137/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
+        echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:9137/webhooks/github"
         exit 0
     fi
 

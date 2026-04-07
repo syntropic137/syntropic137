@@ -9180,6 +9180,11 @@
             "type": "string",
             "title": "Workflow Id"
           },
+          "workflow_name": {
+            "type": "string",
+            "title": "Workflow Name",
+            "default": ""
+          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -9471,6 +9476,11 @@
           "workflow_id": {
             "type": "string",
             "title": "Workflow Id"
+          },
+          "workflow_name": {
+            "type": "string",
+            "title": "Workflow Name",
+            "default": ""
           },
           "status": {
             "type": "string",

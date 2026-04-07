@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from syn_api._wiring import (
     ensure_connected,
     get_projection_mgr,
+    get_session_cost_query,
     get_session_repo,
     sync_published_events_to_projections,
 )
@@ -276,11 +277,16 @@ async def _load_tool_operations(manager: ProjectionManager, session_id: str) -> 
 
 
 async def _load_cost_data(
-    manager: ProjectionManager, session_id: str, fallback_tokens: int, fallback_cost: Decimal
+    session_id: str, fallback_tokens: int, fallback_cost: Decimal
 ) -> _CostData:
-    """Load cost data for a session from the projection."""
+    """Load cost data for a session via SessionCostQueryService (TimescaleDB).
+
+    Uses the query service directly instead of the deprecated projection method.
+    See #532 for the architectural rationale.
+    """
     try:
-        cost = await manager.session_cost.get_session_cost(session_id)
+        query_svc = get_session_cost_query()
+        cost = await query_svc.get(session_id)
     except Exception:
         logger.exception("Failed to load cost data for session %s", session_id)
         return _CostData(total_tokens=fallback_tokens, total_cost_usd=fallback_cost)
@@ -326,7 +332,7 @@ async def get_session(
         return Err(SessionError.NOT_FOUND, message=f"Session {session_id} not found")
 
     operations = await _load_tool_operations(manager, session_id)
-    cd = await _load_cost_data(manager, session_id, session.total_tokens, session.total_cost_usd)
+    cd = await _load_cost_data(session_id, session.total_tokens, session.total_cost_usd)
 
     return Ok(
         SessionDetail(
@@ -459,6 +465,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         cache_read_tokens=detail.cache_read_tokens,
         total_tokens=detail.total_tokens,
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
+        cost_by_model=detail.cost_by_model,
         operations=operations,
         started_at=str(detail.started_at) if detail.started_at else None,
         completed_at=str(detail.completed_at) if detail.completed_at else None,

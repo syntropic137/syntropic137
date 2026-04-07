@@ -46,7 +46,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/v1': {
-        target: 'http://localhost:8137',
+        target: 'http://localhost:9137',
         changeOrigin: true,
         // Selfhost gateway expects /api/v1 prefix; dev stack doesn't.
         // Keep prefix for selfhost compatibility.

@@ -43,20 +43,20 @@ export function TriggerDetail() {
       <Breadcrumbs
         items={[
           { label: 'Triggers', href: '/triggers' },
-          { label: trigger.name },
+          { label: trigger.workflow_name ? `${trigger.event} → ${trigger.workflow_name}` : trigger.name },
         ]}
       />
 
       <TriggerDetailHeader trigger={trigger} />
 
       {/* Metrics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <MetricCard title="Fire Count" value={trigger.fire_count} icon={Activity} color="accent" />
         <MetricCard title="Event Type" value={trigger.event} icon={Zap} />
         <MetricCard title="Repository" value={trigger.repository || '\u2014'} icon={GitBranch} />
         <MetricCard
           title="Workflow"
-          value={trigger.workflow_id.slice(0, 12) + '...'}
+          value={trigger.workflow_name || trigger.workflow_id.slice(0, 12) + '...'}
           icon={ExternalLink}
           href={`/workflows/${trigger.workflow_id}`}
           subtitle="View workflow \u2192"

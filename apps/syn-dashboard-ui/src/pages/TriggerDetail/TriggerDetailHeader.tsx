@@ -16,7 +16,7 @@ export function TriggerDetailHeader({ trigger }: { trigger: TriggerDetail }) {
       <div>
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
-            {trigger.name}
+            {trigger.workflow_name ? `${trigger.event} → ${trigger.workflow_name}` : trigger.name}
           </h1>
           <span
             className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset ${
