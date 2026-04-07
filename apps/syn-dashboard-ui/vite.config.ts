@@ -6,6 +6,8 @@ import { readFileSync } from 'fs'
 
 const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }
 
+// TODO(#624): FeedbackWidget removed from App.tsx — clean up these ui-feedback
+// references (alias, fs.allow, optimizeDeps) once the submodule is fully deprecated.
 const uiFeedbackPath = path.resolve(__dirname, '../../lib/ui-feedback/packages/ui-feedback-react/src')
 
 // Suppress noisy EPIPE/ECONNRESET proxy errors with a single-line log.

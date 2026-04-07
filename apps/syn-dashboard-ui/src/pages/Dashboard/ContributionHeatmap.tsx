@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+// TODO(#624): Dashboard uses recharts elsewhere — consolidate on one charting
+// library during the redesign (migrate recharts→nivo or rebuild heatmap in recharts).
 import { ResponsiveCalendar } from '@nivo/calendar'
 
 import { API_BASE, fetchJSON } from '../../api/base'
@@ -308,6 +310,7 @@ export function ContributionHeatmap() {
             Loading heatmap data...
           </div>
         )}
+        {/* TODO(#624): Add a retry button for failed API requests */}
         {error && (
           <div className="flex items-center justify-center py-12 text-red-400">
             {error}
