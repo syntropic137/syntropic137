@@ -30,7 +30,7 @@ export function useEventFeed(): UseEventFeedResult {
 
   // Load recent events on mount
   useEffect(() => {
-    fetch(`${API_BASE}/events/recent?limit=30`)
+    fetch(`${API_BASE}/events/recent?limit=30&event_type=git_commit`)
       .then((r) => r.json())
       .then((data) => {
         if (data.events) setEvents(data.events as GitEvent[])

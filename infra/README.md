@@ -472,7 +472,7 @@ The `docker-compose.cloudflare.yaml` overlay:
 
 | Public hostname | Service | Description |
 |----------------|---------|-------------|
-| `syn.yourdomain.com` | `http://gateway:8081` | Dashboard UI (`/`), Pulse UI (`/pulse/`), API (`/api/v1/`) |
+| `syn.yourdomain.com` | `http://gateway:8081` | Dashboard UI (`/`), API (`/api/v1/`) |
 
 **3. Set environment variables** in `infra/.env`:
 

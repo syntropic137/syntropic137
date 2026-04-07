@@ -8,6 +8,7 @@ import {
 
 import { Card, CardContent, CardHeader, EventFeed, MetricCard, PageLoader } from '../../components'
 import { useDashboardData } from '../../hooks/useDashboardData'
+import { ContributionHeatmap } from './ContributionHeatmap'
 import { DashboardCharts, WorkflowStatusChart } from './DashboardCharts'
 import { RecentWorkflowsTable } from './RecentWorkflowsTable'
 
@@ -68,6 +69,9 @@ export function Dashboard() {
           href="/artifacts"
         />
       </div>
+
+      {/* Contribution heatmap */}
+      <ContributionHeatmap />
 
       {/* Charts and event feed */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

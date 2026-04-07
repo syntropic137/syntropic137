@@ -513,6 +513,7 @@ class TriggerSummary(BaseModel):
     event: str
     repository: str
     workflow_id: str
+    workflow_name: str = ""
     status: str
     fire_count: int = 0
     created_at: datetime | None = None
@@ -526,6 +527,7 @@ class TriggerDetail(BaseModel):
     event: str
     repository: str
     workflow_id: str
+    workflow_name: str = ""
     status: str
     fire_count: int = 0
     created_at: datetime | None = None

@@ -5,7 +5,7 @@
 # Runs on PRs targeting the `release` branch. All jobs must pass before merge.
 #
 # Checks:
-#   1. Version consistency — all 13 package files match and are bumped
+#   1. Version consistency — all 11 package files match and are bumped
 #   2. Release notes — PR body must contain meaningful release notes
 #   3. Docs drift — generated CLI + API docs match source
 #   4. CLI ↔ API sync — generated CLI types match OpenAPI spec (single source of truth)
@@ -264,7 +264,6 @@ jobs:
               - '**/Dockerfile*'
               - 'apps/syn-api/**'
               - 'apps/syn-dashboard-ui/**'
-              - 'apps/syn-pulse-ui/**'
               - 'packages/syn-collector/**'
               - 'packages/syn-domain/**'
               - 'packages/syn-adapters/**'
@@ -300,9 +299,6 @@ jobs:
             context: "."
           - image: syn-dashboard-ui
             dockerfile: apps/syn-dashboard-ui/Dockerfile
-            context: "."
-          - image: syn-pulse-ui
-            dockerfile: apps/syn-pulse-ui/Dockerfile
             context: "."
           - image: sidecar-proxy
             dockerfile: docker/sidecar-proxy/Dockerfile

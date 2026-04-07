@@ -35,36 +35,12 @@ ENV VITE_API_URL=/api
 RUN pnpm build
 
 # =============================================================================
-# Build Stage — Pulse UI
-# =============================================================================
-FROM node:22-alpine AS pulse-builder
-
-RUN corepack enable && corepack prepare pnpm@10.24.0 --activate
-
-WORKDIR /workspace
-
-COPY pnpm-workspace.yaml ./
-COPY pnpm-lock.yaml ./
-COPY apps/syn-pulse-ui/package.json ./apps/syn-pulse-ui/
-
-RUN pnpm install --frozen-lockfile --filter syn-pulse-ui
-
-COPY apps/syn-pulse-ui/ ./apps/syn-pulse-ui/
-
-WORKDIR /workspace/apps/syn-pulse-ui
-ENV VITE_BASE_PATH=/pulse/
-RUN pnpm build
-
-# =============================================================================
 # Runtime Stage
 # =============================================================================
 FROM nginx:1.28.2-alpine AS runtime
 
 # Copy built dashboard assets (served at /)
 COPY --from=dashboard-builder /workspace/apps/syn-dashboard-ui/dist /usr/share/nginx/html
-
-# Copy built pulse-ui assets (served at /pulse/)
-COPY --from=pulse-builder /workspace/apps/syn-pulse-ui/dist /usr/share/nginx/html/pulse
 
 # Copy nginx configuration
 COPY infra/docker/images/gateway/nginx.conf /etc/nginx/conf.d/default.conf

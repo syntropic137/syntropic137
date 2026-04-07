@@ -3,14 +3,13 @@ import {
   BarChart,
   Cell,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
 
 import { TrendingUp } from 'lucide-react'
 
-import { Card, CardContent, CardHeader } from '../../components'
+import { Card, CardContent, CardHeader, ChartTooltip } from '../../components'
 import type { PhaseExecutionDetail } from '../../types'
 import { formatCost, formatTokens } from '../../utils/formatters'
 
@@ -110,19 +109,9 @@ export function TokenBreakdownChart({
                 tick={{ fill: '#94a3b8', fontSize: 11 }}
                 tickFormatter={(v: number) => formatTokens(v)}
               />
-              <Tooltip
-                cursor={{ fill: 'rgba(148, 163, 184, 0.08)' }}
+              <ChartTooltip
                 position={{ y: 0 }}
                 offset={20}
-                contentStyle={{
-                  backgroundColor: '#1e293b',
-                  border: '1px solid #334155',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  color: '#e2e8f0',
-                }}
-                labelStyle={{ color: '#e2e8f0', fontWeight: 600, marginBottom: 4 }}
-                itemStyle={{ color: '#cbd5e1' }}
                 formatter={(value: number) => [formatTokens(value), 'tokens']}
               />
               <Bar dataKey="tokens" radius={[4, 4, 0, 0]}>

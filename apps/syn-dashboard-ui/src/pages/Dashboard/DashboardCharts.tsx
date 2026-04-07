@@ -3,24 +3,17 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
-  Tooltip,
 } from 'recharts'
 
 import type { ValueType } from 'recharts/types/component/DefaultTooltipContent'
 import type { MetricsResponse } from '../../types'
+import { ChartTooltip } from '../../components'
 
 interface ChartDataItem {
   [key: string]: unknown
   name: string
   value: number
   fill: string
-}
-
-const TOOLTIP_STYLE = {
-  backgroundColor: 'var(--color-surface-elevated)',
-  border: '1px solid var(--color-border)',
-  borderRadius: '8px',
-  fontSize: '12px',
 }
 
 function ChartLegend({ items }: { items: ChartDataItem[] }) {
@@ -74,10 +67,7 @@ function DonutChart({
               <Cell key={`cell-${index}`} fill={entry.fill} />
             ))}
           </Pie>
-          <Tooltip
-            contentStyle={TOOLTIP_STYLE}
-            formatter={tooltipFormatter}
-          />
+          <ChartTooltip formatter={tooltipFormatter} />
         </PieChart>
       </ResponsiveContainer>
       <ChartLegend items={data} />

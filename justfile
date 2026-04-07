@@ -408,21 +408,13 @@ dev: _workspace-check
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
-    echo "8️⃣ Starting Pulse metrics frontend..."
-    lsof -ti:5174 | xargs kill 2>/dev/null || true
-    sleep 1
-    (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
-    (cd apps/syn-pulse-ui && pnpm run dev > /tmp/syn-pulse.log 2>&1 &)
-    sleep 3
-    echo ""
     just _webhook-start
     echo ""
     echo "✅ Full development stack ready!"
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
-    echo "   📈 Pulse:        http://localhost:5174"
-    echo "   🚀 Backend API:  http://localhost:8137"
-    echo "   📊 API Docs:     http://localhost:8137/docs"
+    echo "   🚀 Backend API:  http://localhost:9137"
+    echo "   📊 API Docs:     http://localhost:9137/docs"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -491,21 +483,13 @@ dev-fresh: _workspace-check
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
-    echo "1️⃣1️⃣ Starting Pulse metrics frontend..."
-    lsof -ti:5174 | xargs kill 2>/dev/null || true
-    sleep 1
-    (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
-    (cd apps/syn-pulse-ui && pnpm run dev > /tmp/syn-pulse.log 2>&1 &)
-    sleep 3
-    echo ""
     just _webhook-start
     echo ""
     echo "✅ Fresh development environment ready!"
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
-    echo "   📈 Pulse:        http://localhost:5174"
-    echo "   🚀 Backend API:  http://localhost:8137"
-    echo "   📊 API Docs:     http://localhost:8137/docs"
+    echo "   🚀 Backend API:  http://localhost:9137"
+    echo "   📊 API Docs:     http://localhost:9137/docs"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -595,26 +579,6 @@ dashboard-qa: dashboard-lint dashboard-build
 
 # --- Pulse UI ---
 
-# Start the Pulse metrics frontend (Vite dev server)
-pulse-frontend:
-    cd apps/syn-pulse-ui && pnpm run dev
-
-# Install Pulse frontend dependencies
-pulse-install:
-    cd apps/syn-pulse-ui && pnpm install
-
-# Build Pulse frontend for production
-pulse-build:
-    cd apps/syn-pulse-ui && pnpm run build
-
-# Lint Pulse frontend
-pulse-lint:
-    cd apps/syn-pulse-ui && pnpm run lint
-
-# Full Pulse QA (lint + build)
-pulse-qa: pulse-lint pulse-build
-    @echo "✅ Pulse UI checks passed!"
-
 # --- Feedback ---
 
 # Start the feedback API server
@@ -651,11 +615,11 @@ dev-webhooks:
     fi
     echo "🔗 Starting webhook proxy..."
     echo "   Source: $DEV__SMEE_URL"
-    echo "   Target: http://localhost:8137/webhooks/github"
+    echo "   Target: http://localhost:9137/webhooks/github"
     echo ""
     echo "   Press Ctrl+C to stop"
     echo ""
-    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8137/webhooks/github --path /webhooks/github
+    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:9137/webhooks/github --path /webhooks/github
 
 # View smee proxy logs
 dev-webhooks-logs:
@@ -733,7 +697,7 @@ e2e-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    API_URL="http://localhost:8137"
+    API_URL="http://localhost:9137"
 
     # 1. Check if the dev stack is already running; start it if not
     if ! curl -sf "${API_URL}/health" > /dev/null 2>&1; then
@@ -1563,7 +1527,7 @@ deps-tree:
     echo "  $(grep -c '^\[\[package\]\]' uv.lock) packages in uv.lock"
     echo ""
     echo "=== Node.js: package counts ==="
-    for dir in apps/syn-dashboard-ui apps/syn-pulse-ui apps/syn-docs; do
+    for dir in apps/syn-dashboard-ui apps/syn-docs; do
         if [ -f "$dir/pnpm-lock.yaml" ]; then
             count=$(grep -c 'resolution:' "$dir/pnpm-lock.yaml" 2>/dev/null || echo "?")
             echo "  $dir: ~$count packages (pnpm)"
@@ -1722,9 +1686,9 @@ _webhook-start:
     if [ -n "${DEV__SMEE_URL:-}" ]; then
         uv run python scripts/manage_webhook_url.py --mode dev || true
         pkill -f "smee-client.*${DEV__SMEE_URL}" 2>/dev/null || true
-        echo "5️⃣  Starting webhook proxy (smee.io → localhost:8137)..."
-        npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8137/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
-        echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:8137/webhooks/github"
+        echo "5️⃣  Starting webhook proxy (smee.io → localhost:9137)..."
+        npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:9137/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
+        echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:9137/webhooks/github"
         exit 0
     fi
 
@@ -1786,11 +1750,11 @@ _workspace-check:
 # Build and push container images to GHCR from your local machine.
 # Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
 
-# Bump version across all 13 package files
+# Bump version across all 11 package files
 bump-version version:
     python3 scripts/bump_version.py {{version}}
 
-# Validate all 13 package files have the same version
+# Validate all 11 package files have the same version
 check-version:
     python3 scripts/bump_version.py --check
 
@@ -1813,12 +1777,11 @@ release-local version:
 
     # Images to build (order: fast first)
     FAILED=()
-    for image in token-injector sidecar-proxy syn-collector syn-pulse-ui syn-dashboard-ui syn-api syn-gateway; do
+    for image in token-injector sidecar-proxy syn-collector syn-dashboard-ui syn-api syn-gateway; do
         case "$image" in
             token-injector)   dockerfile="docker/token-injector/Dockerfile"; context="docker/token-injector" ;;
             sidecar-proxy)    dockerfile="docker/sidecar-proxy/Dockerfile"; context="docker/sidecar-proxy" ;;
             syn-collector)    dockerfile="packages/syn-collector/Dockerfile"; context="." ;;
-            syn-pulse-ui)     dockerfile="apps/syn-pulse-ui/Dockerfile"; context="." ;;
             syn-dashboard-ui) dockerfile="apps/syn-dashboard-ui/Dockerfile"; context="." ;;
             syn-api)          dockerfile="infra/docker/images/syn-api/Dockerfile"; context="." ;;
             syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;

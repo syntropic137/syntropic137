@@ -43,11 +43,18 @@ def _build_optional_filters(**kwargs: str | None) -> dict[str, str] | None:
     return filters or None
 
 
-def _parse_trigger_config(config_data: dict[str, Any] | TriggerConfig) -> TriggerConfig:
-    """Parse a TriggerConfig from raw projection store data."""
-    if isinstance(config_data, dict):
-        return TriggerConfig(**config_data) if config_data else TriggerConfig()
-    return config_data
+def _parse_trigger_config(config_data: dict[str, int | float] | TriggerConfig) -> TriggerConfig:
+    """Parse a TriggerConfig from raw projection store data, ignoring unknown keys."""
+    if isinstance(config_data, TriggerConfig):
+        return config_data
+    if not config_data:
+        return TriggerConfig()
+    return TriggerConfig(
+        max_attempts=int(config_data.get("max_attempts", 3)),
+        daily_limit=int(config_data.get("daily_limit", 20)),
+        debounce_seconds=int(config_data.get("debounce_seconds", 0)),
+        cooldown_seconds=int(config_data.get("cooldown_seconds", 300)),
+    )
 
 
 def _latest_fired_at(records: list[dict[str, Any]]) -> datetime | None:
