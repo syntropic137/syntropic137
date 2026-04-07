@@ -411,8 +411,12 @@ async def update_trigger_endpoint(trigger_id: str, body: UpdateTriggerRequest) -
             detail=f"Cannot {body.action} trigger {trigger_id}: {result.message}",
         )
 
+    # Map action to authoritative status (projection may not have caught up yet).
+    status_map = {"pause": "paused", "resume": "active"}
+    authoritative_status = status_map[body.action]
+
     # Read trigger detail from projection, then override status with the
-    # authoritative command result (projection may not have caught up yet).
+    # authoritative command result.
     detail_result = await get_trigger(trigger_id)
     if isinstance(detail_result, Err):
         # Projection hasn't indexed this trigger — return minimal response
@@ -422,11 +426,11 @@ async def update_trigger_endpoint(trigger_id: str, body: UpdateTriggerRequest) -
             event="",
             repository="",
             workflow_id="",
-            status=body.action + "d",
+            status=authoritative_status,
         )
 
     detail = detail_result.value
-    detail.status = body.action + "d"
+    detail.status = authoritative_status
     return detail
 
 
