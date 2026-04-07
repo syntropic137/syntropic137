@@ -5,17 +5,17 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList, apiPost, buildParams } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
+import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../output/ansi.js";
 import { formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
-import type {
-  ArtifactSummaryResponse,
-  ArtifactResponse,
-  ArtifactContentResponse,
-  CreateArtifactResponse,
-} from "../generated/types.js";
+
+type ArtifactSummary = components["schemas"]["ArtifactSummaryResponse"];
+type ArtifactDetail = components["schemas"]["ArtifactResponse"];
+type ArtifactContent = components["schemas"]["ArtifactContentResponse"];
+type CreateArtifact = components["schemas"]["CreateArtifactResponse"];
 
 const listCommand: CommandDef = {
   name: "list",
@@ -27,13 +27,19 @@ const listCommand: CommandDef = {
     limit: { type: "string", description: "Max results (max 200)", default: "50" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const params = buildParams({
-      workflow_id: (parsed.values["workflow"] as string | undefined) ?? null,
-      phase_id: (parsed.values["phase"] as string | undefined) ?? null,
-      artifact_type: (parsed.values["type"] as string | undefined) ?? null,
-      limit: (parsed.values["limit"] as string | undefined) ?? "50",
-    });
-    const items = await apiGetList<ArtifactSummaryResponse>("/artifacts", { params });
+    const items = unwrap<ArtifactSummary[]>(
+      await api.GET("/artifacts", {
+        params: {
+          query: {
+            workflow_id: (parsed.values["workflow"] as string | undefined) ?? null,
+            phase_id: (parsed.values["phase"] as string | undefined) ?? null,
+            artifact_type: (parsed.values["type"] as string | undefined) ?? null,
+            limit: Number((parsed.values["limit"] as string | undefined) ?? "50"),
+          },
+        },
+      }),
+      "List artifacts",
+    );
 
     if (items.length === 0) { printDim("No artifacts found."); return; }
 
@@ -71,9 +77,15 @@ const showCommand: CommandDef = {
     if (!id) { printError("Missing artifact-id"); throw new CLIError("Missing argument", 1); }
     const noContent = parsed.values["no-content"] === true;
 
-    const a = await apiGet<ArtifactResponse>(`/artifacts/${id}`, {
-      params: { include_content: String(!noContent) },
-    });
+    const a = unwrap<ArtifactDetail>(
+      await api.GET("/artifacts/{artifact_id}", {
+        params: {
+          path: { artifact_id: id },
+          query: { include_content: !noContent },
+        },
+      }),
+      "Get artifact",
+    );
 
     print(`${style("Artifact:", BOLD)} ${a.id}`);
     print(`  Type:    ${a.artifact_type}`);
@@ -98,7 +110,12 @@ const contentCommand: CommandDef = {
     const id = parsed.positionals[0];
     if (!id) { printError("Missing artifact-id"); throw new CLIError("Missing argument", 1); }
 
-    const data = await apiGet<ArtifactContentResponse>(`/artifacts/${id}/content`);
+    const data = unwrap<ArtifactContent>(
+      await api.GET("/artifacts/{artifact_id}/content", {
+        params: { path: { artifact_id: id } },
+      }),
+      "Get artifact content",
+    );
     if (!data.content) { printDim("(no content)"); return; }
     print(data.content);
   },
@@ -115,15 +132,30 @@ const createCommand: CommandDef = {
     phase: { type: "string", short: "p", description: "Phase ID" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const data = await apiPost<CreateArtifactResponse>("/artifacts", {
-      body: {
-        workflow_id: (parsed.values["workflow"] as string | undefined) ?? null,
-        artifact_type: (parsed.values["type"] as string | undefined) ?? null,
-        title: (parsed.values["title"] as string | undefined) ?? null,
-        content: (parsed.values["content"] as string | undefined) ?? null,
-        phase_id: (parsed.values["phase"] as string | undefined) ?? null,
-      },
-    });
+    const workflowId = parsed.values["workflow"] as string | undefined;
+    const artifactType = parsed.values["type"] as string | undefined;
+    const title = parsed.values["title"] as string | undefined;
+    const content = parsed.values["content"] as string | undefined;
+    const phaseId = parsed.values["phase"] as string | undefined;
+
+    if (!workflowId) { printError("Missing --workflow"); throw new CLIError("Missing option", 1); }
+    if (!artifactType) { printError("Missing --type"); throw new CLIError("Missing option", 1); }
+    if (!title) { printError("Missing --title"); throw new CLIError("Missing option", 1); }
+    if (!content) { printError("Missing --content"); throw new CLIError("Missing option", 1); }
+
+    const data = unwrap<CreateArtifact>(
+      await api.POST("/artifacts", {
+        body: {
+          workflow_id: workflowId,
+          artifact_type: artifactType,
+          title,
+          content,
+          content_type: "text/markdown",
+          phase_id: phaseId ?? null,
+        },
+      }),
+      "Create artifact",
+    );
 
     print(`${style("Created artifact:", GREEN)} ${style(data.title, CYAN)}`);
     print(`  ID: ${style(data.id, DIM)}`);

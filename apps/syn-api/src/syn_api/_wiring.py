@@ -277,14 +277,14 @@ class _InMemoryAggregateRepository:
     def __init__(self) -> None:
         self._aggregates: dict[str, Any] = {}
 
-    async def get_by_id(self, aggregate_id: str) -> Any:
+    async def get_by_id(self, aggregate_id: str) -> Any:  # noqa: ANN401
         return self._aggregates.get(aggregate_id)
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: Any) -> None:  # noqa: ANN401
         agg_id = str(aggregate.id) if hasattr(aggregate, "id") else str(aggregate.trigger_id)
         self._aggregates[agg_id] = aggregate
 
-    async def save_new(self, aggregate: Any) -> None:
+    async def save_new(self, aggregate: Any) -> None:  # noqa: ANN401
         """Persist a brand-new aggregate (mirrors Repository protocol)."""
         await self.save(aggregate)
 

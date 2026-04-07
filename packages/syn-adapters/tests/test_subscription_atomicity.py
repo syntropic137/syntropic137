@@ -164,7 +164,7 @@ class TrackingProjectionManager:
         """Configure which event positions should fail on dispatch."""
         self._fail_on_dispatch_for_events = event_positions
 
-    async def process_event_envelope(self, envelope: MockEventEnvelope) -> Any:
+    async def process_event_envelope(self, envelope: MockEventEnvelope) -> Any:  # noqa: ANN401
         """Process an event envelope (tracking version)."""
         global_nonce = envelope.metadata.global_nonce
         event_type = envelope.event.event_type

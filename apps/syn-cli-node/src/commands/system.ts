@@ -5,11 +5,12 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetPaginated, apiPost, apiPut, apiDelete, buildParams } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCost, formatDuration, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
+
 
 function reqId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
@@ -31,15 +32,20 @@ const createCommand: CommandDef = {
     const name = parsed.values["name"] as string | undefined;
     if (!name) { printError("Missing --name"); throw new CLIError("Missing option", 1); }
 
-    const body: Record<string, unknown> = { name };
     const desc = parsed.values["description"] as string | undefined;
     const org = parsed.values["org"] as string | undefined;
-    if (desc) body["description"] = desc;
-    if (org) body["organization_id"] = org;
+    if (!org) { printError("Missing --org"); throw new CLIError("Missing option", 1); }
 
-    const d = await apiPost<Record<string, unknown>>("/systems", { body, expected: [200, 201] });
-    printSuccess(`System created: ${d["system_id"] ?? ""}`);
-    print(`  Name: ${d["name"] ?? name}`);
+    const body = {
+      name,
+      organization_id: org,
+      description: desc ?? "",
+      created_by: "cli",
+    };
+
+    const d = unwrap(await api.POST("/systems", { body }), "Create system");
+    printSuccess(`System created: ${d.system_id}`);
+    print(`  Name: ${d.name}`);
   },
 };
 
@@ -50,10 +56,14 @@ const listCommand: CommandDef = {
     org: { type: "string", short: "o", description: "Filter by organization" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const params = buildParams({
-      organization_id: (parsed.values["org"] as string | undefined) ?? null,
-    });
-    const items = await apiGetPaginated<Record<string, unknown>>("/systems", "systems", { params });
+    const d = unwrap(await api.GET("/systems", {
+      params: {
+        query: {
+          organization_id: (parsed.values["org"] as string | undefined) ?? null,
+        },
+      },
+    }), "List systems");
+    const items = d.systems ?? [];
     if (items.length === 0) { printDim("No systems found."); return; }
 
     const table = new Table({ title: "Systems" });
@@ -64,10 +74,10 @@ const listCommand: CommandDef = {
 
     for (const s of items) {
       table.addRow(
-        String(s["system_id"] ?? ""),
-        String(s["name"] ?? ""),
-        String(s["organization_id"] ?? "\u2014"),
-        String(s["repo_count"] ?? 0),
+        s.system_id,
+        s.name,
+        s.organization_id || "\u2014",
+        String(s.repo_count),
       );
     }
     table.print();
@@ -80,12 +90,12 @@ const showCommand: CommandDef = {
   args: [{ name: "system-id", description: "System ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/systems/${id}`);
-    print(`${style("System:", BOLD)} ${d["name"] ?? id}`);
-    print(`  ID:          ${d["system_id"] ?? id}`);
-    if (d["description"]) print(`  Description: ${String(d["description"])}`);
-    if (d["organization_id"]) print(`  Org:         ${String(d["organization_id"])}`);
-    print(`  Repos:       ${d["repo_count"] ?? 0}`);
+    const d = unwrap(await api.GET("/systems/{system_id}", { params: { path: { system_id: id } } }), "Get system");
+    print(`${style("System:", BOLD)} ${d.name}`);
+    print(`  ID:          ${d.system_id}`);
+    if (d.description) print(`  Description: ${d.description}`);
+    if (d.organization_id) print(`  Org:         ${d.organization_id}`);
+    print(`  Repos:       ${d.repo_count}`);
   },
 };
 
@@ -99,14 +109,15 @@ const updateCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const body: Record<string, unknown> = {};
     const name = parsed.values["name"] as string | undefined;
     const desc = parsed.values["description"] as string | undefined;
-    if (name) body["name"] = name;
-    if (desc) body["description"] = desc;
-    if (Object.keys(body).length === 0) { printError("Nothing to update. Use --name or --description."); throw new CLIError("No updates", 1); }
+    if (!name && !desc) { printError("Nothing to update. Use --name or --description."); throw new CLIError("No updates", 1); }
 
-    await apiPut(`/systems/${id}`, { body });
+    const body = {
+      ...(name ? { name } : {}),
+      ...(desc ? { description: desc } : {}),
+    };
+    unwrap(await api.PUT("/systems/{system_id}", { params: { path: { system_id: id } }, body }), "Update system");
     printSuccess(`System ${id} updated.`);
   },
 };
@@ -124,7 +135,7 @@ const deleteCommand: CommandDef = {
       printError(`Use --force to confirm deleting system ${id}`);
       throw new CLIError("Confirmation required", 1);
     }
-    await apiDelete(`/systems/${id}`);
+    unwrap(await api.DELETE("/systems/{system_id}", { params: { path: { system_id: id } } }), "Delete system");
     printSuccess(`System ${id} deleted.`);
   },
 };
@@ -137,16 +148,15 @@ const statusCommand: CommandDef = {
   args: [{ name: "system-id", description: "System ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/systems/${id}/status`);
-    const h = String(d["health_status"] ?? "unknown");
+    const d = unwrap(await api.GET("/systems/{system_id}/status", { params: { path: { system_id: id } } }), "Get system status");
+    const h = d.overall_status;
     const color = h === "healthy" ? GREEN : h === "degraded" ? YELLOW : RED;
 
-    print(`${style("System Status:", BOLD)} ${d["name"] ?? id}`);
+    print(`${style("System Status:", BOLD)} ${d.system_name || id}`);
     print(`  Health:    ${style(h, color)}`);
-    print(`  Repos:     ${d["repo_count"] ?? 0}`);
-    print(`  Active:    ${d["active_executions"] ?? 0}`);
+    print(`  Repos:     ${d.total_repos}`);
 
-    const repos = (d["repos"] ?? []) as Record<string, unknown>[];
+    const repos = d.repos ?? [];
     if (repos.length > 0) {
       const table = new Table({ title: "Repository Health" });
       table.addColumn("Repo", { style: CYAN });
@@ -155,13 +165,13 @@ const statusCommand: CommandDef = {
       table.addColumn("Success Rate", { align: "right" });
 
       for (const r of repos) {
-        const rh = String(r["health"] ?? "unknown");
+        const rh = r.status;
         const rc = rh === "healthy" ? GREEN : rh === "degraded" ? YELLOW : RED;
         table.addRow(
-          String(r["repo_url"] ?? r["repo_id"] ?? ""),
+          r.repo_full_name || r.repo_id,
           style(rh, rc),
-          formatTimestamp(r["last_run_at"] as string | undefined),
-          r["success_rate"] != null ? `${(Number(r["success_rate"]) * 100).toFixed(0)}%` : "\u2014",
+          formatTimestamp(r.last_execution_at || undefined),
+          `${(r.success_rate * 100).toFixed(0)}%`,
         );
       }
       table.print();
@@ -175,24 +185,20 @@ const costCommand: CommandDef = {
   args: [{ name: "system-id", description: "System ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/systems/${id}/cost`);
+    const d = unwrap(await api.GET("/systems/{system_id}/cost", { params: { path: { system_id: id } } }), "Get system cost");
 
     print(`${style("System Costs:", BOLD)} ${id}`);
-    print(`  Total cost:  ${formatCost(String(d["total_cost_usd"] ?? "0"))}`);
-    print(`  Tokens:      ${formatTokens(Number(d["total_tokens"] ?? 0))}`);
+    print(`  Total cost:  ${formatCost(d.total_cost_usd)}`);
+    print(`  Tokens:      ${formatTokens(d.total_tokens)}`);
 
-    const byRepo = (d["by_repo"] ?? []) as Record<string, unknown>[];
-    if (byRepo.length > 0) {
+    const byRepo = d.cost_by_repo ?? {};
+    const repoEntries = Object.entries(byRepo);
+    if (repoEntries.length > 0) {
       const table = new Table({ title: "Cost by Repository" });
       table.addColumn("Repo", { style: CYAN });
       table.addColumn("Cost", { align: "right" });
-      table.addColumn("Tokens", { align: "right" });
-      for (const r of byRepo) {
-        table.addRow(
-          String(r["repo_url"] ?? r["repo_id"] ?? ""),
-          formatCost(String(r["cost_usd"] ?? "0")),
-          formatTokens(Number(r["tokens"] ?? 0)),
-        );
+      for (const [repo, cost] of repoEntries) {
+        table.addRow(repo, formatCost(cost));
       }
       table.print();
     }
@@ -208,26 +214,23 @@ const activityCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const limit = (parsed.values["limit"] as string | undefined) ?? "20";
-    const items = await apiGetPaginated<Record<string, unknown>>(`/systems/${id}/activity`, "entries", { params: { limit } });
+    const limit = Number((parsed.values["limit"] as string | undefined) ?? "20");
+    const d = unwrap(await api.GET("/systems/{system_id}/activity", { params: { path: { system_id: id }, query: { limit } } }), "Get system activity");
+    const items = d.entries ?? [];
     if (items.length === 0) { printDim("No recent activity."); return; }
 
     const table = new Table({ title: `Activity: ${id}` });
     table.addColumn("Execution", { style: DIM });
-    table.addColumn("Repo");
     table.addColumn("Workflow");
     table.addColumn("Status");
     table.addColumn("Started");
-    table.addColumn("Cost", { align: "right" });
 
     for (const e of items) {
       table.addRow(
-        String(e["execution_id"] ?? "").slice(0, 12),
-        String(e["repo_url"] ?? ""),
-        String(e["workflow_name"] ?? ""),
-        formatStatus(String(e["status"] ?? "")),
-        formatTimestamp(e["started_at"] as string | undefined),
-        formatCost(String(e["cost_usd"] ?? "0")),
+        e.execution_id.slice(0, 12),
+        e.workflow_name,
+        formatStatus(e.status),
+        formatTimestamp(e.started_at),
       );
     }
     table.print();
@@ -240,9 +243,9 @@ const patternsCommand: CommandDef = {
   args: [{ name: "system-id", description: "System ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/systems/${id}/patterns`);
+    const d = unwrap(await api.GET("/systems/{system_id}/patterns", { params: { path: { system_id: id } } }), "Get system patterns");
 
-    const failures = (d["failure_patterns"] ?? []) as Record<string, unknown>[];
+    const failures = d.failure_patterns ?? [];
     if (failures.length > 0) {
       const table = new Table({ title: "Failure Patterns" });
       table.addColumn("Pattern");
@@ -250,9 +253,9 @@ const patternsCommand: CommandDef = {
       table.addColumn("Last Seen");
       for (const f of failures) {
         table.addRow(
-          String(f["pattern"] ?? "").slice(0, 60),
-          String(f["count"] ?? 0),
-          formatTimestamp(f["last_seen"] as string | undefined),
+          f.error_message.slice(0, 60),
+          String(f.occurrence_count),
+          formatTimestamp(f.last_seen || undefined),
         );
       }
       table.print();
@@ -260,19 +263,19 @@ const patternsCommand: CommandDef = {
       printDim("No failure patterns detected.");
     }
 
-    const outliers = (d["cost_outliers"] ?? []) as Record<string, unknown>[];
+    const outliers = d.cost_outliers ?? [];
     if (outliers.length > 0) {
       const table = new Table({ title: "Cost Outliers" });
       table.addColumn("Execution", { style: DIM });
       table.addColumn("Cost", { align: "right" });
-      table.addColumn("Avg Cost", { align: "right" });
+      table.addColumn("Median Cost", { align: "right" });
       table.addColumn("Ratio", { align: "right" });
       for (const o of outliers) {
         table.addRow(
-          String(o["execution_id"] ?? "").slice(0, 12),
-          formatCost(String(o["cost_usd"] ?? "0")),
-          formatCost(String(o["avg_cost_usd"] ?? "0")),
-          `${Number(o["ratio"] ?? 0).toFixed(1)}x`,
+          o.execution_id.slice(0, 12),
+          formatCost(o.cost_usd),
+          formatCost(o.median_cost_usd),
+          `${o.deviation_factor.toFixed(1)}x`,
         );
       }
       table.print();
@@ -286,15 +289,12 @@ const historyCommand: CommandDef = {
   args: [{ name: "system-id", description: "System ID", required: true }],
   options: {
     limit: { type: "string", short: "n", description: "Max results", default: "50" },
-    status: { type: "string", short: "s", description: "Filter by status" },
   },
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const params = buildParams({
-      limit: (parsed.values["limit"] as string | undefined) ?? "50",
-      status: (parsed.values["status"] as string | undefined) ?? null,
-    });
-    const items = await apiGetPaginated<Record<string, unknown>>(`/systems/${id}/history`, "entries", { params });
+    const limit = Number((parsed.values["limit"] as string | undefined) ?? "50");
+    const d = unwrap(await api.GET("/systems/{system_id}/history", { params: { path: { system_id: id }, query: { limit } } }), "Get system history");
+    const items = d.entries ?? [];
     if (items.length === 0) { printDim("No execution history."); return; }
 
     const table = new Table({ title: `History: ${id}` });
@@ -303,16 +303,14 @@ const historyCommand: CommandDef = {
     table.addColumn("Status");
     table.addColumn("Started");
     table.addColumn("Duration", { align: "right" });
-    table.addColumn("Cost", { align: "right" });
 
     for (const e of items) {
       table.addRow(
-        String(e["execution_id"] ?? "").slice(0, 12),
-        String(e["workflow_name"] ?? ""),
-        formatStatus(String(e["status"] ?? "")),
-        formatTimestamp(e["started_at"] as string | undefined),
-        e["duration_ms"] != null ? formatDuration(Number(e["duration_ms"])) : "\u2014",
-        formatCost(String(e["cost_usd"] ?? "0")),
+        e.execution_id.slice(0, 12),
+        e.workflow_name,
+        formatStatus(e.status),
+        formatTimestamp(e.started_at),
+        e.duration_seconds ? formatDuration(e.duration_seconds * 1000) : "\u2014",
       );
     }
     table.print();

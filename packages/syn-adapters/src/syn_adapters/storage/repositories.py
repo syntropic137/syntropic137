@@ -218,7 +218,7 @@ def get_artifact_repository() -> RepositoryAdapter[ArtifactAggregate]:
     return _artifact_repository
 
 
-def get_trigger_repository() -> Any:
+def get_trigger_repository() -> Any:  # noqa: ANN401
     """Get a TriggerRuleAggregate repository.
 
     NOTE: In test mode, returns InMemoryTriggerQueryStore (a query store

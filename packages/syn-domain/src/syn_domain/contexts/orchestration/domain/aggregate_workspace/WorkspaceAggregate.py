@@ -90,7 +90,7 @@ def _build_command_event(
     workspace_id: str,
     command: list[str],
     result: ExecutionResult,
-) -> Any:
+) -> Any:  # noqa: ANN401
     """Build a CommandExecutedEvent or CommandFailedEvent from execution result."""
     from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
         CommandExecutedEvent,

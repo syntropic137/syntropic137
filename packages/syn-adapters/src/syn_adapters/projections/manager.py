@@ -77,7 +77,7 @@ class ProjectionManager:
         self._projections = build_projection_registry(self._store)
         self._initialized = True
 
-    def get_projection(self, name: str) -> Any:  # heterogeneous registry
+    def get_projection(self, name: str) -> Any:  # noqa: ANN401  # heterogeneous registry
         """Get a projection by name.
 
         Args:

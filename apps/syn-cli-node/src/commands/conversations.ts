@@ -5,12 +5,11 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
-import type { ConversationLogResponse, ConversationMetadataResponse } from "../generated/types.js";
 
 const showCommand: CommandDef = {
   name: "show",
@@ -26,9 +25,9 @@ const showCommand: CommandDef = {
     const offset = parseInt((parsed.values["offset"] as string) ?? "0", 10);
     const limit = parseInt((parsed.values["limit"] as string) ?? "100", 10);
 
-    const data = await apiGet<ConversationLogResponse>(`/conversations/${sessionId}`, {
-      params: { offset, limit },
-    });
+    const data = unwrap(await api.GET("/conversations/{session_id}", {
+      params: { path: { session_id: sessionId }, query: { offset, limit } },
+    }), "Fetch conversation log");
 
     if (data.lines.length === 0) { printDim("No conversation lines found."); return; }
 
@@ -65,9 +64,9 @@ const metadataCommand: CommandDef = {
     const sessionId = parsed.positionals[0];
     if (!sessionId) { printError("Missing session-id"); throw new CLIError("Missing argument", 1); }
 
-    // API returns 404 if metadata not found, 500 on service error.
-    // apiGet throws CLIError for non-200 responses (see client/api.ts).
-    const m = await apiGet<ConversationMetadataResponse>(`/conversations/${sessionId}/metadata`);
+    const m = unwrap(await api.GET("/conversations/{session_id}/metadata", {
+      params: { path: { session_id: sessionId } },
+    }), "Fetch conversation metadata");
 
     print(`${style("Metadata:", BOLD)} ${m.session_id}`);
 

@@ -52,16 +52,19 @@ describe("repo commands", () => {
   it("health shows health metrics", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
-        health_status: "healthy",
+        repo_id: "repo-1",
+        repo_full_name: "owner/repo",
         success_rate: 0.95,
-        avg_duration_ms: 45000,
+        trend: "stable",
         total_executions: 20,
-        trends: [],
+        window_cost_usd: "1.50",
+        window_tokens: 5000,
+        last_execution_at: "2026-01-01T00:00:00Z",
       }),
     );
     await repoGroup.getCommand("health")!.handler({ positionals: ["repo-1"], values: {} });
     const out = stdout();
-    expect(out).toContain("healthy");
+    expect(out).toContain("stable");
     expect(out).toContain("95.0%");
   });
 

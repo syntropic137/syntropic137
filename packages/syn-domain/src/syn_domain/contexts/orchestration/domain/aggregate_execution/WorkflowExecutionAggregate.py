@@ -78,7 +78,7 @@ if TYPE_CHECKING:
     )
 
 
-def _evt(event: DomainEvent, field: str, default: Any = None) -> Any:
+def _evt(event: DomainEvent, field: str, default: Any = None) -> Any:  # noqa: ANN401
     """Get field from event, handling both typed and GenericDomainEvent formats.
 
     Returns Any because the caller knows the concrete type based on the field name.

@@ -148,7 +148,7 @@ class SessionToolsProjection:
         phase_id: str | None = None,
         tool_name: str | None = None,
         limit: int = 1000,
-        **_kwargs: Any,
+        **_kwargs: Any,  # noqa: ANN401
     ) -> list[ToolOperation]:
         """Query tool operations with filters.
 

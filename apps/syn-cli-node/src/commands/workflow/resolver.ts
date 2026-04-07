@@ -4,28 +4,21 @@
  */
 
 import { CLIError } from "../../framework/errors.js";
-import { apiGet } from "../../client/api.js";
+import { api, unwrap } from "../../client/typed.js";
 import { printError, print, printDim } from "../../output/console.js";
 import { style, YELLOW, DIM as DIM_CODE } from "../../output/ansi.js";
 import type { WorkflowSummary } from "./models.js";
-
-interface WorkflowListItem {
-  id: string;
-  name: string;
-  workflow_type: string;
-  phase_count?: number;
-}
 
 export async function resolveWorkflow(
   partialId: string,
   opts?: { includeArchived?: boolean },
 ): Promise<WorkflowSummary> {
-  const params: Record<string, string> = {};
-  if (opts?.includeArchived) {
-    params["include_archived"] = "true";
-  }
-
-  const data = await apiGet<{ workflows: WorkflowListItem[] }>("/workflows", { params });
+  const data = unwrap(
+    await api.GET("/workflows", {
+      params: { query: { include_archived: opts?.includeArchived ?? false } },
+    }),
+    "Failed to list workflows",
+  );
   const workflows = data.workflows ?? [];
   const matching = workflows.filter((w) => w.id.startsWith(partialId));
 

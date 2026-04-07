@@ -17,6 +17,7 @@ from syn_api._wiring import (
 )
 from syn_api.types import (
     CostOutlierResponse,
+    CreateSystemRequest,
     Err,
     FailurePatternResponse,
     Ok,
@@ -33,6 +34,7 @@ from syn_api.types import (
     SystemPatternsResponse,
     SystemStatusResponse,
     SystemSummaryResponse,
+    UpdateSystemRequest,
 )
 
 if TYPE_CHECKING:
@@ -411,22 +413,22 @@ def _classify_sys_error(error_msg: str) -> SystemErrorCode:
 
 
 @router.post("")
-async def create_system_endpoint(body: dict[str, Any]) -> SystemCreatedResponse:
+async def create_system_endpoint(body: CreateSystemRequest) -> SystemCreatedResponse:
     """Create a new system."""
     try:
         result = await create_system(
-            organization_id=body["organization_id"],
-            name=body["name"],
-            description=body.get("description", ""),
-            created_by=body.get("created_by", "api"),
+            organization_id=body.organization_id,
+            name=body.name,
+            description=body.description,
+            created_by=body.created_by,
         )
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return SystemCreatedResponse(system_id=result.value, name=body["name"])
+    return SystemCreatedResponse(system_id=result.value, name=body.name)
 
 
 @router.get("")
@@ -457,12 +459,12 @@ async def get_system_endpoint(system_id: str) -> SystemSummaryResponse:
 
 
 @router.put("/{system_id}")
-async def update_system_endpoint(system_id: str, body: dict[str, Any]) -> SystemActionResponse:
+async def update_system_endpoint(system_id: str, body: UpdateSystemRequest) -> SystemActionResponse:
     """Update a system."""
     result = await update_system(
         system_id=system_id,
-        name=body.get("name"),
-        description=body.get("description"),
+        name=body.name,
+        description=body.description,
     )
 
     if isinstance(result, Err):

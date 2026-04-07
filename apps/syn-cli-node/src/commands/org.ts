@@ -5,10 +5,11 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetPaginated, apiPost, apiPut, apiDelete } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { Table } from "../output/table.js";
+
 
 function reqId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
@@ -28,13 +29,12 @@ const createCommand: CommandDef = {
     const slug = parsed.values["slug"] as string | undefined;
     if (!name) { printError("Missing --name"); throw new CLIError("Missing option", 1); }
 
-    const body: Record<string, unknown> = { name };
-    if (slug) body["slug"] = slug;
+    const body = { name, slug: slug ?? "", created_by: "cli" as const };
 
-    const d = await apiPost<Record<string, unknown>>("/organizations", { body, expected: [200, 201] });
-    printSuccess(`Organization created: ${d["organization_id"] ?? ""}`);
-    print(`  Name: ${d["name"] ?? name}`);
-    if (d["slug"]) print(`  Slug: ${String(d["slug"])}`);
+    const d = unwrap(await api.POST("/organizations", { body }), "Create organization");
+    printSuccess(`Organization created: ${d.organization_id}`);
+    print(`  Name: ${d.name ?? name}`);
+    if (d.slug) print(`  Slug: ${d.slug}`);
   },
 };
 
@@ -42,7 +42,8 @@ const listCommand: CommandDef = {
   name: "list",
   description: "List all organizations",
   handler: async () => {
-    const items = await apiGetPaginated<Record<string, unknown>>("/organizations", "organizations");
+    const d = unwrap(await api.GET("/organizations"), "List organizations");
+    const items = d.organizations ?? [];
     if (items.length === 0) { printDim("No organizations found."); return; }
 
     const table = new Table({ title: "Organizations" });
@@ -54,11 +55,11 @@ const listCommand: CommandDef = {
 
     for (const o of items) {
       table.addRow(
-        String(o["organization_id"] ?? ""),
-        String(o["name"] ?? ""),
-        String(o["slug"] ?? ""),
-        String(o["system_count"] ?? 0),
-        String(o["repo_count"] ?? 0),
+        o.organization_id,
+        o.name,
+        o.slug,
+        String(o.system_count),
+        String(o.repo_count),
       );
     }
     table.print();
@@ -71,12 +72,12 @@ const showCommand: CommandDef = {
   args: [{ name: "org-id", description: "Organization ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const d = await apiGet<Record<string, unknown>>(`/organizations/${id}`);
-    print(`${style("Organization:", BOLD)} ${d["name"] ?? id}`);
-    print(`  ID:      ${d["organization_id"] ?? id}`);
-    if (d["slug"]) print(`  Slug:    ${String(d["slug"])}`);
-    print(`  Systems: ${d["system_count"] ?? 0}`);
-    print(`  Repos:   ${d["repo_count"] ?? 0}`);
+    const d = unwrap(await api.GET("/organizations/{organization_id}", { params: { path: { organization_id: id } } }), "Get organization");
+    print(`${style("Organization:", BOLD)} ${d.name}`);
+    print(`  ID:      ${d.organization_id}`);
+    if (d.slug) print(`  Slug:    ${d.slug}`);
+    print(`  Systems: ${d.system_count}`);
+    print(`  Repos:   ${d.repo_count}`);
   },
 };
 
@@ -90,14 +91,15 @@ const updateCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const id = reqId(parsed);
-    const body: Record<string, unknown> = {};
     const name = parsed.values["name"] as string | undefined;
     const slug = parsed.values["slug"] as string | undefined;
-    if (name) body["name"] = name;
-    if (slug) body["slug"] = slug;
-    if (Object.keys(body).length === 0) { printError("Nothing to update. Use --name or --slug."); throw new CLIError("No updates", 1); }
+    if (!name && !slug) { printError("Nothing to update. Use --name or --slug."); throw new CLIError("No updates", 1); }
 
-    await apiPut(`/organizations/${id}`, { body });
+    const body = {
+      ...(name ? { name } : {}),
+      ...(slug ? { slug } : {}),
+    };
+    unwrap(await api.PUT("/organizations/{organization_id}", { params: { path: { organization_id: id } }, body }), "Update organization");
     printSuccess(`Organization ${id} updated.`);
   },
 };
@@ -115,7 +117,7 @@ const deleteCommand: CommandDef = {
       printError(`Use --force to confirm deleting organization ${id}`);
       throw new CLIError("Confirmation required", 1);
     }
-    await apiDelete(`/organizations/${id}`);
+    unwrap(await api.DELETE("/organizations/{organization_id}", { params: { path: { organization_id: id } } }), "Delete organization");
     printSuccess(`Organization ${id} deleted.`);
   },
 };

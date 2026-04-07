@@ -25,7 +25,7 @@ class SingleBenchmark(BaseBenchmark):
 
     benchmark_type = "single"
 
-    async def run(self, iterations: int = 10, **_kwargs: Any) -> BenchmarkResult:
+    async def run(self, iterations: int = 10, **_kwargs: Any) -> BenchmarkResult:  # noqa: ANN401
         """Run single workspace benchmark.
 
         Args:

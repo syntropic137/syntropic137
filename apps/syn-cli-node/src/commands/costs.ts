@@ -5,16 +5,12 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, apiGetList, buildParams } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { formatCost, formatDuration, formatTimestamp, formatTokens, formatBreakdown } from "../output/format.js";
 import { Table } from "../output/table.js";
-import type {
-  CostSummaryResponse,
-  SessionCostResponse,
-  ExecutionCostResponse,
-} from "../generated/types.js";
+
 
 function safeCost(v: string): string {
   if (v.startsWith("$")) return v;
@@ -25,7 +21,7 @@ const summaryCommand: CommandDef = {
   name: "summary",
   description: "Show aggregated cost summary",
   handler: async () => {
-    const d = await apiGet<CostSummaryResponse>("/costs/summary");
+    const d = unwrap(await api.GET("/costs/summary"), "Get cost summary");
 
     print(style("Cost Summary", CYAN));
     print(`  ${style("Total Cost:", BOLD)} ${formatCost(d.total_cost_usd)}`);
@@ -65,11 +61,15 @@ const sessionsCommand: CommandDef = {
     limit: { type: "string", short: "n", description: "Max results", default: "50" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const params = buildParams({
-      execution_id: (parsed.values["execution"] as string | undefined) ?? null,
-      limit: (parsed.values["limit"] as string | undefined) ?? "50",
-    });
-    const items = await apiGetList<SessionCostResponse>("/costs/sessions", { params });
+    const limit = Number((parsed.values["limit"] as string | undefined) ?? "50");
+    const items = unwrap(await api.GET("/costs/sessions", {
+      params: {
+        query: {
+          execution_id: (parsed.values["execution"] as string | undefined) ?? null,
+          limit,
+        },
+      },
+    }), "List session costs");
 
     if (items.length === 0) { printDim("No session cost data found."); return; }
 
@@ -102,7 +102,7 @@ const sessionDetailCommand: CommandDef = {
     const id = parsed.positionals[0];
     if (!id) { printError("Missing session-id"); throw new CLIError("Missing argument", 1); }
 
-    const s = await apiGet<SessionCostResponse>(`/costs/sessions/${id}`);
+    const s = unwrap(await api.GET("/costs/sessions/{session_id}", { params: { path: { session_id: id } } }), "Get session cost");
 
     print(style("Session Cost Detail", CYAN));
     print(`  ${style("Session:", BOLD)} ${s.session_id}`);
@@ -124,8 +124,8 @@ const executionsCommand: CommandDef = {
   description: "List cost data for workflow executions",
   options: { limit: { type: "string", short: "n", description: "Max results", default: "50" } },
   handler: async (parsed: ParsedArgs) => {
-    const limit = (parsed.values["limit"] as string | undefined) ?? "50";
-    const items = await apiGetList<ExecutionCostResponse>("/costs/executions", { params: { limit } });
+    const limit = Number((parsed.values["limit"] as string | undefined) ?? "50");
+    const items = unwrap(await api.GET("/costs/executions", { params: { query: { limit } } }), "List execution costs");
 
     if (items.length === 0) { printDim("No execution cost data found."); return; }
 
@@ -156,7 +156,7 @@ const executionDetailCommand: CommandDef = {
     const id = parsed.positionals[0];
     if (!id) { printError("Missing execution-id"); throw new CLIError("Missing argument", 1); }
 
-    const e = await apiGet<ExecutionCostResponse>(`/costs/executions/${id}`);
+    const e = unwrap(await api.GET("/costs/executions/{execution_id}", { params: { path: { execution_id: id } } }), "Get execution cost");
 
     print(style("Execution Cost Detail", CYAN));
     print(`  ${style("Execution:", BOLD)} ${e.execution_id}`);

@@ -207,7 +207,7 @@ class ArtifactBundle:
         artifact_type: ArtifactType = ArtifactType.OTHER,
         title: str | None = None,
         is_primary: bool = False,
-        **extra_metadata: Any,
+        **extra_metadata: Any,  # noqa: ANN401
     ) -> ArtifactFile:
         """Add a file to the bundle.
 
