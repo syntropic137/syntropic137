@@ -58,40 +58,37 @@ async def _resolve_workflow_names(workflow_ids: set[str]) -> dict[str, str]:
 async def _resolve_repo_names(repo_values: set[str]) -> dict[str, str]:
     """Best-effort resolve repo IDs to ``owner/repo`` display names.
 
-    If a value already looks like ``owner/repo`` (contains ``/``), it is
-    kept as-is.  Internal repo IDs (e.g. ``repo-91408957``) are resolved
-    via the repo projection.
-
-    Returns ``{original_value: display_name}`` for every input.
+    Values already in ``owner/repo`` form (contain ``/``) are kept as-is.
+    Internal repo IDs (e.g. ``repo-91408957``) are resolved via the repo
+    projection.  Returns ``{original_value: display_name}`` for every input.
     """
+    # Partition into already-resolved and needing lookup
+    result = {v: v for v in repo_values if "/" in v}
+    ids_to_resolve = repo_values - result.keys()
+    if not ids_to_resolve:
+        return result
+
+    resolved = await _lookup_repo_ids(ids_to_resolve)
+    result.update(resolved)
+    return result
+
+
+async def _lookup_repo_ids(repo_ids: set[str]) -> dict[str, str]:
+    """Look up repo IDs via the repo projection. Returns ID→display_name."""
     from syn_domain.contexts.organization.slices.list_repos.projection import (
         get_repo_projection,
     )
 
     result: dict[str, str] = {}
-    ids_to_resolve: set[str] = set()
-    for val in repo_values:
-        if "/" in val:
-            result[val] = val  # already owner/repo
-        else:
-            ids_to_resolve.add(val)
-
-    if not ids_to_resolve:
-        return result
-
     try:
         projection = get_repo_projection()
-        for repo_id in ids_to_resolve:
+        for repo_id in repo_ids:
             repo = await projection.get(repo_id)
-            if repo and repo.full_name:
-                result[repo_id] = repo.full_name
-            else:
-                result[repo_id] = repo_id  # fallback to raw ID
+            result[repo_id] = repo.full_name if repo and repo.full_name else repo_id
     except Exception:
         logger.debug("Could not resolve repo names", exc_info=True)
-        for repo_id in ids_to_resolve:
+        for repo_id in repo_ids:
             result.setdefault(repo_id, repo_id)
-
     return result
 
 

@@ -1,6 +1,7 @@
+import type { CSSProperties } from 'react'
 import { Tooltip, type TooltipProps } from 'recharts'
 
-const defaultContentStyle: React.CSSProperties = {
+const defaultContentStyle: CSSProperties = {
   backgroundColor: 'var(--color-surface-elevated)',
   border: '1px solid var(--color-border)',
   borderRadius: '8px',
@@ -8,13 +9,13 @@ const defaultContentStyle: React.CSSProperties = {
   color: 'var(--color-text-primary)',
 }
 
-const defaultLabelStyle: React.CSSProperties = {
+const defaultLabelStyle: CSSProperties = {
   color: 'var(--color-text-primary)',
   fontWeight: 600,
   marginBottom: 4,
 }
 
-const defaultItemStyle: React.CSSProperties = {
+const defaultItemStyle: CSSProperties = {
   color: 'var(--color-text-secondary)',
 }
 

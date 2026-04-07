@@ -38,7 +38,7 @@ const registerCommand: CommandDef = {
     workflow: { type: "string", short: "w", description: "Workflow ID to execute" },
     event: { type: "string", short: "e", description: "GitHub event type (e.g. check_run.completed)" },
     condition: { type: "string", short: "c", multiple: true, description: "Condition as field=value (repeatable, uses 'eq' operator)" },
-    "max-fires": { type: "string", description: "Maximum fires per period", default: "5" },
+    "max-fires": { type: "string", description: "Maximum fire attempts per PR/trigger combination", default: "5" },
     cooldown: { type: "string", description: "Cooldown in seconds", default: "300" },
   },
   handler: async (parsed: ParsedArgs) => {

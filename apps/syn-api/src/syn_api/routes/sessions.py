@@ -277,7 +277,7 @@ async def _load_tool_operations(manager: ProjectionManager, session_id: str) -> 
 
 
 async def _load_cost_data(
-    manager: ProjectionManager, session_id: str, fallback_tokens: int, fallback_cost: Decimal
+    session_id: str, fallback_tokens: int, fallback_cost: Decimal
 ) -> _CostData:
     """Load cost data for a session via SessionCostQueryService (TimescaleDB).
 
@@ -332,7 +332,7 @@ async def get_session(
         return Err(SessionError.NOT_FOUND, message=f"Session {session_id} not found")
 
     operations = await _load_tool_operations(manager, session_id)
-    cd = await _load_cost_data(manager, session_id, session.total_tokens, session.total_cost_usd)
+    cd = await _load_cost_data(session_id, session.total_tokens, session.total_cost_usd)
 
     return Ok(
         SessionDetail(
