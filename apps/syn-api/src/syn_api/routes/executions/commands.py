@@ -7,6 +7,7 @@ to a specific workflow.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -120,6 +121,66 @@ async def _validate_repo_access(repo_full_name: str) -> None:
         ) from exc
     except Exception as exc:
         logger.warning("Could not pre-validate repo access for %s: %s", repo_full_name, exc)
+
+
+def _merge_inputs(
+    workflow: WorkflowTemplateAggregate,
+    inputs: dict[str, str],
+    task: str | None,
+) -> dict[str, str]:
+    """Merge declaration defaults, provided inputs, and task."""
+    merged: dict[str, str] = {
+        decl.name: str(decl.default)
+        for decl in workflow.input_declarations
+        if decl.default is not None
+    }
+    merged.update(inputs)
+    if task is not None:
+        merged["task"] = task
+    return merged
+
+
+def _validate_required_inputs(
+    workflow: WorkflowTemplateAggregate,
+    inputs: dict[str, str],
+    task: str | None,
+) -> None:
+    """Eagerly validate that all required inputs are satisfied.
+
+    Merges input declaration defaults, provided inputs, and the task
+    placeholder, then checks the repository URL for unresolved
+    ``{{placeholder}}`` patterns.  Raises HTTPException(422) with a
+    clear message listing the missing inputs so the caller knows
+    exactly what to provide.
+    """
+    repo_url: str | None = workflow._repository_url
+    if not repo_url:
+        return
+
+    merged = _merge_inputs(workflow, inputs, task)
+    for key, value in merged.items():
+        repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
+
+    if "{{" not in repo_url:
+        return
+
+    unresolved = sorted(set(re.findall(r"\{\{(\w+)\}\}", repo_url)))
+    if not unresolved:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Repository URL contains malformed placeholders. "
+                "Use the format {{name}} with alphanumeric/underscore characters."
+            ),
+        )
+    hints = [f"--input {name}=<value>" for name in unresolved]
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"Missing required inputs: {', '.join(unresolved)}. "
+            f"Provide them via: {', '.join(hints)}"
+        ),
+    )
 
 
 router = APIRouter(prefix="/workflows", tags=["execution"])
@@ -293,6 +354,9 @@ async def execute_workflow_endpoint(
     workflow = await workflow_repo.get_by_id(workflow_id)
     if workflow is None:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+    # Validate required inputs before returning 200 (#639)
+    _validate_required_inputs(workflow, request.inputs, request.task)
 
     repo_full_name = _resolve_target_repo(workflow, request.inputs, request.task)
     if repo_full_name:

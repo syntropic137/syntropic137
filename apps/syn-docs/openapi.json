@@ -7392,7 +7392,8 @@
         "properties": {
           "organization_id": {
             "type": "string",
-            "title": "Organization Id"
+            "title": "Organization Id",
+            "default": "_unaffiliated"
           },
           "full_name": {
             "type": "string",
@@ -7437,7 +7438,6 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "organization_id",
           "full_name"
         ],
         "title": "RegisterRepoRequest",

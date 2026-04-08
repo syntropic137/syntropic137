@@ -23,17 +23,15 @@ class ClaimRepoCommand:
         command_id: Unique identifier for this command.
     """
 
-    organization_id: str
-    provider: str
-    full_name: str
-    repo_id: str
+    organization_id: str = "_unaffiliated"
+    provider: str = "github"
+    full_name: str = ""
+    repo_id: str = ""
     aggregate_id: str = ""
     command_id: str = field(default_factory=lambda: str(uuid4()))
 
     def __post_init__(self) -> None:
         """Validate the command."""
-        if not self.organization_id:
-            raise ValueError("organization_id is required")
         if not self.full_name:
             raise ValueError("full_name is required")
         if not self.provider:
@@ -42,3 +40,7 @@ class ClaimRepoCommand:
             raise ValueError("repo_id is required")
         if not self.aggregate_id:
             raise ValueError("aggregate_id is required")
+        if self.organization_id == "":
+            raise ValueError(
+                "organization_id cannot be empty; use '_unaffiliated' for org-less repos"
+            )
