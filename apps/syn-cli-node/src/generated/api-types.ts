@@ -3462,6 +3462,8 @@ export interface components {
             id: string;
             /** Workflow Id */
             workflow_id: string | null;
+            /** Workflow Name */
+            workflow_name?: string | null;
             /** Execution Id */
             execution_id?: string | null;
             /** Phase Id */

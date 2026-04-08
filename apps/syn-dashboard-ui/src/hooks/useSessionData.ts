@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getSession } from '../api/sessions'
 import type { SessionResponse } from '../types'
 import { useLiveTimer } from './useLiveTimer'
 import { usePolling } from './usePolling'
@@ -13,16 +14,6 @@ export interface UseSessionDataResult {
 }
 
 const FETCH_TIMEOUT_MS = 15_000
-const API_BASE = '/api/v1'
-
-async function fetchSessionWithTimeout(sessionId: string, signal?: AbortSignal): Promise<SessionResponse> {
-  const response = await fetch(`${API_BASE}/sessions/${sessionId}`, { signal })
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }))
-    throw new Error(error.detail || `API Error: ${response.status}`)
-  }
-  return response.json()
-}
 
 export function useSessionData(sessionId: string | undefined): UseSessionDataResult {
   const [session, setSession] = useState<SessionResponse | null>(null)
@@ -49,7 +40,7 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
       controller.abort()
     }, FETCH_TIMEOUT_MS)
 
-    fetchSessionWithTimeout(sessionId, controller.signal)
+    getSession(sessionId, controller.signal)
       .then((data) => {
         setSession(data)
         setError(null)
