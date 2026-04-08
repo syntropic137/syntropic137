@@ -6,7 +6,9 @@ import {
   Box,
   FileText,
   GitBranch,
+  Lightbulb,
   LayoutDashboard,
+  MessageCircle,
   X,
   Zap,
 } from 'lucide-react'
@@ -107,6 +109,24 @@ export function Layout() {
 
         {/* Bottom section */}
         <div className="border-t border-[var(--color-border)] p-3">
+          <a
+            href="https://syntropic137.canny.io/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)] transition-colors"
+          >
+            <Lightbulb className="h-4 w-4" />
+            <span className="text-xs font-medium">Request a Feature</span>
+          </a>
+          <a
+            href="https://github.com/syntropic137/syntropic137/discussions"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)] transition-colors"
+          >
+            <MessageCircle className="h-4 w-4" />
+            <span className="text-xs font-medium">Discussions</span>
+          </a>
           <div className="flex items-center gap-3 rounded-md px-3 py-2">
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-elevated)]">
               <Box className="h-3.5 w-3.5 text-[var(--color-text-secondary)]" />
