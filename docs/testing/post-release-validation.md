@@ -33,16 +33,16 @@ When run by Claude Code, sections can be parallelized via subagents to reduce
 wall-clock time from ~30 minutes to ~10 minutes. The dependency graph:
 
 ```
-Preflight (sequential — verify stack, CLI version, health)
+Preflight (sequential — reset stack, install CLI, verify health)
   │
-  ├─ Agent A: Sections 3 + 4 — Release artifacts, webhook/polling mode
-  ├─ Agent B: Section 5 — Core CLI read-only (all command groups)
-  ├─ Agent C: Section 9 — Dashboard UI (browser-qa-agent)
+  ├─ Agent A: Sections 2 + 3 — Release artifacts, webhook/polling mode
+  ├─ Agent B: Section 4 — Core CLI read-only (all command groups)
+  ├─ Agent C: Section 8 — Dashboard UI (browser-qa-agent)
   │   └── All three run in parallel (Batch 1, read-only)
   │
-  ├─ Section 6 — Repo & system management (write ops, sequential)
-  ├─ Section 7 — Workflow lifecycle (sequential, skip execution if no token budget)
-  └─ Section 8 — Trigger lifecycle (sequential, depends on repos + workflows)
+  ├─ Section 5 — Repo & system management (write ops, sequential)
+  ├─ Section 6 — Workflow lifecycle (sequential, skip execution if no token budget)
+  └─ Section 7 — Trigger lifecycle (sequential, depends on repos + workflows)
       └── Batch 2-3: sequential, uses IDs from Batch 1
 ```
 
@@ -51,7 +51,7 @@ Preflight (sequential — verify stack, CLI version, health)
 - Batch 2-3 must wait for Batch 1 to complete (need discovered IDs)
 - Dashboard agent should use `sdlc:browser-qa-agent` subagent type
 - Each agent reports `[PASS]`/`[FAIL]`/`[SKIP]` per check
-- The orchestrating agent compiles results into the Section 10 report template
+- The orchestrating agent compiles results into the Section 9 report template
 
 ---
 
@@ -73,53 +73,15 @@ Preflight (sequential — verify stack, CLI version, health)
 
 ---
 
-## 0. Check Current Stack State
+## 0. Reset and Upgrade Selfhost Stack
 
-> **IMPORTANT: Do not assume the stack is running the correct version.** The
-> selfhost stack may be running a previous release, locally-built dev images, or
-> a mix. You MUST verify the running version before proceeding — and you MUST
-> reset + upgrade before any validation.
-
-### Identify running stacks
-
-```bash
-docker compose ls
-```
-
-Look for the `syntropic137_selfhost` project. The dev stack (`syn-dev`) may also
-be running — ignore it entirely for validation purposes.
-
-### Check what version the selfhost stack is currently running
-
-```bash
-docker ps --filter "label=com.docker.compose.project=syntropic137_selfhost" --format "table {{.Image}}\t{{.Names}}\t{{.Status}}"
-```
-
-Inspect the **Image** column carefully:
-- `ghcr.io/syntropic137/syn-api:<VERSION>` — published GHCR images (what we want)
-- `syntropic137_development-*:latest` — locally-built dev images (NOT valid for validation)
-- A mix of both — partial upgrade, needs full reset
-
-**If images do NOT show the release version being validated, you MUST proceed
-with the reset and upgrade in Section 1.** Do not skip ahead to validation.
-
-> **If no selfhost stack is running at all**, start it:
-> ```bash
-> npx @syntropic137/setup init
-> ```
-
----
-
-## 1. Reset Data and Upgrade Selfhost Stack
-
-> **MANDATORY before every validation run.** Always reset data and upgrade to the
-> release under test. This ensures:
-> - Clean state — no stale sessions, leftover workflows, or duplicate repos
-> - Correct images — the published GHCR images for the release, not dev builds
-> - Reproducible results — every validation starts from the same baseline
+> **MANDATORY before every validation run.** Don't bother checking what's
+> currently running — tear it down, upgrade, and verify. This ensures clean
+> state, correct GHCR images, and reproducible results every time.
 >
-> **Never skip this section.** Even if the stack appears to be running the right
-> version, reset anyway — leftover data from previous runs will pollute results.
+> `npx @syntropic137/setup update` is the single command that pulls the
+> correct GHCR images for the release and starts the stack. This is the same
+> upgrade path users follow, so it's itself a release quality signal.
 
 ### Step 1: Tear down and clear data
 
@@ -127,14 +89,14 @@ with the reset and upgrade in Section 1.** Do not skip ahead to validation.
 docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml down -v
 ```
 
-- [ ] Selfhost stack stopped
-- [ ] All data volumes removed
+- [ ] Selfhost stack stopped and all data volumes removed
+
+> **If no selfhost stack exists yet**, initialize instead:
+> ```bash
+> npx @syntropic137/setup init
+> ```
 
 ### Step 2: Upgrade to the release under test
-
-This step validates that the `npx @syntropic137/setup update` upgrade path works
-correctly — this is itself a release quality signal. Users will run this exact
-command to pick up new releases.
 
 ```bash
 npx @syntropic137/setup update
@@ -142,7 +104,7 @@ npx @syntropic137/setup update
 
 - [ ] Update command completes without errors
 - [ ] New GHCR images pulled for the release version
-- [ ] All containers restart with new images
+- [ ] All containers start with new images
 
 > **If the update fails:** Re-initialize from scratch:
 > ```bash
@@ -150,23 +112,13 @@ npx @syntropic137/setup update
 > npx @syntropic137/setup init
 > ```
 
-### Step 3: Verify the stack is running the correct version
-
-```bash
-npx @syntropic137/setup status
-```
-
-- [ ] All services show healthy
-- [ ] API responds at health endpoint
-
-Verify the running images match the release version:
+### Step 3: Verify GHCR images and health
 
 ```bash
 docker ps --format "table {{.Image}}\t{{.Status}}\t{{.Names}}" | grep syn137
 ```
 
-- [ ] Image tags match the release being validated (e.g., `ghcr.io/syntropic137/syn-api:<VERSION>`)
-- [ ] **No** `syntropic137_development-*` images — those are dev-built, not published
+- [ ] Images are `ghcr.io/syntropic137/*` (GHCR digests) — **not** `syntropic137_development-*:latest`
 - [ ] All containers show healthy status
 
 ```bash
@@ -174,6 +126,10 @@ curl -s http://localhost:8137/health
 ```
 
 - [ ] Health check returns healthy status
+
+> **Troubleshooting:** If you see `syntropic137_development-*:latest` images,
+> the stack is running locally-built dev images instead of published GHCR images.
+> This means the update didn't work correctly — tear down and re-initialize.
 
 ### Step 4: Verify clean state
 
@@ -189,7 +145,7 @@ syn repo list
 
 ---
 
-## 2. Install CLI from npm
+## 1. Install CLI from npm
 
 > **CRITICAL: Use published artifacts only.** Always install the CLI from npm
 > (`@syntropic137/cli`) — never build from source or use `node dist/syn.js`.
@@ -232,7 +188,7 @@ echo "CLI: $CLI_VERSION  API: $API_VERSION"
 
 ---
 
-## 3. Validate Release Artifacts
+## 2. Validate Release Artifacts
 
 ### Container images
 
@@ -262,7 +218,7 @@ gh release view v<VERSION> --repo syntropic137/syntropic137
 
 ---
 
-## 4. Determine Webhook / Polling Mode
+## 3. Determine Webhook / Polling Mode
 
 Before testing triggers, determine whether the stack is receiving webhooks or
 operating in polling-only mode. This affects which triggers can fire.
@@ -300,12 +256,12 @@ in polling-only mode.
 
 ---
 
-## 5. Functional Validation — Core CLI (Read-Only)
+## 4. Functional Validation — Core CLI (Read-Only)
 
-> **Fresh stack note:** After a data reset (Section 1), most commands that take
+> **Fresh stack note:** After a data reset (Section 0), most commands that take
 > `<id>` arguments will have no data. For these commands, verify they return
 > graceful empty responses (empty lists, "not found" errors) without crashes or
-> stack traces. Re-run ID-dependent commands after Sections 6-7 create data.
+> stack traces. Re-run ID-dependent commands after Sections 5-6 create data.
 
 ### Configuration
 
@@ -515,12 +471,12 @@ syn artifacts content <artifact-id>
 - [ ] Artifact listing works (may be empty on fresh stack)
 - [ ] Artifact detail and content render (if artifacts exist)
 
-> **Note:** `syn artifacts create` is tested in Section 7 after a workflow
+> **Note:** `syn artifacts create` is tested in Section 6 after a workflow
 > execution produces artifacts.
 
 ---
 
-## 6. Functional Validation — Repo & System Management (Write Operations)
+## 5. Functional Validation — Repo & System Management (Write Operations)
 
 ### Register a repository
 
@@ -552,7 +508,7 @@ syn repo unassign <repo-id>
 
 ---
 
-## 7. Functional Validation — Workflow Lifecycle
+## 6. Functional Validation — Workflow Lifecycle
 
 > **COST WARNING: This section runs real workflows that consume Anthropic API tokens.**
 >
@@ -760,11 +716,11 @@ syn workflow uninstall <package-name>
 
 ---
 
-## 8. Functional Validation — Trigger Lifecycle & Round-Trip
+## 7. Functional Validation — Trigger Lifecycle & Round-Trip
 
 ### Determine available trigger presets
 
-Based on Section 4 (webhook/polling mode):
+Based on Section 3 (webhook/polling mode):
 
 | Preset | Can test? |
 |--------|-----------|
@@ -923,7 +879,7 @@ syn triggers disable-all --repo owner/repo
 
 ---
 
-## 9. Functional Validation — Dashboard (Playwright)
+## 8. Functional Validation — Dashboard (Playwright)
 
 > **Use Playwright for automated dashboard validation.** When run by Claude Code,
 > use the `sdlc:browser-qa-agent` subagent type with Playwright MCP tools to
@@ -976,7 +932,7 @@ Navigate to `http://localhost:8137` via Playwright.
 
 ---
 
-## 10. Validation Report
+## 9. Validation Report
 
 ### Where to save
 
@@ -1183,7 +1139,7 @@ to open source launch? What must be fixed first, what can ship as-is?
 
 ---
 
-## 11. Post-Fix Validation Loop
+## 10. Post-Fix Validation Loop
 
 After the initial validation discovers issues and fixes are implemented locally,
 verify those fixes against the selfhost stack before merging. This avoids shipping
@@ -1273,11 +1229,11 @@ behavior:
 
 | Finding | Re-validate with |
 |---------|-----------------|
-| API/domain fix | Section 5 (relevant commands) + Section 7 (workflow lifecycle) |
-| CLI fix | Section 5 (relevant commands) |
-| Gateway/CSP fix | Section 9 (dashboard — check console for CSP violations) |
-| Cost calculation fix | Section 5 (`syn costs`, `syn execution show`) |
-| Input validation fix | Section 7 (workflow run with missing inputs) |
+| API/domain fix | Section 4 (relevant commands) + Section 6 (workflow lifecycle) |
+| CLI fix | Section 4 (relevant commands) |
+| Gateway/CSP fix | Section 8 (dashboard — check console for CSP violations) |
+| Cost calculation fix | Section 4 (`syn costs`, `syn execution show`) |
+| Input validation fix | Section 6 (workflow run with missing inputs) |
 
 ```bash
 # Quick smoke test after image swap
@@ -1342,4 +1298,4 @@ Once all findings pass re-validation:
 4. PR `main` → `release` — triggers the full release pipeline
 5. After release publishes, run `npx @syntropic137/setup update` on the selfhost
    stack to pull the new GHCR images with the fixes baked in
-6. Run a final smoke test (Sections 2-5) against the updated selfhost stack
+6. Run a final smoke test (Sections 1-4) against the updated selfhost stack

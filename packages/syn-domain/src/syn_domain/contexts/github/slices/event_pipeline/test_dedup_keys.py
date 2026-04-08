@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key
+from syn_domain.contexts.github.slices.event_pipeline.event_type_mapper import map_events_api_to_normalized
 
 # ---------------------------------------------------------------------------
 # Push events
@@ -121,6 +122,71 @@ class TestCreateDeleteDedupKey:
         }
         key = compute_dedup_key("delete", "", payload)
         assert key == "delete:owner/repo:tag:v1.0"
+
+
+# ---------------------------------------------------------------------------
+# Unknown event type fallback
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Pull request review events
+# ---------------------------------------------------------------------------
+
+
+class TestPullRequestReviewDedupKey:
+    def test_pr_review_submitted(self) -> None:
+        payload = {
+            "review": {"id": 12345},
+            "repository": {"full_name": "owner/repo"},
+        }
+        key = compute_dedup_key("pull_request_review", "submitted", payload)
+        assert key == "review:owner/repo:12345:submitted"
+
+    def test_pr_review_different_actions_produce_different_keys(self) -> None:
+        base = {
+            "review": {"id": 12345},
+            "repository": {"full_name": "owner/repo"},
+        }
+        key_submitted = compute_dedup_key("pull_request_review", "submitted", base)
+        key_edited = compute_dedup_key("pull_request_review", "edited", base)
+        assert key_submitted != key_edited
+
+    def test_pr_review_cross_source_dedup_consistency(self) -> None:
+        """Webhook and Events API payloads produce identical dedup keys.
+
+        The Events API uses action="created" which is normalized to "submitted"
+        by the event type mapper. Both paths must produce the same dedup key
+        to prevent duplicate trigger firings.
+        """
+        # Webhook payload — action is already "submitted"
+        webhook_payload = {
+            "action": "submitted",
+            "review": {"id": 12345, "state": "commented", "body": "Looks good"},
+            "pull_request": {"number": 42, "draft": False},
+            "repository": {"full_name": "owner/repo", "id": 999},
+        }
+        webhook_key = compute_dedup_key("pull_request_review", "submitted", webhook_payload)
+
+        # Events API payload — action is "created", normalized to "submitted"
+        events_api_raw = {
+            "id": "evt-abc",
+            "type": "PullRequestReviewEvent",
+            "repo": {"name": "owner/repo"},
+            "payload": {
+                "action": "created",
+                "review": {"id": 12345, "state": "commented", "body": "Looks good"},
+                "pull_request": {"number": 42, "draft": False},
+            },
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+        normalized = map_events_api_to_normalized(events_api_raw, "inst-1")
+        assert normalized is not None
+        events_api_key = normalized.dedup_key
+
+        assert webhook_key == events_api_key, (
+            f"Dedup key mismatch: webhook={webhook_key!r} vs events_api={events_api_key!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
