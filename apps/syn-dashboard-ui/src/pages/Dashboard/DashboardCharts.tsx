@@ -101,7 +101,6 @@ export function WorkflowStatusChart({ metrics }: DashboardChartsProps) {
     ? [
       { name: 'Completed', value: metrics.completed_workflows, fill: '#22c55e' },
       { name: 'Failed', value: metrics.failed_workflows, fill: '#ef4444' },
-      { name: 'Other', value: metrics.total_workflows - metrics.completed_workflows - metrics.failed_workflows, fill: '#4D80FF' },
     ].filter(d => d.value > 0)
     : []
 
