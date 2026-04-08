@@ -46,6 +46,7 @@ class MockEventEnvelope:
         self.event.event_type = event_type
         self.event.to_dict.return_value = data or {"id": f"test-{global_nonce}"}
         self.metadata = MagicMock()
+        self.metadata.event_type = event_type
         self.metadata.global_nonce = global_nonce
 
 
@@ -169,7 +170,7 @@ class MockProjectionManager:
 
     async def process_event_envelope(self, envelope: MockEventEnvelope) -> MockEventProvenance:
         """Process an event envelope (mock implementation)."""
-        event_type = envelope.event.event_type
+        event_type = envelope.metadata.event_type
         event_data = envelope.event.to_dict()
         self.dispatched_events.append((event_type, event_data))
         return MockEventProvenance(

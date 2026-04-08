@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key
-from syn_domain.contexts.github.slices.event_pipeline.event_type_mapper import map_events_api_to_normalized
+from syn_domain.contexts.github.slices.event_pipeline.event_type_mapper import (
+    map_events_api_to_normalized,
+)
 
 # ---------------------------------------------------------------------------
 # Push events

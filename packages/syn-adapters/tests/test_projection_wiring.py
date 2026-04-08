@@ -46,8 +46,9 @@ def _make_envelope(
     global_nonce: int = 1,
 ) -> EventEnvelope[GenericDomainEvent]:
     """Build an EventEnvelope for testing projection handlers."""
-    event = GenericDomainEvent(event_type=event_type, **data)
+    event = GenericDomainEvent(**data)
     metadata = EventMetadata(
+        event_type=event_type,
         aggregate_id=aggregate_id,
         aggregate_type="TriggerRule",
         aggregate_nonce=global_nonce,

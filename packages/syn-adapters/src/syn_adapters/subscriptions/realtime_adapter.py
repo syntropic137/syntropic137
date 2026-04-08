@@ -65,7 +65,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
-        event_type = envelope.event.event_type
+        event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump()
         global_nonce = envelope.metadata.global_nonce or 0
         try:
@@ -124,11 +124,8 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
-        event_type = envelope.event.event_type
+        event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump()
-        # Strip event_type injected by gRPC client — domain events use
-        # extra="forbid" and reject this extra key during model_validate().
-        event_data.pop("event_type", None)
         global_nonce = envelope.metadata.global_nonce or 0
         try:
             bare = event_type.split(".")[-1]
@@ -238,10 +235,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
         event_data = envelope.event.model_dump()
-        # Strip event_type injected by gRPC client — domain events use
-        # extra="forbid" and reject this extra key during model_validate().
-        event_data.pop("event_type", None)
-        event_type = envelope.event.event_type
+        event_type = envelope.metadata.event_type or "Unknown"
         global_nonce = envelope.metadata.global_nonce or 0
         try:
             await self._dispatch(event_data, event_type, global_nonce)
