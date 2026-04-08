@@ -487,6 +487,20 @@ syn repo register --url owner/repo
 - [ ] Repo registered successfully
 - [ ] Appears in `syn repo list`
 
+### Create an org and system (required for assignment)
+
+> **Fresh stack note:** `syn repo assign` requires an existing system. On a fresh
+> stack, create them first. `syn system create` requires `--org`.
+
+```bash
+ORG_ID=$(syn org create --name "Test Org" --slug "test-org" 2>&1 | grep -oE 'org-[a-f0-9]+')
+echo "Org: $ORG_ID"
+syn system create --name "test-system" --org "$ORG_ID"
+```
+
+- [ ] Org created successfully
+- [ ] System created with org reference
+
 ### Assign repo to system
 
 ```bash
@@ -688,8 +702,12 @@ syn workflow update <package-name>
 
 ### Initialize a new workflow from template
 
+> **Known constraint:** `syn workflow init` and `syn workflow export` error with
+> "Directory not empty" when run from any non-empty directory. Use a temp dir.
+
 ```bash
-syn workflow init --name test-workflow --type single
+mkdir -p /tmp/wf-test && cd /tmp/wf-test && syn workflow init --name test-workflow --type single
+syn workflow validate /tmp/wf-test
 ```
 
 - [ ] Scaffolds a new workflow YAML file
@@ -698,7 +716,7 @@ syn workflow init --name test-workflow --type single
 ### Export workflow
 
 ```bash
-syn workflow export <workflow-id> --format plugin
+mkdir -p /tmp/wf-export && cd /tmp/wf-export && syn workflow export <workflow-id> --format plugin
 ```
 
 - [ ] Export produces a Claude Code plugin package
@@ -717,6 +735,20 @@ syn workflow uninstall <package-name>
 ---
 
 ## 7. Functional Validation — Trigger Lifecycle & Round-Trip
+
+### Verify event poller is running before testing round-trips
+
+> **Check this before spending time on round-trip tests.** The poller has a known
+> startup race condition where a concurrent `CREATE TYPE trigger_index` in Postgres
+> causes a unique violation — the poller crashes and enters backoff. If the error
+> is present, round-trip tests will fail silently (triggers registered, never fire).
+
+```bash
+docker logs syn137-api 2>&1 | grep "Polling error"
+```
+
+- [ ] No "Polling error" lines — poller started cleanly
+- [ ] If error present: restart the API container (`docker restart syn137-api`) and recheck. If it persists, record as a blocker and skip round-trip sections.
 
 ### Determine available trigger presets
 
@@ -870,8 +902,8 @@ syn triggers show <trigger-id>
 ### Trigger cleanup
 
 ```bash
-syn triggers delete <trigger-id>
-syn triggers disable-all --repo owner/repo
+syn triggers delete <trigger-id> --force
+syn triggers disable-all --repo owner/repo --force
 ```
 
 - [ ] Individual trigger deleted
@@ -921,7 +953,8 @@ Navigate to `http://localhost:8137` via Playwright.
 
 ### Real-time
 
-- [ ] WebSocket connection established (check network tab for `ws://` connection)
+- [ ] SSE connection active — `GET /api/v1/sse/activity` returns 200 and stays open (check network tab for the persistent SSE request, not a `ws://` WebSocket — the dashboard uses SSE)
+- [ ] Dashboard shows green "Live" dot in top-right corner
 - [ ] Live updates appear when new events are recorded
 
 ### Insights

@@ -330,12 +330,20 @@ export const initCommand: CommandDef = {
     multi: { type: "boolean", description: "Scaffold multi-workflow plugin", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
-    const directory = parsed.positionals[0] ?? ".";
-    const resolvedDir = path.resolve(directory);
     const workflowType = (parsed.values["type"] as string | undefined) ?? "research";
     const numPhases = parseInt((parsed.values["phases"] as string | undefined) ?? "3", 10);
     const multi = parsed.values["multi"] === true;
-    const wfName = (parsed.values["name"] as string | undefined) ??
+    const explicitName = parsed.values["name"] as string | undefined;
+
+    // When no directory is given, default to a new named subdirectory in cwd
+    // (not cwd itself — cwd is almost always non-empty in a project).
+    const defaultDir = explicitName
+      ? explicitName.toLowerCase().replace(/\s+/g, "-")
+      : "my-workflow";
+    const directory = parsed.positionals[0] ?? defaultDir;
+    const resolvedDir = path.resolve(directory);
+
+    const wfName = explicitName ??
       path.basename(resolvedDir).replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
     if (fs.existsSync(resolvedDir)) {

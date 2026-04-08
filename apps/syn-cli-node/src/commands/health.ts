@@ -32,7 +32,11 @@ export const healthCommand: CommandDef = {
     const subscription = data["subscription"];
     if (subscription) {
       print(style("  Event store: connected", DIM));
-      print(style(`  Subscription: ${subscription}`, DIM));
+      const subStatus =
+        typeof subscription === "object" && subscription !== null
+          ? ((subscription as Record<string, unknown>)["status"] ?? "unknown")
+          : subscription;
+      print(style(`  Subscription: ${subStatus}`, DIM));
     }
   },
 };

@@ -51,13 +51,6 @@ export const exportCommand: CommandDef = {
     }
 
     const outDir = path.resolve(outputDir);
-    if (fs.existsSync(outDir)) {
-      const entries = fs.readdirSync(outDir);
-      if (entries.length > 0) {
-        printError(`Output directory is not empty: ${outDir}`);
-        throw new CLIError("Directory not empty", 1);
-      }
-    }
 
     // Write files with path traversal protection
     for (const [relPath, content] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
