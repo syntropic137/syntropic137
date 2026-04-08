@@ -69,6 +69,77 @@ class ObservabilityRecorder(Protocol):
     ) -> None: ...
 
 
+_MAX_ERROR_REASON_LEN = 200
+
+# Well-known Anthropic API error types → human-readable labels
+_API_ERROR_LABELS: dict[str, str] = {
+    "overloaded_error": "API overloaded",
+    "rate_limit_error": "Rate limited",
+    "api_error": "API internal error",
+    "authentication_error": "Authentication failed",
+    "invalid_request_error": "Invalid request",
+    "not_found_error": "Resource not found",
+    "permission_error": "Permission denied",
+}
+
+
+def _extract_error_reason(raw: str) -> str:
+    """Extract a clean, human-readable error reason from CLI result text.
+
+    The CLI result can contain raw JSON error bodies, stack traces, or plain
+    text. This function extracts the most useful signal and returns a short,
+    readable string suitable for display in the dashboard and CLI.
+
+    Examples:
+        >>> _extract_error_reason('API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},...}')
+        'API overloaded (HTTP 529)'
+        >>> _extract_error_reason('Connection refused')
+        'Connection refused'
+    """
+    text = raw.strip()
+    if not text:
+        return "Unknown error"
+
+    # Try to find an embedded JSON error body (Anthropic API shape)
+    brace_start = text.find("{")
+    if brace_start >= 0:
+        prefix = text[:brace_start].strip()
+        json_part = text[brace_start:]
+        try:
+            parsed: dict[str, object] = json.loads(json_part)
+            # Anthropic API errors: {"type":"error","error":{"type":"...","message":"..."}}
+            error_obj = parsed.get("error")
+            if isinstance(error_obj, dict):
+                error_type = str(error_obj.get("type", ""))
+                message = str(error_obj.get("message", ""))
+                label = _API_ERROR_LABELS.get(error_type, error_type.replace("_", " "))
+
+                # Extract HTTP status code from prefix like "API Error: 529"
+                http_code = ""
+                for word in prefix.split():
+                    if word.isdigit() and len(word) == 3:
+                        http_code = word
+                        break
+
+                if http_code:
+                    return f"{label} (HTTP {http_code})"
+                if message and message.lower() != label.lower():
+                    return f"{label}: {message}"
+                return label
+
+            # Generic JSON error with "message" key
+            if "message" in parsed and isinstance(parsed["message"], str):
+                return str(parsed["message"])[:_MAX_ERROR_REASON_LEN]
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Plain text — truncate cleanly at word boundary
+    if len(text) <= _MAX_ERROR_REASON_LEN:
+        return text
+    truncated = text[:_MAX_ERROR_REASON_LEN].rsplit(" ", 1)[0]
+    return truncated + "..."
+
+
 @dataclass(frozen=True)
 class StreamResult:
     """Result of processing the event stream."""
@@ -86,6 +157,8 @@ class StreamResult:
     result_cache_read: int = 0
     duration_ms: int | None = None
     num_turns: int | None = None
+    # Error reason extracted from CLI result event (e.g. "API Error: 529 Overloaded")
+    error_reason: str | None = None
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
@@ -141,6 +214,7 @@ class EventStreamProcessor:
         self._result_cache_read: int = 0
         self._result_duration_ms: int | None = None
         self._result_num_turns: int | None = None
+        self._error_reason: str | None = None
 
         # ISS-196: Use collector if provided, else create one from raw writer
         if collector is not None:
@@ -222,6 +296,7 @@ class EventStreamProcessor:
             result_cache_read=self._result_cache_read,
             duration_ms=self._result_duration_ms,
             num_turns=self._result_num_turns,
+            error_reason=self._error_reason,
         )
 
     async def _process_line(
@@ -363,6 +438,11 @@ class EventStreamProcessor:
                 )
             except (json.JSONDecodeError, ValueError):
                 logger.debug("Could not parse TASK_RESULT block")
+
+        # Capture error reason from CLI result event when the agent failed.
+        is_error = cli_event.get("is_error", False)
+        if is_error and result_text:
+            self._error_reason = _extract_error_reason(result_text)
 
         # ISS-217: Capture authoritative cumulative totals from the result event.
         # The result event usage is the TOTAL across all turns — do NOT add it to

@@ -52,6 +52,7 @@ class SessionSummaryResponse(BaseModel):
 
     id: str
     workflow_id: str | None
+    workflow_name: str | None = None
     execution_id: str | None = None
     phase_id: str | None
     status: str
@@ -124,6 +125,17 @@ class SessionResponse(BaseModel):
 # =============================================================================
 # Service functions (importable by tests)
 # =============================================================================
+
+
+async def _build_workflow_name_map() -> dict[str, str]:
+    """Build a {workflow_id: workflow_name} lookup from the workflow list projection."""
+    try:
+        manager = get_projection_mgr()
+        workflows = await manager.workflow_list.query()
+        return {w.id: w.name for w in workflows if w.name}
+    except Exception:
+        logger.debug("Could not load workflow names for session display", exc_info=True)
+        return {}
 
 
 async def list_sessions(
@@ -334,10 +346,17 @@ async def get_session(
     operations = await _load_tool_operations(manager, session_id)
     cd = await _load_cost_data(session_id, session.total_tokens, session.total_cost_usd)
 
+    # Resolve workflow name from the workflow list projection
+    wf_name: str | None = None
+    if session.workflow_id:
+        wf_names = await _build_workflow_name_map()
+        wf_name = wf_names.get(session.workflow_id)
+
     return Ok(
         SessionDetail(
             id=session.id,
             workflow_id=session.workflow_id,
+            workflow_name=wf_name,
             execution_id=session.execution_id,
             phase_id=session.phase_id,
             agent_type=session.agent_type,
@@ -354,6 +373,7 @@ async def get_session(
             started_at=session.started_at,
             completed_at=session.completed_at,
             duration_seconds=cd.duration_seconds,
+            error_message=session.error_message,
         )
     )
 
@@ -380,10 +400,12 @@ async def list_sessions_endpoint(
         raise HTTPException(status_code=500, detail=result.message)
 
     summaries = result.value
+    wf_names = await _build_workflow_name_map()
     responses = [
         SessionSummaryResponse(
             id=s.id,
             workflow_id=s.workflow_id,
+            workflow_name=wf_names.get(s.workflow_id, None) if s.workflow_id else None,
             execution_id=s.execution_id,
             phase_id=s.phase_id,
             status=s.status,
@@ -470,6 +492,6 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         started_at=str(detail.started_at) if detail.started_at else None,
         completed_at=str(detail.completed_at) if detail.completed_at else None,
         duration_seconds=detail.duration_seconds,
-        error_message=None,
+        error_message=detail.error_message,
         metadata={},
     )

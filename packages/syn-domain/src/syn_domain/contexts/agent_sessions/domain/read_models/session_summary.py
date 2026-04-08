@@ -222,6 +222,9 @@ class SessionSummary:
     duration_api_ms: int | None = None
     """API latency in milliseconds (from result event)."""
 
+    error_message: str | None = None
+    """Error message if the session failed."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "SessionSummary":
         """Create from dictionary data."""
@@ -255,6 +258,7 @@ class SessionSummary:
             # Enhanced metrics
             num_turns=data.get("num_turns", 0),
             duration_api_ms=data.get("duration_api_ms"),
+            error_message=data.get("error_message"),
         )
 
     def to_dict(self) -> dict:

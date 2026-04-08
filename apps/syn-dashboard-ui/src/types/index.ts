@@ -69,6 +69,7 @@ export interface SubagentRecord {
 export interface SessionSummary {
   id: string
   workflow_id: string | null
+  workflow_name: string | null
   execution_id: string | null
   phase_id: string | null
   status: string

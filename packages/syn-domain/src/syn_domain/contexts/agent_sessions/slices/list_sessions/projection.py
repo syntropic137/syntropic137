@@ -198,6 +198,10 @@ class SessionListProjection(AutoDispatchProjection):
             if started_at and completed_at:
                 existing["duration_seconds"] = _calculate_duration(started_at, completed_at)
 
+            # Error message from failed sessions
+            if event_data.get("error_message"):
+                existing["error_message"] = event_data["error_message"]
+
             # Enhanced metrics from result event (agentic_isolation v0.3.0)
             if "num_turns" in event_data:
                 existing["num_turns"] = event_data["num_turns"]

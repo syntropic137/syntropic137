@@ -17,6 +17,7 @@ import pytest
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
+    _extract_error_reason,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
@@ -368,3 +369,60 @@ class TestEventStreamProcessor:
             assert result.line_count == 20  # Stopped at line 20
         finally:
             ctrl_mod.ControlSignalType = original
+
+
+class TestExtractErrorReason:
+    """Tests for _extract_error_reason — clean error messages from raw CLI output."""
+
+    def test_anthropic_overloaded_error(self) -> None:
+        raw = 'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_011CZquToahVwgCwb9nCVbPy"}'
+        assert _extract_error_reason(raw) == "API overloaded (HTTP 529)"
+
+    def test_anthropic_rate_limit_error(self) -> None:
+        raw = 'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"}}'
+        assert _extract_error_reason(raw) == "Rate limited (HTTP 429)"
+
+    def test_anthropic_auth_error(self) -> None:
+        raw = 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"Invalid API key"}}'
+        assert _extract_error_reason(raw) == "Authentication failed (HTTP 401)"
+
+    def test_anthropic_invalid_request(self) -> None:
+        raw = '{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens must be positive"}}'
+        assert _extract_error_reason(raw) == "Invalid request: max_tokens must be positive"
+
+    def test_anthropic_500_error(self) -> None:
+        raw = 'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}'
+        assert _extract_error_reason(raw) == "API internal error (HTTP 500)"
+
+    def test_plain_text_error(self) -> None:
+        assert _extract_error_reason("Connection refused") == "Connection refused"
+
+    def test_empty_string(self) -> None:
+        assert _extract_error_reason("") == "Unknown error"
+
+    def test_whitespace_only(self) -> None:
+        assert _extract_error_reason("   ") == "Unknown error"
+
+    def test_long_text_truncates_at_word_boundary(self) -> None:
+        long_msg = "Error: " + "something went wrong " * 20
+        result = _extract_error_reason(long_msg)
+        assert len(result) <= 210  # 200 + "..."
+        assert result.endswith("...")
+
+    def test_generic_json_with_message(self) -> None:
+        raw = '{"message": "Something failed", "code": 42}'
+        assert _extract_error_reason(raw) == "Something failed"
+
+    def test_malformed_json_falls_back_to_text(self) -> None:
+        raw = 'Error: 529 {"broken json'
+        result = _extract_error_reason(raw)
+        assert result == 'Error: 529 {"broken json'
+
+    def test_unknown_error_type_uses_type_as_label(self) -> None:
+        raw = '{"type":"error","error":{"type":"new_future_error","message":"Something new"}}'
+        assert _extract_error_reason(raw) == "new future error: Something new"
+
+    def test_error_type_label_matches_message_no_duplication(self) -> None:
+        """When the label and message say the same thing, don't repeat it."""
+        raw = '{"type":"error","error":{"type":"overloaded_error","message":"API overloaded"}}'
+        assert _extract_error_reason(raw) == "API overloaded"
