@@ -8421,6 +8421,17 @@
             ],
             "title": "Workflow Id"
           },
+          "workflow_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Name"
+          },
           "execution_id": {
             "anyOf": [
               {

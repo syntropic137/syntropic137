@@ -359,8 +359,10 @@ jobs:
           uv export --format requirements-txt --no-hashes --frozen --quiet \
             | uv tool run pip-audit --disable-pip --no-deps \
               --ignore-vuln GHSA-5239-wwwm-4pmq \
+              --ignore-vuln GHSA-p423-j2cm-9vmq \
               -r /dev/stdin
           # TODO(#345): remove --ignore-vuln once pygments releases a fix
+          # TODO(#634): remove --ignore-vuln once cryptography 46.0.7 is available on PyPI
 
   dependency-review:
     name: Dependency Review

@@ -696,6 +696,7 @@ class SessionDetail(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     duration_seconds: float | None = None
+    error_message: str | None = None
 
 
 # ---------------------------------------------------------------------------

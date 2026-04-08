@@ -32,18 +32,19 @@ export function SessionHeader({
           </div>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="font-mono text-xl font-bold text-[var(--color-text-primary)]">
-                {session.id.slice(0, 16)}...
+              <h1 className="text-xl font-bold text-[var(--color-text-primary)]">
+                {session.workflow_name ?? session.id.slice(0, 16) + '...'}
               </h1>
               <StatusBadge status={session.status} size="lg" pulse />
             </div>
             <div className="mt-2 flex items-center gap-4 text-sm text-[var(--color-text-secondary)]">
+              <span className="font-mono">{session.id.slice(0, 12)}</span>
               {session.workflow_id && (
                 <Link
                   to={`/workflows/${session.workflow_id}`}
                   className="hover:text-[var(--color-accent)]"
                 >
-                  Workflow: {session.workflow_id.slice(0, 8)}...
+                  {session.workflow_name ? `Workflow: ${session.workflow_name}` : `wf:${session.workflow_id.slice(0, 8)}`}
                 </Link>
               )}
               {session.phase_id && <span>Phase: {session.phase_id}</span>}
