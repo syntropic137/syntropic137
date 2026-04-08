@@ -13,6 +13,11 @@ echo "▶ pre-push: architectural fitness..."
 just fitness-check
 
 echo "▶ pre-push: codegen drift check..."
-just docs-sync
+just codegen > /dev/null 2>&1
+if ! git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null; then
+  echo "❌ Codegen drift: API types or docs are stale. Run 'just codegen' and commit the changes."
+  exit 1
+fi
+echo "✓ Codegen up to date"
 
 echo "✓ pre-push checks passed"
