@@ -56,7 +56,8 @@ async function deleteWorkflowsViaApi(record: InstallationRecord): Promise<number
       print(style("done", GREEN));
       deleted++;
     } catch (err) {
-      const isGone = err instanceof CLIError && err.message.toLowerCase().includes("not found");
+      const msg = err instanceof CLIError ? err.message.toLowerCase() : "";
+      const isGone = msg.includes("already archived") || msg.includes("not found");
       print(isGone ? style("already archived", DIM) : style("failed", RED));
     }
   }
