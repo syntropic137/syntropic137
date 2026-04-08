@@ -58,8 +58,7 @@ describe("workflow export command", () => {
     expect(fs.existsSync(path.join(tmpDir, "phases", "phase-1.md"))).toBe(true);
   });
 
-  it("exports into a non-empty directory without error", async () => {
-    // Pre-populate the output directory — export should not reject it
+  it("exports into a non-empty directory when no files collide", async () => {
     fs.writeFileSync(path.join(tmpDir, "existing-file.txt"), "existing content");
 
     mockFetch.mockResolvedValue(
@@ -77,8 +76,48 @@ describe("workflow export command", () => {
     ).resolves.not.toThrow();
 
     expect(fs.existsSync(path.join(tmpDir, "workflow.yaml"))).toBe(true);
-    // Pre-existing file is untouched
     expect(fs.existsSync(path.join(tmpDir, "existing-file.txt"))).toBe(true);
+  });
+
+  it("fails when an export file would overwrite an existing file", async () => {
+    fs.writeFileSync(path.join(tmpDir, "workflow.yaml"), "old content");
+
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        workflow_name: "Code Review",
+        files: { "workflow.yaml": "name: Code Review\n" },
+      }),
+    );
+
+    await expect(
+      exportCommand.handler({
+        positionals: ["wf-123"],
+        values: { format: "package", output: tmpDir },
+      }),
+    ).rejects.toThrow(CLIError);
+
+    // Original file is untouched
+    expect(fs.readFileSync(path.join(tmpDir, "workflow.yaml"), "utf-8")).toBe("old content");
+  });
+
+  it("overwrites existing files with --force", async () => {
+    fs.writeFileSync(path.join(tmpDir, "workflow.yaml"), "old content");
+
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        workflow_name: "Code Review",
+        files: { "workflow.yaml": "name: Code Review\n" },
+      }),
+    );
+
+    await expect(
+      exportCommand.handler({
+        positionals: ["wf-123"],
+        values: { format: "package", output: tmpDir, force: true },
+      }),
+    ).resolves.not.toThrow();
+
+    expect(fs.readFileSync(path.join(tmpDir, "workflow.yaml"), "utf-8")).toBe("name: Code Review\n");
   });
 
   it("rejects unsafe path traversal in export manifest", async () => {
