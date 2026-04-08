@@ -127,12 +127,18 @@ class SessionResponse(BaseModel):
 # =============================================================================
 
 
-async def _build_workflow_name_map() -> dict[str, str]:
-    """Build a {workflow_id: workflow_name} lookup from the workflow list projection."""
+async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
+    """Build a {workflow_id: workflow_name} lookup for the given IDs via targeted store lookups."""
+    if not workflow_ids:
+        return {}
     try:
         manager = get_projection_mgr()
-        workflows = await manager.workflow_list.query()
-        return {w.id: w.name for w in workflows if w.name}
+        result: dict[str, str] = {}
+        for wf_id in workflow_ids:
+            wf_data = await manager.store.get("workflow_summaries", wf_id)
+            if isinstance(wf_data, dict) and wf_data.get("name"):
+                result[wf_id] = wf_data["name"]
+        return result
     except Exception:
         logger.debug("Could not load workflow names for session display", exc_info=True)
         return {}
@@ -404,7 +410,8 @@ async def list_sessions_endpoint(
         raise HTTPException(status_code=500, detail=result.message)
 
     summaries = result.value
-    wf_names = await _build_workflow_name_map()
+    wf_ids = {s.workflow_id for s in summaries if s.workflow_id}
+    wf_names = await _build_workflow_name_map(wf_ids)
     responses = [
         SessionSummaryResponse(
             id=s.id,

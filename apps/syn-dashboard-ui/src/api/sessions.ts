@@ -20,6 +20,6 @@ export async function listSessions(params?: {
   return fetchJSON(`${API_BASE}/sessions${query ? `?${query}` : ''}`)
 }
 
-export async function getSession(sessionId: string): Promise<SessionResponse> {
-  return fetchJSON<SessionResponse>(`${API_BASE}/sessions/${sessionId}`)
+export async function getSession(sessionId: string, signal?: AbortSignal): Promise<SessionResponse> {
+  return fetchJSON<SessionResponse>(`${API_BASE}/sessions/${sessionId}`, { signal })
 }
