@@ -280,11 +280,12 @@ export const installedCommand: CommandDef = {
     const registry = loadInstalled();
 
     // Filter out entries whose local source path no longer exists.
-    // Remote sources (marketplace, GitHub shorthand) are always shown.
+    // Remote sources (URLs, git@, marketplace bare names) are always shown.
     const liveInstallations = registry.installations.filter((r) => {
       const src = r.source;
-      if (!src.startsWith("/") && !src.startsWith(".")) return true; // remote source
-      return fs.existsSync(src);
+      const isRemote = src.includes("://") || src.startsWith("git@") || src.startsWith("ssh://") || isBarePluginName(src);
+      if (isRemote) return true;
+      return fs.existsSync(path.resolve(src));
     });
 
     if (liveInstallations.length === 0) {
