@@ -126,6 +126,9 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
     ) -> ProjectionResult:
         event_type = envelope.event.event_type
         event_data = envelope.event.model_dump()
+        # Strip event_type injected by gRPC client — domain events use
+        # extra="forbid" and reject this extra key during model_validate().
+        event_data.pop("event_type", None)
         global_nonce = envelope.metadata.global_nonce or 0
         try:
             bare = event_type.split(".")[-1]
@@ -235,6 +238,9 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
         event_data = envelope.event.model_dump()
+        # Strip event_type injected by gRPC client — domain events use
+        # extra="forbid" and reject this extra key during model_validate().
+        event_data.pop("event_type", None)
         event_type = envelope.event.event_type
         global_nonce = envelope.metadata.global_nonce or 0
         try:
