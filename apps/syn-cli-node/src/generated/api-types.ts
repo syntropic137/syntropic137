@@ -2843,7 +2843,10 @@ export interface components {
          * @description Request body for registering a new repo.
          */
         RegisterRepoRequest: {
-            /** Organization Id */
+            /**
+             * Organization Id
+             * @default _unaffiliated
+             */
             organization_id: string;
             /** Full Name */
             full_name: string;
