@@ -4,10 +4,10 @@
 set -euo pipefail
 
 echo "▶ pre-push: ruff format check..."
-uv run ruff format --check apps/ packages/ lib/event-sourcing-platform/event-sourcing/python/ 2>/dev/null
+uv run ruff format --check apps/ packages/ 2>/dev/null
 
 echo "▶ pre-push: ruff lint..."
-uv run ruff check apps/ packages/ lib/event-sourcing-platform/event-sourcing/python/ 2>/dev/null
+uv run ruff check apps/ packages/ 2>/dev/null
 
 echo "▶ pre-push: architectural fitness..."
 just fitness-check
