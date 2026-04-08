@@ -33,7 +33,6 @@ from syn_api.types import (
     SessionSummary,
     ToolOperation,
 )
-
 from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
     WorkflowListProjection,
 )
@@ -132,7 +131,9 @@ class SessionResponse(BaseModel):
 # =============================================================================
 
 
-async def _fetch_one_workflow_name(manager: ProjectionManager, wf_id: str) -> tuple[str, str] | None:
+async def _fetch_one_workflow_name(
+    manager: ProjectionManager, wf_id: str
+) -> tuple[str, str] | None:
     """Fetch a single workflow name; returns (id, name) or None on failure."""
     try:
         wf_data = await manager.store.get(WorkflowListProjection.PROJECTION_NAME, wf_id)
@@ -367,7 +368,9 @@ async def get_session(
     wf_name: str | None = None
     if session.workflow_id:
         try:
-            wf_data = await manager.store.get(WorkflowListProjection.PROJECTION_NAME, session.workflow_id)
+            wf_data = await manager.store.get(
+                WorkflowListProjection.PROJECTION_NAME, session.workflow_id
+            )
             if isinstance(wf_data, dict):
                 wf_name = wf_data.get("name")
         except Exception:
