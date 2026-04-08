@@ -69,6 +69,82 @@ class ObservabilityRecorder(Protocol):
     ) -> None: ...
 
 
+_MAX_ERROR_REASON_LEN = 200
+
+# Well-known Anthropic API error types → human-readable labels
+_API_ERROR_LABELS: dict[str, str] = {
+    "overloaded_error": "API overloaded",
+    "rate_limit_error": "Rate limited",
+    "api_error": "API internal error",
+    "authentication_error": "Authentication failed",
+    "invalid_request_error": "Invalid request",
+    "not_found_error": "Resource not found",
+    "permission_error": "Permission denied",
+}
+
+
+def _http_code_from_prefix(prefix: str) -> str:
+    """Return the first 3-digit token from a prefix like 'API Error: 529 '."""
+    return next((w for w in prefix.split() if w.isdigit() and len(w) == 3), "")
+
+
+def _format_anthropic_error(error_obj: dict[str, object], prefix: str) -> str:
+    """Format a human-readable label from an Anthropic API error dict."""
+    error_type = str(error_obj.get("type", ""))
+    message = str(error_obj.get("message", ""))
+    label = _API_ERROR_LABELS.get(error_type, error_type.replace("_", " "))
+    http_code = _http_code_from_prefix(prefix)
+    if http_code:
+        return f"{label} (HTTP {http_code})"
+    if message and message.lower() != label.lower():
+        return f"{label}: {message}"
+    return label
+
+
+def _parse_json_error(text: str) -> str | None:
+    """Try to parse an embedded JSON error body and return a label, or None."""
+    brace_start = text.find("{")
+    if brace_start < 0:
+        return None
+    prefix = text[:brace_start].strip()
+    try:
+        parsed = json.loads(text[brace_start:])
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    error_obj = parsed.get("error")
+    if isinstance(error_obj, dict):
+        return _format_anthropic_error(error_obj, prefix)
+    if isinstance(parsed.get("message"), str):
+        return str(parsed["message"])[:_MAX_ERROR_REASON_LEN]
+    return None
+
+
+def _extract_error_reason(raw: str) -> str:
+    """Extract a clean, human-readable error reason from CLI result text.
+
+    The CLI result can contain raw JSON error bodies, stack traces, or plain
+    text. This function extracts the most useful signal and returns a short,
+    readable string suitable for display in the dashboard and CLI.
+
+    Examples:
+        >>> _extract_error_reason('API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},...}')
+        'API overloaded (HTTP 529)'
+        >>> _extract_error_reason('Connection refused')
+        'Connection refused'
+    """
+    text = raw.strip()
+    if not text:
+        return "Unknown error"
+    json_label = _parse_json_error(text)
+    if json_label is not None:
+        return json_label
+    if len(text) <= _MAX_ERROR_REASON_LEN:
+        return text
+    return text[:_MAX_ERROR_REASON_LEN].rsplit(" ", 1)[0] + "..."
+
+
 @dataclass(frozen=True)
 class StreamResult:
     """Result of processing the event stream."""
@@ -86,6 +162,8 @@ class StreamResult:
     result_cache_read: int = 0
     duration_ms: int | None = None
     num_turns: int | None = None
+    # Error reason extracted from CLI result event (e.g. "API Error: 529 Overloaded")
+    error_reason: str | None = None
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
@@ -141,6 +219,7 @@ class EventStreamProcessor:
         self._result_cache_read: int = 0
         self._result_duration_ms: int | None = None
         self._result_num_turns: int | None = None
+        self._error_reason: str | None = None
 
         # ISS-196: Use collector if provided, else create one from raw writer
         if collector is not None:
@@ -222,6 +301,7 @@ class EventStreamProcessor:
             result_cache_read=self._result_cache_read,
             duration_ms=self._result_duration_ms,
             num_turns=self._result_num_turns,
+            error_reason=self._error_reason,
         )
 
     async def _process_line(
@@ -340,35 +420,24 @@ class EventStreamProcessor:
 
         return task_result
 
-    async def _handle_result_event(self, cli_event: dict[str, Any]) -> dict[str, Any] | None:
-        """Handle a result event — extract task result and token usage."""
-        task_result: dict[str, Any] | None = None
+    @staticmethod
+    def _parse_task_result(result_text: str) -> dict[str, Any] | None:
+        """Extract the structured TASK_RESULT JSON block from a result string."""
+        if "TASK_RESULT:" not in result_text:
+            return None
+        try:
+            marker = "TASK_RESULT:"
+            raw = result_text[result_text.rfind(marker) + len(marker) :].strip()
+            brace_end = raw.find("}")
+            if brace_end >= 0:
+                raw = raw[: brace_end + 1]
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            logger.debug("Could not parse TASK_RESULT block")
+            return None
 
-        # Parse structured task result
-        result_text = cli_event.get("result", "")
-        if result_text and "TASK_RESULT:" in result_text:
-            try:
-                marker = "TASK_RESULT:"
-                idx = result_text.rfind(marker)
-                raw = result_text[idx + len(marker) :].strip()
-                brace_end = raw.find("}")
-                if brace_end >= 0:
-                    raw = raw[: brace_end + 1]
-                parsed_result: dict[str, Any] = json.loads(raw)
-                task_result = parsed_result
-                logger.info(
-                    "Agent task result: success=%s comments=%s",
-                    parsed_result.get("success"),
-                    str(parsed_result.get("comments", ""))[:100],
-                )
-            except (json.JSONDecodeError, ValueError):
-                logger.debug("Could not parse TASK_RESULT block")
-
-        # ISS-217: Capture authoritative cumulative totals from the result event.
-        # The result event usage is the TOTAL across all turns — do NOT add it to
-        # TokenAccumulator (which already has per-turn sums) or record a TOKEN_USAGE
-        # observation (which would double-count with per-turn assistant events).
-        # These values are carried in StreamResult and emitted as a session_summary.
+    def _capture_result_tokens(self, cli_event: dict[str, Any]) -> None:
+        """Store authoritative cumulative token counts from a result event."""
         usage = cli_event.get("usage", {})
         self._result_input_tokens = usage.get("input_tokens", 0)
         self._result_output_tokens = usage.get("output_tokens", 0)
@@ -377,7 +446,6 @@ class EventStreamProcessor:
         self._result_cost_usd = cli_event.get("total_cost_usd")
         self._result_duration_ms = cli_event.get("duration_ms")
         self._result_num_turns = cli_event.get("num_turns")
-
         if self._result_input_tokens > 0 or self._result_output_tokens > 0:
             logger.info(
                 "Result totals: cost=$%s, %d in, %d out (cache: %d read, %d create)",
@@ -388,6 +456,19 @@ class EventStreamProcessor:
                 self._result_cache_creation,
             )
 
+    async def _handle_result_event(self, cli_event: dict[str, Any]) -> dict[str, Any] | None:
+        """Handle a result event — extract task result and token usage."""
+        result_text = cli_event.get("result", "")
+        task_result = self._parse_task_result(result_text) if result_text else None
+        if task_result:
+            logger.info(
+                "Agent task result: success=%s comments=%s",
+                task_result.get("success"),
+                str(task_result.get("comments", ""))[:100],
+            )
+        if cli_event.get("is_error") and result_text:
+            self._error_reason = _extract_error_reason(result_text)
+        self._capture_result_tokens(cli_event)
         return task_result
 
     async def _handle_assistant_event(self, cli_event: dict[str, Any]) -> None:
