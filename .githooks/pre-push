@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Pre-push hook — catches the most common CI failures locally before they waste a round-trip.
+# Fast checks only (~30s). Full suite: just qa
+set -euo pipefail
+
+echo "▶ pre-push: ruff format check..."
+uv run ruff format --check apps/ packages/ lib/event-sourcing-platform/event-sourcing/python/ 2>/dev/null
+
+echo "▶ pre-push: ruff lint..."
+uv run ruff check apps/ packages/ lib/event-sourcing-platform/event-sourcing/python/ 2>/dev/null
+
+echo "▶ pre-push: architectural fitness..."
+just fitness-check
+
+echo "▶ pre-push: codegen drift check..."
+just docs-sync
+
+echo "✓ pre-push checks passed"
