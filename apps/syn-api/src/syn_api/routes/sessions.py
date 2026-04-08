@@ -5,6 +5,7 @@ Provides listing, starting, completing, and retrieving agent sessions.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import (
@@ -31,6 +32,10 @@ from syn_api.types import (
     SessionError,
     SessionSummary,
     ToolOperation,
+)
+
+from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
+    WorkflowListProjection,
 )
 
 if TYPE_CHECKING:
@@ -127,21 +132,27 @@ class SessionResponse(BaseModel):
 # =============================================================================
 
 
+async def _fetch_one_workflow_name(manager: ProjectionManager, wf_id: str) -> tuple[str, str] | None:
+    """Fetch a single workflow name; returns (id, name) or None on failure."""
+    try:
+        wf_data = await manager.store.get(WorkflowListProjection.PROJECTION_NAME, wf_id)
+        if isinstance(wf_data, dict) and wf_data.get("name"):
+            return wf_id, wf_data["name"]
+    except Exception:
+        logger.debug("Could not load workflow name for %s", wf_id, exc_info=True)
+    return None
+
+
 async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
-    """Build a {workflow_id: workflow_name} lookup for the given IDs via targeted store lookups."""
+    """Build a {workflow_id: workflow_name} lookup for the given IDs via concurrent store lookups."""
     if not workflow_ids:
         return {}
-    try:
-        manager = get_projection_mgr()
-        result: dict[str, str] = {}
-        for wf_id in workflow_ids:
-            wf_data = await manager.store.get("workflow_summaries", wf_id)
-            if isinstance(wf_data, dict) and wf_data.get("name"):
-                result[wf_id] = wf_data["name"]
-        return result
-    except Exception:
-        logger.debug("Could not load workflow names for session display", exc_info=True)
-        return {}
+    manager = get_projection_mgr()
+    results = await asyncio.gather(
+        *(_fetch_one_workflow_name(manager, wf_id) for wf_id in workflow_ids),
+        return_exceptions=False,
+    )
+    return dict(entry for entry in results if entry is not None)
 
 
 async def list_sessions(
@@ -356,7 +367,7 @@ async def get_session(
     wf_name: str | None = None
     if session.workflow_id:
         try:
-            wf_data = await manager.store.get("workflow_summaries", session.workflow_id)
+            wf_data = await manager.store.get(WorkflowListProjection.PROJECTION_NAME, session.workflow_id)
             if isinstance(wf_data, dict):
                 wf_name = wf_data.get("name")
         except Exception:
