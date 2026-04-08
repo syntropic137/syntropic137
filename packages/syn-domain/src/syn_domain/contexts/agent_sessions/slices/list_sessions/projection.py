@@ -80,6 +80,28 @@ _OPERATION_FIELDS = [
 _OPERATION_DEFAULTS: dict[str, Any] = {"operation_id": "", "operation_type": "", "success": True}
 
 
+def _apply_session_completed(existing: dict[str, Any], event_data: dict) -> None:
+    """Apply SessionCompleted fields to an existing session record."""
+    existing["status"] = event_data.get("status", "completed")
+    existing["completed_at"] = event_data.get("completed_at")
+    existing["input_tokens"] = event_data.get("total_input_tokens", 0)
+    existing["output_tokens"] = event_data.get("total_output_tokens", 0)
+    existing["total_tokens"] = event_data.get("total_tokens", existing.get("total_tokens", 0))
+    existing["total_cost_usd"] = float(
+        Decimal(str(event_data.get("total_cost_usd", existing.get("total_cost_usd", 0))))
+    )
+    started_at = existing.get("started_at")
+    completed_at = event_data.get("completed_at")
+    if started_at and completed_at:
+        existing["duration_seconds"] = _calculate_duration(started_at, completed_at)
+    if event_data.get("error_message"):
+        existing["error_message"] = event_data["error_message"]
+    if "num_turns" in event_data:
+        existing["num_turns"] = event_data["num_turns"]
+    if "duration_api_ms" in event_data:
+        existing["duration_api_ms"] = event_data["duration_api_ms"]
+
+
 def _append_operation(existing: dict[str, Any], event_data: dict) -> None:
     """Append an operation record to the session's operations list."""
     operation = {
@@ -176,38 +198,9 @@ class SessionListProjection(AutoDispatchProjection):
         session_id = event_data.get("session_id")
         if not session_id:
             return
-
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         if existing:
-            existing["status"] = event_data.get("status", "completed")
-            existing["completed_at"] = event_data.get("completed_at")
-
-            # Token breakdown - extract input/output separately
-            existing["input_tokens"] = event_data.get("total_input_tokens", 0)
-            existing["output_tokens"] = event_data.get("total_output_tokens", 0)
-            existing["total_tokens"] = event_data.get(
-                "total_tokens", existing.get("total_tokens", 0)
-            )
-            existing["total_cost_usd"] = float(
-                Decimal(str(event_data.get("total_cost_usd", existing.get("total_cost_usd", 0))))
-            )
-
-            # Duration calculation
-            started_at = existing.get("started_at")
-            completed_at = event_data.get("completed_at")
-            if started_at and completed_at:
-                existing["duration_seconds"] = _calculate_duration(started_at, completed_at)
-
-            # Error message from failed sessions
-            if event_data.get("error_message"):
-                existing["error_message"] = event_data["error_message"]
-
-            # Enhanced metrics from result event (agentic_isolation v0.3.0)
-            if "num_turns" in event_data:
-                existing["num_turns"] = event_data["num_turns"]
-            if "duration_api_ms" in event_data:
-                existing["duration_api_ms"] = event_data["duration_api_ms"]
-
+            _apply_session_completed(existing, event_data)
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_subagent_started(self, event_data: dict) -> None:
