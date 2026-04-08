@@ -5,10 +5,21 @@ Run this after every release to catch regressions before users hit them.
 
 > **This runbook validates the published release artifacts (GHCR images, npm CLI
 > package) running on the selfhost compose project (`syntropic137_selfhost`).**
-> The selfhost stack is completely independent of the local dev stack — different
-> compose project, different container names (`syn137-*` vs `syn-dev-*`), different
-> port mappings, and different routing. They do not collide and can run side by side.
-> Results from the dev stack do not validate release quality.
+>
+> **The selfhost stack and dev stack are completely separate.** Do not confuse them:
+>
+> | | Selfhost (validate this) | Dev (ignore for validation) |
+> |---|---|---|
+> | **Compose project** | `syntropic137_selfhost` | `syn-dev` |
+> | **Container prefix** | `syn137-*` | `syn-dev-*` |
+> | **API port** | `8137` | `8000` (or configured dev port) |
+> | **Images** | `ghcr.io/syntropic137/*:<VERSION>` | `syntropic137_development-*:latest` (locally built) |
+> | **Config location** | `~/.syntropic137/` | `docker/docker-compose.*.yaml` in repo |
+> | **Compose file** | `~/.syntropic137/docker-compose.syntropic137.yaml` | `docker/docker-compose.yaml` |
+>
+> They can run side by side without collision. **Results from the dev stack do not
+> validate release quality** — dev images are locally built and may contain uncommitted
+> changes.
 
 Designed to be executed by a developer or by Claude Code following the steps sequentially.
 
@@ -62,58 +73,64 @@ Preflight (sequential — verify stack, CLI version, health)
 
 ---
 
-## 0. Ensure Selfhost Stack Is Running
+## 0. Check Current Stack State
 
-Check if the selfhost stack is already up:
+> **IMPORTANT: Do not assume the stack is running the correct version.** The
+> selfhost stack may be running a previous release, locally-built dev images, or
+> a mix. You MUST verify the running version before proceeding — and you MUST
+> reset + upgrade before any validation.
 
-```bash
-docker ps --format "{{.Image}}\t{{.Names}}" | grep -E "ghcr\.io/syntropic137|syn137-"
-```
-
-**If containers are running** with `ghcr.io/syntropic137/` images or `syn137-*` names,
-the stack is up — proceed to Section 1.
-
-**If no selfhost containers are found**, start the stack:
+### Identify running stacks
 
 ```bash
-npx @syntropic137/setup init
+docker compose ls
 ```
 
-- [ ] Setup completes without errors
-- [ ] All services start and report healthy
+Look for the `syntropic137_selfhost` project. The dev stack (`syn-dev`) may also
+be running — ignore it entirely for validation purposes.
 
-> The dev stack (`syn-dev-*` containers) may also be running — that's fine.
-> The selfhost stack (`syn137-*` containers, compose project `syntropic137_selfhost`)
-> is fully isolated and does not collide with the dev stack.
+### Check what version the selfhost stack is currently running
+
+```bash
+docker ps --filter "label=com.docker.compose.project=syntropic137_selfhost" --format "table {{.Image}}\t{{.Names}}\t{{.Status}}"
+```
+
+Inspect the **Image** column carefully:
+- `ghcr.io/syntropic137/syn-api:<VERSION>` — published GHCR images (what we want)
+- `syntropic137_development-*:latest` — locally-built dev images (NOT valid for validation)
+- A mix of both — partial upgrade, needs full reset
+
+**If images do NOT show the release version being validated, you MUST proceed
+with the reset and upgrade in Section 1.** Do not skip ahead to validation.
+
+> **If no selfhost stack is running at all**, start it:
+> ```bash
+> npx @syntropic137/setup init
+> ```
 
 ---
 
 ## 1. Reset Data and Upgrade Selfhost Stack
 
-> **Start fresh.** Always reset data before a validation run. This ensures
-> consistent, reproducible results — no stale sessions, leftover test workflows,
-> or duplicate repos from previous runs polluting the validation.
+> **MANDATORY before every validation run.** Always reset data and upgrade to the
+> release under test. This ensures:
+> - Clean state — no stale sessions, leftover workflows, or duplicate repos
+> - Correct images — the published GHCR images for the release, not dev builds
+> - Reproducible results — every validation starts from the same baseline
+>
+> **Never skip this section.** Even if the stack appears to be running the right
+> version, reset anyway — leftover data from previous runs will pollute results.
 
-### Reset event store and databases
+### Step 1: Tear down and clear data
 
 ```bash
-npx @syntropic137/setup reset --data
+docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml down -v
 ```
 
-If `reset --data` is not available, manually reset:
+- [ ] Selfhost stack stopped
+- [ ] All data volumes removed
 
-```bash
-docker compose -f docker-compose.syntropic137.yaml down -v
-npx @syntropic137/setup init
-```
-
-- [ ] All data volumes cleared
-- [ ] Stack restarted with clean state
-- [ ] `syn sessions list` returns empty
-- [ ] `syn workflow list` returns empty
-- [ ] `syn repo list` returns empty
-
-### Upgrade to release under test
+### Step 2: Upgrade to the release under test
 
 This step validates that the `npx @syntropic137/setup update` upgrade path works
 correctly — this is itself a release quality signal. Users will run this exact
@@ -126,6 +143,14 @@ npx @syntropic137/setup update
 - [ ] Update command completes without errors
 - [ ] New GHCR images pulled for the release version
 - [ ] All containers restart with new images
+
+> **If the update fails:** Re-initialize from scratch:
+> ```bash
+> docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml down -v
+> npx @syntropic137/setup init
+> ```
+
+### Step 3: Verify the stack is running the correct version
 
 ```bash
 npx @syntropic137/setup status
@@ -140,14 +165,27 @@ Verify the running images match the release version:
 docker ps --format "table {{.Image}}\t{{.Status}}\t{{.Names}}" | grep syn137
 ```
 
-- [ ] Image tags match the release being validated (e.g., `ghcr.io/syntropic137/syn-api:0.21.6`)
+- [ ] Image tags match the release being validated (e.g., `ghcr.io/syntropic137/syn-api:<VERSION>`)
+- [ ] **No** `syntropic137_development-*` images — those are dev-built, not published
 - [ ] All containers show healthy status
 
 ```bash
-curl -s http://localhost:8137/health | jq .
+curl -s http://localhost:8137/health
 ```
 
-- [ ] Health check returns `ok` / healthy status
+- [ ] Health check returns healthy status
+
+### Step 4: Verify clean state
+
+```bash
+syn sessions list
+syn workflow list
+syn repo list
+```
+
+- [ ] Sessions list is empty
+- [ ] Workflow list is empty
+- [ ] Repo list is empty
 
 ---
 
@@ -169,7 +207,7 @@ npm install -g @syntropic137/cli@latest
 syn version
 ```
 
-- [ ] Version matches the release being validated (e.g., `0.21.6`)
+- [ ] Version matches the release being validated (e.g., `<VERSION>`)
 
 ```bash
 syn health
@@ -264,6 +302,11 @@ in polling-only mode.
 
 ## 5. Functional Validation — Core CLI (Read-Only)
 
+> **Fresh stack note:** After a data reset (Section 1), most commands that take
+> `<id>` arguments will have no data. For these commands, verify they return
+> graceful empty responses (empty lists, "not found" errors) without crashes or
+> stack traces. Re-run ID-dependent commands after Sections 6-7 create data.
+
 ### Configuration
 
 ```bash
@@ -347,7 +390,27 @@ syn marketplace refresh
 
 - [ ] Registered marketplaces listed (should show `syntropic137-marketplace`)
 - [ ] Refresh completes without errors
-- [ ] If no marketplace registered, add one: `syn marketplace add syntropic137-marketplace syntropic137/syntropic137-marketplace`
+
+If no marketplace is registered:
+
+```bash
+syn marketplace add syntropic137-marketplace syntropic137/syntropic137-marketplace
+```
+
+- [ ] Marketplace added successfully
+- [ ] Appears in `syn marketplace list`
+
+To test removal and re-add (round-trip):
+
+```bash
+syn marketplace remove syntropic137-marketplace
+syn marketplace list
+syn marketplace add syntropic137-marketplace syntropic137/syntropic137-marketplace
+```
+
+- [ ] Remove succeeds
+- [ ] List confirms removal
+- [ ] Re-add succeeds
 
 ### Triggers
 
@@ -451,6 +514,9 @@ syn artifacts content <artifact-id>
 
 - [ ] Artifact listing works (may be empty on fresh stack)
 - [ ] Artifact detail and content render (if artifacts exist)
+
+> **Note:** `syn artifacts create` is tested in Section 7 after a workflow
+> execution produces artifacts.
 
 ---
 
@@ -621,6 +687,14 @@ syn control stop <execution-id>
 - [ ] Cancel stops the execution cleanly
 - [ ] Stop sends SIGINT for immediate halt
 
+### Inject context into running execution
+
+```bash
+syn control inject <execution-id> --message "Focus on the auth module"
+```
+
+- [ ] Injection accepted (or graceful error if execution not in injectable state)
+
 ### Verify session recorded
 
 ```bash
@@ -655,6 +729,15 @@ syn workflow update <package-name>
 
 - [ ] Dry run shows what would change
 - [ ] Update pulls latest version
+
+### Initialize a new workflow from template
+
+```bash
+syn workflow init --name test-workflow --type single
+```
+
+- [ ] Scaffolds a new workflow YAML file
+- [ ] Generated file passes `syn workflow validate`
 
 ### Export workflow
 
@@ -696,10 +779,10 @@ Based on Section 4 (webhook/polling mode):
 syn triggers enable review-fix --repo owner/repo --workflow <workflow-id>
 
 # Register a custom trigger with safety limits
+# Note: action is part of the event name (e.g., issue_comment.created), not a separate flag
 syn triggers register \
-  --event issue_comment \
-  --action created \
-  --repo owner/repo \
+  --event issue_comment.created \
+  --repo <repo-id> \
   --workflow <workflow-id> \
   --max-fires 5 \
   --cooldown 300
@@ -847,12 +930,26 @@ syn triggers disable-all --repo owner/repo
 > validate the dashboard programmatically. This ensures repeatable, scriptable
 > UI validation rather than manual browser checks.
 
-Open `http://localhost:8137` via Playwright.
+Navigate to `http://localhost:8137` via Playwright.
+
+**Key routes to validate:**
+
+| Route | What to check |
+|-------|---------------|
+| `/` | Dashboard home loads, no JS errors in console |
+| `/workflows` | Workflow list table renders |
+| `/sessions` | Session list table renders |
+| `/executions` | Execution list with status badges |
+| `/triggers` | Trigger list with repo names (not UUIDs) |
+| `/insights` | Overview charts and metrics |
+| `/insights/cost` | Cost breakdown |
+| `/insights/heatmap` | Activity heatmap |
 
 ### Navigation and rendering
 
-- [ ] Dashboard loads without errors
+- [ ] Dashboard loads without errors (check browser console for JS exceptions)
 - [ ] All navigation links work (workflows, sessions, executions, triggers, insights)
+- [ ] No broken images or missing assets (check network tab for 404s)
 
 ### Data views
 
@@ -868,7 +965,7 @@ Open `http://localhost:8137` via Playwright.
 
 ### Real-time
 
-- [ ] WebSocket connection established
+- [ ] WebSocket connection established (check network tab for `ws://` connection)
 - [ ] Live updates appear when new events are recorded
 
 ### Insights
@@ -889,7 +986,7 @@ Save the report to `docs/testing/output/` using the naming convention:
 docs/testing/output/v<VERSION>-post-release-validation.md
 ```
 
-Example: `docs/testing/output/v0.22.0-post-release-validation.md`
+Example: `docs/testing/output/v<VERSION>-post-release-validation.md`
 
 This directory is **gitignored** (`docs/testing/output/.gitignore` excludes `*.md`), so
 reports never pollute the commit history. They persist locally as reference artifacts
@@ -1083,3 +1180,166 @@ Ordered by priority. Link to GitHub issues when filed.
 One paragraph: based on this validation, what is the state of the release relative
 to open source launch? What must be fixed first, what can ship as-is?
 ```
+
+---
+
+## 11. Post-Fix Validation Loop
+
+After the initial validation discovers issues and fixes are implemented locally,
+verify those fixes against the selfhost stack before merging. This avoids shipping
+a "fix" that passes unit tests but fails in the real deployment topology.
+
+### Identify affected images
+
+Map each fix to the Docker image it ships in:
+
+| Fix area | Image to rebuild |
+|----------|-----------------|
+| API routes, domain logic | `syntropic137_development-api` |
+| CLI (Node.js) | `syntropic137_development-cli` |
+| Dashboard UI | `syntropic137_development-dashboard` |
+| Gateway / nginx config | `syntropic137_development-gateway` |
+| Collector | `syntropic137_development-collector` |
+
+### Initialize submodules
+
+The Docker build context requires submodule contents (event-sourcing-platform,
+agentic-primitives). If working in a worktree or fresh clone:
+
+```bash
+git submodule update --init --recursive
+```
+
+### Rebuild affected images locally
+
+Build only the images that changed. The build uses the base compose file plus the
+selfhost overlay (which adds build args, entrypoints, etc.):
+
+```bash
+# From docker/ directory — build only the image(s) you need
+cd docker
+
+# API (includes domain packages + adapters)
+docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml build api
+
+# Gateway (nginx + security headers)
+docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml build gateway
+
+# Dashboard
+docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml build dashboard
+```
+
+This produces local images named `syntropic137_development-<service>:latest`.
+
+### Swap images into the selfhost stack
+
+The selfhost stack at `~/.syntropic137/docker-compose.syntropic137.yaml` uses
+pinned GHCR image digests. To use local builds, temporarily replace the image
+references for affected services:
+
+```bash
+# 1. Find the current image lines
+grep 'image:.*syn-api\|image:.*syn-gateway' ~/.syntropic137/docker-compose.syntropic137.yaml
+
+# 2. Replace GHCR digest with local image name
+#    Before: image: ghcr.io/syntropic137/syn-api@sha256:a4751f91...
+#    After:  image: syntropic137_development-api:latest
+#
+#    Before: image: ghcr.io/syntropic137/syn-gateway@sha256:fbaaecad...
+#    After:  image: syntropic137_development-gateway:latest
+```
+
+Then recreate only the affected containers:
+
+```bash
+docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps api
+docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps gateway
+```
+
+Verify the containers restarted with the local images:
+
+```bash
+docker ps --filter "name=syn137-" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+```
+
+- [ ] Affected container(s) show `syntropic137_development-<service>:latest` image
+- [ ] Other containers unchanged (still on GHCR digests)
+- [ ] `syn health` returns healthy after restart
+
+### Re-run targeted validation
+
+Do NOT re-run the entire runbook. Only re-run the sections that exercise the fixed
+behavior:
+
+| Finding | Re-validate with |
+|---------|-----------------|
+| API/domain fix | Section 5 (relevant commands) + Section 7 (workflow lifecycle) |
+| CLI fix | Section 5 (relevant commands) |
+| Gateway/CSP fix | Section 9 (dashboard — check console for CSP violations) |
+| Cost calculation fix | Section 5 (`syn costs`, `syn execution show`) |
+| Input validation fix | Section 7 (workflow run with missing inputs) |
+
+```bash
+# Quick smoke test after image swap
+syn health
+syn version
+# Then run the specific commands that were broken
+```
+
+- [ ] Each finding's reproduction steps now pass
+- [ ] No regressions in adjacent functionality
+- [ ] Dashboard loads without new console errors
+
+### Update the validation report
+
+Append a "Post-Fix Re-Validation" section to the report in `docs/testing/output/`:
+
+```markdown
+## Post-Fix Re-Validation
+
+**Date:** YYYY-MM-DD
+**Images rebuilt:** api, gateway (list which)
+**Commit:** <short SHA of fix commit>
+
+| Finding | Status | Notes |
+|---------|--------|-------|
+| P1-1: ... | FIXED | Verified with ... |
+| P1-2: ... | FIXED | ... |
+```
+
+### Restore GHCR images
+
+After validation, restore the selfhost compose file to its original GHCR digests:
+
+```bash
+# Revert the image lines back to their original GHCR digests
+# Before: image: syntropic137_development-api:latest
+# After:  image: ghcr.io/syntropic137/syn-api@sha256:<original-digest>
+```
+
+> **Important:** Do NOT leave the selfhost compose pointing at local images.
+> The next `npx @syntropic137/setup update` will overwrite the file anyway,
+> but restoring avoids confusion if someone inspects the stack before then.
+
+### Iterate if needed
+
+If re-validation reveals new issues or regressions:
+
+1. Fix locally
+2. Rebuild the affected image
+3. Swap into selfhost stack (edit image reference + `up -d --no-deps`)
+4. Re-validate
+
+Repeat until all findings are resolved.
+
+### Cut a patch release
+
+Once all findings pass re-validation:
+
+1. Commit, push, and create a PR for all fixes
+2. Merge to `main`
+3. Bump version: `just bump-version <next-patch>`
+4. PR `main` → `release` — triggers the full release pipeline
+5. After release publishes, run `npx @syntropic137/setup update` on the selfhost
+   stack to pull the new GHCR images with the fixes baked in
+6. Run a final smoke test (Sections 2-5) against the updated selfhost stack

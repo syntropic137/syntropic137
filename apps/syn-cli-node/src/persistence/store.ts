@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import type { z } from "zod";
 
-const SYN_DIR = path.join(os.homedir(), ".syntropic137");
+const SYN_DIR = process.env.SYN_CONFIG_DIR || path.join(os.homedir(), ".syntropic137");
 
 export function synPath(...segments: string[]): string {
   return path.join(SYN_DIR, ...segments);

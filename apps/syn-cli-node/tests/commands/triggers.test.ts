@@ -83,23 +83,19 @@ describe("triggers commands", () => {
     ).rejects.toThrow(CLIError);
   });
 
-  it("pause sends request", async () => {
-    const detail = {
-      trigger_id: "trig-1",
-      name: "test",
-      event: "push",
-      repository: "r1",
-      workflow_id: "w1",
-      status: "paused",
-      fire_count: 0,
-      installation_id: "inst-1",
-      created_by: "cli",
-    };
-    // PATCH (action) then GET (re-fetch detail)
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ trigger_id: "trig-1", status: "paused" }))
-      .mockResolvedValueOnce(jsonResponse(detail));
+  it("pause sends PATCH only, no stale GET re-fetch", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ trigger_id: "trig-1", status: "paused" }));
     await triggersGroup.getCommand("pause")!.handler({ positionals: ["trig-1"], values: {} });
     expect(stdout()).toContain("paused");
+    // Only one fetch call (PATCH) — no follow-up GET that would read stale projection
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("resume sends PATCH only, no stale GET re-fetch", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ trigger_id: "trig-1", status: "resumed" }));
+    await triggersGroup.getCommand("resume")!.handler({ positionals: ["trig-1"], values: {} });
+    expect(stdout()).toContain("resumed");
+    // Only one fetch call (PATCH) — no follow-up GET that would read stale projection
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -303,6 +303,32 @@ async def get(
     )
 
 
+async def _enrich_costs(
+    execution_id: str,
+    manager: object,
+    phases: list[PhaseExecution],
+    fallback_tokens: int,
+    fallback_cost: Decimal | str,
+) -> tuple[int, Decimal | str]:
+    """Enrich execution and phase costs from TimescaleDB (#505)."""
+    try:
+        exec_cost = await manager.execution_cost.get_execution_cost(execution_id)  # type: ignore[attr-defined]
+    except Exception:
+        logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
+        return fallback_tokens, fallback_cost
+
+    if exec_cost is None or exec_cost.total_tokens == 0:
+        return fallback_tokens, fallback_cost
+
+    if exec_cost.cost_by_phase:
+        for phase in phases:
+            phase_cost = exec_cost.cost_by_phase.get(phase.phase_id)
+            if phase_cost is not None:
+                phase.cost_usd = phase_cost
+
+    return exec_cost.total_tokens, exec_cost.total_cost_usd
+
+
 async def get_detail(
     execution_id: str,
     auth: AuthContext | None = None,  # noqa: ARG001
@@ -314,17 +340,13 @@ async def get_detail(
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     phases = [await _map_phase_detail(p, manager) for p in detail.phases]
 
-    # Enrich with TimescaleDB cost data when available (#505)
-    total_tokens = detail.total_input_tokens + detail.total_output_tokens
-    total_cost = detail.total_cost_usd
-
-    try:
-        exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
-        if exec_cost is not None and exec_cost.total_tokens > 0:
-            total_tokens = exec_cost.total_tokens
-            total_cost = exec_cost.total_cost_usd
-    except Exception:
-        logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
+    total_tokens, total_cost = await _enrich_costs(
+        execution_id,
+        manager,
+        phases,
+        fallback_tokens=detail.total_input_tokens + detail.total_output_tokens,
+        fallback_cost=detail.total_cost_usd,
+    )
 
     return Ok(
         ExecutionDetailFull(

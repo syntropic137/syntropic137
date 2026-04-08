@@ -229,7 +229,7 @@ class RegisterRepoRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    organization_id: str
+    organization_id: str = "_unaffiliated"
     full_name: str
     provider: str = "github"
     owner: str = ""

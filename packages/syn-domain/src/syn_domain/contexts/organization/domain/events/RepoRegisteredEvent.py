@@ -27,8 +27,8 @@ class RepoRegisteredEvent(DomainEvent):
     """
 
     repo_id: str
-    organization_id: str
-    provider: str
+    organization_id: str = "_unaffiliated"
+    provider: str = "github"
     provider_repo_id: str = ""
     full_name: str
     owner: str = ""
@@ -48,9 +48,11 @@ class RepoRegisteredEvent(DomainEvent):
     @field_validator("organization_id")
     @classmethod
     def validate_organization_id(cls, v: str) -> str:
-        """Ensure organization_id is provided."""
-        if not v:
-            raise ValueError("organization_id is required")
+        """Reject empty string — use _unaffiliated for org-less repos."""
+        if v == "":
+            raise ValueError(
+                "organization_id cannot be empty; use '_unaffiliated' for org-less repos"
+            )
         return v
 
     @field_validator("full_name")

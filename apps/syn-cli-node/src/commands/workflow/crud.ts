@@ -8,7 +8,7 @@ import { CLIError } from "../../framework/errors.js";
 import { api, unwrap } from "../../client/typed.js";
 import type { components } from "../../generated/api-types.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
-import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
+import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
 import { detectFormat, resolvePackage } from "../../packages/resolver.js";
@@ -112,6 +112,18 @@ export const listCommand: CommandDef = {
 // show
 // ---------------------------------------------------------------------------
 
+function renderInputDeclarations(declarations: WorkflowResponse["input_declarations"]): void {
+  const items = declarations ?? [];
+  if (items.length === 0) return;
+  print(`\n  ${style("Inputs:", BOLD)}`);
+  for (const d of items) {
+    const req = d.required ? style("required", YELLOW) : style("optional", DIM);
+    const desc = d.description ? ` — ${d.description}` : "";
+    const def = d.default != null ? ` (default: ${d.default})` : "";
+    print(`    ${style(d.name, GREEN)} [${req}]${desc}${def}`);
+  }
+}
+
 function renderWorkflowDetail(detail: WorkflowResponse): void {
   print("");
   print(style("Workflow Details", BOLD));
@@ -128,6 +140,7 @@ function renderWorkflowDetail(detail: WorkflowResponse): void {
   } else {
     printDim("  No phases defined");
   }
+  renderInputDeclarations(detail.input_declarations);
 }
 
 export const showCommand: CommandDef = {

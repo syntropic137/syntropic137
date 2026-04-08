@@ -7,11 +7,14 @@ import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
 import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
-import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
+import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../../output/ansi.js";
 import { formatCost, formatTokens } from "../../output/format.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
 import { parseInputs } from "./models.js";
+import type { components } from "../../generated/api-types.js";
+
+type InputDeclaration = components["schemas"]["InputDeclarationModel"];
 
 // ---------------------------------------------------------------------------
 // run
@@ -68,6 +71,29 @@ export const runCommand: CommandDef = {
     const quiet = parsed.values["quiet"] === true;
 
     const wf = await resolveWorkflow(partialId);
+
+    // Fetch full workflow detail to check input declarations
+    const detail = unwrap(
+      await api.GET("/workflows/{workflow_id}", {
+        params: { path: { workflow_id: wf.id } },
+      }),
+      "Failed to get workflow details",
+    );
+
+    const declarations: InputDeclaration[] = detail.input_declarations ?? [];
+    const missingRequired = declarations.filter(
+      (d) => d.required && d.default == null && !Object.hasOwn(parsedInputs, d.name),
+    );
+    if (missingRequired.length > 0) {
+      printError("Missing required inputs:");
+      for (const d of missingRequired) {
+        const desc = d.description ? ` — ${d.description}` : "";
+        print(`  ${style(`--input ${d.name}=<value>`, RED)}${desc}`);
+      }
+      print("");
+      printDim("Provide all required inputs to run this workflow.");
+      throw new CLIError("Missing required inputs", 1);
+    }
 
     if (!quiet) {
       displayRunPreview(wf.name, wf.id, wf.phase_count, task, parsedInputs);
