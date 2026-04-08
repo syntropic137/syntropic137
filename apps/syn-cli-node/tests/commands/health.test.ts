@@ -70,7 +70,7 @@ describe("health command", () => {
       jsonResponse({
         status: "healthy",
         mode: "full",
-        subscription: "running",
+        subscription: { status: "healthy", running: true },
       }),
     );
 
@@ -80,7 +80,7 @@ describe("health command", () => {
       .map((c: unknown[]) => String(c[0]))
       .join("");
     expect(output).toContain("Event store: connected");
-    expect(output).toContain("Subscription: running");
+    expect(output).toContain("Subscription: healthy");
   });
 
   it("throws on connection failure", async () => {
