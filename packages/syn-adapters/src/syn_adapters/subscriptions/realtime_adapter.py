@@ -124,7 +124,13 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
-        event_type = envelope.metadata.event_type or "Unknown"
+        event_type = envelope.metadata.event_type
+        if not event_type:
+            logger.error(
+                "Event missing event_type in metadata for %s",
+                self.PROJECTION_NAME,
+            )
+            return ProjectionResult.FAILURE
         event_data = envelope.event.model_dump()
         global_nonce = envelope.metadata.global_nonce or 0
         try:
