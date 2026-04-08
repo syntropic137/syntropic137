@@ -55,12 +55,9 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
         setError(null)
       })
       .catch((err) => {
-        if (err.name === 'AbortError' && didTimeout) {
-          setError('Request timed out — the API may be overloaded')
-        } else if (err.name !== 'AbortError') {
-          setError(err.message)
-        }
-        // Intentional abort (navigation/new fetch) — do not set error
+        // Intentional aborts (navigation, new fetch cycle) — silent
+        if (err.name === 'AbortError' && !didTimeout) return
+        setError(didTimeout ? 'Request timed out — the API may be overloaded' : err.message)
       })
       .finally(() => {
         clearTimeout(timeoutId)

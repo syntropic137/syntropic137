@@ -353,8 +353,6 @@ async def get_session(
             wf_data = await manager.store.get("workflow_summaries", session.workflow_id)
             if isinstance(wf_data, dict):
                 wf_name = wf_data.get("name")
-            elif wf_data is not None:
-                wf_name = getattr(wf_data, "name", None)
         except Exception:
             logger.debug("Could not load workflow name for session %s", session_id, exc_info=True)
 
