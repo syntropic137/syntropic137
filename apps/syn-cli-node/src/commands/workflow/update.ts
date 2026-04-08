@@ -7,7 +7,7 @@ import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
 import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
-import { style, BOLD, CYAN, GREEN, RED } from "../../output/ansi.js";
+import { style, BOLD, CYAN, DIM, GREEN, RED } from "../../output/ansi.js";
 import type { InstallationRecord, PluginManifest, ResolvedWorkflow } from "../../packages/models.js";
 import {
   detectFormat,
@@ -55,8 +55,10 @@ async function deleteWorkflowsViaApi(record: InstallationRecord): Promise<number
       );
       print(style("done", GREEN));
       deleted++;
-    } catch {
-      print(style("failed", RED));
+    } catch (err) {
+      const msg = err instanceof CLIError ? err.message.toLowerCase() : "";
+      const isGone = msg.includes("already archived") || msg.includes("not found");
+      print(isGone ? style("already archived", DIM) : style("failed", RED));
     }
   }
   return deleted;

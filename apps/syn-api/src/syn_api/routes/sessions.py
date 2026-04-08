@@ -144,15 +144,21 @@ async def _fetch_one_workflow_name(
     return None
 
 
+_WF_NAME_CONCURRENCY = 20
+
+
 async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
     """Build a {workflow_id: workflow_name} lookup for the given IDs via concurrent store lookups."""
     if not workflow_ids:
         return {}
     manager = get_projection_mgr()
-    results = await asyncio.gather(
-        *(_fetch_one_workflow_name(manager, wf_id) for wf_id in workflow_ids),
-        return_exceptions=False,
-    )
+    semaphore = asyncio.Semaphore(_WF_NAME_CONCURRENCY)
+
+    async def _fetch_bounded(wf_id: str) -> tuple[str, str] | None:
+        async with semaphore:
+            return await _fetch_one_workflow_name(manager, wf_id)
+
+    results = await asyncio.gather(*(_fetch_bounded(wf_id) for wf_id in workflow_ids))
     return dict(entry for entry in results if entry is not None)
 
 

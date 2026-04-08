@@ -44,15 +44,16 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
       .then((data) => {
         setSession(data)
         setError(null)
+        setLoading(false)
       })
       .catch((err) => {
-        // Intentional aborts (navigation, new fetch cycle) — silent
+        // Intentional aborts (navigation, new fetch cycle) — skip all state updates
         if (err.name === 'AbortError' && !didTimeout) return
         setError(didTimeout ? 'Request timed out — the API may be overloaded' : err.message)
+        setLoading(false)
       })
       .finally(() => {
         clearTimeout(timeoutId)
-        setLoading(false)
       })
   }, [sessionId])
 

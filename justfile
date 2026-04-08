@@ -819,6 +819,11 @@ check-fix:
 import-check:
     @uv run python scripts/import_check.py
 
+# Wire up git hooks from .githooks/ — run once after cloning or when hooks change
+setup-hooks:
+    git config core.hooksPath .githooks
+    @echo "✓ Git hooks configured (.githooks/pre-push active)"
+
 # Comprehensive QA: all checks (pre-commit, comprehensive)
 qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate docs-sync
     @echo ""

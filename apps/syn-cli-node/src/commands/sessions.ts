@@ -51,7 +51,7 @@ const listCommand: CommandDef = {
 
     for (const s of items) {
       table.addRow(
-        s.id.slice(0, 16),
+        s.id.slice(0, 8) + "…",
         formatStatus(s.status),
         s.agent_provider ?? "\u2014",
         formatTimestamp(s.started_at),

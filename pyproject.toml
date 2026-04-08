@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.23.0"
+version = "0.23.1"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"

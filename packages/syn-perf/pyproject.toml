@@ -1,6 +1,6 @@
 [project]
 name = "syn-perf"
-version = "0.23.0"
+version = "0.23.1"
 description = "Performance benchmarking suite for Syntropic137 isolated workspaces"
 readme = "README.md"
 requires-python = ">=3.12"

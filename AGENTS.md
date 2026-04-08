@@ -349,3 +349,20 @@ Submodules (agentic-primitives, event-sourcing-platform) have independent versio
 - **just** for task running
 - **Docker Compose** for local and selfhost deployment
 - QA: `just qa` runs lint, format, typecheck, test, coverage, vsa-validate
+
+## Pre-PR Checklist (mandatory before opening any PR)
+
+CI failures that could have been caught locally waste 8–10 minutes per round-trip and block the release chain. Always run these before pushing:
+
+```bash
+just fitness-check   # catches cognitive/cyclomatic violations before CI does
+just docs-sync       # catches codegen drift (CLI types, OpenAPI spec, API docs)
+uv run ruff check .  # catches lint and import order issues
+uv run ruff format --check .  # catches formatting
+```
+
+Or run `just qa` for the full suite (slower but catches everything including tests).
+
+**Git hooks:** `.githooks/pre-push` runs the fast checks automatically. Wire it up once with `just setup-hooks` after cloning.
+
+**For small fixes on already-merged PRs** (formatting nits, Copilot review comments): push directly to `main` with `git push origin <branch>:main` rather than opening a new PR. Keeps the release chain unblocked.

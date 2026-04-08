@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Pre-push hook — catches the most common CI failures locally before they waste a round-trip.
+# Fast checks only (~30s). Full suite: just qa
+set -euo pipefail
+
+echo "▶ pre-push: ruff format check..."
+uv run ruff format --check apps/ packages/ 2>/dev/null
+
+echo "▶ pre-push: ruff lint..."
+uv run ruff check apps/ packages/ 2>/dev/null
+
+echo "▶ pre-push: architectural fitness..."
+just fitness-check
+
+echo "▶ pre-push: codegen drift check..."
+just codegen > /dev/null 2>&1
+if ! git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null; then
+  git restore apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null || true
+  echo "❌ Codegen drift: API types or docs are stale. Run 'just codegen' and commit the changes."
+  exit 1
+fi
+echo "✓ Codegen up to date"
+
+echo "✓ pre-push checks passed"

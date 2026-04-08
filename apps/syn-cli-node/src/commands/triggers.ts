@@ -141,7 +141,7 @@ const listCommand: CommandDef = {
         t.trigger_id.slice(0, 12),
         t.event,
         t.repository.slice(0, 12),
-        t.workflow_id.slice(0, 12),
+        (t.workflow_name ?? t.workflow_id).slice(0, 12),
         formatStatus(t.status),
         String(t.fire_count),
       );
@@ -154,9 +154,12 @@ function renderTriggerDetail(d: TriggerDetail, fallbackId?: string): void {
   print(`${style("Trigger:", BOLD)} ${d.trigger_id || fallbackId || ""}`);
   print(`  Event:      ${d.event}`);
   print(`  Repo:       ${d.repository}`);
-  print(`  Workflow:   ${d.workflow_id}`);
+  print(`  Workflow:   ${d.workflow_name ?? d.workflow_id}`);
   print(`  Status:     ${formatStatus(d.status)}`);
-  print(`  Fires:      ${d.fire_count} / max —`);
+  const maxFires = (d.config?.["max_attempts"] as number | undefined) ?? null;
+  const cooldown = (d.config?.["cooldown_seconds"] as number | undefined) ?? null;
+  print(`  Fires:      ${d.fire_count}${maxFires != null ? ` / max ${maxFires}` : ""}`);
+  if (cooldown != null) print(`  Cooldown:   ${cooldown}s`);
   if (d.last_fired_at) print(`  Last fired: ${formatTimestamp(d.last_fired_at)}`);
 
   const conditions = d.conditions ?? [];

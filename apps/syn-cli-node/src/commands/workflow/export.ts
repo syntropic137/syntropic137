@@ -18,6 +18,7 @@ export const exportCommand: CommandDef = {
   options: {
     format: { type: "string", short: "f", description: "Export format: 'package' (default) or 'plugin'", default: "package" },
     output: { type: "string", short: "o", description: "Output directory (created if absent)", default: "." },
+    force: { type: "boolean", description: "Overwrite existing files without error", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
     const workflowId = parsed.positionals[0];
@@ -33,6 +34,7 @@ export const exportCommand: CommandDef = {
     }
 
     const outputDir = (parsed.values["output"] as string | undefined) ?? ".";
+    const force = parsed.values["force"] === true;
 
     const data = unwrap(
       await api.GET("/workflows/{workflow_id}/export", {
@@ -51,13 +53,6 @@ export const exportCommand: CommandDef = {
     }
 
     const outDir = path.resolve(outputDir);
-    if (fs.existsSync(outDir)) {
-      const entries = fs.readdirSync(outDir);
-      if (entries.length > 0) {
-        printError(`Output directory is not empty: ${outDir}`);
-        throw new CLIError("Directory not empty", 1);
-      }
-    }
 
     // Write files with path traversal protection
     for (const [relPath, content] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
@@ -70,6 +65,11 @@ export const exportCommand: CommandDef = {
       if (!filePath.startsWith(outDir)) {
         printError(`Path escapes output directory: ${relPath}`);
         throw new CLIError("Path traversal", 1);
+      }
+
+      if (!force && fs.existsSync(filePath)) {
+        printError(`File already exists: ${relPath} (use --force to overwrite)`);
+        throw new CLIError("File exists", 1);
       }
 
       fs.mkdirSync(path.dirname(filePath), { recursive: true });

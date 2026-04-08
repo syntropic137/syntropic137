@@ -487,6 +487,20 @@ syn repo register --url owner/repo
 - [ ] Repo registered successfully
 - [ ] Appears in `syn repo list`
 
+### Create an org and system (required for assignment)
+
+> **Fresh stack note:** `syn repo assign` requires an existing system. On a fresh
+> stack, create them first. `syn system create` requires `--org`.
+
+```bash
+ORG_ID=$(syn org create --name "Test Org" --slug "test-org" 2>&1 | grep -oE 'org-[a-f0-9]+')
+echo "Org: $ORG_ID"
+syn system create --name "test-system" --org "$ORG_ID"
+```
+
+- [ ] Org created successfully
+- [ ] System created with org reference
+
 ### Assign repo to system
 
 ```bash
@@ -690,9 +704,10 @@ syn workflow update <package-name>
 
 ```bash
 syn workflow init --name test-workflow --type single
+syn workflow validate test-workflow
 ```
 
-- [ ] Scaffolds a new workflow YAML file
+- [ ] Scaffolds a new workflow YAML file into `./test-workflow/`
 - [ ] Generated file passes `syn workflow validate`
 
 ### Export workflow
@@ -717,6 +732,19 @@ syn workflow uninstall <package-name>
 ---
 
 ## 7. Functional Validation — Trigger Lifecycle & Round-Trip
+
+### Verify event poller is running before testing round-trips
+
+> **Check this before spending time on round-trip tests.** If the poller failed
+> to start, round-trip tests will fail silently (triggers registered, never fire).
+
+```bash
+docker logs syn137-api 2>&1 | grep -E "poller started|Polling error"
+```
+
+- [ ] "GitHub event poller started" line is present
+- [ ] No "Polling error" lines
+- [ ] If poller error is present: restart the API container (`docker restart syn137-api`) and recheck. If it persists, record as a blocker and skip round-trip sections.
 
 ### Determine available trigger presets
 
@@ -870,8 +898,8 @@ syn triggers show <trigger-id>
 ### Trigger cleanup
 
 ```bash
-syn triggers delete <trigger-id>
-syn triggers disable-all --repo owner/repo
+syn triggers delete <trigger-id> --force
+syn triggers disable-all --repo owner/repo --force
 ```
 
 - [ ] Individual trigger deleted
@@ -921,7 +949,8 @@ Navigate to `http://localhost:8137` via Playwright.
 
 ### Real-time
 
-- [ ] WebSocket connection established (check network tab for `ws://` connection)
+- [ ] SSE connection active — `GET /api/v1/sse/activity` returns 200 and stays open (check network tab for the persistent SSE request, not a `ws://` WebSocket — the dashboard uses SSE)
+- [ ] Dashboard shows green "Live" dot in top-right corner
 - [ ] Live updates appear when new events are recorded
 
 ### Insights
