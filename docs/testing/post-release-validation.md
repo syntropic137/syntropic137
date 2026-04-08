@@ -702,21 +702,18 @@ syn workflow update <package-name>
 
 ### Initialize a new workflow from template
 
-> **Known constraint:** `syn workflow init` and `syn workflow export` error with
-> "Directory not empty" when run from any non-empty directory. Use a temp dir.
-
 ```bash
-mkdir -p /tmp/wf-test && cd /tmp/wf-test && syn workflow init --name test-workflow --type single
-syn workflow validate /tmp/wf-test
+syn workflow init --name test-workflow --type single
+syn workflow validate test-workflow
 ```
 
-- [ ] Scaffolds a new workflow YAML file
+- [ ] Scaffolds a new workflow YAML file into `./test-workflow/`
 - [ ] Generated file passes `syn workflow validate`
 
 ### Export workflow
 
 ```bash
-mkdir -p /tmp/wf-export && cd /tmp/wf-export && syn workflow export <workflow-id> --format plugin
+syn workflow export <workflow-id> --format plugin
 ```
 
 - [ ] Export produces a Claude Code plugin package
@@ -738,17 +735,16 @@ syn workflow uninstall <package-name>
 
 ### Verify event poller is running before testing round-trips
 
-> **Check this before spending time on round-trip tests.** The poller has a known
-> startup race condition where a concurrent `CREATE TYPE trigger_index` in Postgres
-> causes a unique violation — the poller crashes and enters backoff. If the error
-> is present, round-trip tests will fail silently (triggers registered, never fire).
+> **Check this before spending time on round-trip tests.** If the poller failed
+> to start, round-trip tests will fail silently (triggers registered, never fire).
 
 ```bash
-docker logs syn137-api 2>&1 | grep "Polling error"
+docker logs syn137-api 2>&1 | grep -E "poller started|Polling error"
 ```
 
-- [ ] No "Polling error" lines — poller started cleanly
-- [ ] If error present: restart the API container (`docker restart syn137-api`) and recheck. If it persists, record as a blocker and skip round-trip sections.
+- [ ] "GitHub event poller started" line is present
+- [ ] No "Polling error" lines
+- [ ] If poller error is present: restart the API container (`docker restart syn137-api`) and recheck. If it persists, record as a blocker and skip round-trip sections.
 
 ### Determine available trigger presets
 

@@ -159,7 +159,7 @@ function renderTriggerDetail(d: TriggerDetail, fallbackId?: string): void {
   const maxFires = (d.config?.["max_attempts"] as number | undefined) ?? null;
   const cooldown = (d.config?.["cooldown_seconds"] as number | undefined) ?? null;
   print(`  Fires:      ${d.fire_count}${maxFires != null ? ` / max ${maxFires}` : ""}`);
-  if (cooldown) print(`  Cooldown:   ${cooldown}s`);
+  if (cooldown != null) print(`  Cooldown:   ${cooldown}s`);
   if (d.last_fired_at) print(`  Last fired: ${formatTimestamp(d.last_fired_at)}`);
 
   const conditions = d.conditions ?? [];

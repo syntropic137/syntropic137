@@ -338,7 +338,7 @@ export const initCommand: CommandDef = {
     // When no directory is given, default to a new named subdirectory in cwd
     // (not cwd itself — cwd is almost always non-empty in a project).
     const defaultDir = explicitName
-      ? explicitName.toLowerCase().replace(/\s+/g, "-")
+      ? path.basename(explicitName.toLowerCase().replace(/\s+/g, "-")) || "my-workflow"
       : "my-workflow";
     const directory = parsed.positionals[0] ?? defaultDir;
     const resolvedDir = path.resolve(directory);
