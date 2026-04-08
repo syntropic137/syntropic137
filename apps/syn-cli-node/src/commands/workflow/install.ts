@@ -279,7 +279,17 @@ export const installedCommand: CommandDef = {
   handler: async () => {
     const registry = loadInstalled();
 
-    if (registry.installations.length === 0) {
+    // Filter out entries whose local source path no longer exists.
+    // Remote sources (URLs, git@, GitHub shorthand, marketplace bare names) are always shown.
+    const liveInstallations = registry.installations.filter((r) => {
+      const src = r.source;
+      const isGitHubShorthand = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#.+)?$/.test(src);
+      const isRemote = src.includes("://") || src.startsWith("git@") || src.startsWith("ssh://") || isBarePluginName(src) || isGitHubShorthand;
+      if (isRemote) return true;
+      return fs.existsSync(path.resolve(src));
+    });
+
+    if (liveInstallations.length === 0) {
       printDim("No packages installed yet.");
       print(`Install one with: ${style("syn workflow install <source>", CYAN)}`);
       return;
@@ -292,7 +302,7 @@ export const installedCommand: CommandDef = {
     table.addColumn("Workflows", { align: "right" });
     table.addColumn("Installed", { style: DIM });
 
-    for (const record of registry.installations) {
+    for (const record of liveInstallations) {
       table.addRow(
         record.package_name,
         record.package_version,

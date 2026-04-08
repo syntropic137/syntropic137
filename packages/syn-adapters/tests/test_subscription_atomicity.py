@@ -48,6 +48,7 @@ class MockEventEnvelope:
         self.event.event_type = event_type
         self.event.to_dict.return_value = data or {"id": f"test-{global_nonce}"}
         self.metadata = MagicMock()
+        self.metadata.event_type = event_type
         self.metadata.global_nonce = global_nonce
         self.metadata.stream_id = f"TestStream-{global_nonce}"
 
@@ -167,7 +168,7 @@ class TrackingProjectionManager:
     async def process_event_envelope(self, envelope: MockEventEnvelope) -> Any:  # noqa: ANN401
         """Process an event envelope (tracking version)."""
         global_nonce = envelope.metadata.global_nonce
-        event_type = envelope.event.event_type
+        event_type = envelope.metadata.event_type
 
         if global_nonce in self._fail_on_dispatch_for_events:
             raise RuntimeError(f"Simulated dispatch failure for event {global_nonce}")

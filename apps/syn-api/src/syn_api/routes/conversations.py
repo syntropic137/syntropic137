@@ -223,7 +223,7 @@ async def get_conversation_metadata(
                 model=meta.get("model"),
                 total_input_tokens=meta.get("total_input_tokens", 0),
                 total_output_tokens=meta.get("total_output_tokens", 0),
-                tool_counts=meta.get("tool_counts", {}),
+                tool_counts=meta.get("tool_counts") or {},
                 started_at=meta.get("started_at"),
                 completed_at=meta.get("completed_at"),
                 size_bytes=meta.get("size_bytes"),
