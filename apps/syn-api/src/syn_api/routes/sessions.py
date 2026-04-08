@@ -346,11 +346,17 @@ async def get_session(
     operations = await _load_tool_operations(manager, session_id)
     cd = await _load_cost_data(session_id, session.total_tokens, session.total_cost_usd)
 
-    # Resolve workflow name from the workflow list projection
+    # Resolve workflow name with a targeted store lookup (avoids loading all workflows)
     wf_name: str | None = None
     if session.workflow_id:
-        wf_names = await _build_workflow_name_map()
-        wf_name = wf_names.get(session.workflow_id)
+        try:
+            wf_data = await manager.store.get("workflow_summaries", session.workflow_id)
+            if isinstance(wf_data, dict):
+                wf_name = wf_data.get("name")
+            elif wf_data is not None:
+                wf_name = getattr(wf_data, "name", None)
+        except Exception:
+            logger.debug("Could not load workflow name for session %s", session_id, exc_info=True)
 
     return Ok(
         SessionDetail(

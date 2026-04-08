@@ -41,7 +41,13 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
+    // Track whether the abort was triggered by our timeout (vs intentional unmount/navigation)
+    let didTimeout = false
+    const timeoutId = setTimeout(() => {
+      didTimeout = true
+      controller.abort()
+    }, FETCH_TIMEOUT_MS)
 
     fetchSessionWithTimeout(sessionId, controller.signal)
       .then((data) => {
@@ -49,11 +55,12 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
         setError(null)
       })
       .catch((err) => {
-        if (err.name === 'AbortError') {
+        if (err.name === 'AbortError' && didTimeout) {
           setError('Request timed out — the API may be overloaded')
-        } else {
+        } else if (err.name !== 'AbortError') {
           setError(err.message)
         }
+        // Intentional abort (navigation/new fetch) — do not set error
       })
       .finally(() => {
         clearTimeout(timeoutId)

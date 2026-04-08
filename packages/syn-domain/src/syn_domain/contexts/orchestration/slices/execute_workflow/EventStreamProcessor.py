@@ -108,8 +108,10 @@ def _parse_json_error(text: str) -> str | None:
         return None
     prefix = text[:brace_start].strip()
     try:
-        parsed: dict[str, object] = json.loads(text[brace_start:])
+        parsed = json.loads(text[brace_start:])
     except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
         return None
     error_obj = parsed.get("error")
     if isinstance(error_obj, dict):

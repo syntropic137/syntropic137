@@ -303,4 +303,5 @@ class SessionSummary:
             # Enhanced metrics
             "num_turns": self.num_turns,
             "duration_api_ms": self.duration_api_ms,
+            "error_message": self.error_message,
         }
