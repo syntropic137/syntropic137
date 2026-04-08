@@ -112,6 +112,18 @@ export const listCommand: CommandDef = {
 // show
 // ---------------------------------------------------------------------------
 
+function renderInputDeclarations(declarations: WorkflowResponse["input_declarations"]): void {
+  const items = declarations ?? [];
+  if (items.length === 0) return;
+  print(`\n  ${style("Inputs:", BOLD)}`);
+  for (const d of items) {
+    const req = d.required ? style("required", YELLOW) : style("optional", DIM);
+    const desc = d.description ? ` — ${d.description}` : "";
+    const def = d.default != null ? ` (default: ${d.default})` : "";
+    print(`    ${style(d.name, GREEN)} [${req}]${desc}${def}`);
+  }
+}
+
 function renderWorkflowDetail(detail: WorkflowResponse): void {
   print("");
   print(style("Workflow Details", BOLD));
@@ -128,17 +140,7 @@ function renderWorkflowDetail(detail: WorkflowResponse): void {
   } else {
     printDim("  No phases defined");
   }
-
-  const declarations = detail.input_declarations ?? [];
-  if (declarations.length > 0) {
-    print(`\n  ${style("Inputs:", BOLD)}`);
-    for (const d of declarations) {
-      const req = d.required ? style("required", YELLOW) : style("optional", DIM);
-      const desc = d.description ? ` — ${d.description}` : "";
-      const def = d.default != null ? ` (default: ${d.default})` : "";
-      print(`    ${style(d.name, GREEN)} [${req}]${desc}${def}`);
-    }
-  }
+  renderInputDeclarations(detail.input_declarations);
 }
 
 export const showCommand: CommandDef = {

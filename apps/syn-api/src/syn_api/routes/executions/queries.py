@@ -308,8 +308,8 @@ async def _enrich_costs(
     manager: object,
     phases: list[PhaseExecution],
     fallback_tokens: int,
-    fallback_cost: float,
-) -> tuple[int, float]:
+    fallback_cost: Decimal | str,
+) -> tuple[int, Decimal | str]:
     """Enrich execution and phase costs from TimescaleDB (#505)."""
     try:
         exec_cost = await manager.execution_cost.get_execution_cost(execution_id)  # type: ignore[attr-defined]
