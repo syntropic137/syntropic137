@@ -296,7 +296,7 @@ const disableAllCommand: CommandDef = {
   name: "disable-all",
   description: "Disable all triggers for a repository",
   options: {
-    repo: { type: "string", short: "r", description: "Repository ID" },
+    repo: { type: "string", short: "r", description: "Repository in owner/repo format" },
     force: { type: "boolean", short: "f", description: "Skip confirmation", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
