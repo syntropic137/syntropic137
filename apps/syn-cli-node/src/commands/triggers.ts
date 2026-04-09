@@ -22,7 +22,7 @@ function reqId(parsed: ParsedArgs): string {
   return id;
 }
 
-function parseConditions(condStrs: string[]): Record<string, string>[] {
+function parseConditions(condStrs: string[]): components["schemas"]["ConditionRequest"][] {
   return condStrs.map((c) => {
     const eqIdx = c.indexOf("=");
     if (eqIdx < 1) throw new CLIError(`Invalid condition format: ${c} (expected field=value)`, 1);
