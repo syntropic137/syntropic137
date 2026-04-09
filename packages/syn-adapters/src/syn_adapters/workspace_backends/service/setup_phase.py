@@ -19,10 +19,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_adapters.workspace_backends.service.setup_phase_secrets import (
-    DEFAULT_SETUP_SCRIPT,
-    SetupPhaseSecrets,
-)
+from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
@@ -30,7 +27,6 @@ from syn_shared.env_constants import (
     ENV_GIT_AUTHOR_NAME,
     ENV_GIT_COMMITTER_EMAIL,
     ENV_GIT_COMMITTER_NAME,
-    ENV_GITHUB_APP_TOKEN,
 )
 
 if TYPE_CHECKING:
@@ -52,8 +48,8 @@ def _build_setup_env(secrets: SetupPhaseSecrets) -> dict[str, str]:
     """
     setup_env: dict[str, str] = {}
 
-    if secrets.github_app_token:
-        setup_env[ENV_GITHUB_APP_TOKEN] = secrets.github_app_token
+    # GitHub tokens are now embedded in the setup script by build_setup_script()
+    # (per-repo entries in ~/.git-credentials — ADR-058). No env var needed.
 
     if secrets.claude_code_oauth_token:
         setup_env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = secrets.claude_code_oauth_token
@@ -92,7 +88,7 @@ async def run_setup_phase(
     Args:
         workspace: ManagedWorkspace instance (typed as object to avoid circular import)
         secrets: Secrets to make available during setup
-        setup_script: Custom setup script (uses DEFAULT_SETUP_SCRIPT if None)
+        setup_script: Custom setup script override (uses secrets.build_setup_script() if None)
 
     Returns:
         ExecutionResult from setup script
@@ -106,7 +102,7 @@ async def run_setup_phase(
     setup_env = _build_setup_env(secrets)
 
     # Write setup script to container
-    script = setup_script or DEFAULT_SETUP_SCRIPT
+    script = setup_script or secrets.build_setup_script()
     await ws.inject_files(
         [(".setup/setup.sh", script.encode())],
         base_path="/workspace",

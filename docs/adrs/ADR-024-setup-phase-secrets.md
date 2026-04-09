@@ -357,3 +357,90 @@ The current implementation (Anthropic key exposed) is acceptable ONLY for:
 - ✅ Controlled deployments with trusted prompts
 - ❌ NOT acceptable for multi-tenant production
 - ❌ NOT acceptable for untrusted agent code
+
+---
+
+## 2026-04-09 Update: Multi-Repository Support (ADR-058)
+
+This update documents changes to `SetupPhaseSecrets` introduced by workspace hydration ([ADR-058](ADR-058-workspace-hydration.md)).
+
+### New `repositories` Field
+
+`SetupPhaseSecrets` now carries the list of repositories to clone during setup:
+
+```python
+@dataclass(frozen=True)
+class SetupPhaseSecrets:
+    # NEW: GitHub URLs of repositories to clone during setup
+    repositories: list[str]
+
+    # SUPERSEDED: single github_app_token replaced by repo_tokens (see below)
+    # github_app_token: str | None  ← no longer present
+
+    # NEW: per-repo token — maps full repo URL → installation access token
+    repo_tokens: dict[str, str]
+
+    # Unchanged
+    anthropic_api_key: str
+    git_author_name: str
+    git_author_email: str
+```
+
+### `create()` Factory Changes
+
+The `create()` classmethod now accepts a `repositories` parameter and resolves tokens per GitHub App installation rather than per-workflow:
+
+```python
+@classmethod
+async def create(
+    cls,
+    *,
+    repositories: list[str] | None = None,
+    require_github: bool = True,
+) -> SetupPhaseSecrets:
+    ...
+```
+
+**Token resolution algorithm** (see ADR-058 for full detail):
+
+1. For each repo URL, call `GET /repos/{owner}/{repo}/installation` to get `installation_id`.
+2. If any repo returns **404** → raise `RepositoryNotInstalledException` before cloning begins. Fail fast with the offending URL in the error message.
+3. Group repos by `installation_id` (one installation covers all repos in an org/account).
+4. For each unique `installation_id`, call `POST /app/installations/{id}/access_tokens` once.
+5. Build `repo_tokens: dict[str, str]` — full repo URL → token.
+
+The backward-compatible single-repo path (`_repository_url` fallback) still works: one repo → one installation lookup → same token written as before, just under the new `repo_tokens` structure.
+
+### `build_setup_script()` Replaces `DEFAULT_SETUP_SCRIPT`
+
+Direct use of the `DEFAULT_SETUP_SCRIPT` constant is replaced by a `build_setup_script()` method on `SetupPhaseSecrets`. This method:
+
+1. Writes the standard credential and git identity setup (unchanged from before).
+2. Writes **per-repo** credential entries to `~/.git-credentials` instead of one blanket `github.com` entry:
+
+```
+https://x-access-token:TOKEN_A@github.com/org/repo-a
+https://x-access-token:TOKEN_A@github.com/org/repo-b
+https://x-access-token:TOKEN_B@github.com/personal/repo-c
+```
+
+3. Appends `git clone` commands for each repo with idempotency guards:
+
+```bash
+mkdir -p /workspace/repos
+
+[ -d "/workspace/repos/repo-a" ] || git clone "https://github.com/org/repo-a" "/workspace/repos/repo-a"
+[ -d "/workspace/repos/repo-b" ] || git clone "https://github.com/org/repo-b" "/workspace/repos/repo-b"
+```
+
+### Summary of Changes
+
+| Aspect | Before (ADR-024) | After (ADR-058) |
+|--------|-----------------|-----------------|
+| GitHub token field | `github_app_token: str \| None` | `repo_tokens: dict[str, str]` |
+| Token resolution | One token for the execution | One token per unique installation ID |
+| `~/.git-credentials` | One blanket `github.com` entry | Per-repo URL entries |
+| Setup script source | `DEFAULT_SETUP_SCRIPT` constant | `build_setup_script()` method |
+| Repo cloning | Not in setup phase | Appended by `build_setup_script()` |
+| Auth failure mode | Silent / runtime git error | Fail fast before any cloning |
+| Multi-org support | Not supported | Supported via per-installation tokens |

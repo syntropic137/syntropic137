@@ -361,3 +361,40 @@ ADR compliance is verified by integration tests:
 - [Fail-Fast Design](https://en.wikipedia.org/wiki/Fail-fast)
 - [ADR-021: Isolated Workspace Architecture](./ADR-021-isolated-workspace-architecture.md)
 - [ADR-022: Secure Token Architecture](./ADR-022-secure-token-architecture.md)
+
+---
+
+## 2026-04-09 Update: Setup Phase Now Pre-Clones Repositories (ADR-058)
+
+[ADR-058: Workspace Hydration](ADR-058-workspace-hydration.md) extends the setup phase (introduced in ADR-024) to pre-clone all declared repositories before the agent process starts.
+
+### Setup Phase as Infrastructure Work
+
+This change is a direct application of the principle established in this ADR: **infrastructure work belongs in the setup phase, not in agent execution.**
+
+Before this update, the first tool call for every workflow execution was a `Bash: git clone ...` event. Cloning a repository is not a task decision — it is infrastructure provisioning. It has the same character as configuring git credentials or writing `~/.git-credentials`: mechanical, predictable, and safely handled without agent reasoning.
+
+Moving git clone into the setup phase completes the boundary between infrastructure setup (pre-agent) and task execution (agent):
+
+```
+SETUP PHASE (infrastructure)           AGENT PHASE (task work)
+──────────────────────────────         ────────────────────────────
+Configure git credentials              Turn 1: actual task action
+Clone declared repositories            Turn 2: code change / PR
+Inject /workspace/CLAUDE.md            Turn 3: ...
+Clear secrets
+```
+
+### Observability Impact
+
+The Syntropic137 dashboard timeline now shows the agent's first tool call as the first unit of meaningful task work. Git clone events no longer appear in agent session tool traces — they happen in the setup phase before the session begins.
+
+This makes cost attribution cleaner: setup-phase time is infrastructure overhead; agent-session time is where task value is created.
+
+### CLAUDE.md Context Loading
+
+As a consequence of pre-cloning, a synthetic `/workspace/CLAUDE.md` can be injected after repos are cloned and before the agent starts (see ADR-058, ADR-036 update). This means Claude Code's at-launch CLAUDE.md discovery loads full project context from turn 1 — a capability that was impossible when repos didn't exist at launch time.
+
+### Idempotency Requirement Reinforced
+
+The setup-phase clone commands use idempotency guards (`[ -d "..." ] || git clone ...`). This is consistent with the Processor To-Do List crash-recovery guarantee described in the main architecture documentation: setup phase handlers must be safe to re-run after a crash. Pre-cloning with an idempotency guard satisfies this requirement.

@@ -76,6 +76,7 @@ class ExecuteWorkflowHandler:
         phases = self._get_executable_phases(workflow)
         merged_inputs = self._merge_inputs(command, workflow)
         repo_url = self._resolve_repo_url(workflow, merged_inputs)
+        repos = self._resolve_repos(merged_inputs, repo_url)
 
         return await self._processor.run(
             workflow_id=command.aggregate_id,
@@ -85,7 +86,7 @@ class ExecuteWorkflowHandler:
             execution_id=command.execution_id
             if command.execution_id and command.execution_id.startswith("exec-")
             else f"exec-{uuid4().hex[:12]}",
-            repo_url=repo_url,
+            repos=repos,
         )
 
     @staticmethod
@@ -101,6 +102,19 @@ class ExecuteWorkflowHandler:
         if command.task is not None:
             merged["task"] = command.task
         return merged
+
+    @staticmethod
+    def _resolve_repos(
+        merged_inputs: dict[str, Any],
+        repo_url: str | None,
+    ) -> list[str]:
+        """Resolve the list of repos from inputs, falling back to the template repo URL."""
+        repos_raw = merged_inputs.get("repos", "")
+        if repos_raw:
+            return [u.strip() for u in str(repos_raw).split(",") if u.strip()]
+        if repo_url:
+            return [repo_url]
+        return []
 
     @staticmethod
     def _resolve_repo_url(

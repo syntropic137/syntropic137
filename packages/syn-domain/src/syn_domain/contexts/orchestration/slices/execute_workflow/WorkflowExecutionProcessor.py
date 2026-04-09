@@ -128,7 +128,7 @@ class WorkflowExecutionProcessor:
         phases: list[ExecutablePhase],
         inputs: dict[str, Any],
         execution_id: str,
-        repo_url: str | None = None,
+        repos: list[str] | None = None,
         expected_completion_at: datetime | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow using the Processor To-Do List pattern."""
@@ -177,7 +177,7 @@ class WorkflowExecutionProcessor:
                     all_artifact_ids=all_artifact_ids,
                     completed_phase_ids=completed_phase_ids,
                     phase_outputs=phase_outputs,
-                    repo_url=repo_url,
+                    repos=repos,
                 )
             return await self._complete_execution(
                 aggregate,
@@ -210,7 +210,7 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
-        repo_url: str | None,
+        repos: list[str] | None,
     ) -> None:
         """Dispatch a single to-do item to its handler."""
         assert todo.phase_id is not None
@@ -220,7 +220,7 @@ class WorkflowExecutionProcessor:
                 todo,
                 phase,
                 aggregate,
-                repo_url,
+                repos,
                 completed_phase_ids,
                 phase_outputs,
             )
@@ -324,7 +324,7 @@ class WorkflowExecutionProcessor:
         todo: TodoItem,
         phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
-        repo_url: str | None,
+        repos: list[str] | None,
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
     ) -> None:
@@ -369,7 +369,7 @@ class WorkflowExecutionProcessor:
             phase=phase,
             workflow_id=aggregate.workflow_id or "",
             session_id=session_id,
-            repo_url=repo_url,
+            repos=repos,
             artifacts=artifacts,
             completed_phase_ids=completed_phase_ids,
             phase_outputs=phase_outputs,
