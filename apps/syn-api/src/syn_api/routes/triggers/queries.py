@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -24,9 +24,6 @@ from syn_api.types import (
     TriggerListResponse,
     TriggerSummary,
 )
-
-if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +128,6 @@ async def _resolve_trigger_id(trigger_id: str) -> str:
 async def list_triggers(
     repository: str | None = None,
     status: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[TriggerSummary], TriggerError]:
     """List trigger rules with optional filters."""
     await ensure_connected()
@@ -186,7 +182,6 @@ def _resolve_config(config: object) -> dict[str, Any]:
 
 async def get_trigger(
     trigger_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[TriggerDetail, TriggerError]:
     """Get detailed information about a trigger rule."""
     await ensure_connected()
@@ -225,7 +220,6 @@ async def get_trigger(
 async def get_trigger_history(
     trigger_id: str,
     limit: int = 50,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[TriggerHistoryEntry], TriggerError]:
     """Get execution history for a trigger rule."""
     from syn_domain.contexts.github.domain.queries.get_trigger_history import GetTriggerHistoryQuery

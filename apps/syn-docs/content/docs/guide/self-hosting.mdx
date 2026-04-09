@@ -78,6 +78,45 @@ For **1,000+ concurrent agents** with auto-scaling:
 - HPA with 70% CPU target, 3–20 replicas
 - PersistentVolume for artifact storage
 
+## Authentication
+
+### Gateway credentials
+
+The nginx gateway uses HTTP Basic Auth to protect external access. During `npx @syntropic137/setup init`, a 64-character random password is generated automatically and stored in `~/.syntropic137/.env`.
+
+The setup wizard never prints the password to the terminal. Retrieve it from `~/.syntropic137/.env` when needed:
+
+```bash
+# View password
+grep SYN_API_PASSWORD ~/.syntropic137/.env | cut -d= -f2
+
+# Copy to clipboard (macOS)
+grep SYN_API_PASSWORD ~/.syntropic137/.env | cut -d= -f2 | pbcopy
+
+# Set env vars for the syn CLI
+export SYN_API_USER=admin
+export SYN_API_PASSWORD=$(grep SYN_API_PASSWORD ~/.syntropic137/.env | cut -d= -f2)
+```
+
+To rotate credentials (generates a new password and restarts the stack):
+
+```bash
+npx @syntropic137/setup credentials rotate
+```
+
+### Port model
+
+The gateway exposes two ports with different auth policies:
+
+| Port | Auth | Used by |
+|------|------|---------|
+| 80 | None | Docker health checks, internal service traffic, local dev (`localhost:8137`) |
+| 8081 | Basic Auth | Cloudflare Tunnel, any external access |
+
+**If you use Cloudflare Tunnel**, your tunnel config must route to `http://gateway:8081` (not `localhost:8137`). The setup wizard enforces this: `npx @syntropic137/setup tunnel` will exit with an error if `SYN_API_PASSWORD` is not set.
+
+See the [Tunnels guide](/docs/guide/tunnels) for full setup instructions.
+
 ## Tunnels (Optional)
 
 For secure external access and GitHub Actions webhook delivery, set up a tunnel. Syntropic137 includes built-in Cloudflare Tunnel support via a Docker Compose profile.

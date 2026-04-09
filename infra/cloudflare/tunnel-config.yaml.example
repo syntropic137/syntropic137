@@ -1,7 +1,13 @@
 # Cloudflare Tunnel Configuration for Syn137 Self-Host
 #
-# This file is for running cloudflared as a standalone service (not via Docker).
-# For Docker deployment, refer to the selfhost docs which use CLOUDFLARE_TUNNEL_TOKEN via .env.
+# Usage: cloudflared runs as a container in the Docker Compose stack (see docker-compose.selfhost.yaml).
+# It connects inside the Docker network, so `gateway:8081` resolves to the nginx auth-guarded port.
+# This file is an alternative for running cloudflared standalone (outside Docker), in which case
+# `gateway` must resolve from your host — e.g. `localhost` or the Docker host IP — but port 8081
+# must still be exposed and targeted. Do NOT change to port 80 or 8137 (unauthenticated).
+#
+# SECURITY: Both ingress rules target the nginx server block that enforces basic auth via
+# SYN_API_PASSWORD. SYN_API_PASSWORD MUST be set in your .env before activating the tunnel.
 #
 # Setup:
 #   1. Create tunnel: cloudflared tunnel create syn-selfhost
@@ -19,20 +25,20 @@ credentials-file: /etc/cloudflared/credentials.json
 
 # Ingress rules define how traffic is routed
 ingress:
-  # Syn137 Dashboard UI (main entry point)
+  # Syn137 Dashboard UI + API (auth-guarded nginx block — requires SYN_API_PASSWORD)
   - hostname: syn.yourdomain.com
-    service: http://localhost:80
+    service: http://gateway:8081
     originRequest:
-      # Skip TLS verification for local services
+      # Skip TLS verification for internal Docker service communication
       noTLSVerify: true
       # Connection timeout
       connectTimeout: 30s
       # Keep-alive timeout
       tcpKeepAlive: 30s
 
-  # Syn137 API (for direct API access)
+  # Syn137 API direct access (auth-guarded nginx block — requires SYN_API_PASSWORD)
   - hostname: api.syn.yourdomain.com
-    service: http://localhost:8137
+    service: http://gateway:8081
     originRequest:
       noTLSVerify: true
       connectTimeout: 30s

@@ -6,7 +6,7 @@ Pause, resume, cancel, inject, and state inspection for running executions.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -19,9 +19,6 @@ from syn_api.types import (
     Ok,
     Result,
 )
-
-if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +85,6 @@ class StateResponse(BaseModel):
 async def pause(
     execution_id: str,
     reason: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ControlResult, ExecutionError]:
     """Pause a running execution at the next yield point."""
     from syn_adapters.control.commands import PauseExecution
@@ -113,7 +109,6 @@ async def pause(
 
 async def resume(
     execution_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ControlResult, ExecutionError]:
     """Resume a paused execution."""
     from syn_adapters.control.commands import ResumeExecution
@@ -137,7 +132,6 @@ async def resume(
 async def cancel(
     execution_id: str,
     reason: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ControlResult, ExecutionError]:
     """Cancel a running or paused execution."""
     from syn_adapters.control.commands import CancelExecution
@@ -164,7 +158,6 @@ async def inject(
     execution_id: str,
     message: str,
     role: Literal["user", "system"] = "user",
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ControlResult, ExecutionError]:
     """Inject a message into an execution's agent context."""
     from syn_adapters.control.commands import InjectContext
@@ -189,7 +182,6 @@ async def inject(
 
 async def get_state(
     execution_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[dict[str, str], ExecutionError]:
     """Get the current control state of an execution."""
     try:
