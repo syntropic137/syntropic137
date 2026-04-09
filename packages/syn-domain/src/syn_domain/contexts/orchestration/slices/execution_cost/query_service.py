@@ -197,7 +197,9 @@ class ExecutionCostQueryService:
         )
 
     @staticmethod
-    def _resolve_duration(duration_ms_val: object, started_at: object, completed_at: object) -> float:
+    def _resolve_duration(
+        duration_ms_val: object, started_at: object, completed_at: object
+    ) -> float:
         """Resolve duration_ms, falling back to timestamp delta when the payload field is absent.
 
         session_summary events rarely carry duration_ms in their JSON payload,
