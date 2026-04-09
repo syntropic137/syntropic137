@@ -6,11 +6,11 @@ description: Monitor and manage Syntropic137 from inside Claude Code with slash 
 
 The [Syntropic137 Claude Code plugin](https://github.com/syntropic137/syntropic137-claude-plugin)
 adds slash commands and domain knowledge to Claude Code, turning it into a Syntropic137
-orchestrator — create workflows, kick off executions, monitor costs, and troubleshoot
+orchestrator: create workflows, kick off executions, monitor costs, and troubleshoot
 issues without leaving your editor.
 
 <Callout type="info">
-This is a **Claude Code plugin** — it teaches Claude Code how to operate Syntropic137.
+This is a **Claude Code plugin**: it teaches Claude Code how to operate Syntropic137.
 It is not a [Syntropic137 plugin](/docs/guide/plugins) (workflow package). See
 [Plugin Ecosystem](/docs/guide/plugins#two-plugin-boundaries) for how these two concepts
 differ.
@@ -54,14 +54,14 @@ The plugin provides 7 commands for quick platform interaction:
 | Command | Purpose | Example |
 |---------|---------|---------|
 | `/syn-setup` | Open the setup wizard | `/syn-setup` |
-| `/syn-status` | Platform health — containers, API, recent activity | `/syn-status` |
+| `/syn-status` | Platform health: containers, API, recent activity | `/syn-status` |
 | `/syn-health` | Deep API diagnostics | `/syn-health` |
 | `/syn-costs` | Cost tracking and breakdown | `/syn-costs summary` |
 | `/syn-sessions` | Session listing and details | `/syn-sessions list` |
 | `/syn-metrics` | Aggregated metrics across executions | `/syn-metrics --workflow <id>` |
 | `/syn-observe` | Debug a specific agent session | `/syn-observe <session-id> tools` |
 
-Commands resolve the API URL automatically — from `SYN_API_URL` env var, your `~/.syntropic137/.env` config, or the default `http://localhost:8137`.
+Commands resolve the API URL automatically: from `SYN_API_URL` env var, your `~/.syntropic137/.env` config, or the default `http://localhost:8137`.
 
 ## Domain Skills
 
@@ -77,7 +77,7 @@ The plugin includes 7 domain skills that Claude loads contextually based on your
 | **setup** | `npx @syntropic137/setup`, Docker stack, secrets, troubleshooting |
 | **platform-ops** | Service map, workspace lifecycle, token injection, QA commands |
 
-Skills are not invoked directly — Claude uses them automatically when your question matches their domain. For example, asking "create a workflow that reviews PRs" activates both **workflow-management** and **github-automation** skills.
+Skills are not invoked directly: Claude uses them automatically when your question matches their domain. For example, asking "create a workflow that reviews PRs" activates both **workflow-management** and **github-automation** skills.
 
 ## Session Start Hook
 

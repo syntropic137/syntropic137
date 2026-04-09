@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: How to configure workspace images — custom images, environment variables, OTel endpoints, and plugin configuration.
+description: "How to configure workspace images: custom images, environment variables, OTel endpoints, and plugin configuration."
 ---
 
 ## Choosing a Workspace Image
@@ -47,7 +47,7 @@ These are injected automatically by syn137 when creating workspaces:
 |----------|---------|
 | `ANTHROPIC_API_KEY` | Claude API key (injected via sidecar) |
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | Activates OTel export (set to `1` when collector is configured) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint — auto-set to `COLLECTOR_URL` from syn-api config |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint, auto-set to `COLLECTOR_URL` from syn-api config |
 | `GITHUB_TOKEN` | GitHub access (injected via sidecar) |
 
 You do not need to set these manually. The orchestrator injects them when workspace containers are provisioned.
@@ -56,15 +56,15 @@ You do not need to set these manually. The orchestrator injects them when worksp
 
 ### How OTel connects to syn-collector
 
-`CLAUDE_CODE_ENABLE_TELEMETRY=1` is baked into the workspace image as a default. When syn-api has `COLLECTOR_URL` set, it also injects `OTEL_EXPORTER_OTLP_ENDPOINT` pointing at the collector. If no `COLLECTOR_URL` is configured, OTel export silently no-ops — no crash, no side effects.
+`CLAUDE_CODE_ENABLE_TELEMETRY=1` is baked into the workspace image as a default. When syn-api has `COLLECTOR_URL` set, it also injects `OTEL_EXPORTER_OTLP_ENDPOINT` pointing at the collector. If no `COLLECTOR_URL` is configured, OTel export silently no-ops, no crash, no side effects.
 
 syn-collector's internal port is **8080** (service name `collector` inside Docker). The dev stack maps it to `localhost:8080`.
 
 ```
-# Inside Docker (agent-net) — what the container uses:
+# Inside Docker (agent-net), what the container uses:
 http://collector:8080
 
-# From your host machine — for debugging:
+# From your host machine, for debugging:
 http://localhost:8080
 ```
 

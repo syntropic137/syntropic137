@@ -12,7 +12,7 @@ Workspace images are built by [agentic-primitives](https://github.com/AgentParad
 | Component | Purpose |
 |-----------|---------|
 | Claude CLI | Agent runtime (pinned version) |
-| RTK | Token compression — 53% context reduction on Bash output |
+| RTK | Token compression: 53% context reduction on Bash output |
 | Python 3.12 + uv | Hooks, scripts, agentic packages |
 | Node.js 22 LTS | Required for Claude CLI |
 | Rust toolchain | rust-analyzer LSP, cargo builds |
@@ -22,7 +22,7 @@ Workspace images are built by [agentic-primitives](https://github.com/AgentParad
 
 ## Version Manifest
 
-Every image includes `/opt/agentic/version.json` — a machine-readable manifest that orchestrators read after container creation:
+Every image includes `/opt/agentic/version.json`, a machine-readable manifest that orchestrators read after container creation:
 
 ```json
 {
@@ -50,6 +50,6 @@ Images are built for both `linux/amd64` and `linux/arm64`:
 
 ## Next Steps
 
-- [Features](/docs/workspaces/features) — RTK, OTel observability, LSP, plugins
-- [Security](/docs/workspaces/security) — Non-root execution, secret injection, supply chain
-- [Configuration](/docs/workspaces/configuration) — Environment variables, custom images, tool setup
+- [Features](/docs/workspaces/features): RTK, OTel observability, LSP, plugins
+- [Security](/docs/workspaces/security): Non-root execution, secret injection, supply chain
+- [Configuration](/docs/workspaces/configuration): Environment variables, custom images, tool setup

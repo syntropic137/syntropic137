@@ -976,7 +976,7 @@ export interface paths {
          * @description Stream the global activity feed (git events, system-wide activity).
          *
          *     Runs indefinitely until the client disconnects.  There is no terminal
-         *     sentinel for the activity channel — it never completes.
+         *     sentinel for the activity channel, it never completes.
          */
         get: operations["activity_sse_sse_activity_get"];
         put?: never;
@@ -1620,6 +1620,18 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * ConditionRequest
+         * @description A single trigger condition (field operator value).
+         */
+        ConditionRequest: {
+            /** Field */
+            field: string;
+            /** Operator */
+            operator: string;
+            /** Value */
+            value: string;
         };
         /**
          * ContributionHeatmapResponse
@@ -2900,9 +2912,7 @@ export interface components {
             /** Workflow Id */
             workflow_id: string;
             /** Conditions */
-            conditions?: {
-                [key: string]: unknown;
-            }[] | null;
+            conditions?: components["schemas"]["ConditionRequest"][] | null;
             /**
              * Installation Id
              * @default
@@ -2912,10 +2922,7 @@ export interface components {
             input_mapping?: {
                 [key: string]: string;
             } | null;
-            /** Config */
-            config?: {
-                [key: string]: unknown;
-            } | null;
+            config?: components["schemas"]["TriggerConfigRequest"] | null;
             /**
              * Created By
              * @default api
@@ -3928,6 +3935,32 @@ export interface components {
             preset?: string | null;
             /** Action */
             action?: string | null;
+        };
+        /**
+         * TriggerConfigRequest
+         * @description Safety configuration for a trigger rule.
+         */
+        TriggerConfigRequest: {
+            /**
+             * Max Attempts
+             * @default 3
+             */
+            max_attempts: number;
+            /**
+             * Daily Limit
+             * @default 20
+             */
+            daily_limit: number;
+            /**
+             * Debounce Seconds
+             * @default 0
+             */
+            debounce_seconds: number;
+            /**
+             * Cooldown Seconds
+             * @default 300
+             */
+            cooldown_seconds: number;
         };
         /**
          * TriggerDetail

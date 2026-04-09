@@ -23,10 +23,10 @@ const orbitron = Orbitron({
 export const metadata: Metadata = {
   title: {
     template: '%s | Syntropic137',
-    default: 'Syntropic137 — Agentic Engineering',
+    default: 'Syntropic137 - Agentic Engineering',
   },
   description:
-    'Self-hosted agentic engineering platform. Run AI agents in isolated Docker workspaces with full observability — every decision permanently captured.',
+    'Self-hosted agentic engineering platform. Run AI agents in isolated Docker workspaces with full observability. Every decision permanently captured.',
   icons: {
     icon: '/favicon.png',
     apple: '/favicon.png',

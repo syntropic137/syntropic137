@@ -279,6 +279,27 @@ class UpdateSystemRequest(BaseModel):
     description: str | None = None
 
 
+class TriggerConfigRequest(BaseModel):
+    """Safety configuration for a trigger rule."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    max_attempts: int = 3
+    daily_limit: int = 20
+    debounce_seconds: int = 0
+    cooldown_seconds: int = 300
+
+
+class ConditionRequest(BaseModel):
+    """A single trigger condition (field operator value)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    field: str
+    operator: str
+    value: str
+
+
 class RegisterTriggerRequest(BaseModel):
     """Request body for registering a new trigger rule."""
 
@@ -288,10 +309,10 @@ class RegisterTriggerRequest(BaseModel):
     event: str
     repository: str
     workflow_id: str
-    conditions: list[dict[str, object]] | None = None
+    conditions: list[ConditionRequest] | None = None
     installation_id: str = ""
     input_mapping: dict[str, str] | None = None
-    config: dict[str, object] | None = None
+    config: TriggerConfigRequest | None = None
     created_by: str = "api"
 
 

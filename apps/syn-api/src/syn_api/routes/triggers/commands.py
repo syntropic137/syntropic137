@@ -346,20 +346,31 @@ async def disable_triggers(
 @router.post("", response_model=TriggerActionResponse)
 async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActionResponse:
     """Register a new trigger rule."""
-    try:
-        result = await register_trigger(
-            name=body.name,
-            event=body.event,
-            repository=body.repository,
-            workflow_id=body.workflow_id,
-            conditions=list(body.conditions) if body.conditions is not None else None,
-            installation_id=body.installation_id,
-            input_mapping=dict(body.input_mapping) if body.input_mapping is not None else None,
-            config=dict(body.config) if body.config is not None else None,
-            created_by=body.created_by,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    cfg = body.config
+    config_dict: dict[str, object] | None = (
+        {
+            "max_attempts": cfg.max_attempts,
+            "daily_limit": cfg.daily_limit,
+            "debounce_seconds": cfg.debounce_seconds,
+            "cooldown_seconds": cfg.cooldown_seconds,
+        }
+        if cfg is not None
+        else None
+    )
+    result = await register_trigger(
+        name=body.name,
+        event=body.event,
+        repository=body.repository,
+        workflow_id=body.workflow_id,
+        conditions=[
+            {"field": c.field, "operator": c.operator, "value": c.value}
+            for c in (body.conditions or [])
+        ],
+        installation_id=body.installation_id,
+        input_mapping=dict(body.input_mapping) if body.input_mapping else None,
+        config=config_dict,
+        created_by=body.created_by,
+    )
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
