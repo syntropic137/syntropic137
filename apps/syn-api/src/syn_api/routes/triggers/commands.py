@@ -15,7 +15,14 @@ from syn_api._wiring import (
     get_workflow_repo,
     sync_published_events_to_projections,
 )
-from syn_api.types import Err, Ok, RegisterTriggerRequest, Result, TriggerActionResponse, TriggerError  # noqa: TCH001
+from syn_api.types import (
+    Err,
+    Ok,
+    RegisterTriggerRequest,
+    Result,
+    TriggerActionResponse,
+    TriggerError,
+)  # noqa: TCH001
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
 
 if TYPE_CHECKING:
