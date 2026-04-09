@@ -362,7 +362,7 @@ async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActi
         event=body.event,
         repository=body.repository,
         workflow_id=body.workflow_id,
-        conditions=[dict(c) for c in (body.conditions or [])],
+        conditions=[{"field": c.field, "operator": c.operator, "value": c.value} for c in (body.conditions or [])],
         installation_id=body.installation_id,
         input_mapping=dict(body.input_mapping) if body.input_mapping else None,
         config=config_dict,

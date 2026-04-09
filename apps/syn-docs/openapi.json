@@ -4852,6 +4852,31 @@
         "title": "CancelRequest",
         "description": "Request to cancel an execution."
       },
+      "ConditionRequest": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "operator": {
+            "type": "string",
+            "title": "Operator"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "field",
+          "operator",
+          "value"
+        ],
+        "title": "ConditionRequest",
+        "description": "A single trigger condition (field operator value)."
+      },
       "ContributionHeatmapResponse": {
         "properties": {
           "metric": {
@@ -7465,8 +7490,7 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/ConditionRequest"
                 },
                 "type": "array"
               },

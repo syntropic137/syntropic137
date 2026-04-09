@@ -290,6 +290,16 @@ class TriggerConfigRequest(BaseModel):
     cooldown_seconds: int = 300
 
 
+class ConditionRequest(BaseModel):
+    """A single trigger condition (field operator value)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    field: str
+    operator: str
+    value: str
+
+
 class RegisterTriggerRequest(BaseModel):
     """Request body for registering a new trigger rule."""
 
@@ -299,7 +309,7 @@ class RegisterTriggerRequest(BaseModel):
     event: str
     repository: str = ""
     workflow_id: str = ""
-    conditions: list[dict[str, object]] | None = None
+    conditions: list[ConditionRequest] | None = None
     installation_id: str = ""
     input_mapping: dict[str, str] | None = None
     config: TriggerConfigRequest | None = None

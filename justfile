@@ -848,16 +848,17 @@ format-check:
 
 # Ratchet: no untyped dicts in API types (dict[str, Any] or dict[str, object] in Pydantic models)
 check-untyped-dicts:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    THRESHOLD=$(cat .ratchets/untyped-dicts 2>/dev/null || echo "0")
-    COUNT=$(grep -c "dict\[str, \(Any\|object\)\]" apps/syn-api/src/syn_api/types.py 2>/dev/null || echo "0")
-    if [ "$COUNT" -gt "$THRESHOLD" ]; then
-        echo "❌ Untyped dict ratchet exceeded: $COUNT occurrences (threshold: $THRESHOLD)"
-        echo "   Fix dict[str, Any] and dict[str, object] in apps/syn-api/src/syn_api/types.py"
-        exit 1
-    fi
-    echo "✓ Untyped dict check: $COUNT/$THRESHOLD"
+    #!/usr/bin/env python3
+    import re, sys
+    from pathlib import Path
+    threshold = int(Path(".ratchets/untyped-dicts").read_text().strip() or 0)
+    text = Path("apps/syn-api/src/syn_api/types.py").read_text()
+    count = len(re.findall(r"dict\[str, (?:Any|object)\]", text))
+    if count > threshold:
+        print(f"❌ Untyped dict ratchet exceeded: {count} occurrences (threshold: {threshold})")
+        print("   Fix dict[str, Any] and dict[str, object] in apps/syn-api/src/syn_api/types.py")
+        sys.exit(1)
+    print(f"✓ Untyped dict check: {count}/{threshold}")
 
 # Run type checker (strict mode)
 typecheck:

@@ -1622,6 +1622,18 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * ConditionRequest
+         * @description A single trigger condition (field operator value).
+         */
+        ConditionRequest: {
+            /** Field */
+            field: string;
+            /** Operator */
+            operator: string;
+            /** Value */
+            value: string;
+        };
+        /**
          * ContributionHeatmapResponse
          * @description Contribution heatmap data.
          */
@@ -2906,9 +2918,7 @@ export interface components {
              */
             workflow_id: string;
             /** Conditions */
-            conditions?: {
-                [key: string]: unknown;
-            }[] | null;
+            conditions?: components["schemas"]["ConditionRequest"][] | null;
             /**
              * Installation Id
              * @default
