@@ -44,7 +44,7 @@ Running 10 parallel Claude Code agents in a terminal is about as far as you can 
 Get your own instance running in minutes. Prerequisites: **Node.js 18+** and **Docker**.
 
 ```bash
-npx @syntropic137/setup
+npx @syntropic137/setup init
 ```
 
 The setup CLI interactively handles Docker validation, secret generation, GitHub App creation (via OAuth manifest flow), and starting the full stack.
@@ -55,21 +55,24 @@ Access: http://localhost:8137
 > **Optional features** (configurable during setup or anytime after):
 > - **Cloudflare Tunnel**: remote access + webhook delivery (highly recommended, free; required for GitHub webhook triggers; without it, manual workflow runs only and dashboard on localhost only; domain costs $10-15/year if buying new)
 > - **1Password**: encrypted secrets management
->
-> Run `npx @syntropic137/setup` again to add features later.
 
 > [!WARNING]
 > **Security:** Set `SYN_API_PASSWORD` for basic auth. Or protect with Cloudflare Access / VPN.
 
 ### Management Commands
 
-| Action | Setup CLI (`npx @syntropic137/setup`) | Source repo |
-|--------|----------------------------------------|-------------|
-| Status | `npx @syntropic137/setup status` | `just selfhost-status` |
-| Logs | `npx @syntropic137/setup logs` | `just selfhost-logs` |
-| Stop | `npx @syntropic137/setup stop` | `just selfhost-down` |
-| Start | `npx @syntropic137/setup start` | `just selfhost-up` |
-| Update | `npx @syntropic137/setup update` | `git pull && just selfhost-up` |
+| Action | Command |
+|--------|---------|
+| Initialize | `npx @syntropic137/setup init` |
+| Status | `npx @syntropic137/setup status` |
+| Logs | `npx @syntropic137/setup logs` |
+| Stop | `npx @syntropic137/setup stop` |
+| Start | `npx @syntropic137/setup start` |
+| Update | `npx @syntropic137/setup update` |
+| Install CLI | `npx @syntropic137/setup cli` |
+| Install plugin | `npx @syntropic137/setup plugin` |
+| GitHub App settings | `npx @syntropic137/setup github-app` |
+| Tunnel setup | `npx @syntropic137/setup tunnel` |
 
 ---
 
