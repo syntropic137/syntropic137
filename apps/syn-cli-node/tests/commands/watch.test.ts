@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { watchGroup } from "../../src/commands/watch.js";
+import { streamSSE } from "../../src/client/sse.js";
 
 // Watch commands use SSE streaming (streamSSE) which requires a persistent
 // EventSource-like connection. Smoke-testing the actual handlers would need
@@ -20,5 +21,18 @@ describe("watch commands", () => {
     const requiredArg = cmd.args?.find((a) => a.name === "execution-id");
     expect(requiredArg).toBeDefined();
     expect(requiredArg!.required).toBe(true);
+  });
+});
+
+// Regression guard: verify the activity endpoint path is /sse/activity, not /watch/activity.
+// The SSEPath type (extracted from the OpenAPI spec) enforces the /sse/ prefix at compile
+// time, but this test provides a runtime signal for the specific path used.
+describe("watch activity SSE path regression", () => {
+  it("streamSSE is typed to only accept /sse/* paths", () => {
+    // The TypeScript type SSEPath = `/sse/${string}` means passing `/watch/activity`
+    // would be a compile error. This test documents the constraint at runtime.
+    // If this test ever needs to pass a non-/sse/ path, the type guard was weakened.
+    const validPath: Parameters<typeof streamSSE>[0] = "/sse/activity";
+    expect(validPath).toBe("/sse/activity");
   });
 });

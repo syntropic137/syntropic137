@@ -113,6 +113,10 @@ describe("workflow crud commands", () => {
             workflow_type: "custom",
             classification: "single-phase",
             phases: [{ name: "build" }, { name: "test" }],
+            input_declarations: [
+              { name: "pr_number", required: true, description: "Pull request number" },
+              { name: "branch", required: false, description: "Target branch", default: "main" },
+            ],
           }),
         );
 
@@ -126,6 +130,10 @@ describe("workflow crud commands", () => {
       expect(out).toContain("Workflow Details");
       expect(out).toContain("build");
       expect(out).toContain("test");
+      // Regression: show must display required inputs so users know what --input flags to pass
+      expect(out).toContain("pr_number");
+      expect(out).toContain("required");
+      expect(out).toContain("branch");
     });
 
     it("throws CLIError when workflow-id is missing", async () => {

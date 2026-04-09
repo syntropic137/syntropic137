@@ -155,7 +155,7 @@ const healthCommand: CommandDef = {
     print(`  Success rate:    ${(d.success_rate * 100).toFixed(1)}%`);
     print(`  Trend:           ${d.trend}`);
     print(`  Total runs:      ${d.total_executions}`);
-    print(`  Window cost:     ${formatCost(d.window_cost_usd)}`);
+    print(`  Recent cost:     ${formatCost(d.recent_cost_usd)}`);
     print(`  Window tokens:   ${formatTokens(d.window_tokens)}`);
     if (d.last_execution_at) print(`  Last execution:  ${formatTimestamp(d.last_execution_at)}`);
   },

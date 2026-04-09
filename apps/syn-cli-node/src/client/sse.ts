@@ -1,4 +1,10 @@
 import { SSE_CONNECT_TIMEOUT_MS, getApiUrl, getAuthHeaders } from "../config.js";
+/**
+ * Valid SSE endpoint paths must start with /sse/.
+ * This catches wrong prefixes (e.g. /watch/activity) at compile time
+ * while still allowing parameterised paths like /sse/executions/${id}.
+ */
+export type SSEPath = `/sse/${string}`;
 
 const API_PREFIX = (process.env["SYN_NO_PREFIX"] === "1" || process.env["SYN_NO_PREFIX"] === "true") ? "" : "/api/v1";
 
@@ -45,7 +51,7 @@ async function fetchStream(path: string): Promise<ReadableStream<Uint8Array>> {
   return response.body;
 }
 
-export async function* streamSSE(path: string): AsyncGenerator<SSEEvent, void, void> {
+export async function* streamSSE(path: SSEPath): AsyncGenerator<SSEEvent, void, void> {
   const body = await fetchStream(path);
   const reader = body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";

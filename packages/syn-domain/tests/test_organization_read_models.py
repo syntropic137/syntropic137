@@ -56,7 +56,7 @@ class TestReadModelRoundTrip:
             failed_executions=5,
             success_rate=0.95,
             trend="improving",
-            window_cost_usd=Decimal("12.50"),
+            recent_cost_usd=Decimal("12.50"),
             window_tokens=50000,
             last_execution_at="2026-03-06T10:00:00",
         )

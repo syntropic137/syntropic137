@@ -796,6 +796,7 @@ class ExecutionCostData(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    duration_ms: float = 0.0
     cost_by_phase: dict = Field(default_factory=dict)
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
@@ -966,7 +967,12 @@ class RepoListResponse(BaseModel):
 
 
 class RepoHealthResponse(BaseModel):
-    """Per-repo health snapshot with success rate, trend, and windowed costs."""
+    """Per-repo health snapshot with success rate, trend, and accumulated costs.
+
+    Note: ``recent_cost_usd`` is accumulated from WorkflowCompleted/Failed events
+    since the projection was last reset — it is not a fixed time window and may
+    differ from ``RepoCostResponse.total_cost_usd`` which is a TimescaleDB total.
+    """
 
     repo_id: str = ""
     repo_full_name: str = ""
@@ -975,7 +981,7 @@ class RepoHealthResponse(BaseModel):
     failed_executions: int = 0
     success_rate: float = 0.0
     trend: str = "stable"
-    window_cost_usd: str = "0"
+    recent_cost_usd: str = "0"
     window_tokens: int = 0
     last_execution_at: str = ""
 

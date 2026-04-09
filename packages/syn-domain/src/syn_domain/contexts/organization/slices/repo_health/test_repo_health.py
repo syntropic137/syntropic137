@@ -175,7 +175,7 @@ class TestRepoHealthProjection:
         )
 
         health = await proj.get_health("acme/api")
-        assert str(health.window_cost_usd) == "6.00"
+        assert str(health.recent_cost_usd) == "6.00"
         assert health.window_tokens == 3000
 
     @pytest.mark.asyncio
