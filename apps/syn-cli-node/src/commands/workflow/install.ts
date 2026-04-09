@@ -325,12 +325,12 @@ export const initCommand: CommandDef = {
   args: [{ name: "directory", description: "Directory to scaffold (defaults to current dir)" }],
   options: {
     name: { type: "string", short: "n", description: "Workflow name" },
-    type: { type: "string", short: "t", description: "Workflow type", default: "research" },
+    type: { type: "string", short: "t", description: "Free-form workflow type label (e.g. research, planning, custom, code-quality)", default: "custom" },
     phases: { type: "string", description: "Number of phases", default: "3" },
     multi: { type: "boolean", description: "Scaffold multi-workflow plugin", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
-    const workflowType = (parsed.values["type"] as string | undefined) ?? "research";
+    const workflowType = (parsed.values["type"] as string | undefined) ?? "custom";
     const numPhases = parseInt((parsed.values["phases"] as string | undefined) ?? "3", 10);
     const multi = parsed.values["multi"] === true;
     const explicitName = parsed.values["name"] as string | undefined;

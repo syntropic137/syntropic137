@@ -217,9 +217,7 @@ async def validate_yaml(
             WorkflowValidation(
                 valid=True,
                 name=definition.name,
-                workflow_type=definition.type.value
-                if hasattr(definition.type, "value")
-                else str(definition.type),
+                workflow_type=definition.type,
                 phase_count=len(definition.phases),
             )
         )

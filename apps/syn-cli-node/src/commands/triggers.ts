@@ -296,7 +296,7 @@ const disableAllCommand: CommandDef = {
   name: "disable-all",
   description: "Disable all triggers for a repository",
   options: {
-    repo: { type: "string", short: "r", description: "Repository ID" },
+    repo: { type: "string", short: "r", description: "Repository in owner/repo format" },
     force: { type: "boolean", short: "f", description: "Skip confirmation", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
@@ -308,11 +308,14 @@ const disableAllCommand: CommandDef = {
     }
     const d = unwrap(
       await api.GET("/triggers", {
-        params: { query: { repository: repo, status: "active" } },
+        params: { query: { status: "active" } },
       }),
       "List active triggers",
     );
-    const triggers = d.triggers ?? [];
+    // Filter client-side: the API response always resolves repo IDs to display
+    // names, so triggers stored with either an ID or a name both show up as
+    // "owner/repo" in the response — a single string compare catches both.
+    const triggers = (d.triggers ?? []).filter((t) => t.repository === repo);
     if (triggers.length === 0) { printDim("No active triggers found."); return; }
     let count = 0;
     for (const t of triggers) {
