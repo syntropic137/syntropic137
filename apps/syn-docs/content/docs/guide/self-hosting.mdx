@@ -113,7 +113,7 @@ The gateway exposes two ports with different auth policies:
 | 80 | None | Docker health checks, internal service traffic, local dev (`localhost:8137`) |
 | 8081 | Basic Auth | Cloudflare Tunnel, any external access |
 
-**If you use Cloudflare Tunnel**, your tunnel config must route to `http://gateway:8081` — not `localhost:8137`. The setup wizard enforces this: `npx @syntropic137/setup tunnel` will exit with an error if `SYN_API_PASSWORD` is not set.
+**If you use Cloudflare Tunnel**, your tunnel config must route to `http://gateway:8081` (not `localhost:8137`). The setup wizard enforces this: `npx @syntropic137/setup tunnel` will exit with an error if `SYN_API_PASSWORD` is not set.
 
 See the [Tunnels guide](/docs/guide/tunnels) for full setup instructions.
 
