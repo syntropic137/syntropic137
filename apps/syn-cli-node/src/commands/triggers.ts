@@ -22,7 +22,7 @@ function reqId(parsed: ParsedArgs): string {
   return id;
 }
 
-function parseConditions(condStrs: string[]): Record<string, string>[] {
+function parseConditions(condStrs: string[]): components["schemas"]["ConditionRequest"][] {
   return condStrs.map((c) => {
     const eqIdx = c.indexOf("=");
     if (eqIdx < 1) throw new CLIError(`Invalid condition format: ${c} (expected field=value)`, 1);
@@ -38,7 +38,7 @@ const registerCommand: CommandDef = {
     workflow: { type: "string", short: "w", description: "Workflow ID to execute" },
     event: { type: "string", short: "e", description: "GitHub event type (e.g. check_run.completed)" },
     condition: { type: "string", short: "c", multiple: true, description: "Condition as field=value (repeatable, uses 'eq' operator)" },
-    "max-fires": { type: "string", description: "Maximum fire attempts per PR/trigger combination", default: "5" },
+    "max-attempts": { type: "string", description: "Maximum fire attempts per PR/trigger combination", default: "5" },
     cooldown: { type: "string", description: "Cooldown in seconds", default: "300" },
   },
   handler: async (parsed: ParsedArgs) => {
@@ -52,8 +52,10 @@ const registerCommand: CommandDef = {
     const conditionStrs = (parsed.values["condition"] as string[] | undefined) ?? [];
     const conditions = conditionStrs.length > 0 ? parseConditions(conditionStrs) : [];
 
-    const config: Record<string, unknown> = {
-      max_attempts: parseInt((parsed.values["max-fires"] as string | undefined) ?? "5", 10),
+    const config: components["schemas"]["TriggerConfigRequest"] = {
+      max_attempts: parseInt((parsed.values["max-attempts"] as string | undefined) ?? "5", 10),
+      daily_limit: 20,
+      debounce_seconds: 0,
       cooldown_seconds: parseInt((parsed.values["cooldown"] as string | undefined) ?? "300", 10),
     };
 

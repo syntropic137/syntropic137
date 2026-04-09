@@ -11,23 +11,39 @@
 
 # Syntropic137
 
-**Self-hosted agentic engineering platform.** Run AI agents in isolated Docker workspaces with full observability — every tool call, token, cost, conversation, and artifact permanently captured in a queryable event store.
+Running 10 parallel Claude Code agents in a terminal is about as far as you can go before it becomes unmanageable. Syntropic137 scales that to 100+ with workflow orchestration, full observability on every tool call and conversation, model routing across Haiku/Sonnet/Opus, and a self-hosted workflow marketplace. Your data stays yours.
 
-- **Permanent, queryable data** — events, conversation logs, and artifacts are never lost. Analyze what agents do across sessions, workflows, repos, systems, and organizations. Enables compounding learning loops.
-- **Artifact pipeline** — each workflow phase produces output artifacts (stored in MinIO), passed as inputs to the next phase. Research → plan → code → review, each building on the last.
-- **Claude Code as a primitive** — agents run Claude Code inside secure ephemeral containers, leveraging Claude Code standards like [skills, commands, and hooks](https://docs.anthropic.com/en/docs/claude-code)
-- **Full observability** — token usage, tool traces, costs, and errors captured via event sourcing. [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) capture agent tasks and tool calls; conversation logs are saved after each session for reviewability; git hooks capture all git-related events.
-- **GitHub-native triggers** — integrated event triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows — zero-config, no tunnel required, agents respond in minutes so developers stay out of the loop
-- **Security as a first-class citizen** — isolated Docker workspaces, secret injection/clearing lifecycle, read-only containers, no-new-privileges
-- **Production-grade** — event-sourced state, crash recovery, idempotent handlers, Docker Compose single-machine deployment
-- **Workflow phases as Claude Code commands** — each phase is a prompt template using the `$ARGUMENTS` command standard, composable into multi-phase pipelines (research → plan → implement → review)
+**Self-hosted agentic engineering platform.** Run AI agents in isolated Docker workspaces with full observability. Every tool call, token, cost, conversation, and artifact is permanently captured in a queryable event store.
+
+- **Never lose agent work**: events, conversation logs, and artifacts are permanent and queryable. Analyze what agents do across sessions, workflows, repos, systems, and organizations. Enables compounding learning loops.
+- **Model routing**: assign Haiku or Sonnet to workflow phases that don't need Opus. Real cost savings across multi-phase pipelines without sacrificing quality where it matters.
+- **Workflow marketplace**: publish and consume reusable workflows via the CLI. One command to install any published workflow. Build once, run anywhere.
+- **Artifact pipeline**: each workflow phase produces output artifacts (stored in MinIO), passed as inputs to the next phase. Research, plan, code, review. Each phase builds on the last.
+- **Claude Code as a primitive**: agents run Claude Code inside secure ephemeral containers, leveraging Claude Code standards like [skills, commands, and hooks](https://docs.anthropic.com/en/docs/claude-code).
+- **Full observability**: token usage, tool traces, costs, and errors captured via event sourcing. [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) capture agent tasks and tool calls; conversation logs are saved after each session for reviewability; git hooks capture all git-related events.
+- **GitHub-native triggers**: integrated event triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows. Zero-config, no tunnel required. Agents respond in minutes so developers stay out of the loop.
+- **Security first**: isolated Docker workspaces, secret injection/clearing lifecycle, read-only containers, no-new-privileges.
+- **Production-grade**: event-sourced state, crash recovery, idempotent handlers, Docker Compose single-machine deployment.
+- **Workflow phases as Claude Code commands**: each phase is a prompt template using the `$ARGUMENTS` command standard, composable into multi-phase pipelines (research, plan, implement, review).
+
+## vs. Alternatives
+
+| Feature | Syntropic137 | Claude Code CLI | Cursor | LangGraph |
+|---|---|---|---|---|
+| Full observability (tool calls + costs) | Yes | Manual | No | Partial |
+| Self-hostable | Yes | Yes | No | Yes |
+| Repeatable Workflows | Yes | Partial | Partial | From Scratch |
+| Scale past 10 parallel agents | Yes (100+) | Limited | Limited | Yes |
+| Your data stays yours | Yes | Yes | No | Yes |
+| Open source | Yes | No | No | Yes |
+| One-command setup | Yes | Yes | No | No |
 
 ## Self-Hosting (recommended)
 
 Get your own instance running in minutes. Prerequisites: **Node.js 18+** and **Docker**.
 
 ```bash
-npx @syntropic137/setup
+npx @syntropic137/setup init
 ```
 
 The setup CLI interactively handles Docker validation, secret generation, GitHub App creation (via OAuth manifest flow), and starting the full stack.
@@ -36,23 +52,26 @@ Access: http://localhost:8137
 
 > [!NOTE]
 > **Optional features** (configurable during setup or anytime after):
-> - **Cloudflare Tunnel** — remote access + webhook delivery (highly recommended, free; required for GitHub webhook triggers; without it, manual workflow runs only and dashboard on localhost only; domain costs $10-15/year if buying new)
-> - **1Password** — encrypted secrets management
->
-> Run `npx @syntropic137/setup` again to add features later.
+> - **Cloudflare Tunnel**: remote access + webhook delivery (highly recommended, free; required for GitHub webhook triggers; without it, manual workflow runs only and dashboard on localhost only; domain costs $10-15/year if buying new)
+> - **1Password**: encrypted secrets management
 
 > [!WARNING]
 > **Security:** Set `SYN_API_PASSWORD` for basic auth. Or protect with Cloudflare Access / VPN.
 
 ### Management Commands
 
-| Action | Setup CLI (`npx @syntropic137/setup`) | Source repo |
-|--------|----------------------------------------|-------------|
-| Status | `npx @syntropic137/setup status` | `just selfhost-status` |
-| Logs | `npx @syntropic137/setup logs` | `just selfhost-logs` |
-| Stop | `npx @syntropic137/setup stop` | `just selfhost-down` |
-| Start | `npx @syntropic137/setup start` | `just selfhost-up` |
-| Update | `npx @syntropic137/setup update` | `git pull && just selfhost-up` |
+| Action | Command |
+|--------|---------|
+| Initialize | `npx @syntropic137/setup init` |
+| Status | `npx @syntropic137/setup status` |
+| Logs | `npx @syntropic137/setup logs` |
+| Stop | `npx @syntropic137/setup stop` |
+| Start | `npx @syntropic137/setup start` |
+| Update | `npx @syntropic137/setup update` |
+| Install CLI | `npx @syntropic137/setup cli` |
+| Install plugin | `npx @syntropic137/setup plugin` |
+| GitHub App settings | `npx @syntropic137/setup github-app` |
+| Tunnel setup | `npx @syntropic137/setup tunnel` |
 
 ---
 
@@ -181,7 +200,7 @@ syn version
 | Command | Description |
 |---------|-------------|
 | `just dev` | Start full dev stack (deps, containers, seeds, frontend) |
-| `just dev-fresh` | Wipe volumes, rebuild, re-seed — clean slate |
+| `just dev-fresh` | Wipe volumes, rebuild, re-seed for a clean slate |
 | `just dev-down` | Stop all services |
 | `just dev-logs` | Tail service logs |
 | `just dev-doctor` | Check environment health |
@@ -231,10 +250,10 @@ syntropic137/
 
 ## Environment Configuration
 
-Two `.env` files with **strict separation** — no variable appears in both:
+Two `.env` files with strict separation (no variable appears in both):
 
-- **Root `.env`** — Application config (API keys, GitHub App, app settings). Auto-generated template: `just gen-env` → `.env.example`
-- **`infra/.env`** — Infrastructure config (Docker, resource limits, Cloudflare, secrets). Template: `infra/.env.example`
+- **Root `.env`**: Application config (API keys, GitHub App, app settings). Auto-generated template: `just gen-env` → `.env.example`
+- **`infra/.env`**: Infrastructure config (Docker, resource limits, Cloudflare, secrets). Template: `infra/.env.example`
 
 > [!TIP]
 > Both `.env.example` files are extensively commented with descriptions, defaults, and security notes. Reference them directly for all available configuration options.
@@ -256,6 +275,10 @@ Provide the matching service account token (e.g. `OP_SERVICE_ACCOUNT_TOKEN_SYN13
 **Precedence:** shell env > 1Password > `.env` file
 
 Full setup guide: [docs/development/1password-secrets.md](docs/development/1password-secrets.md)
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=syntropic137/syntropic137&type=Date)](https://star-history.com/#syntropic137/syntropic137)
 
 ## License
 

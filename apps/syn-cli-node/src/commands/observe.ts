@@ -83,5 +83,5 @@ const tokenMetricsCommand: CommandDef = {
   },
 };
 
-export const observeGroup = new CommandGroup("observe", "Session observability — tool timelines and token metrics");
+export const observeGroup = new CommandGroup("observe", "Session observability: tool timelines and token metrics");
 observeGroup.command(toolTimelineCommand).command(tokenMetricsCommand);

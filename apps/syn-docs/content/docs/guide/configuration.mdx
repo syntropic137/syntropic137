@@ -11,8 +11,8 @@ and customize as needed.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `APP_ENVIRONMENT` | `development` | Runtime environment (`development`, `staging`, `production`) |
-| `DATABASE_URL` | — | PostgreSQL connection string |
-| `REDIS_URL` | — | Redis connection string |
+| `DATABASE_URL` | | PostgreSQL connection string |
+| `REDIS_URL` | | Redis connection string |
 | `API_HOST` | `0.0.0.0` | API server bind address |
 | `API_PORT` | `8000` | API server port |
 
@@ -50,7 +50,7 @@ See [GitHub Integration](/docs/guide/github-integration) for the full setup guid
 ## Event Polling
 
 Syntropic137 polls the GitHub Events API as a zero-config fallback when webhooks
-are unavailable. Polling is **enabled by default** — no tunnel setup required.
+are unavailable. Polling is **enabled by default**, no tunnel setup required.
 See [Event Ingestion](/docs/guide/event-ingestion) for how the hybrid approach works.
 
 | Variable | Default | Description |

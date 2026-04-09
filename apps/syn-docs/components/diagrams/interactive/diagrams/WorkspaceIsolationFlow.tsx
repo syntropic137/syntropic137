@@ -28,7 +28,7 @@ const nodes: Node[] = [
   // Setup Phase
   {
     id: 'grpSetup', type: 'groupNode', position: { x: CX - 305, y: 100 },
-    data: { title: 'Setup Phase — Git config & repo clone', color: 'amber' },
+    data: { title: 'Setup Phase: Git config & repo clone', color: 'amber' },
     style: { width: 610, height: 85 },
   },
   { id: 'configGit', type: 'flowNode', position: setupPositions.configGit, data: { icon: 'git', label: 'Configure git', color: 'amber', size: 'sm' } },
@@ -37,7 +37,7 @@ const nodes: Node[] = [
   // Agent Phase
   {
     id: 'grpAgent', type: 'groupNode', position: { x: CX - 305, y: 220 },
-    data: { title: 'Agent Phase — No real secrets in container', color: 'purple' },
+    data: { title: 'Agent Phase: No real secrets in container', color: 'purple' },
     style: { width: 610, height: 85 },
   },
   { id: 'agent', type: 'flowNode', position: agentPositions.agent, data: { icon: 'zap', label: 'AI Agent', color: 'purple', size: 'sm' } },
