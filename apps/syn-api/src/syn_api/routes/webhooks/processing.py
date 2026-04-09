@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from syn_api._wiring import ensure_connected, get_event_pipeline, get_webhook_health_tracker
 from syn_api.routes.webhooks.acknowledgments import _post_trigger_acknowledgments
@@ -18,9 +18,6 @@ from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
     NormalizedEvent,
 )
 
-if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
-
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +26,6 @@ async def verify_and_process_webhook(
     event_type: str,
     delivery_id: str,
     signature: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[WebhookResult, GitHubError]:
     """Verify a GitHub webhook signature and process the event.
 

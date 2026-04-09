@@ -39,7 +39,6 @@ from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
-    from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +166,6 @@ async def list_sessions(
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[SessionSummary], SessionError]:
     """List agent sessions, optionally filtered.
 
@@ -176,7 +174,6 @@ async def list_sessions(
         status: Filter by session status.
         limit: Maximum results to return.
         offset: Pagination offset.
-        auth: Optional authentication context.
 
     Returns:
         Ok(list[SessionSummary]) on success, Err(SessionError) on failure.
@@ -214,7 +211,6 @@ async def start_session(
     phase_id: str | None = None,
     execution_id: str | None = None,
     agent_type: str = "claude",
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, SessionError]:
     """Start a new agent session.
 
@@ -223,7 +219,6 @@ async def start_session(
         phase_id: Optional phase within the workflow.
         execution_id: Optional execution ID.
         agent_type: The agent provider (default: claude).
-        auth: Optional authentication context.
 
     Returns:
         Ok(session_id) on success, Err(SessionError) on failure.
@@ -256,13 +251,11 @@ async def start_session(
 
 async def complete_session(
     session_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[None, SessionError]:
     """Complete an agent session.
 
     Args:
         session_id: The session to complete.
-        auth: Optional authentication context.
 
     Returns:
         Ok(None) on success, Err(SessionError) on failure.
@@ -346,13 +339,11 @@ async def _load_cost_data(
 
 async def get_session(
     session_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[SessionDetail, SessionError]:
     """Get detailed information about a session, including tool operations and costs.
 
     Args:
         session_id: The session ID to look up.
-        auth: Optional authentication context.
 
     Returns:
         Ok(SessionDetail) on success, Err(SessionError.NOT_FOUND) if missing.

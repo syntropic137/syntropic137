@@ -7,7 +7,7 @@ installations). These hit the GitHub API directly — not projections.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
 from fastapi import APIRouter, HTTPException
 
@@ -20,9 +20,6 @@ from syn_api.types import (
     Ok,
     Result,
 )
-
-if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
 
 
 class _RepoLister(Protocol):
@@ -73,7 +70,6 @@ def _map_repo_dict(raw: dict, installation_id: str) -> GitHubRepoResponse | None
 async def list_accessible_repos(
     installation_id: str | None = None,
     include_private: bool = True,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[GitHubRepoResponse], GitHubError]:
     """List repositories accessible to the GitHub App (live query).
 
