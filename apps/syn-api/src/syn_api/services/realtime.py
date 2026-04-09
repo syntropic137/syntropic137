@@ -24,8 +24,7 @@ def get_realtime_projection_ref() -> RealTimeProjection:
     return get_realtime()  # type: ignore[return-value]
 
 
-async def get_realtime_health(
-) -> Result[RealtimeHealth, ObservabilityError]:
+async def get_realtime_health() -> Result[RealtimeHealth, ObservabilityError]:
     """Get health status of the realtime SSE projection.
 
     Args:

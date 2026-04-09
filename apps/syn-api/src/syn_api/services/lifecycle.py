@@ -180,8 +180,7 @@ async def startup(
     return Ok({"mode": mode, "degraded_reasons": _state.degraded_reasons})
 
 
-async def shutdown(
-) -> Result[None, LifecycleError]:
+async def shutdown() -> Result[None, LifecycleError]:
     """Gracefully shut down: stop subscriptions, disconnect from event store.
 
     Args:
@@ -210,8 +209,7 @@ async def shutdown(
         return Err(LifecycleError.CONNECTION_FAILED, message=str(e))
 
 
-async def health_check(
-) -> Result[dict, LifecycleError]:
+async def health_check() -> Result[dict, LifecycleError]:
     """Check application health.
 
     Args:

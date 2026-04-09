@@ -288,8 +288,7 @@ async def get_execution_cost(
         return Err(MetricsError.QUERY_FAILED, message=str(e))
 
 
-async def get_cost_summary(
-) -> Result[CostSummary, MetricsError]:
+async def get_cost_summary() -> Result[CostSummary, MetricsError]:
     """Get overall cost summary across all executions.
 
     Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532.

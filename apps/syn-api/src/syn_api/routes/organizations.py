@@ -71,8 +71,7 @@ async def create_organization(
         return Err(OrganizationError.INVALID_INPUT, message=str(e))
 
 
-async def list_organizations(
-) -> Result[list[OrganizationSummaryResponse], OrganizationError]:
+async def list_organizations() -> Result[list[OrganizationSummaryResponse], OrganizationError]:
     """List all organizations."""
     from syn_domain.contexts.organization.slices.list_organizations.projection import (
         get_organization_projection,

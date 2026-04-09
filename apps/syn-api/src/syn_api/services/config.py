@@ -177,8 +177,7 @@ def _validate_environment(settings: object) -> list[ConfigIssue]:
     return []
 
 
-async def validate_config(
-) -> Result[list[ConfigIssue], ConfigError]:
+async def validate_config() -> Result[list[ConfigIssue], ConfigError]:
     """Validate the current configuration and report issues.
 
     Checks settings validity and agent provider availability.
@@ -203,8 +202,7 @@ async def validate_config(
     return Ok(issues)
 
 
-async def get_env_template(
-) -> Result[str, ConfigError]:
+async def get_env_template() -> Result[str, ConfigError]:
     """Get the .env template for configuring Syntropic137.
 
     Args:
