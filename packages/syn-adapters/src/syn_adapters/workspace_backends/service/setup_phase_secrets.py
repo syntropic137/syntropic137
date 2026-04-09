@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,88 @@ class GitHubAppNotConfiguredError(Exception):
             "and GITHUB_APP_INSTALLATION_ID environment variables. "
             "See docs/deployment/github-app-setup.md for details."
         )
+
+
+class _GitHubClientProtocol(Protocol):
+    """Structural protocol for GitHubAppClient — avoids circular import."""
+
+    async def get_installation_for_repo(self, full_name: str) -> str: ...
+    async def get_installation_token(self, installation_id: str) -> str: ...
+
+
+async def _resolve_github_auth(
+    repos: list[str],
+    require_github: bool,
+) -> tuple[dict[str, str], str | None, str | None]:
+    """Resolve GitHub App tokens for all repos and return (repo_tokens, author_name, author_email).
+
+    Imports GitHubAppClient and GitHubAppSettings lazily to avoid loading GitHub
+    auth machinery for executions that don't need it.
+    """
+    from syn_adapters.github import GitHubAppClient
+    from syn_shared.settings.github import GitHubAppSettings
+
+    github_settings = GitHubAppSettings()
+
+    if not github_settings.is_configured:
+        if require_github:
+            raise GitHubAppNotConfiguredError()
+        return {}, None, None
+
+    client: _GitHubClientProtocol = GitHubAppClient(github_settings)  # type: ignore[arg-type]
+    url_to_installation = await _lookup_installations(client, repos, require_github)
+    repo_tokens = await _mint_tokens_per_installation(client, url_to_installation)
+    return repo_tokens, github_settings.bot_name, github_settings.bot_email
+
+
+async def _lookup_installations(
+    client: _GitHubClientProtocol,
+    repos: list[str],
+    require_github: bool,
+) -> dict[str, str]:
+    """Map each repo URL to its GitHub App installation_id.
+
+    Fails fast (re-raises) on any lookup error when require_github=True.
+    Silently skips repos with no installation when require_github=False.
+    """
+    url_to_installation: dict[str, str] = {}
+    for url in repos:
+        full_name = _repo_full_name(url)
+        try:
+            installation_id = await client.get_installation_for_repo(full_name)
+            url_to_installation[url] = installation_id
+            logger.debug("Resolved installation %s for repo %s", installation_id, full_name)
+        except Exception:
+            if require_github:
+                logger.error(
+                    "GitHub App not installed on repository: %s. "
+                    "Add it at github.com/settings/installations.",
+                    full_name,
+                )
+                raise
+            logger.warning(
+                "No GitHub App installation for %s — will attempt clone without token.",
+                full_name,
+            )
+    return url_to_installation
+
+
+async def _mint_tokens_per_installation(
+    client: _GitHubClientProtocol,
+    url_to_installation: dict[str, str],
+) -> dict[str, str]:
+    """Mint one token per unique installation and return url → token mapping."""
+    installation_to_urls: dict[str, list[str]] = {}
+    for url, inst_id in url_to_installation.items():
+        installation_to_urls.setdefault(inst_id, []).append(url)
+
+    tokens_by_installation: dict[str, str] = {}
+    for inst_id, urls in installation_to_urls.items():
+        token = await client.get_installation_token(inst_id)
+        tokens_by_installation[inst_id] = token
+        logger.info("Generated token for installation %s (%d repo(s))", inst_id, len(urls))
+
+    return {url: tokens_by_installation[inst_id] for url, inst_id in url_to_installation.items()}
 
 
 @dataclass
@@ -143,60 +226,9 @@ class SetupPhaseSecrets:
         git_author_email: str | None = None
 
         if repos:
-            from syn_adapters.github import GitHubAppClient
-            from syn_shared.settings.github import GitHubAppSettings
-
-            github_settings = GitHubAppSettings()
-
-            if not github_settings.is_configured:
-                if require_github:
-                    raise GitHubAppNotConfiguredError()
-            else:
-                client = GitHubAppClient(github_settings)  # type: ignore[arg-type]
-
-                # Per-repo installation lookup — fail fast on 404 if require_github
-                url_to_installation: dict[str, str] = {}
-                for url in repos:
-                    full_name = _repo_full_name(url)
-                    try:
-                        installation_id = await client.get_installation_for_repo(full_name)
-                        url_to_installation[url] = installation_id
-                        logger.debug(
-                            "Resolved installation %s for repo %s", installation_id, full_name
-                        )
-                    except Exception:
-                        if require_github:
-                            logger.error(
-                                "GitHub App not installed on repository: %s. "
-                                "Add it at github.com/settings/installations.",
-                                full_name,
-                            )
-                            raise
-                        logger.warning(
-                            "No GitHub App installation for %s — will attempt clone without token.",
-                            full_name,
-                        )
-
-                # Group by installation_id → one token per unique installation
-                installation_to_urls: dict[str, list[str]] = {}
-                for url, inst_id in url_to_installation.items():
-                    installation_to_urls.setdefault(inst_id, []).append(url)
-
-                tokens_by_installation: dict[str, str] = {}
-                for inst_id in installation_to_urls:
-                    token = await client.get_installation_token(inst_id)
-                    tokens_by_installation[inst_id] = token
-                    logger.info(
-                        "Generated token for installation %s (%d repo(s))",
-                        inst_id,
-                        len(installation_to_urls[inst_id]),
-                    )
-
-                for url, inst_id in url_to_installation.items():
-                    repo_tokens[url] = tokens_by_installation[inst_id]
-
-                git_author_name = github_settings.bot_name
-                git_author_email = github_settings.bot_email
+            repo_tokens, git_author_name, git_author_email = await _resolve_github_auth(
+                repos, require_github
+            )
 
         claude_code_oauth_token, anthropic_api_key = _resolve_claude_credentials()
 
