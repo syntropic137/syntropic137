@@ -22,7 +22,7 @@ from syn_api.types import (
     Result,
     TriggerActionResponse,
     TriggerError,
-)  # noqa: TCH001
+)
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
 
 if TYPE_CHECKING:
