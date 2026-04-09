@@ -22,7 +22,7 @@ Live A/B evaluation on an "explore repository" task:
 | Conversation turns | 12 | 6 | **50%** |
 | Bash tool calls | 10 | 5 | **50%** |
 
-RTK reduces context consumption without changing agent behavior — the same tasks complete with fewer tokens.
+RTK reduces context consumption without changing agent behavior: the same tasks complete with fewer tokens.
 
 ## OpenTelemetry Observability
 
@@ -51,7 +51,7 @@ Workspace images export standard OTel metrics via OTLP, providing real-time toke
 OTel export is enabled by default in the image. The orchestrator auto-injects the collector endpoint when `COLLECTOR_URL` is configured:
 
 ```bash
-# Set by the image (defaults — no user action needed)
+# Set by the image (defaults, no user action needed)
 CLAUDE_CODE_ENABLE_TELEMETRY=1
 OTEL_METRICS_EXPORTER=otlp
 OTEL_LOGS_EXPORTER=otlp
@@ -65,7 +65,7 @@ If no endpoint is provided, OTel export silently no-ops (no crash, no side effec
 
 ### Two-Channel Observability
 
-Workspace observability uses two complementary channels. They capture different data — neither can fully replace the other:
+Workspace observability uses two complementary channels. They capture different data, neither can fully replace the other:
 
 | Captured by Plugin Hooks only | Captured by OTel only | Captured by both |
 |-------------------------------|----------------------|-----------------|
@@ -88,13 +88,13 @@ The image bundles language servers for Claude Code's LSP plugins:
 | TypeScript | typescript-language-server | typescript-lsp |
 | Rust | rust-analyzer | rust-analyzer-lsp |
 
-LSP servers are **lazy** — they only start when Claude encounters files in the matching language. An agent working on a Python-only repo will not start rust-analyzer or typescript-language-server.
+LSP servers are **lazy**: they only start when Claude encounters files in the matching language. An agent working on a Python-only repo will not start rust-analyzer or typescript-language-server.
 
 ## Pre-Bundled Plugins
 
 Plugins are baked into `/opt/agentic/plugins/` and loaded at runtime via `--plugin-dir`. Available plugins:
 
-- **sdlc** — Git operation hooks (commit metrics, branch tracking, push events)
-- **workspace** — Compaction tracking, subagent lifecycle events
+- **sdlc**: Git operation hooks (commit metrics, branch tracking, push events)
+- **workspace**: Compaction tracking, subagent lifecycle events
 
 Plugin hooks emit JSONL events to stderr, captured by the orchestrator's event collection pipeline.

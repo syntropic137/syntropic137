@@ -2524,9 +2524,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/RegisterTriggerRequest"
               }
             }
           }
@@ -2961,7 +2959,7 @@
           "sse"
         ],
         "summary": "Activity Sse",
-        "description": "Stream the global activity feed (git events, system-wide activity).\n\nRuns indefinitely until the client disconnects.  There is no terminal\nsentinel for the activity channel \u2014 it never completes.",
+        "description": "Stream the global activity feed (git events, system-wide activity).\n\nRuns indefinitely until the client disconnects.  There is no terminal\nsentinel for the activity channel, it never completes.",
         "operationId": "activity_sse_sse_activity_get",
         "responses": {
           "200": {
@@ -4853,6 +4851,31 @@
         "type": "object",
         "title": "CancelRequest",
         "description": "Request to cancel an execution."
+      },
+      "ConditionRequest": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "operator": {
+            "type": "string",
+            "title": "Operator"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "field",
+          "operator",
+          "value"
+        ],
+        "title": "ConditionRequest",
+        "description": "A single trigger condition (field operator value)."
       },
       "ContributionHeatmapResponse": {
         "properties": {
@@ -7443,6 +7466,84 @@
         "title": "RegisterRepoRequest",
         "description": "Request body for registering a new repo."
       },
+      "RegisterTriggerRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository",
+            "default": ""
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id",
+            "default": ""
+          },
+          "conditions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConditionRequest"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions"
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id",
+            "default": ""
+          },
+          "input_mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Mapping"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriggerConfigRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "event"
+        ],
+        "title": "RegisterTriggerRequest",
+        "description": "Request body for registering a new trigger rule."
+      },
       "RepoActionResponse": {
         "properties": {
           "repo_id": {
@@ -9168,6 +9269,34 @@
         ],
         "title": "TriggerActionResponse",
         "description": "Response for trigger create/update/delete actions."
+      },
+      "TriggerConfigRequest": {
+        "properties": {
+          "max_attempts": {
+            "type": "integer",
+            "title": "Max Attempts",
+            "default": 3
+          },
+          "daily_limit": {
+            "type": "integer",
+            "title": "Daily Limit",
+            "default": 20
+          },
+          "debounce_seconds": {
+            "type": "integer",
+            "title": "Debounce Seconds",
+            "default": 0
+          },
+          "cooldown_seconds": {
+            "type": "integer",
+            "title": "Cooldown Seconds",
+            "default": 300
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "TriggerConfigRequest",
+        "description": "Safety configuration for a trigger rule."
       },
       "TriggerDetail": {
         "properties": {

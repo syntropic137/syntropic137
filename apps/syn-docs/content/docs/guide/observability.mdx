@@ -1,6 +1,6 @@
 ---
 title: Observability
-description: How Syntropic137 collects agent events — two-channel pipeline, event types, and how to verify everything is flowing.
+description: "How Syntropic137 collects agent events: two-channel pipeline, event types, and how to verify everything is flowing."
 ---
 
 Syntropic137 captures every agent action in real time. Events flow from workspace containers through the collector service into TimescaleDB, where projections build the read models that power the dashboard.
@@ -18,7 +18,7 @@ Both channels flow through **syn-collector** (`/events` for plugin hooks, `/v1/m
 
 ### Why two channels?
 
-OTel can't capture everything — subagent lifecycle, context compaction, and granular git operations (branch, merge, push) are not exported by Claude Code's OTel implementation. Conversely, plugin hooks can't give you per-API-call cost breakdowns or retry counts. The channels are complementary:
+OTel can't capture everything: subagent lifecycle, context compaction, and granular git operations (branch, merge, push) are not exported by Claude Code's OTel implementation. Conversely, plugin hooks can't give you per-API-call cost breakdowns or retry counts. The channels are complementary:
 
 | Event | Source |
 |-------|--------|
@@ -94,10 +94,10 @@ COLLECTOR_URL=http://collector:8080
 ```
 
 When `COLLECTOR_URL` is set, every workspace container gets:
-- `CLAUDE_CODE_ENABLE_TELEMETRY=1` — activates Claude Code's OTel export
-- `OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:8080` — directs OTel push to the collector
+- `CLAUDE_CODE_ENABLE_TELEMETRY=1`: activates Claude Code's OTel export
+- `OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:8080`: directs OTel push to the collector
 
-If `COLLECTOR_URL` is not set, OTel export is a graceful no-op — containers still emit plugin hook events via the JSONL channel.
+If `COLLECTOR_URL` is not set, OTel export is a graceful no-op: containers still emit plugin hook events via the JSONL channel.
 
 ## Verifying Events Are Flowing
 
@@ -139,11 +139,11 @@ docker run --rm --network syn-dev_agent-net curlimages/curl \
 
 ## Token Cost Optimization
 
-Workspace images include built-in optimizations that reduce token consumption — and the observability pipeline captures the evidence.
+Workspace images include built-in optimizations that reduce token consumption, and the observability pipeline captures the evidence.
 
 ### RTK Bash Compression
 
-[RTK](https://github.com/rtk-ai/rtk) is pre-installed in workspace images and intercepts Bash tool calls. It compresses output from commands like `ls`, `find`, `git log`, and `tree` into token-efficient formatting. Claude Code uses these aliases transparently — no configuration needed.
+[RTK](https://github.com/rtk-ai/rtk) is pre-installed in workspace images and intercepts Bash tool calls. It compresses output from commands like `ls`, `find`, `git log`, and `tree` into token-efficient formatting. Claude Code uses these aliases transparently, no configuration needed.
 
 Measured impact from A/B testing on an "explore repository" task:
 
@@ -153,18 +153,18 @@ Measured impact from A/B testing on an "explore repository" task:
 | Cost (USD) | $0.13 | $0.09 | **29%** |
 | Conversation turns | 12 | 6 | **50%** |
 
-RTK primarily reduces **input tokens** — the largest cost driver. This shows up in the OTel channel's `api_request` events: compare `input_tokens` vs `cache_read_tokens` to see how much context the model is consuming per call.
+RTK primarily reduces **input tokens**, the largest cost driver. This shows up in the OTel channel's `api_request` events: compare `input_tokens` vs `cache_read_tokens` to see how much context the model is consuming per call.
 
 ### Observing the Impact
 
 With both channels active, you can track token efficiency per session:
 
-- **`api_request` events** (OTel) — `input_tokens`, `output_tokens`, `cache_read_tokens` per API call. Lower `input_tokens` relative to task complexity indicates RTK compression is working.
-- **`token_usage` events** (both channels) — cumulative input/output/cache totals per turn.
-- **`cost_recorded` events** (OTel) — running USD cost. Compare sessions with similar tasks to measure savings.
+- **`api_request` events** (OTel): `input_tokens`, `output_tokens`, `cache_read_tokens` per API call. Lower `input_tokens` relative to task complexity indicates RTK compression is working.
+- **`token_usage` events** (both channels): cumulative input/output/cache totals per turn.
+- **`cost_recorded` events** (OTel): running USD cost. Compare sessions with similar tasks to measure savings.
 
 The dashboard's session cost view aggregates these into per-session and per-execution cost breakdowns.
 
 ## Deduplication
 
-Events are identified by a deterministic SHA256 `event_id` derived from content (session ID, metric name, timestamp, index). The collector deduplicates within a sliding window — safe to retry any event submission without double-counting.
+Events are identified by a deterministic SHA256 `event_id` derived from content (session ID, metric name, timestamp, index). The collector deduplicates within a sliding window, safe to retry any event submission without double-counting.

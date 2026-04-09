@@ -21,4 +21,12 @@ if ! git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/
 fi
 echo "✓ Codegen up to date"
 
+echo "▶ pre-push: em dash check in docs..."
+if grep -rq $'\xe2\x80\x94' apps/syn-docs/content/ 2>/dev/null; then
+  echo "❌ Em dashes (—) found in syn-docs/content/. Use colons or commas instead:"
+  grep -rn $'\xe2\x80\x94' apps/syn-docs/content/ 2>/dev/null || true
+  exit 1
+fi
+echo "✓ No em dashes in docs"
+
 echo "✓ pre-push checks passed"

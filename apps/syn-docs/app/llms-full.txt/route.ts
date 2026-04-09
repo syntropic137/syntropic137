@@ -33,7 +33,7 @@ export function GET() {
   });
 
   const sections: string[] = [
-    '# Syntropic137 — Complete Documentation',
+    '# Syntropic137: Complete Documentation',
     '',
     '> Agentic Engineering platform. Orchestrate AI agents with event-sourced workflows.',
     '',

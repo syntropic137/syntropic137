@@ -6,7 +6,7 @@ description: How Syntropic137 receives GitHub events through webhooks, Events AP
 Syntropic137 uses a **hybrid approach** to receive GitHub events from three
 sources: webhooks for real-time delivery, Events API polling for zero-config
 event ingestion, and Checks API polling for CI failure detection (self-healing).
-All three feed into a unified pipeline with content-based deduplication — the
+All three feed into a unified pipeline with content-based deduplication: the
 same event is never processed twice, regardless of how it arrives.
 
 ## How It Works
@@ -33,11 +33,11 @@ same event is never processed twice, regardless of how it arrives.
 2. **Events API poller** runs as a background task, polling GitHub's Events API
    for repositories that have active triggers (17 event types including PR, push, etc.)
 3. **Checks API poller** watches commit SHAs from PR events and polls
-   `GET /repos/{owner}/{repo}/commits/{sha}/check-runs` to detect CI failures —
-   this enables self-healing without webhooks (~30-90s latency)
+   `GET /repos/{owner}/{repo}/commits/{sha}/check-runs` to detect CI failures,
+   enabling self-healing without webhooks (~30-90s latency)
 4. All three sources normalize their payloads into a common `NormalizedEvent` format
 5. The **EventPipeline** checks each event against a dedup store (Redis) using
-   content-based keys — if the event was already processed, it's skipped
+   content-based keys: if the event was already processed, it's skipped
 6. New events are routed to trigger evaluation, which fires matching workflows
 
 ## Polling Modes
@@ -50,7 +50,7 @@ The poller adapts its behavior based on whether webhooks are arriving:
 | **Safety Net** | 300 seconds | Webhooks arriving normally |
 
 When you first start Syntropic137 without a webhook URL configured, the poller
-operates in **Active Polling** mode — checking for new events every 60 seconds.
+operates in **Active Polling** mode, checking for new events every 60 seconds.
 Once webhooks start arriving (after configuring a tunnel or public URL), the
 poller automatically backs off to **Safety Net** mode, polling every 5 minutes
 as a catch-up mechanism.
@@ -60,7 +60,7 @@ the gap after 30 minutes and switches back to active polling.
 
 ## Checks API Polling (Self-Healing)
 
-The Checks API poller enables **zero-config self-healing** — detecting CI
+The Checks API poller enables **zero-config self-healing**: detecting CI
 failures without requiring a webhook URL or tunnel setup.
 
 **How it works:**
@@ -97,7 +97,7 @@ in both webhook and Events API payloads:
 - **Check runs:** repository + check run ID + action
 - **Issue comments:** repository + comment ID + action
 
-Keys are stored in Redis with a 24-hour TTL using atomic `SETNX` — the first
+Keys are stored in Redis with a 24-hour TTL using atomic `SETNX`: the first
 source to deliver an event "wins," and the duplicate from the other source is
 silently skipped.
 
@@ -117,7 +117,7 @@ installation. Syntropic137 minimizes quota usage through several mechanisms:
 - **Selective polling:** Only repositories with active triggers are polled.
   Repos without triggers consume zero API calls.
 - **Adaptive intervals:** In Safety Net mode (webhooks healthy), polling drops
-  to every 5 minutes — roughly 12 requests per hour per repo.
+  to every 5 minutes, roughly 12 requests per hour per repo.
 - **X-Poll-Interval:** The poller respects GitHub's recommended minimum interval
   from the `X-Poll-Interval` response header.
 

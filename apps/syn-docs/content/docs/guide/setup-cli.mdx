@@ -1,6 +1,6 @@
 ---
 title: "Setup CLI"
-description: "npx @syntropic137/setup — interactive CLI for installing and managing the Syntropic137 platform."
+description: "npx @syntropic137/setup: interactive CLI for installing and managing the Syntropic137 platform."
 ---
 
 The setup CLI is a zero-dependency Node.js tool for bootstrapping and managing your Syntropic137 installation. It wraps Docker Compose operations with an interactive TUI.
@@ -17,7 +17,7 @@ Running without a command shows an interactive menu.
 
 | Command | Purpose |
 |---------|---------|
-| `init` | Full setup wizard — Docker check, secrets, API key, GitHub App, plugin, pull images, start stack |
+| `init` | Full setup wizard: Docker check, secrets, API key, GitHub App, plugin, pull images, start stack |
 | `status` | Show running services (`docker compose ps`) |
 | `start` | Start the stack |
 | `stop` | Stop the stack |
@@ -35,7 +35,7 @@ npx @syntropic137/setup init [options]
 --name <app-name>    GitHub App name (default: syntropic137)
 --dir <path>         Install directory (default: ~/.syntropic137)
 --skip-github        Skip GitHub App creation
---skip-docker        Generate config files only — don't pull images or start services
+--skip-docker        Generate config files only, don't pull images or start services
 --webhook-url <url>  Set webhook URL for the GitHub App
 ```
 

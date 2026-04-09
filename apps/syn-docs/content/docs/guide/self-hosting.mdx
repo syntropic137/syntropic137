@@ -1,6 +1,6 @@
 ---
 title: Self-Hosting
-description: Deploy Syntropic137 on your own infrastructure — from bare metal to Kubernetes
+description: Deploy Syntropic137 on your own infrastructure, from bare metal to Kubernetes
 ---
 
 ## Deployment Architecture
@@ -15,7 +15,7 @@ Syntropic137 runs as a set of Docker services connected through a shared network
 npx @syntropic137/setup init
 ```
 
-The setup wizard handles everything — Docker validation, secret generation, API key configuration, image pulls, and starting the stack. See [Getting Started](/docs/guide/getting-started) for the full walkthrough.
+The setup wizard handles everything: Docker validation, secret generation, API key configuration, image pulls, and starting the stack. See [Getting Started](/docs/guide/getting-started) for the full walkthrough.
 
 The dashboard will be available at `http://localhost:8137`.
 
@@ -23,7 +23,7 @@ The dashboard will be available at `http://localhost:8137`.
 
 | Service | Port | Description |
 |---------|------|-------------|
-| `api` | 8000 | FastAPI backend — REST API, SSE |
+| `api` | 8000 | FastAPI backend: REST API, SSE |
 | `gateway` | 80 | nginx reverse proxy + React dashboard frontend |
 | `event-store` | 50051 | gRPC event sourcing server |
 | `event-collector` | 8080 | High-throughput event ingestion |
@@ -37,9 +37,9 @@ Each agent execution runs in an isolated Docker workspace with a two-phase secur
 
 <WorkspaceIsolationFlow />
 
-**Setup Phase** — Secrets are available briefly to configure credential helpers. Raw tokens are cleared before the agent starts.
+**Setup Phase**: Secrets are available briefly to configure credential helpers. Raw tokens are cleared before the agent starts.
 
-**Agent Phase** — The agent runs with only `ANTHROPIC_API_KEY` in its environment. Git operations use cached credentials from the setup phase.
+**Agent Phase**: The agent runs with only `ANTHROPIC_API_KEY` in its environment. Git operations use cached credentials from the setup phase.
 
 ## Environment Variables
 
@@ -50,11 +50,11 @@ Each agent execution runs in an isolated Docker workspace with a two-phase secur
 | `TIMESCALEDB_PORT` | `5432` | TimescaleDB port |
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
 | `MINIO_ENDPOINT` | `localhost:9000` | MinIO S3 endpoint |
-| `MINIO_ACCESS_KEY` | — | MinIO access key |
-| `MINIO_SECRET_KEY` | — | MinIO secret key |
-| `GITHUB_APP_ID` | — | GitHub App ID for webhook triggers |
-| `GITHUB_APP_PRIVATE_KEY` | — | GitHub App private key (PEM) |
-| `ANTHROPIC_API_KEY` | — | API key for Claude agent execution |
+| `MINIO_ACCESS_KEY` | | MinIO access key |
+| `MINIO_SECRET_KEY` | | MinIO secret key |
+| `GITHUB_APP_ID` | | GitHub App ID for webhook triggers |
+| `GITHUB_APP_PRIVATE_KEY` | | GitHub App private key (PEM) |
+| `ANTHROPIC_API_KEY` | | API key for Claude agent execution |
 
 ## Scaling Options
 
@@ -86,6 +86,6 @@ See the [Tunnels guide](/docs/guide/tunnels) for setup instructions.
 
 ## Secrets
 
-Infrastructure secrets (database, Redis, MinIO) are stored as `chmod 600` files and mounted via Docker Compose's secrets mechanism — never baked into image layers. Application-level API keys (e.g. `ANTHROPIC_API_KEY`) are supplied via environment variables.
+Infrastructure secrets (database, Redis, MinIO) are stored as `chmod 600` files and mounted via Docker Compose's secrets mechanism, never baked into image layers. Application-level API keys (e.g. `ANTHROPIC_API_KEY`) are supplied via environment variables.
 
 See [Secrets Management](/docs/guide/secrets) for details on how secrets work and optional 1Password integration.

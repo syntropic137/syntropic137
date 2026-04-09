@@ -1,10 +1,10 @@
 ---
 title: Core Concepts
-description: The mental model behind Syntropic137 — events, workspaces, workflows, and observability.
+description: "The mental model behind Syntropic137: events, workspaces, workflows, and observability."
 ---
 
 <Callout type="info">
-You don't need to understand event sourcing to use Syntropic137. This page gives you the mental model — the "why" behind what you see in the dashboard and CLI.
+You don't need to understand event sourcing to use Syntropic137. This page gives you the mental model, the "why" behind what you see in the dashboard and CLI.
 </Callout>
 
 ## Two Kinds of Events
@@ -18,16 +18,16 @@ Syntropic137 separates all data into two lanes, each optimized for its purpose:
 | **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → Collector → EventBuffer → TimescaleDB |
 | **Examples** | `WorkflowCreated`, `ExecutionCompleted`, `TriggerFired` | `ToolExecuted`, `TokensUsed`, `StreamChunk` |
 
-**Domain events** are the source of truth for what happened. The current state of any workflow or execution is derived by replaying its events — there's no mutable database row to corrupt.
+**Domain events** are the source of truth for what happened. The current state of any workflow or execution is derived by replaying its events: there's no mutable database row to corrupt.
 
 **Observability events** are append-only telemetry. They power the dashboard metrics, cost tracking, and session timelines. They never affect business logic.
 
 ## Workspaces
 
-Every agent execution runs inside an **isolated Docker container** — a workspace. Workspaces use a two-phase security model:
+Every agent execution runs inside an **isolated Docker container**, a workspace. Workspaces use a two-phase security model:
 
-1. **Setup Phase** — Secrets (API keys, Git credentials) are briefly available to configure credential helpers. Raw tokens are cleared before the agent starts.
-2. **Agent Phase** — The agent runs with only `ANTHROPIC_API_KEY` in its environment. Git operations use cached credentials from the setup phase. Network egress goes through an Envoy sidecar proxy.
+1. **Setup Phase**: Secrets (API keys, Git credentials) are briefly available to configure credential helpers. Raw tokens are cleared before the agent starts.
+2. **Agent Phase**: The agent runs with only `ANTHROPIC_API_KEY` in its environment. Git operations use cached credentials from the setup phase. Network egress goes through an Envoy sidecar proxy.
 
 This means the agent never sees raw GitHub tokens or other secrets. Even if an agent is compromised, credentials are already gone.
 
@@ -49,7 +49,7 @@ phases:
 
 Phases execute sequentially. Each phase can reference the output of previous phases using `{{phase-id}}` substitution. The `$ARGUMENTS` variable passes user input into the prompt.
 
-Workflows can be packaged and distributed — see [Workflow Packages](/docs/guide/workflows).
+Workflows can be packaged and distributed. See [Workflow Packages](/docs/guide/workflows).
 
 ## Executions
 
@@ -91,22 +91,22 @@ An **execution** is a running instance of a workflow. It progresses through a st
   </div>
 </div>
 
-You can **pause**, **resume**, and **cancel** executions in real time via the REST API or the CLI. The agent can only be paused at safe yield points — between phases, after tool calls, or after LLM responses.
+You can **pause**, **resume**, and **cancel** executions in real time via the REST API or the CLI. The agent can only be paused at safe yield points: between phases, after tool calls, or after LLM responses.
 
 ## Sessions
 
 A **session** is an agent's working period within an execution. It captures:
 
-- **Conversation** — the full message history
-- **Tool timeline** — every tool call with input, output, and duration
-- **Token metrics** — input/output tokens per model
-- **Cost** — calculated from token usage and model pricing
+- **Conversation**: the full message history
+- **Tool timeline**: every tool call with input, output, and duration
+- **Token metrics**: input/output tokens per model
+- **Cost**: calculated from token usage and model pricing
 
 Sessions are the primary unit of observability. When you debug a failed execution or analyze costs, you're looking at session data.
 
 ## Artifacts
 
-**Artifacts** are outputs produced by agents — code files, reports, design documents, test results. They're stored in MinIO (S3-compatible object storage) and linked to their source execution.
+**Artifacts** are outputs produced by agents: code files, reports, design documents, test results. They're stored in MinIO (S3-compatible object storage) and linked to their source execution.
 
 ## Triggers
 

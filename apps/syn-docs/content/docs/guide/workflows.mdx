@@ -47,7 +47,7 @@ workflow via the API. Installed packages are tracked locally in
 
 ### Single Workflow
 
-The simplest format — one workflow with its phase prompts:
+The simplest format: one workflow with its phase prompts:
 
 <Files>
   <Folder name="my-workflow" defaultOpen>
@@ -96,7 +96,7 @@ phases:
     prompt_file: shared://summarize  # → phase-library/summarize.md
 ```
 
-Content is resolved at install time — no runtime dependency on the library.
+Content is resolved at install time, no runtime dependency on the library.
 
 ## Creating Packages
 
@@ -198,7 +198,7 @@ Produces a Syntropic137 plugin with a manifest, CC command wrapper, and workflow
 
 The `commands/syn-*.md` wrapper calls `syn workflow run`, so the exported workflow
 can also be invoked as a `/syn-*` slash command from Claude Code. The package itself
-is a Syntropic137 plugin — the CC command is a convenience bridge.
+is a Syntropic137 plugin: the CC command is a convenience bridge.
 
 ### Round-Trip Guarantee
 
@@ -226,8 +226,8 @@ and resolves `shared://` references.
 
 The repository includes reference implementations:
 
-- **`workflows/examples/research-package/`** — Single workflow with discovery + synthesis phases
-- **`workflows/examples/starter-plugin/`** — Multi-workflow plugin with shared summarize phase
+- **`workflows/examples/research-package/`**: Single workflow with discovery + synthesis phases
+- **`workflows/examples/starter-plugin/`**: Multi-workflow plugin with shared summarize phase
 
 ## Marketplace
 
@@ -414,7 +414,7 @@ Each plugin entry in the `plugins` array:
 | `tags` | array | No | List of tags for filtering (e.g., `["multi-phase", "github"]`) |
 
 The `source` path must be relative (no absolute paths or `..` traversal). Each
-plugin directory follows the standard [package format](#package-formats) — either
+plugin directory follows the standard [package format](#package-formats): either
 a single workflow or a multi-workflow plugin.
 
 ### Caching and Refresh
@@ -434,7 +434,7 @@ entries are skipped silently.
 ### Private Marketplaces
 
 Private GitHub repositories work as marketplaces if git can authenticate.
-The CLI uses your local git credential configuration — no special flags needed.
+The CLI uses your local git credential configuration, no special flags needed.
 
 ```bash
 # Ensure git can access the private repo (any of these work):
@@ -451,25 +451,25 @@ or configure a credential helper that reads from environment variables.
 
 ### Troubleshooting
 
-**"No marketplace.json found in repo"** — The repository must have a
+**"No marketplace.json found in repo"**: The repository must have a
 `marketplace.json` at the root of the default branch (or the branch specified
 with `--ref`).
 
-**"syntropic137.type must be 'workflow-marketplace'"** — The `syntropic137`
+**"syntropic137.type must be 'workflow-marketplace'"**: The `syntropic137`
 key in `marketplace.json` must contain `"type": "workflow-marketplace"`.
 This marker distinguishes marketplace repos from other Syntropic137 content.
 
-**"Invalid registry name"** — Registry names must start with an alphanumeric
+**"Invalid registry name"**: Registry names must start with an alphanumeric
 character and contain only letters, digits, hyphens, underscores, and dots.
 Names like `../evil` or `my/registry` are rejected.
 
-**Plugin not found after registering** — Run `syn marketplace refresh` to
+**Plugin not found after registering**: Run `syn marketplace refresh` to
 re-fetch the latest index. The local cache may be stale.
 
-**Private repo access denied** — Ensure `git clone` works for the repo URL
+**Private repo access denied**: Ensure `git clone` works for the repo URL
 from your terminal. The CLI uses the same git credentials as your shell.
 
-**"Package is already up to date"** — `syn workflow update` compares git
+**"Package is already up to date"**: `syn workflow update` compares git
 SHAs. If the remote HEAD hasn't changed, no update is needed.
 
 ### Limitations
@@ -482,5 +482,5 @@ SHAs. If the remote HEAD hasn't changed, no update is needed.
 
 ## Learn More
 
-- [CLI Reference](/docs/cli) — all `syn workflow` and `syn marketplace` commands
-- [API Reference](/docs/api/workflows) — workflow creation endpoints
+- [CLI Reference](/docs/cli): all `syn workflow` and `syn marketplace` commands
+- [API Reference](/docs/api/workflows): workflow creation endpoints
