@@ -172,10 +172,12 @@ class WorkspaceProvisionHandler:
         # preserving maximum @import depth for repo-internal context.
         context = self._generate_workspace_context(effective_repos)
         if context:
-            await workspace.inject_files([
-                ("AGENTS.md", context.encode()),
-                ("CLAUDE.md", context.encode()),
-            ])
+            await workspace.inject_files(
+                [
+                    ("AGENTS.md", context.encode()),
+                    ("CLAUDE.md", context.encode()),
+                ]
+            )
             logger.info(
                 "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(effective_repos)
             )

@@ -569,9 +569,7 @@ class TestWorkspaceProvisionHandler:
 
         repos = ["https://github.com/org/repo-a"]
 
-        with patch(
-            "syn_adapters.workspace_backends.service.SetupPhaseSecrets"
-        ) as MockSecrets:
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
             mock_secrets_instance = MagicMock()
             mock_secrets_instance.build_setup_script.return_value = "#!/bin/bash\necho ok\n"
             MockSecrets.create = AsyncMock(return_value=mock_secrets_instance)
@@ -588,7 +586,8 @@ class TestWorkspaceProvisionHandler:
         inject_calls = workspace.inject_files.call_args_list
         # Find the call that contains AGENTS.md and CLAUDE.md
         context_inject = next(
-            c for c in inject_calls
+            c
+            for c in inject_calls
             if any("AGENTS.md" in str(f) or "CLAUDE.md" in str(f) for f in c.args[0])
         )
         files_injected = dict(context_inject.args[0])
@@ -650,9 +649,7 @@ class TestWorkspaceProvisionHandler:
             output_artifact_type="text",
         )
 
-        with patch(
-            "syn_adapters.workspace_backends.service.SetupPhaseSecrets"
-        ) as MockSecrets:
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
             mock_secrets_instance = MagicMock()
             mock_secrets_instance.build_setup_script.return_value = "#!/bin/bash\necho ok\n"
             MockSecrets.create = AsyncMock(return_value=mock_secrets_instance)

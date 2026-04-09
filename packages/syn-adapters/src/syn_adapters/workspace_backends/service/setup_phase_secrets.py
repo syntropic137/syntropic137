@@ -285,7 +285,7 @@ class SetupPhaseSecrets:
             lines.append("cat > ~/.config/gh/hosts.yml << 'GHEOF'")
             lines.append("github.com:")
             lines.append(f"    oauth_token: {first_token}")
-            lines.append('    user: ${GIT_AUTHOR_NAME:-syn-bot}')
+            lines.append("    user: ${GIT_AUTHOR_NAME:-syn-bot}")
             lines.append("    git_protocol: https")
             lines.append("GHEOF")
             lines.append("chmod 600 ~/.config/gh/hosts.yml")
