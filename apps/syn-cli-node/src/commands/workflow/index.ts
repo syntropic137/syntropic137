@@ -5,7 +5,7 @@
 import { CommandGroup } from "../../framework/command.js";
 import { createCommand, listCommand, showCommand, validateCommand, deleteCommand } from "./crud.js";
 import { runCommand, statusCommand } from "./run.js";
-import { installCommand, installedCommand, initCommand } from "./install.js";
+import { installCommand, packagesCommand, initCommand } from "./install.js";
 import { exportCommand } from "./export.js";
 import { searchCommand, infoCommand } from "./search.js";
 import { updateCommand, uninstallCommand } from "./update.js";
@@ -24,7 +24,7 @@ workflowGroup
   .command(runCommand)
   .command(statusCommand)
   .command(installCommand)
-  .command(installedCommand)
+  .command(packagesCommand)
   .command(initCommand)
   .command(exportCommand)
   .command(searchCommand)

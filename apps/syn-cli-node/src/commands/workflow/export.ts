@@ -47,7 +47,11 @@ export const exportCommand: CommandDef = {
     );
 
     const files = data.files;
-    const workflowSlug = data.workflow_name.toLowerCase().replace(/\s+/g, "-");
+    const workflowSlug = data.workflow_name
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "")  // strip path separators and special chars
+      || "workflow";  // fallback if sanitization yields empty string
     const outputDir = outputOverride ?? `./${workflowSlug}-export`;
     if (Object.keys(files).length === 0) {
       printError("Export returned no files");

@@ -104,7 +104,7 @@ class TriggerHistoryProjection:
 
         Args:
             event: The blocked event data.
-            global_nonce: Stream position for deterministic, replay-safe keys.
+            global_nonce: Kept for API compatibility; not used for blocked entries (see NOTE below).
         """
         entry = TriggerHistoryEntry(
             trigger_id=event.trigger_id,
@@ -122,7 +122,7 @@ class TriggerHistoryProjection:
         # Content-based key namespaced by trigger_id.
         # Blocked entries intentionally use the same key for the same logical event
         # so that rapid re-deliveries of the same event (e.g. poller bursts) overwrite
-        # rather than accumulate. This deduplicate noise in trigger history without
+        # rather than accumulate. This deduplicates noise in trigger history without
         # hiding genuine new events (different guard, event type, or PR number).
         # NOTE: global_nonce is deliberately NOT used here — nonce-keyed blocked entries
         # would create one record per delivery, producing the noise we are eliminating.

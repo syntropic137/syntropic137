@@ -22,8 +22,8 @@ class RepoHealth:
         failed_executions: Number of failed executions.
         success_rate: Success rate as a fraction (0.0 to 1.0).
         trend: Health trend direction ("improving", "stable", "degrading").
-        recent_cost_usd: Cost in current time window.
-        window_tokens: Tokens used in current time window.
+        recent_cost_usd: Accumulated cost since last projection reset (not a fixed time window).
+        window_tokens: Accumulated token usage since last projection reset.
         last_execution_at: ISO timestamp of last execution.
     """
 
@@ -49,7 +49,9 @@ class RepoHealth:
             failed_executions=data.get("failed_executions", 0),
             success_rate=data.get("success_rate", 0.0),
             trend=data.get("trend", "stable"),
-            recent_cost_usd=Decimal(str(data.get("recent_cost_usd", 0))),
+            recent_cost_usd=Decimal(
+                str(data.get("recent_cost_usd", data.get("window_cost_usd", 0)))
+            ),
             window_tokens=data.get("window_tokens", 0),
             last_execution_at=data.get("last_execution_at", ""),
         )

@@ -156,7 +156,7 @@ const healthCommand: CommandDef = {
     print(`  Trend:           ${d.trend}`);
     print(`  Total runs:      ${d.total_executions}`);
     print(`  Recent cost:     ${formatCost(d.recent_cost_usd)}`);
-    print(`  Recent tokens:   ${formatTokens(d.window_tokens)}`);
+    print(`  Window tokens:   ${formatTokens(d.window_tokens)}`);
     if (d.last_execution_at) print(`  Last execution:  ${formatTimestamp(d.last_execution_at)}`);
   },
 };
