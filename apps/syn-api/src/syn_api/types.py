@@ -775,6 +775,7 @@ class ExecutionCostData(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    duration_ms: float = 0.0
     cost_by_phase: dict = Field(default_factory=dict)
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)

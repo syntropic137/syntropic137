@@ -206,6 +206,13 @@ class ExecutionCostQueryService:
         """Build an ExecutionCost from a session_summary aggregate row."""
         eid = row["execution_id"]  # type: ignore[index]
         cost = self._resolve_cost(row)
+        started_at = row["started_at"]  # type: ignore[index]
+        completed_at = row["completed_at"]  # type: ignore[index]
+        # session_summary events rarely carry duration_ms in their payload; fall back
+        # to computing duration from the event timestamps when the field is absent/zero.
+        duration_ms = float(row["duration_ms_val"] or 0)  # type: ignore[index]
+        if not duration_ms and started_at and completed_at:
+            duration_ms = (completed_at - started_at).total_seconds() * 1000
         return ExecutionCost(
             execution_id=eid,
             session_count=row["session_count"] or 0,  # type: ignore[index]
@@ -218,11 +225,11 @@ class ExecutionCostQueryService:
             cache_read_tokens=row["cache_read"] or 0,  # type: ignore[index]
             tool_calls=tool_counts.get(eid, 0),
             turns=row["total_turns"] or 0,  # type: ignore[index]
-            duration_ms=float(row["duration_ms_val"] or 0),  # type: ignore[index]
+            duration_ms=duration_ms,
             cost_by_phase=phase_map.get(eid, {}),
             cost_by_model=model_map.get(eid, {}),
-            started_at=row["started_at"],  # type: ignore[index]
-            completed_at=row["completed_at"],  # type: ignore[index]
+            started_at=started_at,
+            completed_at=completed_at,
         )
 
     def _build_from_token_usage(

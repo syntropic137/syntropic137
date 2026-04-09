@@ -177,8 +177,13 @@ class TimescaleExecutionCostQuery:
         )
 
     def _calculate_duration(self, data: _TokenData) -> float:
-        """Calculate duration in ms from token data."""
-        if data.from_summary:
+        """Calculate duration in ms from token data.
+
+        Prefers the explicit duration_ms_raw from session_summary payloads, but
+        falls back to computing from timestamps when that field is absent/zero —
+        which is the common case because session_summary events rarely carry it.
+        """
+        if data.duration_ms_raw:
             return float(data.duration_ms_raw)
         if data.started_at and data.end_at:
             return (data.end_at - data.started_at).total_seconds() * 1000

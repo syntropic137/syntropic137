@@ -356,3 +356,74 @@ class TestExecutionCostQueryServiceBuildFromTokenUsage:
         result = service._build_from_token_usage(row, tool_counts={})
 
         assert result.duration_ms == 0.0
+
+
+@pytest.mark.unit
+class TestExecutionCostQueryServiceBuildFromSummary:
+    """Regression tests for _build_from_summary duration calculation.
+
+    Regression: session_summary event payloads rarely include duration_ms, so
+    the SQL SUM of that field was always 0. The fix falls back to computing
+    duration from MIN(time)/MAX(time) timestamps available in the same query.
+    """
+
+    def test_duration_falls_back_to_timestamps_when_summary_field_absent(self) -> None:
+        """duration_ms is derived from started_at/completed_at when duration_ms_val is 0."""
+        from decimal import Decimal
+
+        from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+            ExecutionCostQueryService,
+        )
+
+        service = ExecutionCostQueryService(pool=None)  # type: ignore[arg-type]
+        started = datetime(2026, 4, 8, 21, 0, 0, tzinfo=UTC)
+        completed = datetime(2026, 4, 8, 21, 5, 0, tzinfo=UTC)  # 5 min
+
+        row: dict[str, object] = {
+            "execution_id": "exec-s1",
+            "total_input": 5000,
+            "total_output": 2000,
+            "cache_creation": 0,
+            "cache_read": 0,
+            "sdk_cost": Decimal("0.42"),
+            "duration_ms_val": 0,  # not present in payload — the broken case
+            "total_turns": 3,
+            "session_count": 2,
+            "session_ids": ["s-a", "s-b"],
+            "started_at": started,
+            "completed_at": completed,
+        }
+        result = service._build_from_summary(row, tool_counts={}, phase_map={}, model_map={})
+
+        assert result.duration_ms == pytest.approx(300_000.0)  # 5 min = 300,000 ms
+
+    def test_duration_uses_summary_field_when_present(self) -> None:
+        """duration_ms uses duration_ms_val from session summaries when non-zero."""
+        from decimal import Decimal
+
+        from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+            ExecutionCostQueryService,
+        )
+
+        service = ExecutionCostQueryService(pool=None)  # type: ignore[arg-type]
+        started = datetime(2026, 4, 8, 21, 0, 0, tzinfo=UTC)
+        completed = datetime(2026, 4, 8, 21, 5, 0, tzinfo=UTC)
+
+        row: dict[str, object] = {
+            "execution_id": "exec-s2",
+            "total_input": 1000,
+            "total_output": 500,
+            "cache_creation": 0,
+            "cache_read": 0,
+            "sdk_cost": Decimal("0.10"),
+            "duration_ms_val": 120_000,  # 2 min from session summary payload
+            "total_turns": 1,
+            "session_count": 1,
+            "session_ids": ["s-c"],
+            "started_at": started,
+            "completed_at": completed,
+        }
+        result = service._build_from_summary(row, tool_counts={}, phase_map={}, model_map={})
+
+        # Should use the explicit value, not recompute from timestamps
+        assert result.duration_ms == pytest.approx(120_000.0)
