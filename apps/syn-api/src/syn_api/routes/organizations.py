@@ -6,7 +6,7 @@ Provides CRUD for organizations with domain aggregate interaction.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException
 
@@ -15,6 +15,7 @@ from syn_api._wiring import (
     sync_published_events_to_projections,
 )
 from syn_api.types import (
+    CreateOrganizationRequest,
     Err,
     Ok,
     OrganizationActionResponse,
@@ -22,6 +23,7 @@ from syn_api.types import (
     OrganizationListResponse,
     OrganizationSummaryResponse,
     Result,
+    UpdateOrganizationRequest,
 )
 
 if TYPE_CHECKING:
@@ -234,15 +236,17 @@ def _classify_org_error(error_msg: str) -> OrganizationError:
 
 
 @router.post("", response_model=OrganizationActionResponse)
-async def create_organization_endpoint(body: dict[str, Any]) -> OrganizationActionResponse:
+async def create_organization_endpoint(
+    body: CreateOrganizationRequest,
+) -> OrganizationActionResponse:
     """Create a new organization."""
     try:
         result = await create_organization(
-            name=body["name"],
-            slug=body["slug"],
-            created_by=body.get("created_by", "api"),
+            name=body.name,
+            slug=body.slug,
+            created_by=body.created_by,
         )
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
@@ -250,8 +254,8 @@ async def create_organization_endpoint(body: dict[str, Any]) -> OrganizationActi
 
     return OrganizationActionResponse(
         organization_id=result.value,
-        name=body["name"],
-        slug=body["slug"],
+        name=body.name,
+        slug=body.slug,
         status="created",
     )
 
@@ -273,6 +277,13 @@ async def list_organizations_endpoint() -> OrganizationListResponse:
 @router.get("/{organization_id}", response_model=OrganizationSummaryResponse)
 async def get_organization_endpoint(organization_id: str) -> OrganizationSummaryResponse:
     """Get organization details."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    organization_id = await resolve_or_raise(
+        mgr.store, "organizations", organization_id, "Organization"
+    )
     result = await get_organization(organization_id)
 
     if isinstance(result, Err):
@@ -287,13 +298,13 @@ async def get_organization_endpoint(organization_id: str) -> OrganizationSummary
     response_model_exclude_none=True,
 )
 async def update_organization_endpoint(
-    organization_id: str, body: dict[str, Any]
+    organization_id: str, body: UpdateOrganizationRequest
 ) -> OrganizationActionResponse:
     """Update an organization."""
     result = await update_organization(
         organization_id=organization_id,
-        name=body.get("name"),
-        slug=body.get("slug"),
+        name=body.name,
+        slug=body.slug,
     )
 
     if isinstance(result, Err):

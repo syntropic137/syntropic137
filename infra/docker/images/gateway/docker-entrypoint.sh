@@ -35,7 +35,7 @@ location = /api/v1/webhooks/github {
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_read_timeout 30s;
 
-    limit_req zone=api burst=10 nodelay;
+    limit_req zone=webhooks burst=30 nodelay;
     limit_req_status 429;
 }
 
@@ -117,20 +117,6 @@ location /assets/ {
     include /etc/nginx/conf.d/security-headers.conf;
 }
 
-# Pulse UI — contribution heatmap / activity visualization
-location /pulse/ {
-    alias /usr/share/nginx/html/pulse/;
-    try_files $uri $uri/ /pulse/index.html;
-    include /etc/nginx/conf.d/security-headers.conf;
-}
-
-# Pulse UI static assets
-location /pulse/assets/ {
-    alias /usr/share/nginx/html/pulse/assets/;
-    expires 1y;
-    add_header Cache-Control "public, immutable";
-    include /etc/nginx/conf.d/security-headers.conf;
-}
 
 # SPA routing (dashboard — root)
 location / {

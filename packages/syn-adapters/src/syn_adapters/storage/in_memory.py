@@ -1,19 +1,11 @@
-"""In-memory storage adapters for TESTING ONLY.
+"""In-memory storage utilities for TESTING ONLY.
 
-WARNING: These adapters are for unit/integration tests only.
-For local development, use Docker with PostgreSQL (see docker/docker-compose.dev.yaml).
-For production, use the real event store and PostgreSQL.
+Contains InMemoryEventStore, InMemoryEventPublisher, test-environment
+guards, and singleton factory functions. All repositories now go through
+the SDK's EventStoreRepository backed by MemoryEventStoreClient — see
+repositories.py.
 
-The in-memory store:
-- Does NOT persist between process restarts
-- Is NOT thread-safe
-- Should NEVER be used outside of tests
-- Will raise an error if used in non-test environments
-
-This module contains the core event store, event publisher, and test-environment
-guard. Repository classes are in in_memory_repositories.py and singleton
-factory functions are in in_memory_factories.py. All symbols are re-exported
-here for backwards compatibility.
+WARNING: These utilities are for unit/integration tests only.
 """
 
 from __future__ import annotations
@@ -65,16 +57,6 @@ class StoredEvent:
 class InMemoryEventStore:
     """In-memory event store for TESTING ONLY.
 
-    ⚠️  WARNING: Do NOT use for local development!
-    Use Docker + PostgreSQL for local dev to mirror production.
-
-    This is NOT thread-safe and should only be used for:
-    - Unit tests (fast, isolated)
-    - Integration tests (when mocking external deps)
-
-    For local development: docker/docker-compose.dev.yaml
-    For production: Real PostgreSQL event store
-
     Raises:
         InMemoryStorageError: If instantiated outside test environment.
     """
@@ -123,8 +105,8 @@ class InMemoryEventStore:
 class InMemoryEventPublisher:
     """In-memory event publisher for testing ONLY.
 
-    Implements the EventPublisher protocol. In production, this would
-    publish to a message broker (e.g., RabbitMQ, Kafka).
+    Implements the EventPublisher protocol. Collects events so that
+    sync_published_events_to_projections() can dispatch them to projections.
 
     Raises:
         InMemoryStorageError: If instantiated outside test environment.
@@ -148,59 +130,44 @@ class InMemoryEventPublisher:
 
 
 # ---------------------------------------------------------------------------
-# Backwards-compatibility re-exports
-#
-# External code (repositories.py, _wiring.py, tests, collector) imports
-# repository classes and factory functions from this module. Re-export
-# everything so those imports continue to work without modification.
+# Singleton factory functions (lazy-loaded globals)
 # ---------------------------------------------------------------------------
 
-from syn_adapters.storage.in_memory_factories import (  # noqa: E402
-    get_artifact_repository,
-    get_event_publisher,
-    get_event_store,
-    get_organization_repository,
-    get_repo_repository,
-    get_session_repository,
-    get_system_repository,
-    get_workflow_execution_repository,
-    get_workflow_repository,
-    reset_storage,
-)
-from syn_adapters.storage.in_memory_repositories import (  # noqa: E402
-    InMemoryArtifactRepository,
-    InMemoryOrganizationRepository,
-    InMemoryRepoRepository,
-    InMemorySessionRepository,
-    InMemorySystemRepository,
-    InMemoryWorkflowExecutionRepository,
-    InMemoryWorkflowRepository,
-)
+_event_store: InMemoryEventStore | None = None
+_event_publisher: InMemoryEventPublisher | None = None
+
+
+def get_event_store() -> InMemoryEventStore:
+    """Get the global in-memory event store (TESTING ONLY)."""
+    global _event_store
+    if _event_store is None:
+        _event_store = InMemoryEventStore()
+    return _event_store
+
+
+def get_event_publisher() -> InMemoryEventPublisher:
+    """Get the global in-memory event publisher (TESTING ONLY)."""
+    global _event_publisher
+    if _event_publisher is None:
+        _event_publisher = InMemoryEventPublisher()
+    return _event_publisher
+
+
+def reset_storage() -> None:
+    """Reset test utilities (InMemoryEventStore and InMemoryEventPublisher)."""
+    if _event_store is not None:
+        _event_store.clear()
+    if _event_publisher is not None:
+        _event_publisher.clear()
+
 
 __all__ = [
-    "InMemoryArtifactRepository",
     "InMemoryEventPublisher",
     "InMemoryEventStore",
-    "InMemoryOrganizationRepository",
-    "InMemoryRepoRepository",
-    "InMemorySessionRepository",
-    # Core (defined here)
     "InMemoryStorageError",
-    "InMemorySystemRepository",
-    "InMemoryWorkflowExecutionRepository",
-    # Re-exported repositories
-    "InMemoryWorkflowRepository",
     "StoredEvent",
     "_assert_test_environment",
-    "get_artifact_repository",
     "get_event_publisher",
-    # Re-exported factories
     "get_event_store",
-    "get_organization_repository",
-    "get_repo_repository",
-    "get_session_repository",
-    "get_system_repository",
-    "get_workflow_execution_repository",
-    "get_workflow_repository",
     "reset_storage",
 ]

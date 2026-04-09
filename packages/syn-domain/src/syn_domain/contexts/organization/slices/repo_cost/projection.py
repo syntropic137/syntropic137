@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import asyncpg
+
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import AutoDispatchProjection
 
@@ -29,13 +34,18 @@ class RepoCostProjection(AutoDispatchProjection):
 
     Handles WorkflowCompleted and WorkflowFailed events. Looks up the
     repo-execution correlation from the shared ProjectionStore.
+
+    Data Sources:
+    - TimescaleDB: agent_events table (session_summary, token_usage) — preferred
+    - Projection Store: fallback for environments without TimescaleDB
     """
 
     PROJECTION_NAME = REPO_COST
     VERSION = 1
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: ProjectionStoreProtocol, pool: asyncpg.Pool | None = None) -> None:
         self._store = store
+        self._pool = pool
         self._events_since_snapshot = 0
 
     def get_name(self) -> str:
@@ -135,11 +145,60 @@ class RepoCostProjection(AutoDispatchProjection):
     # --- Query methods ---
 
     async def get_cost(self, repo_full_name: str) -> RepoCost:
-        """Get cost breakdown for a repo."""
+        """Get cost breakdown for a repo.
+
+        Queries TimescaleDB directly when a pool is available (preferred).
+        Falls back to projection store for environments without TimescaleDB.
+        """
+        if self._pool is not None:
+            return await self._query_timescale_for_repo(repo_full_name)
+
+        # Fallback to projection store (legacy path)
         data = await self._get_or_create(repo_full_name)
         return RepoCost.from_dict(data)
 
+    async def _query_timescale_for_repo(self, repo_full_name: str) -> RepoCost:
+        """Calculate repo cost directly from TimescaleDB observations.
+
+        Delegates to TimescaleRepoCostQuery for the actual computation.
+
+        Args:
+            repo_full_name: Full repository name (e.g. "owner/repo")
+
+        Returns:
+            RepoCost with aggregated metrics (zero-cost if no data found)
+        """
+        if self._pool is None:
+            data = await self._get_or_create(repo_full_name)
+            return RepoCost.from_dict(data)
+        from syn_domain.contexts.organization.slices.repo_cost.timescale_query import (
+            TimescaleRepoCostQuery,
+        )
+
+        query = TimescaleRepoCostQuery(self._pool, self._store)
+        return await query.calculate_for_repo(repo_full_name)
+
     async def get_all_costs(self) -> list[RepoCost]:
-        """Get cost breakdowns for all repos."""
+        """Get cost breakdowns for all repos.
+
+        Queries TimescaleDB directly when a pool is available (preferred).
+        Falls back to projection store for environments without TimescaleDB.
+        """
+        if self._pool is not None:
+            return await self._query_timescale_all()
+
+        # Fallback to projection store (legacy path)
         all_data = await self._store.get_all(self.PROJECTION_NAME)
         return [RepoCost.from_dict(d) for d in all_data]
+
+    async def _query_timescale_all(self) -> list[RepoCost]:
+        """Calculate all repo costs from TimescaleDB."""
+        if self._pool is None:
+            all_data = await self._store.get_all(self.PROJECTION_NAME)
+            return [RepoCost.from_dict(d) for d in all_data]
+        from syn_domain.contexts.organization.slices.repo_cost.timescale_query import (
+            TimescaleRepoCostQuery,
+        )
+
+        query = TimescaleRepoCostQuery(self._pool, self._store)
+        return await query.calculate_all()

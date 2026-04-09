@@ -5,6 +5,7 @@ Core dispatch logic: evaluates registered trigger rules against incoming webhook
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 from collections.abc import Callable, Coroutine
@@ -12,8 +13,12 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+    TriggerBlockedResult,
     TriggerDeferredResult,
     TriggerMatchResult,
+)
+from syn_domain.contexts.github.domain.commands.RecordTriggerBlockedCommand import (
+    RecordTriggerBlockedCommand,
 )
 from syn_domain.contexts.github.domain.commands.RecordTriggerFiredCommand import (
     RecordTriggerFiredCommand,
@@ -23,6 +28,7 @@ from syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator impo
     extract_inputs,
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
+    GuardResult,
     SafetyGuards,
     _extract_pr_number,
 )
@@ -30,6 +36,7 @@ from syn_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
 if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import (
         TriggerQueryStore,
+        _IndexedTrigger,
     )
     from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
         TriggerRuleAggregate,
@@ -37,11 +44,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.evaluate_webhook.debouncer import (
         TriggerDebouncer,
     )
+    from syn_domain.repository import Repository
 
 logger = logging.getLogger(__name__)
 
 
-OnFireCallback = Callable[[Any, dict[str, Any]], Coroutine[Any, Any, None]]
+OnFireCallback = Callable[[TriggerMatchResult, dict[str, Any]], Coroutine[Any, Any, None]]
 """Called when a trigger fires: (result: TriggerMatchResult, payload: dict)."""
 
 
@@ -49,7 +57,7 @@ class EvaluateWebhookHandler:
     def __init__(
         self,
         store: TriggerQueryStore,
-        repository: Any,
+        repository: Repository[TriggerRuleAggregate],
         debouncer: TriggerDebouncer | None = None,
         on_fire: OnFireCallback | None = None,
     ) -> None:
@@ -58,6 +66,10 @@ class EvaluateWebhookHandler:
         self._debouncer = debouncer
         self._on_fire = on_fire
         self._guards = SafetyGuards()
+        # Per-(trigger, pr) lock: ensures the concurrency guard check and
+        # record_fire are atomic — prevents two concurrent webhook handlers
+        # from both passing the guard before either records.
+        self._fire_locks: dict[tuple[str, int | None], asyncio.Lock] = {}
 
     async def evaluate(
         self,
@@ -65,13 +77,13 @@ class EvaluateWebhookHandler:
         repository: str,
         installation_id: str,
         payload: dict[str, Any],
-    ) -> list[TriggerMatchResult | TriggerDeferredResult]:
+    ) -> list[TriggerMatchResult | TriggerDeferredResult | TriggerBlockedResult]:
         rules = await self._store.list_by_event_and_repo(event, repository)
         if not rules:
             logger.debug(f"No trigger rules for {event} on {repository}")
             return []
 
-        results: list[TriggerMatchResult | TriggerDeferredResult] = []
+        results: list[TriggerMatchResult | TriggerDeferredResult | TriggerBlockedResult] = []
         for rule in rules:
             result = await self._evaluate_rule(rule, event, repository, installation_id, payload)
             if result is not None:
@@ -80,19 +92,50 @@ class EvaluateWebhookHandler:
 
     async def _evaluate_rule(
         self,
-        rule: Any,
+        rule: _IndexedTrigger,
         event: str,
         repository: str,
         installation_id: str,
         payload: dict[str, Any],
-    ) -> TriggerMatchResult | TriggerDeferredResult | None:
+    ) -> TriggerMatchResult | TriggerDeferredResult | TriggerBlockedResult | None:
         """Evaluate a single rule against the payload. Returns None if skipped."""
         if rule.status != "active":
             return None
         if not evaluate_conditions(rule.conditions, payload):
             logger.debug(f"Trigger {rule.trigger_id} conditions not met for {event}")
-            return None
+            return await self._record_block(
+                rule=rule,
+                guard_name="conditions_not_met",
+                reason=f"Conditions not met for {event}",
+                event=event,
+                repository=repository,
+                payload=payload,
+            )
 
+        # Acquire per-(trigger, pr) lock so the guard check and record_fire
+        # are atomic.  Without this, two concurrent webhook handlers could
+        # both pass the concurrency guard before either records its fire.
+        pr_number = _extract_pr_number(payload)
+        lock_key = (rule.trigger_id, pr_number)
+        lock = self._fire_locks.setdefault(lock_key, asyncio.Lock())
+        async with lock:
+            return await self._guarded_evaluate(
+                rule,
+                event,
+                repository,
+                installation_id,
+                payload,
+            )
+
+    async def _guarded_evaluate(
+        self,
+        rule: _IndexedTrigger,
+        event: str,
+        repository: str,
+        installation_id: str,
+        payload: dict[str, Any],
+    ) -> TriggerMatchResult | TriggerDeferredResult | TriggerBlockedResult | None:
+        """Guard check → debounce → fire, called under the per-(trigger, pr) lock."""
         guard_result = await self._guards.check_all(rule, payload, self._store)
         if not guard_result.passed:
             return await self._handle_guard_block(
@@ -120,14 +163,14 @@ class EvaluateWebhookHandler:
 
     async def _handle_guard_block(
         self,
-        rule: Any,
-        guard_result: Any,
+        rule: _IndexedTrigger,
+        guard_result: GuardResult,
         event: str,
         repository: str,
         installation_id: str,
         payload: dict[str, Any],
-    ) -> TriggerDeferredResult | None:
-        """Handle a guard block — schedule retry if retryable, otherwise log."""
+    ) -> TriggerDeferredResult | TriggerBlockedResult:
+        """Handle a guard block — schedule retry if retryable, otherwise record block."""
         if guard_result.retryable and self._debouncer is not None:
             return await self._schedule_deferred(
                 rule=rule,
@@ -139,12 +182,18 @@ class EvaluateWebhookHandler:
                 reason=guard_result.reason,
                 key_suffix=":retry",
             )
-        logger.info(f"Trigger {rule.trigger_id} blocked by guard: {guard_result.reason}")
-        return None
+        return await self._record_block(
+            rule=rule,
+            guard_name=guard_result.guard_name,
+            reason=guard_result.reason,
+            event=event,
+            repository=repository,
+            payload=payload,
+        )
 
     async def _fire_trigger(
         self,
-        rule: Any,
+        rule: _IndexedTrigger,
         event: str,
         repository: str,
         payload: dict[str, Any],
@@ -171,6 +220,9 @@ class EvaluateWebhookHandler:
             aggregate.record_fired(cmd)
             await self._repository.save(aggregate)
 
+        # Mark execution as running for concurrency guard (Guard 6)
+        await self._store.record_fire(rule.trigger_id, pr_number, execution_id)
+
         result = TriggerMatchResult(trigger_id=rule.trigger_id, execution_id=execution_id)
         logger.info(
             f"Trigger {rule.trigger_id} fired for {event} on {repository} "
@@ -180,9 +232,40 @@ class EvaluateWebhookHandler:
             await self._on_fire(result, payload)
         return result
 
+    async def _record_block(
+        self,
+        rule: _IndexedTrigger,
+        guard_name: str,
+        reason: str,
+        event: str,
+        repository: str,
+        payload: dict[str, Any],
+    ) -> TriggerBlockedResult:
+        """Record a trigger block in the event store and return a blocked result."""
+        aggregate: TriggerRuleAggregate | None = await self._repository.get_by_id(rule.trigger_id)
+        if aggregate is not None:
+            cmd = RecordTriggerBlockedCommand(
+                trigger_id=rule.trigger_id,
+                guard_name=guard_name,
+                reason=reason,
+                webhook_delivery_id=payload.get("_delivery_id", ""),
+                event_type=event,
+                repository=repository,
+                pr_number=_extract_pr_number(payload),
+                payload_summary=_build_payload_summary(payload, event),
+            )
+            aggregate.record_blocked(cmd)
+            await self._repository.save(aggregate)
+        logger.info(f"Trigger {rule.trigger_id} blocked by {guard_name}: {reason}")
+        return TriggerBlockedResult(
+            trigger_id=rule.trigger_id,
+            guard_name=guard_name,
+            reason=reason,
+        )
+
     async def _schedule_deferred(
         self,
-        rule: Any,
+        rule: _IndexedTrigger,
         event: str,
         repository: str,
         installation_id: str,
@@ -231,8 +314,8 @@ class EvaluateWebhookHandler:
         )
 
 
-def _build_payload_summary(payload: dict[str, Any], event: str) -> dict:
-    summary: dict[str, Any] = {"event": event}
+def _build_payload_summary(payload: dict[str, Any], event: str) -> dict[str, object]:
+    summary: dict[str, object] = {"event": event}
     sender = payload.get("sender", {})
     if sender:
         summary["sender"] = sender.get("login", "")

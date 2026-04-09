@@ -408,21 +408,13 @@ dev: _workspace-check
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
-    echo "8️⃣ Starting Pulse metrics frontend..."
-    lsof -ti:5174 | xargs kill 2>/dev/null || true
-    sleep 1
-    (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
-    (cd apps/syn-pulse-ui && pnpm run dev > /tmp/syn-pulse.log 2>&1 &)
-    sleep 3
-    echo ""
     just _webhook-start
     echo ""
     echo "✅ Full development stack ready!"
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
-    echo "   📈 Pulse:        http://localhost:5174"
-    echo "   🚀 Backend API:  http://localhost:8137"
-    echo "   📊 API Docs:     http://localhost:8137/docs"
+    echo "   🚀 Backend API:  http://localhost:9137"
+    echo "   📊 API Docs:     http://localhost:9137/docs"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -491,21 +483,13 @@ dev-fresh: _workspace-check
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
-    echo "1️⃣1️⃣ Starting Pulse metrics frontend..."
-    lsof -ti:5174 | xargs kill 2>/dev/null || true
-    sleep 1
-    (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
-    (cd apps/syn-pulse-ui && pnpm run dev > /tmp/syn-pulse.log 2>&1 &)
-    sleep 3
-    echo ""
     just _webhook-start
     echo ""
     echo "✅ Fresh development environment ready!"
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
-    echo "   📈 Pulse:        http://localhost:5174"
-    echo "   🚀 Backend API:  http://localhost:8137"
-    echo "   📊 API Docs:     http://localhost:8137/docs"
+    echo "   🚀 Backend API:  http://localhost:9137"
+    echo "   📊 API Docs:     http://localhost:9137/docs"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -545,19 +529,12 @@ dev-doctor: _env-check
     @echo ""
     @echo "💡 Run 'just dev' to start the development stack."
 
-# Run the CLI application
-cli *args:
-    uv run --package syn-cli syn {{args}}
-
 # --- CLI Node ---
 
 # Build the Node.js CLI
 cli-node-build:
     cd apps/syn-cli-node && pnpm run build
 
-# Generate TypeScript types from OpenAPI spec
-cli-node-gen:
-    cd apps/syn-cli-node && pnpm run generate:types
 
 # Run CLI Node tests
 cli-node-test:
@@ -602,26 +579,6 @@ dashboard-qa: dashboard-lint dashboard-build
 
 # --- Pulse UI ---
 
-# Start the Pulse metrics frontend (Vite dev server)
-pulse-frontend:
-    cd apps/syn-pulse-ui && pnpm run dev
-
-# Install Pulse frontend dependencies
-pulse-install:
-    cd apps/syn-pulse-ui && pnpm install
-
-# Build Pulse frontend for production
-pulse-build:
-    cd apps/syn-pulse-ui && pnpm run build
-
-# Lint Pulse frontend
-pulse-lint:
-    cd apps/syn-pulse-ui && pnpm run lint
-
-# Full Pulse QA (lint + build)
-pulse-qa: pulse-lint pulse-build
-    @echo "✅ Pulse UI checks passed!"
-
 # --- Feedback ---
 
 # Start the feedback API server
@@ -658,11 +615,11 @@ dev-webhooks:
     fi
     echo "🔗 Starting webhook proxy..."
     echo "   Source: $DEV__SMEE_URL"
-    echo "   Target: http://localhost:8137/webhooks/github"
+    echo "   Target: http://localhost:9137/webhooks/github"
     echo ""
     echo "   Press Ctrl+C to stop"
     echo ""
-    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8137/webhooks/github --path /webhooks/github
+    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:9137/webhooks/github --path /webhooks/github
 
 # View smee proxy logs
 dev-webhooks-logs:
@@ -724,7 +681,7 @@ test-e2e:
 
 # Run tests with coverage report
 test-cov:
-    uv run pytest --cov=apps/syn-cli/src --cov=packages/syn-domain/src --cov=packages/syn-adapters/src --cov=packages/syn-shared/src --cov-report=term-missing --cov-fail-under=80
+    uv run pytest --cov=packages/syn-domain/src --cov=packages/syn-adapters/src --cov=packages/syn-shared/src --cov-report=term-missing --cov-fail-under=80
 
 # Run E2E container execution tests (full flow: sidecar + workspace + agent)
 test-e2e-container:
@@ -733,6 +690,66 @@ test-e2e-container:
 # Run E2E container tests with image rebuild
 test-e2e-container-build:
     uv run python scripts/e2e_agent_in_container_test.py --build
+
+# Quick E2E smoke test: validate the full dev stack is working (#516)
+# Starts the dev stack if not running, hits health endpoint, runs core CLI commands.
+e2e-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    API_URL="http://localhost:9137"
+
+    # 1. Check if the dev stack is already running; start it if not
+    if ! curl -sf "${API_URL}/health" > /dev/null 2>&1; then
+        echo "🔧 Dev stack not running — starting it..."
+        just dev
+        echo ""
+    fi
+
+    # 2. Wait briefly for services to stabilise
+    echo "⏳ Waiting for services..."
+    for i in $(seq 1 30); do
+        if curl -sf "${API_URL}/health" > /dev/null 2>&1; then
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "❌ Health endpoint did not respond within 30 seconds"
+            exit 1
+        fi
+        sleep 1
+    done
+
+    # 3. Health endpoint
+    echo "🏥 Checking health endpoint..."
+    curl -sf "${API_URL}/health" | python3 -m json.tool
+    echo ""
+
+    # 4. Core CLI smoke tests
+    echo "🔍 Running CLI smoke tests..."
+    echo ""
+
+    echo "  → syn workflow list"
+    just cli workflow list
+    echo ""
+
+    echo "  → syn session list"
+    just cli session list
+    echo ""
+
+    echo "  → syn events recent --limit 5"
+    just cli events recent --limit 5
+    echo ""
+
+    echo "  → syn org list"
+    just cli org list
+    echo ""
+
+    echo "  → syn status"
+    just cli status
+    echo ""
+
+    # 5. Success
+    echo "✅ E2E smoke test passed — full stack is operational"
 
 # Check for test debt (xfail, skip, TODO in tests)
 test-debt:
@@ -801,6 +818,11 @@ check-fix:
 # Quick import smoke test - catches broken imports fast
 import-check:
     @uv run python scripts/import_check.py
+
+# Wire up git hooks from .githooks/ — run once after cloning or when hooks change
+setup-hooks:
+    git config core.hooksPath .githooks
+    @echo "✓ Git hooks configured (.githooks/pre-push active)"
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
 qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate docs-sync
@@ -1314,9 +1336,10 @@ docs-regen: diagram docs-gen
     @echo "   • docs/architecture/docker-workspace-lifecycle.md"
     @echo "   • docs/architecture/infrastructure-data-flow.md"
 
-# Regenerate docs and fail if uncommitted changes (enforces docs are committed)
+# Regenerate all derived artifacts and fail if any are uncommitted.
+# Runs `just codegen` once, then checks architecture docs, CLI docs, and API artifacts.
 docs-sync:
-    @echo "🔄 Syncing architecture documentation..."
+    @echo "🔄 Regenerating architecture documentation..."
     @uv run python scripts/generate-architecture-docs.py > /tmp/docs-gen.txt 2>&1
     @if git diff --quiet docs/architecture/projection-subscriptions.md docs/architecture/event-flows/README.md README.md 2>/dev/null; then \
         echo "✅ Architecture docs are up-to-date"; \
@@ -1325,35 +1348,37 @@ docs-sync:
         echo "   git add docs/architecture/ README.md && git commit -m 'docs: update generated architecture docs'"; \
         exit 1; \
     fi
-    @echo "🔄 Syncing CLI reference docs..."
-    @cd apps/syn-cli-node && pnpm run generate:docs > /dev/null 2>&1
+    @echo "🔄 Running codegen (CLI docs + OpenAPI spec + API docs + CLI types)..."
+    @just codegen > /dev/null 2>&1
     @if git diff --quiet apps/syn-docs/content/docs/cli/ 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)" ]; then \
         echo "✅ CLI docs are up-to-date"; \
     else \
         echo "❌ CLI docs need to be committed:"; \
-        echo "   git add apps/syn-docs/content/docs/cli/ && git commit -m 'docs: regenerate CLI docs'"; \
+        echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
-    @echo "🔄 Syncing API reference docs..."
-    @uv run python scripts/extract_openapi.py > /dev/null 2>&1
-    @cd apps/syn-docs && pnpm run generate:openapi > /dev/null 2>&1
-    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
-        echo "✅ API docs are up-to-date"; \
+    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
+        echo "✅ API docs and CLI types are up-to-date"; \
     else \
-        echo "❌ API docs need to be committed:"; \
-        echo "   git add apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ && git commit -m 'docs: regenerate API docs'"; \
+        echo "❌ API artifacts need to be committed:"; \
+        echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
 
-# Regenerate docs site content (CLI reference + OpenAPI spec + API reference MDX)
-docs-site-gen: docs-cli-gen
+# Regenerate ALL derived artifacts: CLI docs, OpenAPI spec, API docs, CLI types.
+# Single command after changing any Pydantic model, API route, or CLI command.
+# Pipeline: CLI commands → CLI docs, FastAPI app → openapi.json → API docs MDX → CLI TS types
+codegen: docs-cli-gen
     @echo "📄 Extracting OpenAPI spec from FastAPI..."
     uv run python scripts/extract_openapi.py
     @echo "📄 Generating API reference docs..."
     cd apps/syn-docs && pnpm run generate:openapi
+    @echo "📄 Generating CLI TypeScript types..."
+    cd apps/syn-cli-node && pnpm run generate:types
+    @echo "✅ All generated artifacts up to date"
 
-# Build docs site (runs generation + next build)
-docs-site-build: docs-site-gen
+# Build docs site (codegen + Next.js build, for deployment)
+docs-site-build: codegen
     cd apps/syn-docs && pnpm run build
 
 # --- Utilities ---
@@ -1483,9 +1508,7 @@ deps-audit-npm:
     # Scan the same lock files as CI's OSV Scanner job.
     # All Node packages standardized on pnpm — single root lock file.
     for lockfile in \
-        pnpm-lock.yaml \
-        apps/syn-dashboard-ui/pnpm-lock.yaml \
-        apps/syn-pulse-ui/pnpm-lock.yaml; do
+        pnpm-lock.yaml; do
         if [ -f "$lockfile" ]; then
             echo "--- $lockfile ---"
             if command -v osv-scanner &>/dev/null; then
@@ -1509,7 +1532,7 @@ deps-tree:
     echo "  $(grep -c '^\[\[package\]\]' uv.lock) packages in uv.lock"
     echo ""
     echo "=== Node.js: package counts ==="
-    for dir in apps/syn-dashboard-ui apps/syn-pulse-ui apps/syn-docs; do
+    for dir in apps/syn-dashboard-ui apps/syn-docs; do
         if [ -f "$dir/pnpm-lock.yaml" ]; then
             count=$(grep -c 'resolution:' "$dir/pnpm-lock.yaml" 2>/dev/null || echo "?")
             echo "  $dir: ~$count packages (pnpm)"
@@ -1668,9 +1691,9 @@ _webhook-start:
     if [ -n "${DEV__SMEE_URL:-}" ]; then
         uv run python scripts/manage_webhook_url.py --mode dev || true
         pkill -f "smee-client.*${DEV__SMEE_URL}" 2>/dev/null || true
-        echo "5️⃣  Starting webhook proxy (smee.io → localhost:8137)..."
-        npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8137/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
-        echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:8137/webhooks/github"
+        echo "5️⃣  Starting webhook proxy (smee.io → localhost:9137)..."
+        npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:9137/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
+        echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:9137/webhooks/github"
         exit 0
     fi
 
@@ -1732,11 +1755,11 @@ _workspace-check:
 # Build and push container images to GHCR from your local machine.
 # Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
 
-# Bump version across all 13 package files
+# Bump version across all 11 package files
 bump-version version:
     python3 scripts/bump_version.py {{version}}
 
-# Validate all 13 package files have the same version
+# Validate all 11 package files have the same version
 check-version:
     python3 scripts/bump_version.py --check
 
@@ -1759,12 +1782,11 @@ release-local version:
 
     # Images to build (order: fast first)
     FAILED=()
-    for image in token-injector sidecar-proxy syn-collector syn-pulse-ui syn-dashboard-ui syn-api syn-gateway; do
+    for image in token-injector sidecar-proxy syn-collector syn-dashboard-ui syn-api syn-gateway; do
         case "$image" in
             token-injector)   dockerfile="docker/token-injector/Dockerfile"; context="docker/token-injector" ;;
             sidecar-proxy)    dockerfile="docker/sidecar-proxy/Dockerfile"; context="docker/sidecar-proxy" ;;
             syn-collector)    dockerfile="packages/syn-collector/Dockerfile"; context="." ;;
-            syn-pulse-ui)     dockerfile="apps/syn-pulse-ui/Dockerfile"; context="." ;;
             syn-dashboard-ui) dockerfile="apps/syn-dashboard-ui/Dockerfile"; context="." ;;
             syn-api)          dockerfile="infra/docker/images/syn-api/Dockerfile"; context="." ;;
             syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;

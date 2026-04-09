@@ -14,7 +14,7 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import asyncpg
 from agentic_logging import get_logger
@@ -30,9 +30,14 @@ from syn_adapters.subscriptions.realtime_adapter import (
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
+    from event_sourcing import EventStoreClient
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
 
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.realtime import RealTimeProjection
+    from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
+        _ExecutionService,
+    )
 
 logger = get_logger(__name__)
 
@@ -55,7 +60,7 @@ class CoordinatorSubscriptionService:
 
     def __init__(
         self,
-        event_store: Any,
+        event_store: EventStoreClient,
         projections: list[CheckpointedProjection],
         realtime_projection: RealTimeProjection | None = None,
         checkpoint_store: ProjectionCheckpointStore | None = None,
@@ -123,7 +128,7 @@ class CoordinatorSubscriptionService:
             logger.info("Database pool created for checkpoint store")
 
             # Create checkpoint store (table is created on first operation)
-            self._checkpoint_store = PostgresCheckpointStore(self._db_pool)
+            self._checkpoint_store = PostgresCheckpointStore(self._db_pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
             logger.info("Checkpoint store initialized")
 
         # Build projection list (add realtime adapter if configured)
@@ -166,11 +171,12 @@ class CoordinatorSubscriptionService:
 
 
 def create_coordinator_service(
-    event_store: Any,
-    projection_store: Any,
+    event_store: EventStoreClient,
+    projection_store: ProjectionStoreProtocol,
     realtime_projection: RealTimeProjection | None = None,
-    execution_service: Any = None,
+    execution_service: object | None = None,
     checkpoint_store: ProjectionCheckpointStore | None = None,
+    pool: asyncpg.Pool | None = None,
 ) -> CoordinatorSubscriptionService:
     """Factory to create the coordinator subscription service.
 
@@ -191,13 +197,25 @@ def create_coordinator_service(
         execution_service: Optional execution service (required by WorkflowDispatchProjection)
         checkpoint_store: Optional injected checkpoint store (e.g. MemoryCheckpointStore
             for tests). If None, a PostgresCheckpointStore is created on start().
+        pool: Optional asyncpg Pool for TimescaleDB direct queries.
+            Cost projections use this to bypass empty projection stores
+            and read from the actual observability data source (Lane 2).
 
     Returns:
         Configured CoordinatorSubscriptionService
     """
+    from syn_adapters.projections.manager_registry import create_session_cost_projection
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
+    from syn_adapters.subscriptions.projection_adapters import (
+        ExecutionCostAdapter,
+        SessionCostAdapter,
+        ToolTimelineAdapter,
+    )
     from syn_adapters.subscriptions.realtime_adapter import (
         OrganizationListAdapter as _OrganizationListAdapter,
+    )
+    from syn_adapters.subscriptions.realtime_adapter import (
+        RepoCorrelationAdapter as _RepoCorrelationAdapter,
     )
     from syn_adapters.subscriptions.realtime_adapter import (
         RepoListAdapter as _RepoListAdapter,
@@ -205,13 +223,26 @@ def create_coordinator_service(
     from syn_adapters.subscriptions.realtime_adapter import (
         SystemListAdapter as _SystemListAdapter,
     )
+    from syn_adapters.subscriptions.realtime_adapter import (
+        TriggerHistoryAdapter as _TriggerHistoryAdapter,
+    )
     from syn_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
+    from syn_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
     from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow import (
         WorkflowDispatchProjection,
     )
+    from syn_domain.contexts.github.slices.trigger_history.projection import (
+        TriggerHistoryProjection,
+    )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
+        ExecutionCostProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+        ExecutionTodoProjection,
     )
     from syn_domain.contexts.orchestration.slices.get_execution_detail import (
         WorkflowExecutionDetailProjection,
@@ -223,27 +254,54 @@ def create_coordinator_service(
         WorkflowExecutionListProjection,
     )
     from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
+    from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
+        WorkflowPhaseMetricsProjection,
+    )
     from syn_domain.contexts.organization._shared.organization_projection import (
         OrganizationProjection,
     )
     from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
     from syn_domain.contexts.organization.slices.list_systems.projection import SystemProjection
+    from syn_domain.contexts.organization.slices.repo_correlation import (
+        RepoCorrelationProjection,
+    )
+    from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
+    from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
-    # Create all checkpointed projections
+    # Create all checkpointed projections (21 total)
     projections: list[CheckpointedProjection] = [
+        # --- Orchestration context (AutoDispatchProjection — direct) ---
         WorkflowListProjection(projection_store),
         WorkflowDetailProjection(projection_store),
         WorkflowExecutionListProjection(projection_store),
         WorkflowExecutionDetailProjection(projection_store),
-        SessionListProjection(projection_store),
-        ArtifactListProjection(projection_store),
         DashboardMetricsProjection(projection_store),
-        WorkflowDispatchProjection(execution_service=execution_service, store=projection_store),
+        WorkflowPhaseMetricsProjection(projection_store),
+        ExecutionTodoProjection(store=projection_store),
+        WorkflowDispatchProjection(
+            execution_service=cast("_ExecutionService | None", execution_service),
+            store=projection_store,
+        ),
         TriggerQueryProjection(projection_store),
-        # Organization context — namespace-qualified events require adapters
+        # --- Agent sessions context ---
+        SessionListProjection(projection_store),
+        # --- Artifacts context ---
+        ArtifactListProjection(projection_store),
+        # --- Organization context — namespace-qualified events require adapters ---
         _OrganizationListAdapter(OrganizationProjection(projection_store)),
         _SystemListAdapter(SystemProjection(projection_store)),
         _RepoListAdapter(RepoProjection(projection_store)),
+        # Organization insight projections (AutoDispatchProjection — direct)
+        RepoHealthProjection(projection_store),
+        RepoCostProjection(projection_store, pool=pool),
+        # RepoCorrelation handles mixed namespaces (github.* + unnamespaced)
+        _RepoCorrelationAdapter(RepoCorrelationProjection(projection_store)),
+        # Trigger history — github.TriggerFired → fire log entries
+        _TriggerHistoryAdapter(TriggerHistoryProjection(projection_store)),
+        # --- Observability projections — plain classes wrapped via adapters ---
+        ToolTimelineAdapter(ToolTimelineProjection(projection_store)),
+        ExecutionCostAdapter(ExecutionCostProjection(projection_store, pool=pool)),
+        SessionCostAdapter(create_session_cost_projection(projection_store)),
     ]
 
     return CoordinatorSubscriptionService(

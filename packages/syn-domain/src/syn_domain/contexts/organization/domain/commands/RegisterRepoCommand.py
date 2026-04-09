@@ -27,9 +27,9 @@ class RegisterRepoCommand:
         command_id: Unique identifier for this command.
     """
 
-    organization_id: str
-    provider: str
-    full_name: str
+    organization_id: str = "_unaffiliated"
+    provider: str = "github"
+    full_name: str = ""
     provider_repo_id: str = ""
     owner: str = ""
     default_branch: str = "main"
@@ -41,11 +41,13 @@ class RegisterRepoCommand:
 
     def __post_init__(self) -> None:
         """Validate the command."""
-        if not self.organization_id:
-            raise ValueError("organization_id is required")
         if not self.full_name:
             raise ValueError("full_name is required")
         if not self.provider:
             raise ValueError("provider is required")
         if self.provider not in ("github", "gitea", "gitlab"):
             raise ValueError("provider must be one of: github, gitea, gitlab")
+        if self.organization_id == "":
+            raise ValueError(
+                "organization_id cannot be empty; use '_unaffiliated' for org-less repos"
+            )

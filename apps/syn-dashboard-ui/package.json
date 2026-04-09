@@ -1,7 +1,7 @@
 {
   "name": "syn-dashboard-ui",
   "private": true,
-  "version": "0.20.1",
+  "version": "0.23.2",
   "type": "module",
   "scripts": {
     "predev": "[ -d node_modules ] || npm install",
@@ -14,6 +14,8 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@nivo/calendar": "^0.99.0",
+    "@nivo/core": "^0.99.0",
     "clsx": "2.1.1",
     "html2canvas": "1.4.1",
     "lucide-react": "0.555.0",
@@ -42,7 +44,7 @@
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "typescript-eslint": "8.46.4",
-    "vite": "7.2.4",
+    "vite": "7.3.2",
     "vitest": "4.1.1"
   }
 }

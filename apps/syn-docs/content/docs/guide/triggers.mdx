@@ -1,0 +1,192 @@
+---
+title: Triggers
+description: Automatically run workflows in response to GitHub events with safety guards and full observability.
+---
+
+Triggers connect GitHub events to workflow executions. When a matching event arrives (CI failure, review comment, PR opened), Syntropic137 evaluates safety guards and either fires the workflow or blocks with a recorded reason.
+
+## Quick Start
+
+Enable self-healing for a repository:
+
+```bash
+syn triggers enable self-healing --repo owner/my-repo --workflow ci-fix-v1
+```
+
+This creates a trigger that fires when a CI check fails on a PR, dispatching your workflow to fix it automatically.
+
+## How Triggers Work
+
+```
+GitHub Event (webhook or polling)
+        │
+        ▼
+  Match trigger rules (event type + repository)
+        │
+        ▼
+  Evaluate conditions (field operators)
+        │
+        ▼
+  Run safety guards (concurrency, cooldown, limits)
+        │
+   ┌────┴────┐
+   │         │
+   ▼         ▼
+ Fire     Block
+ (TriggerFiredEvent)    (TriggerBlockedEvent)
+   │         │
+   ▼         ▼
+ Start      Record in
+ execution  history
+```
+
+Every decision — fire or block — is recorded as a domain event. You can query the full audit trail via `syn triggers history`.
+
+## Trigger Lifecycle
+
+Triggers have three states:
+
+| State | Description |
+|-------|-------------|
+| **active** | Evaluating incoming events |
+| **paused** | Temporarily disabled, events ignored |
+| **deleted** | Soft-deleted, not evaluated |
+
+```bash
+syn triggers pause <trigger-id>    # Temporarily disable
+syn triggers resume <trigger-id>   # Re-enable
+syn triggers delete <trigger-id> --force   # Soft-delete
+```
+
+## Safety Guards
+
+Every trigger evaluation passes through safety guards before firing. Guards are evaluated in order — the first failure blocks the trigger.
+
+| Guard | Config Key | Default | Description |
+|-------|-----------|---------|-------------|
+| **Concurrency** | — | Always on | Blocks if an execution is already running for the same trigger + PR |
+| **Max Attempts** | `max_attempts` | 3 | Maximum fires per (trigger, PR) combination |
+| **Cooldown** | `cooldown_seconds` | 300 | Minimum seconds between fires for the same PR |
+| **Daily Limit** | `daily_limit` | 20 | Maximum fires per day per trigger |
+| **Idempotency** | — | Always on | Prevents processing the same webhook delivery twice |
+
+The concurrency guard is especially important after restarts — when the event poller catches up, it prevents firing multiple executions for the same PR simultaneously.
+
+<Callout type="info">
+When a guard blocks a trigger, the block is recorded as a `TriggerBlockedEvent` with the guard name and reason. Use `syn triggers history` to see exactly why a trigger didn't fire.
+</Callout>
+
+## Conditions
+
+Triggers can include conditions that filter which events match. Conditions use dot-notation field paths into the webhook payload with operators:
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `eq` | Equals | `check_run.conclusion=failure` |
+| `neq` | Not equals | `sender.login!=my-bot` |
+| `in` | In list | `review.state=changes_requested,commented` |
+| `not_in` | Not in list | `sender.type=Bot` |
+| `contains` | Contains substring | `comment.body=/syn` |
+| `not_empty` | Value is present | `pull_request.number` |
+| `is_empty` | Value is absent | `pull_request.draft` |
+
+All conditions must match (AND logic).
+
+<Callout type="warn">
+The CLI `--condition` flag only supports equality checks (`field=value`), which maps to the `eq` operator. For advanced operators like `neq`, `in`, `contains`, etc., use the [Triggers API](/docs/api/triggers) directly.
+</Callout>
+
+Register conditions via CLI:
+
+```bash
+syn triggers register \
+  --repo owner/my-repo \
+  --event check_run.completed \
+  --workflow ci-fix-v1 \
+  --condition "check_run.conclusion=failure" \
+  --condition "sender.type=User"
+```
+
+### Field Paths
+
+Conditions support dot-notation for nested fields and array indexing:
+
+- `check_run.conclusion` — nested object access
+- `check_run.pull_requests[0].number` — array index
+- `review.user.login` — deeply nested
+- `sender.login` — top-level
+
+## Built-In Presets
+
+Three presets ship with the system:
+
+| Preset | Event | Conditions | Use Case |
+|--------|-------|------------|----------|
+| `self-healing` | `check_run.completed` | `conclusion == failure` | Auto-fix CI failures |
+| `review-fix` | `pull_request_review.submitted` | `state == changes_requested` | Address review feedback |
+| `comment-command` | `issue_comment.created` | `body contains /syn` | Dispatch on `/syn` command |
+
+```bash
+syn triggers enable self-healing --repo owner/my-repo
+syn triggers enable review-fix --repo owner/my-repo
+syn triggers enable comment-command --repo owner/my-repo
+```
+
+## Trigger History & Observability
+
+Every trigger fire and block is recorded. Query the history:
+
+```bash
+# History for a specific trigger
+syn triggers history <trigger-id>
+
+# Example output (when blocked entries exist):
+# Time                Execution    Status     Guard         Reason
+# 2026-04-05 10:30    exec-a1b2    dispatched
+# 2026-04-05 10:30    —            blocked    concurrency   Execution already running for PR #42
+# 2026-04-05 10:29    —            blocked    max_attempts  Max attempts (3) reached for PR #15
+# 2026-04-05 10:15    exec-c3d4    completed                $0.0058
+```
+
+History entries have these statuses:
+
+| Status | Meaning |
+|--------|---------|
+| `dispatched` | Trigger fired, execution started |
+| `completed` | Execution finished successfully |
+| `failed` | Execution failed |
+| `blocked` | Guard or condition prevented firing |
+
+Blocked entries include `guard_name` (which guard blocked) and `block_reason` (human-readable explanation). This answers the common question: "Why didn't this trigger fire?"
+
+## Input Mapping
+
+Trigger rules extract workflow inputs from the webhook payload using dot-notation paths:
+
+```bash
+syn triggers register \
+  --repo owner/my-repo \
+  --event check_run.completed \
+  --workflow ci-fix-v1 \
+  --input "repository=repository.full_name" \
+  --input "pr_number=check_run.pull_requests[0].number" \
+  --input "branch=check_run.pull_requests[0].head.ref"
+```
+
+This keeps triggers declarative — all behavioral intelligence lives in the workflow definition.
+
+## Debounce
+
+For events that arrive in bursts (e.g., multiple review comments), triggers support debouncing:
+
+```bash
+syn triggers register \
+  --event pull_request_review.submitted \
+  --debounce 60   # Wait 60s after last event before firing
+```
+
+With debouncing enabled, rapid-fire events reset a timer. When the timer expires, the trigger fires once and the workflow reads the complete picture (all comments, all reviews).
+
+## API Reference
+
+See the [Triggers API](/docs/api/triggers) for programmatic access to all trigger operations.

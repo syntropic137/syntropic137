@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import (
         TriggerQueryStore,
+        _IndexedTrigger,
     )
 
 logger = logging.getLogger(__name__)
@@ -39,12 +40,13 @@ class GuardResult:
 
     passed: bool
     reason: str
+    guard_name: str = ""
     retryable: bool = False
     retry_after_seconds: float = 0
 
 
 async def _check_max_attempts(
-    rule: Any,
+    rule: _IndexedTrigger,
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -52,13 +54,15 @@ async def _check_max_attempts(
     attempts = await store.get_fire_count(trigger_id=rule.trigger_id, pr_number=pr_number)
     if attempts >= rule.config.max_attempts:
         return GuardResult(
-            False, f"Max attempts ({rule.config.max_attempts}) reached for PR #{pr_number}"
+            False,
+            f"Max attempts ({rule.config.max_attempts}) reached for PR #{pr_number}",
+            guard_name="max_attempts",
         )
     return None
 
 
 async def _check_cooldown(
-    rule: Any,
+    rule: _IndexedTrigger,
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -74,17 +78,22 @@ async def _check_cooldown(
         return GuardResult(
             False,
             f"Cooldown: {remaining:.0f}s remaining",
+            guard_name="cooldown",
             retryable=True,
             retry_after_seconds=remaining + RETRY_BUFFER_SECONDS,
         )
     return None
 
 
-async def _check_daily_limit(rule: Any, store: TriggerQueryStore) -> GuardResult | None:
+async def _check_daily_limit(rule: _IndexedTrigger, store: TriggerQueryStore) -> GuardResult | None:
     """Guard 3: Daily fire limit."""
     today_count = await store.get_daily_fire_count(rule.trigger_id)
     if today_count >= rule.config.daily_limit:
-        return GuardResult(False, f"Daily limit ({rule.config.daily_limit}) reached")
+        return GuardResult(
+            False,
+            f"Daily limit ({rule.config.daily_limit}) reached",
+            guard_name="daily_limit",
+        )
     return None
 
 
@@ -94,12 +103,16 @@ async def _check_idempotency(
     """Guard 4: Don't fire twice for same delivery."""
     delivery_id = payload.get("_delivery_id", "")
     if delivery_id and await store.was_delivery_processed(delivery_id):
-        return GuardResult(False, f"Delivery {delivery_id} already processed")
+        return GuardResult(
+            False,
+            f"Delivery {delivery_id} already processed",
+            guard_name="idempotency",
+        )
     return None
 
 
 async def _check_cross_trigger_cooldown(
-    rule: Any,
+    rule: _IndexedTrigger,
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -112,8 +125,34 @@ async def _check_cross_trigger_cooldown(
         return GuardResult(
             False,
             f"Another trigger fired on PR #{pr_number} {elapsed:.0f}s ago",
+            guard_name="cross_trigger_cooldown",
             retryable=True,
             retry_after_seconds=(CROSS_TRIGGER_COOLDOWN_SECONDS - elapsed) + RETRY_BUFFER_SECONDS,
+        )
+    return None
+
+
+async def _check_concurrency(
+    rule: _IndexedTrigger,
+    pr_number: int | None,
+    store: TriggerQueryStore,
+) -> GuardResult | None:
+    """Guard 6: Block if execution already running for same trigger+PR.
+
+    Coalescing key: (trigger_id, pr_number). Prevents catch-up storms after
+    restart — when the poller replays missed events, only one execution runs
+    per trigger+PR at a time.
+
+    Lifecycle: record_fire() → marks running, complete_execution() → clears.
+    Cleared by TriggerHistoryAdapter on WorkflowCompleted/WorkflowFailed.
+    In-memory only — resets on restart (correct: no containers survive).
+    """
+    if await store.has_running_execution(rule.trigger_id, pr_number):
+        return GuardResult(
+            False,
+            f"Execution already running for trigger {rule.trigger_id}"
+            + (f" on PR #{pr_number}" if pr_number is not None else ""),
+            guard_name="concurrency",
         )
     return None
 
@@ -123,12 +162,17 @@ class SafetyGuards:
 
     async def check_all(
         self,
-        rule: Any,
+        rule: _IndexedTrigger,
         payload: dict[str, Any],
         store: TriggerQueryStore,
     ) -> GuardResult:
         """Run all safety checks. Returns first failure or success."""
         pr_number = _extract_pr_number(payload)
+
+        # Guard 6: Concurrency — check first (cheapest, most common catch-up block)
+        result = await _check_concurrency(rule, pr_number, store)
+        if result is not None:
+            return result
 
         if pr_number is not None:
             for check in (_check_max_attempts, _check_cooldown, _check_cross_trigger_cooldown):

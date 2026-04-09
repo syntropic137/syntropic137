@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 
 from syn_api._wiring import get_github_settings
 from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY
 
+if TYPE_CHECKING:
+    from syn_api.services.lifecycle import DegradedReason
+
 logger = logging.getLogger(__name__)
 
 
-def validate_credentials(degraded_reasons: list[str]) -> None:
+def validate_credentials(degraded_reasons: list[DegradedReason]) -> None:
     """Validate API keys and GitHub App configuration (degraded, not critical).
 
     Exports ANTHROPIC_API_KEY to os.environ for agent adapters.
@@ -20,6 +24,7 @@ def validate_credentials(degraded_reasons: list[str]) -> None:
     Args:
         degraded_reasons: Mutable list — appended to when credentials are missing.
     """
+    from syn_api.services.lifecycle import DegradedReason
     from syn_shared.settings import get_settings
 
     settings = get_settings()
@@ -41,7 +46,7 @@ def validate_credentials(degraded_reasons: list[str]) -> None:
             "ANTHROPIC_API_KEY not configured — agent execution disabled. "
             "Set it in .env or 1Password to enable workflow runs."
         )
-        degraded_reasons.append("anthropic_api_key")
+        degraded_reasons.append(DegradedReason.ANTHROPIC_API_KEY)
 
     # Validate GitHub App (warn-only — dashboard should work without it)
     try:
@@ -51,7 +56,7 @@ def validate_credentials(degraded_reasons: list[str]) -> None:
                 "GitHub App not configured — webhook triggers disabled. "
                 "Run 'just onboard --stage configure_github_app' to configure."
             )
-            degraded_reasons.append("github_app")
+            degraded_reasons.append(DegradedReason.GITHUB_APP)
     except Exception:
         logger.exception("Failed to validate GitHub App configuration")
-        degraded_reasons.append("github_app")
+        degraded_reasons.append(DegradedReason.GITHUB_APP)

@@ -90,6 +90,9 @@ class DeduplicationFilter:
     def is_seen(self, event_id: str) -> bool:
         """Check if event is seen without marking it.
 
+        Tracks stats (checks/hits) like is_duplicate() but does NOT mark the
+        event as seen.  Use with mark_seen() for write-after-confirm dedup.
+
         Args:
             event_id: Event identifier to check
 
@@ -97,7 +100,12 @@ class DeduplicationFilter:
             True if event was seen
         """
         with self._lock:
-            return event_id in self._seen
+            self._stats["checks"] += 1
+            if event_id in self._seen:
+                self._stats["hits"] += 1
+                self._seen.move_to_end(event_id)
+                return True
+            return False
 
     def clear(self) -> None:
         """Clear all tracked events."""

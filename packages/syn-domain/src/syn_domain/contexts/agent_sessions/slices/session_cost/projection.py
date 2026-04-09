@@ -9,9 +9,16 @@ Data Sources:
 See ADR-029: Simplified Event System
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import asyncpg
+
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
@@ -21,7 +28,7 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query impo
 )
 
 
-def _parse_timestamp(value: Any) -> datetime | None:
+def _parse_timestamp(value: object) -> datetime | None:
     """Parse a timestamp from string or datetime, returning None on failure."""
     if isinstance(value, datetime):
         return value
@@ -107,7 +114,10 @@ class SessionCostProjection:
     PROJECTION_NAME = "session_cost"
 
     def __init__(
-        self, store: Any, pool: Any | None = None, cost_calculator: CostCalculator | None = None
+        self,
+        store: ProjectionStoreProtocol,
+        pool: asyncpg.Pool | None = None,
+        cost_calculator: CostCalculator | None = None,
     ):
         """Initialize with a projection store and optional DB pool.
 
@@ -276,6 +286,10 @@ class SessionCostProjection:
     async def get_session_cost(self, session_id: str) -> SessionCost | None:
         """Get session cost by session ID.
 
+        .. deprecated::
+            API routes should use ``SessionCostQueryService`` instead.
+            This method remains for handler/test use. See #532.
+
         Queries TimescaleDB directly for real-time cost calculation.
 
         Args:
@@ -327,6 +341,12 @@ class SessionCostProjection:
         return [SessionCost.from_dict(d) for d in data]
 
     async def get_all(self) -> list[SessionCost]:
-        """Get all session costs."""
+        """Get all session costs.
+
+        .. deprecated::
+            API routes should use ``SessionCostQueryService.list_all()`` instead.
+            This method reads from the projection store which is always empty
+            for cost data. See #532.
+        """
         data = await self._store.get_all(self.PROJECTION_NAME)
         return [SessionCost.from_dict(d) for d in data]

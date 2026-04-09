@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { apiGet } from "../../client/api.js";
+import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 
@@ -18,6 +18,7 @@ export const exportCommand: CommandDef = {
   options: {
     format: { type: "string", short: "f", description: "Export format: 'package' (default) or 'plugin'", default: "package" },
     output: { type: "string", short: "o", description: "Output directory (created if absent)", default: "." },
+    force: { type: "boolean", description: "Overwrite existing files without error", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
     const workflowId = parsed.positionals[0];
@@ -33,26 +34,25 @@ export const exportCommand: CommandDef = {
     }
 
     const outputDir = (parsed.values["output"] as string | undefined) ?? ".";
+    const force = parsed.values["force"] === true;
 
-    const data = await apiGet<{ files: Record<string, string>; workflow_name?: string }>(
-      `/workflows/${workflowId}/export`,
-      { params: { format: fmt } },
+    const data = unwrap(
+      await api.GET("/workflows/{workflow_id}/export", {
+        params: {
+          path: { workflow_id: workflowId },
+          query: { format: fmt },
+        },
+      }),
+      "Failed to export workflow",
     );
 
-    const files = data.files ?? {};
+    const files = data.files;
     if (Object.keys(files).length === 0) {
       printError("Export returned no files");
       throw new CLIError("Export empty", 1);
     }
 
     const outDir = path.resolve(outputDir);
-    if (fs.existsSync(outDir)) {
-      const entries = fs.readdirSync(outDir);
-      if (entries.length > 0) {
-        printError(`Output directory is not empty: ${outDir}`);
-        throw new CLIError("Directory not empty", 1);
-      }
-    }
 
     // Write files with path traversal protection
     for (const [relPath, content] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
@@ -67,11 +67,16 @@ export const exportCommand: CommandDef = {
         throw new CLIError("Path traversal", 1);
       }
 
+      if (!force && fs.existsSync(filePath)) {
+        printError(`File already exists: ${relPath} (use --force to overwrite)`);
+        throw new CLIError("File exists", 1);
+      }
+
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, content, "utf-8");
     }
 
-    const workflowName = data.workflow_name ?? workflowId;
+    const workflowName = data.workflow_name;
 
     // Summary
     print("");

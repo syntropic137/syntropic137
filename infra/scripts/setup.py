@@ -2128,9 +2128,11 @@ def print_summary(ctx: SetupContext) -> bool:
     print()
     callout("Next step: start the stack")
     print(f"    {_BOLD}just selfhost-up-tunnel{_RST}    Start with Cloudflare Tunnel (recommended)")
-    print(f"    {_BOLD}just selfhost-up{_RST}           Start local-only (no GitHub triggers)")
-    hint("The tunnel is required for GitHub webhooks — without it, self-healing")
-    hint("triggers and automated workflows won't fire.")
+    print(
+        f"    {_BOLD}just selfhost-up{_RST}           Start local-only (self-healing works via polling)"
+    )
+    hint("Self-healing and most triggers work without a tunnel (via polling).")
+    hint("A tunnel adds real-time delivery and additional CI/CD event types.")
     print()
     print("  Useful commands:")
     print("    just health-check      Check service health")

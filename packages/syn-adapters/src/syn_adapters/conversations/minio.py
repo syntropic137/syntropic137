@@ -24,6 +24,8 @@ from syn_adapters.conversations.minio_session import (
 from syn_adapters.conversations.minio_session import retrieve_session as _retrieve_session
 
 if TYPE_CHECKING:
+    from minio import Minio
+
     from syn_adapters.conversations.protocol import SessionContext
 
 logger = logging.getLogger(__name__)
@@ -80,7 +82,7 @@ class MinioConversationStorage:
         self._db_url = db_url
         self._secure = secure
 
-        self._client: Any = None
+        self._client: Minio | None = None
         self._pool: asyncpg.Pool | None = None
         self._initialized = False
 
@@ -105,8 +107,20 @@ class MinioConversationStorage:
             self._client.make_bucket(self.BUCKET_NAME)
             logger.info("Created bucket: %s", self.BUCKET_NAME)
 
-        # Create database pool
-        self._pool = await asyncpg.create_pool(self._db_url, min_size=1, max_size=5)
+        # Create database pool for metadata queries (session_conversations table).
+        # If this fails, the exception propagates to the lifecycle startup loop
+        # which marks conversation_storage as degraded and retries via the
+        # recovery loop (ADR-057). _client is reset so retry re-initializes fully.
+        try:
+            self._pool = await asyncpg.create_pool(self._db_url, min_size=1, max_size=5)
+        except Exception:
+            self._client = None  # Reset so next initialize() attempt retries fully
+            logger.warning(
+                "Failed to create database pool for conversation storage "
+                "— metadata queries will be unavailable until recovery",
+                exc_info=True,
+            )
+            raise
 
         self._initialized = True
         logger.info("MinioConversationStorage initialized")
@@ -144,6 +158,8 @@ class MinioConversationStorage:
         size_bytes = len(content_bytes)
 
         # Upload to MinIO
+        if self._client is None:
+            raise RuntimeError("Conversation storage not initialized — call ensure_ready() first")
         self._client.put_object(
             self.BUCKET_NAME,
             object_key,
@@ -243,6 +259,15 @@ async def create_conversation_storage(
 
 # Singleton instance
 _conversation_storage_instance: MinioConversationStorage | None = None
+
+
+def reset_conversation_storage() -> None:
+    """Reset the singleton so the next get_conversation_storage() retries initialization.
+
+    Called by the lifecycle recovery loop (ADR-057) after a failed startup.
+    """
+    global _conversation_storage_instance
+    _conversation_storage_instance = None
 
 
 async def get_conversation_storage() -> MinioConversationStorage:

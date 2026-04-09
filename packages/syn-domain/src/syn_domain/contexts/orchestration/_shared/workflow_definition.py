@@ -31,7 +31,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseDefinition,
     PhaseExecutionType,
     WorkflowClassification,
-    WorkflowType,
 )
 
 _SHARED_PREFIX = "shared://"
@@ -284,7 +283,7 @@ class WorkflowDefinition(BaseModel):
     description: str | None = None
 
     # Classification
-    type: WorkflowType = WorkflowType.CUSTOM
+    type: str = "custom"
     classification: WorkflowClassification = WorkflowClassification.STANDARD
 
     # Repository context

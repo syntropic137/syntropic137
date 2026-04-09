@@ -1,6 +1,11 @@
 """Event handler mapping, provenance, and dispatch for projection manager.
 
-Extracted from manager.py to reduce module complexity.
+DEPRECATED: The coordinator service (ADR-055) uses per-projection
+AutoDispatchProjection with handle_event() instead. EVENT_HANDLERS
+and dispatch_to_handlers() are only used by the legacy ProjectionManager
+path. Remove this file when ProjectionManager is fully retired.
+
+Refs: #504, #517
 """
 
 from __future__ import annotations
@@ -18,6 +23,8 @@ from syn_shared.events import (
 )
 
 if TYPE_CHECKING:
+    from event_sourcing import DomainEvent, EventEnvelope
+
     from syn_adapters.projections.manager import ProjectionManager
 
 logger = logging.getLogger(__name__)
@@ -42,7 +49,7 @@ class EventProvenance:
     event_type: str
 
     @classmethod
-    def from_envelope(cls, envelope: Any) -> EventProvenance:
+    def from_envelope(cls, envelope: EventEnvelope[DomainEvent]) -> EventProvenance:
         """Extract provenance from an event store envelope."""
         metadata = getattr(envelope, "metadata", None)
         if metadata is None:
@@ -216,7 +223,7 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
 
 
 async def _invoke_handler(
-    projection: Projection,
+    projection: object,
     projection_name: str,
     method_name: str,
     event_type: str,

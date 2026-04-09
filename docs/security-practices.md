@@ -30,9 +30,7 @@ CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every p
 
 **Lock files scanned:**
 - `uv.lock` — Python workspace
-- `apps/syn-dashboard-ui/package-lock.json` — Dashboard
-- `apps/syn-pulse-ui/pnpm-lock.yaml` — Pulse UI
-- `packages/openclaw-plugin/package-lock.json` — OpenClaw plugin
+- `pnpm-lock.yaml` — Node.js workspace (root, shared across all pnpm apps)
 
 **Rollout:** OSV runs in warn mode (`continue-on-error: true`) until a clean baseline is established, then switches to blocking. See `TODO(#259)` in `ci.yml`.
 
@@ -41,7 +39,7 @@ CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every p
 `--ignore-scripts` is applied to all package installs in CI to block `postinstall` hooks — the primary npm supply chain attack vector (event-stream, ua-parser-js style). Applied per-project:
 
 - **ui-feedback-react** (submodule, pnpm): `pnpm install --ignore-scripts`
-- **syn-dashboard-ui** (npm): `npm ci --ignore-scripts` — Vite 7.x sources esbuild via optional platform packages, so no binary restore is needed
+- **syn-dashboard-ui** (pnpm): `pnpm install --frozen-lockfile --ignore-scripts` — shares the root workspace lockfile
 - **syn-docs** (pnpm): `pnpm.onlyBuiltDependencies` allowlist in `package.json` restricts install scripts to explicitly reviewed packages (esbuild, sharp, @img/\*)
 
 The `onlyBuiltDependencies` approach for pnpm is preferred over blanket `--ignore-scripts` when some packages legitimately require build steps. The allowlist is code-reviewed and auditable.
@@ -86,15 +84,12 @@ If a secret is accidentally committed:
 
 ## Lock File Discipline
 
-All lock files (`uv.lock`, `package-lock.json`, `pnpm-lock.yaml`) are committed to the repository and enforced in CI:
+All lock files (`uv.lock`, `pnpm-lock.yaml`) are committed to the repository and enforced in CI:
 
 - **Python**: `uv sync --all-extras` (add `--frozen` to enforce lock — planned)
-- **npm**: `npm ci --ignore-scripts` — uses exact versions from `package-lock.json`, fails if stale
-- **pnpm**: `pnpm install --ignore-scripts` or `--frozen-lockfile` for strict enforcement
+- **pnpm**: `pnpm install --frozen-lockfile --ignore-scripts` — uses exact versions from root `pnpm-lock.yaml`, shared across all workspace apps
 
-`npm ci` vs `npm install`: `npm install` re-resolves dependencies and can silently pick up
-a newly published (potentially malicious) version of any package in the tree. `npm ci` enforces
-exact versions from the lock file and fails if `package-lock.json` is out of sync.
+All Node.js packages use pnpm with a single root lockfile (`shared-workspace-lockfile` defaults to `true`). Per-app lockfiles are not used — the root lockfile is authoritative.
 
 ---
 

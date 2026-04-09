@@ -72,6 +72,7 @@ syn workflow export <workflow-id> [options]
 |------|------|---------|-------------|
 | `--format`, `-f` | `text` | `package` | Export format: 'package' (default) or 'plugin' |
 | `--output`, `-o` | `text` | `.` | Output directory (created if absent) |
+| `--force` | `boolean` | `false` | Overwrite existing files without error |
 
 ---
 
@@ -110,7 +111,7 @@ syn workflow init <directory> [options]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--name`, `-n` | `text` | --- | Workflow name |
-| `--type`, `-t` | `text` | `research` | Workflow type |
+| `--type`, `-t` | `text` | `custom` | Free-form workflow type label (e.g. research, planning, custom, code-quality) |
 | `--phases` | `text` | `3` | Number of phases |
 | `--multi` | `boolean` | `false` | Scaffold multi-workflow plugin |
 

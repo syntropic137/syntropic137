@@ -13,16 +13,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import asyncpg
+
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
-
-# Prices per 1M tokens (Claude 3.5 Sonnet pricing)
-_INPUT_PRICE_PER_MILLION = Decimal("3.00")
-_OUTPUT_PRICE_PER_MILLION = Decimal("15.00")
-_CACHE_WRITE_PER_MILLION = Decimal("3.75")
-_CACHE_READ_PER_MILLION = Decimal("0.30")
+from syn_shared.pricing import get_model_pricing
 
 
 def _get_or_create(existing: dict[str, Any] | None, execution_id: str) -> ExecutionCost:
@@ -54,14 +54,11 @@ def _calculate_token_cost(
     output_tokens: int,
     cache_creation: int,
     cache_read: int,
+    model: str | None = None,
 ) -> Decimal:
-    """Calculate token cost from counts using default pricing."""
-    return (
-        (Decimal(input_tokens) / 1_000_000) * _INPUT_PRICE_PER_MILLION
-        + (Decimal(output_tokens) / 1_000_000) * _OUTPUT_PRICE_PER_MILLION
-        + (Decimal(cache_creation) / 1_000_000) * _CACHE_WRITE_PER_MILLION
-        + (Decimal(cache_read) / 1_000_000) * _CACHE_READ_PER_MILLION
-    )
+    """Calculate token cost from counts using model-specific pricing."""
+    pricing = get_model_pricing(model or "")
+    return pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
 
 
 def _apply_token_usage(
@@ -80,11 +77,12 @@ def _apply_token_usage(
     execution_cost.cache_creation_tokens += cache_creation
     execution_cost.cache_read_tokens += cache_read
 
-    token_cost = _calculate_token_cost(input_tokens, output_tokens, cache_creation, cache_read)
+    model = data.get("model")
+    token_cost = _calculate_token_cost(
+        input_tokens, output_tokens, cache_creation, cache_read, model=model
+    )
     execution_cost.token_cost_usd += token_cost
     execution_cost.total_cost_usd += token_cost
-
-    model = data.get("model")
     if model:
         current = execution_cost.cost_by_model.get(model, Decimal("0"))
         execution_cost.cost_by_model[model] = current + token_cost
@@ -119,17 +117,25 @@ class ExecutionCostProjection:
 
     This projection maintains running totals for each execution,
     enabling queries like "how much has execution X cost so far".
+
+    Data Sources:
+    - TimescaleDB: agent_events table (token_usage, session_summary) — preferred
+    - Projection Store: fallback for environments without TimescaleDB
     """
 
     PROJECTION_NAME = "execution_cost"
 
-    def __init__(self, store: Any):
-        """Initialize with a projection store.
+    def __init__(self, store: ProjectionStoreProtocol, pool: asyncpg.Pool | None = None):
+        """Initialize with a projection store and optional TimescaleDB pool.
 
         Args:
             store: A ProjectionStoreProtocol implementation
+            pool: asyncpg Pool for querying TimescaleDB directly (ADR-029).
+                  When available, query methods bypass the (empty) projection
+                  store and read from the actual observability data source.
         """
         self._store = store
+        self._pool = pool
 
     @property
     def name(self) -> str:
@@ -215,18 +221,56 @@ class ExecutionCostProjection:
     async def get_execution_cost(self, execution_id: str) -> ExecutionCost | None:
         """Get execution cost by execution ID.
 
+        .. deprecated::
+            API routes should use ``ExecutionCostQueryService`` instead.
+            This method remains for handler/test use. See #532.
+
+        Queries TimescaleDB directly when a pool is available (preferred).
+        Falls back to projection store for environments without TimescaleDB.
+
         Args:
             execution_id: The execution to get cost for.
 
         Returns:
             ExecutionCost if found, None otherwise.
         """
+        # Query TimescaleDB directly if pool is available
+        if self._pool is not None:
+            return await self._query_timescale(execution_id)
+
+        # Fallback to projection store (legacy path)
         data = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not data:
             return None
         return ExecutionCost.from_dict(data)
 
+    async def _query_timescale(self, execution_id: str) -> ExecutionCost | None:
+        """Calculate execution cost directly from TimescaleDB observations.
+
+        Delegates to TimescaleExecutionCostQuery for the actual computation.
+
+        Args:
+            execution_id: The execution to calculate cost for
+
+        Returns:
+            ExecutionCost with aggregated metrics, or None if no observations found
+        """
+        if self._pool is None:
+            return None
+        from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
+            TimescaleExecutionCostQuery,
+        )
+
+        query = TimescaleExecutionCostQuery(self._pool)
+        return await query.calculate(execution_id)
+
     async def get_all(self) -> list[ExecutionCost]:
-        """Get all execution costs."""
+        """Get all execution costs.
+
+        .. deprecated::
+            API routes should use ``ExecutionCostQueryService.list_all()`` instead.
+            This method reads from the projection store which is always empty
+            for cost data. See #532.
+        """
         data = await self._store.get_all(self.PROJECTION_NAME)
         return [ExecutionCost.from_dict(d) for d in data]

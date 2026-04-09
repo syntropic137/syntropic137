@@ -246,7 +246,6 @@ class TestTriggerValueObjects:
         """Test TriggerConfig default values."""
         config = TriggerConfig()
         assert config.max_attempts == 3
-        assert config.budget_per_trigger_usd == 5.00
         assert config.daily_limit == 20
         assert config.cooldown_seconds == 300
 
@@ -254,9 +253,6 @@ class TestTriggerValueObjects:
         """Test TriggerConfig validation."""
         with pytest.raises(ValueError, match="max_attempts must be >= 1"):
             TriggerConfig(max_attempts=0)
-
-        with pytest.raises(ValueError, match="budget_per_trigger_usd must be > 0"):
-            TriggerConfig(budget_per_trigger_usd=0)
 
         with pytest.raises(ValueError, match="daily_limit must be >= 1"):
             TriggerConfig(daily_limit=0)

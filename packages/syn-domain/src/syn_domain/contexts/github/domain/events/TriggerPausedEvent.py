@@ -5,8 +5,6 @@ Emitted when a trigger rule is paused.
 
 from __future__ import annotations
 
-from typing import Any
-
 from event_sourcing import DomainEvent, event
 from pydantic import field_validator
 
@@ -23,7 +21,7 @@ class TriggerPausedEvent(DomainEvent):
 
     trigger_id: str
     paused_by: str = ""
-    reason: Any = None
+    reason: str | None = None
 
     @field_validator("trigger_id")
     @classmethod

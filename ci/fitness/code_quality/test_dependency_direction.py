@@ -1,7 +1,7 @@
 """Fitness function: package dependency direction.
 
 Enforces that packages respect the dependency hierarchy:
-  syn-shared → syn-domain → syn-adapters → syn-api/syn-cli
+  syn-shared → syn-domain → syn-adapters → syn-api
 
 No package may import from a higher layer at runtime.
 TYPE_CHECKING imports are exempt.
@@ -17,15 +17,15 @@ from ci.fitness.conftest import load_exceptions, rel_path, repo_root
 _RULES: dict[str, tuple[str, set[str]]] = {
     "syn-domain": (
         "packages/syn-domain/src",
-        {"syn_adapters", "syn_api", "syn_cli", "syn_collector"},
+        {"syn_adapters", "syn_api", "syn_collector"},
     ),
     "syn-shared": (
         "packages/syn-shared/src",
-        {"syn_domain", "syn_adapters", "syn_api", "syn_cli"},
+        {"syn_domain", "syn_adapters", "syn_api"},
     ),
     "syn-adapters": (
         "packages/syn-adapters/src",
-        {"syn_api", "syn_cli"},
+        {"syn_api"},
     ),
 }
 

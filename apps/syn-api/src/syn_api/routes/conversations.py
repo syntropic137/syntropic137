@@ -79,6 +79,47 @@ class ConversationMetadataResponse(BaseModel):
 # =============================================================================
 
 
+def _get_top_level_content(data: dict[str, Any]) -> str:
+    """Check top-level ``content`` / ``text`` fields."""
+    content = data.get("content") or data.get("text") or ""
+    if content and isinstance(content, str):
+        return content
+    return ""
+
+
+def _get_message_content(data: dict[str, Any]) -> str:
+    """Check nested ``message.content`` (Claude Code JSONL format)."""
+    msg = data.get("message")
+    if not isinstance(msg, dict):
+        return ""
+    msg_content = msg.get("content")
+    if isinstance(msg_content, str):
+        return msg_content
+    if isinstance(msg_content, list):
+        return next(
+            (p["text"] for p in msg_content if isinstance(p, dict) and p.get("text")),
+            "",
+        )
+    return ""
+
+
+def _get_result_content(data: dict[str, Any]) -> str:
+    """Check nested ``result.output`` / ``result.text``."""
+    result = data.get("result")
+    if isinstance(result, dict):
+        return result.get("output", "") or result.get("text", "")
+    return ""
+
+
+def _extract_content_preview(data: dict[str, Any]) -> str:
+    """Extract content text from a parsed JSONL object.
+
+    Checks top-level fields, then nested message.content (Claude Code format),
+    then result.output.
+    """
+    return _get_top_level_content(data) or _get_message_content(data) or _get_result_content(data)
+
+
 def _extract_line_fields(
     raw: str,
 ) -> tuple[str | None, str | None, str | None]:
@@ -94,8 +135,8 @@ def _extract_line_fields(
 
     event_type = data.get("type") or data.get("event_type")
     tool_name = data.get("tool_name") or data.get("name")
-    content = data.get("content") or data.get("text") or ""
-    preview = content[:200] if isinstance(content, str) and content else None
+    content = _extract_content_preview(data)
+    preview = content[:200] if content else None
     return event_type, tool_name, preview
 
 
@@ -182,9 +223,14 @@ async def get_conversation_metadata(
                 model=meta.get("model"),
                 total_input_tokens=meta.get("total_input_tokens", 0),
                 total_output_tokens=meta.get("total_output_tokens", 0),
-                tool_counts=meta.get("tool_counts", {}),
+                tool_counts=meta.get("tool_counts") or {},
                 started_at=meta.get("started_at"),
                 completed_at=meta.get("completed_at"),
+                size_bytes=meta.get("size_bytes"),
+                execution_id=meta.get("execution_id"),
+                workflow_id=meta.get("workflow_id"),
+                phase_id=meta.get("phase_id"),
+                success=meta.get("success"),
             )
         )
     except Exception as e:
@@ -203,6 +249,11 @@ async def get_conversation_log_endpoint(
     limit: int = 100,
 ) -> ConversationLogResponse:
     """Get conversation log for a session."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     if limit > 500:
         limit = 500
 
@@ -241,19 +292,30 @@ async def get_conversation_log_endpoint(
     )
 
 
-@router.get("/{session_id}/metadata", response_model=ConversationMetadataResponse | None)
+@router.get("/{session_id}/metadata", response_model=ConversationMetadataResponse)
 async def get_conversation_metadata_endpoint(
     session_id: str,
-) -> ConversationMetadataResponse | None:
+) -> ConversationMetadataResponse:
     """Get conversation metadata for a session."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_conversation_metadata(session_id)
 
     if isinstance(result, Err):
-        return None
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving conversation metadata: {result.message}",
+        )
 
     meta = result.value
     if meta is None:
-        return None
+        raise HTTPException(
+            status_code=404,
+            detail=f"No metadata found for session: {session_id}",
+        )
 
     return ConversationMetadataResponse(
         session_id=session_id,
@@ -264,4 +326,9 @@ async def get_conversation_metadata_endpoint(
         started_at=str(meta.started_at) if meta.started_at else None,
         completed_at=str(meta.completed_at) if meta.completed_at else None,
         model=meta.model,
+        size_bytes=meta.size_bytes,
+        execution_id=meta.execution_id,
+        workflow_id=meta.workflow_id,
+        phase_id=meta.phase_id,
+        success=meta.success,
     )

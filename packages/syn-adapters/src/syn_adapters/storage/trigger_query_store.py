@@ -1,15 +1,26 @@
 """Persistent TriggerQueryStore backed by ProjectionStoreProtocol.
 
 Reads from the same projection tables that TriggerQueryProjection writes to.
-All write methods are no-ops — writes come exclusively from the projection
+Most write methods are no-ops — writes come exclusively from the projection
 processing domain events.
+
+Running-execution tracking is in-memory: populated by record_fire(), cleared
+by complete_execution().  This is correct because on restart no executions
+survive (containers are ephemeral) — the in-memory set starts empty and the
+poller catch-up won't be blocked.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerCondition import (
+        TriggerCondition,
+    )
 
 from syn_domain.contexts.github._shared.trigger_query_store import (
     TriggerQueryStore,
@@ -26,17 +37,24 @@ NS_FIRE_RECORDS = "trigger_fire_records"
 NS_DELIVERIES = "trigger_deliveries"
 
 
-def _build_optional_filters(**kwargs: str | None) -> dict[str, Any] | None:
+def _build_optional_filters(**kwargs: str | None) -> dict[str, str] | None:
     """Build a filters dict from non-None keyword arguments, or None if empty."""
     filters = {k: v for k, v in kwargs.items() if v is not None}
     return filters or None
 
 
-def _parse_trigger_config(config_data: Any) -> TriggerConfig:
-    """Parse a TriggerConfig from raw projection store data."""
-    if isinstance(config_data, dict):
-        return TriggerConfig(**config_data) if config_data else TriggerConfig()
-    return config_data
+def _parse_trigger_config(config_data: dict[str, int | float] | TriggerConfig) -> TriggerConfig:
+    """Parse a TriggerConfig from raw projection store data, ignoring unknown keys."""
+    if isinstance(config_data, TriggerConfig):
+        return config_data
+    if not config_data:
+        return TriggerConfig()
+    return TriggerConfig(
+        max_attempts=int(config_data.get("max_attempts", 3)),
+        daily_limit=int(config_data.get("daily_limit", 20)),
+        debounce_seconds=int(config_data.get("debounce_seconds", 0)),
+        cooldown_seconds=int(config_data.get("cooldown_seconds", 300)),
+    )
 
 
 def _latest_fired_at(records: list[dict[str, Any]]) -> datetime | None:
@@ -51,11 +69,19 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
     """TriggerQueryStore backed by PostgreSQL via ProjectionStoreProtocol.
 
     Reads from projection tables populated by TriggerQueryProjection.
-    Write methods are no-ops since all mutations flow through events.
+    Most write methods are no-ops since all mutations flow through events.
+
+    Running-execution tracking is in-memory (not persisted).  On restart,
+    no executions are running (containers are ephemeral), so starting with
+    an empty set is correct by design — see ADR-040 and AGENTS.md crash
+    recovery section.
     """
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
         self._store = store
+        # In-memory running execution tracking: execution_id → (trigger_id, pr_number)
+        # Mirrors InMemoryTriggerQueryStore._running_executions.
+        self._running_executions: dict[str, tuple[str, int | None]] = {}
 
     def _to_indexed_trigger(self, data: dict[str, Any]) -> _IndexedTrigger:
         """Reconstruct an _IndexedTrigger from projection store data."""
@@ -73,6 +99,12 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
             status=data.get("status", "active"),
         )
         trigger.fire_count = data.get("fire_count", 0)
+        raw_created_at = data.get("created_at")
+        if isinstance(raw_created_at, str):
+            trigger.created_at = datetime.fromisoformat(raw_created_at)
+        raw_last_fired = data.get("last_fired_at")
+        if isinstance(raw_last_fired, str):
+            trigger.last_fired_at = datetime.fromisoformat(raw_last_fired)
         return trigger
 
     # --- Read methods ---
@@ -150,12 +182,13 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         event: str,
         repository: str,
         workflow_id: str,
-        conditions: list[Any],
+        conditions: list[TriggerCondition | dict[str, object]],
         input_mapping: dict[str, str],
-        config: Any,
+        config: TriggerConfig,
         installation_id: str,
         created_by: str,
         status: str,
+        created_at: datetime | None = None,
     ) -> None:
         pass  # Writes come from TriggerQueryProjection
 
@@ -171,4 +204,20 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         pr_number: int | None,
         execution_id: str,
     ) -> None:
-        pass  # Writes come from TriggerQueryProjection
+        # Fire record persistence comes from TriggerQueryProjection.
+        # Running-execution tracking is in-memory for the concurrency guard.
+        self._running_executions[execution_id] = (trigger_id, pr_number)
+
+    async def has_running_execution(
+        self,
+        trigger_id: str,
+        pr_number: int | None,
+    ) -> bool:
+        """Check the in-memory running-execution set for this (trigger, PR) pair."""
+        return any(
+            tid == trigger_id and pr == pr_number for tid, pr in self._running_executions.values()
+        )
+
+    async def complete_execution(self, execution_id: str) -> None:
+        """Clear the running state for a completed/failed execution."""
+        self._running_executions.pop(execution_id, None)

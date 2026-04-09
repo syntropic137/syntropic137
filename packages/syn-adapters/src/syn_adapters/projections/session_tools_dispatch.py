@@ -6,8 +6,13 @@ Extracted from session_tools_queries.py to reduce module complexity.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    import asyncpg
+
+    from syn_adapters.projections.session_tools import ToolOperation
 
 from syn_adapters.projections.session_tools_converters import (
     row_to_git_operation,
@@ -23,7 +28,7 @@ from syn_shared.events import (
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
 
 
-def _parse_row_data(row: Any) -> dict[str, Any]:
+def _parse_row_data(row: asyncpg.Record) -> dict[str, Any]:
     """Extract and decode the data field from a database row."""
     data = row["data"]
     if isinstance(data, str):
@@ -41,7 +46,9 @@ def _is_subagent_tool_event(
     return tool_name in subagent_tool_names
 
 
-def _build_standard_operation(row: Any, data: dict[str, Any], event_type: str) -> Any:
+def _build_standard_operation(
+    row: asyncpg.Record, data: dict[str, Any], event_type: str
+) -> ToolOperation:
     """Build a ToolOperation for a standard tool event."""
     from syn_adapters.projections.session_tools import ToolOperation
 
@@ -63,10 +70,10 @@ def _build_standard_operation(row: Any, data: dict[str, Any], event_type: str) -
 
 
 def row_to_operation(
-    row: Any,
+    row: asyncpg.Record,
     subagent_tool_names: set[str],
     git_event_types: tuple[str, ...],
-) -> Any | None:
+) -> ToolOperation | None:
     """Convert a database row to a ToolOperation.
 
     Dispatches to specialized handlers based on event type.

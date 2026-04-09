@@ -27,7 +27,6 @@ Example Usage:
 See ADR-040: Ports Per Bounded Context for architectural decisions.
 """
 
-from syn_domain.contexts.orchestration.ports.AgentFactoryPort import AgentFactoryPort
 from syn_domain.contexts.orchestration.ports.ArtifactContentStoragePort import (
     ArtifactContentStoragePort,
 )
@@ -57,8 +56,6 @@ from syn_domain.contexts.orchestration.ports.WorkspaceServicePort import (
 )
 
 __all__ = [
-    # Factory Ports
-    "AgentFactoryPort",
     "ArtifactContentStoragePort",
     "ArtifactQueryServicePort",
     "ArtifactRepositoryPort",

@@ -5,6 +5,9 @@ Provides session event queries, timelines, cost summaries, and tool summaries.
 
 from __future__ import annotations
 
+from datetime import (
+    datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
+)
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -22,6 +25,8 @@ from syn_api.types import (
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.projections.manager import ProjectionManager
+    from syn_adapters.projections.session_tools import ToolOperation as AdapterToolOperation
     from syn_api.auth import AuthContext
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -35,7 +40,7 @@ router = APIRouter(prefix="/events", tags=["events"])
 class EventResponse(BaseModel):
     """Single event response."""
 
-    time: Any
+    time: datetime | str | None = None
     event_type: str
     session_id: str | None = None
     execution_id: str | None = None
@@ -54,7 +59,7 @@ class EventListResponse(BaseModel):
 class TimelineEntryResponse(BaseModel):
     """Timeline entry for visualization."""
 
-    time: Any
+    time: datetime | str | None = None
     event_type: str
     tool_name: str | None = None
     duration_ms: int | None = None
@@ -165,7 +170,9 @@ async def get_session_timeline(
         return Err(ObservabilityError.QUERY_FAILED, message=str(e))
 
 
-def _accumulate_tool_stats(operations: list[Any]) -> dict[str, dict[str, int | float]]:
+def _accumulate_tool_stats(
+    operations: list[AdapterToolOperation],
+) -> dict[str, dict[str, int | float]]:
     """Aggregate tool operation stats by tool name."""
     tool_stats: dict[str, dict[str, int | float]] = {}
     for op in operations:
@@ -220,15 +227,17 @@ async def get_session_tool_summary(
 
 async def get_recent_activity_events(
     limit: int = 50,
+    event_type: str | None = None,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[dict[str, Any]], ObservabilityError]:
-    """Get recent git/activity events for the global dashboard feed.
+    """Get recent activity events for the global dashboard feed.
 
-    Returns the most recent git_commit, git_push, git_branch_changed, and
-    git_operation events across all sessions, ordered newest-first.
+    When event_type is provided, filters to that single type.
+    Otherwise returns all event types, ordered newest-first.
 
     Args:
         limit: Maximum events to return.
+        event_type: Optional event type filter (e.g. "git_commit").
         auth: Optional authentication context.
 
     Returns:
@@ -238,17 +247,14 @@ async def get_recent_activity_events(
     try:
         store = get_event_store_instance()
         await store.initialize()
-        events = await store.query_recent_by_types(
-            event_types=["git_commit", "git_push", "git_branch_changed", "git_operation"],
-            limit=limit,
-        )
+        events = await store.query_recent(limit=limit, event_type=event_type)
         return Ok(events)
     except Exception as e:
         return Err(ObservabilityError.QUERY_FAILED, message=str(e))
 
 
 async def _get_session_token_metrics(
-    manager: Any, session_id: str
+    manager: ProjectionManager, session_id: str
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single session."""
     cost = await manager.session_cost.get_session_cost(session_id)
@@ -268,7 +274,7 @@ async def _get_session_token_metrics(
 
 
 async def _get_execution_token_metrics(
-    manager: Any, execution_id: str
+    manager: ProjectionManager, execution_id: str
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Build token metrics dict for a single execution."""
     exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
@@ -326,9 +332,10 @@ async def get_token_metrics(
 @router.get("/recent", response_model=EventListResponse)
 async def get_recent_activity_endpoint(
     limit: int = Query(50, ge=1, le=200, description="Max events to return"),
+    event_type: str | None = Query(None, description="Filter by event type"),
 ) -> EventListResponse:
-    """Get recent git activity events for the global dashboard feed."""
-    result = await get_recent_activity_events(limit=limit)
+    """Get recent activity events for the global dashboard feed."""
+    result = await get_recent_activity_events(limit=limit, event_type=event_type)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=f"Failed to query activity: {result.message}")
@@ -357,6 +364,10 @@ async def get_session_events_endpoint(
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ) -> EventListResponse:
     """Get all events for a session."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_session_events(
         session_id=session_id,
         event_type=event_type,
@@ -395,6 +406,10 @@ async def get_session_timeline_endpoint(
     limit: int = Query(100, ge=1, le=500, description="Max entries"),
 ) -> list[TimelineEntryResponse]:
     """Get a timeline view of session events."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_session_timeline(session_id=session_id, limit=limit)
 
     if isinstance(result, Err):
@@ -415,6 +430,10 @@ async def get_session_timeline_endpoint(
 @router.get("/sessions/{session_id}/costs", response_model=CostSummaryResponse)
 async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
     """Get cost summary for a session."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_token_metrics(session_id=session_id)
 
     if isinstance(result, Err):
@@ -435,6 +454,10 @@ async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
 @router.get("/sessions/{session_id}/tools", response_model=list[ToolSummary])
 async def get_session_tools_endpoint(session_id: str) -> list[ToolSummary]:
     """Get tool usage summary for a session."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    session_id = await resolve_or_raise(mgr.store, "session_summaries", session_id, "Session")
     result = await get_session_tool_summary(session_id=session_id)
 
     if isinstance(result, Err):

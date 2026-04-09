@@ -244,12 +244,18 @@ pnpm check:api-drift
 
 ## API Type Safety
 
-Response types are generated from the OpenAPI spec (`apps/syn-docs/openapi.json`) using `openapi-typescript`. Commands import these types and pass them as generics to `apiGet<T>()` / `apiPost<T>()`, so the TypeScript compiler catches any mismatch between the CLI and API.
+All commands use the typed API client powered by [openapi-fetch](https://openapi-ts.dev/openapi-fetch/). Response types are generated from the OpenAPI spec (`apps/syn-docs/openapi.json`) using `openapi-typescript`, giving compile-time path validation and fully typed responses.
 
 ```typescript
-import type { ExecutionListResponse } from "../generated/types.js";
+import { api, unwrap } from "../client/typed.js";
+import type { components } from "../generated/api-types.js";
 
-const data = await apiGet<ExecutionListResponse>("/executions", { params });
+type ExecutionList = components["schemas"]["ExecutionListResponse"];
+
+const data = unwrap(
+  await api.GET("/executions", { params: { query: { status: "running" } } }),
+  "List executions",
+);
 // data.executions is typed as ExecutionSummaryResponse[]
 // data.total is typed as number
 ```
@@ -258,6 +264,7 @@ If the API spec changes:
 1. `pnpm generate:types` regenerates the types
 2. `tsc` catches any CLI code that doesn't match the new schema
 3. `pnpm check:api-drift` in CI flags stale generated types
+4. `pnpm check:untyped-api` in CI prevents use of the deprecated untyped client
 
 ## License
 

@@ -1,11 +1,11 @@
 """API routers."""
 
-from syn_api.routes.agents import router as agents_router
 from syn_api.routes.artifacts import router as artifacts_router
 from syn_api.routes.conversations import router as conversations_router
 from syn_api.routes.costs import router as costs_router
 from syn_api.routes.events import router as events_router
 from syn_api.routes.executions import router as executions_router
+from syn_api.routes.github import router as github_router
 from syn_api.routes.insights import router as insights_router
 from syn_api.routes.metrics import router as metrics_router
 from syn_api.routes.observability import router as observability_router
@@ -19,12 +19,12 @@ from syn_api.routes.webhooks import router as webhooks_router
 from syn_api.routes.workflows import router as workflows_router
 
 __all__ = [
-    "agents_router",
     "artifacts_router",
     "conversations_router",
     "costs_router",
     "events_router",
     "executions_router",
+    "github_router",
     "insights_router",
     "metrics_router",
     "observability_router",

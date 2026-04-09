@@ -1,6 +1,6 @@
 [project]
 name = "syn-adapters"
-version = "0.20.1"
+version = "0.23.2"
 description = "External integrations for Syntropic137"
 requires-python = ">=3.12"
 
@@ -12,24 +12,16 @@ dependencies = [
     "agentic-events", # Simple event emission (ADR-029)
     "agentic-isolation", # Workspace isolation (ADR-021 from agentic-primitives)
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
-    "anthropic>=0.75.0",
     "pyyaml>=6.0.3",
     "pyjwt>=2.12.0",
     "cryptography>=46.0.5",
     "redis>=5.0.0",
+    "httpx==0.28.1",
 ]
 
 [project.optional-dependencies]
 postgres = [
     "asyncpg>=0.30.0",
-]
-# Chat completion adapter (direct Anthropic API)
-claude = [
-    "anthropic>=0.42.0",
-]
-# Install all chat completion agent adapters
-agents = [
-    "anthropic>=0.42.0",
 ]
 # MinIO storage adapter
 minio = [
@@ -38,7 +30,6 @@ minio = [
 # Install everything
 all = [
     "asyncpg>=0.30.0",
-    "anthropic>=0.42.0",
     "minio>=7.2.0",
 ]
 

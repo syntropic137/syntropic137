@@ -6,7 +6,7 @@ Pause, resume, cancel, inject, and state inspection for running executions.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -26,6 +26,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["control"])
+
+
+async def _resolve_execution_id(execution_id: str) -> str:
+    """Resolve a (possibly partial) execution ID via prefix matching."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    return await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
 
 
 # =============================================================================
@@ -204,7 +215,9 @@ async def get_state(
 # =============================================================================
 
 
-async def _handle_control_result(result: Any, _action: str = "") -> ControlResponse:
+async def _handle_control_result(
+    result: Result[ControlResult, ExecutionError], _action: str = ""
+) -> ControlResponse:
     """Convert control result to HTTP response."""
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
@@ -227,6 +240,7 @@ async def pause_execution_endpoint(
     request: PauseRequest | None = None,
 ) -> ControlResponse:
     """Pause a running execution."""
+    execution_id = await _resolve_execution_id(execution_id)
     result = await pause(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "pause")
 
@@ -234,6 +248,7 @@ async def pause_execution_endpoint(
 @router.post("/executions/{execution_id}/resume", response_model=ControlResponse)
 async def resume_execution_endpoint(execution_id: str) -> ControlResponse:
     """Resume a paused execution."""
+    execution_id = await _resolve_execution_id(execution_id)
     result = await resume(execution_id)
     return await _handle_control_result(result, "resume")
 
@@ -244,6 +259,7 @@ async def cancel_execution_endpoint(
     request: CancelRequest | None = None,
 ) -> ControlResponse:
     """Cancel a running or paused execution."""
+    execution_id = await _resolve_execution_id(execution_id)
     result = await cancel(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "cancel")
 
@@ -254,6 +270,7 @@ async def inject_context_endpoint(
     request: InjectRequest,
 ) -> ControlResponse:
     """Inject a message into the execution context."""
+    execution_id = await _resolve_execution_id(execution_id)
     result = await inject(execution_id, message=request.message, role=request.role)
     return await _handle_control_result(result, "inject")
 
@@ -261,6 +278,13 @@ async def inject_context_endpoint(
 @router.get("/executions/{execution_id}/state", response_model=StateResponse)
 async def get_execution_state_endpoint(execution_id: str) -> StateResponse:
     """Get current execution state."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    execution_id = await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
     result = await get_state(execution_id)
 
     state_val = "unknown"

@@ -33,6 +33,12 @@ class PhaseExecutionDetail:
     output_tokens: int = 0
     """Output tokens used."""
 
+    cache_creation_tokens: int = 0
+    """Cache creation (write) tokens used."""
+
+    cache_read_tokens: int = 0
+    """Cache read tokens used."""
+
     total_tokens: int = 0
     """Total tokens used."""
 
@@ -71,6 +77,8 @@ class PhaseExecutionDetail:
             "artifact_id": self.artifact_id,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
             "total_tokens": self.total_tokens,
             "duration_seconds": self.duration_seconds,
             "cost_usd": str(self.cost_usd),
@@ -101,6 +109,8 @@ class PhaseExecutionDetail:
             artifact_id=data.get("artifact_id"),
             input_tokens=data.get("input_tokens", 0),
             output_tokens=data.get("output_tokens", 0),
+            cache_creation_tokens=data.get("cache_creation_tokens", 0),
+            cache_read_tokens=data.get("cache_read_tokens", 0),
             total_tokens=data.get("total_tokens", 0),
             duration_seconds=data.get("duration_seconds", 0.0),
             cost_usd=cost,

@@ -21,7 +21,7 @@ export async function listExecutions(
 }
 
 export async function getExecution(executionId: string): Promise<ExecutionDetailResponse> {
-  return fetchJSON(`${API_BASE}/executions/${executionId}`)
+  return fetchJSON<ExecutionDetailResponse>(`${API_BASE}/executions/${executionId}`)
 }
 
 export async function listAllExecutions(params?: {

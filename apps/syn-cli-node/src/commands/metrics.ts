@@ -4,12 +4,11 @@
  */
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
-import { apiGet } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
 import { print, printDim } from "../output/console.js";
 import { style, BOLD, CYAN } from "../output/ansi.js";
 import { formatCost, formatDuration, formatStatus, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
-import type { MetricsResponse } from "../generated/types.js";
 
 const showCommand: CommandDef = {
   name: "show",
@@ -19,10 +18,10 @@ const showCommand: CommandDef = {
   },
   handler: async (parsed: ParsedArgs) => {
     const workflow = (parsed.values["workflow"] as string | undefined) ?? null;
-    const params: Record<string, string> = {};
-    if (workflow) params["workflow_id"] = workflow;
 
-    const d = await apiGet<MetricsResponse>("/metrics", { params });
+    const d = unwrap(await api.GET("/metrics", {
+      params: { query: { workflow_id: workflow } },
+    }), "Fetch metrics");
 
     print(style("Aggregated Metrics", CYAN));
     print(`  ${style("Workflows:", BOLD)}     ${d.total_workflows}`);

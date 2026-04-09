@@ -4,8 +4,13 @@ Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 Keyed by workflow_id; accumulates token/cost/duration per phase_id.
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import AutoDispatchProjection
 
@@ -23,7 +28,7 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workflow_phase_metrics"
     VERSION = 1
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
         self._store = store
 
     def get_name(self) -> str:

@@ -43,7 +43,7 @@ class MockEventsClient:
         )
         self.poll_count = 0
 
-    async def poll_repo_events(self, owner: str, repo: str, installation_id: str) -> Any:
+    async def poll_repo_events(self, owner: str, repo: str, installation_id: str) -> Any:  # noqa: ANN401
         self.poll_count += 1
         return self._response
 
@@ -222,3 +222,46 @@ class TestPollerStartStop:
 
         # The event's dedup key should have been recorded
         assert len(dedup._seen) >= 1
+
+    @pytest.mark.asyncio
+    async def test_skips_repos_without_installation_id(self) -> None:
+        """Repos with empty or missing installation_id must not be polled (ISS-542)."""
+        clock = FakeClock(start=1000.0)
+        store = InMemoryTriggerQueryStore()
+
+        # Index triggers with empty / missing installation_id
+        for idx, inst_id in enumerate(["", "  "]):
+            await store.index_trigger(
+                trigger_id=f"tr-empty-{idx}",
+                name=f"trigger-no-inst-{idx}",
+                event="push",
+                repository=f"owner/repo-{idx}",
+                workflow_id="wf-001",
+                conditions=[],
+                input_mapping={},
+                config=TriggerConfig(),
+                installation_id=inst_id,
+                created_by="test",
+                status="active",
+            )
+
+        mock_client = MockEventsClient()
+        poller = GitHubEventPoller(
+            events_client=mock_client,
+            pipeline=EventPipeline(
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
+            ),
+            health_tracker=WebhookHealthTracker(clock=clock),
+            trigger_store=store,
+            settings=MockPollingSettings(),  # type: ignore[arg-type]
+            sleep=_instant_sleep,
+        )
+
+        await poller.start()
+        # Let the poller run a few cycles — no valid repos to poll
+        await asyncio.sleep(0.05)
+        await poller.stop()
+
+        # No API calls should have been made
+        assert mock_client.poll_count == 0

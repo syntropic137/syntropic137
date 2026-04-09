@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -91,12 +92,46 @@ async def _load_phase_operations(
         return []
 
 
+class _SessionCostData(NamedTuple):
+    cache_creation: int
+    cache_read: int
+    agent_model: str | None
+    cost_by_model: dict[str, Decimal]
+
+
+async def _load_session_cost(
+    manager: ProjectionManager, session_id: str, phase: PhaseExecutionDetail
+) -> _SessionCostData:
+    """Load session cost enrichment data (cache tokens, model info)."""
+    cache_creation = phase.cache_creation_tokens
+    cache_read = phase.cache_read_tokens
+    agent_model: str | None = None
+    cost_by_model: dict[str, Decimal] = {}
+    try:
+        sc = await manager.session_cost.get_session_cost(session_id)
+        if sc is not None:
+            if cache_creation == 0 and cache_read == 0:
+                cache_creation = sc.cache_creation_tokens
+                cache_read = sc.cache_read_tokens
+            agent_model = sc.agent_model
+            cost_by_model = dict(sc.cost_by_model)
+    except Exception:
+        logger.debug("Failed to load session cost for %s", session_id, exc_info=True)
+    return _SessionCostData(cache_creation, cache_read, agent_model, cost_by_model)
+
+
 async def _map_phase_detail(
     phase: PhaseExecutionDetail,
     manager: ProjectionManager,
 ) -> PhaseExecution:
     """Map a domain phase to an API PhaseExecution."""
     ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else []
+
+    if phase.session_id:
+        sc = await _load_session_cost(manager, phase.session_id, phase)
+    else:
+        sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, {})
+
     return PhaseExecution(
         phase_id=phase.workflow_phase_id,
         name=phase.name,
@@ -105,10 +140,14 @@ async def _map_phase_detail(
         artifact_id=phase.artifact_id,
         input_tokens=phase.input_tokens,
         output_tokens=phase.output_tokens,
+        cache_creation_tokens=sc.cache_creation,
+        cache_read_tokens=sc.cache_read,
         cost_usd=Decimal(str(phase.cost_usd)),
         duration_seconds=phase.duration_seconds,
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
+        model=sc.agent_model,
+        cost_by_model=sc.cost_by_model,
         operations=ops,
     )
 
@@ -134,11 +173,18 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         artifact_id=phase.artifact_id,
         input_tokens=phase.input_tokens,
         output_tokens=phase.output_tokens,
-        total_tokens=phase.input_tokens + phase.output_tokens,
+        cache_creation_tokens=phase.cache_creation_tokens,
+        cache_read_tokens=phase.cache_read_tokens,
+        total_tokens=phase.input_tokens
+        + phase.output_tokens
+        + phase.cache_creation_tokens
+        + phase.cache_read_tokens,
         duration_seconds=phase.duration_seconds or 0.0,
         cost_usd=Decimal(str(phase.cost_usd)),
         started_at=str(phase.started_at) if phase.started_at else None,
         completed_at=str(phase.completed_at) if phase.completed_at else None,
+        model=phase.model,
+        cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
         operations=operations,
     )
 
@@ -219,9 +265,26 @@ async def get(
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionDetail, ExecutionError]:
     await ensure_connected()
-    detail = await get_projection_mgr().workflow_execution_detail.get_by_id(execution_id)
+    manager = get_projection_mgr()
+    detail = await manager.workflow_execution_detail.get_by_id(execution_id)
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
+
+    # Enrich with TimescaleDB cost data when available (#505)
+    total_input = detail.total_input_tokens
+    total_output = detail.total_output_tokens
+    total_cost = detail.total_cost_usd
+    total_duration = detail.total_duration_seconds
+
+    with contextlib.suppress(Exception):
+        exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
+        if exec_cost is not None and exec_cost.total_tokens > 0:
+            total_input = exec_cost.input_tokens
+            total_output = exec_cost.output_tokens
+            total_cost = exec_cost.total_cost_usd
+            if exec_cost.duration_ms > 0:
+                total_duration = exec_cost.duration_ms / 1000.0
+
     return Ok(
         ExecutionDetail(
             workflow_execution_id=detail.workflow_execution_id,
@@ -230,14 +293,40 @@ async def get(
             status=detail.status,
             started_at=detail.started_at,
             completed_at=detail.completed_at,
-            total_input_tokens=detail.total_input_tokens,
-            total_output_tokens=detail.total_output_tokens,
-            total_cost_usd=detail.total_cost_usd,
-            total_duration_seconds=detail.total_duration_seconds,
+            total_input_tokens=total_input,
+            total_output_tokens=total_output,
+            total_cost_usd=total_cost,
+            total_duration_seconds=total_duration,
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
         )
     )
+
+
+async def _enrich_costs(
+    execution_id: str,
+    manager: object,
+    phases: list[PhaseExecution],
+    fallback_tokens: int,
+    fallback_cost: Decimal | str,
+) -> tuple[int, Decimal | str]:
+    """Enrich execution and phase costs from TimescaleDB (#505)."""
+    try:
+        exec_cost = await manager.execution_cost.get_execution_cost(execution_id)  # type: ignore[attr-defined]
+    except Exception:
+        logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
+        return fallback_tokens, fallback_cost
+
+    if exec_cost is None or exec_cost.total_tokens == 0:
+        return fallback_tokens, fallback_cost
+
+    if exec_cost.cost_by_phase:
+        for phase in phases:
+            phase_cost = exec_cost.cost_by_phase.get(phase.phase_id)
+            if phase_cost is not None:
+                phase.cost_usd = phase_cost
+
+    return exec_cost.total_tokens, exec_cost.total_cost_usd
 
 
 async def get_detail(
@@ -250,6 +339,15 @@ async def get_detail(
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     phases = [await _map_phase_detail(p, manager) for p in detail.phases]
+
+    total_tokens, total_cost = await _enrich_costs(
+        execution_id,
+        manager,
+        phases,
+        fallback_tokens=detail.total_input_tokens + detail.total_output_tokens,
+        fallback_cost=detail.total_cost_usd,
+    )
+
     return Ok(
         ExecutionDetailFull(
             workflow_execution_id=detail.workflow_execution_id,
@@ -257,8 +355,8 @@ async def get_detail(
             workflow_name=detail.workflow_name,
             status=detail.status,
             phases=phases,
-            total_tokens=detail.total_input_tokens + detail.total_output_tokens,
-            total_cost_usd=detail.total_cost_usd,
+            total_tokens=total_tokens,
+            total_cost_usd=total_cost,
             started_at=detail.started_at,
             completed_at=detail.completed_at,
             error_message=detail.error_message,
@@ -325,6 +423,7 @@ async def list_executions_endpoint(
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 tool_call_count=e.tool_call_count,
+                error_message=e.error_message,
             )
             for e in result.value
         ],
@@ -336,7 +435,14 @@ async def list_executions_endpoint(
 
 @router.get("/executions/{execution_id}", response_model=ExecutionDetailResponse)
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
-    """Get detailed information about a workflow execution run."""
+    """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    execution_id = await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
     result = await get_detail(execution_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
@@ -344,6 +450,8 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     phases = [_map_phase_to_response(p) for p in detail.phases or []]
     total_input = sum(p.input_tokens for p in detail.phases or [])
     total_output = sum(p.output_tokens for p in detail.phases or [])
+    total_cache_creation = sum(p.cache_creation_tokens for p in phases)
+    total_cache_read = sum(p.cache_read_tokens for p in phases)
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
     return ExecutionDetailResponse(
         workflow_execution_id=detail.workflow_execution_id,
@@ -355,7 +463,12 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         phases=phases,
         total_input_tokens=total_input,
         total_output_tokens=total_output,
-        total_tokens=detail.total_tokens,
+        cache_creation_tokens=total_cache_creation,
+        cache_read_tokens=total_cache_read,
+        total_tokens=max(
+            detail.total_tokens,
+            total_input + total_output + total_cache_creation + total_cache_read,
+        ),
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
         artifact_ids=artifact_ids,
         error_message=detail.error_message,

@@ -15,7 +15,15 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerCondition import (
+        TriggerCondition,
+    )
+    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import (
+        TriggerConfig,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +43,13 @@ class TriggerQueryStore(ABC):
         event: str,
         repository: str,
         workflow_id: str,
-        conditions: list[Any],
+        conditions: list[TriggerCondition | dict[str, object]],
         input_mapping: dict[str, str],
-        config: Any,
+        config: TriggerConfig,
         installation_id: str,
         created_by: str,
         status: str,
+        created_at: datetime | None = None,
     ) -> None:
         """Index a trigger for fast lookups."""
         ...
@@ -51,12 +60,12 @@ class TriggerQueryStore(ABC):
         ...
 
     @abstractmethod
-    async def get(self, trigger_id: str) -> Any | None:
+    async def get(self, trigger_id: str) -> _IndexedTrigger | None:
         """Get a trigger by ID from the index."""
         ...
 
     @abstractmethod
-    async def list_by_event_and_repo(self, event: str, repository: str) -> list[Any]:
+    async def list_by_event_and_repo(self, event: str, repository: str) -> list[_IndexedTrigger]:
         """List active triggers matching an event and repository."""
         ...
 
@@ -65,7 +74,7 @@ class TriggerQueryStore(ABC):
         self,
         repository: str | None = None,
         status: str | None = None,
-    ) -> list[Any]:
+    ) -> list[_IndexedTrigger]:
         """List all triggers with optional filters."""
         ...
 
@@ -111,6 +120,38 @@ class TriggerQueryStore(ABC):
         """Record a trigger firing."""
         ...
 
+    @abstractmethod
+    async def has_running_execution(
+        self,
+        trigger_id: str,
+        pr_number: int | None,
+    ) -> bool:
+        """Check if there's an active (non-terminal) execution for this trigger+PR."""
+        ...
+
+    @abstractmethod
+    async def complete_execution(self, execution_id: str) -> None:
+        """Mark an execution as completed (no longer running)."""
+        ...
+
+
+class _FireRecord:
+    """Record of a trigger firing."""
+
+    __slots__ = ("execution_id", "fired_at", "pr_number", "trigger_id")
+
+    def __init__(
+        self,
+        trigger_id: str,
+        pr_number: int | None,
+        execution_id: str,
+        fired_at: datetime,
+    ) -> None:
+        self.trigger_id = trigger_id
+        self.pr_number = pr_number
+        self.execution_id = execution_id
+        self.fired_at = fired_at
+
 
 class _IndexedTrigger:
     """Lightweight indexed trigger for query store."""
@@ -122,9 +163,9 @@ class _IndexedTrigger:
         event: str,
         repository: str,
         workflow_id: str,
-        conditions: list[Any],
+        conditions: list[TriggerCondition | dict[str, object]],
         input_mapping: dict[str, str],
-        config: Any,
+        config: TriggerConfig,
         installation_id: str,
         created_by: str,
         status: str,
@@ -155,8 +196,13 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
 
     def __init__(self) -> None:
         self._triggers: dict[str, _IndexedTrigger] = {}
-        self._fire_records: list[dict] = []
+        self._fire_records: list[_FireRecord] = []
         self._processed_deliveries: set[str] = set()
+        # Concurrency guard (Guard 6): in-memory running-execution tracking.
+        # Populated by record_fire(), cleared by complete_execution().
+        # Intentionally NOT persisted — on restart no containers survive,
+        # so an empty set is the correct initial state. See ADR-040 §4.
+        self._running_executions: dict[str, tuple[str, int | None]] = {}
 
     async def index_trigger(
         self,
@@ -165,14 +211,15 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         event: str,
         repository: str,
         workflow_id: str,
-        conditions: list[Any],
+        conditions: list[TriggerCondition | dict[str, object]],
         input_mapping: dict[str, str],
-        config: Any,
+        config: TriggerConfig,
         installation_id: str,
         created_by: str,
         status: str,
+        created_at: datetime | None = None,
     ) -> None:
-        self._triggers[trigger_id] = _IndexedTrigger(
+        trigger = _IndexedTrigger(
             trigger_id=trigger_id,
             name=name,
             event=event,
@@ -185,6 +232,8 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
             created_by=created_by,
             status=status,
         )
+        trigger.created_at = created_at or datetime.now(UTC)
+        self._triggers[trigger_id] = trigger
 
     async def update_status(self, trigger_id: str, status: str) -> None:
         trigger = self._triggers.get(trigger_id)
@@ -215,27 +264,23 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
 
     async def get_fire_count(self, trigger_id: str, pr_number: int) -> int:
         return sum(
-            1
-            for r in self._fire_records
-            if r["trigger_id"] == trigger_id and r.get("pr_number") == pr_number
+            1 for r in self._fire_records if r.trigger_id == trigger_id and r.pr_number == pr_number
         )
 
     async def get_last_fired_at(self, trigger_id: str, pr_number: int) -> datetime | None:
         matching = [
-            r
-            for r in self._fire_records
-            if r["trigger_id"] == trigger_id and r.get("pr_number") == pr_number
+            r for r in self._fire_records if r.trigger_id == trigger_id and r.pr_number == pr_number
         ]
         if not matching:
             return None
-        return max(r["fired_at"] for r in matching)
+        return max(r.fired_at for r in matching)
 
     async def get_daily_fire_count(self, trigger_id: str) -> int:
         today = datetime.now(UTC).date()
         return sum(
             1
             for r in self._fire_records
-            if r["trigger_id"] == trigger_id and r["fired_at"].date() == today
+            if r.trigger_id == trigger_id and r.fired_at.date() == today
         )
 
     async def get_last_any_fired_at(
@@ -244,12 +289,12 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         matching = [
             r
             for r in self._fire_records
-            if r.get("pr_number") == pr_number
-            and (exclude_trigger_id is None or r["trigger_id"] != exclude_trigger_id)
+            if r.pr_number == pr_number
+            and (exclude_trigger_id is None or r.trigger_id != exclude_trigger_id)
         ]
         if not matching:
             return None
-        return max(r["fired_at"] for r in matching)
+        return max(r.fired_at for r in matching)
 
     async def was_delivery_processed(self, delivery_id: str) -> bool:
         return delivery_id in self._processed_deliveries
@@ -264,16 +309,30 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         execution_id: str,
     ) -> None:
         self._fire_records.append(
-            {
-                "trigger_id": trigger_id,
-                "pr_number": pr_number,
-                "execution_id": execution_id,
-                "fired_at": datetime.now(UTC),
-            }
+            _FireRecord(
+                trigger_id=trigger_id,
+                pr_number=pr_number,
+                execution_id=execution_id,
+                fired_at=datetime.now(UTC),
+            )
         )
         trigger = self._triggers.get(trigger_id)
         if trigger:
             trigger.fire_count += 1
+        # Track as running execution for concurrency guard
+        self._running_executions[execution_id] = (trigger_id, pr_number)
+
+    async def has_running_execution(
+        self,
+        trigger_id: str,
+        pr_number: int | None,
+    ) -> bool:
+        return any(
+            tid == trigger_id and pr == pr_number for tid, pr in self._running_executions.values()
+        )
+
+    async def complete_execution(self, execution_id: str) -> None:
+        self._running_executions.pop(execution_id, None)
 
 
 # --- Backward-compatible aliases ---

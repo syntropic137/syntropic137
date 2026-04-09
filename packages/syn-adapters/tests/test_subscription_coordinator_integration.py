@@ -75,6 +75,7 @@ def _make_envelope(
         event=event,
         metadata=EventMetadata(
             event_id=f"evt-{aggregate_id}-{nonce}",
+            event_type=event.event_type,
             aggregate_id=aggregate_id,
             aggregate_type="WorkflowTemplate",
             aggregate_nonce=nonce,

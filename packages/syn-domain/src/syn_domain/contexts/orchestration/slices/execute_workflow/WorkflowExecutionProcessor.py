@@ -436,11 +436,13 @@ class WorkflowExecutionProcessor:
         )
 
         if result.command.exit_code != 0:
-            msg = (
-                f"Agent execution failed for phase {todo.phase_id} "
-                f"(exit_code={result.command.exit_code}, "
-                f"tokens={result.tokens.input_tokens}+{result.tokens.output_tokens})"
+            reason = result.stream_result.error_reason
+            base = (
+                f"Agent failed: {reason} (phase={todo.phase_id}, exit_code={result.command.exit_code})"
+                if reason
+                else f"Agent execution failed for phase {todo.phase_id} (exit_code={result.command.exit_code})"
             )
+            msg = f"{base} (tokens={result.tokens.input_tokens}+{result.tokens.output_tokens})"
             logger.error(msg)
             raise RuntimeError(msg)
 

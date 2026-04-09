@@ -14,12 +14,14 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 @pytest.fixture(autouse=True)
 def _reset_storage():
-    """Reset in-memory storage between tests."""
+    """Reset all storage between tests (SDK repos + trigger query store)."""
     import syn_api._wiring
+    from syn_adapters.storage import reset_storage
     from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
         reset_trigger_store,
     )
 
+    reset_storage()
     reset_trigger_store()
     syn_api._wiring._test_trigger_repo = None
     yield
@@ -29,40 +31,48 @@ def _reset_storage():
 
 @pytest.fixture(autouse=True)
 async def _seed_test_workflows():
-    """Seed the in-memory workflow store with workflow IDs used by trigger tests.
+    """Seed workflow repository with workflow IDs used by trigger tests.
 
-    Trigger registration validates that the referenced workflow exists (via
-    InMemoryWorkflowRepository.exists), so we must create them first.
+    Trigger registration validates that the referenced workflow exists,
+    so we must create them first via the actual repository.
     """
     from syn_api._wiring import ensure_connected
 
     await ensure_connected()
 
-    from syn_adapters.storage.in_memory import get_event_store
+    from syn_adapters.storage.repositories import get_workflow_repository
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+        WorkflowClassification,
+        WorkflowType,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+        CreateWorkflowTemplateCommand,
+    )
 
-    store = get_event_store()
+    repo = get_workflow_repository()
     for wf_id in ("wf-1", "wf-2", "wf-3", "ci-fix-workflow", "wf-abc"):
-        store.append(
+        aggregate = WorkflowTemplateAggregate()
+        command = CreateWorkflowTemplateCommand(
             aggregate_id=wf_id,
-            aggregate_type="WorkflowTemplate",
-            event_type="WorkflowTemplateCreated",
-            event_data={
-                "workflow_id": wf_id,
-                "name": f"test-workflow-{wf_id}",
-                "workflow_type": "custom",
-                "classification": "simple",
-                "repository_url": "https://github.com/test/repo",
-                "repository_ref": "main",
-                "phases": [
-                    {
-                        "phase_id": "phase-1",
-                        "name": "phase1",
-                        "order": 1,
-                    }
-                ],
-            },
-            version=1,
+            name=f"test-workflow-{wf_id}",
+            workflow_type=WorkflowType.CUSTOM,
+            classification=WorkflowClassification.SIMPLE,
+            repository_url="https://github.com/test/repo",
+            repository_ref="main",
+            phases=[
+                PhaseDefinition(
+                    phase_id="phase-1",
+                    name="phase1",
+                    order=1,
+                ),
+            ],
         )
+        aggregate._handle_command(command)
+        await repo.save(aggregate)
 
 
 async def test_register_trigger():
@@ -191,7 +201,7 @@ async def test_pause_trigger():
 
 
 async def test_pause_already_paused():
-    """Pausing an already-paused trigger returns error."""
+    """Pausing an already-paused trigger returns error with descriptive message."""
     from syn_api.routes.triggers import pause_trigger, register_trigger
 
     reg_result = await register_trigger(
@@ -202,6 +212,37 @@ async def test_pause_already_paused():
     await pause_trigger(trigger_id)
     result = await pause_trigger(trigger_id)
     assert isinstance(result, Err)
+    assert result.error == "already_paused"
+    assert result.message is not None
+    assert "already paused" in result.message.lower()
+
+
+async def test_pause_deleted_trigger():
+    """Pausing a deleted trigger returns already-deleted error."""
+    from syn_api.routes.triggers import delete_trigger, pause_trigger, register_trigger
+
+    reg_result = await register_trigger(
+        name="pause-deleted", event="push", repository="owner/repo", workflow_id="wf-1"
+    )
+    trigger_id = reg_result.value
+
+    await delete_trigger(trigger_id)
+    result = await pause_trigger(trigger_id)
+    assert isinstance(result, Err)
+    assert result.error == "already_deleted"
+    assert result.message is not None
+    assert "deleted" in result.message.lower()
+
+
+async def test_pause_not_found():
+    """Pausing a nonexistent trigger returns not-found error."""
+    from syn_api.routes.triggers import pause_trigger
+
+    result = await pause_trigger("nonexistent-id")
+    assert isinstance(result, Err)
+    assert result.error == "not_found"
+    assert result.message is not None
+    assert "not found" in result.message.lower()
 
 
 async def test_resume_trigger():
@@ -239,8 +280,52 @@ async def test_delete_trigger():
     assert detail.value.status == "deleted"
 
 
+async def test_resume_active_trigger():
+    """Resuming an already-active trigger returns error with descriptive message."""
+    from syn_api.routes.triggers import register_trigger, resume_trigger
+
+    reg_result = await register_trigger(
+        name="resume-active", event="push", repository="owner/repo", workflow_id="wf-1"
+    )
+    trigger_id = reg_result.value
+
+    result = await resume_trigger(trigger_id)
+    assert isinstance(result, Err)
+    assert result.error == "already_active"
+    assert result.message is not None
+    assert "not paused" in result.message.lower()
+
+
+async def test_resume_deleted_trigger():
+    """Resuming a deleted trigger returns already-deleted error."""
+    from syn_api.routes.triggers import delete_trigger, register_trigger, resume_trigger
+
+    reg_result = await register_trigger(
+        name="resume-deleted", event="push", repository="owner/repo", workflow_id="wf-1"
+    )
+    trigger_id = reg_result.value
+
+    await delete_trigger(trigger_id)
+    result = await resume_trigger(trigger_id)
+    assert isinstance(result, Err)
+    assert result.error == "already_deleted"
+    assert result.message is not None
+    assert "deleted" in result.message.lower()
+
+
+async def test_resume_not_found():
+    """Resuming a nonexistent trigger returns not-found error."""
+    from syn_api.routes.triggers import resume_trigger
+
+    result = await resume_trigger("nonexistent-id")
+    assert isinstance(result, Err)
+    assert result.error == "not_found"
+    assert result.message is not None
+    assert "not found" in result.message.lower()
+
+
 async def test_delete_already_deleted():
-    """Deleting an already-deleted trigger returns error."""
+    """Deleting an already-deleted trigger returns error with descriptive message."""
     from syn_api.routes.triggers import delete_trigger, register_trigger
 
     reg_result = await register_trigger(
@@ -251,6 +336,20 @@ async def test_delete_already_deleted():
     await delete_trigger(trigger_id)
     result = await delete_trigger(trigger_id)
     assert isinstance(result, Err)
+    assert result.error == "already_deleted"
+    assert result.message is not None
+    assert "already been deleted" in result.message.lower()
+
+
+async def test_delete_not_found():
+    """Deleting a nonexistent trigger returns not-found error."""
+    from syn_api.routes.triggers import delete_trigger
+
+    result = await delete_trigger("nonexistent-id")
+    assert isinstance(result, Err)
+    assert result.error == "not_found"
+    assert result.message is not None
+    assert "not found" in result.message.lower()
 
 
 async def test_disable_triggers():

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+    TriggerBlockedResult,
     TriggerDeferredResult,
     TriggerMatchResult,
 )
@@ -15,6 +18,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_evaluator import TriggerEvaluator
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
+
+type _ObserverCallback = Callable[[NormalizedEvent], Coroutine[object, object, None]]
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,7 @@ class PipelineResult:
     event_type: str
     triggers_fired: list[str] = field(default_factory=list)
     deferred: list[str] = field(default_factory=list)
+    blocked: list[str] = field(default_factory=list)
 
 
 class EventPipeline:
@@ -51,6 +57,19 @@ class EventPipeline:
     ) -> None:
         self._dedup = dedup
         self._evaluator = evaluator
+        self._observers: list[_ObserverCallback] = []
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
+    def add_observer(self, callback: _ObserverCallback) -> None:
+        """Register a callback notified after each non-deduplicated event.
+
+        Used by CheckRunPoller to learn about PR events and register
+        pending SHAs for check-run polling (#602).
+
+        Note: observers should be registered during startup, before the
+        first ``ingest()`` call. This is safe in asyncio (single-threaded).
+        """
+        self._observers.append(callback)
 
     async def ingest(self, event: NormalizedEvent) -> PipelineResult:
         """Process a normalized event through dedup and trigger evaluation.
@@ -87,24 +106,58 @@ class EventPipeline:
             payload=payload,
         )
 
-        fired, deferred = _classify_results(results)
+        # 4. Notify observers — best-effort, non-blocking (#602)
+        for observer in self._observers:
+            task = asyncio.create_task(
+                _safe_observer_call(observer, event),
+                name=f"observer-{event.dedup_key}",
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+
+        fired, deferred, blocked = _classify_results(results)
         return PipelineResult(
             status="processed",
             event_type=event.event_type,
             triggers_fired=fired,
             deferred=deferred,
+            blocked=blocked,
+        )
+
+
+async def _safe_observer_call(
+    observer: _ObserverCallback,
+    event: NormalizedEvent,
+) -> None:
+    """Call an observer, logging any exception without propagating."""
+    try:
+        await observer(event)
+    except Exception:
+        logger.warning(
+            "Observer failed for %s",
+            event.dedup_key,
+            exc_info=True,
         )
 
 
 def _classify_results(
-    results: list[TriggerMatchResult | TriggerDeferredResult],
-) -> tuple[list[str], list[str]]:
-    """Separate trigger evaluation results into (fired, deferred) ID lists."""
+    results: list[TriggerMatchResult | TriggerDeferredResult | TriggerBlockedResult],
+) -> tuple[list[str], list[str], list[str]]:
+    """Separate trigger evaluation results into (fired, deferred, blocked) ID lists."""
     fired: list[str] = []
     deferred: list[str] = []
+    blocked: list[str] = []
     for r in results:
         if isinstance(r, TriggerMatchResult):
             fired.append(r.trigger_id)
         elif isinstance(r, TriggerDeferredResult):
             deferred.append(r.trigger_id)
-    return fired, deferred
+        elif isinstance(r, TriggerBlockedResult):
+            logger.info(
+                "Trigger %s blocked by %s: %s",
+                r.trigger_id,
+                r.guard_name,
+                r.reason,
+            )
+            blocked.append(r.trigger_id)
+    return fired, deferred, blocked

@@ -21,8 +21,8 @@ const colorClasses = {
     iconBg: 'bg-[var(--color-surface-elevated)]',
   },
   accent: {
-    icon: 'text-indigo-400',
-    iconBg: 'bg-indigo-500/10',
+    icon: 'text-blue-400',
+    iconBg: 'bg-blue-500/10',
   },
   success: {
     icon: 'text-emerald-400',
@@ -38,6 +38,14 @@ const colorClasses = {
   },
 }
 
+function TrendBadge({ value, isPositive }: { value: number; isPositive: boolean }) {
+  return (
+    <p className={clsx('mt-2 text-xs font-medium', isPositive ? 'text-emerald-400' : 'text-red-400')}>
+      {isPositive ? '↑' : '↓'} {Math.abs(value)}%
+    </p>
+  )
+}
+
 export function MetricCard({
   title,
   value,
@@ -48,6 +56,9 @@ export function MetricCard({
   href,
 }: MetricCardProps) {
   const colors = colorClasses[color]
+  const isNumeric = typeof value === 'number'
+  const displayValue = isNumeric ? value.toLocaleString() : value
+  const valueSize = isNumeric ? 'text-2xl' : 'text-base'
 
   const content = (
     <div className={clsx(
@@ -55,26 +66,20 @@ export function MetricCard({
       href && 'cursor-pointer hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-elevated)] transition-colors'
     )}>
       <div className="flex items-start justify-between">
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <p className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
             {title}
           </p>
-          <p className="mt-2 text-2xl font-bold text-[var(--color-text-primary)] truncate" title={String(value)}>
-            {typeof value === 'number' ? value.toLocaleString() : value}
+          <p
+            className={clsx('mt-2 font-bold text-[var(--color-text-primary)] truncate', valueSize)}
+            title={String(value)}
+          >
+            {displayValue}
           </p>
           {subtitle && (
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">{subtitle}</p>
           )}
-          {trend && (
-            <p
-              className={clsx(
-                'mt-2 text-xs font-medium',
-                trend.isPositive ? 'text-emerald-400' : 'text-red-400'
-              )}
-            >
-              {trend.isPositive ? '↑' : '↓'} {Math.abs(trend.value)}%
-            </p>
-          )}
+          {trend && <TrendBadge value={trend.value} isPositive={trend.isPositive} />}
         </div>
         {Icon && (
           <div className={clsx('rounded-lg p-2', colors.iconBg)}>

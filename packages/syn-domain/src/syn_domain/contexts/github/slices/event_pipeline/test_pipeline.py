@@ -179,7 +179,7 @@ class TestPipelineWithTriggers:
         assert "tr-001" in result.triggers_fired
 
 
-def _make_config() -> Any:
+def _make_config() -> Any:  # noqa: ANN401
     from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
 
     return TriggerConfig()

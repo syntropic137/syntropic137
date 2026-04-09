@@ -3,12 +3,12 @@ import {
   BarChart,
   Cell,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
 
-import { Card, CardContent, CardHeader } from '../../components'
+import { Card, CardContent, CardHeader, ChartTooltip } from '../../components'
+import { formatTokens } from '../../utils/formatters'
 
 interface PhaseChartDatum {
   name: string
@@ -29,21 +29,21 @@ export function PhaseMetricsChart({ phaseChartData }: PhaseMetricsChartProps) {
         {phaseChartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={phaseChartData} layout="vertical">
-              <XAxis type="number" tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }} />
+              <XAxis
+                type="number"
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tickFormatter={(v: number) => formatTokens(v)}
+              />
               <YAxis
                 type="category"
                 dataKey="name"
-                tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
                 width={100}
               />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'var(--color-surface-elevated)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                }}
-                formatter={(value) => [Number(Array.isArray(value) ? value[0] : value ?? 0).toLocaleString(), 'tokens']}
+              <ChartTooltip
+                position={{ x: 0 }}
+                offset={20}
+                formatter={(value: number) => [formatTokens(value), 'tokens']}
               />
               <Bar dataKey="tokens" radius={[0, 4, 4, 0]}>
                 {phaseChartData.map((entry, index) => (

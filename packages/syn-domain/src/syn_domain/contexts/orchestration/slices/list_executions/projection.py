@@ -7,7 +7,12 @@ and WorkflowFailed events from the WorkflowExecutionAggregate.
 Uses AutoDispatchProjection (ADR-014) for reliable position tracking.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import AutoDispatchProjection
 
@@ -27,9 +32,9 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_executions"
-    VERSION = 3  # Bumped: migrated to AutoDispatchProjection, removed dead handlers
+    VERSION = 4  # Bumped: resilient on_workflow_failed for orphaned failure events (#598)
 
-    def __init__(self, store: Any):  # Using Any to avoid circular import
+    def __init__(self, store: ProjectionStoreProtocol):
         """Initialize with a projection store.
 
         Args:
@@ -144,7 +149,23 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             return
 
         existing = await self._store.get(self.PROJECTION_NAME, execution_id)
-        if existing:
+        if not existing:
+            # Create minimal entry for orphaned failure events (#598)
+            existing = WorkflowExecutionSummary(
+                workflow_execution_id=execution_id,
+                workflow_id=event_data.get("workflow_id", ""),
+                workflow_name=event_data.get("workflow_name", ""),
+                status="failed",
+                started_at=event_data.get("started_at"),
+                completed_at=event_data.get("failed_at"),
+                completed_phases=event_data.get("completed_phases", 0),
+                total_phases=event_data.get("total_phases", 0),
+                total_tokens=event_data.get("total_tokens", 0),
+                total_cost_usd=event_data.get("total_cost_usd", "0"),
+                tool_call_count=0,
+                error_message=event_data.get("error_message"),
+            ).to_dict()
+        else:
             existing["status"] = "failed"
             existing["completed_at"] = event_data.get("failed_at")
             existing["error_message"] = event_data.get("error_message")
@@ -152,7 +173,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
                 "completed_phases", existing.get("completed_phases", 0)
             )
 
-            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+        await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_execution_cancelled(self, event_data: dict) -> None:
         """Handle ExecutionCancelled event.

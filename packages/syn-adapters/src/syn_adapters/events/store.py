@@ -196,6 +196,33 @@ class AgentEventStore:
             self.pool, execution_id, event_type=event_type, limit=limit
         )
 
+    async def query_recent(
+        self,
+        limit: int = 50,
+        event_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query most recent events across all sessions.
+
+        When event_type is provided, filters to that single type.
+        Otherwise returns all event types.
+
+        Args:
+            limit: Maximum events to return.
+            event_type: Optional single event type filter.
+
+        Returns:
+            List of event dicts ordered by time DESC.
+        """
+        from syn_adapters.events.queries import query_recent as _query_recent
+
+        if not self._initialized:
+            await self.initialize()
+
+        if self.pool is None:
+            raise RuntimeError("AgentEventStore pool is not initialized")
+
+        return await _query_recent(self.pool, limit=limit, event_type=event_type)
+
     async def query_recent_by_types(
         self,
         event_types: list[str],

@@ -21,24 +21,20 @@ function SessionRow({ session, idx }: { session: SessionSummary; idx: number }) 
             </div>
             <div>
               <div className="flex items-center gap-3">
-                <span className="font-mono text-sm font-medium text-[var(--color-text-primary)]">
-                  {session.id.slice(0, 12)}...
+                <span className="text-sm font-medium text-[var(--color-text-primary)]">
+                  {session.workflow_name ?? session.id.slice(0, 12) + '...'}
                 </span>
                 <StatusBadge status={session.status} size="sm" />
               </div>
               <div className="mt-0.5 flex items-center gap-3 text-xs text-[var(--color-text-secondary)]">
-                {session.workflow_id && (
-                  <>
-                    <span>wf:{session.workflow_id.slice(0, 8)}</span>
-                    <span>&bull;</span>
-                  </>
-                )}
+                <span className="font-mono">{session.id.slice(0, 8)}</span>
                 {session.phase_id && (
                   <>
-                    <span>{session.phase_id}</span>
                     <span>&bull;</span>
+                    <span>{session.phase_id}</span>
                   </>
                 )}
+                <span>&bull;</span>
                 <span>{session.agent_provider ?? 'unknown'}</span>
               </div>
             </div>

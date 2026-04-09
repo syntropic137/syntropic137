@@ -56,7 +56,7 @@ _openapi:
         heading: list-workflows-endpoint
       - content: Create a new workflow template.
         heading: create-workflow-endpoint
-      - content: Get workflow details by ID.
+      - content: Get workflow details by ID (supports partial ID prefix matching).
         heading: get-workflow-endpoint
       - content: >-
           Archive (soft-delete) a workflow template.
@@ -73,7 +73,7 @@ _openapi:
         heading: list-workflow-runs-endpoint
       - content: 'DEPRECATED: Use /workflows/{workflow_id}/runs instead.'
         heading: get-workflow-history-endpoint
-      - content: Validate a workflow YAML file.
+      - content: Validate a workflow YAML definition.
         heading: validate-yaml-endpoint
       - content: Update a workflow phase's prompt template and optional config.
         heading: update-phase-prompt-endpoint

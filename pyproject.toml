@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.20.1"
+version = "0.23.2"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -11,7 +11,6 @@ keywords = ["ai", "agents", "event-sourcing", "workflows", "metrics"]
 # Workspace member dependencies
 dependencies = [
     "syn-api",
-    "syn-cli",
     "syn-collector",
     "syn-domain",
     "syn-adapters",
@@ -53,11 +52,10 @@ constraint-dependencies = [
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
-exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-docs", "apps/syn-pulse-ui", "packages/openclaw-plugin"]
+exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-docs", "packages/openclaw-plugin"]
 
 [tool.uv.sources]
 syn-api = { workspace = true }
-syn-cli = { workspace = true }
 syn-collector = { workspace = true }
 syn-domain = { workspace = true }
 syn-adapters = { workspace = true }
@@ -95,6 +93,9 @@ select = [
     "TCH",    # flake8-type-checking
     "PTH",    # flake8-use-pathlib
     "RUF",    # Ruff-specific rules
+    "ANN401", # Ban `Any` in type annotations (#593). The OpenAPI→TypeScript pipeline
+              # generates `{ [key: string]: unknown }` for `Any`-typed fields, breaking
+              # end-to-end type safety. Use `object`, concrete types, or generics instead.
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
@@ -122,11 +123,10 @@ max-complexity = 22
 "**/token_injector.py" = ["ARG002"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["syn_api", "syn_cli", "syn_collector", "syn_domain", "syn_adapters", "syn_shared", "syn_perf"]
+known-first-party = ["syn_api", "syn_collector", "syn_domain", "syn_adapters", "syn_shared", "syn_perf"]
 
 [tool.pytest.ini_options]
 testpaths = [
-    "apps/syn-cli/tests",
     "apps/syn-api/tests",
     "packages/syn-collector/tests",
     "packages/syn-domain/tests",
@@ -135,7 +135,6 @@ testpaths = [
     "packages/syn-shared/tests",
 ]
 pythonpath = [
-    "apps/syn-cli/src",
     "apps/syn-api/src",
     "packages/syn-collector/src",
     "packages/syn-domain/src",

@@ -18,6 +18,8 @@ from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator import (
     _check_operator,
+    _coerce_bool,
+    _coerce_to_list,
     _resolve_array_index,
     _resolve_field,
     _unpack_condition,
@@ -28,6 +30,7 @@ from syn_domain.contexts.github.slices.evaluate_webhook.debouncer import (
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
+    TriggerBlockedResult,
     TriggerDeferredResult,
     TriggerMatchResult,
 )
@@ -174,9 +177,12 @@ class TestSafetyGuards:
         agg.register(cmd)
         await _index_aggregate(store, agg)
 
-        # Record 2 fires for PR #42
+        # Record 2 fires for PR #42 and mark them completed
+        # so the concurrency guard (Guard 6) doesn't block before max_attempts
         await store.record_fire(agg.trigger_id, 42, "exec-1")
+        await store.complete_execution("exec-1")
         await store.record_fire(agg.trigger_id, 42, "exec-2")
+        await store.complete_execution("exec-2")
 
         guards = SafetyGuards()
         payload = {
@@ -267,7 +273,9 @@ class TestEvaluateWebhookHandler:
         )
 
         assert len(results) == 1
-        assert results[0].execution_id.startswith("exec-")
+        result = results[0]
+        assert isinstance(result, TriggerMatchResult)
+        assert result.execution_id.startswith("exec-")
 
     @pytest.mark.asyncio
     async def test_no_matching_rules_returns_empty(self) -> None:
@@ -285,8 +293,8 @@ class TestEvaluateWebhookHandler:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_conditions_not_met_skips(self) -> None:
-        """Test that conditions not met skips the trigger."""
+    async def test_conditions_not_met_returns_blocked(self) -> None:
+        """Test that conditions not met returns a TriggerBlockedResult."""
         store = InMemoryTriggerQueryStore()
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -312,7 +320,9 @@ class TestEvaluateWebhookHandler:
             payload=payload,
         )
 
-        assert results == []
+        assert len(results) == 1
+        assert isinstance(results[0], TriggerBlockedResult)
+        assert results[0].guard_name == "conditions_not_met"
 
     @pytest.mark.asyncio
     async def test_bot_sender_allowed(self) -> None:
@@ -439,9 +449,11 @@ class TestDebounceAndRetry:
         await _register_trigger(store, cooldown_seconds=300)
 
         # Simulate a recent fire so cooldown blocks
+        # Must complete the execution so the concurrency guard passes first
         rules = await store.list_by_event_and_repo("check_run.completed", "org/repo")
         trigger_id = rules[0].trigger_id
         await store.record_fire(trigger_id, 1, "exec-old")
+        await store.complete_execution("exec-old")
 
         handler = EvaluateWebhookHandler(
             store=store, repository=NullRepository(), debouncer=debouncer
@@ -461,7 +473,7 @@ class TestDebounceAndRetry:
 
     @pytest.mark.asyncio
     async def test_permanent_guard_does_not_retry(self) -> None:
-        """Max-attempts guard blocks → no retry scheduled, pending_count == 0."""
+        """Max-attempts guard blocks → TriggerBlockedResult, no retry scheduled."""
         store = InMemoryTriggerQueryStore()
         debouncer = TriggerDebouncer()
         await _register_trigger(store, max_attempts=1)
@@ -469,6 +481,7 @@ class TestDebounceAndRetry:
         rules = await store.list_by_event_and_repo("check_run.completed", "org/repo")
         rule = rules[0]
         await store.record_fire(rule.trigger_id, 1, "exec-old")
+        await store.complete_execution("exec-old")
 
         handler = EvaluateWebhookHandler(
             store=store, repository=NullRepository(), debouncer=debouncer
@@ -482,7 +495,9 @@ class TestDebounceAndRetry:
             payload=payload,
         )
 
-        assert results == []
+        assert len(results) == 1
+        assert isinstance(results[0], TriggerBlockedResult)
+        assert results[0].guard_name == "max_attempts"
         assert debouncer.pending_count == 0
         debouncer.cancel_all()
 
@@ -517,6 +532,7 @@ class TestDebounceAndRetry:
         rules = await store.list_by_event_and_repo("check_run.completed", "org/repo")
         rule = rules[0]
         await store.record_fire(rule.trigger_id, 1, "exec-old")
+        await store.complete_execution("exec-old")
 
         guards = SafetyGuards()
         result = await guards.check_all(rule, _make_payload(), store)
@@ -608,6 +624,40 @@ class TestExtractedHelpers:
     def test_check_operator_unknown(self) -> None:
         with pytest.raises(ValueError, match="Unknown operator"):
             _check_operator("unknown_op", "a", "b")
+
+    def test_eq_coerces_string_false_to_bool(self) -> None:
+        """String 'false' from CLI must match resolved boolean False."""
+        assert _check_operator("eq", False, "false") is True
+        assert _check_operator("eq", True, "true") is True
+        assert _check_operator("eq", True, "false") is False
+
+    def test_in_coerces_comma_separated_string(self) -> None:
+        """Comma-separated string 'a,b' from CLI must work as list for 'in'."""
+        assert _check_operator("in", "commented", "changes_requested,commented") is True
+        assert _check_operator("in", "approved", "changes_requested,commented") is False
+
+    def test_coerce_bool_preserves_native_types(self) -> None:
+        assert _coerce_bool(False) is False
+        assert _coerce_bool(["a", "b"]) == ["a", "b"]
+        assert _coerce_bool(42) == 42
+
+    def test_coerce_bool_converts_strings(self) -> None:
+        assert _coerce_bool("true") is True
+        assert _coerce_bool("false") is False
+        assert _coerce_bool(" False ") is False  # strip whitespace
+        assert _coerce_bool("hello") == "hello"
+
+    def test_coerce_to_list_handles_types(self) -> None:
+        assert _coerce_to_list(["a", "b"]) == ["a", "b"]
+        assert _coerce_to_list(None) == []
+        assert _coerce_to_list("a,b") == ["a", "b"]
+        assert _coerce_to_list("hello") == ["hello"]
+        assert _coerce_to_list(True) == [True]
+
+    def test_eq_does_not_split_commas(self) -> None:
+        """eq operator should not split comma-containing strings into lists."""
+        assert _check_operator("eq", "foo,bar", "foo,bar") is True
+        assert _check_operator("eq", "foo", "foo,bar") is False
 
     def test_unpack_condition_dict(self) -> None:
         field, op, val = _unpack_condition({"field": "action", "operator": "eq", "value": "opened"})

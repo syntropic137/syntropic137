@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
@@ -19,10 +20,34 @@ from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import Tr
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
+    from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
+    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
+        TriggerRuleAggregate,
+    )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/triggers", tags=["triggers"])
+
+
+async def _resolve_installation_id(installation_id: str, repository: str) -> str:
+    """Auto-resolve installation_id from the GitHub App if not provided."""
+    if installation_id or not repository:
+        return installation_id
+    try:
+        from syn_adapters.github.client import get_github_client
+
+        client = get_github_client()
+        resolved = await client.get_installation_for_repo(repository)
+        logger.info("Auto-resolved installation_id=%s for %s", resolved, repository)
+        return str(resolved)
+    except Exception:
+        logger.warning(
+            "Could not auto-resolve installation_id for %s",
+            repository,
+            exc_info=True,
+        )
+        return installation_id
 
 
 async def register_trigger(
@@ -46,6 +71,7 @@ async def register_trigger(
     )
 
     await ensure_connected()
+    installation_id = await _resolve_installation_id(installation_id, repository)
 
     workflow_repo = get_workflow_repo()
     if not await workflow_repo.exists(workflow_id):
@@ -81,7 +107,9 @@ async def register_trigger(
         return Err(TriggerError.INVALID_INPUT, message=str(e))
 
 
-async def _index_and_sync_trigger(store: Any, aggregate: Any) -> None:
+async def _index_and_sync_trigger(
+    store: TriggerQueryStore, aggregate: TriggerRuleAggregate
+) -> None:
     """Index a trigger aggregate in the store and sync projections."""
     await store.index_trigger(
         trigger_id=aggregate.trigger_id,
@@ -98,6 +126,7 @@ async def _index_and_sync_trigger(store: Any, aggregate: Any) -> None:
         installation_id=aggregate.installation_id,
         created_by=aggregate.created_by,
         status=aggregate.status.value,
+        created_at=datetime.now(UTC),
     )
     await sync_published_events_to_projections()
 
@@ -130,6 +159,7 @@ async def enable_preset(
     repository: str,
     installation_id: str = "",
     created_by: str = "system",
+    workflow_id: str = "",
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, TriggerError]:
     """Enable a built-in trigger preset for a repository."""
@@ -139,6 +169,7 @@ async def enable_preset(
     )
 
     await ensure_connected()
+    installation_id = await _resolve_installation_id(installation_id, repository)
 
     try:
         command = create_preset_command(
@@ -146,6 +177,7 @@ async def enable_preset(
             repository=repository,
             installation_id=installation_id,
             created_by=created_by,
+            workflow_id=workflow_id,
         )
     except (ValueError, KeyError):
         return Err(TriggerError.PRESET_NOT_FOUND, message=f"Preset '{preset_name}' not found")
@@ -192,9 +224,9 @@ async def pause_trigger(
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
     if indexed.status == TriggerStatus.PAUSED:
-        return Err(TriggerError.ALREADY_PAUSED)
+        return Err(TriggerError.ALREADY_PAUSED, message="Trigger is already paused")
     if indexed.status == TriggerStatus.DELETED:
-        return Err(TriggerError.ALREADY_DELETED)
+        return Err(TriggerError.ALREADY_DELETED, message="Trigger has been deleted")
 
     command = PauseTriggerCommand(trigger_id=trigger_id, paused_by=paused_by, reason=reason)
     repo = get_trigger_repo()
@@ -227,9 +259,9 @@ async def resume_trigger(
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
     if indexed.status == TriggerStatus.ACTIVE:
-        return Err(TriggerError.ALREADY_ACTIVE)
+        return Err(TriggerError.ALREADY_ACTIVE, message="Trigger is not paused")
     if indexed.status == TriggerStatus.DELETED:
-        return Err(TriggerError.ALREADY_DELETED)
+        return Err(TriggerError.ALREADY_DELETED, message="Trigger has been deleted")
 
     command = ResumeTriggerCommand(trigger_id=trigger_id, resumed_by=resumed_by)
     repo = get_trigger_repo()
@@ -262,7 +294,7 @@ async def delete_trigger(
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
     if indexed.status == TriggerStatus.DELETED:
-        return Err(TriggerError.ALREADY_DELETED)
+        return Err(TriggerError.ALREADY_DELETED, message="Trigger has already been deleted")
 
     command = DeleteTriggerCommand(trigger_id=trigger_id, deleted_by=deleted_by)
     repo = get_trigger_repo()
@@ -339,6 +371,7 @@ async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> Trig
         repository=repository,
         installation_id=body.get("installation_id", ""),
         created_by=body.get("created_by", "api"),
+        workflow_id=body.get("workflow_id", ""),
     )
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
@@ -355,6 +388,9 @@ async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> Trig
 )
 async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> TriggerActionResponse:
     """Update trigger (pause/resume)."""
+    from .queries import _resolve_trigger_id
+
+    trigger_id = await _resolve_trigger_id(trigger_id)
     action = body.get("action", "")
     if action == "pause":
         result = await pause_trigger(
@@ -383,6 +419,9 @@ async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> Trig
 )
 async def delete_trigger_endpoint(trigger_id: str) -> TriggerActionResponse:
     """Delete a trigger rule."""
+    from .queries import _resolve_trigger_id
+
+    trigger_id = await _resolve_trigger_id(trigger_id)
     result = await delete_trigger(trigger_id=trigger_id, deleted_by="api")
     if isinstance(result, Err):
         raise HTTPException(

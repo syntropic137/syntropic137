@@ -69,6 +69,7 @@ export interface SubagentRecord {
 export interface SessionSummary {
   id: string
   workflow_id: string | null
+  workflow_name: string | null
   execution_id: string | null
   phase_id: string | null
   status: string
@@ -129,8 +130,11 @@ export interface SessionResponse {
   status: string
   input_tokens: number
   output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
   total_tokens: number
   total_cost_usd: number
+  cost_by_model: Record<string, string>
   operations: OperationInfo[]
   started_at: string | null
   completed_at: string | null
@@ -281,10 +285,14 @@ export interface PhaseExecutionDetail {
   artifact_id: string | null
   input_tokens: number
   output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
   duration_seconds: number
   cost_usd: number
   started_at: string | null
   completed_at: string | null
+  model: string | null
+  cost_by_model: Record<string, string>
 }
 
 export interface ExecutionDetailResponse {
@@ -298,6 +306,9 @@ export interface ExecutionDetailResponse {
   phases: PhaseExecutionDetail[]
   total_input_tokens: number
   total_output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
   total_cost_usd: number
   artifact_ids: string[]
   error_message: string | null

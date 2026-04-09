@@ -2,11 +2,11 @@
 """Bump version across all Syntropic137 packages.
 
 Usage:
-    python scripts/bump_version.py 0.20.0          # Update all 13 files
+    python scripts/bump_version.py 0.20.0          # Update all 11 files
     python scripts/bump_version.py --check          # Validate all files match
     python scripts/bump_version.py --current        # Print current version
 
-This script updates the 13 tracked version files. Submodule versions
+This script updates the 11 tracked version files. Submodule versions
 (event-sourcing-platform, agentic-primitives, openclaw-plugin) are
 intentionally excluded — they have independent versioning.
 
@@ -23,12 +23,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Hardcoded list — matches the 13 files in every "chore: bump version" commit.
+# Hardcoded list — matches the 11 files in every "chore: bump version" commit.
 # DO NOT discover dynamically. Submodules must be excluded.
 PYPROJECT_FILES = [
     ROOT / "pyproject.toml",
     ROOT / "apps/syn-api/pyproject.toml",
-    ROOT / "apps/syn-cli/pyproject.toml",
     ROOT / "packages/syn-adapters/pyproject.toml",
     ROOT / "packages/syn-collector/pyproject.toml",
     ROOT / "packages/syn-domain/pyproject.toml",
@@ -41,7 +40,6 @@ PACKAGE_JSON_FILES = [
     ROOT / "apps/syn-cli-node/package.json",
     ROOT / "apps/syn-dashboard-ui/package.json",
     ROOT / "apps/syn-docs/package.json",
-    ROOT / "apps/syn-pulse-ui/package.json",
 ]
 
 # Semver-ish: 0.19.0, 0.20.0-beta.1, 1.0.0-rc.2, etc.
@@ -81,7 +79,7 @@ def get_current_version() -> str:
 
 
 def check_consistency() -> bool:
-    """Validate all 13 files have the same version. Returns True if consistent."""
+    """Validate all 11 files have the same version. Returns True if consistent."""
     versions = read_all_versions()
     unique = set(versions.values())
 
@@ -91,7 +89,7 @@ def check_consistency() -> bool:
         return False
 
     if len(unique) == 1:
-        print(f"OK: All 13 files at v{unique.pop()}")
+        print(f"OK: All 11 files at v{unique.pop()}")
         return True
 
     print("ERROR: Version mismatch across files:", file=sys.stderr)
@@ -102,7 +100,7 @@ def check_consistency() -> bool:
 
 
 def bump(target: str) -> None:
-    """Update all 13 files to the target version.
+    """Update all 11 files to the target version.
 
     Pre-validates all files before writing any changes. If any file
     is missing a version field, fails without modifying anything.

@@ -24,8 +24,26 @@ from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
+        DeleteTriggerCommand,
+    )
+    from syn_domain.contexts.github.domain.commands.PauseTriggerCommand import (
+        PauseTriggerCommand,
+    )
+    from syn_domain.contexts.github.domain.commands.RecordTriggerBlockedCommand import (
+        RecordTriggerBlockedCommand,
+    )
     from syn_domain.contexts.github.domain.commands.RecordTriggerFiredCommand import (
         RecordTriggerFiredCommand,
+    )
+    from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
+        RegisterTriggerCommand,
+    )
+    from syn_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
+        ResumeTriggerCommand,
+    )
+    from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
+        TriggerBlockedEvent,
     )
     from syn_domain.contexts.github.domain.events.TriggerDeletedEvent import (
         TriggerDeletedEvent,
@@ -120,7 +138,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
     # --- Command handlers ---
 
     @command_handler("RegisterTriggerCommand")
-    def register(self, command: Any) -> None:
+    def register(self, command: RegisterTriggerCommand) -> None:
         from syn_domain.contexts.github.domain.events.TriggerRegisteredEvent import (
             TriggerRegisteredEvent,
         )
@@ -151,7 +169,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("PauseTriggerCommand")
-    def pause(self, command: Any) -> None:
+    def pause(self, command: PauseTriggerCommand) -> None:
         from syn_domain.contexts.github.domain.events.TriggerPausedEvent import (
             TriggerPausedEvent,
         )
@@ -168,7 +186,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("ResumeTriggerCommand")
-    def resume(self, command: Any) -> None:
+    def resume(self, command: ResumeTriggerCommand) -> None:
         from syn_domain.contexts.github.domain.events.TriggerResumedEvent import (
             TriggerResumedEvent,
         )
@@ -184,7 +202,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         self._apply(event)
 
     @command_handler("DeleteTriggerCommand")
-    def delete(self, command: Any) -> None:
+    def delete(self, command: DeleteTriggerCommand) -> None:
         from syn_domain.contexts.github.domain.events.TriggerDeletedEvent import (
             TriggerDeletedEvent,
         )
@@ -218,6 +236,24 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         )
         self._apply(event)
 
+    @command_handler("RecordTriggerBlockedCommand")
+    def record_blocked(self, command: RecordTriggerBlockedCommand) -> None:
+        from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
+            TriggerBlockedEvent,
+        )
+
+        event = TriggerBlockedEvent(
+            trigger_id=self.trigger_id,
+            guard_name=command.guard_name,
+            reason=command.reason,
+            webhook_delivery_id=command.webhook_delivery_id,
+            github_event_type=command.event_type,
+            repository=command.repository,
+            pr_number=command.pr_number,
+            payload_summary=command.payload_summary or {},
+        )
+        self._apply(event)
+
     def can_fire(self) -> bool:
         """Check if this trigger is in a state that allows firing."""
         return self._status == TriggerStatus.ACTIVE
@@ -227,7 +263,17 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
     @staticmethod
     def _extract_trigger_fields(
         event: TriggerRegisteredEvent,
-    ) -> tuple[str, str, str, str, str, str, dict[str, str], Any, Any]:
+    ) -> tuple[
+        str,
+        str,
+        str,
+        str,
+        str,
+        str,
+        dict[str, str],
+        tuple[dict[str, Any], ...] | list[dict[str, Any]],
+        dict[str, Any],
+    ]:
         """Extract core trigger fields from a typed or dict-based event.
 
         Returns (name, event_type, repository, installation_id, workflow_id,
@@ -259,7 +305,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         )
 
     @staticmethod
-    def _parse_trigger_config(config_raw: Any) -> TriggerConfig:
+    def _parse_trigger_config(config_raw: dict[str, Any]) -> TriggerConfig:
         """Parse a config dict into a TriggerConfig, ignoring unknown keys."""
         config_dict = config_raw if isinstance(config_raw, dict) else {}
         if not config_dict:
@@ -307,3 +353,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
     @event_sourcing_handler("github.TriggerFired")
     def on_trigger_fired(self, _event: TriggerFiredEvent) -> None:
         self._fire_count += 1
+
+    @event_sourcing_handler("github.TriggerBlocked")
+    def on_trigger_blocked(self, _event: TriggerBlockedEvent) -> None:
+        pass  # Audit-only event — no aggregate state change

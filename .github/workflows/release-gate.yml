@@ -5,14 +5,14 @@
 # Runs on PRs targeting the `release` branch. All jobs must pass before merge.
 #
 # Checks:
-#   1. Version consistency — all 13 package files match and are bumped
+#   1. Version consistency — all 11 package files match and are bumped
 #   2. Release notes — PR body must contain meaningful release notes
 #   3. Docs drift — generated CLI + API docs match source
 #   4. CLI ↔ API sync — generated CLI types match OpenAPI spec (single source of truth)
 #   5. Docker dry-run — all container images build successfully (single-arch)
+#   6. Security scans — OSV, pip-audit, dependency review (no known vulnerabilities)
 #
-# Full CI (tests, lint, typecheck, security scans) also runs on these PRs
-# via ci.yml which triggers on pull_request to both main and release.
+# Full CI (tests, lint, typecheck) also runs on these PRs via ci.yml.
 # =============================================================================
 
 name: Release Gate
@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -156,6 +157,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+          cache: 'pnpm'
 
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
@@ -172,7 +174,7 @@ jobs:
           CHANGED=$(git diff --name-only apps/syn-docs/content/docs/cli/)
           UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)
           if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::CLI docs are out of sync. Run 'pnpm --filter @syntropic137/cli generate:docs' and commit."
+            echo "::error::CLI docs are out of sync. Run 'just codegen' and commit."
             [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
             [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
             exit 1
@@ -189,7 +191,7 @@ jobs:
           CHANGED=$(git diff --name-only apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/)
           UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)
           if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::API docs are out of sync. Run 'just docs-site-gen' and commit."
+            echo "::error::API docs are out of sync. Run 'just codegen' and commit."
             [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
             [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
             exit 1
@@ -214,6 +216,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+          cache: 'pnpm'
 
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
@@ -233,7 +236,7 @@ jobs:
           UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-cli-node/src/generated/)
           if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
             echo "::error::CLI generated types are out of sync with OpenAPI spec."
-            echo "Run 'pnpm --filter @syntropic137/cli generate:types' and commit."
+            echo "Run 'just codegen' and commit."
             [[ -n "$CHANGED" ]] && echo "Changed files:" && echo "$CHANGED"
             [[ -n "$UNTRACKED" ]] && echo "Untracked files:" && echo "$UNTRACKED"
             exit 1
@@ -241,10 +244,43 @@ jobs:
           echo "CLI types are in sync with OpenAPI spec."
 
   # ---------------------------------------------------------------------------
+  # Docker Change Detection — skip Docker builds when only non-Docker files changed
+  # ---------------------------------------------------------------------------
+  check-docker-changes:
+    name: Check Docker Changes
+    runs-on: ubuntu-latest
+    outputs:
+      docker_changed: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          filters: |
+            docker:
+              - 'infra/docker/**'
+              - 'docker/**'
+              - '**/Dockerfile*'
+              - 'apps/syn-api/**'
+              - 'apps/syn-dashboard-ui/**'
+              - 'packages/syn-collector/**'
+              - 'packages/syn-domain/**'
+              - 'packages/syn-adapters/**'
+              - 'packages/syn-shared/**'
+              - 'lib/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+
+  # ---------------------------------------------------------------------------
   # Docker Dry-Run — verify all images build (single-arch, no push)
   # ---------------------------------------------------------------------------
   docker-dry-run:
     name: "Docker Build: ${{ matrix.image }}"
+    needs: check-docker-changes
+    if: needs.check-docker-changes.outputs.docker_changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -263,9 +299,6 @@ jobs:
             context: "."
           - image: syn-dashboard-ui
             dockerfile: apps/syn-dashboard-ui/Dockerfile
-            context: "."
-          - image: syn-pulse-ui
-            dockerfile: apps/syn-pulse-ui/Dockerfile
             context: "."
           - image: sidecar-proxy
             dockerfile: docker/sidecar-proxy/Dockerfile
@@ -295,12 +328,58 @@ jobs:
           cache-from: type=gha
 
   # ---------------------------------------------------------------------------
+  # Security Scans — no known vulnerabilities in dependencies
+  # ---------------------------------------------------------------------------
+  osv-scan:
+    name: OSV Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run OSV Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@19ec1116569a47416e11a45848722b1af31a857b # v1.9.0
+        with:
+          scan-args: |-
+            --lockfile=uv.lock
+            --lockfile=pnpm-lock.yaml
+
+  pip-audit:
+    name: Python Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Install pip-audit
+        run: uv tool install pip-audit==2.7.3
+
+      - name: Audit Python dependencies
+        run: |
+          uv export --format requirements-txt --no-hashes --frozen --quiet \
+            | uv tool run pip-audit --disable-pip --no-deps \
+              --ignore-vuln GHSA-5239-wwwm-4pmq \
+              --ignore-vuln GHSA-p423-j2cm-9vmq \
+              -r /dev/stdin
+          # TODO(#345): remove --ignore-vuln once pygments releases a fix
+          # TODO(#634): remove --ignore-vuln once cryptography 46.0.7 is available on PyPI
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@f5b971718edcbb31275a1db40004592335c0e031 # v4.9.0
+
+  # ---------------------------------------------------------------------------
   # Aggregator — required status check for branch protection
   # ---------------------------------------------------------------------------
   release-gate-success:
     name: Release Gate
     if: always()
-    needs: [version-check, changelog-check, docs-drift, cli-api-sync, docker-dry-run]
+    needs: [version-check, changelog-check, docs-drift, cli-api-sync, check-docker-changes, docker-dry-run, osv-scan, pip-audit, dependency-review]
     runs-on: ubuntu-latest
     steps:
       - name: Check all gates passed
@@ -309,14 +388,38 @@ jobs:
           echo "changelog-check: ${{ needs.changelog-check.result }}"
           echo "docs-drift: ${{ needs.docs-drift.result }}"
           echo "cli-api-sync: ${{ needs.cli-api-sync.result }}"
+          echo "check-docker-changes: ${{ needs.check-docker-changes.result }}"
           echo "docker-dry-run: ${{ needs.docker-dry-run.result }}"
+          echo "osv-scan: ${{ needs.osv-scan.result }}"
+          echo "pip-audit: ${{ needs.pip-audit.result }}"
+          echo "dependency-review: ${{ needs.dependency-review.result }}"
 
+          # Core gates must all succeed
           if [[ "${{ needs.version-check.result }}" != "success" ]] || \
              [[ "${{ needs.changelog-check.result }}" != "success" ]] || \
              [[ "${{ needs.docs-drift.result }}" != "success" ]] || \
              [[ "${{ needs.cli-api-sync.result }}" != "success" ]] || \
-             [[ "${{ needs.docker-dry-run.result }}" != "success" ]]; then
+             [[ "${{ needs.check-docker-changes.result }}" != "success" ]]; then
             echo "::error::One or more release gate checks failed."
+            exit 1
+          fi
+
+          # Docker dry-run must succeed when it ran, or be skipped (no docker changes)
+          DOCKER_RESULT="${{ needs.docker-dry-run.result }}"
+          if [[ "$DOCKER_RESULT" != "success" && "$DOCKER_RESULT" != "skipped" ]]; then
+            echo "::error::Docker dry-run failed."
+            exit 1
+          fi
+
+          if [[ "$DOCKER_RESULT" == "skipped" ]]; then
+            echo "Docker dry-run skipped (no Docker-related changes detected)."
+          fi
+
+          # Security scans must all succeed
+          if [[ "${{ needs.osv-scan.result }}" != "success" ]] || \
+             [[ "${{ needs.pip-audit.result }}" != "success" ]] || \
+             [[ "${{ needs.dependency-review.result }}" != "success" ]]; then
+            echo "::error::Security scan(s) failed — release blocked until vulnerabilities are resolved."
             exit 1
           fi
 

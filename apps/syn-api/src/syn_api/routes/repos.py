@@ -16,8 +16,10 @@ from syn_api._wiring import (
     sync_published_events_to_projections,
 )
 from syn_api.types import (
+    AssignRepoToSystemRequest,
     Err,
     Ok,
+    RegisterRepoRequest,
     RepoActionResponse,
     RepoActivityEntryResponse,
     RepoActivityResponse,
@@ -32,6 +34,7 @@ from syn_api.types import (
     RepoSessionsResponse,
     RepoSummaryResponse,
     Result,
+    UpdateRepoRequest,
 )
 
 if TYPE_CHECKING:
@@ -48,9 +51,9 @@ router = APIRouter(prefix="/repos", tags=["repos"])
 
 
 async def register_repo(
-    organization_id: str,
-    provider: str,
-    full_name: str,
+    organization_id: str = "_unaffiliated",
+    provider: str = "github",
+    full_name: str = "",
     owner: str = "",
     default_branch: str = "main",
     provider_repo_id: str = "",
@@ -60,7 +63,10 @@ async def register_repo(
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, RepoError]:
     """Register a new repo within an organization."""
-    from syn_adapters.storage.repositories import get_repo_repository
+    from syn_adapters.storage.repositories import (
+        get_repo_claim_repository,
+        get_repo_repository,
+    )
     from syn_domain.contexts.organization.domain.commands.RegisterRepoCommand import (
         RegisterRepoCommand,
     )
@@ -86,12 +92,16 @@ async def register_repo(
         return Err(RepoError.INVALID_INPUT, message=str(e))
 
     repo = get_repo_repository()
-    handler = RegisterRepoHandler(repository=repo)
+    claim_repo = get_repo_claim_repository()
+    handler = RegisterRepoHandler(repository=repo, claim_repository=claim_repo)
 
     try:
         aggregate = await handler.handle(command)
         await sync_published_events_to_projections()
         return Ok(aggregate.repo_id)
+    except ValueError as e:
+        error_enum = _classify_repo_error(str(e))
+        return Err(error_enum, message=str(e))
     except Exception as e:
         return Err(RepoError.INVALID_INPUT, message=str(e))
 
@@ -366,7 +376,11 @@ async def get_repo_sessions(
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
     handler = GetRepoSessionsHandler(store=get_projection_store())
-    results = await handler.handle(GetRepoSessionsQuery(repo_id=repo_id, limit=limit))
+    results = await handler.handle(
+        GetRepoSessionsQuery(
+            repo_id=repo_id, repo_full_name=repo_result.value.full_name, limit=limit
+        )
+    )
     return Ok([r.to_dict() for r in results])
 
 
@@ -450,6 +464,7 @@ async def deregister_repo(
     """Deregister (soft-delete) a repo.
 
     Cross-context guard: rejects if active trigger rules reference this repo.
+    After successful deregister, releases the repo claim to allow re-registration.
     """
     from syn_adapters.storage.repositories import get_repo_repository
     from syn_domain.contexts.organization.domain.commands.DeregisterRepoCommand import (
@@ -463,8 +478,12 @@ async def deregister_repo(
 
     repo_result = await get_repo(repo_id)
     repo_full_name: str | None = None
+    repo_org_id: str | None = None
+    repo_provider: str | None = None
     if isinstance(repo_result, Ok):
         repo_full_name = repo_result.value.full_name
+        repo_org_id = repo_result.value.organization_id
+        repo_provider = repo_result.value.provider
 
     trigger_check = await _check_active_triggers(repo_id, repo_full_name)
     if isinstance(trigger_check, Err):
@@ -489,13 +508,56 @@ async def deregister_repo(
         error_enum = _classify_repo_error(result.error)
         return Err(error_enum, message=result.error)
 
+    # Release the repo claim to allow re-registration (best-effort)
+    await _try_release_repo_claim(repo_id, repo_org_id, repo_provider, repo_full_name)
+
     await sync_published_events_to_projections()
     return Ok(None)
+
+
+async def _try_release_repo_claim(
+    repo_id: str,
+    organization_id: str | None,
+    provider: str | None,
+    full_name: str | None,
+) -> None:
+    """Best-effort release of a repo claim after deregistration.
+
+    Silently handles missing repo details and any errors — deregister
+    should not fail because claim release failed.
+    """
+    if not (organization_id and provider and full_name):
+        return
+
+    from syn_adapters.storage.repositories import get_repo_claim_repository
+    from syn_domain.contexts.organization.domain.aggregate_repo_claim.claim_id import (
+        compute_repo_claim_id,
+    )
+    from syn_domain.contexts.organization.domain.commands.ReleaseRepoClaimCommand import (
+        ReleaseRepoClaimCommand,
+    )
+
+    try:
+        claim_repo = get_repo_claim_repository()
+        claim_id = compute_repo_claim_id(organization_id, provider, full_name)
+        existing = await claim_repo.get_by_id(claim_id)
+        if existing is None or existing.is_released:
+            return
+        existing.release(ReleaseRepoClaimCommand(claim_id=claim_id, repo_id=repo_id))
+        await claim_repo.save(existing)
+    except Exception:
+        logger.warning(
+            "Failed to release repo claim for %s — claim may be stale",
+            repo_id,
+            exc_info=True,
+        )
 
 
 def _classify_repo_error(error_msg: str) -> RepoError:
     """Map a domain ValueError message to a specific RepoError."""
     lower = error_msg.lower()
+    if "already registered" in lower:
+        return RepoError.ALREADY_EXISTS
     if "already assigned" in lower:
         return RepoError.ALREADY_ASSIGNED
     if "not assigned" in lower:
@@ -511,27 +573,28 @@ def _classify_repo_error(error_msg: str) -> RepoError:
 
 
 @router.post("")
-async def register_repo_endpoint(body: dict[str, Any]) -> RepoCreatedResponse:
+async def register_repo_endpoint(body: RegisterRepoRequest) -> RepoCreatedResponse:
     """Register a new repo."""
     try:
         result = await register_repo(
-            organization_id=body["organization_id"],
-            provider=body.get("provider", "github"),
-            full_name=body["full_name"],
-            owner=body.get("owner", ""),
-            default_branch=body.get("default_branch", "main"),
-            provider_repo_id=body.get("provider_repo_id", ""),
-            installation_id=body.get("installation_id", ""),
-            is_private=body.get("is_private", False),
-            created_by=body.get("created_by", "api"),
+            organization_id=body.organization_id,
+            provider=body.provider,
+            full_name=body.full_name,
+            owner=body.owner,
+            default_branch=body.default_branch,
+            provider_repo_id=body.provider_repo_id,
+            installation_id=body.installation_id,
+            is_private=body.is_private,
+            created_by=body.created_by,
         )
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
-        raise HTTPException(status_code=400, detail=result.message)
+        status = 409 if result.error == RepoError.ALREADY_EXISTS else 400
+        raise HTTPException(status_code=status, detail=result.message)
 
-    return RepoCreatedResponse(repo_id=result.value, full_name=body["full_name"])
+    return RepoCreatedResponse(repo_id=result.value, full_name=body.full_name)
 
 
 @router.get("")
@@ -558,6 +621,11 @@ async def list_repos_endpoint(
 @router.get("/{repo_id}")
 async def get_repo_endpoint(repo_id: str) -> RepoSummaryResponse:
     """Get repo details."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo(repo_id)
 
     if isinstance(result, Err):
@@ -567,14 +635,14 @@ async def get_repo_endpoint(repo_id: str) -> RepoSummaryResponse:
 
 
 @router.put("/{repo_id}")
-async def update_repo_endpoint(repo_id: str, body: dict[str, Any]) -> RepoActionResponse:
+async def update_repo_endpoint(repo_id: str, body: UpdateRepoRequest) -> RepoActionResponse:
     """Update mutable fields of a repo."""
     result = await update_repo(
         repo_id=repo_id,
-        default_branch=body.get("default_branch"),
-        is_private=body.get("is_private"),
-        installation_id=body.get("installation_id"),
-        updated_by=body.get("updated_by", "api"),
+        default_branch=body.default_branch,
+        is_private=body.is_private,
+        installation_id=body.installation_id,
+        updated_by=body.updated_by,
     )
 
     if isinstance(result, Err):
@@ -605,21 +673,23 @@ async def deregister_repo_endpoint(repo_id: str) -> RepoActionResponse:
 
 
 @router.post("/{repo_id}/assign")
-async def assign_repo_to_system_endpoint(repo_id: str, body: dict[str, Any]) -> RepoActionResponse:
+async def assign_repo_to_system_endpoint(
+    repo_id: str, body: AssignRepoToSystemRequest
+) -> RepoActionResponse:
     """Assign a repo to a system."""
     try:
         result = await assign_repo_to_system(
             repo_id=repo_id,
-            system_id=body["system_id"],
+            system_id=body.system_id,
         )
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
         status = 404 if result.error == RepoError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
-    return RepoActionResponse(repo_id=repo_id, system_id=body["system_id"], status="assigned")
+    return RepoActionResponse(repo_id=repo_id, system_id=body.system_id, status="assigned")
 
 
 @router.post("/{repo_id}/unassign")
@@ -642,19 +712,37 @@ async def unassign_repo_from_system_endpoint(repo_id: str) -> RepoActionResponse
 @router.get("/{repo_id}/health")
 async def get_repo_health_endpoint(repo_id: str) -> RepoHealthResponse:
     """Get health snapshot for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_health(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return RepoHealthResponse(**result.value)
+    response = RepoHealthResponse(**result.value)
+    # Fix(#542): read model may return empty repo_id — ensure it matches the request
+    if not response.repo_id:
+        response = response.model_copy(update={"repo_id": repo_id})
+    return response
 
 
 @router.get("/{repo_id}/cost")
 async def get_repo_cost_endpoint(repo_id: str) -> RepoCostResponse:
     """Get cost breakdown for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_cost(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return RepoCostResponse(**result.value)
+    response = RepoCostResponse(**result.value)
+    # Fix(#542): read model may return empty repo_id — ensure it matches the request
+    if not response.repo_id:
+        response = response.model_copy(update={"repo_id": repo_id})
+    return response
 
 
 @router.get("/{repo_id}/activity")
@@ -662,6 +750,11 @@ async def get_repo_activity_endpoint(
     repo_id: str, offset: int = 0, limit: int = 50
 ) -> RepoActivityResponse:
     """Get execution timeline for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_activity(repo_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -672,6 +765,11 @@ async def get_repo_activity_endpoint(
 @router.get("/{repo_id}/failures")
 async def get_repo_failures_endpoint(repo_id: str, limit: int = 50) -> RepoFailuresResponse:
     """Get recent failures for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_failures(repo_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -682,6 +780,11 @@ async def get_repo_failures_endpoint(repo_id: str, limit: int = 50) -> RepoFailu
 @router.get("/{repo_id}/sessions")
 async def get_repo_sessions_endpoint(repo_id: str, limit: int = 50) -> RepoSessionsResponse:
     """Get agent sessions for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    repo_id = await resolve_or_raise(mgr.store, "repos", repo_id, "Repo")
     result = await get_repo_sessions(repo_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)

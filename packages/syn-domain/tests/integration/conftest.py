@@ -49,8 +49,16 @@ async def grpc_client(test_infrastructure) -> AsyncGenerator[GrpcEventStoreClien
     """
     from syn_tests.fixtures.infrastructure import _check_port_open
 
+    from syn_shared.testing import DEV_STACK_PORTS
+
     host = test_infrastructure.eventstore_host
     port = test_infrastructure.eventstore_port
+
+    if port == DEV_STACK_PORTS["eventstore"]:
+        pytest.fail(
+            f"SAFETY: grpc_client would connect to dev event store at {host}:{port}. "
+            "Run 'just test-stack' or set TEST_EVENTSTORE_PORT to a test port."
+        )
 
     if port == 0 or not _check_port_open(host, port):
         pytest.skip(f"Event store not available at {host}:{port} (TODO(#343))")

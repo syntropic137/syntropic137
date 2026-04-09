@@ -5,8 +5,11 @@ Extracted from postgres_helpers.py to reduce module cognitive complexity.
 
 from typing import Any
 
+# Type alias for filter values that can be serialized for JSONB queries
+_FilterValue = str | int | bool | float
 
-def _serialize_filter_value(value: Any) -> str:
+
+def _serialize_filter_value(value: _FilterValue) -> str:
     """Serialize a Python value to match PostgreSQL's JSONB ->> text extraction.
 
     JSONB ->> extracts booleans as 'true'/'false' (lowercase JSON literals),

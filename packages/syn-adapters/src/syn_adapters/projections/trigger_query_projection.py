@@ -12,11 +12,15 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import (
     CheckpointedProjection,
     EventEnvelope,
+    GenericDomainEvent,
     ProjectionCheckpoint,
     ProjectionCheckpointStore,
     ProjectionResult,
@@ -50,7 +54,7 @@ class TriggerQueryProjection(CheckpointedProjection):
     PROJECTION_NAME = "trigger_query"
     VERSION = 1
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
         self._store = store
 
     def get_name(self) -> str:
@@ -70,7 +74,10 @@ class TriggerQueryProjection(CheckpointedProjection):
     }
 
     async def _dispatch_event(
-        self, event_type: str, event_data: dict[str, Any], envelope: EventEnvelope[Any]
+        self,
+        event_type: str,
+        event_data: dict[str, Any],
+        envelope: EventEnvelope[GenericDomainEvent],
     ) -> None:
         """Route an event to the appropriate handler method."""
         if event_type == "github.TriggerFired":
@@ -79,14 +86,14 @@ class TriggerQueryProjection(CheckpointedProjection):
         handler_name = self._EVENT_DISPATCH.get(event_type)
         if handler_name is not None:
             handler = getattr(self, handler_name)
-            await handler(event_data)
+            await handler(event_data, envelope)
 
-    async def handle_event(
+    async def handle_event(  # type: ignore[override]  # ESP SDK EventEnvelope invariance
         self,
-        envelope: EventEnvelope[Any],
+        envelope: EventEnvelope[GenericDomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
-        event_type = envelope.event.event_type
+        event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump()
         global_nonce = envelope.metadata.global_nonce or 0
 
@@ -117,7 +124,9 @@ class TriggerQueryProjection(CheckpointedProjection):
             await self._store.delete_all(NS_FIRE_RECORDS)
             await self._store.delete_all(NS_DELIVERIES)
 
-    async def _on_trigger_registered(self, data: dict[str, Any]) -> None:
+    async def _on_trigger_registered(
+        self, data: dict[str, Any], envelope: EventEnvelope[GenericDomainEvent]
+    ) -> None:
         trigger_id = data.get("trigger_id", "")
         await self._store.save(
             NS_TRIGGER_INDEX,
@@ -135,31 +144,40 @@ class TriggerQueryProjection(CheckpointedProjection):
                 "created_by": data.get("created_by", ""),
                 "status": "active",
                 "fire_count": 0,
+                "created_at": envelope.metadata.timestamp.isoformat(),
             },
         )
 
-    async def _on_trigger_paused(self, data: dict[str, Any]) -> None:
+    async def _on_trigger_paused(
+        self, data: dict[str, Any], _envelope: EventEnvelope[GenericDomainEvent]
+    ) -> None:
         trigger_id = data.get("trigger_id", "")
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
             existing["status"] = "paused"
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
 
-    async def _on_trigger_resumed(self, data: dict[str, Any]) -> None:
+    async def _on_trigger_resumed(
+        self, data: dict[str, Any], _envelope: EventEnvelope[GenericDomainEvent]
+    ) -> None:
         trigger_id = data.get("trigger_id", "")
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
             existing["status"] = "active"
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
 
-    async def _on_trigger_deleted(self, data: dict[str, Any]) -> None:
+    async def _on_trigger_deleted(
+        self, data: dict[str, Any], _envelope: EventEnvelope[GenericDomainEvent]
+    ) -> None:
         trigger_id = data.get("trigger_id", "")
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
             existing["status"] = "deleted"
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
 
-    async def _on_trigger_fired(self, data: dict[str, Any], envelope: EventEnvelope[Any]) -> None:
+    async def _on_trigger_fired(
+        self, data: dict[str, Any], envelope: EventEnvelope[GenericDomainEvent]
+    ) -> None:
         trigger_id = data.get("trigger_id", "")
         execution_id = data.get("execution_id", "")
         delivery_id = data.get("webhook_delivery_id", "")
@@ -191,8 +209,9 @@ class TriggerQueryProjection(CheckpointedProjection):
                 },
             )
 
-        # Increment fire count on trigger index
+        # Increment fire count and update last_fired_at on trigger index
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
             existing["fire_count"] = existing.get("fire_count", 0) + 1
+            existing["last_fired_at"] = fired_at
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)

@@ -7,6 +7,7 @@ to a specific workflow.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -18,6 +19,7 @@ from syn_api._wiring import (
     ensure_connected,
     get_execution_processor,
     get_projection_mgr,
+    get_workflow_repo,
 )
 from syn_api.types import (
     Err,
@@ -29,8 +31,158 @@ from syn_api.types import (
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
 
 logger = logging.getLogger(__name__)
+
+
+# -- Repo Access Validation ---------------------------------------------------
+
+
+def _parse_repo_from_url(repo_url: str | None) -> str | None:
+    """Extract owner/repo from a GitHub URL, or None if not applicable."""
+    if not repo_url:
+        return None
+    normalized = repo_url.rstrip("/")
+    if "/" not in normalized:
+        return None
+    parts = normalized.split("/")
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    return None
+
+
+def _resolve_target_repo(
+    workflow: WorkflowTemplateAggregate,
+    inputs: dict[str, str],
+    task: str | None,
+) -> str | None:
+    """Resolve the target owner/repo from a workflow's repository URL.
+
+    Merges input defaults and task into placeholders, then extracts
+    owner/repo. Returns None if no repo URL, unresolved placeholders
+    remain, or the URL doesn't parse to a repo name.
+    """
+    repo_url: str | None = workflow._repository_url
+    if not repo_url:
+        return None
+
+    # Merge input declaration defaults + request inputs + task
+    merged: dict[str, str] = {}
+    for decl in workflow.input_declarations:
+        if decl.default is not None and decl.name not in merged:
+            merged[decl.name] = str(decl.default)
+    merged.update(inputs)
+    if task is not None:
+        merged["task"] = task
+
+    for key, value in merged.items():
+        repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
+
+    # Unresolved placeholders — handler will raise later with proper error
+    if "{{" in repo_url:
+        return None
+
+    return _parse_repo_from_url(repo_url)
+
+
+def _build_auth_error_detail(repo_full_name: str, exc: Exception) -> str:
+    """Build a user-facing error detail for GitHub App auth failures."""
+    exc_message = str(exc)
+    if "not installed" in exc_message.lower():
+        return (
+            f"GitHub App not installed on repository: {repo_full_name}. "
+            "Install the GitHub App on this repository before running workflows."
+        )
+    return f"GitHub App authentication failed for {repo_full_name}: {exc_message}"
+
+
+async def _validate_repo_access(repo_full_name: str) -> None:
+    """Pre-validate that the GitHub App can access the target repository.
+
+    Raises HTTPException(422) if the App is not installed. Logs and
+    proceeds on transient errors (network, rate limit).
+    """
+    from syn_shared.settings.github import GitHubAppSettings
+
+    if not GitHubAppSettings().is_configured:
+        return
+
+    from syn_adapters.github.client import GitHubAuthError, get_github_client
+
+    try:
+        await get_github_client().get_installation_for_repo(repo_full_name)
+    except GitHubAuthError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=_build_auth_error_detail(repo_full_name, exc),
+        ) from exc
+    except Exception as exc:
+        logger.warning("Could not pre-validate repo access for %s: %s", repo_full_name, exc)
+
+
+def _merge_inputs(
+    workflow: WorkflowTemplateAggregate,
+    inputs: dict[str, str],
+    task: str | None,
+) -> dict[str, str]:
+    """Merge declaration defaults, provided inputs, and task."""
+    merged: dict[str, str] = {
+        decl.name: str(decl.default)
+        for decl in workflow.input_declarations
+        if decl.default is not None
+    }
+    merged.update(inputs)
+    if task is not None:
+        merged["task"] = task
+    return merged
+
+
+def _validate_required_inputs(
+    workflow: WorkflowTemplateAggregate,
+    inputs: dict[str, str],
+    task: str | None,
+) -> None:
+    """Eagerly validate that all required inputs are satisfied.
+
+    Merges input declaration defaults, provided inputs, and the task
+    placeholder, then checks the repository URL for unresolved
+    ``{{placeholder}}`` patterns.  Raises HTTPException(422) with a
+    clear message listing the missing inputs so the caller knows
+    exactly what to provide.
+    """
+    repo_url: str | None = workflow._repository_url
+    if not repo_url:
+        return
+
+    merged = _merge_inputs(workflow, inputs, task)
+    for key, value in merged.items():
+        repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
+
+    if "{{" not in repo_url:
+        return
+
+    unresolved = sorted(set(re.findall(r"\{\{(\w+)\}\}", repo_url)))
+    if not unresolved:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Repository URL contains malformed placeholders. "
+                "Use the format {{name}} with alphanumeric/underscore characters."
+            ),
+        )
+    hints = [f"--input {name}=<value>" for name in unresolved]
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"Missing required inputs: {', '.join(unresolved)}. "
+            f"Provide them via: {', '.join(hints)}"
+        ),
+    )
+
+
 router = APIRouter(prefix="/workflows", tags=["execution"])
 
 
@@ -167,9 +319,9 @@ async def execute(
         result = await handler.handle(cmd)
     except WorkflowNotFoundError:
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
-    except Exception:
+    except Exception as e:
         logger.exception("Workflow execution error for %s", workflow_id)
-        return Err(WorkflowError.EXECUTION_FAILED, message="internal error")
+        return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
     return Ok(
         ExecutionSummary(
@@ -196,7 +348,21 @@ async def execute_workflow_endpoint(
     background_tasks: BackgroundTasks,
 ) -> ExecuteWorkflowResponse:
     """Start workflow execution in background."""
-    execution_id = str(uuid4())
+    # Pre-validate GitHub App access before creating the execution (#598)
+    await ensure_connected()
+    workflow_repo = get_workflow_repo()
+    workflow = await workflow_repo.get_by_id(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+    # Validate required inputs before returning 200 (#639)
+    _validate_required_inputs(workflow, request.inputs, request.task)
+
+    repo_full_name = _resolve_target_repo(workflow, request.inputs, request.task)
+    if repo_full_name:
+        await _validate_repo_access(repo_full_name)
+
+    execution_id = f"exec-{uuid4().hex[:12]}"
 
     async def _run() -> None:
         result = await execute(
@@ -238,8 +404,14 @@ async def get_execution_status_endpoint(
     execution_id: str,
 ) -> ExecutionStatusResponse:
     """Get the status of a workflow execution."""
+    from syn_api.prefix_resolver import resolve_or_raise
+
     from .queries import get_detail
 
+    mgr = get_projection_mgr()
+    execution_id = await resolve_or_raise(
+        mgr.store, "workflow_execution_details", execution_id, "Execution"
+    )
     result = await get_detail(execution_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")

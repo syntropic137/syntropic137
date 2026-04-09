@@ -3,24 +3,17 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
-  Tooltip,
 } from 'recharts'
 
 import type { ValueType } from 'recharts/types/component/DefaultTooltipContent'
 import type { MetricsResponse } from '../../types'
+import { ChartTooltip } from '../../components'
 
 interface ChartDataItem {
   [key: string]: unknown
   name: string
   value: number
   fill: string
-}
-
-const TOOLTIP_STYLE = {
-  backgroundColor: 'var(--color-surface-elevated)',
-  border: '1px solid var(--color-border)',
-  borderRadius: '8px',
-  fontSize: '12px',
 }
 
 function ChartLegend({ items }: { items: ChartDataItem[] }) {
@@ -74,10 +67,7 @@ function DonutChart({
               <Cell key={`cell-${index}`} fill={entry.fill} />
             ))}
           </Pie>
-          <Tooltip
-            contentStyle={TOOLTIP_STYLE}
-            formatter={tooltipFormatter}
-          />
+          <ChartTooltip formatter={tooltipFormatter} />
         </PieChart>
       </ResponsiveContainer>
       <ChartLegend items={data} />
@@ -92,8 +82,8 @@ interface DashboardChartsProps {
 export function DashboardCharts({ metrics }: DashboardChartsProps) {
   const tokenDistribution: ChartDataItem[] = metrics
     ? [
-      { name: 'Input', value: metrics.total_input_tokens, fill: '#6366f1' },
-      { name: 'Output', value: metrics.total_output_tokens, fill: '#818cf8' },
+      { name: 'Input', value: metrics.total_input_tokens, fill: '#4D80FF' },
+      { name: 'Output', value: metrics.total_output_tokens, fill: '#5A8CFF' },
     ]
     : []
 
@@ -111,7 +101,6 @@ export function WorkflowStatusChart({ metrics }: DashboardChartsProps) {
     ? [
       { name: 'Completed', value: metrics.completed_workflows, fill: '#22c55e' },
       { name: 'Failed', value: metrics.failed_workflows, fill: '#ef4444' },
-      { name: 'Other', value: metrics.total_workflows - metrics.completed_workflows - metrics.failed_workflows, fill: '#6366f1' },
     ].filter(d => d.value > 0)
     : []
 

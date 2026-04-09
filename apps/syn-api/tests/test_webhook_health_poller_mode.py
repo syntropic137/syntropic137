@@ -68,7 +68,7 @@ class MockEventsClient:
         )
         self.poll_count = 0
 
-    async def poll_repo_events(self, owner: str, repo: str, installation_id: str) -> Any:
+    async def poll_repo_events(self, owner: str, repo: str, installation_id: str) -> Any:  # noqa: ANN401
         self.poll_count += 1
         return self._response
 

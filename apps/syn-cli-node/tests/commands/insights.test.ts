@@ -52,8 +52,8 @@ describe("insights commands", () => {
       jsonResponse({
         total_cost_usd: "1.50",
         total_tokens: 100000,
-        by_repo: [{ repo_name: "test-repo", cost_usd: "1.50", tokens: 100000 }],
-        by_model: [],
+        cost_by_repo: { "test-repo": "1.50" },
+        cost_by_model: {},
       }),
     );
 

@@ -49,8 +49,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from schemas.plugin.trigger_file_schema import TriggerFileSchema  # noqa: E402
 
-from syn_cli.commands._marketplace_models import MarketplaceIndex  # noqa: E402
-from syn_cli.commands._package_models import PluginManifest  # noqa: E402
 from syn_domain.contexts.orchestration._shared.workflow_definition import (  # noqa: E402
     PhaseFrontmatterSchema,
     WorkflowDefinition,
@@ -69,10 +67,11 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (  # n
 
 SCHEMA_REGISTRY: dict[str, type[BaseModel]] = {
     "workflow.schema.json": WorkflowDefinition,
-    "plugin-manifest.schema.json": PluginManifest,
-    "marketplace.schema.json": MarketplaceIndex,
     "triggers.schema.json": TriggerFileSchema,
     "phase-frontmatter.schema.json": PhaseFrontmatterSchema,
+    # TODO(#532): plugin-manifest and marketplace schemas were previously generated
+    # from syn-cli Pydantic models. Now that syn-cli is deleted, these schemas are
+    # maintained as static files until the models are relocated (e.g., to syn-domain).
 }
 
 
@@ -128,9 +127,11 @@ def check_staleness(schemas: dict[str, str]) -> bool:
             stale = True
 
     # Detect orphaned schema files not in the registry.
+    # Static schemas maintained outside the registry (see TODO(#532) in SCHEMA_REGISTRY).
+    static_schemas = {"plugin-manifest.schema.json", "marketplace.schema.json"}
     if SCHEMA_DIR.exists():
         for path in sorted(SCHEMA_DIR.glob("*.schema.json")):
-            if path.name not in schemas:
+            if path.name not in schemas and path.name not in static_schemas:
                 print(f"  ORPHAN: {path.relative_to(REPO_ROOT)} (not in SCHEMA_REGISTRY)")
                 stale = True
 

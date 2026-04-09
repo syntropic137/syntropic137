@@ -11,7 +11,7 @@
 
 # Syntropic137
 
-Running 10 parallel Claude Code agents in terminal is about as far as you can go before it becomes unmanageable. Syntropic137 scales that to 100+ with workflow orchestration, full observability on every tool call and conversation, model routing across Haiku/Sonnet/Opus, and a self-hosted workflow marketplace. Your data stays yours.
+Running 10 parallel Claude Code agents in a terminal is about as far as you can go before it becomes unmanageable. Syntropic137 scales that to 100+ with workflow orchestration, full observability on every tool call and conversation, model routing across Haiku/Sonnet/Opus, and a self-hosted workflow marketplace. Your data stays yours.
 
 **Self-hosted agentic engineering platform.** Run AI agents in isolated Docker workspaces with full observability. Every tool call, token, cost, conversation, and artifact is permanently captured in a queryable event store.
 
@@ -19,16 +19,16 @@ Running 10 parallel Claude Code agents in terminal is about as far as you can go
 - **Model routing**: assign Haiku or Sonnet to workflow phases that don't need Opus. Real cost savings across multi-phase pipelines without sacrificing quality where it matters.
 - **Workflow marketplace**: publish and consume reusable workflows via the CLI. One command to install any published workflow. Build once, run anywhere.
 - **Artifact pipeline**: each workflow phase produces output artifacts (stored in MinIO), passed as inputs to the next phase. Research, plan, code, review. Each phase builds on the last.
-- **Claude Code as a primitive**: agents run Claude Code inside secure ephemeral containers, leveraging Claude Code standards like [skills, commands, and hooks](https://docs.anthropic.com/en/docs/claude-code)
+- **Claude Code as a primitive**: agents run Claude Code inside secure ephemeral containers, leveraging Claude Code standards like [skills, commands, and hooks](https://docs.anthropic.com/en/docs/claude-code).
 - **Full observability**: token usage, tool traces, costs, and errors captured via event sourcing. [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) capture agent tasks and tool calls; conversation logs are saved after each session for reviewability; git hooks capture all git-related events.
-- **GitHub-native triggers**: integrated webhook triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows. Agents respond in minutes so developers stay out of the loop.
+- **GitHub-native triggers**: integrated event triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows. Zero-config, no tunnel required. Agents respond in minutes so developers stay out of the loop.
 - **Security first**: isolated Docker workspaces, secret injection/clearing lifecycle, read-only containers, no-new-privileges.
 - **Production-grade**: event-sourced state, crash recovery, idempotent handlers, Docker Compose single-machine deployment.
 - **Workflow phases as Claude Code commands**: each phase is a prompt template using the `$ARGUMENTS` command standard, composable into multi-phase pipelines (research, plan, implement, review).
 
 ## vs. Alternatives
 
-| | Syntropic137 | Claude Code CLI | Cursor | LangGraph |
+| Feature | Syntropic137 | Claude Code CLI | Cursor | LangGraph |
 |---|---|---|---|---|
 | Full observability (tool calls + costs) | Yes | No | No | Partial |
 | Self-hostable | Yes | Yes | No | Yes |
@@ -121,8 +121,7 @@ Regenerate diagram: `just diagram`
 ## CLI (`syn`)
 
 ```bash
-just cli -- <command>           # run via just
-# or install: uv tool install -e apps/syn-cli
+npx @syntropic137/cli <command>
 ```
 
 ### Workflows
@@ -178,6 +177,13 @@ syn triggers enable <name> --repository owner/repo
 syn triggers pause <id> --reason "maintenance"
 ```
 
+### GitHub
+
+```bash
+syn github repos                              # list repositories accessible to the GitHub App
+syn github repos --installation <id>          # filter by installation
+```
+
 ### Config
 
 ```bash
@@ -219,10 +225,9 @@ syn version
 syntropic137/
 ├── apps/
 │   ├── syn-api/                 # FastAPI HTTP server
-│   ├── syn-cli/                 # CLI tool ("syn")
+│   ├── syn-cli-node/             # CLI tool ("syn") — Node.js
 │   ├── syn-dashboard-ui/        # Dashboard frontend (Vite + React)
 │   ├── syn-docs/                # Public documentation site (Next.js + Fumadocs)
-│   └── syn-pulse-ui/            # Pulse/heatmap UI
 ├── packages/
 │   ├── syn-domain/              # Domain events, aggregates, ports
 │   ├── syn-adapters/            # Orchestration + observability adapters

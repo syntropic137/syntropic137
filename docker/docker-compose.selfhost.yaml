@@ -114,6 +114,7 @@ services:
         max-file: "3"
     networks:
       - syn-internal
+      - agent-net  # Workspace containers push OTLP metrics here (receive-only, no secrets)
 
   # ===========================================================================
   # DOCKER SOCKET PROXY (ISS-164)
@@ -191,7 +192,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
-      - SYN_WORKSPACE_HOST_DIR=${PWD}/workspaces
+      - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-.}/workspaces
       # Docker socket proxy (ISS-164)
       - DOCKER_HOST=tcp://docker-socket-proxy:2375
       - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-production}_agent-net
@@ -200,6 +201,8 @@ services:
     depends_on:
       docker-socket-proxy:
         condition: service_started
+      minio:
+        condition: service_healthy
     secrets:
       - db_password
       - redis_password
@@ -290,8 +293,8 @@ services:
     command: []
     secrets:
       - minio_password
-    ports:
-      - "127.0.0.1:9000:9000" # S3 API — localhost-only, required for bucket init script
+    # Port removed — bucket init happens inside the Docker network via API
+    # ensure_ready(). Use dev overlay for host-side MinIO access.
     volumes:
       - minio_data:/data
     restart: always
@@ -389,3 +392,6 @@ networks:
     name: syn137_proxy
     driver: bridge
     internal: true  # no external routing — proxy ↔ api only
+  agent-net:
+    name: syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+    driver: bridge

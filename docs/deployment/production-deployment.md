@@ -125,17 +125,17 @@ SYN_OTEL_ENDPOINT=http://localhost:4317
 docker compose -f docker/docker-compose.dev.yaml up -d
 
 # Start Syn137
-uv run python -m syn_cli start
+npx @syntropic137/cli start
 ```
 
 #### 5. Verify Installation
 
 ```bash
 # Check status
-uv run python -m syn_cli status
+npx @syntropic137/cli status
 
 # Run test workflow
-uv run python -m syn_cli workflow run examples/hello-world.yaml
+npx @syntropic137/cli workflow run examples/hello-world.yaml
 
 # Check workspace isolation
 uv run pytest packages/syn-adapters/tests/test_workspace_integration.py -v

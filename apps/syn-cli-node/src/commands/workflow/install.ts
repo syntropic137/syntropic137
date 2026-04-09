@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { apiPost } from "../../client/api.js";
+import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 import { formatTimestamp } from "../../output/format.js";
@@ -120,21 +120,23 @@ export async function installWorkflowsViaApi(
     const wf = workflows[i]!;
     process.stdout.write(`  [${i + 1}/${workflows.length}] Creating ${style(wf.name, BOLD)}... `);
     try {
-      const data = await apiPost<Record<string, unknown>>("/workflows", {
-        body: {
-          name: wf.name,
-          workflow_type: wf.workflow_type,
-          classification: wf.classification,
-          repository_url: wf.repository_url,
-          repository_ref: wf.repository_ref,
-          description: wf.description,
-          project_name: wf.project_name,
-          phases: wf.phases,
-          input_declarations: wf.input_declarations,
-        },
-        expected: [201],
-      });
-      const wfId = String(data["id"] ?? "unknown");
+      const data = unwrap(
+        await api.POST("/workflows", {
+          body: {
+            name: wf.name,
+            workflow_type: wf.workflow_type,
+            classification: wf.classification ?? "standard",
+            repository_url: wf.repository_url,
+            repository_ref: wf.repository_ref,
+            description: wf.description ?? null,
+            project_name: wf.project_name ?? null,
+            phases: wf.phases,
+            input_declarations: wf.input_declarations,
+          },
+        }),
+        "Failed to create workflow",
+      );
+      const wfId = data.id;
       print(`${style("done", GREEN)} (id: ${wfId})`);
       installed.push({ id: wfId, name: wf.name });
     } catch (err) {
@@ -277,7 +279,17 @@ export const installedCommand: CommandDef = {
   handler: async () => {
     const registry = loadInstalled();
 
-    if (registry.installations.length === 0) {
+    // Filter out entries whose local source path no longer exists.
+    // Remote sources (URLs, git@, GitHub shorthand, marketplace bare names) are always shown.
+    const liveInstallations = registry.installations.filter((r) => {
+      const src = r.source;
+      const isGitHubShorthand = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#.+)?$/.test(src);
+      const isRemote = src.includes("://") || src.startsWith("git@") || src.startsWith("ssh://") || isBarePluginName(src) || isGitHubShorthand;
+      if (isRemote) return true;
+      return fs.existsSync(path.resolve(src));
+    });
+
+    if (liveInstallations.length === 0) {
       printDim("No packages installed yet.");
       print(`Install one with: ${style("syn workflow install <source>", CYAN)}`);
       return;
@@ -290,7 +302,7 @@ export const installedCommand: CommandDef = {
     table.addColumn("Workflows", { align: "right" });
     table.addColumn("Installed", { style: DIM });
 
-    for (const record of registry.installations) {
+    for (const record of liveInstallations) {
       table.addRow(
         record.package_name,
         record.package_version,
@@ -313,17 +325,25 @@ export const initCommand: CommandDef = {
   args: [{ name: "directory", description: "Directory to scaffold (defaults to current dir)" }],
   options: {
     name: { type: "string", short: "n", description: "Workflow name" },
-    type: { type: "string", short: "t", description: "Workflow type", default: "research" },
+    type: { type: "string", short: "t", description: "Free-form workflow type label (e.g. research, planning, custom, code-quality)", default: "custom" },
     phases: { type: "string", description: "Number of phases", default: "3" },
     multi: { type: "boolean", description: "Scaffold multi-workflow plugin", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
-    const directory = parsed.positionals[0] ?? ".";
-    const resolvedDir = path.resolve(directory);
-    const workflowType = (parsed.values["type"] as string | undefined) ?? "research";
+    const workflowType = (parsed.values["type"] as string | undefined) ?? "custom";
     const numPhases = parseInt((parsed.values["phases"] as string | undefined) ?? "3", 10);
     const multi = parsed.values["multi"] === true;
-    const wfName = (parsed.values["name"] as string | undefined) ??
+    const explicitName = parsed.values["name"] as string | undefined;
+
+    // When no directory is given, default to a new named subdirectory in cwd
+    // (not cwd itself — cwd is almost always non-empty in a project).
+    const defaultDir = explicitName
+      ? path.basename(explicitName.toLowerCase().replace(/\s+/g, "-")) || "my-workflow"
+      : "my-workflow";
+    const directory = parsed.positionals[0] ?? defaultDir;
+    const resolvedDir = path.resolve(directory);
+
+    const wfName = explicitName ??
       path.basename(resolvedDir).replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
     if (fs.existsSync(resolvedDir)) {

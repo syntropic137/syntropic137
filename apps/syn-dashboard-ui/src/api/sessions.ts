@@ -1,11 +1,16 @@
 import type { SessionResponse, SessionSummary } from '../types'
 import { API_BASE, fetchJSON } from './base'
 
+export interface SessionListResponse {
+  sessions: SessionSummary[]
+  total: number
+}
+
 export async function listSessions(params?: {
   workflow_id?: string
   status?: string
   limit?: number
-}): Promise<SessionSummary[]> {
+}): Promise<SessionListResponse> {
   const searchParams = new URLSearchParams()
   if (params?.workflow_id) searchParams.set('workflow_id', params.workflow_id)
   if (params?.status) searchParams.set('status', params.status)
@@ -15,6 +20,6 @@ export async function listSessions(params?: {
   return fetchJSON(`${API_BASE}/sessions${query ? `?${query}` : ''}`)
 }
 
-export async function getSession(sessionId: string): Promise<SessionResponse> {
-  return fetchJSON(`${API_BASE}/sessions/${sessionId}`)
+export async function getSession(sessionId: string, signal?: AbortSignal): Promise<SessionResponse> {
+  return fetchJSON<SessionResponse>(`${API_BASE}/sessions/${sessionId}`, { signal })
 }

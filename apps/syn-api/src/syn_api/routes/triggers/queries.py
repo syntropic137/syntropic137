@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 
+from syn_adapters.projection_stores.prefix_match import format_ambiguous_error
 from syn_api._wiring import ensure_connected, get_trigger_store
 from syn_api.types import (
     Err,
@@ -32,6 +33,96 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/triggers", tags=["triggers"])
 
 
+async def _resolve_workflow_names(workflow_ids: set[str]) -> dict[str, str]:
+    """Best-effort batch lookup of workflow names from projection store.
+
+    Reuses the pattern from ``routes/webhooks/acknowledgments.py``.
+    Returns a mapping of ``{workflow_id: name}``. Missing IDs are omitted.
+    """
+    from syn_adapters.projection_stores import get_projection_store
+
+    proj_store = get_projection_store()
+    names: dict[str, str] = {}
+    for wf_id in workflow_ids:
+        try:
+            data = await proj_store.get("workflow_details", wf_id)
+            if data:
+                name = data.get("name", "")
+                if name:
+                    names[wf_id] = name
+        except Exception:
+            logger.debug("Could not resolve workflow name for %s", wf_id)
+    return names
+
+
+async def _resolve_repo_names(repo_values: set[str]) -> dict[str, str]:
+    """Best-effort resolve repo IDs to ``owner/repo`` display names.
+
+    Values already in ``owner/repo`` form (contain ``/``) are kept as-is.
+    Internal repo IDs (e.g. ``repo-91408957``) are resolved via the repo
+    projection.  Returns ``{original_value: display_name}`` for every input.
+    """
+    # Partition into already-resolved and needing lookup
+    result = {v: v for v in repo_values if "/" in v}
+    ids_to_resolve = repo_values - result.keys()
+    if not ids_to_resolve:
+        return result
+
+    resolved = await _lookup_repo_ids(ids_to_resolve)
+    result.update(resolved)
+    return result
+
+
+async def _lookup_repo_ids(repo_ids: set[str]) -> dict[str, str]:
+    """Look up repo IDs via the repo projection. Returns ID→display_name."""
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        get_repo_projection,
+    )
+
+    result: dict[str, str] = {}
+    try:
+        projection = get_repo_projection()
+        for repo_id in repo_ids:
+            repo = await projection.get(repo_id)
+            result[repo_id] = repo.full_name if repo and repo.full_name else repo_id
+    except Exception:
+        logger.debug("Could not resolve repo names", exc_info=True)
+        for repo_id in repo_ids:
+            result.setdefault(repo_id, repo_id)
+    return result
+
+
+async def _resolve_trigger_id(trigger_id: str) -> str:
+    """Resolve a (possibly partial) trigger ID against the trigger store.
+
+    Unlike other entities, triggers live in ``TriggerQueryStore`` — not the
+    projection store — because they need specialized queries for safety guards
+    (fire counts, cooldowns) and delivery dedup that the generic projection
+    store protocol doesn't support.  The standard ``resolve_or_raise`` only
+    queries the projection store, so trigger endpoints use this helper instead.
+    See #542.
+    """
+    store = get_trigger_store()
+
+    # Fast path: exact match
+    exact = await store.get(trigger_id)
+    if exact is not None:
+        return trigger_id
+
+    # Prefix scan — collect up to 6 candidates then decide
+    all_triggers = await store.list_all()
+    candidates = [t.trigger_id for t in all_triggers if t.trigger_id.startswith(trigger_id)][:6]
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail=format_ambiguous_error("Trigger", trigger_id, candidates),
+        )
+    raise HTTPException(status_code=404, detail=f"Trigger not found: {trigger_id}")
+
+
 # ---------------------------------------------------------------------------
 # Service functions (importable by tests)
 # ---------------------------------------------------------------------------
@@ -51,14 +142,20 @@ async def list_triggers(
     except Exception as e:
         return Err(TriggerError.INVALID_INPUT, message=str(e))
 
+    wf_ids = {t.workflow_id for t in triggers if t.workflow_id}
+    repo_vals = {t.repository for t in triggers if t.repository}
+    wf_names = await _resolve_workflow_names(wf_ids) if wf_ids else {}
+    repo_names = await _resolve_repo_names(repo_vals) if repo_vals else {}
+
     return Ok(
         [
             TriggerSummary(
                 trigger_id=t.trigger_id,
                 name=t.name,
                 event=t.event,
-                repository=t.repository,
+                repository=repo_names.get(t.repository, t.repository),
                 workflow_id=t.workflow_id,
+                workflow_name=wf_names.get(t.workflow_id, ""),
                 status=t.status,
                 fire_count=t.fire_count,
                 created_at=t.created_at if hasattr(t, "created_at") else None,
@@ -68,7 +165,17 @@ async def list_triggers(
     )
 
 
-def _resolve_config(config: Any) -> dict[str, Any]:
+def _resolve_conditions(conditions: list[Any] | None) -> list[dict[str, Any]]:
+    """Convert condition objects (dataclass or dict) to plain dicts."""
+    if not conditions:
+        return []
+    return [
+        dataclasses.asdict(c) if dataclasses.is_dataclass(c) else dict(c)  # type: ignore[arg-type]
+        for c in conditions
+    ]
+
+
+def _resolve_config(config: object) -> dict[str, Any]:
     """Convert a config value (dataclass, dict, or other) to a plain dict."""
     if dataclasses.is_dataclass(config) and not isinstance(config, type):
         return dataclasses.asdict(config)  # type: ignore[arg-type]  # guarded by is_dataclass
@@ -89,17 +196,23 @@ async def get_trigger(
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
 
+    wf_names = await _resolve_workflow_names({indexed.workflow_id}) if indexed.workflow_id else {}
+    repo_names = await _resolve_repo_names({indexed.repository}) if indexed.repository else {}
+    workflow_name = wf_names.get(indexed.workflow_id, "")
+    display_repo = repo_names.get(indexed.repository, indexed.repository)
+
     return Ok(
         TriggerDetail(
             trigger_id=indexed.trigger_id,
             name=indexed.name,
             event=indexed.event,
-            repository=indexed.repository,
+            repository=display_repo,
             workflow_id=indexed.workflow_id,
+            workflow_name=workflow_name,
             status=indexed.status,
             fire_count=indexed.fire_count,
             created_at=indexed.created_at if hasattr(indexed, "created_at") else None,
-            conditions=list(indexed.conditions) if indexed.conditions else [],
+            conditions=_resolve_conditions(indexed.conditions),
             input_mapping=dict(indexed.input_mapping) if indexed.input_mapping else {},
             config=_resolve_config(indexed.config),
             installation_id=indexed.installation_id or "",
@@ -140,6 +253,8 @@ async def get_trigger_history(
                 fired_at=e.fired_at,
                 status=e.status,
                 cost_usd=e.cost_usd,
+                guard_name=e.guard_name,
+                block_reason=e.block_reason,
             )
             for e in entries
         ]
@@ -169,6 +284,7 @@ async def list_triggers_endpoint(
                 event=t.event,
                 repository=t.repository,
                 workflow_id=t.workflow_id,
+                workflow_name=t.workflow_name,
                 status=str(t.status),
                 fire_count=t.fire_count,
             )
@@ -195,6 +311,8 @@ async def _collect_history_entries(
                 event_type=e.github_event_type,
                 pr_number=e.pr_number,
                 status=e.status,
+                guard_name=e.guard_name,
+                block_reason=e.block_reason,
             )
             for e in hist.value
         )
@@ -217,6 +335,7 @@ async def get_all_history_endpoint(limit: int = 50) -> TriggerHistoryListRespons
 @router.get("/{trigger_id}", response_model=TriggerDetail)
 async def get_trigger_endpoint(trigger_id: str) -> TriggerDetail:
     """Get trigger details."""
+    trigger_id = await _resolve_trigger_id(trigger_id)
     result = await get_trigger(trigger_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Trigger not found: {trigger_id}")
@@ -230,6 +349,7 @@ async def get_trigger_history_endpoint(
     limit: int = 50,
 ) -> TriggerHistoryResponse:
     """Get execution history for a trigger."""
+    trigger_id = await _resolve_trigger_id(trigger_id)
     result = await get_trigger_history(trigger_id=trigger_id, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -245,6 +365,8 @@ async def get_trigger_history_endpoint(
                 pr_number=e.pr_number,
                 status=e.status,
                 cost_usd=e.cost_usd,
+                guard_name=e.guard_name,
+                block_reason=e.block_reason,
             )
             for e in result.value
         ],

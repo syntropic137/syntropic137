@@ -63,18 +63,41 @@ describe("triggers commands", () => {
         event: "push",
         repository: "r1",
         workflow_id: "w1",
+        workflow_name: "PR Review",
         status: "active",
         fire_count: 5,
-        max_fires_per_period: 10,
-        cooldown_seconds: 300,
+        config: { max_attempts: 10, cooldown_seconds: 300 },
         conditions: [{ field: "branch", operator: "eq", value: "main" }],
       }),
     );
     await triggersGroup.getCommand("show")!.handler({ positionals: ["trig-1"], values: {} });
     const out = stdout();
     expect(out).toContain("trig-1");
+    // workflow_name is shown instead of workflow_id UUID
+    expect(out).toContain("PR Review");
+    expect(out).not.toContain("w1");
+    // config safety limits are rendered
+    expect(out).toContain("max 10");
+    expect(out).toContain("300s");
+    // conditions
     expect(out).toContain("branch");
     expect(out).toContain("main");
+  });
+
+  it("show falls back to workflow_id when workflow_name is absent", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        trigger_id: "trig-2",
+        event: "push",
+        repository: "r1",
+        workflow_id: "w-uuid-1234",
+        status: "active",
+        fire_count: 0,
+        conditions: [],
+      }),
+    );
+    await triggersGroup.getCommand("show")!.handler({ positionals: ["trig-2"], values: {} });
+    expect(stdout()).toContain("w-uuid-1234");
   });
 
   it("delete requires --force", async () => {
@@ -83,9 +106,19 @@ describe("triggers commands", () => {
     ).rejects.toThrow(CLIError);
   });
 
-  it("pause sends request", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({}));
+  it("pause sends PATCH only, no stale GET re-fetch", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ trigger_id: "trig-1", status: "paused" }));
     await triggersGroup.getCommand("pause")!.handler({ positionals: ["trig-1"], values: {} });
     expect(stdout()).toContain("paused");
+    // Only one fetch call (PATCH) — no follow-up GET that would read stale projection
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("resume sends PATCH only, no stale GET re-fetch", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ trigger_id: "trig-1", status: "resumed" }));
+    await triggersGroup.getCommand("resume")!.handler({ positionals: ["trig-1"], values: {} });
+    expect(stdout()).toContain("resumed");
+    // Only one fetch call (PATCH) — no follow-up GET that would read stale projection
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -61,7 +61,7 @@ services:
       args:
         INCLUDE_DOCKER_CLI: "1"
     ports:
-      - "8137:8000"
+      - "9137:8000"
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000}"]
@@ -90,7 +90,7 @@ services:
       # Host path that Docker daemon can mount (must match volume mount below).
       # ../workspaces resolves to the repo root workspaces/ dir, which is what
       # the API container has mounted at /workspaces via the volume below.
-      SYN_WORKSPACE_HOST_DIR: ${PWD}/workspaces
+      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-.}/workspaces
       # Agent network: matches the compose-prefixed name for this stack (syn-dev_agent-net).
       # Each compose stack gets its own prefix, preventing cross-stack container leakage.
       # Production override: SYN_AGENT_NETWORK=syntropic137_agent-net (or whatever that stack's prefix is)

@@ -4,7 +4,7 @@
  */
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
-import { apiGet } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
 import { print, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCost, formatTokens } from "../output/format.js";
@@ -28,37 +28,30 @@ const overviewCommand: CommandDef = {
   name: "overview",
   description: "Show global overview of systems and health",
   handler: async () => {
-    const d = await apiGet<Record<string, unknown>>("/insights/overview");
+    const d = unwrap(await api.GET("/insights/overview"), "Fetch overview");
 
     print(style("System Overview", CYAN));
-    print(`  ${style("Total systems:", BOLD)}     ${d["total_systems"] ?? 0}`);
-    print(`  ${style("Total repos:", BOLD)}       ${d["total_repos"] ?? 0}`);
-    print(`  ${style("Active sessions:", BOLD)}   ${d["active_sessions"] ?? 0}`);
-    print(`  ${style("Total executions:", BOLD)}  ${d["total_executions"] ?? 0}`);
+    print(`  ${style("Total systems:", BOLD)}     ${d.total_systems}`);
+    print(`  ${style("Total repos:", BOLD)}       ${d.total_repos}`);
+    print(`  ${style("Unassigned repos:", BOLD)}  ${d.unassigned_repos}`);
+    print(`  ${style("Active executions:", BOLD)} ${d.total_active_executions}`);
 
-    const health = d["health"] as Record<string, unknown> | undefined;
-    if (health) {
-      const h = String(health["status"] ?? "unknown");
-      const color = h === "healthy" ? GREEN : h === "degraded" ? YELLOW : RED;
-      print(`  ${style("Health:", BOLD)}           ${style(h, color)}`);
-    }
-
-    const systems = (d["systems"] ?? []) as Record<string, unknown>[];
+    const systems = d.systems ?? [];
     if (systems.length > 0) {
       const table = new Table({ title: "Systems" });
       table.addColumn("Name", { style: CYAN });
       table.addColumn("Repos", { align: "right" });
-      table.addColumn("Health");
+      table.addColumn("Status");
       table.addColumn("Executions", { align: "right" });
 
       for (const sys of systems) {
-        const sh = String(sys["health"] ?? "unknown");
+        const sh = sys.overall_status;
         const sc = sh === "healthy" ? GREEN : sh === "degraded" ? YELLOW : RED;
         table.addRow(
-          String(sys["name"] ?? ""),
-          String(sys["repo_count"] ?? 0),
+          sys.system_name,
+          String(sys.repo_count),
           style(sh, sc),
-          String(sys["execution_count"] ?? 0),
+          String(sys.active_executions),
         );
       }
       table.print();
@@ -69,43 +62,33 @@ const overviewCommand: CommandDef = {
 const costCommand: CommandDef = {
   name: "cost",
   description: "Show global cost breakdown",
-  options: {
-    days: { type: "string", short: "d", description: "Number of days to look back", default: "30" },
-  },
-  handler: async (parsed: ParsedArgs) => {
-    const days = (parsed.values["days"] as string | undefined) ?? "30";
-    const d = await apiGet<Record<string, unknown>>("/insights/cost", { params: { days } });
+  handler: async () => {
+    const d = unwrap(await api.GET("/insights/cost"), "Fetch cost");
 
-    print(style(`Cost Overview (last ${days} days)`, CYAN));
-    print(`  ${style("Total cost:", BOLD)}   ${formatCost(String(d["total_cost_usd"] ?? "0"))}`);
-    print(`  ${style("Total tokens:", BOLD)} ${formatTokens(Number(d["total_tokens"] ?? 0))}`);
+    print(style("Cost Overview", CYAN));
+    print(`  ${style("Total cost:", BOLD)}   ${formatCost(d.total_cost_usd)}`);
+    print(`  ${style("Total tokens:", BOLD)} ${formatTokens(d.total_tokens)}`);
 
-    const byRepo = (d["by_repo"] ?? []) as Record<string, unknown>[];
-    if (byRepo.length > 0) {
+    const byRepo = d.cost_by_repo ?? {};
+    const repoEntries = Object.entries(byRepo);
+    if (repoEntries.length > 0) {
       const table = new Table({ title: "Cost by Repository" });
       table.addColumn("Repository", { style: CYAN });
       table.addColumn("Cost", { align: "right" });
-      table.addColumn("Tokens", { align: "right" });
-      for (const r of byRepo) {
-        table.addRow(
-          String(r["repo_name"] ?? r["repo_id"] ?? ""),
-          formatCost(String(r["cost_usd"] ?? "0")),
-          formatTokens(Number(r["tokens"] ?? 0)),
-        );
+      for (const [repo, cost] of repoEntries) {
+        table.addRow(repo, formatCost(cost));
       }
       table.print();
     }
 
-    const byModel = (d["by_model"] ?? []) as Record<string, unknown>[];
-    if (byModel.length > 0) {
+    const byModel = d.cost_by_model ?? {};
+    const modelEntries = Object.entries(byModel);
+    if (modelEntries.length > 0) {
       const table = new Table({ title: "Cost by Model" });
       table.addColumn("Model", { style: CYAN });
       table.addColumn("Cost", { align: "right" });
-      for (const m of byModel) {
-        table.addRow(
-          String(m["model"] ?? ""),
-          formatCost(String(m["cost_usd"] ?? "0")),
-        );
+      for (const [model, cost] of modelEntries) {
+        table.addRow(model, formatCost(cost));
       }
       table.print();
     }
@@ -125,18 +108,17 @@ const heatmapCommand: CommandDef = {
     startDate.setDate(endDate.getDate() - numDays);
     const fmt = (dt: Date) => dt.toISOString().split("T")[0]!;
 
-    const d = await apiGet<Record<string, unknown>>("/insights/contribution-heatmap", {
-      params: { start_date: fmt(startDate), end_date: fmt(endDate) },
-    });
+    const d = unwrap(await api.GET("/insights/contribution-heatmap", {
+      params: { query: { start_date: fmt(startDate), end_date: fmt(endDate) } },
+    }), "Fetch heatmap");
 
-    const days = (d["days"] ?? []) as Record<string, unknown>[];
+    const days = d.days ?? [];
     if (days.length === 0) { printDim("No activity data."); return; }
 
-    const values = days.map((b) => Number(b["count"] ?? 0));
+    const values = days.map((b) => b.count);
     print(style(`Activity Heatmap (last ${numDays} days)`, CYAN));
     print(`  ${renderSparkline(values)}`);
-    const total = Number(d["total"] ?? values.reduce((a, b) => a + b, 0));
-    print(style(`  ${total} total events`, DIM));
+    print(style(`  ${d.total} total events`, DIM));
   },
 };
 

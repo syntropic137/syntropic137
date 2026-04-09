@@ -28,29 +28,24 @@ If you already ran `npx @syntropic137/setup init`, the GitHub App step was offer
 
 ## Trigger Rules
 
-A **trigger rule** connects a GitHub event to a workflow. When a matching event arrives, Syntropic137 starts a workflow execution automatically.
+A **trigger rule** connects a GitHub event to a workflow. When a matching event arrives, Syntropic137 evaluates conditions and safety guards, then either fires the workflow or records a block with the reason.
 
 ```bash
 # Create a trigger via CLI
-syn trigger create \
+syn triggers register \
   --repo owner/my-repo \
   --event pull_request.opened \
   --workflow pr-review-v1 \
-  --daily-limit 20 \
   --cooldown 60
 ```
 
-### Safety Limits
+Triggers include safety guards (concurrency, cooldown, daily limits, idempotency), condition operators for filtering events, built-in presets, and full observability — every fire and block is recorded and queryable.
 
-Every trigger has built-in guards to prevent runaway execution:
+### Conditions
 
-| Guard | Default | Purpose |
-|-------|---------|---------|
-| `daily_limit` | 50 | Maximum executions per day per trigger |
-| `cooldown` | 30s | Minimum seconds between executions |
-| `budget` | — | Maximum spend before pausing (optional) |
+Triggers support fine-grained filtering with dot-notation field paths and comparison operators. Use conditions to whitelist specific contributors, exclude bots, filter by branch, skip draft PRs, and more. See [Trigger Conditions](/docs/guide/trigger-conditions) for the full reference.
 
-These are enforced server-side and cannot be bypassed by webhook payloads.
+For the complete guide on triggers, conditions, guards, and observability, see [Triggers](/docs/guide/triggers).
 
 ### Supported Events
 
@@ -71,8 +66,8 @@ Syntropic137 uses a hybrid approach for receiving GitHub events:
 
 **Events API polling** is the fallback — a background task polls GitHub's Events API on an adaptive interval. This enables zero-config onboarding without a tunnel.
 
-<Callout type="warn">
-GitHub's Events API does **not** include GitHub Actions webhook events (`workflow_run`, `check_run`, etc.). If you need to trigger workflows from Actions events, you must set up a [tunnel](/docs/guide/tunnels) for webhook delivery.
+<Callout type="info">
+**Self-healing works without a tunnel.** `check_run` events are automatically detected via Checks API polling (~30-90s latency). A [tunnel](/docs/guide/tunnels) provides real-time delivery (~1s) and access to additional CI/CD events (`workflow_run`, `check_suite`, etc.).
 </Callout>
 
 The system automatically deduplicates events using content-based keys (commit SHA, PR number, check run ID), so the same logical event is processed exactly once regardless of whether it arrived via webhook, polling, or both.
@@ -87,3 +82,14 @@ After creating the GitHub App, install it on your repositories:
 2. Select the organization or personal account
 3. Choose **All repositories** or select specific ones
 4. Syntropic137 dynamically resolves installation IDs per repository — no reconfiguration needed when you add new repos
+
+## Discovering Accessible Repositories
+
+Once the GitHub App is installed, you can list all repositories it has access to:
+
+```bash
+syn github repos
+syn github repos --installation <id>    # filter by a specific installation
+```
+
+This queries the GitHub API through your App's installation tokens and returns repository metadata (name, owner, visibility, default branch). Use it to verify that the App can see the repos you expect before setting up trigger rules.

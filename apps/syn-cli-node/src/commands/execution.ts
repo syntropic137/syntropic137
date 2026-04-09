@@ -5,12 +5,15 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
-import { apiGet, buildParams } from "../client/api.js";
+import { api, unwrap } from "../client/typed.js";
+import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, RED } from "../output/ansi.js";
 import { formatCost, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
-import type { ExecutionListResponse, ExecutionDetailResponse } from "../generated/types.js";
+
+type ExecutionList = components["schemas"]["ExecutionListResponse"];
+type ExecutionDetail = components["schemas"]["ExecutionDetailResponse"];
 
 const listCommand: CommandDef = {
   name: "list",
@@ -21,15 +24,23 @@ const listCommand: CommandDef = {
     "page-size": { type: "string", description: "Items per page (max 100)", default: "50" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const params = buildParams({
-      status: (parsed.values["status"] as string | undefined) ?? null,
-      page: (parsed.values["page"] as string | undefined) ?? "1",
-      page_size: (parsed.values["page-size"] as string | undefined) ?? "50",
-    });
-    const data = await apiGet<ExecutionListResponse>("/executions", { params });
+    const status = parsed.values["status"] as string | undefined;
+    const pageStr = (parsed.values["page"] as string | undefined) ?? "1";
+    const pageSizeStr = (parsed.values["page-size"] as string | undefined) ?? "50";
+
+    const data: ExecutionList = unwrap(await api.GET("/executions", {
+      params: {
+        query: {
+          status: status ?? null,
+          page: parseInt(pageStr, 10),
+          page_size: parseInt(pageSizeStr, 10),
+        },
+      },
+    }), "Failed to list executions");
+
     const { executions, total } = data;
-    const page = parseInt((parsed.values["page"] as string) ?? "1", 10);
-    const pageSize = parseInt((parsed.values["page-size"] as string) ?? "50", 10);
+    const page = parseInt(pageStr, 10);
+    const pageSize = parseInt(pageSizeStr, 10);
 
     if (executions.length === 0) { printDim("No executions found."); return; }
 
@@ -66,7 +77,9 @@ const showCommand: CommandDef = {
     const id = parsed.positionals[0];
     if (!id) { printError("Missing execution-id"); throw new CLIError("Missing argument", 1); }
 
-    const ex = await apiGet<ExecutionDetailResponse>(`/executions/${id}`);
+    const ex: ExecutionDetail = unwrap(await api.GET("/executions/{execution_id}", {
+      params: { path: { execution_id: id } },
+    }), "Failed to get execution");
 
     print(`${style("Execution:", BOLD)} ${ex.workflow_execution_id}`);
     print(`  Workflow:   ${ex.workflow_name}`);

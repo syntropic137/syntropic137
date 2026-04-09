@@ -6,21 +6,25 @@ Handles update and delete commands for artifacts.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
     from syn_domain.contexts.artifacts.domain.commands.DeleteArtifactCommand import (
         DeleteArtifactCommand,
     )
     from syn_domain.contexts.artifacts.domain.commands.UpdateArtifactCommand import (
         UpdateArtifactCommand,
     )
+    from syn_domain.repository import Repository
 
 logger = logging.getLogger(__name__)
 
 
 class ManageArtifactHandler:
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Repository[ArtifactAggregate]) -> None:
         self._repository = repository
 
     async def update(self, command: UpdateArtifactCommand) -> bool:

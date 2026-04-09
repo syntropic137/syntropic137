@@ -29,7 +29,7 @@ class ThroughputBenchmark(BaseBenchmark):
         self,
         duration: float = 30.0,
         max_concurrent: int = 5,
-        **_kwargs: Any,
+        **_kwargs: Any,  # noqa: ANN401
     ) -> BenchmarkResult:
         """Run throughput benchmark.
 

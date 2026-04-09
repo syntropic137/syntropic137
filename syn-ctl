@@ -95,7 +95,7 @@ get_current_version() {
 
 # Compose wrapper — always targets the correct file and project directory
 dc() {
-    docker compose -f "${WORK_DIR}/${COMPOSE_FILE}" --project-directory "${WORK_DIR}" "$@"
+    SYN_INSTALL_DIR="${WORK_DIR}" docker compose -f "${WORK_DIR}/${COMPOSE_FILE}" --project-directory "${WORK_DIR}" "$@"
 }
 
 # ---------------------------------------------------------------------------

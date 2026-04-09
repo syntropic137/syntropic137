@@ -61,6 +61,16 @@ class FakeProjectionStore:
     async def set_position(self, projection: str, position: int) -> None:
         self._positions[projection] = position
 
+    async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
+        if projection not in self._data:
+            return []
+        return [
+            (key, data) for key, data in self._data[projection].items() if key.startswith(prefix)
+        ][:10]
+
+    async def delete_all(self, projection: str) -> None:
+        self._data.pop(projection, None)
+
     async def get_last_updated(self, projection: str) -> datetime | None:  # noqa: ARG002
         return None
 

@@ -39,7 +39,7 @@ syn triggers disable-all [options]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--repo`, `-r` | `text` | --- | Repository ID |
+| `--repo`, `-r` | `text` | --- | Repository in owner/repo format |
 | `--force`, `-f` | `boolean` | `false` | Skip confirmation |
 
 ---
@@ -56,13 +56,14 @@ syn triggers enable <preset> [options]
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `preset` | `text` | Yes | Preset name (self-healing, review-fix) |
+| `preset` | `text` | Yes | Preset name (self-healing, review-fix, comment-command) |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--repo`, `-r` | `text` | --- | Repository ID |
+| `--workflow`, `-w` | `text` | --- | Workflow ID to dispatch (default: preset default) |
 
 ---
 
@@ -101,7 +102,8 @@ syn triggers list [options]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--repo`, `-r` | `text` | --- | Filter by repository |
-| `--status`, `-s` | `text` | --- | Filter by status |
+| `--status`, `-s` | `text` | --- | Filter by status (active, paused, deleted) |
+| `--all`, `-a` | `boolean` | `false` | Include deleted triggers |
 
 ---
 
@@ -136,10 +138,9 @@ syn triggers register [options]
 | `--repo`, `-r` | `text` | --- | Repository ID |
 | `--workflow`, `-w` | `text` | --- | Workflow ID to execute |
 | `--event`, `-e` | `text` | --- | GitHub event type (e.g. check_run.completed) |
-| `--condition`, `-c` | `text` | --- | Condition as key=value (repeatable) |
-| `--max-fires` | `text` | `5` | Maximum fires per period |
+| `--condition`, `-c` | `text` | --- | Condition as field=value (repeatable, uses 'eq' operator) |
+| `--max-fires` | `text` | `5` | Maximum fire attempts per PR/trigger combination |
 | `--cooldown` | `text` | `300` | Cooldown in seconds |
-| `--budget` | `text` | --- | Budget limit in USD |
 
 ---
 

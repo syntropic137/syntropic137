@@ -17,6 +17,7 @@ from syn_api._wiring import (
 )
 from syn_api.types import (
     CostOutlierResponse,
+    CreateSystemRequest,
     Err,
     FailurePatternResponse,
     Ok,
@@ -33,6 +34,7 @@ from syn_api.types import (
     SystemPatternsResponse,
     SystemStatusResponse,
     SystemSummaryResponse,
+    UpdateSystemRequest,
 )
 
 if TYPE_CHECKING:
@@ -411,22 +413,22 @@ def _classify_sys_error(error_msg: str) -> SystemErrorCode:
 
 
 @router.post("")
-async def create_system_endpoint(body: dict[str, Any]) -> SystemCreatedResponse:
+async def create_system_endpoint(body: CreateSystemRequest) -> SystemCreatedResponse:
     """Create a new system."""
     try:
         result = await create_system(
-            organization_id=body["organization_id"],
-            name=body["name"],
-            description=body.get("description", ""),
-            created_by=body.get("created_by", "api"),
+            organization_id=body.organization_id,
+            name=body.name,
+            description=body.description,
+            created_by=body.created_by,
         )
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return SystemCreatedResponse(system_id=result.value, name=body["name"])
+    return SystemCreatedResponse(system_id=result.value, name=body.name)
 
 
 @router.get("")
@@ -443,6 +445,11 @@ async def list_systems_endpoint(organization_id: str | None = None) -> SystemLis
 @router.get("/{system_id}")
 async def get_system_endpoint(system_id: str) -> SystemSummaryResponse:
     """Get system details."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system(system_id)
 
     if isinstance(result, Err):
@@ -452,12 +459,12 @@ async def get_system_endpoint(system_id: str) -> SystemSummaryResponse:
 
 
 @router.put("/{system_id}")
-async def update_system_endpoint(system_id: str, body: dict[str, Any]) -> SystemActionResponse:
+async def update_system_endpoint(system_id: str, body: UpdateSystemRequest) -> SystemActionResponse:
     """Update a system."""
     result = await update_system(
         system_id=system_id,
-        name=body.get("name"),
-        description=body.get("description"),
+        name=body.name,
+        description=body.description,
     )
 
     if isinstance(result, Err):
@@ -490,6 +497,11 @@ async def delete_system_endpoint(system_id: str) -> SystemActionResponse:
 @router.get("/{system_id}/status")
 async def get_system_status_endpoint(system_id: str) -> SystemStatusResponse:
     """Get cross-repo health overview for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_status(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -501,6 +513,11 @@ async def get_system_status_endpoint(system_id: str) -> SystemStatusResponse:
 @router.get("/{system_id}/cost")
 async def get_system_cost_endpoint(system_id: str) -> SystemCostResponse:
     """Get cost breakdown for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_cost(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -512,6 +529,11 @@ async def get_system_activity_endpoint(
     system_id: str, offset: int = 0, limit: int = 50
 ) -> SystemActivityResponse:
     """Get execution timeline for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_activity(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -522,6 +544,11 @@ async def get_system_activity_endpoint(
 @router.get("/{system_id}/patterns")
 async def get_system_patterns_endpoint(system_id: str) -> SystemPatternsResponse:
     """Get recurring failure and cost patterns for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_patterns(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -542,6 +569,11 @@ async def get_system_history_endpoint(
     system_id: str, offset: int = 0, limit: int = 50
 ) -> SystemHistoryResponse:
     """Get historical execution timeline for a system."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    system_id = await resolve_or_raise(mgr.store, "systems", system_id, "System")
     result = await get_system_history(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)

@@ -4,6 +4,7 @@ Extracted from postgres_store.py to reduce module complexity.
 """
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,7 +24,7 @@ def deserialize(data: str | dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def json_serializer(obj: Any) -> Any:
+def json_serializer(obj: object) -> str:
     """JSON serializer for objects not serializable by default."""
     if isinstance(obj, datetime):
         return obj.isoformat()
@@ -41,20 +42,29 @@ async def ensure_projection_table(
         return
 
     async with pool.acquire() as conn:
-        await conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                id VARCHAR(255) PRIMARY KEY,
-                data JSONB NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            )
-        """)
+        try:
+            await conn.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    id VARCHAR(255) PRIMARY KEY,
+                    data JSONB NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+            """)
 
-        # Create index on updated_at for efficient queries
-        await conn.execute(f"""
-            CREATE INDEX IF NOT EXISTS idx_{table_name}_updated_at
-            ON {table_name}(updated_at DESC)
-        """)
+            # Create index on updated_at for efficient queries
+            await conn.execute(f"""
+                CREATE INDEX IF NOT EXISTS idx_{table_name}_updated_at
+                ON {table_name}(updated_at DESC)
+            """)
+        except asyncpg.exceptions.UniqueViolationError:
+            # PostgreSQL creates a composite row type with the same name as
+            # each table. Under asyncio concurrency, two coroutines can both
+            # pass the initialized_tables guard and race to CREATE TABLE —
+            # one succeeds, the other gets a UniqueViolationError on the
+            # implicit composite type. The table exists at this point, so
+            # this is safe to ignore.
+            pass
 
     initialized_tables.add(projection)
 
@@ -83,7 +93,7 @@ async def ensure_state_table(
 async def fetch_get_all(
     pool: asyncpg.Pool,
     table_name: str,
-    deserialize_fn: Any,
+    deserialize_fn: Callable[[str | dict[str, Any]], dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Fetch all records from a projection table ordered by updated_at."""
     async with pool.acquire() as conn:

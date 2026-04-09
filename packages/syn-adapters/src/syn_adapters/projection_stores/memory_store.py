@@ -101,6 +101,16 @@ class InMemoryProjectionStore:
         results = apply_sorting(results, order_by)
         return apply_pagination(results, offset, limit)
 
+    async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
+        """Get all records whose key starts with the given prefix."""
+        if projection not in self._data:
+            return []
+        return [
+            (key, data.copy())
+            for key, data in self._data[projection].items()
+            if key.startswith(prefix)
+        ][:10]
+
     async def get_position(self, projection: str) -> int | None:
         """Get the last processed event position for a projection."""
         state = self._state.get(projection)
@@ -111,6 +121,11 @@ class InMemoryProjectionStore:
         state = self._ensure_state(projection)
         state.last_position = position
         state.last_updated = datetime.now(UTC)
+
+    async def delete_all(self, projection: str) -> None:
+        """Delete all records for a projection."""
+        self._data.pop(projection, None)
+        self._state.pop(projection, None)
 
     async def get_last_updated(self, projection: str) -> datetime | None:
         """Get the last update timestamp for a projection."""
