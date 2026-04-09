@@ -24,6 +24,9 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    WorkflowType,
+)
 from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
     CreateWorkflowTemplateCommand,
 )
@@ -69,10 +72,11 @@ _DUPLICATE_MARKERS = ("already exists", "precondition failed", "concurrency conf
 def _build_create_command(definition: WorkflowDefinition) -> CreateWorkflowTemplateCommand:
     """Build a CreateWorkflowTemplateCommand from a workflow definition."""
     default_url = "https://github.com/placeholder/not-configured"
+    workflow_type = WorkflowType(definition.type) if definition.type in WorkflowType._value2member_map_ else WorkflowType.CUSTOM
     return CreateWorkflowTemplateCommand(
         aggregate_id=definition.id,
         name=definition.name,
-        workflow_type=definition.type,
+        workflow_type=workflow_type,
         classification=definition.classification,
         repository_url=(definition.repository.url if definition.repository else default_url),
         repository_ref=(definition.repository.ref if definition.repository else "main"),
