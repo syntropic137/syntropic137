@@ -846,6 +846,19 @@ format:
 format-check:
     uv run ruff format --check .
 
+# Ratchet: no untyped dicts in API types (dict[str, Any] or dict[str, object] in Pydantic models)
+check-untyped-dicts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    THRESHOLD=$(cat .ratchets/untyped-dicts 2>/dev/null || echo "0")
+    COUNT=$(grep -c "dict\[str, \(Any\|object\)\]" apps/syn-api/src/syn_api/types.py 2>/dev/null || echo "0")
+    if [ "$COUNT" -gt "$THRESHOLD" ]; then
+        echo "❌ Untyped dict ratchet exceeded: $COUNT occurrences (threshold: $THRESHOLD)"
+        echo "   Fix dict[str, Any] and dict[str, object] in apps/syn-api/src/syn_api/types.py"
+        exit 1
+    fi
+    echo "✓ Untyped dict check: $COUNT/$THRESHOLD"
+
 # Run type checker (strict mode)
 typecheck:
     uv run pyright
@@ -855,7 +868,7 @@ validate-domain-events:
     uv run python scripts/validate_domain_events.py
 
 # Check architecture fitness thresholds (APSS-based, reads .topology/metrics/)
-fitness-check: aps-build
+fitness-check: aps-build check-untyped-dicts
     # Always regenerate topology before checking — never validate against stale data
     just topology-analyze
     @echo "Checking architecture fitness thresholds..."

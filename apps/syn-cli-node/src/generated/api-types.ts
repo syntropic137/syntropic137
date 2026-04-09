@@ -2887,6 +2887,45 @@ export interface components {
             created_by: string;
         };
         /**
+         * RegisterTriggerRequest
+         * @description Request body for registering a new trigger rule.
+         */
+        RegisterTriggerRequest: {
+            /** Name */
+            name: string;
+            /** Event */
+            event: string;
+            /**
+             * Repository
+             * @default
+             */
+            repository: string;
+            /**
+             * Workflow Id
+             * @default
+             */
+            workflow_id: string;
+            /** Conditions */
+            conditions?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /** Input Mapping */
+            input_mapping?: {
+                [key: string]: string;
+            } | null;
+            config?: components["schemas"]["TriggerConfigRequest"] | null;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
+        /**
          * RepoActionResponse
          * @description Response for repo mutation actions (update, deregister, assign, unassign).
          */
@@ -3888,6 +3927,32 @@ export interface components {
             preset?: string | null;
             /** Action */
             action?: string | null;
+        };
+        /**
+         * TriggerConfigRequest
+         * @description Safety configuration for a trigger rule.
+         */
+        TriggerConfigRequest: {
+            /**
+             * Max Attempts
+             * @default 3
+             */
+            max_attempts: number;
+            /**
+             * Daily Limit
+             * @default 20
+             */
+            daily_limit: number;
+            /**
+             * Debounce Seconds
+             * @default 0
+             */
+            debounce_seconds: number;
+            /**
+             * Cooldown Seconds
+             * @default 300
+             */
+            cooldown_seconds: number;
         };
         /**
          * TriggerDetail
@@ -5871,9 +5936,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["RegisterTriggerRequest"];
             };
         };
         responses: {

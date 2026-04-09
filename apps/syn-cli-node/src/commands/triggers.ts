@@ -52,8 +52,10 @@ const registerCommand: CommandDef = {
     const conditionStrs = (parsed.values["condition"] as string[] | undefined) ?? [];
     const conditions = conditionStrs.length > 0 ? parseConditions(conditionStrs) : [];
 
-    const config: Record<string, unknown> = {
+    const config: components["schemas"]["TriggerConfigRequest"] = {
       max_attempts: parseInt((parsed.values["max-attempts"] as string | undefined) ?? "5", 10),
+      daily_limit: 20,
+      debounce_seconds: 0,
       cooldown_seconds: parseInt((parsed.values["cooldown"] as string | undefined) ?? "300", 10),
     };
 
