@@ -27,8 +27,6 @@ def get_realtime_projection_ref() -> RealTimeProjection:
 async def get_realtime_health() -> Result[RealtimeHealth, ObservabilityError]:
     """Get health status of the realtime SSE projection.
 
-    Args:
-
     Returns:
         Ok(RealtimeHealth) with active subscriber and execution counts.
     """

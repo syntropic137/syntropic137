@@ -183,8 +183,6 @@ async def startup(
 async def shutdown() -> Result[None, LifecycleError]:
     """Gracefully shut down: stop subscriptions, disconnect from event store.
 
-    Args:
-
     Returns:
         Ok(None) on success, Err(LifecycleError) on failure.
     """
@@ -211,8 +209,6 @@ async def shutdown() -> Result[None, LifecycleError]:
 
 async def health_check() -> Result[dict, LifecycleError]:
     """Check application health.
-
-    Args:
 
     Returns:
         Ok(dict) with health status including mode (full/degraded).

@@ -418,7 +418,7 @@ services:
     networks:
     - syn-internal
   redis:
-    image: redis:7-alpine
+    image: redis:7.2.5-alpine
     command: []
     healthcheck:
       test:

@@ -182,8 +182,6 @@ async def validate_config() -> Result[list[ConfigIssue], ConfigError]:
 
     Checks settings validity and agent provider availability.
 
-    Args:
-
     Returns:
         Ok(list[ConfigIssue]) on success, Err(ConfigError) on failure.
     """
@@ -204,8 +202,6 @@ async def validate_config() -> Result[list[ConfigIssue], ConfigError]:
 
 async def get_env_template() -> Result[str, ConfigError]:
     """Get the .env template for configuring Syntropic137.
-
-    Args:
 
     Returns:
         Ok(template_string) on success, Err(ConfigError) on failure.
