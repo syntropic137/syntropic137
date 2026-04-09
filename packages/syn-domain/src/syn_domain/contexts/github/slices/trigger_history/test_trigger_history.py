@@ -173,3 +173,67 @@ class TestTriggerHistoryProjection:
         history = await projection.get_history("tr-1")
         blocked = [e for e in history if e.status == "blocked"]
         assert len(blocked) == 2, "Blocked entries for different PRs must be kept separate."
+
+    async def test_blocked_entries_distinct_for_different_comments_on_same_pr(self) -> None:
+        """Regression: two issue_comment events on the same PR must produce separate blocked
+        entries even when guard_name, event_type, and pr_number are identical.
+
+        The dedup key must incorporate comment_id from payload_summary so that poller
+        re-deliveries of the *same* comment collapse (Fix 5 intent) while genuinely
+        distinct comments do not.
+        """
+        projection = TriggerHistoryProjection(store=InMemoryProjectionStore())
+
+        await projection.handle_trigger_blocked(
+            TriggerBlockedEvent(
+                trigger_id="tr-1",
+                guard_name="concurrency",
+                reason="Execution already running",
+                github_event_type="issue_comment",
+                repository="owner/repo",
+                pr_number=42,
+                payload_summary={"comment_id": 1001},
+            )
+        )
+        await projection.handle_trigger_blocked(
+            TriggerBlockedEvent(
+                trigger_id="tr-1",
+                guard_name="concurrency",
+                reason="Execution already running",
+                github_event_type="issue_comment",
+                repository="owner/repo",
+                pr_number=42,
+                payload_summary={"comment_id": 1002},
+            )
+        )
+
+        history = await projection.get_history("tr-1")
+        blocked = [e for e in history if e.status == "blocked"]
+        assert len(blocked) == 2, (
+            "Blocked entries for different issue_comment events on the same PR must be "
+            "kept separate (different comment_id values)."
+        )
+
+    async def test_rapid_redeliveries_of_same_comment_still_deduplicated(self) -> None:
+        """Regression: 10 rapid re-deliveries of the same issue_comment event (same comment_id)
+        must still collapse to a single blocked entry."""
+        projection = TriggerHistoryProjection(store=InMemoryProjectionStore())
+
+        for _ in range(10):
+            await projection.handle_trigger_blocked(
+                TriggerBlockedEvent(
+                    trigger_id="tr-1",
+                    guard_name="concurrency",
+                    reason="Execution already running",
+                    github_event_type="issue_comment",
+                    repository="owner/repo",
+                    pr_number=42,
+                    payload_summary={"comment_id": 1001},
+                )
+            )
+
+        history = await projection.get_history("tr-1")
+        blocked = [e for e in history if e.status == "blocked"]
+        assert len(blocked) == 1, (
+            "10 re-deliveries of the same issue_comment event must collapse to 1 blocked entry."
+        )

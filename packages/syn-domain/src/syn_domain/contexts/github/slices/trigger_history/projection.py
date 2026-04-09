@@ -130,9 +130,16 @@ class TriggerHistoryProjection:
             key = f"{entry.trigger_id}_blocked_{entry.webhook_delivery_id}"
         else:
             pr_part = str(entry.pr_number) if entry.pr_number is not None else "no_pr"
-            key = (
-                f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
-            )
+            # Use event-specific stable ID from payload_summary when available
+            # (e.g. comment_id for issue_comment events) so distinct events on
+            # the same PR are not over-deduplicated into a single entry.
+            event_id = entry.payload_summary.get("comment_id")
+            if event_id:
+                key = f"{entry.trigger_id}_blocked_{entry.github_event_type}_{pr_part}_{event_id}"
+            else:
+                key = (
+                    f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
+                )
         data = _entry_to_dict(entry)
         data["_projection_key"] = key
         await self._store.save(PROJECTION_NAME, key, data)

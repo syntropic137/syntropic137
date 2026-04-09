@@ -17,7 +17,7 @@ export const exportCommand: CommandDef = {
   args: [{ name: "workflow-id", description: "Workflow ID to export", required: true }],
   options: {
     format: { type: "string", short: "f", description: "Export format: 'package' (default) or 'plugin'", default: "package" },
-    output: { type: "string", short: "o", description: "Output directory (default: ./&lt;workflow-slug&gt;-export)" },
+    output: { type: "string", short: "o", description: "Output directory (default: ./<workflow-slug>-export)" },
     force: { type: "boolean", description: "Overwrite existing files without error", default: false },
   },
   handler: async (parsed: ParsedArgs) => {

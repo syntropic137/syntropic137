@@ -15,7 +15,14 @@ from syn_api._wiring import (
     get_workflow_repo,
     sync_published_events_to_projections,
 )
-from syn_api.types import Err, Ok, Result, TriggerActionResponse, TriggerError
+from syn_api.types import (
+    Err,
+    Ok,
+    RegisterTriggerRequest,
+    Result,
+    TriggerActionResponse,
+    TriggerError,
+)
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
 
 if TYPE_CHECKING:
@@ -337,26 +344,26 @@ async def disable_triggers(
 
 
 @router.post("", response_model=TriggerActionResponse)
-async def register_trigger_endpoint(body: dict[str, Any]) -> TriggerActionResponse:
+async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActionResponse:
     """Register a new trigger rule."""
     try:
         result = await register_trigger(
-            name=body["name"],
-            event=body["event"],
-            repository=body.get("repository", ""),
-            workflow_id=body.get("workflow_id", ""),
-            conditions=body.get("conditions"),
-            installation_id=body.get("installation_id", ""),
-            input_mapping=body.get("input_mapping"),
-            config=body.get("config"),
-            created_by=body.get("created_by", "api"),
+            name=body.name,
+            event=body.event,
+            repository=body.repository,
+            workflow_id=body.workflow_id,
+            conditions=list(body.conditions) if body.conditions is not None else None,
+            installation_id=body.installation_id,
+            input_mapping=dict(body.input_mapping) if body.input_mapping is not None else None,
+            config=dict(body.config) if body.config is not None else None,
+            created_by=body.created_by,
         )
-    except (KeyError, ValueError) as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
-    return TriggerActionResponse(trigger_id=result.value, name=body["name"], status="active")
+    return TriggerActionResponse(trigger_id=result.value, name=body.name, status="active")
 
 
 @router.post("/presets/{preset_name}", response_model=TriggerActionResponse)

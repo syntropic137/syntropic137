@@ -2524,9 +2524,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/RegisterTriggerRequest"
               }
             }
           }
@@ -7442,6 +7440,87 @@
         ],
         "title": "RegisterRepoRequest",
         "description": "Request body for registering a new repo."
+      },
+      "RegisterTriggerRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "conditions": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions"
+          },
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id",
+            "default": ""
+          },
+          "input_mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Mapping"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By",
+            "default": "api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "event",
+          "repository",
+          "workflow_id"
+        ],
+        "title": "RegisterTriggerRequest",
+        "description": "Request body for registering a new trigger rule."
       },
       "RepoActionResponse": {
         "properties": {

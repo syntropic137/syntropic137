@@ -286,8 +286,8 @@ class RegisterTriggerRequest(BaseModel):
 
     name: str
     event: str
-    repository: str = ""
-    workflow_id: str = ""
+    repository: str
+    workflow_id: str
     conditions: list[dict[str, object]] | None = None
     installation_id: str = ""
     input_mapping: dict[str, str] | None = None

@@ -2887,6 +2887,42 @@ export interface components {
             created_by: string;
         };
         /**
+         * RegisterTriggerRequest
+         * @description Request body for registering a new trigger rule.
+         */
+        RegisterTriggerRequest: {
+            /** Name */
+            name: string;
+            /** Event */
+            event: string;
+            /** Repository */
+            repository: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Conditions */
+            conditions?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /** Input Mapping */
+            input_mapping?: {
+                [key: string]: string;
+            } | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
+        /**
          * RepoActionResponse
          * @description Response for repo mutation actions (update, deregister, assign, unassign).
          */
@@ -5875,9 +5911,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["RegisterTriggerRequest"];
             };
         };
         responses: {
