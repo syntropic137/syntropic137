@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Configuration for Syn137 Self-Host
 #
-# Usage: cloudflared runs as a container in the Docker Compose stack (see docker-compose.selfhost.yaml).
+# Usage: cloudflared runs as a container in the Docker Compose stack (see docker/docker-compose.selfhost.yaml).
 # It connects inside the Docker network, so `gateway:8081` resolves to the nginx auth-guarded port.
 # This file is an alternative for running cloudflared standalone (outside Docker), in which case
 # `gateway` must resolve from your host — e.g. `localhost` or the Docker host IP — but port 8081

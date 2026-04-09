@@ -312,5 +312,5 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ## Related Documentation
 
-- [GitHub App Setup Guide](./github-app-setup.md)
-- [ADR-022: Secure Token Architecture](../adrs/ADR-022-secure-token-architecture.md)
+- [GitHub App Setup Guide](../../docs/deployment/github-app-setup.md)
+- [ADR-022: Secure Token Architecture](../../docs/adrs/ADR-022-secure-token-architecture.md)

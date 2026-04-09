@@ -43,11 +43,13 @@ Used by:
 - **Cloudflare Tunnel** — tunnel config MUST reference `http://gateway:8081`, not `localhost:8137`
 - Any other reverse proxy or external access point
 
-Basic auth is enforced when `SYN_API_PASSWORD` is non-empty. An empty password disables auth entirely — the setup wizard (`npx @syntropic137/setup init`) generates a 64-character random hex password automatically and blocks tunnel activation until one is present.
+Basic auth is enforced when `SYN_API_PASSWORD` is non-empty. An empty password disables auth entirely — the setup wizard generates a strong random password automatically and blocks tunnel activation until one is present.
 
 ### `SYN_API_PASSWORD` lifecycle
 
-- **Generated**: 64-char hex via `crypto.randomBytes(32).toString("hex")` during `npx @syntropic137/setup init`
+- **Generated**: ~256 bits of entropy, automatically during setup. Format varies by wizard:
+  - **npx wizard** (`npx @syntropic137/setup init`): 64-char hex via `crypto.randomBytes(32).toString("hex")`
+  - **Python wizard** (`infra/scripts/setup.py`): URL-safe base64 via `secrets.token_urlsafe(32)` (~43 chars)
 - **Stored**: `~/.syntropic137/.env` with mode `0600`
 - **Rotated**: `npx @syntropic137/setup credentials rotate` — generates new password, updates `.env`, restarts stack
 - **Never printed**: Password is never written to terminal output. Retrieval commands are shown instead.
