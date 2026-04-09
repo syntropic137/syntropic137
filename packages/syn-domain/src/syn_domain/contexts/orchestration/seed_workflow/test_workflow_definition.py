@@ -15,7 +15,6 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseExecutionType,
     WorkflowClassification,
-    WorkflowType,
 )
 
 VALID_WORKFLOW_YAML = """
@@ -61,7 +60,7 @@ def test_parse_valid_workflow_yaml() -> None:
     assert definition.id == "test-workflow-v1"
     assert definition.name == "Test Workflow"
     assert definition.description == "A test workflow"
-    assert definition.type == WorkflowType.RESEARCH
+    assert definition.type == "research"
     assert definition.classification == WorkflowClassification.STANDARD
     assert definition.repository is not None
     assert definition.repository.url == "https://github.com/test/repo"
@@ -128,7 +127,7 @@ def test_parse_minimal_workflow() -> None:
     """
     definition = WorkflowDefinition.from_yaml(minimal_yaml)
     assert definition.id == "minimal"
-    assert definition.type == WorkflowType.CUSTOM  # Default
+    assert definition.type == "custom"  # Default
     assert definition.classification == WorkflowClassification.STANDARD  # Default
 
 

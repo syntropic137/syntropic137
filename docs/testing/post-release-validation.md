@@ -350,7 +350,7 @@ syn marketplace refresh
 If no marketplace is registered:
 
 ```bash
-syn marketplace add syntropic137-marketplace syntropic137/syntropic137-marketplace
+syn marketplace add syntropic137/syntropic137-marketplace
 ```
 
 - [ ] Marketplace added successfully
@@ -361,7 +361,7 @@ To test removal and re-add (round-trip):
 ```bash
 syn marketplace remove syntropic137-marketplace
 syn marketplace list
-syn marketplace add syntropic137-marketplace syntropic137/syntropic137-marketplace
+syn marketplace add syntropic137/syntropic137-marketplace
 ```
 
 - [ ] Remove succeeds
@@ -727,7 +727,7 @@ syn workflow uninstall <package-name>
 
 - [ ] Workflow archived (soft-deleted)
 - [ ] Package uninstalled
-- [ ] `syn workflow list` no longer shows it (unless `--all` flag)
+- [ ] `syn workflow list` no longer shows it (archived workflows are filtered from default list)
 
 ---
 
