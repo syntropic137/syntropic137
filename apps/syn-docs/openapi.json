@@ -2961,7 +2961,7 @@
           "sse"
         ],
         "summary": "Activity Sse",
-        "description": "Stream the global activity feed (git events, system-wide activity).\n\nRuns indefinitely until the client disconnects.  There is no terminal\nsentinel for the activity channel \u2014 it never completes.",
+        "description": "Stream the global activity feed (git events, system-wide activity).\n\nRuns indefinitely until the client disconnects.  There is no terminal\nsentinel for the activity channel, it never completes.",
         "operationId": "activity_sse_sse_activity_get",
         "responses": {
           "200": {

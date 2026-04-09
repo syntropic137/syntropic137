@@ -976,7 +976,7 @@ export interface paths {
          * @description Stream the global activity feed (git events, system-wide activity).
          *
          *     Runs indefinitely until the client disconnects.  There is no terminal
-         *     sentinel for the activity channel — it never completes.
+         *     sentinel for the activity channel, it never completes.
          */
         get: operations["activity_sse_sse_activity_get"];
         put?: never;
