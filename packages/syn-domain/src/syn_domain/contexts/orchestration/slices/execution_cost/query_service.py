@@ -196,6 +196,20 @@ class ExecutionCostQueryService:
             cache_read=row["cache_read"] or 0,  # type: ignore[index]
         )
 
+    @staticmethod
+    def _resolve_duration(duration_ms_val: object, started_at: object, completed_at: object) -> float:
+        """Resolve duration_ms, falling back to timestamp delta when the payload field is absent.
+
+        session_summary events rarely carry duration_ms in their JSON payload,
+        so the SQL SUM is usually 0. In that case compute from event timestamps.
+        """
+        explicit = float(duration_ms_val or 0)  # type: ignore[arg-type]
+        if explicit:
+            return explicit
+        if started_at and completed_at:
+            return (completed_at - started_at).total_seconds() * 1000  # type: ignore[union-attr,operator]
+        return 0.0
+
     def _build_from_summary(
         self,
         row: object,
@@ -208,11 +222,6 @@ class ExecutionCostQueryService:
         cost = self._resolve_cost(row)
         started_at = row["started_at"]  # type: ignore[index]
         completed_at = row["completed_at"]  # type: ignore[index]
-        # session_summary events rarely carry duration_ms in their payload; fall back
-        # to computing duration from the event timestamps when the field is absent/zero.
-        duration_ms = float(row["duration_ms_val"] or 0)  # type: ignore[index]
-        if not duration_ms and started_at and completed_at:
-            duration_ms = (completed_at - started_at).total_seconds() * 1000
         return ExecutionCost(
             execution_id=eid,
             session_count=row["session_count"] or 0,  # type: ignore[index]
@@ -225,7 +234,7 @@ class ExecutionCostQueryService:
             cache_read_tokens=row["cache_read"] or 0,  # type: ignore[index]
             tool_calls=tool_counts.get(eid, 0),
             turns=row["total_turns"] or 0,  # type: ignore[index]
-            duration_ms=duration_ms,
+            duration_ms=self._resolve_duration(row["duration_ms_val"], started_at, completed_at),  # type: ignore[index]
             cost_by_phase=phase_map.get(eid, {}),
             cost_by_model=model_map.get(eid, {}),
             started_at=started_at,
@@ -251,9 +260,6 @@ class ExecutionCostQueryService:
         )
         started_at = row["started_at"]  # type: ignore[index]
         completed_at = row.get("last_observation")  # type: ignore[union-attr]
-        duration_ms = 0.0
-        if started_at and completed_at:
-            duration_ms = (completed_at - started_at).total_seconds() * 1000
         return ExecutionCost(
             execution_id=eid,
             session_count=row["session_count"] or 0,  # type: ignore[index]
@@ -265,7 +271,7 @@ class ExecutionCostQueryService:
             cache_creation_tokens=cache_creation,
             cache_read_tokens=cache_read,
             tool_calls=tool_counts.get(eid, 0),
-            duration_ms=duration_ms,
+            duration_ms=self._resolve_duration(None, started_at, completed_at),
             started_at=started_at,
             completed_at=completed_at,
         )
