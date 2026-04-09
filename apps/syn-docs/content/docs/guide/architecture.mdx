@@ -43,7 +43,7 @@ Syntropic137 is organized into five bounded contexts with nine aggregates:
 
 ## Real-Time Communication
 
-Syntropic137 uses **Server-Sent Events (SSE)** for real-time monitoring of executions — progress updates, tool events, token metrics, and state changes all stream over a single connection:
+Syntropic137 uses **Server-Sent Events (SSE)** for real-time monitoring of executions: progress updates, tool events, token metrics, and state changes all stream over a single connection:
 
 ```
 GET /api/executions/{execution_id}/stream
@@ -89,7 +89,7 @@ Control commands (pause, resume, cancel) are sent via standard REST API calls ra
   </div>
 </div>
 
-**Yield Points** — The agent can only be paused at safe points: before each workflow phase, after each tool execution, and after each LLM call.
+**Yield Points**: The agent can only be paused at safe points: before each workflow phase, after each tool execution, and after each LLM call.
 
 ## Performance
 

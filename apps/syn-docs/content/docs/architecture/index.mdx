@@ -1,13 +1,13 @@
 ---
 title: Architecture Deep Dive
-description: How Syntropic137 is built — event sourcing, CQRS, bounded contexts, and the Processor To-Do List pattern for crash-resilient workflow execution.
+description: How Syntropic137 is built: event sourcing, CQRS, bounded contexts, and the Processor To-Do List pattern for crash-resilient workflow execution.
 ---
 
 The [Architecture Overview](/docs/guide/architecture) in the Getting Started guide gives you the 60-second picture. This page goes deeper: the design decisions, the patterns, and the "why" behind each layer.
 
 ## Event Sourcing and the Two-Lane Architecture
 
-Syntropic137 is built on event sourcing — state is never stored directly. Every change to a workflow, execution, or trigger is recorded as an immutable event. The current state of anything is derived by replaying those events.
+Syntropic137 is built on event sourcing: state is never stored directly. Every change to a workflow, execution, or trigger is recorded as an immutable event. The current state of anything is derived by replaying those events.
 
 <EventSourcingFlow />
 
@@ -22,13 +22,13 @@ All data in Syntropic137 flows through two strictly separated lanes:
 | | Domain Events | Observability Events |
 |---|---|---|
 | **Purpose** | Source of truth for business logic and state transitions | High-throughput telemetry for dashboards and debugging |
-| **Validation** | Aggregate invariants — commands can be rejected | Schema only — always accepted |
+| **Validation** | Aggregate invariants: commands can be rejected | Schema only, always accepted |
 | **Storage** | TimescaleDB (append-only, replay-safe) | TimescaleDB (hypertable, time-series optimized) |
 | **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → Collector → EventBuffer → TimescaleDB |
 | **Examples** | `WorkflowCreated`, `ExecutionStarted`, `TriggerFired` | `ToolExecuted`, `TokensUsed`, `StreamChunk` |
 
 <Callout type="info">
-Observability events never flow through aggregates. Telemetry — token counts, tool traces, timing — is append-only and never replayed to reconstruct state. The two lanes are architecturally separate.
+Observability events never flow through aggregates. Telemetry (token counts, tool traces, timing) is append-only and never replayed to reconstruct state. The two lanes are architecturally separate.
 </Callout>
 
 ## CQRS and Projections
@@ -39,15 +39,15 @@ Commands and queries are strictly separated.
 
 **Commands** modify state by going through aggregates. The aggregate validates the command against its current state, decides whether to accept or reject it, and emits one or more events.
 
-**Queries** never touch aggregates. They read from pre-built projections — read models computed from the event stream and cached in Redis or PostgreSQL for fast lookups.
+**Queries** never touch aggregates. They read from pre-built projections, read models computed from the event stream and cached in Redis or PostgreSQL for fast lookups.
 
 ### How Projections Work
 
 A projection subscribes to the event stream and builds a specialized read model for a particular query pattern. Projections are:
 
-- **Rebuilt from scratch on version change** — increment the version number and the projection rebuilds by replaying all events from the beginning
-- **Checkpoint-aware** — each projection tracks its position in the event stream; on restart it catches up from the last processed event rather than replaying everything
-- **Never the source of truth** — if a projection becomes corrupt or out of date, it can always be discarded and rebuilt
+- **Rebuilt from scratch on version change**: increment the version number and the projection rebuilds by replaying all events from the beginning
+- **Checkpoint-aware**: each projection tracks its position in the event stream; on restart it catches up from the last processed event rather than replaying everything
+- **Never the source of truth**: if a projection becomes corrupt or out of date, it can always be discarded and rebuilt
 
 The full list of projections, aggregates, and bounded contexts is generated automatically by the [VSA tool](/docs/guide/architecture) from the codebase structure.
 
@@ -66,10 +66,10 @@ The domain is organized into bounded contexts. Each context owns its aggregates 
 | `orchestration` | Workspace, Workflow, WorkflowExecution | Workspace lifecycle, workflow definitions, multi-phase execution |
 | `agent_sessions` | AgentSession | Agent session recording, tool timelines, token and cost tracking |
 | `github` | Installation, TriggerRule | GitHub App integration, webhook and polling event ingestion, trigger evaluation |
-| `artifacts` | Artifact | Output storage — code files, reports, design documents |
+| `artifacts` | Artifact | Output storage: code files, reports, design documents |
 | `organization` | Organization, System, Repo | Org hierarchy, system and repo management, cost rollup |
 
-Aggregates are the sole decision-makers for their state. No service or engine is allowed to decide "what's next" for an aggregate — that logic lives in the aggregate itself.
+Aggregates are the sole decision-makers for their state. No service or engine is allowed to decide "what's next" for an aggregate: that logic lives in the aggregate itself.
 
 ## Execution Model: The Processor To-Do List
 
@@ -77,10 +77,10 @@ Long-running multi-phase workflows require coordination across infrastructure th
 
 The pattern has four parts:
 
-1. **Aggregate** — handles commands, enforces rules, emits events, decides what work is pending
-2. **To-Do List Projection** — builds a list of pending work from the event stream
-3. **Processor** — reads the to-do list and dispatches commands; contains zero business logic
-4. **Infrastructure Handlers** — react to commands, do the actual work (provision containers, run agents, collect artifacts), and emit result events
+1. **Aggregate**: handles commands, enforces rules, emits events, decides what work is pending
+2. **To-Do List Projection**: builds a list of pending work from the event stream
+3. **Processor**: reads the to-do list and dispatches commands; contains zero business logic
+4. **Infrastructure Handlers**: react to commands, do the actual work (provision containers, run agents, collect artifacts), and emit result events
 
 ```
 Event
@@ -97,7 +97,7 @@ Event
 Compare it to a naive imperative approach:
 
 ```
-# Naive — not how Syntropic137 works
+# Naive approach, not how Syntropic137 works
 async def execute(workflow):
     for phase in workflow.phases:
         workspace = await provision_workspace(phase)  # crashes here?
@@ -109,13 +109,13 @@ If the process crashes between provisioning and running the agent, you've lost t
 
 With the Processor To-Do List:
 
-- **Domain state** is in the event store — fully recoverable by replaying events onto the aggregate
-- **To-do list** is a projection — rebuilt from the event stream on restart and catches up automatically
+- **Domain state** is in the event store, fully recoverable by replaying events onto the aggregate
+- **To-do list** is a projection, rebuilt from the event stream on restart and catches up automatically
 - **Infrastructure state** (active Docker containers) is ephemeral and assumed lost on crash. On restart, handlers re-provision from the last completed domain event
 
 ### Handler Idempotency
 
-Because a handler might be called twice for the same to-do item (if the process crashes after the handler did work but before the result event was committed), handlers must be idempotent. Re-provisioning a workspace or re-running an agent must be safe. The aggregate enforces ordering via command guards — for example, it rejects a "complete phase" command if the phase is not currently in a running state.
+Because a handler might be called twice for the same to-do item (if the process crashes after the handler did work but before the result event was committed), handlers must be idempotent. Re-provisioning a workspace or re-running an agent must be safe. The aggregate enforces ordering via command guards: for example, it rejects a "complete phase" command if the phase is not currently in a running state.
 
 <Callout type="info">
 The to-do list pattern was influenced by Martin Dilger's *Understanding Event Sourcing*, Chapter 37. The "Passage of Time" variant of this pattern (for timeout enforcement and SLA deadlines) is also used for stale execution detection.
@@ -127,7 +127,7 @@ Projections subscribe to the event stream through a catch-up subscription with l
 
 1. On startup, a projection reads all events from its last checkpoint position
 2. Once caught up, it switches to live mode, receiving new events as they are committed
-3. Each projection maintains its own checkpoint — they advance independently
+3. Each projection maintains its own checkpoint, they advance independently
 
 This means projections can safely restart mid-stream without reprocessing the full history, and a slow projection doesn't block faster ones.
 
@@ -135,10 +135,10 @@ This means projections can safely restart mid-stream without reprocessing the fu
 
 The dashboard and CLI receive live execution updates over **Server-Sent Events (SSE)**. A single long-lived HTTP connection streams progress updates, tool events, token metrics, and state changes as they happen.
 
-Control commands (pause, resume, cancel) are issued via standard REST calls — they do not require a persistent connection and can be sent from anywhere.
+Control commands (pause, resume, cancel) are issued via standard REST calls, they do not require a persistent connection and can be sent from anywhere.
 
 <Callout type="info">
-SSE was chosen over WebSockets because execution updates are unidirectional — the server pushes updates to the client, not the other way around. SSE is simpler, works through HTTP/2 multiplexing, and reconnects automatically on drop.
+SSE was chosen over WebSockets because execution updates are unidirectional: the server pushes updates to the client, not the other way around. SSE is simpler, works through HTTP/2 multiplexing, and reconnects automatically on drop.
 </Callout>
 
 ## Performance Characteristics

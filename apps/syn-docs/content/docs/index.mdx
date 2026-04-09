@@ -1,11 +1,11 @@
 ---
 title: Overview
-description: Syntropic137 — orchestrate AI agents with event-sourced workflows
+description: Syntropic137: orchestrate AI agents with event-sourced workflows
 ---
 
 ## What is Syntropic137?
 
-**Syntropic137** is an event-sourced platform for orchestrating AI coding agents. It provides workflow execution, real-time observability, workspace isolation, and cost tracking — everything you need to run AI agents in production with confidence.
+**Syntropic137** is an event-sourced platform for orchestrating AI coding agents. It provides workflow execution, real-time observability, workspace isolation, and cost tracking: everything you need to run AI agents in production with confidence.
 
 <SystemArchitectureFlow />
 
@@ -13,11 +13,11 @@ description: Syntropic137 — orchestrate AI agents with event-sourced workflows
 
 | Concept | Description |
 |---------|-------------|
-| **Workflow** | A YAML definition of work to be done — steps, inputs, outputs, triggers |
+| **Workflow** | A YAML definition of work to be done: steps, inputs, outputs, triggers |
 | **Execution** | A running instance of a workflow in an isolated workspace |
 | **Session** | An agent's working session within an execution (conversation, tool calls, tokens) |
 | **Artifact** | Output produced by an agent (code, files, reports) stored in object storage |
-| **Event** | An immutable record of state change — the single source of truth |
+| **Event** | An immutable record of state change: the single source of truth |
 | **Trigger** | A GitHub event or webhook that automatically starts a workflow |
 
 ## Architecture at a Glance
@@ -26,30 +26,30 @@ Syntropic137 is built on four bounded contexts:
 
 <DomainModelFlow />
 
-- **Orchestration** — Workflow definitions, execution lifecycle, workspace management
-- **Agent Sessions** — Agent conversation tracking, token metrics, tool timelines
-- **GitHub Integration** — App installations, webhook triggers, automated workflows
-- **Artifacts** — Output storage and retrieval with metadata
+- **Orchestration**: Workflow definitions, execution lifecycle, workspace management
+- **Agent Sessions**: Agent conversation tracking, token metrics, tool timelines
+- **GitHub Integration**: App installations, webhook triggers, automated workflows
+- **Artifacts**: Output storage and retrieval with metadata
 
 ## Quick Links
 
 **Get Started**
-- [Getting Started](/docs/guide/getting-started) — install and run your first workflow in 5 minutes
-- [Core Concepts](/docs/guide/core-concepts) — understand events, workspaces, and the mental model
+- [Getting Started](/docs/guide/getting-started): install and run your first workflow in 5 minutes
+- [Core Concepts](/docs/guide/core-concepts): understand events, workspaces, and the mental model
 
 **Build**
-- [Workflows](/docs/guide/workflows) — create and distribute workflow packages
-- [Claude Code Plugin](/docs/guide/claude-code-plugin) — manage Syntropic137 from inside Claude Code
-- [GitHub Integration](/docs/guide/github-integration) — trigger workflows from GitHub events
+- [Workflows](/docs/guide/workflows): create and distribute workflow packages
+- [Claude Code Plugin](/docs/guide/claude-code-plugin): manage Syntropic137 from inside Claude Code
+- [GitHub Integration](/docs/guide/github-integration): trigger workflows from GitHub events
 
 **Operate**
-- [Tunnels](/docs/guide/tunnels) — expose the platform for webhooks and remote access
-- [Secrets Management](/docs/guide/secrets) — file-based secrets and 1Password integration
-- [Setup CLI](/docs/guide/setup-cli) — manage the running platform
-- [Self-Hosting](/docs/guide/self-hosting) — deploy and scale on your infrastructure
+- [Tunnels](/docs/guide/tunnels): expose the platform for webhooks and remote access
+- [Secrets Management](/docs/guide/secrets): file-based secrets and 1Password integration
+- [Setup CLI](/docs/guide/setup-cli): manage the running platform
+- [Self-Hosting](/docs/guide/self-hosting): deploy and scale on your infrastructure
 
 **Reference**
-- [API Reference](/docs/api) — 45+ REST endpoints with interactive docs
-- [CLI Reference](/docs/cli) — `syn` command-line interface
-- [Architecture](/docs/guide/architecture) — event sourcing, CQRS, and system internals
-- [LLM Docs](/llms) — machine-readable documentation for AI agents
+- [API Reference](/docs/api): 45+ REST endpoints with interactive docs
+- [CLI Reference](/docs/cli): `syn` command-line interface
+- [Architecture](/docs/guide/architecture): event sourcing, CQRS, and system internals
+- [LLM Docs](/llms): machine-readable documentation for AI agents

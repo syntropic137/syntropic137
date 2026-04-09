@@ -3,7 +3,7 @@ title: GitHub Integration
 description: Connect GitHub repositories to trigger automated agent workflows from events.
 ---
 
-Syntropic137 integrates with GitHub through a GitHub App. This enables webhook-driven workflow automation — PRs opened, pushes to branches, issues labeled, and more can automatically trigger agent workflows.
+Syntropic137 integrates with GitHub through a GitHub App. This enables webhook-driven workflow automation: PRs opened, pushes to branches, issues labeled, and more can automatically trigger agent workflows.
 
 ## Setting Up the GitHub App
 
@@ -39,7 +39,7 @@ syn triggers register \
   --cooldown 60
 ```
 
-Triggers include safety guards (concurrency, cooldown, daily limits, idempotency), condition operators for filtering events, built-in presets, and full observability — every fire and block is recorded and queryable.
+Triggers include safety guards (concurrency, cooldown, daily limits, idempotency), condition operators for filtering events, built-in presets, and full observability: every fire and block is recorded and queryable.
 
 ### Conditions
 
@@ -51,20 +51,20 @@ For the complete guide on triggers, conditions, guards, and observability, see [
 
 Triggers can fire on any GitHub webhook event type:
 
-- `push` — commits pushed to a branch
-- `pull_request.opened`, `pull_request.synchronize` — PR activity
-- `issues.labeled` — issue triage
-- `check_run.completed` — CI results
-- `workflow_run.completed` — GitHub Actions completion
+- `push`: commits pushed to a branch
+- `pull_request.opened`, `pull_request.synchronize`: PR activity
+- `issues.labeled`: issue triage
+- `check_run.completed`: CI results
+- `workflow_run.completed`: GitHub Actions completion
 - And any other [GitHub webhook event](https://docs.github.com/en/webhooks/webhook-events-and-payloads)
 
 ## Event Delivery: Webhooks + Polling
 
 Syntropic137 uses a hybrid approach for receiving GitHub events:
 
-**Webhooks** are the primary path — real-time delivery from GitHub when your App has a reachable URL (via [tunnel](/docs/guide/tunnels) or public server).
+**Webhooks** are the primary path: real-time delivery from GitHub when your App has a reachable URL (via [tunnel](/docs/guide/tunnels) or public server).
 
-**Events API polling** is the fallback — a background task polls GitHub's Events API on an adaptive interval. This enables zero-config onboarding without a tunnel.
+**Events API polling** is the fallback: a background task polls GitHub's Events API on an adaptive interval. This enables zero-config onboarding without a tunnel.
 
 <Callout type="info">
 **Self-healing works without a tunnel.** `check_run` events are automatically detected via Checks API polling (~30-90s latency). A [tunnel](/docs/guide/tunnels) provides real-time delivery (~1s) and access to additional CI/CD events (`workflow_run`, `check_suite`, etc.).
@@ -81,7 +81,7 @@ After creating the GitHub App, install it on your repositories:
 1. Go to your GitHub App settings → **Install App**
 2. Select the organization or personal account
 3. Choose **All repositories** or select specific ones
-4. Syntropic137 dynamically resolves installation IDs per repository — no reconfiguration needed when you add new repos
+4. Syntropic137 dynamically resolves installation IDs per repository, no reconfiguration needed when you add new repos
 
 ## Discovering Accessible Repositories
 

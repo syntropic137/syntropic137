@@ -40,7 +40,7 @@ GitHub Event (webhook or polling)
  execution  history
 ```
 
-Every decision — fire or block — is recorded as a domain event. You can query the full audit trail via `syn triggers history`.
+Every decision, fire or block, is recorded as a domain event. You can query the full audit trail via `syn triggers history`.
 
 ## Trigger Lifecycle
 
@@ -60,17 +60,17 @@ syn triggers delete <trigger-id> --force   # Soft-delete
 
 ## Safety Guards
 
-Every trigger evaluation passes through safety guards before firing. Guards are evaluated in order — the first failure blocks the trigger.
+Every trigger evaluation passes through safety guards before firing. Guards are evaluated in order: the first failure blocks the trigger.
 
 | Guard | Config Key | Default | Description |
 |-------|-----------|---------|-------------|
-| **Concurrency** | — | Always on | Blocks if an execution is already running for the same trigger + PR |
+| **Concurrency** | | Always on | Blocks if an execution is already running for the same trigger + PR |
 | **Max Attempts** | `max_attempts` | 3 | Maximum fires per (trigger, PR) combination |
 | **Cooldown** | `cooldown_seconds` | 300 | Minimum seconds between fires for the same PR |
 | **Daily Limit** | `daily_limit` | 20 | Maximum fires per day per trigger |
-| **Idempotency** | — | Always on | Prevents processing the same webhook delivery twice |
+| **Idempotency** | | Always on | Prevents processing the same webhook delivery twice |
 
-The concurrency guard is especially important after restarts — when the event poller catches up, it prevents firing multiple executions for the same PR simultaneously.
+The concurrency guard is especially important after restarts: when the event poller catches up, it prevents firing multiple executions for the same PR simultaneously.
 
 <Callout type="info">
 When a guard blocks a trigger, the block is recorded as a `TriggerBlockedEvent` with the guard name and reason. Use `syn triggers history` to see exactly why a trigger didn't fire.
@@ -111,10 +111,10 @@ syn triggers register \
 
 Conditions support dot-notation for nested fields and array indexing:
 
-- `check_run.conclusion` — nested object access
-- `check_run.pull_requests[0].number` — array index
-- `review.user.login` — deeply nested
-- `sender.login` — top-level
+- `check_run.conclusion`: nested object access
+- `check_run.pull_requests[0].number`: array index
+- `review.user.login`: deeply nested
+- `sender.login`: top-level
 
 ## Built-In Presets
 
@@ -143,8 +143,8 @@ syn triggers history <trigger-id>
 # Example output (when blocked entries exist):
 # Time                Execution    Status     Guard         Reason
 # 2026-04-05 10:30    exec-a1b2    dispatched
-# 2026-04-05 10:30    —            blocked    concurrency   Execution already running for PR #42
-# 2026-04-05 10:29    —            blocked    max_attempts  Max attempts (3) reached for PR #15
+# 2026-04-05 10:30     -             blocked    concurrency   Execution already running for PR #42
+# 2026-04-05 10:29     -             blocked    max_attempts  Max attempts (3) reached for PR #15
 # 2026-04-05 10:15    exec-c3d4    completed                $0.0058
 ```
 
@@ -173,7 +173,7 @@ syn triggers register \
   --input "branch=check_run.pull_requests[0].head.ref"
 ```
 
-This keeps triggers declarative — all behavioral intelligence lives in the workflow definition.
+This keeps triggers declarative: all behavioral intelligence lives in the workflow definition.
 
 ## Debounce
 
