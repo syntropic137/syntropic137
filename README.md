@@ -30,11 +30,10 @@ Running 10 parallel Claude Code agents in a terminal is about as far as you can 
 
 | Feature | Syntropic137 | Claude Code CLI | Cursor | LangGraph |
 |---|---|---|---|---|
-| Full observability (tool calls + costs) | Yes | No | No | Partial |
+| Full observability (tool calls + costs) | Yes | Manual | No | Partial |
 | Self-hostable | Yes | Yes | No | Yes |
-| Workflow marketplace | Yes | No | No | No |
-| Model routing per phase | Yes | No | No | Manual |
-| Scale past 10 parallel agents | Yes (100+) | No | Limited | Yes |
+| Repeatable Workflows | Yes | Partial | Partial | From Scratch |
+| Scale past 10 parallel agents | Yes (100+) | Limited | Limited | Yes |
 | Your data stays yours | Yes | Yes | No | Yes |
 | Open source | Yes | No | No | Yes |
 | One-command setup | Yes | Yes | No | No |
