@@ -428,7 +428,8 @@ class TestBuildAgentEnv:
             _build_agent_env,
         )
 
-        workspace = MagicMock(spec=[])  # no proxy_url attribute
+        workspace = MagicMock()
+        workspace.proxy_url = None  # sidecar not running
         with pytest.raises(RuntimeError, match="proxy not available"):
             _build_agent_env(workspace, "sess-1")
 
@@ -532,7 +533,7 @@ class TestWorkspaceProvisionHandler:
         workspace.proxy_url = "http://envoy:10000"
         workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
         workspace.inject_files = AsyncMock()
-        workspace.id = "ws-test"
+        workspace.workspace_id = "ws-test"
 
         workspace_cm = AsyncMock()
         workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
@@ -614,7 +615,7 @@ class TestWorkspaceProvisionHandler:
         workspace.proxy_url = "http://envoy:10000"
         workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
         workspace.inject_files = AsyncMock()
-        workspace.id = "ws-test"
+        workspace.workspace_id = "ws-test"
 
         workspace_cm = AsyncMock()
         workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
@@ -668,3 +669,143 @@ class TestWorkspaceProvisionHandler:
                 assert filename not in ("AGENTS.md", "CLAUDE.md"), (
                     f"Unexpected context inject for {filename} with empty repos"
                 )
+
+    @pytest.mark.anyio
+    async def test_handle_setup_failure_cleans_up_workspace(self) -> None:
+        """When setup phase fails, workspace context manager __aexit__ is called (P0 leak fix)."""
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        workspace = AsyncMock()
+        workspace.proxy_url = "http://envoy:10000"
+        workspace.workspace_id = "ws-test"
+        workspace.run_setup_phase = AsyncMock(
+            return_value=MagicMock(exit_code=1, stderr="Script error")
+        )
+
+        workspace_cm = AsyncMock()
+        workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
+        workspace_cm.__aexit__ = AsyncMock(return_value=False)
+
+        workspace_service = MagicMock()
+        workspace_service.create_workspace.return_value = workspace_cm
+
+        async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
+            return "Do the task"
+
+        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
+            return ["claude", "--print", prompt]
+
+        handler = WorkspaceProvisionHandler(
+            workspace_service=workspace_service,
+            prompt_builder=fake_prompt_builder,
+            command_builder=fake_command_builder,
+        )
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.PROVISION_WORKSPACE,
+            phase_id="phase-1",
+        )
+        phase = ExecutablePhase(
+            phase_id="phase-1",
+            name="Test Phase",
+            order=1,
+            description="",
+            agent_config=AgentConfiguration(),
+            prompt_template="Do the task",
+            output_artifact_type="text",
+        )
+
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+            MockSecrets.create = AsyncMock(return_value=MagicMock())
+            with pytest.raises(RuntimeError, match="Setup phase failed"):
+                await handler.handle(
+                    todo=todo,
+                    phase=phase,
+                    workflow_id="wf-1",
+                    session_id="sess-1",
+                    repos=[],
+                )
+
+        # Container must have been cleaned up despite the failure
+        workspace_cm.__aexit__.assert_called_once()
+
+
+# =========================================================================
+# ExecuteWorkflowHandler — _resolve_repos
+# =========================================================================
+
+
+@pytest.mark.unit
+class TestResolveRepos:
+    """Tests for ExecuteWorkflowHandler._resolve_repos."""
+
+    def test_comma_separated_repos_parsed(self) -> None:
+        """Comma-separated repos string is split into a list."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        result = ExecuteWorkflowHandler._resolve_repos(
+            {"repos": "https://github.com/org/repo-a,https://github.com/org/repo-b"},
+            repo_url=None,
+        )
+        assert result == [
+            "https://github.com/org/repo-a",
+            "https://github.com/org/repo-b",
+        ]
+
+    def test_repos_with_whitespace_stripped(self) -> None:
+        """Whitespace around repo URLs is stripped."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        result = ExecuteWorkflowHandler._resolve_repos(
+            {"repos": " https://github.com/org/repo-a , https://github.com/org/repo-b "},
+            repo_url=None,
+        )
+        assert result == [
+            "https://github.com/org/repo-a",
+            "https://github.com/org/repo-b",
+        ]
+
+    def test_falls_back_to_repo_url_when_repos_empty(self) -> None:
+        """Falls back to repo_url when repos input is absent."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        result = ExecuteWorkflowHandler._resolve_repos(
+            {},
+            repo_url="https://github.com/org/repo-a",
+        )
+        assert result == ["https://github.com/org/repo-a"]
+
+    def test_empty_inputs_and_no_repo_url_returns_empty(self) -> None:
+        """Empty inputs and no repo_url → empty list."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        result = ExecuteWorkflowHandler._resolve_repos({}, repo_url=None)
+        assert result == []
+
+    def test_repos_takes_precedence_over_repo_url(self) -> None:
+        """repos input takes precedence over repo_url fallback."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        result = ExecuteWorkflowHandler._resolve_repos(
+            {"repos": "https://github.com/org/repo-a"},
+            repo_url="https://github.com/org/fallback-repo",
+        )
+        assert result == ["https://github.com/org/repo-a"]

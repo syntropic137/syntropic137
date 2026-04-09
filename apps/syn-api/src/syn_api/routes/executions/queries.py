@@ -424,6 +424,7 @@ async def list_executions_endpoint(
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 tool_call_count=e.tool_call_count,
                 error_message=e.error_message,
+                repos=list(e.repos),
             )
             for e in result.value
         ],
@@ -472,4 +473,5 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
         artifact_ids=artifact_ids,
         error_message=detail.error_message,
+        repos=list(detail.repos),
     )

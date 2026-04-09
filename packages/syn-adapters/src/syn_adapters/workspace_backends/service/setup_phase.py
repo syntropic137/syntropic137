@@ -110,10 +110,12 @@ async def run_setup_phase(
 
     # Run setup script WITH secrets
     logger.info("Running setup phase with secrets (workspace=%s)", ws.workspace_id)
+    from syn_shared.settings import get_settings
+
     result = await ws.execute(
         ["bash", "/workspace/.setup/setup.sh"],
         environment=setup_env,
-        timeout_seconds=60,  # Setup should be quick
+        timeout_seconds=get_settings().setup_phase_timeout_seconds,
     )
 
     if result.exit_code != 0:

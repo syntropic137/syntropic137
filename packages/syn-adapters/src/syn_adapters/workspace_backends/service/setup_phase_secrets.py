@@ -250,6 +250,7 @@ class SetupPhaseSecrets:
         git_author_name: str = "Test Agent",
         git_author_email: str = "test@example.com",
         repositories: list[str] | None = None,
+        repo_tokens: dict[str, str] | None = None,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -261,13 +262,14 @@ class SetupPhaseSecrets:
             git_author_name: Git author name (default: "Test Agent")
             git_author_email: Git author email (default: "test@example.com")
             repositories: Optional list of repo URLs (no tokens fetched)
+            repo_tokens: Optional pre-minted URL→token map for tests that need credentials
         """
         import os
 
         from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_CLAUDE_CODE_OAUTH_TOKEN
 
         return cls(
-            repo_tokens={},
+            repo_tokens=repo_tokens or {},
             repositories=repositories or [],
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),

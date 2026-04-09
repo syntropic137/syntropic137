@@ -8,7 +8,7 @@ Run: pytest -m unit packages/syn-adapters/src/syn_adapters/workspace_backends/se
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -311,3 +311,57 @@ class TestSetupPhaseSecretsCreate:
 
         # No token fetched, but no exception
         assert secrets.repo_tokens == {}
+
+    @pytest.mark.anyio
+    async def test_github_app_not_configured_raises_when_required(self) -> None:
+        """GitHubAppNotConfiguredError raised when require_github=True and App not configured."""
+        from syn_adapters.workspace_backends.service.setup_phase_secrets import (
+            GitHubAppNotConfiguredError,
+        )
+
+        with (
+            patch(
+                "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_claude_credentials",
+                return_value=(None, None),
+            ),
+            patch("syn_shared.settings.github.GitHubAppSettings") as MockSettings,
+        ):
+            MockSettings.return_value.is_configured = False
+            with pytest.raises(GitHubAppNotConfiguredError):
+                await SetupPhaseSecrets.create(
+                    repositories=["https://github.com/org/repo"],
+                    require_github=True,
+                )
+
+
+# =============================================================================
+# Claude credential resolution
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestClaudeCredentialResolution:
+    """Tests for _resolve_claude_credentials dual-credential behaviour."""
+
+    def test_both_set_oauth_wins_and_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        """When both OAuth token and API key are set, OAuth wins and a warning is logged."""
+        import logging
+
+        from syn_adapters.workspace_backends.service.setup_phase_secrets import (
+            _resolve_claude_credentials,
+        )
+
+        with patch("syn_shared.settings.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.claude_code_oauth_token = MagicMock()
+            mock_settings.claude_code_oauth_token.get_secret_value.return_value = "oauth-token-123"
+            mock_settings.anthropic_api_key = MagicMock()
+            mock_settings.anthropic_api_key.get_secret_value.return_value = "api-key-456"
+            mock_get_settings.return_value = mock_settings
+
+            with caplog.at_level(logging.WARNING):
+                oauth_token, api_key = _resolve_claude_credentials()
+
+        assert oauth_token == "oauth-token-123"
+        assert api_key == "api-key-456"
+        assert any("CLAUDE_CODE_OAUTH_TOKEN" in record.message for record in caplog.records)

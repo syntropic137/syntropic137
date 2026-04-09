@@ -418,6 +418,8 @@ class ExecutionSummary(BaseModel):
     total_cost_usd: Decimal | str = Decimal("0")
     tool_call_count: int = 0
     error_message: str | None = None
+    repos: list[str] = Field(default_factory=list)
+    """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -435,6 +437,8 @@ class ExecutionDetail(BaseModel):
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
+    repos: list[str] = Field(default_factory=list)
+    """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
 
 class SessionSummary(BaseModel):

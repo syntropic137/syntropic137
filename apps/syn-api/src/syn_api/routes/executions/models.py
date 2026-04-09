@@ -54,6 +54,7 @@ class ExecutionDetailResponse(BaseModel):
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
+    repos: list[str] = Field(default_factory=list)
 
 
 class ExecutionSummaryResponse(BaseModel):
@@ -69,6 +70,7 @@ class ExecutionSummaryResponse(BaseModel):
     total_cost_usd: Decimal = Decimal("0")
     tool_call_count: int = 0
     error_message: str | None = None
+    repos: list[str] = Field(default_factory=list)
 
 
 class ExecutionListResponse(BaseModel):

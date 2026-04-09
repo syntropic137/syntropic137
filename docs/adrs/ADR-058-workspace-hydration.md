@@ -226,4 +226,10 @@ repo_name = repo_url.rstrip("/").split("/")[-1].removesuffix(".git")
 # "https://github.com/org/repo-b"     → "repo-b"
 ```
 
-Collision handling: if two URLs produce the same name, the second is suffixed with the owner slug.
+### Known Limitation: Same-Name Repos Across Orgs
+
+If two URLs produce the same repo name (e.g. `org-a/myapp` and `org-b/myapp`), only the first will be cloned — the second clone is silently skipped by the idempotency guard (`[ -d "/workspace/repos/myapp" ] || git clone ...`). The `@`-import lines for both repos are still injected, but only the first will resolve.
+
+**Workaround (manual):** Rename one repo before passing the URL list, or fork one under a different name.
+
+**Future fix:** Namespace clash detection in `build_setup_script()` — suffix the second occurrence with the owner slug (e.g. `myapp` → `myapp-org-b`). Tracked as a follow-up issue.

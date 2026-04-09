@@ -5967,6 +5967,13 @@
               }
             ],
             "title": "Error Message"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos"
           }
         },
         "type": "object",
@@ -6307,6 +6314,13 @@
               }
             ],
             "title": "Error Message"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos"
           }
         },
         "type": "object",

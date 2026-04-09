@@ -2143,6 +2143,8 @@ export interface components {
             artifact_ids?: string[];
             /** Error Message */
             error_message?: string | null;
+            /** Repos */
+            repos?: string[];
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -2296,6 +2298,8 @@ export interface components {
             tool_call_count: number;
             /** Error Message */
             error_message?: string | null;
+            /** Repos */
+            repos?: string[];
         };
         /**
          * ExportManifestResponse

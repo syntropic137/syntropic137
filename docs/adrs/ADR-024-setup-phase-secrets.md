@@ -404,7 +404,7 @@ async def create(
 **Token resolution algorithm** (see ADR-058 for full detail):
 
 1. For each repo URL, call `GET /repos/{owner}/{repo}/installation` to get `installation_id`.
-2. If any repo returns **404** → raise `RepositoryNotInstalledException` before cloning begins. Fail fast with the offending URL in the error message.
+2. If any repo returns **404** → re-raise immediately before cloning begins. The lookup error propagates as-is (fail fast with the offending URL in the error message).
 3. Group repos by `installation_id` (one installation covers all repos in an org/account).
 4. For each unique `installation_id`, call `POST /app/installations/{id}/access_tokens` once.
 5. Build `repo_tokens: dict[str, str]` — full repo URL → token.

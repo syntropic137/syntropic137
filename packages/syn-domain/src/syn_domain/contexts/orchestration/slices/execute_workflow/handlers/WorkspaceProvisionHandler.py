@@ -57,7 +57,7 @@ def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, 
     not in agent env vars). Routes Anthropic SDK via ANTHROPIC_BASE_URL
     (not HTTP_PROXY — Node.js CONNECT tunneling breaks Envoy forward proxy).
     """
-    proxy_url = getattr(workspace, "proxy_url", None)
+    proxy_url = workspace.proxy_url
     if not proxy_url:
         msg = (
             "Shared Envoy proxy not available. "
@@ -136,14 +136,9 @@ class WorkspaceProvisionHandler:
             phase_outputs: Content from previous phase artifacts.
             inputs: Workflow execution inputs dict.
         """
-        from syn_adapters.workspace_backends.service import SetupPhaseSecrets
-
         assert todo.phase_id is not None
 
         effective_repos = repos or []
-        completed_ids = completed_phase_ids or []
-        outputs = phase_outputs or {}
-
         workspace_cm = self._workspace_service.create_workspace(
             execution_id=todo.execution_id,
             workflow_id=workflow_id,
@@ -152,14 +147,40 @@ class WorkspaceProvisionHandler:
             inject_tokens=True,
         )
 
-        # Enter the async context manager
+        # Enter the async context manager; clean up on any exception (P0: container leak fix)
         workspace = await workspace_cm.__aenter__()
+        try:
+            await self._hydrate_workspace(workspace, effective_repos)
+            await self._inject_phase_artifacts(
+                workspace, artifacts, completed_phase_ids or [], phase_outputs or {}, todo
+            )
+            return await self._build_provision_result(
+                workspace,
+                workspace_cm,
+                todo,
+                phase,
+                workflow_id,
+                session_id,
+                effective_repos,
+                phase_outputs or {},
+                inputs,
+            )
+        except BaseException as exc:
+            await workspace_cm.__aexit__(type(exc), exc, exc.__traceback__)
+            raise
+
+    async def _hydrate_workspace(
+        self,
+        workspace: ManagedWorkspace,
+        effective_repos: list[str],
+    ) -> None:
+        """Run setup phase and inject synthetic context files (ADR-058)."""
+        from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             require_github=bool(effective_repos),
         )
-
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
             msg = f"Setup phase failed: {setup_result.stderr}"
@@ -173,44 +194,53 @@ class WorkspaceProvisionHandler:
         context = self._generate_workspace_context(effective_repos)
         if context:
             await workspace.inject_files(
-                [
-                    ("AGENTS.md", context.encode()),
-                    ("CLAUDE.md", context.encode()),
-                ]
+                [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
             )
             logger.info(
                 "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(effective_repos)
             )
 
-        # Inject artifacts from previous phases
+    async def _inject_phase_artifacts(
+        self,
+        workspace: ManagedWorkspace,
+        artifacts: ArtifactCollector | None,
+        completed_ids: list[str],
+        outputs: dict[str, str],
+        todo: TodoItem,
+    ) -> None:
+        """Inject artifacts from previous phases into the workspace."""
         if artifacts is not None:
             await artifacts.inject_from_previous_phases_explicit(
-                workspace,
-                completed_ids,
-                outputs,
-                execution_id=todo.execution_id,
+                workspace, completed_ids, outputs, execution_id=todo.execution_id
             )
 
+    async def _build_provision_result(
+        self,
+        workspace: ManagedWorkspace,
+        workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        workflow_id: str,
+        session_id: str,
+        effective_repos: list[str],
+        outputs: dict[str, str],
+        inputs: dict[str, object] | None,
+    ) -> ProvisionResult:
+        """Build prompt, CLI command, and return the ProvisionResult."""
         # repo_url for {{repo_url}} prompt substitution (backward compat — uses first repo)
         repo_url_for_prompt = effective_repos[0] if effective_repos else None
-
-        # Build prompt and CLI command
         prompt = await self._prompt_builder(
             phase, todo.execution_id, workflow_id, repo_url_for_prompt, outputs, inputs or {}
         )
         claude_cmd = self._command_builder(phase, prompt)
-
         agent_env = _build_agent_env(workspace, session_id)
-
-        workspace_id = getattr(workspace, "id", todo.phase_id)
-
+        assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
-            workspace_id=str(workspace_id),
+            workspace_id=workspace.workspace_id,
             session_id=session_id,
         )
-
         return ProvisionResult(
             workspace=workspace,
             workspace_cm=workspace_cm,

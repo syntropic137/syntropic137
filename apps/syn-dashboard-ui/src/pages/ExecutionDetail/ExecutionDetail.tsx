@@ -126,6 +126,23 @@ export function ExecutionDetail() {
       <Breadcrumbs items={breadcrumbs} />
       <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} now={now} refreshExecution={refreshExecution} />
       {execution.error_message && <ExecutionErrorCard message={execution.error_message} />}
+      {execution.repos && execution.repos.length > 0 && (
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <h3 className="mb-2 text-sm font-medium text-[var(--color-text-muted)]">Repositories</h3>
+          <ul className="space-y-1">
+            {execution.repos.map((url) => {
+              const name = url.split('/').pop()?.replace(/\.git$/, '') ?? url
+              return (
+                <li key={url} className="text-sm">
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] hover:underline" title={url}>
+                    {name}
+                  </a>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
       <ExecutionMetricsGrid execution={execution} />
       <TokenBreakdownChart
         inputTokens={execution.total_input_tokens}
