@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -22,9 +22,6 @@ from syn_api.types import (
     Ok,
     Result,
 )
-
-if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +153,6 @@ async def get_conversation_log(
     session_id: str,
     offset: int = 0,
     limit: int = 1000,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ConversationLog, ObservabilityError]:
     """Retrieve a session's conversation log.
 
@@ -164,7 +160,6 @@ async def get_conversation_log(
         session_id: The session to retrieve.
         offset: Line offset for pagination.
         limit: Maximum lines to return.
-        auth: Optional authentication context.
 
     Returns:
         Ok(ConversationLog) on success, Err(ObservabilityError) on failure.
@@ -197,13 +192,11 @@ async def get_conversation_log(
 
 async def get_conversation_metadata(
     session_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ConversationMeta | None, ObservabilityError]:
     """Get metadata for a conversation without the full log.
 
     Args:
         session_id: The session to query.
-        auth: Optional authentication context.
 
     Returns:
         Ok(ConversationMeta) on success, Ok(None) if not found.

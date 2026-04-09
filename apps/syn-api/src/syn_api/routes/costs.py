@@ -9,7 +9,7 @@ store, which is empty for cost data. See #532 for the architectural rationale.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -24,9 +24,6 @@ from syn_api.types import (
     Result,
     SessionCostData,
 )
-
-if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
 
 router = APIRouter(prefix="/costs", tags=["costs"])
 
@@ -110,7 +107,6 @@ class CostSummaryResponse(BaseModel):
 async def list_session_costs(
     execution_id: str | None = None,
     limit: int = 100,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[SessionCostData], MetricsError]:
     """List cost data for sessions.
 
@@ -121,7 +117,6 @@ async def list_session_costs(
             because execution_id is a grouping dimension, not a primary filter
             in the aggregate queries. For small result sets this is adequate.
         limit: Maximum results to return (pushed down to SQL).
-        auth: Optional authentication context.
     """
     await ensure_connected()
     try:
@@ -165,7 +160,6 @@ async def list_session_costs(
 async def get_session_cost(
     session_id: str,
     include_breakdown: bool = False,  # noqa: ARG001
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[SessionCostData, MetricsError]:
     """Get cost data for a single session.
 
@@ -174,7 +168,6 @@ async def get_session_cost(
     Args:
         session_id: The session ID.
         include_breakdown: Whether to include model/tool breakdowns.
-        auth: Optional authentication context.
     """
     await ensure_connected()
     try:
@@ -213,7 +206,6 @@ async def get_session_cost(
 
 async def list_execution_costs(
     limit: int = 100,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ExecutionCostData], MetricsError]:
     """List cost data for executions.
 
@@ -221,7 +213,6 @@ async def list_execution_costs(
 
     Args:
         limit: Maximum results to return.
-        auth: Optional authentication context.
     """
     await ensure_connected()
     try:
@@ -257,7 +248,6 @@ async def list_execution_costs(
 async def get_execution_cost(
     execution_id: str,
     include_breakdown: bool = False,  # noqa: ARG001
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionCostData, MetricsError]:
     """Get cost data for a single execution.
 
@@ -266,7 +256,6 @@ async def get_execution_cost(
     Args:
         execution_id: The execution ID.
         include_breakdown: Whether to include phase/model/tool breakdowns.
-        auth: Optional authentication context.
     """
     await ensure_connected()
     try:
@@ -300,14 +289,12 @@ async def get_execution_cost(
 
 
 async def get_cost_summary(
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[CostSummary, MetricsError]:
     """Get overall cost summary across all executions.
 
     Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532.
 
     Args:
-        auth: Optional authentication context.
     """
     await ensure_connected()
     try:

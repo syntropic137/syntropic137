@@ -13,7 +13,6 @@ from syn_api.types import ObservabilityError, Ok, RealtimeHealth, Result
 
 if TYPE_CHECKING:
     from syn_adapters.projections.realtime import RealTimeProjection
-    from syn_api.auth import AuthContext
 
 
 def get_realtime_projection_ref() -> RealTimeProjection:
@@ -26,12 +25,10 @@ def get_realtime_projection_ref() -> RealTimeProjection:
 
 
 async def get_realtime_health(
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[RealtimeHealth, ObservabilityError]:
     """Get health status of the realtime SSE projection.
 
     Args:
-        auth: Optional authentication context.
 
     Returns:
         Ok(RealtimeHealth) with active subscriber and execution counts.

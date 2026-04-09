@@ -33,7 +33,6 @@ from .models import (
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
-    from syn_api.auth import AuthContext
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
     )
@@ -221,7 +220,6 @@ async def list_(
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
@@ -262,7 +260,6 @@ async def list_(
 
 async def get(
     execution_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionDetail, ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
@@ -331,7 +328,6 @@ async def _enrich_costs(
 
 async def get_detail(
     execution_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionDetailFull, ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
@@ -366,7 +362,6 @@ async def get_detail(
 
 async def list_active(
     limit: int = 50,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     """List currently running or paused executions."""
     await ensure_connected()

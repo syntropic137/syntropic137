@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,9 +27,6 @@ from syn_api.types import (
     Ok,
     Result,
 )
-
-if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +80,6 @@ async def list_artifacts(
     session_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ArtifactSummary], ArtifactError]:
     """List artifacts, optionally filtered by workflow or session.
 
@@ -92,7 +88,6 @@ async def list_artifacts(
         session_id: Filter by session ID.
         limit: Maximum results to return.
         offset: Pagination offset.
-        auth: Optional authentication context.
 
     Returns:
         Ok(list[ArtifactSummary]) on success, Err(ArtifactError) on failure.
@@ -160,14 +155,12 @@ def _parse_artifact_created_at(created_at: str | datetime | None) -> datetime | 
 async def get_artifact(
     artifact_id: str,
     include_content: bool = False,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ArtifactDetail, ArtifactError]:
     """Get detailed artifact information, optionally with content.
 
     Args:
         artifact_id: The artifact ID.
         include_content: Whether to include the artifact content.
-        auth: Optional authentication context.
 
     Returns:
         Ok(ArtifactDetail) on success, Err(ArtifactError) on failure.
@@ -218,7 +211,6 @@ async def create_artifact(
     phase_id: str | None = None,
     session_id: str | None = None,  # noqa: ARG001
     content_type: str = "text/markdown",  # noqa: ARG001
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, ArtifactError]:
     """Create a new artifact.
 
@@ -230,7 +222,6 @@ async def create_artifact(
         phase_id: Optional phase within the workflow.
         session_id: Optional session that created this artifact.
         content_type: MIME type of the content.
-        auth: Optional authentication context.
 
     Returns:
         Ok(artifact_id) on success, Err(ArtifactError) on failure.
@@ -282,7 +273,6 @@ async def upload_artifact(
     data: bytes,
     filename: str,  # noqa: ARG001
     content_type: str = "application/octet-stream",
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, ArtifactError]:
     """Upload binary content for an existing artifact.
 
@@ -291,7 +281,6 @@ async def upload_artifact(
         data: Binary content to upload.
         filename: Original filename.
         content_type: MIME type of the uploaded content.
-        auth: Optional authentication context.
 
     Returns:
         Ok(storage_url) on success, Err(ArtifactError) on failure.
@@ -321,7 +310,6 @@ async def update_artifact(
     title: str | None = None,
     metadata: dict[str, Any] | None = None,
     is_primary_deliverable: bool | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[None, ArtifactError]:
     """Update mutable metadata of an artifact."""
     await ensure_connected()
@@ -358,7 +346,6 @@ async def update_artifact(
 async def delete_artifact(
     artifact_id: str,
     deleted_by: str = "",
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[None, ArtifactError]:
     """Soft-delete an artifact."""
     await ensure_connected()

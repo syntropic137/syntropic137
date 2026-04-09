@@ -12,8 +12,7 @@ Usage:
             print(f"Error: {error}")
 """
 
-from syn_api.auth import AuthContext
 from syn_api.types import Err, Ok, Result
 
-__all__ = ["AuthContext", "Err", "Ok", "Result"]
+__all__ = ["Err", "Ok", "Result"]
 __version__ = "0.1.0"

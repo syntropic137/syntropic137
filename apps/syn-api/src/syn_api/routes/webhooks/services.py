@@ -11,7 +11,6 @@ from syn_api.types import Err, GitHubError, Ok, Result
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from syn_api.auth import AuthContext
     from syn_domain.contexts.github.slices.get_installation.projection import (
         InstallationProjection,
     )
@@ -51,7 +50,6 @@ async def list_repos(
     installation_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[dict[str, Any]], GitHubError]:
     """List GitHub repositories accessible via the GitHub App."""
     await ensure_connected()
@@ -78,7 +76,6 @@ async def list_repos(
 
 async def get_installation(
     installation_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[dict[str, Any], GitHubError]:
     """Get details about a GitHub App installation."""
     await ensure_connected()

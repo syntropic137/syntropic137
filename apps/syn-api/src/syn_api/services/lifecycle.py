@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api._wiring import BackgroundWorkflowDispatcher
-    from syn_api.auth import AuthContext
     from syn_api.services.check_run_poller import CheckRunPoller
     from syn_api.services.github_event_poller import GitHubEventPoller
 
@@ -135,7 +134,6 @@ async def _init_degradable_services(state: LifecycleState) -> None:
 
 async def startup(
     skip_validation: bool = False,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[dict, LifecycleError]:
     """Initialize the application: connect to event store, start subscriptions.
 
@@ -149,7 +147,6 @@ async def startup(
 
     Args:
         skip_validation: Skip credential validation (for test mode).
-        auth: Optional authentication context.
 
     Returns:
         Ok({"mode": "full"|"degraded", ...}) on success,
@@ -184,12 +181,10 @@ async def startup(
 
 
 async def shutdown(
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[None, LifecycleError]:
     """Gracefully shut down: stop subscriptions, disconnect from event store.
 
     Args:
-        auth: Optional authentication context.
 
     Returns:
         Ok(None) on success, Err(LifecycleError) on failure.
@@ -216,12 +211,10 @@ async def shutdown(
 
 
 async def health_check(
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[dict, LifecycleError]:
     """Check application health.
 
     Args:
-        auth: Optional authentication context.
 
     Returns:
         Ok(dict) with health status including mode (full/degraded).
