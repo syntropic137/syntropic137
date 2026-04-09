@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
@@ -30,6 +29,7 @@ from syn_shared.env_constants import (
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
     )

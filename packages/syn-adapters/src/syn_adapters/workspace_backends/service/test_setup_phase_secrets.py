@@ -19,7 +19,6 @@ from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     _repo_name,
 )
 
-
 # =============================================================================
 # _repo_name / _repo_full_name helpers
 # =============================================================================
