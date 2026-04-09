@@ -66,7 +66,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type or "Unknown"
-        event_data = envelope.event.model_dump()
+        event_data = envelope.event.model_dump(mode="json")
         global_nonce = envelope.metadata.global_nonce or 0
         try:
             handler_name = f"on_{_camel_to_snake(event_type)}"
