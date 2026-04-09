@@ -84,7 +84,7 @@ const activityCommand: CommandDef = {
     printDim("Press Ctrl+C to stop.\n");
 
     try {
-      for await (const event of streamSSE("/watch/activity")) {
+      for await (const event of streamSSE("/sse/activity")) {
         renderEvent(event);
       }
       print(style("\nStream ended.", DIM));

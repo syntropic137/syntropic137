@@ -7744,9 +7744,9 @@
             "title": "Trend",
             "default": "stable"
           },
-          "window_cost_usd": {
+          "recent_cost_usd": {
             "type": "string",
-            "title": "Window Cost Usd",
+            "title": "Recent Cost Usd",
             "default": "0"
           },
           "window_tokens": {
@@ -7762,7 +7762,7 @@
         },
         "type": "object",
         "title": "RepoHealthResponse",
-        "description": "Per-repo health snapshot with success rate, trend, and windowed costs."
+        "description": "Per-repo health snapshot with success rate, trend, and accumulated costs.\n\nNote: ``recent_cost_usd`` is accumulated from WorkflowCompleted/Failed events\nsince the projection was last reset \u2014 it is not a fixed time window and may\ndiffer from ``RepoCostResponse.total_cost_usd`` which is a TimescaleDB total."
       },
       "RepoListResponse": {
         "properties": {

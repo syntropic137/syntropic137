@@ -136,6 +136,29 @@ describe("workflow export command", () => {
     ).rejects.toThrow(CLIError);
   });
 
+  // Regression: without --output, export must create a subdirectory, never dump into CWD.
+  it("defaults to <workflow-slug>-export subdirectory when --output is not given", async () => {
+    const originalCwd = process.cwd();
+    // Switch cwd to tmpDir so we can observe where files land
+    process.chdir(tmpDir);
+    try {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          workflow_name: "Code Review",
+          files: { "workflow.yaml": "name: Code Review\n" },
+        }),
+      );
+
+      await exportCommand.handler({ positionals: ["wf-123"], values: {} });
+
+      // File must be inside a subdirectory, not directly in tmpDir
+      expect(fs.existsSync(path.join(tmpDir, "workflow.yaml"))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, "code-review-export", "workflow.yaml"))).toBe(true);
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
   it("throws CLIError when workflow-id is missing", async () => {
     await expect(
       exportCommand.handler({ positionals: [], values: {} }),

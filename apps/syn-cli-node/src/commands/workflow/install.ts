@@ -274,8 +274,8 @@ function printWorkflowSummary(workflows: ResolvedWorkflow[]): void {
 // ---------------------------------------------------------------------------
 
 export const installedCommand: CommandDef = {
-  name: "installed",
-  description: "List installed workflow packages",
+  name: "packages",
+  description: "List workflow packages pulled from the marketplace (local CLI history — use 'syn workflow list' to see what is currently on the running stack)",
   handler: async () => {
     const registry = loadInstalled();
 

@@ -57,7 +57,7 @@ describe("repo commands", () => {
         success_rate: 0.95,
         trend: "stable",
         total_executions: 20,
-        window_cost_usd: "1.50",
+        recent_cost_usd: "1.50",
         window_tokens: 5000,
         last_execution_at: "2026-01-01T00:00:00Z",
       }),

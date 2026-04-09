@@ -1,6 +1,6 @@
 """Tests for ExecutionCostProjection with unified AgentObservation model."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -298,3 +298,61 @@ class TestExtractedHelpers:
         ec = ExecutionCost(execution_id="exec-1")
         _update_completed_at(ec, None)
         assert ec.completed_at is None
+
+
+@pytest.mark.unit
+class TestExecutionCostQueryServiceBuildFromTokenUsage:
+    """Regression tests for _build_from_token_usage duration calculation.
+
+    Regression: before the fix, _build_from_token_usage() omitted duration_ms,
+    so 'syn costs execution <id>' always showed 'Duration: 0ms' for executions
+    whose cost was computed from token_usage events (i.e. no session_summary yet).
+    """
+
+    def test_duration_computed_from_timestamps(self) -> None:
+        """duration_ms is computed from started_at / last_observation when both present."""
+        from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+            ExecutionCostQueryService,
+        )
+
+        service = ExecutionCostQueryService(pool=None)  # type: ignore[arg-type]
+        started = datetime(2026, 4, 8, 20, 14, 0, tzinfo=UTC)
+        completed = datetime(2026, 4, 8, 20, 16, 30, tzinfo=UTC)  # 2.5 min
+
+        row: dict[str, object] = {
+            "execution_id": "exec-1",
+            "total_input": 1000,
+            "total_output": 500,
+            "cache_creation": 0,
+            "cache_read": 0,
+            "session_count": 1,
+            "session_ids": ["s-1"],
+            "started_at": started,
+            "last_observation": completed,
+        }
+        result = service._build_from_token_usage(row, tool_counts={})
+
+        assert result.duration_ms == pytest.approx(150_000.0)  # 2.5 min = 150,000 ms
+
+    def test_duration_zero_when_no_timestamps(self) -> None:
+        """duration_ms defaults to 0 when timestamps are missing (in-progress execution)."""
+        from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+            ExecutionCostQueryService,
+        )
+
+        service = ExecutionCostQueryService(pool=None)  # type: ignore[arg-type]
+
+        row: dict[str, object] = {
+            "execution_id": "exec-2",
+            "total_input": 500,
+            "total_output": 200,
+            "cache_creation": 0,
+            "cache_read": 0,
+            "session_count": 1,
+            "session_ids": ["s-2"],
+            "started_at": None,
+            "last_observation": None,
+        }
+        result = service._build_from_token_usage(row, tool_counts={})
+
+        assert result.duration_ms == 0.0

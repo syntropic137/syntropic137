@@ -40,8 +40,8 @@ def _update_execution_counts(health: dict[str, Any], success: bool) -> None:
 
 def _update_cost_tokens(health: dict[str, Any], cost_usd: str, tokens: int) -> None:
     """Accumulate cost and token metrics."""
-    existing_cost = Decimal(str(health.get("window_cost_usd", "0")))
-    health["window_cost_usd"] = str(existing_cost + Decimal(cost_usd))
+    existing_cost = Decimal(str(health.get("recent_cost_usd", "0")))
+    health["recent_cost_usd"] = str(existing_cost + Decimal(cost_usd))
     health["window_tokens"] = health.get("window_tokens", 0) + tokens
 
 

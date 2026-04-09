@@ -3059,7 +3059,11 @@ export interface components {
         };
         /**
          * RepoHealthResponse
-         * @description Per-repo health snapshot with success rate, trend, and windowed costs.
+         * @description Per-repo health snapshot with success rate, trend, and accumulated costs.
+         *
+         *     Note: ``recent_cost_usd`` is accumulated from WorkflowCompleted/Failed events
+         *     since the projection was last reset — it is not a fixed time window and may
+         *     differ from ``RepoCostResponse.total_cost_usd`` which is a TimescaleDB total.
          */
         RepoHealthResponse: {
             /**
@@ -3098,10 +3102,10 @@ export interface components {
              */
             trend: string;
             /**
-             * Window Cost Usd
+             * Recent Cost Usd
              * @default 0
              */
-            window_cost_usd: string;
+            recent_cost_usd: string;
             /**
              * Window Tokens
              * @default 0

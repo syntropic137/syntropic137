@@ -242,6 +242,11 @@ class ExecutionCostQueryService:
             cache_creation=cache_creation,
             cache_read=cache_read,
         )
+        started_at = row["started_at"]  # type: ignore[index]
+        completed_at = row.get("last_observation")  # type: ignore[union-attr]
+        duration_ms = 0.0
+        if started_at and completed_at:
+            duration_ms = (completed_at - started_at).total_seconds() * 1000
         return ExecutionCost(
             execution_id=eid,
             session_count=row["session_count"] or 0,  # type: ignore[index]
@@ -253,6 +258,7 @@ class ExecutionCostQueryService:
             cache_creation_tokens=cache_creation,
             cache_read_tokens=cache_read,
             tool_calls=tool_counts.get(eid, 0),
-            started_at=row["started_at"],  # type: ignore[index]
-            completed_at=row.get("last_observation"),  # type: ignore[union-attr]
+            duration_ms=duration_ms,
+            started_at=started_at,
+            completed_at=completed_at,
         )

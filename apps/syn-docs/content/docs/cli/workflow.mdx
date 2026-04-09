@@ -71,7 +71,7 @@ syn workflow export <workflow-id> [options]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--format`, `-f` | `text` | `package` | Export format: 'package' (default) or 'plugin' |
-| `--output`, `-o` | `text` | `.` | Output directory (created if absent) |
+| `--output`, `-o` | `text` | --- | Output directory (default: ./<workflow-slug>-export) |
 | `--force` | `boolean` | `false` | Overwrite existing files without error |
 
 ---
@@ -140,16 +140,6 @@ syn workflow install <source> [options]
 
 ---
 
-## `syn workflow installed`
-
-List installed workflow packages
-
-```bash
-syn workflow installed
-```
-
----
-
 ## `syn workflow list`
 
 List all workflows
@@ -163,6 +153,16 @@ syn workflow list [options]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--include-archived` | `boolean` | `false` | Include archived workflows |
+
+---
+
+## `syn workflow packages`
+
+List workflow packages pulled from the marketplace (local CLI history — use 'syn workflow list' to see what is currently on the running stack)
+
+```bash
+syn workflow packages
+```
 
 ---
 
