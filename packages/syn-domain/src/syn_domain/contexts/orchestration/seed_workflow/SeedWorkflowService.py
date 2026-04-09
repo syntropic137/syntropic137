@@ -72,7 +72,11 @@ _DUPLICATE_MARKERS = ("already exists", "precondition failed", "concurrency conf
 def _build_create_command(definition: WorkflowDefinition) -> CreateWorkflowTemplateCommand:
     """Build a CreateWorkflowTemplateCommand from a workflow definition."""
     default_url = "https://github.com/placeholder/not-configured"
-    workflow_type = WorkflowType(definition.type) if definition.type in WorkflowType._value2member_map_ else WorkflowType.CUSTOM
+    workflow_type = (
+        WorkflowType(definition.type)
+        if definition.type in WorkflowType._value2member_map_
+        else WorkflowType.CUSTOM
+    )
     return CreateWorkflowTemplateCommand(
         aggregate_id=definition.id,
         name=definition.name,
