@@ -31,7 +31,7 @@ A condition has three parts:
 | `is_empty` | Field is missing or resolves to a falsy value | None | `pull_request.body is_empty` |
 
 <Callout type="warn">
-`is_empty` uses Python truthiness — `None`, `""`, `0`, `false`, and `[]` all
+`is_empty` uses Python truthiness: `None`, `""`, `0`, `false`, and `[]` all
 match. If you need to check specifically for `null` or missing fields, use
 `is_empty` and be aware that other falsy values will also pass.
 </Callout>

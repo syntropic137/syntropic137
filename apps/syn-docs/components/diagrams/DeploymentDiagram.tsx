@@ -48,7 +48,7 @@ export function WorkspaceIsolationDiagram() {
         {/* Step 1: Create */}
         <DiagramNode icon="play" label="1. Create Container" color="indigo" className="w-full" />
 
-        <DiagramSeparator label="Setup Phase (~30s) — Secrets available" />
+        <DiagramSeparator label="Setup Phase (~30s): Secrets available" />
 
         <DiagramGrid columns={4}>
           <DiagramNode icon="lock" label="Inject Token" color="amber" size="sm" />
@@ -57,7 +57,7 @@ export function WorkspaceIsolationDiagram() {
           <DiagramNode icon="unlock" label="Clear tokens" color="pink" size="sm" />
         </DiagramGrid>
 
-        <DiagramSeparator label="Agent Phase — Only ANTHROPIC_API_KEY" />
+        <DiagramSeparator label="Agent Phase: Only ANTHROPIC_API_KEY" />
 
         <DiagramGrid columns={4}>
           <DiagramNode icon="zap" label="AI Agent" color="purple" size="sm" />

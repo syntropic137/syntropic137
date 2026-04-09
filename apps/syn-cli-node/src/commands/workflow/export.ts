@@ -17,7 +17,7 @@ export const exportCommand: CommandDef = {
   args: [{ name: "workflow-id", description: "Workflow ID to export", required: true }],
   options: {
     format: { type: "string", short: "f", description: "Export format: 'package' (default) or 'plugin'", default: "package" },
-    output: { type: "string", short: "o", description: "Output directory (created if absent)", default: "." },
+    output: { type: "string", short: "o", description: "Output directory (default: ./<workflow-slug>-export)" },
     force: { type: "boolean", description: "Overwrite existing files without error", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
@@ -33,7 +33,7 @@ export const exportCommand: CommandDef = {
       throw new CLIError("Invalid format", 1);
     }
 
-    const outputDir = (parsed.values["output"] as string | undefined) ?? ".";
+    const outputOverride = parsed.values["output"] as string | undefined;
     const force = parsed.values["force"] === true;
 
     const data = unwrap(
@@ -47,6 +47,12 @@ export const exportCommand: CommandDef = {
     );
 
     const files = data.files;
+    const workflowSlug = data.workflow_name
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "")  // strip path separators and special chars
+      || "workflow";  // fallback if sanitization yields empty string
+    const outputDir = outputOverride ?? `./${workflowSlug}-export`;
     if (Object.keys(files).length === 0) {
       printError("Export returned no files");
       throw new CLIError("Export empty", 1);

@@ -143,6 +143,12 @@ syn repo list
 - [ ] Workflow list is empty
 - [ ] Repo list is empty
 
+> **Note:** `syn workflow packages` reads local CLI history (`~/.syntropic137/workflows/installed.json`),
+> not the stack. Clear it before a clean-slate validation:
+> ```bash
+> rm -f ~/.syntropic137/workflows/installed.json
+> ```
+
 ---
 
 ## 1. Install CLI from npm
@@ -961,7 +967,68 @@ Navigate to `http://localhost:8137` via Playwright.
 
 ---
 
-## 9. Validation Report
+## 9. Claude Code Plugin Validation
+
+Run this section **after Section 8** (so sessions and executions from Section 6 exist for
+`/syn-observe` and `/syn-executions show`).
+
+> **Prerequisite:** `claude` CLI must be available. If the plugin is not yet installed:
+> ```bash
+> claude plugin install syntropic137
+> ```
+> The plugin connects to `http://localhost:8137` by default — the same selfhost stack
+> used in Sections 0–8.
+
+### Plugin update (always run first)
+
+```bash
+claude plugin marketplace update syntropic137
+claude plugin update syntropic137@syntropic137
+```
+
+- [ ] Update completes without errors
+- [ ] Plugin version matches expected release version
+
+### Slash command smoke tests
+
+| Command | What to verify |
+|---------|---------------|
+| `/syn-health` | Returns healthy status for `http://localhost:8137` |
+| `/syn-status` | Lists all `syn137-*` containers with healthy status |
+| `/syn-sessions list` | Returns session list (may be empty on fresh stack) |
+| `/syn-costs summary` | Returns cost summary (may be zero on fresh stack) |
+| `/syn-metrics` | Returns aggregated metrics without errors |
+| `/syn-workflows list` | Returns workflows on the stack |
+| `/syn-workflows search` | Returns marketplace results |
+| `/syn-executions list` | Returns execution list (may be empty) |
+| `/syn-marketplace list` | Shows registered marketplace sources |
+| `/syn-triggers list` | Returns trigger list (may be empty) |
+| `/syn-run <workflow-id>` | Starts an execution (after workflows exist from Section 6) |
+| `/syn-observe <session-id> events` | Returns event timeline for a session from Section 6 |
+
+- [ ] All commands above return results without errors
+- [ ] No commands reference deprecated field names (`window_cost_usd`, `syn workflow installed`)
+
+### Skill validation
+
+Invoke these skills and verify they give correct guidance:
+
+- [ ] **`execution-control` skill**: Walk through pause/resume guidance — references valid CLI flags
+- [ ] **`observability` skill**: Query tool timeline for a session from Section 6 — cost fields use `recent_cost_usd`
+- [ ] **`marketplace` skill**: Workflow install/list guidance uses `syn workflow packages` (not `syn workflow installed`) with a note that `syn workflow list` shows the live stack
+
+### Clean state note
+
+`syn workflow packages` reads local CLI history (`~/.syntropic137/workflows/installed.json`), not
+the stack. Clear it before a clean-slate plugin validation:
+
+```bash
+rm -f ~/.syntropic137/workflows/installed.json
+```
+
+---
+
+## 10. Validation Report
 
 ### Where to save
 
@@ -1168,7 +1235,7 @@ to open source launch? What must be fixed first, what can ship as-is?
 
 ---
 
-## 10. Post-Fix Validation Loop
+## 11. Post-Fix Validation Loop
 
 After the initial validation discovers issues and fixes are implemented locally,
 verify those fixes against the selfhost stack before merging. This avoids shipping

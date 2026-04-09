@@ -33,7 +33,7 @@ Secrets (API keys, tokens) are never baked into images. The injection lifecycle:
 2. **Execution phase**: Agent runs with access to injected secrets
 3. **Cleanup phase**: Secrets are revoked/cleared before container destruction
 
-The sidecar proxy (ADR-022) is the preferred injection method — the agent process never sees raw API keys. The proxy intercepts outbound requests and adds authentication headers.
+The sidecar proxy (ADR-022) is the preferred injection method: the agent process never sees raw API keys. The proxy intercepts outbound requests and adds authentication headers.
 
 ## Vendor Telemetry Disabled
 
@@ -69,8 +69,8 @@ All GitHub Actions in the build workflow are pinned to commit SHAs, preventing s
 
 In production deployments, the root filesystem is mounted read-only. Writable paths are limited to:
 
-- `/workspace` — Agent working directory
-- `/tmp` — Temporary files
-- `/home/agent` — Agent home (tmpfs mount)
+- `/workspace`: Agent working directory
+- `/tmp`: Temporary files
+- `/home/agent`: Agent home (tmpfs mount)
 
 This prevents agents from modifying system binaries or installing persistent backdoors.

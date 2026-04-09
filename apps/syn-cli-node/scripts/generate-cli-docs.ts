@@ -132,6 +132,11 @@ function extractGroup(group: CommandGroup): GrpInfo {
 // MDX rendering — matches the format of the previous Python generator
 // ---------------------------------------------------------------------------
 
+/** Escape angle brackets so description strings are safe in MDX table cells. */
+function escapeForMdx(text: string): string {
+  return text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function renderArgRows(args: ParamInfo[]): string[] {
   const lines = [
     "**Arguments:**",
@@ -141,7 +146,7 @@ function renderArgRows(args: ParamInfo[]): string[] {
   ];
   for (const a of args) {
     const req = a.required ? "Yes" : "No";
-    lines.push(`| \`${a.name}\` | \`${a.typeStr}\` | ${req} | ${a.help} |`);
+    lines.push(`| \`${a.name}\` | \`${a.typeStr}\` | ${req} | ${escapeForMdx(a.help)} |`);
   }
   lines.push("");
   return lines;
@@ -157,7 +162,7 @@ function renderOptRows(opts: ParamInfo[]): string[] {
   for (const o of opts) {
     const flags = o.flags.map((f) => `\`${f}\``).join(", ");
     const def = o.defaultValue !== undefined ? `\`${o.defaultValue}\`` : "---";
-    lines.push(`| ${flags} | \`${o.typeStr}\` | ${def} | ${o.help} |`);
+    lines.push(`| ${flags} | \`${o.typeStr}\` | ${def} | ${escapeForMdx(o.help)} |`);
   }
   lines.push("");
   return lines;

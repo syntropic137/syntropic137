@@ -15,7 +15,14 @@ from syn_api._wiring import (
     get_workflow_repo,
     sync_published_events_to_projections,
 )
-from syn_api.types import Err, Ok, Result, TriggerActionResponse, TriggerError
+from syn_api.types import (
+    Err,
+    Ok,
+    RegisterTriggerRequest,
+    Result,
+    TriggerActionResponse,
+    TriggerError,
+)
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
 
 if TYPE_CHECKING:
@@ -337,26 +344,37 @@ async def disable_triggers(
 
 
 @router.post("", response_model=TriggerActionResponse)
-async def register_trigger_endpoint(body: dict[str, Any]) -> TriggerActionResponse:
+async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActionResponse:
     """Register a new trigger rule."""
-    try:
-        result = await register_trigger(
-            name=body["name"],
-            event=body["event"],
-            repository=body.get("repository", ""),
-            workflow_id=body.get("workflow_id", ""),
-            conditions=body.get("conditions"),
-            installation_id=body.get("installation_id", ""),
-            input_mapping=body.get("input_mapping"),
-            config=body.get("config"),
-            created_by=body.get("created_by", "api"),
-        )
-    except (KeyError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    cfg = body.config
+    config_dict: dict[str, object] | None = (
+        {
+            "max_attempts": cfg.max_attempts,
+            "daily_limit": cfg.daily_limit,
+            "debounce_seconds": cfg.debounce_seconds,
+            "cooldown_seconds": cfg.cooldown_seconds,
+        }
+        if cfg is not None
+        else None
+    )
+    result = await register_trigger(
+        name=body.name,
+        event=body.event,
+        repository=body.repository,
+        workflow_id=body.workflow_id,
+        conditions=[
+            {"field": c.field, "operator": c.operator, "value": c.value}
+            for c in (body.conditions or [])
+        ],
+        installation_id=body.installation_id,
+        input_mapping=dict(body.input_mapping) if body.input_mapping else None,
+        config=config_dict,
+        created_by=body.created_by,
+    )
 
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
-    return TriggerActionResponse(trigger_id=result.value, name=body["name"], status="active")
+    return TriggerActionResponse(trigger_id=result.value, name=body.name, status="active")
 
 
 @router.post("/presets/{preset_name}", response_model=TriggerActionResponse)

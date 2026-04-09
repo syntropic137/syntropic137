@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.23.2"
+version = "0.23.3"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -52,7 +52,7 @@ constraint-dependencies = [
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
-exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-docs", "packages/openclaw-plugin"]
+exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-docs", "apps/syn-pulse-ui", "packages/openclaw-plugin"]
 
 [tool.uv.sources]
 syn-api = { workspace = true }

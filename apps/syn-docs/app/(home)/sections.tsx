@@ -62,8 +62,8 @@ export function HeroContent() {
           </p>
           <p className="text-base text-fd-muted-foreground/70 max-w-2xl mx-auto">
             Self-hosted platform for orchestrating AI agents with event-sourced
-            workflows. Every tool call, token, cost, and artifact is captured
-            — data compounds with every run.
+            workflows. Every tool call, token, cost, and artifact is captured.
+            Data compounds with every run.
           </p>
         </div>
 

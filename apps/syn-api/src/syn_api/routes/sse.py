@@ -168,7 +168,7 @@ async def activity_sse(request: Request) -> StreamingResponse:
     """Stream the global activity feed (git events, system-wide activity).
 
     Runs indefinitely until the client disconnects.  There is no terminal
-    sentinel for the activity channel — it never completes.
+    sentinel for the activity channel, it never completes.
     """
     realtime = rt.get_realtime_projection_ref()
     queue: SSEQueue = await realtime.connect(_ACTIVITY_CHANNEL)

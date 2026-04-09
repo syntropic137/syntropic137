@@ -98,13 +98,13 @@ class TriggerHistoryProjection:
     async def handle_trigger_blocked(
         self,
         event: TriggerBlockedEvent,
-        global_nonce: int | None = None,
+        global_nonce: int | None = None,  # noqa: ARG002 — kept for API compat; not used (see comment below)
     ) -> TriggerHistoryEntry:
         """Handle a TriggerBlocked event.
 
         Args:
             event: The blocked event data.
-            global_nonce: Stream position for deterministic, replay-safe keys.
+            global_nonce: Kept for API compatibility; not used for blocked entries (see NOTE below).
         """
         entry = TriggerHistoryEntry(
             trigger_id=event.trigger_id,
@@ -119,17 +119,25 @@ class TriggerHistoryProjection:
             guard_name=event.guard_name,
             block_reason=event.reason,
         )
-        # Deterministic, replay-safe key namespaced by trigger_id.
-        # Use global_nonce (stream position) when available for collision-free keys.
-        if global_nonce is not None:
-            key = f"{entry.trigger_id}_blocked_{global_nonce}"
-        elif entry.webhook_delivery_id:
+        # Content-based key namespaced by trigger_id.
+        # Blocked entries intentionally use the same key for the same logical event
+        # so that rapid re-deliveries of the same event (e.g. poller bursts) overwrite
+        # rather than accumulate. This deduplicates noise in trigger history without
+        # hiding genuine new events (different guard, event type, or PR number).
+        # NOTE: global_nonce is deliberately NOT used here — nonce-keyed blocked entries
+        # would create one record per delivery, producing the noise we are eliminating.
+        if entry.webhook_delivery_id:
             key = f"{entry.trigger_id}_blocked_{entry.webhook_delivery_id}"
         else:
             pr_part = str(entry.pr_number) if entry.pr_number is not None else "no_pr"
-            key = (
-                f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
-            )
+            # Use event-specific stable ID from payload_summary when available
+            # (e.g. comment_id for issue_comment events) so distinct events on
+            # the same PR are not over-deduplicated into a single entry.
+            event_id = entry.payload_summary.get("comment_id")
+            if event_id:
+                key = f"{entry.trigger_id}_blocked_{entry.github_event_type}_{pr_part}_{event_id}"
+            else:
+                key = f"{entry.trigger_id}_blocked_{entry.guard_name}_{entry.github_event_type}_{pr_part}"
         data = _entry_to_dict(entry)
         data["_projection_key"] = key
         await self._store.save(PROJECTION_NAME, key, data)

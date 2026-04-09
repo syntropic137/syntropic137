@@ -976,7 +976,7 @@ export interface paths {
          * @description Stream the global activity feed (git events, system-wide activity).
          *
          *     Runs indefinitely until the client disconnects.  There is no terminal
-         *     sentinel for the activity channel — it never completes.
+         *     sentinel for the activity channel, it never completes.
          */
         get: operations["activity_sse_sse_activity_get"];
         put?: never;
@@ -1620,6 +1620,18 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * ConditionRequest
+         * @description A single trigger condition (field operator value).
+         */
+        ConditionRequest: {
+            /** Field */
+            field: string;
+            /** Operator */
+            operator: string;
+            /** Value */
+            value: string;
         };
         /**
          * ContributionHeatmapResponse
@@ -2887,6 +2899,37 @@ export interface components {
             created_by: string;
         };
         /**
+         * RegisterTriggerRequest
+         * @description Request body for registering a new trigger rule.
+         */
+        RegisterTriggerRequest: {
+            /** Name */
+            name: string;
+            /** Event */
+            event: string;
+            /** Repository */
+            repository: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Conditions */
+            conditions?: components["schemas"]["ConditionRequest"][] | null;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /** Input Mapping */
+            input_mapping?: {
+                [key: string]: string;
+            } | null;
+            config?: components["schemas"]["TriggerConfigRequest"] | null;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
+        /**
          * RepoActionResponse
          * @description Response for repo mutation actions (update, deregister, assign, unassign).
          */
@@ -3059,7 +3102,11 @@ export interface components {
         };
         /**
          * RepoHealthResponse
-         * @description Per-repo health snapshot with success rate, trend, and windowed costs.
+         * @description Per-repo health snapshot with success rate, trend, and accumulated costs.
+         *
+         *     Note: ``recent_cost_usd`` is accumulated from WorkflowCompleted/Failed events
+         *     since the projection was last reset — it is not a fixed time window and may
+         *     differ from ``RepoCostResponse.total_cost_usd`` which is a TimescaleDB total.
          */
         RepoHealthResponse: {
             /**
@@ -3098,10 +3145,10 @@ export interface components {
              */
             trend: string;
             /**
-             * Window Cost Usd
+             * Recent Cost Usd
              * @default 0
              */
-            window_cost_usd: string;
+            recent_cost_usd: string;
             /**
              * Window Tokens
              * @default 0
@@ -3888,6 +3935,32 @@ export interface components {
             preset?: string | null;
             /** Action */
             action?: string | null;
+        };
+        /**
+         * TriggerConfigRequest
+         * @description Safety configuration for a trigger rule.
+         */
+        TriggerConfigRequest: {
+            /**
+             * Max Attempts
+             * @default 3
+             */
+            max_attempts: number;
+            /**
+             * Daily Limit
+             * @default 20
+             */
+            daily_limit: number;
+            /**
+             * Debounce Seconds
+             * @default 0
+             */
+            debounce_seconds: number;
+            /**
+             * Cooldown Seconds
+             * @default 300
+             */
+            cooldown_seconds: number;
         };
         /**
          * TriggerDetail
@@ -5871,9 +5944,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["RegisterTriggerRequest"];
             };
         };
         responses: {
