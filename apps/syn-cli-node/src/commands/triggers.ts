@@ -315,7 +315,9 @@ const disableAllCommand: CommandDef = {
     // Filter client-side: the API response always resolves repo IDs to display
     // names, so triggers stored with either an ID or a name both show up as
     // "owner/repo" in the response — a single string compare catches both.
-    const triggers = (d.triggers ?? []).filter((t) => t.repository === repo);
+    // Normalize case and whitespace since GitHub repo names are case-insensitive.
+    const repoNorm = repo.trim().toLowerCase();
+    const triggers = (d.triggers ?? []).filter((t) => t.repository.trim().toLowerCase() === repoNorm);
     if (triggers.length === 0) { printDim("No active triggers found."); return; }
     let count = 0;
     for (const t of triggers) {
