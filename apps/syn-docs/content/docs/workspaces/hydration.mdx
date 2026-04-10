@@ -1,0 +1,189 @@
+---
+title: Workspace Hydration
+description: How Syntropic137 pre-clones repositories into workspace containers before the agent starts, with GitHub App token injection, namespace-safe directory naming, and automatic AGENTS.md/CLAUDE.md context injection.
+---
+
+Workspace hydration is the process of preparing a container with everything an agent needs before it starts. Repositories are cloned, credentials are installed, and agent context files are synthesized — all during the workspace setup phase, before the agent process runs.
+
+The agent wakes up in a fully configured environment. It does not clone repos, manage credentials, or set up its own context. Hydration does that work up front.
+
+## Why Pre-Clone Instead of Agent-Clone?
+
+When an agent clones its own repositories, several things go wrong:
+
+- Raw GitHub tokens leak into the agent's environment (a security violation under [ADR-024](/docs/workspaces/security#secret-injection-lifecycle-adr-024))
+- Token injection time counts against the agent's context budget
+- The agent wastes turns on setup instead of actual work
+- Cloning errors disrupt the workflow mid-run
+
+Workspace hydration solves all of these. Cloning happens during the setup phase using short-lived GitHub App installation tokens. Those tokens are cleared before the agent starts. The agent inherits cached git credentials and pre-populated repos — but never sees a raw token.
+
+## The `repos` Field
+
+`repos` is a first-class field on both the workflow template and the execute API (ADR-058).
+
+### Workflow Template (default repos)
+
+Set default repos when creating a workflow:
+
+```bash
+syn workflow create my-workflow \
+  --repos https://github.com/acme/api-service \
+  --repos https://github.com/acme/web-app
+```
+
+Or in a workflow YAML:
+
+```yaml
+id: my-workflow-v1
+name: My Workflow
+repos:
+  - https://github.com/acme/api-service
+  - https://github.com/acme/web-app
+phases:
+  - id: analyze
+    prompt_file: phases/analyze.md
+    model: sonnet
+```
+
+Every execution of this workflow will pre-clone both repos unless overridden at run time.
+
+### Execute Override
+
+Pass `--repo` at run time to override or extend the template's default repos:
+
+```bash
+# Override — use these repos instead of the template defaults
+syn workflow run my-workflow-v1 \
+  --repo https://github.com/acme/api-service \
+  --repo https://github.com/acme/staging-fork
+
+# Template has no repos — supply them per-run
+syn workflow run my-workflow-v1 \
+  --repo https://github.com/acme/feature-branch
+```
+
+The execute API accepts the same field:
+
+```bash
+curl -X POST /v1/workflows/{id}/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "Review the latest changes",
+    "repos": [
+      "https://github.com/acme/api-service",
+      "https://github.com/acme/web-app"
+    ]
+  }'
+```
+
+## Clone Directory Naming
+
+Repositories are cloned under `/workspace/repos/` using an `owner__reponame` format — the org and repo name joined by a double underscore.
+
+| Repository URL | Clone Path |
+|----------------|------------|
+| `github.com/acme/api-service` | `/workspace/repos/acme__api-service/` |
+| `github.com/acme/web-app` | `/workspace/repos/acme__web-app/` |
+| `github.com/other-org/api-service` | `/workspace/repos/other-org__api-service/` |
+
+The double underscore prevents namespace collisions when two orgs have repos with the same name (`acme/api-service` and `other-org/api-service` both clone without conflict).
+
+<Callout type="info">
+The double-underscore separator (`__`) was chosen specifically because it cannot appear in a GitHub org or repo name, making it an unambiguous delimiter that requires no escaping.
+</Callout>
+
+## `$SYN_ALL_REPOS`
+
+Every phase prompt has access to `$SYN_ALL_REPOS` — a colon-separated list of all pre-cloned repo paths. This lets prompts reference repos without hardcoding paths:
+
+```
+$SYN_ALL_REPOS=/workspace/repos/acme__api-service:/workspace/repos/acme__web-app
+```
+
+Use it in a phase prompt:
+
+```markdown
+You have access to the following repositories:
+
+$SYN_ALL_REPOS
+
+Review each repository and identify cross-cutting concerns.
+```
+
+Or split it in a script:
+
+```bash
+IFS=':' read -ra REPOS <<< "$SYN_ALL_REPOS"
+for repo in "${REPOS[@]}"; do
+  echo "Processing $repo"
+done
+```
+
+`$SYN_ALL_REPOS` is empty (not unset) when no repos are configured. Scripts that iterate over it will correctly handle the zero-repo case.
+
+## AGENTS.md and CLAUDE.md Injection
+
+When one or more repos are configured, the orchestrator synthesizes `/workspace/AGENTS.md` and `/workspace/CLAUDE.md` at container start. Each file contains `$import` directives that pull in the AGENTS.md and CLAUDE.md from every cloned repo that has one:
+
+```markdown
+# /workspace/AGENTS.md (synthesized by Syntropic137)
+
+@/workspace/repos/acme__api-service/AGENTS.md
+@/workspace/repos/acme__web-app/AGENTS.md
+```
+
+The agent loads these files automatically via Claude Code's standard context injection. This means the agent inherits repo-specific conventions, architecture notes, and coding standards from every configured repository — with no manual setup.
+
+If a cloned repo does not have an AGENTS.md or CLAUDE.md, it is skipped silently. If no repos are configured, no synthesis happens and `/workspace/AGENTS.md` is not created.
+
+## Workspace Directory Structure
+
+A hydrated workspace looks like this:
+
+```
+/workspace/
+  AGENTS.md              # Synthesized — imports each repo's AGENTS.md
+  CLAUDE.md              # Synthesized — imports each repo's CLAUDE.md
+  artifacts/
+    input/               # Previous phase outputs (read-only)
+    output/              # Current phase deliverables
+  repos/
+    acme__api-service/   # Cloned from github.com/acme/api-service
+    acme__web-app/       # Cloned from github.com/acme/web-app
+/opt/agentic/
+  plugins/               # Pre-bundled plugins
+  config/                # Runtime configuration
+  version.json           # Image version manifest
+  entrypoint.sh
+```
+
+## GitHub App Token Lifecycle
+
+Repo cloning uses GitHub App installation tokens, not personal access tokens. The lifecycle:
+
+1. **Setup phase** — Orchestrator generates a short-lived installation token per repo's org and injects it into the workspace via the sidecar proxy
+2. **Clone** — Each repo is cloned using the installation token; git credential helper caches the token for the repo URL
+3. **Token revocation** — Raw tokens are cleared from the environment before the agent phase starts (ADR-024)
+4. **Agent phase** — Agent uses cached git credentials for push/pull operations; it never handles the original token
+
+The agent can push commits and open PRs using the cached credentials. The GitHub App's configured permissions determine what it can do.
+
+<Callout type="warn">
+Repos must be accessible to the GitHub App installation registered with Syntropic137. See [GitHub Integration](/docs/guide/github-integration) for setup. Repos outside the app's installation scope will fail to clone and the execution will error before the agent starts.
+</Callout>
+
+## Dashboard and Execution Detail
+
+Configured repos are surfaced throughout the platform:
+
+- **Execution detail** — The `repos` field appears on `WorkflowExecutionDetail`, visible in the dashboard and via `syn execution show <id>`
+- **Workflow detail** — `syn workflow show <id>` displays the template's default repos
+- **Execution list** — Executions show their configured repos for filtering and audit
+
+## Related
+
+- [Workspace Configuration](/docs/workspaces/configuration) — environment variables including `$SYN_ALL_REPOS`
+- [Workspace Security](/docs/workspaces/security) — secret injection lifecycle (ADR-024)
+- [GitHub Integration](/docs/guide/github-integration) — GitHub App setup and permissions
+- [CLI: syn workflow](/docs/cli/workflow) — `--repo` and `--repos` flag reference

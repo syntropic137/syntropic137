@@ -49,6 +49,7 @@ These are injected automatically by syn137 when creating workspaces:
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | Activates OTel export (set to `1` when collector is configured) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint, auto-set to `COLLECTOR_URL` from syn-api config |
 | `GITHUB_TOKEN` | GitHub access (injected via sidecar) |
+| `SYN_ALL_REPOS` | Colon-separated list of pre-cloned repo paths (e.g. `/workspace/repos/acme__api:/workspace/repos/acme__web`). Empty string when no repos are configured. See [Workspace Hydration](/docs/workspaces/hydration). |
 
 You do not need to set these manually. The orchestrator injects them when workspace containers are provisioned.
 
@@ -93,13 +94,19 @@ Plugins can declare required environment variables in their `plugin.json`. The o
 
 ```
 /workspace/
+  AGENTS.md              # Synthesized — imports each repo's AGENTS.md (when repos configured)
+  CLAUDE.md              # Synthesized — imports each repo's CLAUDE.md (when repos configured)
   artifacts/
-    input/     # Previous phase outputs (read-only)
-    output/    # Current phase deliverables
-  repos/       # Cloned repositories
+    input/               # Previous phase outputs (read-only)
+    output/              # Current phase deliverables
+  repos/
+    owner__reponame/     # Pattern: org + double-underscore + repo name
+    owner__other-repo/   # e.g. acme__api-service, acme__web-app
 /opt/agentic/
-  plugins/     # Pre-bundled plugins
-  config/      # Runtime configuration
-  version.json # Image version manifest
+  plugins/               # Pre-bundled plugins
+  config/                # Runtime configuration
+  version.json           # Image version manifest
   entrypoint.sh
 ```
+
+See [Workspace Hydration](/docs/workspaces/hydration) for how repos are cloned and context files are synthesized.
