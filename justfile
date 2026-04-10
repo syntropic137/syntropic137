@@ -1771,11 +1771,11 @@ _workspace-check:
 
 # Bump version across all 11 package files
 bump-version version:
-    python3 scripts/bump_version.py {{version}}
+    python3 scripts/workflows/bump_version.py {{version}}
 
 # Validate all 11 package files have the same version
 check-version:
-    python3 scripts/bump_version.py --check
+    python3 scripts/workflows/bump_version.py --check
 
 registry := "ghcr.io/syntropic137"
 

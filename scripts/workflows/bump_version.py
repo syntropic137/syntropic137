@@ -5,6 +5,7 @@ Usage:
     python scripts/bump_version.py 0.20.0          # Update all 11 files
     python scripts/bump_version.py --check          # Validate all files match
     python scripts/bump_version.py --current        # Print current version
+    python scripts/bump_version.py --check-release  # Validate version is bumped vs release branch
 
 This script updates the 11 tracked version files. Submodule versions
 (event-sourcing-platform, agentic-primitives, openclaw-plugin) are
@@ -12,12 +13,23 @@ intentionally excluded — they have independent versioning.
 
 All files are pre-validated before any writes occur. If any file is
 missing a version field, the script fails without modifying anything.
+
+─────────────────────────────────────────────────────────────────────────────
+CI DEPENDENCY — this script is called directly by the release gate workflow:
+  .github/workflows/checks/version-check.yml
+    → python3 scripts/workflows/bump_version.py --check          (all 11 files match)
+    → python3 scripts/workflows/bump_version.py --check-release  (version > release branch)
+
+Also called by the just recipes `check-version` and `bump-version`.
+Do not rename flags or change exit codes without updating the workflow.
+─────────────────────────────────────────────────────────────────────────────
 """
 
 from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -48,6 +60,11 @@ VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
 PYPROJECT_VERSION_RE = re.compile(r'^(version\s*=\s*")[^"]*(")', re.MULTILINE)
 PACKAGE_JSON_VERSION_RE = re.compile(r'^(\s*"version"\s*:\s*")[^"]*(")', re.MULTILINE)
 
+SEMVER_RE = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
+)
+
 
 def read_pyproject_version(path: Path) -> str | None:
     text = path.read_text()
@@ -76,6 +93,105 @@ def get_current_version() -> str:
         print("ERROR: Could not read version from root pyproject.toml", file=sys.stderr)
         sys.exit(1)
     return v
+
+
+def _parse_semver(v: str) -> tuple[int, int, int, list[str] | None]:
+    m = SEMVER_RE.fullmatch(v)
+    if not m:
+        raise ValueError(f"Invalid semantic version: {v!r}")
+    major, minor, patch, prerelease = m.groups()
+    pre_parts: list[str] | None = prerelease.split(".") if prerelease else None
+    return int(major), int(minor), int(patch), pre_parts
+
+
+def _compare_prerelease(pr1: list[str] | None, pr2: list[str] | None) -> int:
+    if pr1 is None and pr2 is None:
+        return 0
+    if pr1 is None:
+        return 1  # stable > prerelease
+    if pr2 is None:
+        return -1  # prerelease < stable
+    for a, b in zip(pr1, pr2):
+        a_num, b_num = a.isdigit(), b.isdigit()
+        if a_num and b_num:
+            if int(a) != int(b):
+                return -1 if int(a) < int(b) else 1
+        elif a_num != b_num:
+            return -1 if a_num else 1
+        else:
+            if a != b:
+                return -1 if a < b else 1
+    if len(pr1) == len(pr2):
+        return 0
+    return -1 if len(pr1) < len(pr2) else 1
+
+
+def compare_versions(v1: str, v2: str) -> int:
+    """Compare two semver strings. Returns -1, 0, or 1."""
+    maj1, min1, pat1, pre1 = _parse_semver(v1)
+    maj2, min2, pat2, pre2 = _parse_semver(v2)
+    core1, core2 = (maj1, min1, pat1), (maj2, min2, pat2)
+    if core1 != core2:
+        return -1 if core1 < core2 else 1
+    return _compare_prerelease(pre1, pre2)
+
+
+def check_release_bump(release_ref: str = "origin/release") -> bool:
+    """Validate current version is greater than what's on the release branch.
+
+    Used by CI to ensure the PR has actually bumped the version before merging.
+    Reads the release branch version via git show to avoid a full checkout.
+    """
+    pr_version = get_current_version()
+
+    try:
+        result = subprocess.run(
+            ["git", "show", f"{release_ref}:pyproject.toml"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        print(f"ERROR: Could not read {release_ref}:pyproject.toml", file=sys.stderr)
+        print("Ensure 'git fetch origin' has been run.", file=sys.stderr)
+        return False
+
+    release_version: str | None = None
+    for line in result.stdout.splitlines():
+        if line.startswith("version = "):
+            release_version = line.split('"')[1]
+            break
+
+    if release_version is None:
+        print(f"ERROR: No version field found in {release_ref}:pyproject.toml", file=sys.stderr)
+        return False
+
+    print(f"PR version:      {pr_version}")
+    print(f"Release version: {release_version}")
+
+    if pr_version == release_version:
+        print(
+            f"ERROR: Version {pr_version} has not been bumped from the current release.",
+            file=sys.stderr,
+        )
+        print("Run: just bump-version <new-version>", file=sys.stderr)
+        return False
+
+    try:
+        cmp = compare_versions(pr_version, release_version)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return False
+
+    if cmp <= 0:
+        print(
+            f"ERROR: PR version {pr_version} is not greater than release version {release_version}",
+            file=sys.stderr,
+        )
+        return False
+
+    print(f"OK: {pr_version} > {release_version}")
+    return True
 
 
 def check_consistency() -> bool:
@@ -164,6 +280,9 @@ def main() -> None:
         sys.exit(0 if check_consistency() else 1)
     elif arg == "--current":
         print(get_current_version())
+    elif arg == "--check-release":
+        release_ref = sys.argv[2] if len(sys.argv) > 2 else "origin/release"
+        sys.exit(0 if check_release_bump(release_ref) else 1)
     elif arg.startswith("-"):
         print(f"Unknown flag: {arg}", file=sys.stderr)
         print(__doc__)

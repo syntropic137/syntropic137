@@ -201,7 +201,7 @@ just bump-version 0.19.1
 
 ## Version Files Reference
 
-The `scripts/bump_version.py` script updates exactly these 11 files:
+The `scripts/workflows/bump_version.py` script updates exactly these 11 files:
 
 **Python (pyproject.toml):**
 1. `pyproject.toml` (root)
@@ -228,10 +228,14 @@ The `scripts/bump_version.py` script updates exactly these 11 files:
 ```
 PR: main → release
   ├── ci.yml (full CI suite)
-  └── release-gate.yml
-        ├── version-check
-        ├── changelog-check
-        ├── docker-dry-run (6 images)
+  └── release-gate.yml  (thin orchestrator — 4 reusable checks + 3 inline security scans)
+        ├── checks/version-check.yml       — all 11 files consistent, version > release
+        ├── checks/changelog-check.yml     — PR body >= 20 chars
+        ├── checks/codegen-sync.yml        — CLI types, CLI docs, API docs all current
+        ├── checks/docker-dry-run.yml      — all container images build (single-arch, cached)
+        ├── osv-scan (inline)
+        ├── pip-audit (inline)
+        ├── dependency-review (inline)
         └── release-gate-success (aggregator)
 
 Merge to release
@@ -244,17 +248,29 @@ Merge to release
         │     └── create GitHub Release (PR body = release notes)
         │
         ├── pre-publish-validation job  (needs: create-release)
-        │     ├── verify CLI types match OpenAPI spec
-        │     ├── verify CLI docs are current
-        │     └── verify API docs are current
+        │     └── checks/codegen-sync.yml  (workflow_call — reused from gate)
         │
         ├── release-containers.yaml  (workflow_call, needs: pre-publish-validation)
-        │     ├── build-scan-push (6 images, multi-arch)
+        │     ├── build-scan-push (multi-arch)
         │     └── release-assets (compose, SHA256SUMS, cosign sig, npx dispatch)
         │
         └── release-cli.yaml  (workflow_call, needs: pre-publish-validation)
               └── publish (npm OIDC, provenance)
 ```
+
+### Workflow Files
+
+| File | Purpose |
+|------|---------|
+| `.github/workflows/release-gate.yml` | Thin orchestrator — calls checks + inline security scans |
+| `.github/workflows/release-create.yml` | Release pipeline — create tag/release, publish containers + CLI |
+| `.github/workflows/checks/version-check.yml` | Version consistency: all 11 files match, bumped vs release |
+| `.github/workflows/checks/changelog-check.yml` | PR body length validation (takes `pr_body` input) |
+| `.github/workflows/checks/codegen-sync.yml` | Runs `just codegen`, checks for drift (CLI types, API docs, CLI docs) |
+| `.github/workflows/checks/docker-dry-run.yml` | All container images build successfully (single-arch, GHA cache) |
+| `.github/workflows/release-containers.yaml` | Multi-arch build, cosign sign, push to GHCR, release assets |
+| `.github/workflows/release-cli.yaml` | Build + publish `@syntropic137/cli` to npm (OIDC, provenance) |
+| `scripts/workflows/bump_version.py` | Version bump script; `--check` (consistency) and `--check-release` (semver vs release branch) |
 
 ## Branch Protection (release)
 
