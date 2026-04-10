@@ -9,13 +9,13 @@ Usage:
 
 This script updates the 11 tracked version files. Submodule versions
 (event-sourcing-platform, agentic-primitives, openclaw-plugin) are
-intentionally excluded — they have independent versioning.
+intentionally excluded - they have independent versioning.
 
 All files are pre-validated before any writes occur. If any file is
 missing a version field, the script fails without modifying anything.
 
 ─────────────────────────────────────────────────────────────────────────────
-CI DEPENDENCY — this script is called directly by the release gate workflow:
+CI DEPENDENCY - this script is called directly by the release gate workflow:
   .github/workflows/checks/version-check.yml
     → python3 scripts/workflows/bump_version.py --check          (all 11 files match)
     → python3 scripts/workflows/bump_version.py --check-release  (version > release branch)
@@ -35,7 +35,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Hardcoded list — matches the 11 files in every "chore: bump version" commit.
+# Hardcoded list - matches the 11 files in every "chore: bump version" commit.
 # DO NOT discover dynamically. Submodules must be excluded.
 PYPROJECT_FILES = [
     ROOT / "pyproject.toml",
@@ -230,7 +230,7 @@ def bump(target: str) -> None:
 
     current = get_current_version()
     if current == target:
-        print(f"Version is already {target} — nothing to do.")
+        print(f"Version is already {target} - nothing to do.")
         return
 
     print(f"Bumping: {current} → {target}\n")

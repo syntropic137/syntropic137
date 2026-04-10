@@ -7,7 +7,7 @@
 # Called by: release-gate.yml
 # =============================================================================
 
-name: Check — Release Notes
+name: Check - Release Notes
 
 on:
   workflow_call:

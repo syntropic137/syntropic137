@@ -14,7 +14,7 @@
 # Called by: release-gate.yml, release-create.yml (pre-publish validation)
 # =============================================================================
 
-name: Check — Codegen Sync
+name: Check - Codegen Sync
 
 on:
   workflow_call:

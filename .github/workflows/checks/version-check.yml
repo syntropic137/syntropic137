@@ -7,7 +7,7 @@
 # Called by: release-gate.yml
 # =============================================================================
 
-name: Check — Version Consistency
+name: Check - Version Consistency
 
 on:
   workflow_call:

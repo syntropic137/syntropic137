@@ -1,7 +1,7 @@
 """Tests for scripts/workflows/bump_version.py.
 
 Covers version comparison, consistency checking, release bump validation,
-and the bump logic itself. All tests are pure unit tests — no git or
+and the bump logic itself. All tests are pure unit tests - no git or
 filesystem side effects beyond temporary directories.
 """
 
@@ -192,7 +192,7 @@ class TestCheckConsistency:
 
 
 # =============================================================================
-# check_release_bump — uses subprocess.run, so mock it
+# check_release_bump - uses subprocess.run, so mock it
 # =============================================================================
 
 
@@ -244,7 +244,7 @@ class TestCheckReleaseBump:
     def test_prerelease_before_stable_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # 0.24.2-beta.1 < 0.24.2 — should fail
+        # 0.24.2-beta.1 < 0.24.2 - should fail
         _make_version_files(tmp_path, "0.24.2-beta.1")
         import bump_version as bv
 
@@ -268,7 +268,7 @@ class TestCheckReleaseBump:
 
 
 # =============================================================================
-# bump — filesystem round-trip
+# bump - filesystem round-trip
 # =============================================================================
 
 

@@ -4,13 +4,13 @@
 # Builds all container images (single-arch, no push) to verify Dockerfiles
 # are valid and all build contexts resolve correctly.
 #
-# Always runs — no path-filter skip logic. Docker layer caching (GHA cache,
+# Always runs - no path-filter skip logic. Docker layer caching (GHA cache,
 # per-image scope) makes unchanged images near-instant on subsequent runs.
 #
 # Called by: release-gate.yml
 # =============================================================================
 
-name: Check — Docker Dry-Run
+name: Check - Docker Dry-Run
 
 on:
   workflow_call:
@@ -46,7 +46,7 @@ jobs:
           - image: token-injector
             dockerfile: docker/token-injector/Dockerfile
             context: docker/token-injector
-          # agentic-workspace uses build-provider.py staging — validated
+          # agentic-workspace uses build-provider.py staging - validated
           # separately in e2e-container.yml, skip in gate to save CI time.
 
     steps:

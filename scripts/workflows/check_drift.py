@@ -8,7 +8,7 @@ Exits 0 if all paths are clean (no modified or untracked files).
 Exits 1 if any drift is detected, with a summary of what changed.
 
 ─────────────────────────────────────────────────────────────────────────────
-CI DEPENDENCY — called by the codegen sync check:
+CI DEPENDENCY - called by the codegen sync check:
   .github/workflows/checks/codegen-sync.yml
     → python3 scripts/workflows/check_drift.py \\
         apps/syn-cli-node/src/generated/ \\
@@ -84,7 +84,7 @@ def main() -> None:
 
     paths = sys.argv[1:]
 
-    # Validate paths exist (warn only — they may not exist on first run)
+    # Validate paths exist (warn only - they may not exist on first run)
     for p in paths:
         if not Path(p).exists():
             print(f"::warning::Path does not exist: {p}", file=sys.stderr)
