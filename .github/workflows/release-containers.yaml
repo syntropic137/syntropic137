@@ -2,7 +2,11 @@
 # Release Containers — Build, Scan, Sign, Publish to GHCR
 # =============================================================================
 #
-# Trigger: GitHub release published (or manual dispatch for testing).
+# Trigger: Called by release-create.yml (workflow_call) only.
+#          Manual dispatch (workflow_dispatch) is available for re-triggering
+#          a failed build — must be run from the `release` branch only.
+#          DO NOT add a release.published trigger — it bypasses the approval gate.
+#          See docs/release-process.md before modifying this workflow.
 #
 # Pipeline:
 #   1. Build container images (multi-arch for servers, amd64-only for UI)
@@ -22,8 +26,8 @@
 name: Release Containers
 
 on:
-  release:
-    types: [published]
+  # release.published intentionally omitted — direct release events bypass the
+  # approval gate in release-create.yml. See docs/release-process.md.
   workflow_call:
     inputs:
       version:
@@ -39,7 +43,7 @@ on:
       dry_run:
         description: "Dry run — build and scan but don't push or sign"
         type: boolean
-        default: false
+        default: true  # Safe default: dispatch without explicit inputs never pushes
 
 concurrency:
   group: release-containers-${{ github.ref }}
@@ -111,6 +115,18 @@ jobs:
     # to the release-assets job via upload/download artifact instead.
 
     steps:
+      # -----------------------------------------------------------------------
+      # Poka-yoke guard — dispatch only from release branch
+      # -----------------------------------------------------------------------
+      - name: Guard — dispatch only allowed from release branch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [[ "${{ github.ref }}" != "refs/heads/release" ]]; then
+            echo "::error::Manual dispatch must be run from the release branch. Got: ${{ github.ref }}"
+            echo "See docs/release-process.md for the recovery procedure."
+            exit 1
+          fi
+
       # -----------------------------------------------------------------------
       # Checkout
       # -----------------------------------------------------------------------

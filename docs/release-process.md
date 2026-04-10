@@ -36,7 +36,8 @@ Create `@syntropic137` at https://www.npmjs.com/org/create (if not already done)
    ```
 3. Configure Trusted Publisher on npmjs.com:
    - Go to https://www.npmjs.com/package/@syntropic137/cli/access
-   - Add Trusted Publisher: repo=`syntropic137/syntropic137`, workflow=`release-cli.yaml`, environment=`npm-publish-cli`
+   - Add Trusted Publisher: repo=`syntropic137/syntropic137`, workflow=`release-create.yml`, environment=`npm-publish-cli`
+   - **Important:** The workflow must be the **caller** (`release-create.yml`), not the callee (`release-cli.yaml`). GitHub mints the OIDC token with the caller's workflow name.
 4. Create the `npm-publish-cli` GitHub environment: repo Settings > Environments > New > `npm-publish-cli`
 5. After Trusted Publishing is configured, the `CLI_PUBLISH_NPM_TOKEN` secret is no longer needed and can be deleted.
 
@@ -107,7 +108,7 @@ Two environments are needed across the two repos:
 just bump-version 0.20.0
 ```
 
-This updates all 13 version files atomically (9 `pyproject.toml` + 4 `package.json`). Validate with `just check-version`.
+This updates all 11 version files atomically (8 `pyproject.toml` + 3 `package.json`). Validate with `just check-version`.
 
 ### 2. Commit and Push
 
@@ -119,7 +120,20 @@ git push origin main
 
 ### 3. Open Release PR
 
-Open a PR from `main` to `release`. The PR body becomes the GitHub Release notes — write meaningful release notes here.
+Open a PR from `main` to `release`. **The PR body becomes the GitHub Release notes** — write meaningful release notes here. The release-gate check enforces a minimum of 20 characters. Use this format as a guide:
+
+```markdown
+## What's Changed
+
+- Brief description of each notable change
+- Bug fixes, new features, breaking changes
+
+## Upgrade Notes
+
+Any migration steps or config changes required.
+```
+
+The `release-create.yml` workflow reads the merged PR body verbatim and sets it as the GitHub Release description. Write it for end users, not for internal tracking.
 
 ### 4. Release Gate Checks
 
@@ -217,17 +231,29 @@ PR: main → release
   └── release-gate.yml
         ├── version-check
         ├── changelog-check
-        ├── docker-dry-run (7 images)
+        ├── docker-dry-run (6 images)
         └── release-gate-success (aggregator)
 
 Merge to release
-  └── release-create.yml
-        ├── create-release (tag + GitHub Release)
-        ├── release-containers (reusable workflow call)
-        │     ├── build-scan-push (8 images, multi-arch)
+  └── release-create.yml  (triggered by push to release)
+        │
+        ├── create-release job
+        │     ⏸ environment: release-publish  ← MANUAL APPROVAL REQUIRED HERE
+        │     ├── read version from pyproject.toml
+        │     ├── create git tag
+        │     └── create GitHub Release (PR body = release notes)
+        │
+        ├── pre-publish-validation job  (needs: create-release)
+        │     ├── verify CLI types match OpenAPI spec
+        │     ├── verify CLI docs are current
+        │     └── verify API docs are current
+        │
+        ├── release-containers.yaml  (workflow_call, needs: pre-publish-validation)
+        │     ├── build-scan-push (6 images, multi-arch)
         │     └── release-assets (compose, SHA256SUMS, cosign sig, npx dispatch)
-        └── release-cli (reusable workflow call)
-              └── publish (npm, provenance)
+        │
+        └── release-cli.yaml  (workflow_call, needs: pre-publish-validation)
+              └── publish (npm OIDC, provenance)
 ```
 
 ## Branch Protection (release)
@@ -237,6 +263,48 @@ Merge to release
 - Squash merge only
 - No force pushes, no deletions
 - Admin bypass for emergencies
+
+## Poka-Yoke Rules
+
+These rules exist to prevent out-of-order publishing. Do not work around them.
+
+### The only valid release entry point is `release-create.yml`
+
+`release-containers.yaml` and `release-cli.yaml` are **internal callees** — they must only be triggered by `release-create.yml` via `workflow_call`. Direct triggers are poka-yoke protected:
+
+- **`release.published` is intentionally absent** from both publish workflows. A manually created GitHub Release (via UI, `gh release create`, or an AI agent) does not trigger publishing — it bypasses the approval gate.
+- **`workflow_dispatch` is branch-guarded** — both workflows reject dispatch from any branch other than `release`.
+- **`workflow_dispatch` dry_run defaults to `true`** on both workflows — dispatch with default inputs never pushes anything.
+
+### The approval gate
+
+The `create-release` job in `release-create.yml` uses `environment: release-publish`. GitHub pauses here and waits for a human to approve before creating the tag, the GitHub Release, or calling any publish workflow. **You must approve this manually every time.**
+
+### How to safely re-trigger a failed publish step
+
+If containers or CLI publish fails after the GitHub Release was already created:
+
+```bash
+# Re-trigger CLI publish (version must match package.json on the release branch)
+gh workflow run release-cli.yaml \
+  --repo syntropic137/syntropic137 \
+  --ref release \
+  -f version=vX.Y.Z \
+  -f dry_run=false
+
+# Re-trigger containers publish
+gh workflow run release-containers.yaml \
+  --repo syntropic137/syntropic137 \
+  --ref release \
+  -f version=vX.Y.Z \
+  -f dry_run=false
+```
+
+Both commands must be run against `--ref release`. Any other ref will be rejected by the branch guard.
+
+### Do not create GitHub Releases manually
+
+Creating a release via the GitHub UI, `gh release create`, or any automated tool does NOT trigger publishing (by design). It will create the tag and GitHub Release but nothing will be built or published. The only way to publish is through the `release-create.yml` orchestrator.
 
 ## Known Gotchas
 

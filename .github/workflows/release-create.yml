@@ -17,7 +17,7 @@
 # relying on the release.published event.
 # =============================================================================
 
-name: Release
+name: Release (Create)
 
 on:
   push:

@@ -1,6 +1,6 @@
 # @syntropic137/cli
 
-Command-line interface for [Syntropic137](https://github.com/syntropic137/syntropic137) — an event-sourced workflow engine for AI agents.
+Command-line interface for [Syntropic137](https://github.com/syntropic137/syntropic137). An event-sourced workflow engine for AI agents.
 
 ## Design
 
@@ -8,10 +8,10 @@ Command-line interface for [Syntropic137](https://github.com/syntropic137/syntro
 
 The CLI is built with a zero-dependency philosophy:
 
-- **No Commander.js** — custom two-level command framework on `node:parseArgs`
-- **No chalk** — direct ANSI escape codes with `NO_COLOR` support
-- **No axios** — built-in `fetch` with timeout and streaming (SSE)
-- **One runtime dep** — [Zod](https://zod.dev) for local file validation only
+- **No Commander.js**: custom two-level command framework on `node:parseArgs`
+- **No chalk**: direct ANSI escape codes with `NO_COLOR` support
+- **No axios**: built-in `fetch` with timeout and streaming (SSE)
+- **One runtime dep**: [Zod](https://zod.dev) for local file validation only
 
 The entire CLI ships as a single `dist/syn.mjs` file (168 KB). It targets Node.js 22+ with strict TypeScript (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
 
@@ -212,10 +212,10 @@ syn insights heatmap                 # Activity heatmap
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SYN_API_URL` | `http://localhost:8137` | API server URL |
-| `SYN_API_TOKEN` | — | Bearer token for authentication |
-| `SYN_API_USER` | — | Basic auth username |
-| `SYN_API_PASSWORD` | — | Basic auth password |
-| `NO_COLOR` | — | Disable colored output |
+| `SYN_API_TOKEN` | (none) | Bearer token for authentication |
+| `SYN_API_USER` | (none) | Basic auth username |
+| `SYN_API_PASSWORD` | (none) | Basic auth password |
+| `NO_COLOR` | (none) | Disable colored output |
 
 ## Development
 
