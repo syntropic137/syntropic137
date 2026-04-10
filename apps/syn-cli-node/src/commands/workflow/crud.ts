@@ -54,7 +54,7 @@ export const createCommand: CommandDef = {
           repository_url: repoUrl,
           repository_ref: repoRef,
           description: description ?? null,
-          repos: templateRepos.length > 0 ? templateRepos : undefined,
+          ...(templateRepos.length > 0 ? { repos: templateRepos } : {}),
         },
       }),
       "Failed to create workflow",

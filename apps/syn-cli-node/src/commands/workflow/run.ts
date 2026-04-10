@@ -116,7 +116,7 @@ export const runCommand: CommandDef = {
             Object.entries(parsedInputs).map(([k, v]) => [k, String(v)]),
           ),
           task: task ?? null,
-          repos: repos.length > 0 ? repos : undefined,
+          ...(repos.length > 0 ? { repos } : {}),
           provider: "claude",
         },
       }),
