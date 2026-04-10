@@ -98,6 +98,34 @@ def _build_auth_error_detail(repo_full_name: str, exc: Exception) -> str:
     return f"GitHub App authentication failed for {repo_full_name}: {exc_message}"
 
 
+def _apply_repo_substitution(repos: list[str], merged: dict[str, str]) -> list[str]:
+    """Substitute {{key}} patterns in each repo URL; skip entries with remaining placeholders."""
+    resolved = []
+    for repo_url in repos:
+        for key, value in merged.items():
+            repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
+        if "{{" not in repo_url:
+            resolved.append(repo_url)
+    return resolved
+
+
+def _build_merged_inputs(
+    workflow: WorkflowTemplateAggregate,
+    effective_inputs: dict[str, str],
+    task: str | None,
+) -> dict[str, str]:
+    """Merge input declaration defaults, effective inputs, and task into one dict."""
+    merged: dict[str, str] = {
+        decl.name: str(decl.default)
+        for decl in workflow.input_declarations
+        if decl.default is not None
+    }
+    merged.update(effective_inputs)
+    if task is not None:
+        merged["task"] = task
+    return merged
+
+
 def _get_preflight_repos(
     effective_inputs: dict[str, str],
     workflow: WorkflowTemplateAggregate,
@@ -112,20 +140,8 @@ def _get_preflight_repos(
     # Without this, unresolved {{variable}} patterns in repos silently fall through to
     # repository_url (which defaults to example/repo), producing a misleading auth error.
     if workflow.repos:
-        merged: dict[str, str] = {
-            decl.name: str(decl.default)
-            for decl in workflow.input_declarations
-            if decl.default is not None
-        }
-        merged.update(effective_inputs)
-        if task is not None:
-            merged["task"] = task
-        resolved = []
-        for repo_url in workflow.repos:
-            for key, value in merged.items():
-                repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
-            if "{{" not in repo_url:
-                resolved.append(repo_url)
+        merged = _build_merged_inputs(workflow, effective_inputs, task)
+        resolved = _apply_repo_substitution(workflow.repos, merged)
         if resolved:
             return resolved
 

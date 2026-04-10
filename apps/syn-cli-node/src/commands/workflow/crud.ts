@@ -49,7 +49,7 @@ export const createCommand: CommandDef = {
     const fromPath = parsed.values["from"] as string | undefined;
 
     let phases: Record<string, unknown>[] | undefined;
-    let inputDeclarations: unknown[] | undefined;
+    let inputDeclarations: Record<string, unknown>[] | undefined;
 
     if (fromPath) {
       const resolved = path.resolve(fromPath);

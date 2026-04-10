@@ -89,8 +89,13 @@ class TestAgentExecutionHandler:
         assert result.command.exit_code == 0
 
     @pytest.mark.anyio
-    async def test_interrupt_sets_exit_code_1(self) -> None:
-        """Interrupted execution sets exit_code to 1."""
+    async def test_interrupt_does_not_synthesise_exit_code_1(self) -> None:
+        """Interrupted execution must NOT synthesise exit_code=1.
+
+        The processor (_handle_run_agent) is responsible for routing interrupt_requested
+        to CancelExecutionCommand. _detect_exit_code must only return the actual process
+        exit code so the processor can make the cancellation vs failure decision cleanly.
+        """
         handler = AgentExecutionHandler(controller=None)
         workspace = MagicMock()
         workspace.last_stream_exit_code = 0
@@ -125,7 +130,9 @@ class TestAgentExecutionHandler:
                 timeout_seconds=300,
             )
 
-        assert result.command.exit_code == 1
+        assert result.command.exit_code == 0, (
+            "exit_code must reflect workspace state (0), not synthesise 1 for interrupt_requested"
+        )
         assert result.stream_result.interrupt_requested is True
 
     @pytest.mark.anyio
@@ -351,7 +358,12 @@ class TestHandlerRegistry:
 class TestDetectExitCode:
     """Tests for _detect_exit_code helper."""
 
-    def test_interrupt_returns_1(self) -> None:
+    def test_interrupt_does_not_return_1(self) -> None:
+        """interrupt_requested must NOT synthesise exit code 1.
+
+        The processor (_handle_cancel_signal) owns the cancellation routing.
+        _detect_exit_code must only return the actual process exit code.
+        """
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
             _detect_exit_code,
         )
@@ -366,7 +378,8 @@ class TestDetectExitCode:
             agent_task_result=None,
         )
         workspace = MagicMock()
-        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) == 1
+        workspace.last_stream_exit_code = None
+        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) == 0
 
     def test_nonzero_stream_exit_code(self) -> None:
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (

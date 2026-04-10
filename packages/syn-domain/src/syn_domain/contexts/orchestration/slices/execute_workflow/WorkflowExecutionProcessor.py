@@ -31,6 +31,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecor
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
+    AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
@@ -437,13 +438,7 @@ class WorkflowExecutionProcessor:
         )
 
         if result.stream_result.interrupt_requested:
-            cancel_cmd = CancelExecutionCommand(
-                execution_id=todo.execution_id,
-                phase_id=todo.phase_id,
-                reason=result.stream_result.interrupt_reason or "Cancelled by user",
-            )
-            aggregate._handle_command(cancel_cmd)
-            await self._save_and_sync(aggregate)
+            await self._handle_cancel_signal(todo, result, aggregate)
             return
 
         if result.command.exit_code != 0:
@@ -458,6 +453,21 @@ class WorkflowExecutionProcessor:
             raise RuntimeError(msg)
 
         aggregate._handle_command(result.command)
+        await self._save_and_sync(aggregate)
+
+    async def _handle_cancel_signal(
+        self,
+        todo: TodoItem,
+        result: AgentExecutionResult,
+        aggregate: WorkflowExecutionAggregate,
+    ) -> None:
+        """Dispatch CancelExecutionCommand when the agent stream was interrupted by a cancel signal."""
+        cancel_cmd = CancelExecutionCommand(
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            reason=result.stream_result.interrupt_reason or "Cancelled by user",
+        )
+        aggregate._handle_command(cancel_cmd)
         await self._save_and_sync(aggregate)
 
     async def _handle_collect_artifacts(
