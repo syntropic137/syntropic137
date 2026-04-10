@@ -53,7 +53,9 @@ def check_drift(paths: list[str]) -> bool:
 def _git_diff(paths: list[str]) -> list[str]:
     result = subprocess.run(
         ["git", "diff", "--name-only", "--", *paths],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return [line for line in result.stdout.splitlines() if line]
 
@@ -61,7 +63,9 @@ def _git_diff(paths: list[str]) -> list[str]:
 def _git_untracked(paths: list[str]) -> list[str]:
     result = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard", "--", *paths],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return [line for line in result.stdout.splitlines() if line]
 

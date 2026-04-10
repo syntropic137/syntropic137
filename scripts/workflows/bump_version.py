@@ -111,7 +111,7 @@ def _compare_prerelease(pr1: list[str] | None, pr2: list[str] | None) -> int:
         return 1  # stable > prerelease
     if pr2 is None:
         return -1  # prerelease < stable
-    for a, b in zip(pr1, pr2):
+    for a, b in zip(pr1, pr2, strict=False):
         a_num, b_num = a.isdigit(), b.isdigit()
         if a_num and b_num:
             if int(a) != int(b):

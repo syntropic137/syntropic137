@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import patch
 
 import pytest
-
-from check_drift import check_drift, _git_diff, _git_untracked
+from check_drift import check_drift
 
 pytestmark = pytest.mark.unit
 
@@ -40,25 +38,39 @@ class TestCheckDrift:
         assert check_drift(["apps/syn-cli-node/src/generated/"]) is True
 
     def test_changed_files_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._mock_git(monkeypatch, changed=["apps/syn-cli-node/src/generated/api-types.ts"], untracked=[])
+        self._mock_git(
+            monkeypatch, changed=["apps/syn-cli-node/src/generated/api-types.ts"], untracked=[]
+        )
         assert check_drift(["apps/syn-cli-node/src/generated/"]) is False
 
     def test_untracked_files_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self._mock_git(monkeypatch, changed=[], untracked=["apps/syn-docs/content/docs/cli/new-cmd.md"])
+        self._mock_git(
+            monkeypatch, changed=[], untracked=["apps/syn-docs/content/docs/cli/new-cmd.md"]
+        )
         assert check_drift(["apps/syn-docs/content/docs/cli/"]) is False
 
-    def test_both_changed_and_untracked_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_both_changed_and_untracked_returns_false(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         self._mock_git(
             monkeypatch,
             changed=["apps/syn-cli-node/src/generated/api-types.ts"],
             untracked=["apps/syn-docs/content/docs/cli/new.md"],
         )
-        assert check_drift(["apps/syn-cli-node/src/generated/", "apps/syn-docs/content/docs/cli/"]) is False
+        assert (
+            check_drift(["apps/syn-cli-node/src/generated/", "apps/syn-docs/content/docs/cli/"])
+            is False
+        )
 
     def test_multiple_paths_all_clean(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._mock_git(monkeypatch, changed=[], untracked=[])
-        assert check_drift([
-            "apps/syn-cli-node/src/generated/",
-            "apps/syn-docs/content/docs/cli/",
-            "apps/syn-docs/openapi.json",
-        ]) is True
+        assert (
+            check_drift(
+                [
+                    "apps/syn-cli-node/src/generated/",
+                    "apps/syn-docs/content/docs/cli/",
+                    "apps/syn-docs/openapi.json",
+                ]
+            )
+            is True
+        )

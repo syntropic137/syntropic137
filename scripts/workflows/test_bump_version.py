@@ -10,18 +10,18 @@ from __future__ import annotations
 import json
 import subprocess
 import textwrap
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from pathlib import Path
 from bump_version import (
-    _compare_prerelease,
     _parse_semver,
     bump,
     check_consistency,
     check_release_bump,
     compare_versions,
-    get_current_version,
 )
 
 pytestmark = pytest.mark.unit
@@ -119,11 +119,13 @@ def _make_version_files(tmp_path: Path, version: str) -> None:
     for rel in pyprojects:
         p = tmp_path / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(textwrap.dedent(f"""\
+        p.write_text(
+            textwrap.dedent(f"""\
             [project]
             name = "placeholder"
             version = "{version}"
-        """))
+        """)
+        )
     for rel in package_jsons:
         p = tmp_path / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -139,25 +141,31 @@ class TestCheckConsistency:
         monkeypatch.setattr(
             bv,
             "PYPROJECT_FILES",
-            [tmp_path / p for p in [
-                "pyproject.toml",
-                "apps/syn-api/pyproject.toml",
-                "packages/syn-adapters/pyproject.toml",
-                "packages/syn-collector/pyproject.toml",
-                "packages/syn-domain/pyproject.toml",
-                "packages/syn-perf/pyproject.toml",
-                "packages/syn-shared/pyproject.toml",
-                "packages/syn-tokens/pyproject.toml",
-            ]],
+            [
+                tmp_path / p
+                for p in [
+                    "pyproject.toml",
+                    "apps/syn-api/pyproject.toml",
+                    "packages/syn-adapters/pyproject.toml",
+                    "packages/syn-collector/pyproject.toml",
+                    "packages/syn-domain/pyproject.toml",
+                    "packages/syn-perf/pyproject.toml",
+                    "packages/syn-shared/pyproject.toml",
+                    "packages/syn-tokens/pyproject.toml",
+                ]
+            ],
         )
         monkeypatch.setattr(
             bv,
             "PACKAGE_JSON_FILES",
-            [tmp_path / p for p in [
-                "apps/syn-cli-node/package.json",
-                "apps/syn-dashboard-ui/package.json",
-                "apps/syn-docs/package.json",
-            ]],
+            [
+                tmp_path / p
+                for p in [
+                    "apps/syn-cli-node/package.json",
+                    "apps/syn-dashboard-ui/package.json",
+                    "apps/syn-docs/package.json",
+                ]
+            ],
         )
         assert check_consistency() is True
 
@@ -209,9 +217,7 @@ class TestCheckReleaseBump:
 
         monkeypatch.setattr(bv.subprocess, "run", fake_run)
 
-    def test_bumped_version_passes(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_bumped_version_passes(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_version_files(tmp_path, "0.24.3")
         import bump_version as bv
 
@@ -219,9 +225,7 @@ class TestCheckReleaseBump:
         self._mock_git_show(monkeypatch, "0.24.2")
         assert check_release_bump() is True
 
-    def test_same_version_fails(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_same_version_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_version_files(tmp_path, "0.24.2")
         import bump_version as bv
 
@@ -229,9 +233,7 @@ class TestCheckReleaseBump:
         self._mock_git_show(monkeypatch, "0.24.2")
         assert check_release_bump() is False
 
-    def test_lower_version_fails(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_lower_version_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_version_files(tmp_path, "0.24.1")
         import bump_version as bv
 
@@ -309,9 +311,7 @@ class TestBump:
         out = capsys.readouterr().out
         assert "nothing to do" in out
 
-    def test_invalid_version_exits(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_invalid_version_exits(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_version_files(tmp_path, "0.24.2")
         import bump_version as bv
 
