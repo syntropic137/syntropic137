@@ -5497,6 +5497,14 @@
               }
             ],
             "title": "Input Declarations"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos",
+            "description": "Default GitHub URLs for this workflow template (ADR-058). Can be overridden at execution time via the repos field on the execute request."
           }
         },
         "additionalProperties": false,
@@ -5668,6 +5676,14 @@
             ],
             "title": "Task",
             "description": "Primary task description -- substituted for $ARGUMENTS in phase prompts."
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos",
+            "description": "GitHub URLs to pre-clone for workspace hydration (ADR-058). Overrides the workflow template's repository_url. Equivalent to passing inputs={'repos': 'url1,url2'} but type-safe."
           },
           "provider": {
             "type": "string",
@@ -5967,6 +5983,13 @@
               }
             ],
             "title": "Error Message"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos"
           }
         },
         "type": "object",
@@ -6307,6 +6330,13 @@
               }
             ],
             "title": "Error Message"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos"
           }
         },
         "type": "object",
@@ -10112,6 +10142,24 @@
               }
             ],
             "title": "Runs Link"
+          },
+          "repository_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository Url"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos"
           }
         },
         "type": "object",

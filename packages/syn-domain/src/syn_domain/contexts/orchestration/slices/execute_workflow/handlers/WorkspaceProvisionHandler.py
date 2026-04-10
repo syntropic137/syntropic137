@@ -4,6 +4,10 @@ Extracted from WorkflowExecutionEngine._setup_workspace_for_phase() and
 workspace creation (lines 944-958, 1147-1217).
 
 Reports ProvisionWorkspaceCompletedCommand to the aggregate.
+
+ADR-058: Repos are pre-cloned during setup phase. After setup, synthetic
+/workspace/AGENTS.md and /workspace/CLAUDE.md are injected with @-imports
+of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
 """
 
 from __future__ import annotations
@@ -38,13 +42,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_SKIP_URLS = frozenset(
-    {
-        "https://github.com/placeholder/not-configured",
-        "https://github.com/example/repo",
-    }
-)
-
 # Callable types for dependency injection
 PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, object]],
@@ -60,7 +57,7 @@ def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, 
     not in agent env vars). Routes Anthropic SDK via ANTHROPIC_BASE_URL
     (not HTTP_PROXY — Node.js CONNECT tunneling breaks Envoy forward proxy).
     """
-    proxy_url = getattr(workspace, "proxy_url", None)
+    proxy_url = workspace.proxy_url
     if not proxy_url:
         msg = (
             "Shared Envoy proxy not available. "
@@ -95,9 +92,13 @@ class ProvisionResult:
 
 
 class WorkspaceProvisionHandler:
-    """Creates workspace, injects secrets/artifacts, builds CLI command.
+    """Creates workspace, pre-clones repos, injects context files, builds CLI command.
 
     Reports ProvisionWorkspaceCompletedCommand.
+
+    ADR-058: repos are cloned during setup phase (not by the agent). After setup,
+    synthetic /workspace/AGENTS.md and /workspace/CLAUDE.md are injected so the
+    agent starts with full project context from turn 1.
     """
 
     def __init__(
@@ -116,17 +117,28 @@ class WorkspaceProvisionHandler:
         phase: ExecutablePhase,
         workflow_id: str,
         session_id: str,
-        repo_url: str | None,
-        artifacts: ArtifactCollector,
-        completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
+        repos: list[str] | None = None,
+        artifacts: ArtifactCollector | None = None,
+        completed_phase_ids: list[str] | None = None,
+        phase_outputs: dict[str, str] | None = None,
         inputs: dict[str, object] | None = None,
     ) -> ProvisionResult:
-        """Provision workspace for a phase."""
-        from syn_adapters.workspace_backends.service import SetupPhaseSecrets
+        """Provision workspace for a phase.
 
+        Args:
+            todo: The to-do item being dispatched.
+            phase: The executable phase definition.
+            workflow_id: Workflow aggregate ID.
+            session_id: Agent session ID for this phase.
+            repos: Full GitHub URLs to clone and hydrate context from.
+            artifacts: Artifact collector for previous-phase injection.
+            completed_phase_ids: Phase IDs completed before this one.
+            phase_outputs: Content from previous phase artifacts.
+            inputs: Workflow execution inputs dict.
+        """
         assert todo.phase_id is not None
 
+        effective_repos = repos or []
         workspace_cm = self._workspace_service.create_workspace(
             execution_id=todo.execution_id,
             workflow_id=workflow_id,
@@ -135,48 +147,100 @@ class WorkspaceProvisionHandler:
             inject_tokens=True,
         )
 
-        # Enter the async context manager
+        # Enter the async context manager; clean up on any exception (P0: container leak fix)
         workspace = await workspace_cm.__aenter__()
+        try:
+            await self._hydrate_workspace(workspace, effective_repos)
+            await self._inject_phase_artifacts(
+                workspace, artifacts, completed_phase_ids or [], phase_outputs or {}, todo
+            )
+            return await self._build_provision_result(
+                workspace,
+                workspace_cm,
+                todo,
+                phase,
+                workflow_id,
+                session_id,
+                effective_repos,
+                phase_outputs or {},
+                inputs,
+            )
+        except BaseException as exc:
+            await workspace_cm.__aexit__(type(exc), exc, exc.__traceback__)
+            raise
 
-        # Parse repo for secrets
-        _repo = self._parse_repo(repo_url)
+    async def _hydrate_workspace(
+        self,
+        workspace: ManagedWorkspace,
+        effective_repos: list[str],
+    ) -> None:
+        """Run setup phase and inject synthetic context files (ADR-058)."""
+        from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
         secrets = await SetupPhaseSecrets.create(
-            repository=_repo,
-            require_github=_repo is not None,
+            repositories=effective_repos,
+            require_github=bool(effective_repos),
         )
-
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
             msg = f"Setup phase failed: {setup_result.stderr}"
             raise RuntimeError(msg)
         logger.info("Setup phase completed, secrets cleared")
 
-        # Inject artifacts from previous phases
-        await artifacts.inject_from_previous_phases_explicit(
-            workspace,
-            completed_phase_ids,
-            phase_outputs,
-            execution_id=todo.execution_id,
-        )
+        # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)
+        # Both files are identical: direct @-imports of each repo's AGENTS.md and
+        # CLAUDE.md. Direct imports keep repo content at L2 (not L3 via indirection),
+        # preserving maximum @import depth for repo-internal context.
+        context = self._generate_workspace_context(effective_repos)
+        if context:
+            await workspace.inject_files(
+                [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
+            )
+            logger.info(
+                "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(effective_repos)
+            )
 
-        # Build prompt and CLI command
+    async def _inject_phase_artifacts(
+        self,
+        workspace: ManagedWorkspace,
+        artifacts: ArtifactCollector | None,
+        completed_ids: list[str],
+        outputs: dict[str, str],
+        todo: TodoItem,
+    ) -> None:
+        """Inject artifacts from previous phases into the workspace."""
+        if artifacts is not None:
+            await artifacts.inject_from_previous_phases_explicit(
+                workspace, completed_ids, outputs, execution_id=todo.execution_id
+            )
+
+    async def _build_provision_result(
+        self,
+        workspace: ManagedWorkspace,
+        workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        workflow_id: str,
+        session_id: str,
+        effective_repos: list[str],
+        outputs: dict[str, str],
+        inputs: dict[str, object] | None,
+    ) -> ProvisionResult:
+        """Build prompt, CLI command, and return the ProvisionResult."""
+        # repo_url for {{repo_url}} prompt substitution (backward compat — uses first repo)
+        repo_url_for_prompt = effective_repos[0] if effective_repos else None
         prompt = await self._prompt_builder(
-            phase, todo.execution_id, workflow_id, repo_url, phase_outputs, inputs or {}
+            phase, todo.execution_id, workflow_id, repo_url_for_prompt, outputs, inputs or {}
         )
         claude_cmd = self._command_builder(phase, prompt)
-
         agent_env = _build_agent_env(workspace, session_id)
-
-        workspace_id = getattr(workspace, "id", todo.phase_id)
-
+        assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
-            workspace_id=str(workspace_id),
+            workspace_id=workspace.workspace_id,
             session_id=session_id,
         )
-
         return ProvisionResult(
             workspace=workspace,
             workspace_cm=workspace_cm,
@@ -186,14 +250,35 @@ class WorkspaceProvisionHandler:
         )
 
     @staticmethod
-    def _parse_repo(repo_url: str | None) -> str | None:
-        """Parse owner/repo from URL."""
-        if not repo_url:
-            return None
-        normalized = repo_url.rstrip("/")
-        if normalized in _SKIP_URLS:
-            return None
-        parts = normalized.split("/")
-        if len(parts) >= 2:
-            return f"{parts[-2]}/{parts[-1]}"
-        return None
+    def _repo_name(url: str) -> str:
+        """Return repo name from a full GitHub URL.
+
+        Examples:
+            "https://github.com/org/repo-a.git" → "repo-a"
+            "https://github.com/org/repo-b/"   → "repo-b"
+        """
+        return url.rstrip("/").split("/")[-1].removesuffix(".git")
+
+    @staticmethod
+    def _generate_workspace_context(repos: list[str]) -> str:
+        """Generate content for both /workspace/CLAUDE.md and /workspace/AGENTS.md.
+
+        Both files receive identical content: direct @-imports of each repo's
+        AGENTS.md then CLAUDE.md. Direct imports (not via an intermediary file)
+        keep repo content at depth L2, leaving L3-L5 for repo-internal imports
+        within Claude Code's 5-level absolute limit. Non-existent files are
+        silently ignored by Claude Code's @import system.
+
+        AGENTS.md is the Linux Foundation AAIF standard (Dec 2025), loaded by 15+
+        platforms. CLAUDE.md is required because Claude Code does not auto-load
+        AGENTS.md (issue #6235). Both files ensure full hydration regardless of
+        which platform runs the agent.
+        """
+        if not repos:
+            return ""
+        lines: list[str] = []
+        for url in repos:
+            name = WorkspaceProvisionHandler._repo_name(url)
+            lines.append(f"@/workspace/repos/{name}/AGENTS.md")
+            lines.append(f"@/workspace/repos/{name}/CLAUDE.md")
+        return "\n".join(lines) + "\n"

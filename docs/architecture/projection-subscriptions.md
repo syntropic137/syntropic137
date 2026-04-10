@@ -16,15 +16,15 @@ This diagram shows which events feed which projections in the Syn137 system.
 graph LR
     subgraph events["Key Events"]
         e1[workflow_execution_started]
-        e2[workflow_completed]
-        e3[workflow_failed]
+        e2[workflow_failed]
+        e3[workflow_completed]
         e4[phase_completed]
-        e5[workflow_interrupted]
-        e6[execution_cancelled]
-        e7[workflow_template_created]
-        e8[trigger_fired]
-        e9[phase_started]
-        e10[session_started]
+        e5[trigger_fired]
+        e6[workflow_template_created]
+        e7[phase_started]
+        e8[workflow_interrupted]
+        e9[execution_cancelled]
+        e10[agent_observation]
     end
 
     subgraph projections["Projections"]
@@ -45,26 +45,26 @@ graph LR
         p15[TriggerHistoryProjection]
     end
 
+    e10 --> p10
+    e10 --> p3
+    e5 --> p6
+    e5 --> p15
+    e6 --> p2
     e2 --> p8
     e2 --> p7
     e2 --> p4
     e2 --> p2
-    e5 --> p4
-    e6 --> p4
-    e10 --> p11
-    e10 --> p2
-    e4 --> p4
-    e7 --> p2
-    e8 --> p6
-    e8 --> p15
     e1 --> p6
     e1 --> p4
     e1 --> p2
+    e7 --> p2
+    e8 --> p4
+    e9 --> p4
     e3 --> p8
     e3 --> p7
     e3 --> p4
     e3 --> p2
-    e9 --> p2
+    e4 --> p4
 ```
 
 ---
@@ -82,15 +82,15 @@ graph LR
 | Event | Projections | Count |
 |-------|-------------|-------|
 | workflow_execution_started | RepoCorrelationProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 7 |
-| workflow_completed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
+| workflow_completed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
+| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
+| workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
+| phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
 | workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
 | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
-| workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
-| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
-| phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
-| session_started | SessionListProjection, DashboardMetricsProjection | 2 |
+| agent_observation | SessionCostProjection, ExecutionCostProjection | 2 |
 
 ---
 

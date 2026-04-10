@@ -167,6 +167,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._repository_ref: str | None = None
         self._phases: list[PhaseDefinition] = []
         self._input_declarations: list[InputDeclaration] = []
+        self._repos: list[str] = []
         self._status: WorkflowStatus = WorkflowStatus.PENDING
         self._project_name: str | None = None
         self._description: str | None = None
@@ -200,6 +201,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def input_declarations(self) -> list[InputDeclaration]:
         """Get workflow input declarations."""
         return list(self._input_declarations)
+
+    @property
+    def repos(self) -> list[str]:
+        """Get template-level GitHub URLs for workspace hydration (ADR-058)."""
+        return list(self._repos)
 
     # =========================================================================
     # COMMAND HANDLERS - Validate business rules, emit events
@@ -244,6 +250,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             project_name=command.project_name,
             description=command.description,
             input_declarations=command.input_declarations,
+            repos=command.repos,
         )
 
         self._apply(event)
@@ -311,6 +318,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._project_name = data["project_name"]
         self._description = data["description"]
         self._input_declarations = _parse_typed_list(data["input_declarations"], "InputDeclaration")
+        self._repos = [str(r) for r in data.get("repos", [])]
 
     @command_handler("ArchiveWorkflowTemplateCommand")
     def archive_workflow(self, command: ArchiveWorkflowTemplateCommand) -> None:

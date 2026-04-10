@@ -48,3 +48,7 @@ class CreateWorkflowTemplateCommand(BaseModel):
 
     # Input declarations (ISS-211: CC command inputs)
     input_declarations: list[InputDeclaration] = Field(default_factory=list)
+
+    # Multi-repo support (ADR-058)
+    repos: list[str] = Field(default_factory=list)
+    """Full GitHub URLs for this workflow template. Empty = single-repo (use repository_url)."""
