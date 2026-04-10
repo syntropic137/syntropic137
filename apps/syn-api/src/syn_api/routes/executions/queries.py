@@ -360,6 +360,7 @@ async def get_detail(
             started_at=detail.started_at,
             completed_at=detail.completed_at,
             error_message=detail.error_message,
+            repos=list(detail.repos),
         )
     )
 

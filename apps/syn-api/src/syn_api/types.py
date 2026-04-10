@@ -685,6 +685,8 @@ class ExecutionDetailFull(BaseModel):
     started_at: datetime | str | None = None
     completed_at: datetime | str | None = None
     error_message: str | None = None
+    repos: list[str] = Field(default_factory=list)
+    """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
 
 class ControlResult(BaseModel):
