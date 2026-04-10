@@ -22,6 +22,31 @@ async def _apply_installation_created(payload: dict[str, Any]) -> None:
     await projection.handle_app_installed(event)
 
 
+async def _apply_installation_repositories_changed(
+    payload: dict[str, Any],
+    action: str,  # noqa: ARG001 — reserved for future per-action logic
+) -> None:
+    """Update the projection when repos are added or removed from an installation."""
+    from syn_domain.contexts.github.slices.get_installation.projection import (
+        get_installation_projection,
+    )
+
+    installation_id = str(payload.get("installation", {}).get("id", ""))
+    if not installation_id:
+        logger.warning("installation_repositories event missing installation.id")
+        return
+
+    repos_added = [
+        r["full_name"] for r in payload.get("repositories_added", []) if r.get("full_name")
+    ]
+    repos_removed = [
+        r["full_name"] for r in payload.get("repositories_removed", []) if r.get("full_name")
+    ]
+
+    projection = get_installation_projection()
+    await projection.update_repositories(installation_id, repos_added, repos_removed)
+
+
 async def _handle_installation_event(event_type: str, action: str, payload: dict[str, Any]) -> None:
     """Process installation created/deleted events (best-effort)."""
     if event_type not in ("installation", "installation_repositories"):
@@ -30,6 +55,8 @@ async def _handle_installation_event(event_type: str, action: str, payload: dict
     try:
         if event_type == "installation" and action == "created":
             await _apply_installation_created(payload)
+        elif event_type == "installation_repositories":
+            await _apply_installation_repositories_changed(payload, action)
     except Exception:
         logger.exception("Failed to handle installation event")
 

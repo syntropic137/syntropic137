@@ -2287,7 +2287,7 @@
           "github"
         ],
         "summary": "List Accessible Repos Endpoint",
-        "description": "List repositories accessible to the GitHub App.\n\nMakes a live query to the GitHub API. If no installation_id is provided,\nqueries all active installations and aggregates the results.",
+        "description": "List repositories accessible to the GitHub App.\n\nQueries all active installations and aggregates results when no\ninstallation_id is provided. The installation list is cached locally with\na 1-hour TTL: if empty or stale, it bootstraps automatically from the\nGitHub API without requiring a webhook URL. Stale data is kept as a\nfallback if the GitHub API is unreachable during refresh.",
         "operationId": "list_accessible_repos_endpoint_github_repos_get",
         "parameters": [
           {

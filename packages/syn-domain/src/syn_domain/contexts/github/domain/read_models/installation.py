@@ -35,6 +35,7 @@ class Installation:
         installed_at: When the installation was created.
         last_token_refresh: When the token was last refreshed.
         last_token_expires_at: When the current token expires.
+        synced_at: When this record was last synced from the GitHub API.
     """
 
     installation_id: str
@@ -47,6 +48,7 @@ class Installation:
     installed_at: datetime | None = None
     last_token_refresh: datetime | None = None
     last_token_expires_at: datetime | None = None
+    synced_at: datetime | None = None
 
     @property
     def is_active(self) -> bool:

@@ -35,6 +35,32 @@ logger = logging.getLogger(__name__)
 PROJECTION_NAME = INSTALLATIONS
 
 
+def _resolve_api_status(raw: dict[str, Any], existing: dict[str, Any] | None) -> str:
+    """Derive installation status from a GitHub API payload and any existing record."""
+    if raw.get("suspended_at"):
+        return InstallationStatus.SUSPENDED.value
+    if existing and existing.get("status"):
+        return existing["status"]
+    return InstallationStatus.ACTIVE.value
+
+
+def _preserved_fields(existing: dict[str, Any] | None, now: datetime) -> dict[str, Any]:
+    """Return fields to preserve from an existing record, or defaults for a new one."""
+    if existing:
+        return {
+            "repositories": existing.get("repositories", []),
+            "installed_at": existing.get("installed_at", now.isoformat()),
+            "last_token_refresh": existing.get("last_token_refresh"),
+            "last_token_expires_at": existing.get("last_token_expires_at"),
+        }
+    return {
+        "repositories": [],
+        "installed_at": now.isoformat(),
+        "last_token_refresh": None,
+        "last_token_expires_at": None,
+    }
+
+
 def _inst_to_dict(inst: Installation) -> dict[str, Any]:
     return {
         "installation_id": inst.installation_id,
@@ -51,6 +77,7 @@ def _inst_to_dict(inst: Installation) -> dict[str, Any]:
         "last_token_expires_at": inst.last_token_expires_at.isoformat()
         if inst.last_token_expires_at
         else None,
+        "synced_at": inst.synced_at.isoformat() if inst.synced_at else None,
     }
 
 
@@ -72,6 +99,7 @@ def _inst_from_dict(data: dict[str, Any]) -> Installation:
         last_token_expires_at=datetime.fromisoformat(data["last_token_expires_at"])
         if data.get("last_token_expires_at")
         else None,
+        synced_at=datetime.fromisoformat(data["synced_at"]) if data.get("synced_at") else None,
     )
 
 
@@ -86,6 +114,7 @@ class InstallationProjection:
         """Handle an AppInstalled event."""
         # Note: DomainEvent doesn't have occurred_at - that's in EventMetadata
         # For webhook-created events, we use current time as the installation time
+        now = datetime.now(UTC)
         installation = Installation(
             installation_id=event.installation_id,
             account_id=event.account_id,
@@ -94,7 +123,8 @@ class InstallationProjection:
             status=InstallationStatus.ACTIVE,
             repositories=list(event.repositories),
             permissions=dict(event.permissions),
-            installed_at=datetime.now(UTC),
+            installed_at=now,
+            synced_at=now,
         )
         await self._store.save(PROJECTION_NAME, event.installation_id, _inst_to_dict(installation))
         logger.info(f"Projected AppInstalled: {event.installation_id} ({event.account_name})")
@@ -168,9 +198,40 @@ class InstallationProjection:
             if repo in repos:
                 repos.remove(repo)
         data["repositories"] = repos
+        data["synced_at"] = datetime.now(UTC).isoformat()
         await self._store.save(PROJECTION_NAME, installation_id, data)
         logger.info(
             f"Updated repositories for {installation_id}: +{len(repos_added)} -{len(repos_removed)}"
+        )
+        return _inst_from_dict(data)
+
+    async def upsert_from_github_api(self, raw: dict[str, Any]) -> Installation:
+        """Upsert an installation from a GitHub API GET /app/installations response.
+
+        Preserves existing repositories, installed_at, token fields, and status
+        when the record already exists unless the API payload explicitly indicates
+        the installation is suspended. Always stamps synced_at to now so the TTL
+        cache knows this record is fresh.
+        """
+        installation_id = str(raw["id"])
+        account = raw.get("account", {})
+        now = datetime.now(UTC)
+        existing = await self._store.get(PROJECTION_NAME, installation_id)
+        data: dict[str, Any] = {
+            "installation_id": installation_id,
+            "account_id": int(account.get("id", 0)),
+            "account_name": str(account.get("login", "")),
+            "account_type": str(account.get("type", "User")),
+            "status": _resolve_api_status(raw, existing),
+            "permissions": dict(raw.get("permissions", {})),
+            "synced_at": now.isoformat(),
+            **_preserved_fields(existing, now),
+        }
+        await self._store.save(PROJECTION_NAME, installation_id, data)
+        logger.info(
+            "Upserted installation from GitHub API: %s (%s)",
+            installation_id,
+            data["account_name"],
         )
         return _inst_from_dict(data)
 
