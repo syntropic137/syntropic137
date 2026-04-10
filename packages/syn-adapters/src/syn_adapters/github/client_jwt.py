@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 JWT_ALGORITHM = "RS256"
 
 # JWT validity period (GitHub allows max 10 minutes)
-JWT_EXPIRY_SECONDS = 10 * 60
+# Settings to 9 minutes in case of server clock sync issues (was failing due to a 3 second difference)
+JWT_EXPIRY_SECONDS = 9 * 60
 
 # Clock skew buffer (issue JWT 60 seconds in the past)
 CLOCK_SKEW_SECONDS = 60
