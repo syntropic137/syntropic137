@@ -24,6 +24,8 @@ from bump_version import (
     get_current_version,
 )
 
+pytestmark = pytest.mark.unit
+
 
 # =============================================================================
 # Semver parsing

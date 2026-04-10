@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from check_drift import check_drift, _git_diff, _git_untracked
+
+pytestmark = pytest.mark.unit
 
 
 class TestCheckDrift:
