@@ -19,8 +19,7 @@ logger = logging.getLogger(__name__)
 JWT_ALGORITHM = "RS256"
 
 # JWT validity period (GitHub allows max 10 minutes)
-# Settings to 9 minutes in case of server clock sync issues (was failing due to a 3 second difference)
-JWT_EXPIRY_SECONDS = 9 * 60
+JWT_EXPIRY_SECONDS = 10 * 60
 
 # Clock skew buffer (issue JWT 60 seconds in the past)
 CLOCK_SKEW_SECONDS = 60
@@ -123,7 +122,7 @@ def generate_jwt(app_id: str, private_key: str) -> str:
         # Issued at (with clock skew buffer)
         "iat": now - CLOCK_SKEW_SECONDS,
         # Expires in 10 minutes
-        "exp": now + JWT_EXPIRY_SECONDS,
+        "exp": now + JWT_EXPIRY_SECONDS - CLOCK_SKEW_SECONDS,
         # Issuer is the App ID
         "iss": app_id,
     }
