@@ -462,6 +462,7 @@ class WorkflowExecutionProcessor:
         aggregate: WorkflowExecutionAggregate,
     ) -> None:
         """Dispatch CancelExecutionCommand when the agent stream was interrupted by a cancel signal."""
+        assert todo.phase_id is not None, "phase_id must be set for a running agent todo"
         cancel_cmd = CancelExecutionCommand(
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
