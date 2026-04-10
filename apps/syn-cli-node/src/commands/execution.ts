@@ -52,8 +52,15 @@ const listCommand: CommandDef = {
     table.addColumn("Phases", { align: "right" });
     table.addColumn("Tokens", { align: "right" });
     table.addColumn("Cost", { align: "right" });
+    table.addColumn("Repos");
 
     for (const ex of executions) {
+      const repos = ex.repos ?? [];
+      const reposCell = repos.length === 0
+        ? ""
+        : repos.length === 1
+          ? (repos[0]!.split("/").pop()?.replace(/\.git$/, "") ?? repos[0]!)
+          : `${repos.length} repos`;
       table.addRow(
         ex.workflow_execution_id,
         ex.workflow_name,
@@ -62,6 +69,7 @@ const listCommand: CommandDef = {
         `${ex.completed_phases}/${ex.total_phases}`,
         formatTokens(ex.total_tokens),
         formatCost(ex.total_cost_usd),
+        reposCell,
       );
     }
     table.print();
@@ -89,6 +97,15 @@ const showCommand: CommandDef = {
     print(`  Tokens:     ${formatTokens(ex.total_tokens)}`);
     print(`  Cost:       ${formatCost(ex.total_cost_usd)}`);
     if (ex.error_message) print(`  ${style("Error:", RED)}     ${ex.error_message}`);
+
+    const repos = ex.repos ?? [];
+    if (repos.length > 0) {
+      print(`  Repos:`);
+      for (const url of repos) {
+        const name = url.split("/").pop()?.replace(/\.git$/, "") ?? url;
+        print(`    ${style("•", CYAN)} ${name} ${style(`(${url})`, DIM)}`);
+      }
+    }
 
     const phases = ex.phases ?? [];
     if (phases.length > 0) {

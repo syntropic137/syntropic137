@@ -265,6 +265,18 @@ class Settings(BaseSettings):
         description="Default max tokens for agent responses.",
     )
 
+    setup_phase_timeout_seconds: int = Field(
+        default=120,
+        ge=10,
+        le=3600,
+        description=(
+            "Timeout for the workspace setup phase in seconds. "
+            "The setup phase runs the setup script that configures credentials "
+            "and clones repositories before the agent starts. "
+            "Increase for workflows with large repositories."
+        ),
+    )
+
     # =========================================================================
     # COLLECTOR (Observability) - See ADR-017, ADR-018
     # =========================================================================

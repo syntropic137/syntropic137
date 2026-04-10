@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -31,6 +31,47 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_repo_url(
+    workflow: WorkflowTemplateAggregate,
+    merged_inputs: dict[str, str],
+) -> str | None:
+    """Resolve placeholders in workflow._repository_url and guard against unresolved ones."""
+    repo_url: str | None = getattr(workflow, "_repository_url", None)
+    if not repo_url:
+        return repo_url
+    for key, value in merged_inputs.items():
+        repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
+    if "{{" in repo_url:
+        unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
+        if unresolved:
+            msg = (
+                f"Repository URL contains unresolved placeholders: {unresolved}. "
+                f"Provide them via inputs (e.g., --input {unresolved[0]}=<value>)."
+            )
+        else:
+            msg = (
+                "Repository URL contains malformed placeholders. "
+                "Use the format {{name}} with alphanumeric/underscore characters."
+            )
+        raise ValueError(msg)
+    return repo_url
+
+
+def _normalise_repo_url(url: str) -> str:
+    """Expand 'owner/repo' slugs to full GitHub HTTPS URLs (trigger preset compat).
+
+    Trigger presets inject ``repository.full_name`` (``owner/repo``) rather than
+    the full ``https://github.com/owner/repo`` URL that ``git clone`` expects.
+    This helper normalises slugs so both forms are accepted transparently.
+    """
+    if url.startswith(("https://", "http://", "git@")):
+        return url
+    parts = url.split("/")
+    if len(parts) == 2:  # owner/repo slug
+        return f"https://github.com/{url}"
+    return url
 
 
 class WorkflowRepository(Protocol):
@@ -75,7 +116,7 @@ class ExecuteWorkflowHandler:
 
         phases = self._get_executable_phases(workflow)
         merged_inputs = self._merge_inputs(command, workflow)
-        repo_url = self._resolve_repo_url(workflow, merged_inputs)
+        repos = self._resolve_repos(merged_inputs, workflow)
 
         return await self._processor.run(
             workflow_id=command.aggregate_id,
@@ -85,48 +126,38 @@ class ExecuteWorkflowHandler:
             execution_id=command.execution_id
             if command.execution_id and command.execution_id.startswith("exec-")
             else f"exec-{uuid4().hex[:12]}",
-            repo_url=repo_url,
+            repos=repos,
         )
 
     @staticmethod
     def _merge_inputs(
         command: ExecuteWorkflowCommand,
         workflow: WorkflowTemplateAggregate,
-    ) -> dict[str, Any]:
+    ) -> dict[str, str]:
         """Merge input_declarations defaults and task field into command inputs."""
-        merged = dict(command.inputs)
+        merged: dict[str, str] = dict(command.inputs)
         for decl in workflow.input_declarations:
             if decl.default is not None and decl.name not in merged:
-                merged[decl.name] = decl.default
+                merged[decl.name] = str(decl.default)
         if command.task is not None:
             merged["task"] = command.task
         return merged
 
     @staticmethod
-    def _resolve_repo_url(
+    def _resolve_repos(
+        merged_inputs: dict[str, str],
         workflow: WorkflowTemplateAggregate,
-        merged_inputs: dict[str, Any],
-    ) -> str | None:
-        """Resolve placeholders in repo_url and guard against unresolved ones."""
-        repo_url: str | None = getattr(workflow, "_repository_url", None)
-        if not repo_url:
-            return repo_url
-        for key, value in merged_inputs.items():
-            repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
-        if "{{" in repo_url:
-            unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
-            if unresolved:
-                msg = (
-                    f"Repository URL contains unresolved placeholders: {unresolved}. "
-                    f"Provide them via inputs (e.g., --input {unresolved[0]}=<value>)."
-                )
-            else:
-                msg = (
-                    "Repository URL contains malformed placeholders. "
-                    "Use the format {{name}} with alphanumeric/underscore characters."
-                )
-            raise ValueError(msg)
-        return repo_url
+    ) -> list[str]:
+        """Resolve repos: inputs CSV → template-level repos → repository_url fallback."""
+        repos_raw = merged_inputs.get("repos", "")
+        if repos_raw:
+            return [_normalise_repo_url(u.strip()) for u in repos_raw.split(",") if u.strip()]
+        if workflow.repos:
+            return list(workflow.repos)
+        repo_url = _resolve_repo_url(workflow, merged_inputs)
+        if repo_url:
+            return [repo_url]
+        return []
 
     @staticmethod
     def _get_executable_phases(

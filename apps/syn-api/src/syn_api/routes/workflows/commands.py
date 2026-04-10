@@ -134,6 +134,7 @@ async def create_workflow(
     phases: list[dict[str, Any]] | None = None,
     input_declarations: list[dict[str, Any]] | None = None,
     workflow_id: str | None = None,
+    repos: list[str] | None = None,
 ) -> Result[str, WorkflowError]:
     """Create a new workflow template.
 
@@ -170,6 +171,7 @@ async def create_workflow(
         phases=_build_phase_defs(phases),
         project_name=project_name,
         input_declarations=_build_input_declarations(input_declarations),
+        repos=repos or [],
     )
 
     await ensure_connected()
@@ -303,6 +305,13 @@ class CreateWorkflowRequest(BaseModel):
     project_name: str | None = None
     phases: list[dict[str, Any]] | None = None
     input_declarations: list[dict[str, Any]] | None = None
+    repos: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Default GitHub URLs for this workflow template (ADR-058). "
+            "Can be overridden at execution time via the repos field on the execute request."
+        ),
+    )
 
 
 class ValidateYamlRequest(BaseModel):
@@ -368,6 +377,7 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
         phases=body.phases,
         input_declarations=body.input_declarations,
         workflow_id=body.id,
+        repos=list(body.repos),
     )
 
     if isinstance(result, Err):

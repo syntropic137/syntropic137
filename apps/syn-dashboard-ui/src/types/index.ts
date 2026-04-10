@@ -265,6 +265,8 @@ export interface ExecutionListItem {
   total_tokens: number
   total_cost_usd: number
   tool_call_count: number
+  /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
+  repos: string[]
 }
 
 export interface ExecutionListResponse {
@@ -312,6 +314,8 @@ export interface ExecutionDetailResponse {
   total_cost_usd: number
   artifact_ids: string[]
   error_message: string | null
+  /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
+  repos: string[]
   // Workspace info (ADR-021)
   workspace: WorkspaceInfo | null
 }

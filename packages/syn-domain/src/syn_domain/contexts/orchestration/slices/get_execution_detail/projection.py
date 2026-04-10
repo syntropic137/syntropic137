@@ -95,6 +95,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
+        # Extract repos from inputs field (ADR-058: stored as comma-separated string)
+        repos_raw = event_data.get("inputs", {}).get("repos", "")
+        repos = [u.strip() for u in str(repos_raw).split(",") if u.strip()] if repos_raw else []
+
         # Create initial phases from workflow definition (all pending)
         # Note: In a full implementation, we'd get phase names from workflow
         # For now, phases are populated as they start/complete
@@ -112,6 +116,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "total_duration_seconds": 0.0,
             "artifact_ids": [],
             "error_message": None,
+            "repos": repos,
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
 

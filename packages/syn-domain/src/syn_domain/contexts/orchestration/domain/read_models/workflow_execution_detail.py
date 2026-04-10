@@ -163,6 +163,9 @@ class WorkflowExecutionDetail:
     error_message: str | None = None
     """Error message if execution failed."""
 
+    repos: tuple[str, ...] = field(default_factory=tuple)
+    """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionDetail":
         """Create from dictionary data.
@@ -193,6 +196,7 @@ class WorkflowExecutionDetail:
             total_duration_seconds=data.get("total_duration_seconds", 0.0),
             artifact_ids=tuple(data.get("artifact_ids", [])),
             error_message=data.get("error_message"),
+            repos=tuple(data.get("repos", [])),
         )
 
     @staticmethod
@@ -220,4 +224,5 @@ class WorkflowExecutionDetail:
             "total_duration_seconds": self.total_duration_seconds,
             "artifact_ids": list(self.artifact_ids),
             "error_message": self.error_message,
+            "repos": list(self.repos),
         }

@@ -66,6 +66,12 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
+        # Extract repos from inputs field (ADR-058: stored as comma-separated string)
+        repos_raw = event_data.get("inputs", {}).get("repos", "")
+        repos = (
+            tuple(u.strip() for u in str(repos_raw).split(",") if u.strip()) if repos_raw else ()
+        )
+
         summary = WorkflowExecutionSummary(
             workflow_execution_id=execution_id,
             workflow_id=event_data.get("workflow_id", ""),
@@ -79,6 +85,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             total_cost_usd="0",
             tool_call_count=0,
             expected_completion_at=event_data.get("expected_completion_at"),
+            repos=repos,
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 

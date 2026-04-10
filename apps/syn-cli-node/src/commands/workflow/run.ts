@@ -53,6 +53,7 @@ export const runCommand: CommandDef = {
   options: {
     input: { type: "string", short: "i", description: "Input variables as key=value", multiple: true },
     task: { type: "string", short: "t", description: "Primary task description ($ARGUMENTS)" },
+    repo: { type: "string", short: "R", description: "GitHub URL to pre-clone (repeatable). Overrides workflow template repos.", multiple: true },
     "dry-run": { type: "boolean", short: "n", description: "Validate without executing", default: false },
     quiet: { type: "boolean", short: "q", description: "Minimal output", default: false },
   },
@@ -67,6 +68,8 @@ export const runCommand: CommandDef = {
     const inputs = Array.isArray(inputValues) ? inputValues as string[] : undefined;
     const parsedInputs = parseInputs(inputs);
     const task = parsed.values["task"] as string | undefined;
+    const repoValues = parsed.values["repo"];
+    const repos: string[] = Array.isArray(repoValues) ? repoValues as string[] : repoValues ? [repoValues as string] : [];
     const dryRun = parsed.values["dry-run"] === true;
     const quiet = parsed.values["quiet"] === true;
 
@@ -113,6 +116,7 @@ export const runCommand: CommandDef = {
             Object.entries(parsedInputs).map(([k, v]) => [k, String(v)]),
           ),
           task: task ?? null,
+          ...(repos.length > 0 ? { repos } : {}),
           provider: "claude",
         },
       }),

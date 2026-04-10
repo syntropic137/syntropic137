@@ -112,6 +112,12 @@ class WorkflowDetail:
     runs_count: int = 0
     """Number of times this workflow has been executed."""
 
+    repository_url: str | None = None
+    """Template-level repository URL (single-repo workflows)."""
+
+    repos: tuple[str, ...] = field(default_factory=tuple)
+    """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
@@ -157,6 +163,8 @@ class WorkflowDetail:
             input_declarations=input_decls,
             created_at=data.get(WorkflowFields.CREATED_AT),
             runs_count=data.get(WorkflowFields.RUNS_COUNT, 0),
+            repository_url=data.get("repository_url"),
+            repos=tuple(data.get("repos", [])),
         )
 
     @staticmethod
@@ -212,4 +220,6 @@ class WorkflowDetail:
             "input_declarations": [input_decl_to_dict(d) for d in self.input_declarations],
             WorkflowFields.CREATED_AT: self._to_iso_string(self.created_at),
             WorkflowFields.RUNS_COUNT: self.runs_count,
+            "repository_url": self.repository_url,
+            "repos": list(self.repos),
         }

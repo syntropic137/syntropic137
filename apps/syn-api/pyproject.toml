@@ -1,6 +1,6 @@
 [project]
 name = "syn-api"
-version = "0.24.0"
+version = "0.24.1"
 description = "HTTP API server for the Syntropic137"
 requires-python = ">=3.12"
 dependencies = [

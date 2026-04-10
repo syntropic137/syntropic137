@@ -1,6 +1,6 @@
 """Read model for workflow execution (run) list views."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
@@ -52,6 +52,9 @@ class WorkflowExecutionSummary:
     error_message: str | None = None
     """Error message if execution failed."""
 
+    repos: tuple[str, ...] = field(default_factory=tuple)
+    """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionSummary":
         """Create from dictionary data.
@@ -79,6 +82,7 @@ class WorkflowExecutionSummary:
             tool_call_count=data.get("tool_call_count", 0),
             expected_completion_at=data.get("expected_completion_at"),
             error_message=data.get("error_message"),
+            repos=tuple(data.get("repos", [])),
         )
 
     @staticmethod
@@ -106,4 +110,5 @@ class WorkflowExecutionSummary:
             "tool_call_count": self.tool_call_count,
             "expected_completion_at": self._to_iso_string(self.expected_completion_at),
             "error_message": self.error_message,
+            "repos": list(self.repos),
         }

@@ -32,11 +32,20 @@ function ExecutionProgressBar({ status, completed, total }: { status: string; co
   )
 }
 
+function ReposCell({ repos }: { repos?: string[] }) {
+  if (!repos || repos.length === 0) return <div />
+  if (repos.length === 1) {
+    const name = repos[0].split('/').pop()?.replace(/\.git$/, '') ?? repos[0]
+    return <div className="text-xs text-[var(--color-text-secondary)] truncate" title={repos[0]}>{name}</div>
+  }
+  return <div className="text-xs text-[var(--color-text-muted)]">{repos.length} repos</div>
+}
+
 function ExecutionListRow({ exec, now }: { exec: ExecutionListItem; now: number }) {
   return (
     <Link
       to={`/executions/${exec.workflow_execution_id}`}
-      className="grid grid-cols-8 gap-4 px-4 py-4 hover:bg-[var(--color-surface-elevated)] transition-colors items-center"
+      className="grid grid-cols-9 gap-4 px-4 py-4 hover:bg-[var(--color-surface-elevated)] transition-colors items-center"
     >
       <div className="font-mono text-sm text-[var(--color-text-primary)]">{exec.workflow_execution_id.slice(0, 8)}...</div>
       <div className="text-sm text-[var(--color-text-secondary)] truncate">{exec.workflow_name || exec.workflow_id.slice(0, 12)}</div>
@@ -47,6 +56,7 @@ function ExecutionListRow({ exec, now }: { exec: ExecutionListItem; now: number 
         <span className="text-xs text-[var(--color-text-muted)]">(${Number(exec.total_cost_usd).toFixed(4)})</span>
       </div>
       <div className="text-sm text-[var(--color-text-secondary)]">{exec.tool_call_count}</div>
+      <ReposCell repos={exec.repos} />
       <div className="text-sm text-[var(--color-text-secondary)]">{formatDurationFromRange(exec.started_at, exec.completed_at, now)}</div>
       <div className="text-xs text-[var(--color-text-muted)]">{formatDate(exec.started_at)}</div>
     </Link>
@@ -55,13 +65,14 @@ function ExecutionListRow({ exec, now }: { exec: ExecutionListItem; now: number 
 
 function ExecutionTableHeader() {
   return (
-    <div className="grid grid-cols-8 gap-4 px-4 py-3 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider bg-[var(--color-surface-elevated)]">
+    <div className="grid grid-cols-9 gap-4 px-4 py-3 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider bg-[var(--color-surface-elevated)]">
       <div>Execution ID</div>
       <div>Workflow</div>
       <div>Status</div>
       <div>Progress</div>
       <div className="flex items-center gap-1"><Zap className="h-3 w-3" />Tokens</div>
       <div className="flex items-center gap-1"><Wrench className="h-3 w-3" />Tools</div>
+      <div>Repos</div>
       <div>Duration</div>
       <div>Started</div>
     </div>

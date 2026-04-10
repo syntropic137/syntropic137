@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import (
     CheckpointedProjection,
+    DomainEvent,
     EventEnvelope,
     ProjectionCheckpoint,
     ProjectionCheckpointStore,
@@ -32,9 +33,10 @@ class _ExecutionService(Protocol):
     async def run_workflow(
         self,
         workflow_id: str,
-        inputs: dict[str, Any],
+        inputs: dict[str, str],
         execution_id: str,
-    ) -> object: ...
+        task: str | None = None,
+    ) -> None: ...
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,13 @@ logger = logging.getLogger(__name__)
 _SUBSCRIBED_EVENTS = {
     "github.TriggerFired",
 }
+
+
+def _to_str_dict(value: object) -> dict[str, str]:
+    """Convert an arbitrary dict-like object to dict[str, str] by stringifying values."""
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): str(v) for k, v in value.items()}
 
 
 class WorkflowDispatchProjection(CheckpointedProjection):
@@ -77,7 +86,7 @@ class WorkflowDispatchProjection(CheckpointedProjection):
 
     async def handle_event(
         self,
-        envelope: EventEnvelope[Any],
+        envelope: EventEnvelope[DomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type or "Unknown"
@@ -113,18 +122,18 @@ class WorkflowDispatchProjection(CheckpointedProjection):
                 if key:
                     await self._store.delete(self.PROJECTION_NAME, key)
 
-    async def _on_trigger_fired(self, event_data: dict[str, Any]) -> None:
+    async def _on_trigger_fired(self, event_data: dict[str, object]) -> None:
         """Handle a TriggerFired event by dispatching the workflow."""
-        workflow_id = event_data.get("workflow_id", "")
-        workflow_inputs = event_data.get("workflow_inputs", {})
-        execution_id = event_data.get("execution_id", "")
+        workflow_id = str(event_data.get("workflow_id", ""))
+        str_inputs = _to_str_dict(event_data.get("workflow_inputs", {}))
+        execution_id = str(event_data.get("execution_id", ""))
         trigger_id = event_data.get("trigger_id", "")
 
         dispatch_record = {
             "trigger_id": trigger_id,
             "execution_id": execution_id,
             "workflow_id": workflow_id,
-            "workflow_inputs": workflow_inputs,
+            "workflow_inputs": str_inputs,
             "dispatched_at": datetime.now(UTC).isoformat(),
         }
         if self._store is not None and execution_id:
@@ -138,7 +147,7 @@ class WorkflowDispatchProjection(CheckpointedProjection):
             try:
                 await self._execution_service.run_workflow(
                     workflow_id=workflow_id,
-                    inputs=workflow_inputs,
+                    inputs=str_inputs,
                     execution_id=execution_id,
                 )
                 logger.info(

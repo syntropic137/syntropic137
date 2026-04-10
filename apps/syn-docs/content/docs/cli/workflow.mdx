@@ -27,6 +27,7 @@ syn workflow create <name> [options]
 | `--repo`, `-r` | `text` | `https://github.com/example/repo` | Repository URL |
 | `--ref` | `text` | `main` | Repository ref/branch |
 | `--description`, `-d` | `text` | --- | Workflow description |
+| `--repos`, `-R` | `text` | --- | Default GitHub URLs for workspace hydration (repeatable). ADR-058. |
 
 ---
 
@@ -186,6 +187,7 @@ syn workflow run <workflow-id> [options]
 |------|------|---------|-------------|
 | `--input`, `-i` | `text` | --- | Input variables as key=value |
 | `--task`, `-t` | `text` | --- | Primary task description ($ARGUMENTS) |
+| `--repo`, `-R` | `text` | --- | GitHub URL to pre-clone (repeatable). Overrides workflow template repos. |
 | `--dry-run`, `-n` | `boolean` | `false` | Validate without executing |
 | `--quiet`, `-q` | `boolean` | `false` | Minimal output |
 

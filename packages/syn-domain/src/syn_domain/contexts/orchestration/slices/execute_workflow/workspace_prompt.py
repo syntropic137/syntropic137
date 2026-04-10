@@ -21,10 +21,13 @@ You are an agent running in an ephemeral Docker workspace managed by Syntropic13
 
 ```
 /workspace/
+├── CLAUDE.md    ← @-imports each repo's CLAUDE.md (loaded automatically)
+├── AGENTS.md    ← @-imports each repo's AGENTS.md (same content)
 ├── artifacts/
 │   ├── input/   ← Previous phase outputs (read-only)
 │   └── output/  ← Write YOUR deliverables here
-└── repos/       ← Clone repositories here
+└── repos/       ← Pre-cloned repositories (ready to use)
+    └── {repo-name}/
 ```
 
 ---
@@ -44,7 +47,7 @@ You are an agent running in an ephemeral Docker workspace managed by Syntropic13
 
 Your primary deliverable is **code on GitHub**. The artifact is your summary.
 
-1. Clone to `/workspace/repos/`, create a feature branch
+1. Navigate to `/workspace/repos/{repo-name}` (repositories are **pre-cloned** — do not run `git clone`), create a feature branch
 2. Make changes, commit with clear messages
 3. Push to GitHub, create PR if needed
 4. Write summary to `artifacts/output/deliverable.md` with:

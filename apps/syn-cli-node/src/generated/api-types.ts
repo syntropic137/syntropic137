@@ -755,8 +755,11 @@ export interface paths {
          * List Accessible Repos Endpoint
          * @description List repositories accessible to the GitHub App.
          *
-         *     Makes a live query to the GitHub API. If no installation_id is provided,
-         *     queries all active installations and aggregates the results.
+         *     Queries all active installations and aggregates results when no
+         *     installation_id is provided. The installation list is cached locally with
+         *     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
+         *     GitHub API without requiring a webhook URL. Stale data is kept as a
+         *     fallback if the GitHub API is unreachable during refresh.
          */
         get: operations["list_accessible_repos_endpoint_github_repos_get"];
         put?: never;
@@ -1887,6 +1890,11 @@ export interface components {
             input_declarations?: {
                 [key: string]: unknown;
             }[] | null;
+            /**
+             * Repos
+             * @description Default GitHub URLs for this workflow template (ADR-058). Can be overridden at execution time via the repos field on the execute request.
+             */
+            repos?: string[];
         };
         /** CreateWorkflowResponse */
         CreateWorkflowResponse: {
@@ -1961,6 +1969,11 @@ export interface components {
              * @description Primary task description -- substituted for $ARGUMENTS in phase prompts.
              */
             task?: string | null;
+            /**
+             * Repos
+             * @description GitHub URLs to pre-clone for workspace hydration (ADR-058). Overrides the workflow template's repository_url. Equivalent to passing inputs={'repos': 'url1,url2'} but type-safe.
+             */
+            repos?: string[];
             /**
              * Provider
              * @deprecated
@@ -2143,6 +2156,8 @@ export interface components {
             artifact_ids?: string[];
             /** Error Message */
             error_message?: string | null;
+            /** Repos */
+            repos?: string[];
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -2296,6 +2311,8 @@ export interface components {
             tool_call_count: number;
             /** Error Message */
             error_message?: string | null;
+            /** Repos */
+            repos?: string[];
         };
         /**
          * ExportManifestResponse
@@ -4328,6 +4345,10 @@ export interface components {
             runs_count: number;
             /** Runs Link */
             runs_link?: string | null;
+            /** Repository Url */
+            repository_url?: string | null;
+            /** Repos */
+            repos?: string[];
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
