@@ -285,17 +285,18 @@ The `create-release` job in `release-create.yml` uses `environment: release-publ
 If containers or CLI publish fails after the GitHub Release was already created:
 
 ```bash
-# Re-trigger CLI publish (dry_run must be explicitly set to false)
+# Re-trigger CLI publish (version must match package.json on the release branch)
 gh workflow run release-cli.yaml \
   --repo syntropic137/syntropic137 \
   --ref release \
+  -f version=vX.Y.Z \
   -f dry_run=false
 
 # Re-trigger containers publish
 gh workflow run release-containers.yaml \
   --repo syntropic137/syntropic137 \
   --ref release \
-  -f version=v0.24.1 \
+  -f version=vX.Y.Z \
   -f dry_run=false
 ```
 
