@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -10,7 +10,6 @@ import pytest
 from syn_domain.contexts.github.slices.get_installation.projection import (
     InstallationProjection,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fake store (mirrors FakeProjectionStore in organization slices conftest)
@@ -45,7 +44,7 @@ def _make_installed_event(
     installation_id: str = "inst-1",
     account_name: str = "acme-org",
     repos: tuple[str, ...] = ("acme-org/repo-a",),
-) -> Any:
+) -> object:
     from syn_domain.contexts.github.domain.events.AppInstalledEvent import AppInstalledEvent
 
     return AppInstalledEvent(
