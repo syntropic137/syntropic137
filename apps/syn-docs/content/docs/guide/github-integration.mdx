@@ -93,3 +93,5 @@ syn github repos --installation <id>    # filter by a specific installation
 ```
 
 This queries the GitHub API through your App's installation tokens and returns repository metadata (name, owner, visibility, default branch). Use it to verify that the App can see the repos you expect before setting up trigger rules.
+
+Syntropic137 caches the list of installations locally and refreshes it automatically: on every platform startup, and again if the cache is more than one hour old. No webhook or tunnel is required for this to work. If you add repositories to your GitHub App installation, they will appear in `syn github repos` within one hour, or immediately after a platform restart.

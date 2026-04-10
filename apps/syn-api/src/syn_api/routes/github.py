@@ -7,7 +7,13 @@ installations). These hit the GitHub API directly — not projections.
 from __future__ import annotations
 
 import logging
-from typing import Protocol
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.github.slices.get_installation.projection import (
+        InstallationProjection,
+    )
 
 from fastapi import APIRouter, HTTPException
 
@@ -22,10 +28,14 @@ from syn_api.types import (
 )
 
 
+_INSTALLATION_SYNC_TTL = timedelta(hours=1)
+
+
 class _RepoLister(Protocol):
-    """Protocol for listing accessible repos (subset of GitHubAppClient)."""
+    """Protocol for listing repos and installations (subset of GitHubAppClient)."""
 
     async def list_accessible_repos(self, installation_id: str | None = None) -> list[dict]: ...
+    async def list_installations(self) -> list[dict]: ...
 
 
 logger = logging.getLogger(__name__)
@@ -114,17 +124,59 @@ async def _fetch_repos(
     return await _aggregate_all_installations(client, include_private)
 
 
+def _is_stale(installations: list) -> bool:
+    """Return True if the installation cache is empty or any record is past the TTL."""
+    if not installations:
+        return True
+    now = datetime.now(UTC)
+    return any(
+        inst.synced_at is None or (now - inst.synced_at) > _INSTALLATION_SYNC_TTL
+        for inst in installations
+    )
+
+
+async def _sync_installations(
+    client: _RepoLister,
+    projection: InstallationProjection,
+) -> list:
+    """Fetch all installations from GitHub API and upsert into the projection.
+
+    Called when the installation cache is empty or stale. Returns the refreshed
+    installation list, or an empty list if the GitHub API call fails.
+    """
+    try:
+        raw = await client.list_installations()
+    except Exception:
+        logger.warning("GitHub API installation sync failed", exc_info=True)
+        return []
+    result = []
+    for item in raw:
+        try:
+            result.append(await projection.upsert_from_github_api(item))
+        except Exception:
+            logger.warning("Failed to upsert installation %s", item.get("id"), exc_info=True)
+    logger.info("Synced %d installation(s) from GitHub API", len(result))
+    return result
+
+
 async def _aggregate_all_installations(
     client: _RepoLister,
     include_private: bool,
 ) -> list[GitHubRepoResponse]:
-    """Query all active installations and return deduplicated repos."""
+    """Query all active installations and return deduplicated repos.
+
+    Refreshes the installation cache from GitHub if it is empty or older than
+    the TTL, so the endpoint works without a webhook configured.
+    """
     from syn_domain.contexts.github.slices.get_installation.projection import (
         get_installation_projection,
     )
 
     projection = get_installation_projection()
     installations = await projection.get_all_active()
+
+    if _is_stale(installations):
+        installations = await _sync_installations(client, projection)
 
     if not installations:
         return []

@@ -51,6 +51,7 @@ def _inst_to_dict(inst: Installation) -> dict[str, Any]:
         "last_token_expires_at": inst.last_token_expires_at.isoformat()
         if inst.last_token_expires_at
         else None,
+        "synced_at": inst.synced_at.isoformat() if inst.synced_at else None,
     }
 
 
@@ -72,6 +73,7 @@ def _inst_from_dict(data: dict[str, Any]) -> Installation:
         last_token_expires_at=datetime.fromisoformat(data["last_token_expires_at"])
         if data.get("last_token_expires_at")
         else None,
+        synced_at=datetime.fromisoformat(data["synced_at"]) if data.get("synced_at") else None,
     )
 
 
@@ -86,6 +88,7 @@ class InstallationProjection:
         """Handle an AppInstalled event."""
         # Note: DomainEvent doesn't have occurred_at - that's in EventMetadata
         # For webhook-created events, we use current time as the installation time
+        now = datetime.now(UTC)
         installation = Installation(
             installation_id=event.installation_id,
             account_id=event.account_id,
@@ -94,7 +97,8 @@ class InstallationProjection:
             status=InstallationStatus.ACTIVE,
             repositories=list(event.repositories),
             permissions=dict(event.permissions),
-            installed_at=datetime.now(UTC),
+            installed_at=now,
+            synced_at=now,
         )
         await self._store.save(PROJECTION_NAME, event.installation_id, _inst_to_dict(installation))
         logger.info(f"Projected AppInstalled: {event.installation_id} ({event.account_name})")
@@ -168,9 +172,42 @@ class InstallationProjection:
             if repo in repos:
                 repos.remove(repo)
         data["repositories"] = repos
+        data["synced_at"] = datetime.now(UTC).isoformat()
         await self._store.save(PROJECTION_NAME, installation_id, data)
         logger.info(
             f"Updated repositories for {installation_id}: +{len(repos_added)} -{len(repos_removed)}"
+        )
+        return _inst_from_dict(data)
+
+    async def upsert_from_github_api(self, raw: dict[str, Any]) -> Installation:
+        """Upsert an installation from a GitHub API GET /app/installations response.
+
+        Preserves existing repositories, installed_at, and token fields when the
+        record already exists. Always stamps synced_at to now so the TTL cache
+        knows this record is fresh.
+        """
+        installation_id = str(raw["id"])
+        account = raw.get("account", {})
+        now = datetime.now(UTC)
+        existing = await self._store.get(PROJECTION_NAME, installation_id)
+        data: dict[str, Any] = {
+            "installation_id": installation_id,
+            "account_id": int(account.get("id", 0)),
+            "account_name": str(account.get("login", "")),
+            "account_type": str(account.get("type", "User")),
+            "status": InstallationStatus.ACTIVE.value,
+            "repositories": existing.get("repositories", []) if existing else [],
+            "permissions": dict(raw.get("permissions", {})),
+            "installed_at": existing.get("installed_at") if existing else now.isoformat(),
+            "synced_at": now.isoformat(),
+            "last_token_refresh": existing.get("last_token_refresh") if existing else None,
+            "last_token_expires_at": existing.get("last_token_expires_at") if existing else None,
+        }
+        await self._store.save(PROJECTION_NAME, installation_id, data)
+        logger.info(
+            "Upserted installation from GitHub API: %s (%s)",
+            installation_id,
+            data["account_name"],
         )
         return _inst_from_dict(data)
 
