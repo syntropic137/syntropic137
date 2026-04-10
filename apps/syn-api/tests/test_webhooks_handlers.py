@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from syn_api.routes.webhooks.handlers import (
+    _apply_installation_repositories_changed,
     _classify_trigger_results,
     _evaluate_triggers,
     _handle_installation_event,
@@ -61,6 +62,90 @@ async def test_handle_installation_exception_swallowed() -> None:
     ):
         # Should not raise
         await _handle_installation_event("installation", "created", {})
+
+
+# --- _apply_installation_repositories_changed ---
+
+
+@pytest.mark.anyio
+async def test_installation_repositories_added() -> None:
+    """Repos added via GitHub UI are forwarded to update_repositories."""
+    mock_projection = AsyncMock()
+
+    payload = {
+        "installation": {"id": 1001},
+        "repositories_added": [
+            {"full_name": "acme/repo-a"},
+            {"full_name": "acme/repo-b"},
+        ],
+        "repositories_removed": [],
+    }
+
+    with patch(
+        "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+        return_value=mock_projection,
+    ):
+        await _apply_installation_repositories_changed(payload, "added")
+
+    mock_projection.update_repositories.assert_awaited_once_with(
+        "1001", ["acme/repo-a", "acme/repo-b"], []
+    )
+
+
+@pytest.mark.anyio
+async def test_installation_repositories_removed() -> None:
+    """Repos removed from the installation are forwarded to update_repositories."""
+    mock_projection = AsyncMock()
+
+    payload = {
+        "installation": {"id": 1001},
+        "repositories_added": [],
+        "repositories_removed": [{"full_name": "acme/repo-a"}],
+    }
+
+    with patch(
+        "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+        return_value=mock_projection,
+    ):
+        await _apply_installation_repositories_changed(payload, "removed")
+
+    mock_projection.update_repositories.assert_awaited_once_with("1001", [], ["acme/repo-a"])
+
+
+@pytest.mark.anyio
+async def test_installation_repositories_missing_id_noop() -> None:
+    """Missing installation.id logs a warning and does not call the projection."""
+    mock_projection = AsyncMock()
+
+    payload = {"repositories_added": [{"full_name": "acme/repo-a"}], "repositories_removed": []}
+
+    with patch(
+        "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+        return_value=mock_projection,
+    ):
+        await _apply_installation_repositories_changed(payload, "added")
+
+    mock_projection.update_repositories.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_handle_installation_event_repositories_added() -> None:
+    """_handle_installation_event routes installation_repositories to the correct handler."""
+    mock_projection = AsyncMock()
+
+    payload = {
+        "installation": {"id": 1001},
+        "repositories_added": [{"full_name": "acme/repo-x"}],
+        "repositories_removed": [],
+    }
+
+    with patch(
+        "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+        return_value=mock_projection,
+    ):
+        await _handle_installation_event("installation_repositories", "added", payload)
+
+    mock_projection.update_repositories.assert_awaited_once()
 
 
 # --- _classify_trigger_results ---
