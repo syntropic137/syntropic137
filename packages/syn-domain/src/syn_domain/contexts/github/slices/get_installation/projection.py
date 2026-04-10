@@ -182,20 +182,29 @@ class InstallationProjection:
     async def upsert_from_github_api(self, raw: dict[str, Any]) -> Installation:
         """Upsert an installation from a GitHub API GET /app/installations response.
 
-        Preserves existing repositories, installed_at, and token fields when the
-        record already exists. Always stamps synced_at to now so the TTL cache
-        knows this record is fresh.
+        Preserves existing repositories, installed_at, token fields, and status
+        when the record already exists unless the API payload explicitly indicates
+        the installation is suspended. Always stamps synced_at to now so the TTL
+        cache knows this record is fresh.
         """
         installation_id = str(raw["id"])
         account = raw.get("account", {})
         now = datetime.now(UTC)
         existing = await self._store.get(PROJECTION_NAME, installation_id)
+
+        if raw.get("suspended_at"):
+            status = InstallationStatus.SUSPENDED.value
+        elif existing and existing.get("status"):
+            status = existing["status"]
+        else:
+            status = InstallationStatus.ACTIVE.value
+
         data: dict[str, Any] = {
             "installation_id": installation_id,
             "account_id": int(account.get("id", 0)),
             "account_name": str(account.get("login", "")),
             "account_type": str(account.get("type", "User")),
-            "status": InstallationStatus.ACTIVE.value,
+            "status": status,
             "repositories": existing.get("repositories", []) if existing else [],
             "permissions": dict(raw.get("permissions", {})),
             "installed_at": existing.get("installed_at") if existing else now.isoformat(),

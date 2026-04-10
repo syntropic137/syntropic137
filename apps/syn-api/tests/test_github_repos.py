@@ -205,7 +205,9 @@ def test_is_stale_one_stale_record_triggers_refresh() -> None:
 @pytest.mark.asyncio
 async def test_empty_projection_triggers_github_api_sync() -> None:
     """When projection is empty, list_installations() is called to bootstrap."""
-    raw_installations = [{"id": "inst-1", "account": {"id": 1, "login": "acme", "type": "Org"}, "permissions": {}}]
+    raw_installations = [
+        {"id": "inst-1", "account": {"id": 1, "login": "acme", "type": "Org"}, "permissions": {}}
+    ]
     raw_repos = [_make_repo(1)]
 
     mock_client = MagicMock()
@@ -239,7 +241,9 @@ async def test_stale_projection_triggers_refresh() -> None:
     stale_inst = _make_installation_with_synced_at(datetime.now(UTC) - timedelta(minutes=90))
     stale_inst.installation_id = "inst-1"
 
-    raw_installations = [{"id": "inst-1", "account": {"id": 1, "login": "acme", "type": "Org"}, "permissions": {}}]
+    raw_installations = [
+        {"id": "inst-1", "account": {"id": 1, "login": "acme", "type": "Org"}, "permissions": {}}
+    ]
     fresh_inst = _make_installation_with_synced_at(datetime.now(UTC))
     fresh_inst.installation_id = "inst-1"
 

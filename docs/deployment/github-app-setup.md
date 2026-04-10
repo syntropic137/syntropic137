@@ -147,7 +147,7 @@ These events are **automatically subscribed** for all GitHub Apps - they won't a
 | **Installation** | App lifecycle | `created`, `deleted`, `suspend`, `unsuspend` |
 | **Installation repositories** | Repo access | `added`, `removed` |
 
-**No webhook URL configured?** No problem. Syntropic137 refreshes the installation and repository list directly from the GitHub API on startup and every hour. `installation` and `installation_repositories` events are handled when a webhook is reachable, but they are not required. Repositories added to your GitHub App installation will appear within one hour or on the next platform restart, whichever comes first.
+**No webhook URL configured?** No problem. Syntropic137 can refresh the installation and repository list directly from the GitHub API when the repository list is requested and the cached data is missing or stale. `installation` and `installation_repositories` events are handled when a webhook is reachable, but they are not required. Repositories added to your GitHub App installation will appear after the next `syn github repos` call that triggers a cache refresh (within one hour of the change).
 
 #### Optional Events (Repository & Misc)
 

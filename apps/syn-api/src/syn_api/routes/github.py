@@ -27,7 +27,6 @@ from syn_api.types import (
     Result,
 )
 
-
 _INSTALLATION_SYNC_TTL = timedelta(hours=1)
 
 
@@ -159,6 +158,30 @@ async def _sync_installations(
     return result
 
 
+async def _repos_for_installation(
+    client: _RepoLister,
+    installation_id: str,
+    seen_ids: set[int],
+    include_private: bool,
+) -> list[GitHubRepoResponse]:
+    """Fetch repos for one installation, skipping IDs already in seen_ids."""
+    try:
+        raw_repos = await client.list_accessible_repos(installation_id=installation_id)
+    except Exception:
+        logger.warning(
+            "Failed to list repos for installation %s, skipping",
+            installation_id,
+            exc_info=True,
+        )
+        return []
+    result: list[GitHubRepoResponse] = []
+    for repo in _build_repo_list(raw_repos, installation_id, include_private):
+        if repo.github_id not in seen_ids:
+            seen_ids.add(repo.github_id)
+            result.append(repo)
+    return result
+
+
 async def _aggregate_all_installations(
     client: _RepoLister,
     include_private: bool,
@@ -176,30 +199,19 @@ async def _aggregate_all_installations(
     installations = await projection.get_all_active()
 
     if _is_stale(installations):
-        installations = await _sync_installations(client, projection)
+        refreshed = await _sync_installations(client, projection)
+        if refreshed or not installations:
+            installations = refreshed
 
     if not installations:
         return []
 
     seen_ids: set[int] = set()
     repos: list[GitHubRepoResponse] = []
-
     for inst in installations:
-        try:
-            raw_repos = await client.list_accessible_repos(installation_id=inst.installation_id)
-        except Exception:
-            logger.warning(
-                "Failed to list repos for installation %s, skipping",
-                inst.installation_id,
-                exc_info=True,
-            )
-            continue
-
-        for repo in _build_repo_list(raw_repos, inst.installation_id, include_private):
-            if repo.github_id not in seen_ids:
-                seen_ids.add(repo.github_id)
-                repos.append(repo)
-
+        repos.extend(
+            await _repos_for_installation(client, inst.installation_id, seen_ids, include_private)
+        )
     return repos
 
 

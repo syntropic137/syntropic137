@@ -37,14 +37,10 @@ async def _apply_installation_repositories_changed(
         return
 
     repos_added = [
-        r["full_name"]
-        for r in payload.get("repositories_added", [])
-        if r.get("full_name")
+        r["full_name"] for r in payload.get("repositories_added", []) if r.get("full_name")
     ]
     repos_removed = [
-        r["full_name"]
-        for r in payload.get("repositories_removed", [])
-        if r.get("full_name")
+        r["full_name"] for r in payload.get("repositories_removed", []) if r.get("full_name")
     ]
 
     projection = get_installation_projection()
