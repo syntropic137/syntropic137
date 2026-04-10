@@ -2,7 +2,11 @@
 # Release CLI — Build, Test, Publish @syntropic137/cli to npm
 # =============================================================================
 #
-# Trigger: GitHub release published (same as release-containers).
+# Trigger: Called by release-create.yml (workflow_call) only.
+#          Manual dispatch (workflow_dispatch) is available for re-triggering
+#          a failed publish — must be run from the `release` branch only.
+#          DO NOT add a release.published trigger — it bypasses the approval gate.
+#          See docs/release-process.md before modifying this workflow.
 #
 # Pipeline:
 #   1. Verify package.json version matches release tag
@@ -12,7 +16,7 @@
 # Prerequisites:
 #   - Configure Trusted Publisher on npmjs.com for @syntropic137/cli:
 #     repo: syntropic137/syntropic137
-#     workflow: release-cli.yaml
+#     workflow: release-create.yml   <-- the CALLER, not this file
 #     environment: npm-publish-cli
 #   - Requires npm >= 11.5.1 and Node >= 22 for OIDC token exchange
 #
@@ -29,8 +33,8 @@
 name: Release CLI
 
 on:
-  release:
-    types: [published]
+  # release.published intentionally omitted — direct release events bypass the
+  # approval gate in release-create.yml. See docs/release-process.md.
   workflow_call:
     inputs:
       version:
@@ -65,6 +69,15 @@ jobs:
       id-token: write  # npm provenance + OIDC Trusted Publishing
 
     steps:
+      - name: Guard — dispatch only allowed from release branch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [[ "${{ github.ref }}" != "refs/heads/release" ]]; then
+            echo "::error::Manual dispatch must be run from the release branch. Got: ${{ github.ref }}"
+            echo "See docs/release-process.md for the recovery procedure."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:

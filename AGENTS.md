@@ -334,6 +334,7 @@ The canonical release process lives in [docs/release-process.md](docs/release-pr
 - **Beta releases** bypass `release`: `gh release create v0.20.0-beta.1 --prerelease --target main`
 - **Version management:** `just bump-version 0.20.0` updates all 11 files. `just check-version` validates consistency.
 - **Docs:** `release` → Vercel production, `main` → preview only.
+- **Poka-yoke rules:** Before touching any release workflow or triggering a publish manually, read [docs/release-process.md](docs/release-process.md). The publish workflows have strict firing rules — wrong entry points are blocked by design.
 
 Submodules (agentic-primitives, event-sourcing-platform) have independent versioning — never bumped by the release script.
 
