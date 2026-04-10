@@ -755,8 +755,11 @@ export interface paths {
          * List Accessible Repos Endpoint
          * @description List repositories accessible to the GitHub App.
          *
-         *     Makes a live query to the GitHub API. If no installation_id is provided,
-         *     queries all active installations and aggregates the results.
+         *     Queries all active installations and aggregates results when no
+         *     installation_id is provided. The installation list is cached locally with
+         *     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
+         *     GitHub API without requiring a webhook URL. Stale data is kept as a
+         *     fallback if the GitHub API is unreachable during refresh.
          */
         get: operations["list_accessible_repos_endpoint_github_repos_get"];
         put?: never;
