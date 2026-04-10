@@ -107,6 +107,28 @@ def _get_preflight_repos(
     repos_csv = effective_inputs.get("repos", "")
     if repos_csv:
         return [u.strip() for u in repos_csv.split(",") if u.strip()]
+
+    # Check workflow.repos with variable substitution (mirrors ExecuteWorkflowHandler._resolve_repos).
+    # Without this, unresolved {{variable}} patterns in repos silently fall through to
+    # repository_url (which defaults to example/repo), producing a misleading auth error.
+    if workflow.repos:
+        merged: dict[str, str] = {
+            decl.name: str(decl.default)
+            for decl in workflow.input_declarations
+            if decl.default is not None
+        }
+        merged.update(effective_inputs)
+        if task is not None:
+            merged["task"] = task
+        resolved = []
+        for repo_url in workflow.repos:
+            for key, value in merged.items():
+                repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
+            if "{{" not in repo_url:
+                resolved.append(repo_url)
+        if resolved:
+            return resolved
+
     fallback = _resolve_target_repo(workflow, effective_inputs, task)
     if fallback:
         return [f"https://github.com/{fallback}"]

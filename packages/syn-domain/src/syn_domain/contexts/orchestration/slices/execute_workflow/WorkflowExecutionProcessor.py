@@ -15,6 +15,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    CancelExecutionCommand,
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
@@ -434,6 +435,16 @@ class WorkflowExecutionProcessor:
             result.command.input_tokens,
             result.command.output_tokens,
         )
+
+        if result.stream_result.interrupt_requested:
+            cancel_cmd = CancelExecutionCommand(
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                reason=result.stream_result.interrupt_reason or "Cancelled by user",
+            )
+            aggregate._handle_command(cancel_cmd)
+            await self._save_and_sync(aggregate)
+            return
 
         if result.command.exit_code != 0:
             reason = result.stream_result.error_reason

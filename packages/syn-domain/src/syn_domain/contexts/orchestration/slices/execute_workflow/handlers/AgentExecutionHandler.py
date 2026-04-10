@@ -44,9 +44,12 @@ def _detect_exit_code(
     phase_id: str,
     tokens: TokenAccumulator,
 ) -> int:
-    """Determine agent exit code from stream result and workspace state."""
-    if stream_result.interrupt_requested:
-        return 1
+    """Determine agent exit code from stream result and workspace state.
+
+    Note: If interrupt_requested=True, the caller is responsible for routing
+    to the cancellation path. This function returns only the actual process
+    exit code.
+    """
     stream_exit_code = workspace.last_stream_exit_code
     if stream_exit_code is not None and stream_exit_code != 0:
         logger.error(
