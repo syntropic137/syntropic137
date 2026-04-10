@@ -12,6 +12,7 @@ import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
 import { detectFormat, resolvePackage } from "../../packages/resolver.js";
+import fs from "node:fs";
 import path from "node:path";
 
 type WorkflowResponse = components["schemas"]["WorkflowResponse"];
@@ -30,6 +31,7 @@ export const createCommand: CommandDef = {
     ref: { type: "string", description: "Repository ref/branch", default: "main" },
     description: { type: "string", short: "d", description: "Workflow description" },
     repos: { type: "string", short: "R", description: "Default GitHub URLs for workspace hydration (repeatable). ADR-058.", multiple: true },
+    from: { type: "string", short: "f", description: "Path to workflow.yaml or directory containing it — registers phases from YAML" },
   },
   handler: async (parsed: ParsedArgs) => {
     const name = parsed.positionals[0];
@@ -44,6 +46,34 @@ export const createCommand: CommandDef = {
     const description = parsed.values["description"] as string | undefined;
     const reposValues = parsed.values["repos"];
     const templateRepos: string[] = Array.isArray(reposValues) ? reposValues as string[] : reposValues ? [reposValues as string] : [];
+    const fromPath = parsed.values["from"] as string | undefined;
+
+    let phases: Record<string, unknown>[] | undefined;
+    let inputDeclarations: unknown[] | undefined;
+
+    if (fromPath) {
+      const resolved = path.resolve(fromPath);
+      if (!fs.existsSync(resolved)) {
+        printError(`Path not found: ${fromPath}`);
+        throw new CLIError("Path not found", 1);
+      }
+      const stat = fs.statSync(resolved);
+      const workflowDir = stat.isDirectory() ? resolved : path.dirname(resolved);
+      try {
+        const { workflows } = resolvePackage(workflowDir);
+        if (workflows.length === 0) {
+          printError(`No workflows found in: ${workflowDir}`);
+          throw new CLIError("No workflows found", 1);
+        }
+        const wf = workflows[0]!;
+        phases = wf.phases as Record<string, unknown>[];
+        inputDeclarations = wf.input_declarations;
+      } catch (err) {
+        if (err instanceof CLIError) throw err;
+        printError(`Failed to parse workflow YAML: ${err instanceof Error ? err.message : String(err)}`);
+        throw new CLIError("YAML parse error", 1);
+      }
+    }
 
     const data = unwrap(
       await api.POST("/workflows", {
@@ -55,6 +85,8 @@ export const createCommand: CommandDef = {
           repository_ref: repoRef,
           description: description ?? null,
           ...(templateRepos.length > 0 ? { repos: templateRepos } : {}),
+          ...(phases !== undefined ? { phases } : {}),
+          ...(inputDeclarations !== undefined ? { input_declarations: inputDeclarations } : {}),
         },
       }),
       "Failed to create workflow",
@@ -64,6 +96,9 @@ export const createCommand: CommandDef = {
     printSuccess(`Created workflow: ${style(name, CYAN)}`);
     print(`  ID: ${style(workflowId, DIM)}`);
     print(`  Type: ${style(workflowType, DIM)}`);
+    if (!fromPath) {
+      printDim(`  Tip: Use --from ./workflow.yaml to register phases from a YAML file`);
+    }
   },
 };
 
