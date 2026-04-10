@@ -3,6 +3,9 @@
 # =============================================================================
 events.jsonl
 
+# Claude Code runtime files
+.claude/scheduled_tasks.lock
+
 # Generated visualization outputs
 clusters.html
 codecity.html
