@@ -137,17 +137,18 @@ def _is_stale(installations: list) -> bool:
 async def _sync_installations(
     client: _RepoLister,
     projection: InstallationProjection,
-) -> list:
+) -> list | None:
     """Fetch all installations from GitHub API and upsert into the projection.
 
-    Called when the installation cache is empty or stale. Returns the refreshed
-    installation list, or an empty list if the GitHub API call fails.
+    Returns the refreshed installation list on success (may be empty if no
+    installations exist), or None if the GitHub API call itself failed so the
+    caller can distinguish a successful empty result from a network failure.
     """
     try:
         raw = await client.list_installations()
     except Exception:
         logger.warning("GitHub API installation sync failed", exc_info=True)
-        return []
+        return None
     result = []
     for item in raw:
         try:
@@ -200,7 +201,8 @@ async def _aggregate_all_installations(
 
     if _is_stale(installations):
         refreshed = await _sync_installations(client, projection)
-        if refreshed or not installations:
+        if refreshed is not None:
+            # Success (even if empty): replace cache. None = API failure: keep stale.
             installations = refreshed
 
     if not installations:
