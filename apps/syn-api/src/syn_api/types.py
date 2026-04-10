@@ -399,6 +399,10 @@ class WorkflowDetail(BaseModel):
     input_declarations: list[InputDeclarationResponse] = Field(default_factory=list)
     created_at: datetime | None = None
     runs_count: int = 0
+    repository_url: str | None = None
+    """Template-level repository URL (single-repo workflows)."""
+    repos: list[str] = Field(default_factory=list)
+    """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
 
 
 class ExecutionSummary(BaseModel):

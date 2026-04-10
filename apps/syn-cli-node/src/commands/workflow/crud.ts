@@ -29,6 +29,7 @@ export const createCommand: CommandDef = {
     repo: { type: "string", short: "r", description: "Repository URL", default: "https://github.com/example/repo" },
     ref: { type: "string", description: "Repository ref/branch", default: "main" },
     description: { type: "string", short: "d", description: "Workflow description" },
+    repos: { type: "string", short: "R", description: "Default GitHub URLs for workspace hydration (repeatable). ADR-058.", multiple: true },
   },
   handler: async (parsed: ParsedArgs) => {
     const name = parsed.positionals[0];
@@ -41,6 +42,8 @@ export const createCommand: CommandDef = {
     const repoUrl = (parsed.values["repo"] as string | undefined) ?? "https://github.com/example/repo";
     const repoRef = (parsed.values["ref"] as string | undefined) ?? "main";
     const description = parsed.values["description"] as string | undefined;
+    const reposValues = parsed.values["repos"];
+    const templateRepos: string[] = Array.isArray(reposValues) ? reposValues as string[] : reposValues ? [reposValues as string] : [];
 
     const data = unwrap(
       await api.POST("/workflows", {
@@ -51,6 +54,7 @@ export const createCommand: CommandDef = {
           repository_url: repoUrl,
           repository_ref: repoRef,
           description: description ?? null,
+          repos: templateRepos.length > 0 ? templateRepos : undefined,
         },
       }),
       "Failed to create workflow",

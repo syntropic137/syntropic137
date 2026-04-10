@@ -1887,6 +1887,11 @@ export interface components {
             input_declarations?: {
                 [key: string]: unknown;
             }[] | null;
+            /**
+             * Repos
+             * @description Default GitHub URLs for this workflow template (ADR-058). Can be overridden at execution time via the repos field on the execute request.
+             */
+            repos?: string[];
         };
         /** CreateWorkflowResponse */
         CreateWorkflowResponse: {
@@ -1961,6 +1966,11 @@ export interface components {
              * @description Primary task description -- substituted for $ARGUMENTS in phase prompts.
              */
             task?: string | null;
+            /**
+             * Repos
+             * @description GitHub URLs to pre-clone for workspace hydration (ADR-058). Overrides the workflow template's repository_url. Equivalent to passing inputs={'repos': 'url1,url2'} but type-safe.
+             */
+            repos?: string[];
             /**
              * Provider
              * @deprecated
@@ -4332,6 +4342,10 @@ export interface components {
             runs_count: number;
             /** Runs Link */
             runs_link?: string | null;
+            /** Repository Url */
+            repository_url?: string | null;
+            /** Repos */
+            repos?: string[];
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {

@@ -49,3 +49,7 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
 
     # Input declarations (ISS-211)
     input_declarations: list[InputDeclaration] = Field(default_factory=list)
+
+    # Multi-repo support (ADR-058)
+    repos: list[str] = Field(default_factory=list)
+    """Full GitHub URLs declared for this workflow template (ADR-058). Empty = single-repo (use repository_url)."""

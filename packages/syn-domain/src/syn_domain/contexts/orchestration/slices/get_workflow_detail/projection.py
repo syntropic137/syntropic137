@@ -130,6 +130,8 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             input_declarations=input_decls,
             created_at=event_data.get("created_at"),
             runs_count=0,
+            repository_url=event_data.get("repository_url"),
+            repos=tuple(event_data.get("repos", [])),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 

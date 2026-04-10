@@ -743,6 +743,18 @@ class TestWorkspaceProvisionHandler:
 # =========================================================================
 
 
+def _make_workflow_stub(
+    repository_url: str | None = None,
+    repos: list[str] | None = None,
+) -> MagicMock:
+    """Return a minimal WorkflowTemplateAggregate stub for _resolve_repos tests."""
+    wf = MagicMock()
+    wf._repository_url = repository_url
+    wf.repos = repos or []
+    wf.input_declarations = []
+    return wf
+
+
 @pytest.mark.unit
 class TestResolveRepos:
     """Tests for ExecuteWorkflowHandler._resolve_repos."""
@@ -755,7 +767,7 @@ class TestResolveRepos:
 
         result = ExecuteWorkflowHandler._resolve_repos(
             {"repos": "https://github.com/org/repo-a,https://github.com/org/repo-b"},
-            repo_url=None,
+            _make_workflow_stub(),
         )
         assert result == [
             "https://github.com/org/repo-a",
@@ -770,42 +782,69 @@ class TestResolveRepos:
 
         result = ExecuteWorkflowHandler._resolve_repos(
             {"repos": " https://github.com/org/repo-a , https://github.com/org/repo-b "},
-            repo_url=None,
+            _make_workflow_stub(),
         )
         assert result == [
             "https://github.com/org/repo-a",
             "https://github.com/org/repo-b",
         ]
 
-    def test_falls_back_to_repo_url_when_repos_empty(self) -> None:
-        """Falls back to repo_url when repos input is absent."""
+    def test_falls_back_to_template_repos_when_inputs_empty(self) -> None:
+        """Falls back to workflow.repos when repos input is absent."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
             {},
-            repo_url="https://github.com/org/repo-a",
+            _make_workflow_stub(repos=["https://github.com/org/repo-a"]),
         )
         assert result == ["https://github.com/org/repo-a"]
 
-    def test_empty_inputs_and_no_repo_url_returns_empty(self) -> None:
-        """Empty inputs and no repo_url → empty list."""
+    def test_falls_back_to_repository_url_when_repos_and_template_repos_empty(self) -> None:
+        """Falls back to repository_url when both inputs.repos and workflow.repos are absent."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
-        result = ExecuteWorkflowHandler._resolve_repos({}, repo_url=None)
+        result = ExecuteWorkflowHandler._resolve_repos(
+            {},
+            _make_workflow_stub(repository_url="https://github.com/org/repo-a"),
+        )
+        assert result == ["https://github.com/org/repo-a"]
+
+    def test_empty_inputs_and_no_repos_returns_empty(self) -> None:
+        """Empty inputs, no template repos, no repository_url → empty list."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        result = ExecuteWorkflowHandler._resolve_repos({}, _make_workflow_stub())
         assert result == []
 
-    def test_repos_takes_precedence_over_repo_url(self) -> None:
-        """repos input takes precedence over repo_url fallback."""
+    def test_repos_takes_precedence_over_template_repos_and_repo_url(self) -> None:
+        """inputs.repos takes precedence over workflow.repos and repository_url."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
             {"repos": "https://github.com/org/repo-a"},
-            repo_url="https://github.com/org/fallback-repo",
+            _make_workflow_stub(
+                repos=["https://github.com/org/template-repo"],
+                repository_url="https://github.com/org/fallback-repo",
+            ),
         )
         assert result == ["https://github.com/org/repo-a"]
+
+    def test_slug_normalised_to_full_url(self) -> None:
+        """'owner/repo' slugs from trigger presets are expanded to full HTTPS URLs."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        result = ExecuteWorkflowHandler._resolve_repos(
+            {"repos": "syntropic137/syntropic137"},
+            _make_workflow_stub(),
+        )
+        assert result == ["https://github.com/syntropic137/syntropic137"]

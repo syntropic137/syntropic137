@@ -75,6 +75,10 @@ class WorkflowResponse(BaseModel):
     created_at: str | None = None
     runs_count: int = 0
     runs_link: str | None = None
+    repository_url: str | None = None
+    """Template-level repository URL (single-repo workflows)."""
+    repos: list[str] = Field(default_factory=list)
+    """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
 
 
 class WorkflowListResponse(BaseModel):
@@ -223,6 +227,8 @@ async def get_workflow(
             input_declarations=_map_input_declarations(detail.input_declarations),
             created_at=detail.created_at,
             runs_count=detail.runs_count,
+            repository_url=detail.repository_url,
+            repos=list(detail.repos),
         )
     )
 
@@ -553,6 +559,8 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         created_at=str(detail.created_at) if detail.created_at else None,
         runs_count=detail.runs_count,
         runs_link=f"/api/workflows/{detail.id}/runs",
+        repository_url=detail.repository_url,
+        repos=list(detail.repos),
     )
 
 

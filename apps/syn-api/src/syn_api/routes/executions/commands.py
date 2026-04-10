@@ -99,6 +99,29 @@ def _build_auth_error_detail(repo_full_name: str, exc: Exception) -> str:
     return f"GitHub App authentication failed for {repo_full_name}: {exc_message}"
 
 
+def _get_preflight_repos(
+    effective_inputs: dict[str, str],
+    workflow: WorkflowTemplateAggregate,
+    task: str | None,
+) -> list[str]:
+    """Resolve the list of repos to preflight-validate for GitHub App access."""
+    repos_csv = effective_inputs.get("repos", "")
+    if repos_csv:
+        return [u.strip() for u in repos_csv.split(",") if u.strip()]
+    fallback = _resolve_target_repo(workflow, effective_inputs, task)
+    if fallback:
+        return [f"https://github.com/{fallback}"]
+    return []
+
+
+async def _validate_all_repos_access(repo_urls: list[str]) -> None:
+    """Pre-validate that the GitHub App can access all requested repositories."""
+    for url in repo_urls:
+        repo_full_name = _parse_repo_from_url(url)
+        if repo_full_name:
+            await _validate_repo_access(repo_full_name)
+
+
 async def _validate_repo_access(repo_full_name: str) -> None:
     """Pre-validate that the GitHub App can access the target repository.
 
@@ -140,30 +163,40 @@ def _merge_inputs(
     return merged
 
 
-def _validate_required_inputs(
+def _check_missing_declarations(
     workflow: WorkflowTemplateAggregate,
-    inputs: dict[str, str],
-    task: str | None,
+    merged: dict[str, str],
 ) -> None:
-    """Eagerly validate that all required inputs are satisfied.
+    """Raise 422 if any required InputDeclaration (with no default) is absent."""
+    missing = [
+        decl.name
+        for decl in workflow.input_declarations
+        if decl.required and decl.default is None and decl.name not in merged
+    ]
+    if not missing:
+        return
+    hints = [f"--input {name}=<value>" for name in sorted(missing)]
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"Missing required inputs: {', '.join(sorted(missing))}. "
+            f"Provide them via: {', '.join(hints)}"
+        ),
+    )
 
-    Merges input declaration defaults, provided inputs, and the task
-    placeholder, then checks the repository URL for unresolved
-    ``{{placeholder}}`` patterns.  Raises HTTPException(422) with a
-    clear message listing the missing inputs so the caller knows
-    exactly what to provide.
-    """
+
+def _check_repo_url_placeholders(
+    workflow: WorkflowTemplateAggregate,
+    merged: dict[str, str],
+) -> None:
+    """Raise 422 if workflow repository_url still contains unresolved {{placeholders}}."""
     repo_url: str | None = workflow._repository_url
     if not repo_url:
         return
-
-    merged = _merge_inputs(workflow, inputs, task)
     for key, value in merged.items():
         repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
-
     if "{{" not in repo_url:
         return
-
     unresolved = sorted(set(re.findall(r"\{\{(\w+)\}\}", repo_url)))
     if not unresolved:
         raise HTTPException(
@@ -181,6 +214,21 @@ def _validate_required_inputs(
             f"Provide them via: {', '.join(hints)}"
         ),
     )
+
+
+def _validate_required_inputs(
+    workflow: WorkflowTemplateAggregate,
+    inputs: dict[str, str],
+    task: str | None,
+) -> None:
+    """Eagerly validate that all required inputs are satisfied.
+
+    Checks required InputDeclarations and unresolved {{placeholder}} patterns.
+    Raises HTTPException(422) with a clear message listing what's missing.
+    """
+    merged = _merge_inputs(workflow, inputs, task)
+    _check_missing_declarations(workflow, merged)
+    _check_repo_url_placeholders(workflow, merged)
 
 
 router = APIRouter(prefix="/workflows", tags=["execution"])
@@ -201,6 +249,14 @@ class ExecuteWorkflowRequest(BaseModel):
     task: str | None = Field(
         default=None,
         description="Primary task description -- substituted for $ARGUMENTS in phase prompts.",
+    )
+    repos: list[str] = Field(
+        default_factory=list,
+        description=(
+            "GitHub URLs to pre-clone for workspace hydration (ADR-058). "
+            "Overrides the workflow template's repository_url. "
+            "Equivalent to passing inputs={'repos': 'url1,url2'} but type-safe."
+        ),
     )
     provider: str = Field(
         default="claude",
@@ -355,19 +411,24 @@ async def execute_workflow_endpoint(
     if workflow is None:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-    # Validate required inputs before returning 200 (#639)
-    _validate_required_inputs(workflow, request.inputs, request.task)
+    # Build effective inputs — repos field takes precedence over inputs["repos"] CSV
+    effective_inputs: dict[str, str] = dict(request.inputs)
+    if request.repos:
+        effective_inputs["repos"] = ",".join(request.repos)
 
-    repo_full_name = _resolve_target_repo(workflow, request.inputs, request.task)
-    if repo_full_name:
-        await _validate_repo_access(repo_full_name)
+    # Validate required inputs before returning 200 (#639)
+    _validate_required_inputs(workflow, effective_inputs, request.task)
+
+    # Multi-repo GitHub App preflight validation
+    preflight_repos = _get_preflight_repos(effective_inputs, workflow, request.task)
+    await _validate_all_repos_access(preflight_repos)
 
     execution_id = f"exec-{uuid4().hex[:12]}"
 
     async def _run() -> None:
         result = await execute(
             workflow_id=workflow_id,
-            inputs=request.inputs,
+            inputs=effective_inputs,
             execution_id=execution_id,
             task=request.task,
         )

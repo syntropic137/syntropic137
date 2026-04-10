@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,7 +20,7 @@ class ExecuteWorkflowCommand(BaseModel):
     aggregate_id: str = Field(..., min_length=1, description="Workflow ID to execute")
 
     # Input variables for the workflow
-    inputs: dict[str, Any] = Field(
+    inputs: dict[str, str] = Field(
         default_factory=dict,
         description="Input variables for the workflow phases",
     )
