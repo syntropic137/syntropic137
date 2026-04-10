@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
@@ -20,9 +19,6 @@ from syn_api.types import (
     Ok,
     Result,
 )
-
-if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +67,11 @@ class MetricsResponse(BaseModel):
 
 async def get_dashboard_metrics(
     workflow_id: str | None = None,  # noqa: ARG001
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[DashboardMetrics, MetricsError]:
     """Get aggregated dashboard metrics.
 
     Args:
         workflow_id: Optional filter by workflow ID.
-        auth: Optional authentication context.
 
     Returns:
         Ok(DashboardMetrics) on success, Err(MetricsError) on failure.

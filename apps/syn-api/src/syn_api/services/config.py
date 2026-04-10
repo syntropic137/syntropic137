@@ -5,8 +5,6 @@ Maps to syn_shared.settings.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from pydantic import SecretStr
 
 from syn_api.types import (
@@ -17,9 +15,6 @@ from syn_api.types import (
     Ok,
     Result,
 )
-
-if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
 
 _ENV_TEMPLATE = """\
 # =============================================================================
@@ -131,13 +126,11 @@ def _build_storage_section(settings: object) -> dict[str, object]:
 
 async def get_config(
     show_secrets: bool = False,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ConfigSnapshot, ConfigError]:
     """Get the current application configuration.
 
     Args:
         show_secrets: If True, show secret values. Otherwise mask them.
-        auth: Optional authentication context.
 
     Returns:
         Ok(ConfigSnapshot) on success, Err(ConfigError) on failure.
@@ -184,15 +177,10 @@ def _validate_environment(settings: object) -> list[ConfigIssue]:
     return []
 
 
-async def validate_config(
-    auth: AuthContext | None = None,  # noqa: ARG001
-) -> Result[list[ConfigIssue], ConfigError]:
+async def validate_config() -> Result[list[ConfigIssue], ConfigError]:
     """Validate the current configuration and report issues.
 
     Checks settings validity and agent provider availability.
-
-    Args:
-        auth: Optional authentication context.
 
     Returns:
         Ok(list[ConfigIssue]) on success, Err(ConfigError) on failure.
@@ -212,13 +200,8 @@ async def validate_config(
     return Ok(issues)
 
 
-async def get_env_template(
-    auth: AuthContext | None = None,  # noqa: ARG001
-) -> Result[str, ConfigError]:
+async def get_env_template() -> Result[str, ConfigError]:
     """Get the .env template for configuring Syntropic137.
-
-    Args:
-        auth: Optional authentication context.
 
     Returns:
         Ok(template_string) on success, Err(ConfigError) on failure.

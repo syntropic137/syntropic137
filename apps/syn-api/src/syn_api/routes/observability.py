@@ -22,7 +22,6 @@ from syn_api.types import (
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
-    from syn_api.auth import AuthContext
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 
@@ -36,7 +35,6 @@ async def get_tool_timeline(
     session_id: str,
     limit: int = 1000,
     include_blocked: bool = False,  # noqa: ARG001
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[dict[str, Any]], ObservabilityError]:
     """Get the tool call timeline for a session.
 
@@ -44,7 +42,6 @@ async def get_tool_timeline(
         session_id: The session to get the timeline for.
         limit: Maximum events to return.
         include_blocked: Include blocked tool calls.
-        auth: Optional authentication context.
 
     Returns:
         Ok(list[dict]) with timeline events on success.
@@ -113,14 +110,12 @@ async def _get_execution_token_metrics(
 async def get_token_metrics(
     execution_id: str | None = None,
     session_id: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Get token usage metrics for an execution or session.
 
     Args:
         execution_id: Filter by execution ID.
         session_id: Filter by session ID.
-        auth: Optional authentication context.
 
     Returns:
         Ok(dict) with token metrics on success.

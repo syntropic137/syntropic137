@@ -1,5 +1,7 @@
 # Self-Host Deployment Guide
 
+> **User-facing docs:** The primary self-hosting guide lives at `apps/syn-docs/content/docs/guide/self-hosting.mdx` and is published to the public documentation site. This file is the contributor/infrastructure reference — architecture details, nginx config notes, and deployment internals.
+
 Complete guide for deploying Syntropic137 on a self-hosted server (Mac Mini, Linux box, etc.) with secure external access via Cloudflare Tunnel.
 
 ## Overview

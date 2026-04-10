@@ -27,7 +27,6 @@ from syn_api.types import (
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
     from syn_adapters.projections.session_tools import ToolOperation as AdapterToolOperation
-    from syn_api.auth import AuthContext
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -99,7 +98,6 @@ async def get_session_events(
     event_type: str | None = None,
     limit: int = 1000,
     offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[EventRecord], ObservabilityError]:
     """Get raw events for a session from the event store.
 
@@ -108,7 +106,6 @@ async def get_session_events(
         event_type: Optional event type filter.
         limit: Maximum events to return.
         offset: Pagination offset.
-        auth: Optional authentication context.
     """
     await ensure_connected()
     try:
@@ -140,14 +137,12 @@ async def get_session_events(
 async def get_session_timeline(
     session_id: str,
     limit: int = 1000,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[TimelineEntry], ObservabilityError]:
     """Get a timeline of tool operations for a session.
 
     Args:
         session_id: The session to query.
         limit: Maximum entries to return.
-        auth: Optional authentication context.
     """
     await ensure_connected()
     try:
@@ -195,13 +190,11 @@ def _accumulate_tool_stats(
 
 async def get_session_tool_summary(
     session_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ToolUsageSummary], ObservabilityError]:
     """Get aggregated tool usage summary for a session.
 
     Args:
         session_id: The session to query.
-        auth: Optional authentication context.
     """
     await ensure_connected()
     try:
@@ -228,7 +221,6 @@ async def get_session_tool_summary(
 async def get_recent_activity_events(
     limit: int = 50,
     event_type: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[dict[str, Any]], ObservabilityError]:
     """Get recent activity events for the global dashboard feed.
 
@@ -238,7 +230,6 @@ async def get_recent_activity_events(
     Args:
         limit: Maximum events to return.
         event_type: Optional event type filter (e.g. "git_commit").
-        auth: Optional authentication context.
 
     Returns:
         Ok(list[dict]) on success.
@@ -294,14 +285,12 @@ async def _get_execution_token_metrics(
 async def get_token_metrics(
     execution_id: str | None = None,
     session_id: str | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[dict[str, Any], ObservabilityError]:
     """Get token usage metrics for an execution or session.
 
     Args:
         execution_id: Filter by execution ID.
         session_id: Filter by session ID.
-        auth: Optional authentication context.
 
     Returns:
         Ok(dict) with token metrics on success.

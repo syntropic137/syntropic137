@@ -30,7 +30,6 @@ from syn_api.types import (
 )
 
 if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
@@ -327,7 +326,6 @@ async def execute(
     execution_id: str | None = None,
     task: str | None = None,
     tenant_id: str | None = None,  # noqa: ARG001
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 
@@ -337,7 +335,6 @@ async def execute(
         execution_id: Optional execution ID (auto-generated if omitted).
         task: Optional primary task description.
         tenant_id: Optional tenant ID for multi-tenant deployments.
-        auth: Optional authentication context.
 
     Returns:
         Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.

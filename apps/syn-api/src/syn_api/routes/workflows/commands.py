@@ -28,7 +28,6 @@ from syn_api.types import (
 )
 
 if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         InputDeclaration,
         PhaseDefinition,
@@ -136,7 +135,6 @@ async def create_workflow(
     input_declarations: list[dict[str, Any]] | None = None,
     workflow_id: str | None = None,
     repos: list[str] | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, WorkflowError]:
     """Create a new workflow template.
 
@@ -151,7 +149,6 @@ async def create_workflow(
         phases: Optional list of phase definitions. Defaults to a single initial phase.
         input_declarations: Optional list of input declarations.
         workflow_id: Optional client-supplied ID. Auto-generated if omitted.
-        auth: Optional authentication context.
 
     Returns:
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
@@ -195,13 +192,11 @@ async def create_workflow(
 
 async def validate_yaml(
     yaml_content: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[WorkflowValidation, WorkflowError]:
     """Validate workflow YAML content.
 
     Args:
         yaml_content: Raw YAML content to validate.
-        auth: Optional authentication context.
 
     Returns:
         Ok(WorkflowValidation) on success, Err(WorkflowError) on failure.
@@ -244,13 +239,11 @@ def _classify_workflow_error(error_msg: str) -> WorkflowError:
 
 async def delete_workflow(
     workflow_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[None, WorkflowError]:
     """Archive (soft-delete) a workflow template.
 
     Args:
         workflow_id: ID of the workflow template to archive.
-        auth: Optional authentication context.
 
     Returns:
         Ok(None) on success, Err(WorkflowError) on failure.
@@ -474,7 +467,6 @@ async def update_phase_prompt(
     model: str | None = None,
     timeout_seconds: int | None = None,
     allowed_tools: list[str] | None = None,
-    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, WorkflowError]:
     """Update a workflow phase's prompt template and optional config.
 
@@ -485,7 +477,6 @@ async def update_phase_prompt(
         model: Optional model override.
         timeout_seconds: Optional timeout override.
         allowed_tools: Optional allowed tools override.
-        auth: Optional authentication context.
 
     Returns:
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
