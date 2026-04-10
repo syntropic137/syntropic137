@@ -122,7 +122,7 @@ def generate_jwt(app_id: str, private_key: str) -> str:
         # Issued at (with clock skew buffer)
         "iat": now - CLOCK_SKEW_SECONDS,
         # Expires in 10 minutes
-        "exp": now + JWT_EXPIRY_SECONDS,
+        "exp": now + JWT_EXPIRY_SECONDS - CLOCK_SKEW_SECONDS,
         # Issuer is the App ID
         "iss": app_id,
     }
