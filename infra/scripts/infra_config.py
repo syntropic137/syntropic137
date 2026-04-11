@@ -1,7 +1,7 @@
 """Infrastructure configuration and utilities for Syn137 infrastructure scripts.
 
-Canonical implementations of common operations used across setup.py,
-secrets_setup.py, cloudflare_tunnel.py, health_check.py, and friends.
+Canonical implementations of common operations used across health_check.py,
+print_access_urls.py, op_env_export.py, and justfile recipes.
 Import from here - don't re-implement.
 
 See ADR-004: Environment Configuration with Pydantic Settings.
@@ -9,9 +9,7 @@ See ADR-004: Environment Configuration with Pydantic Settings.
 
 from __future__ import annotations
 
-import contextlib
 import re
-import stat
 import urllib.request
 from pathlib import Path
 
@@ -46,13 +44,6 @@ SECRET_REDIS_PASSWORD = "redis-password.secret"
 SECRET_MINIO_PASSWORD = "minio-password.secret"
 SECRET_GITHUB_KEY = "github-app-private-key.pem"
 SECRET_CF_TUNNEL_TOKEN = "cloudflare-tunnel-token.txt"
-
-# Required auto-generated secrets: filename → byte length (2x chars in hex)
-REQUIRED_SECRETS: dict[str, int] = {
-    SECRET_DB_PASSWORD: 32,
-    SECRET_REDIS_PASSWORD: 32,
-    SECRET_MINIO_PASSWORD: 32,
-}
 
 # ---------------------------------------------------------------------------
 # .env key constants (used across root .env and infra/.env)
@@ -139,20 +130,6 @@ def parse_env_file(path: Path) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# File permissions
-# ---------------------------------------------------------------------------
-
-
-def set_secure_permissions(path: Path) -> None:
-    """Set file permissions to owner read/write only (600).
-
-    Works on Unix-like systems; silently ignored on Windows.
-    """
-    with contextlib.suppress(OSError, AttributeError):
-        path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-
-
-# ---------------------------------------------------------------------------
 # Domain / URL helpers
 # ---------------------------------------------------------------------------
 
@@ -202,22 +179,3 @@ def format_access_urls(hostname: str) -> dict[str, str]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Compose file helpers
-# ---------------------------------------------------------------------------
-
-
-def compose_file_args(*, cloudflare: bool = False, dev: bool = False) -> list[str]:
-    """Build the ``-f file1 -f file2`` args for docker compose.
-
-    Centralises the compose overlay stacking so setup.py and justfile
-    don't independently maintain the same list.
-    """
-    files = ["-f", str(COMPOSE_BASE)]
-    if dev:
-        files += ["-f", str(COMPOSE_DEV)]
-    else:
-        files += ["-f", str(COMPOSE_SELFHOST)]
-    if cloudflare:
-        files += ["-f", str(COMPOSE_CLOUDFLARE)]
-    return files

@@ -84,18 +84,17 @@ Full production setup with secrets, Cloudflare tunnel, GitHub App.
 
 **Steps:**
 
-1. **Run the onboarding wizard**
+1. **Run the NPX setup CLI**
    ```bash
-   just onboard
+   npx @syntropic137/setup init
    ```
-   The wizard (`infra/scripts/setup.py`) handles:
+   The wizard handles:
    - Prerequisite checks
-   - Submodule initialization
    - Secret generation
-   - 1Password configuration (optional)
-   - Cloudflare tunnel setup (optional)
-   - GitHub App configuration (optional)
-   - Smee webhook proxy (optional)
+   - GitHub App configuration
+   - Stack provisioning (docker compose pull + up)
+   - Cloudflare tunnel setup (optional, via `npx @syntropic137/setup tunnel`)
+   - 1Password integration (optional, see `infra/scripts/selfhost-env.sh`)
 
 2. **Start selfhost stack**
    ```bash
