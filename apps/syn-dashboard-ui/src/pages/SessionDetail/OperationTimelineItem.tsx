@@ -64,14 +64,16 @@ export function OperationTimelineItem({ op, index, expanded, onToggle }: {
 
   return (
     <div
-      className="relative flex items-start gap-4 px-4 py-2 hover:bg-[var(--color-surface-elevated)]/50 transition-colors animate-fade-in"
+      className="relative flex items-start py-2 hover:bg-[var(--color-surface-elevated)]/50 transition-colors animate-fade-in"
       style={{ animationDelay: `${index * 30}ms` }}
     >
-      <div className={clsx('relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', bgColor)}>
-        <Icon className={clsx('h-4 w-4', textColor)} />
+      <div className="flex w-[52px] shrink-0 items-start justify-center pt-0.5">
+        <div className={clsx('relative z-10 flex h-8 w-8 items-center justify-center rounded-lg', bgColor)}>
+          <Icon className={clsx('h-4 w-4', textColor)} />
+        </div>
       </div>
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 pl-4 pr-4">
         <div className="flex items-center gap-2">
           {showToolIcon && <ToolIcon className="h-3.5 w-3.5 text-[var(--color-text-secondary)]" />}
           <span className="text-sm font-semibold text-[var(--color-text-primary)]">

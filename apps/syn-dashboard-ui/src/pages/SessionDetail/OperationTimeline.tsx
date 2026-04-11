@@ -93,7 +93,7 @@ export const OperationTimeline = forwardRef<HTMLDivElement, OperationTimelinePro
             </div>
           ) : (
             <div ref={ref} className="relative">
-              <div className="absolute left-8 top-0 bottom-0 w-px bg-[var(--color-border)]" />
+              <div className="absolute left-[52px] top-0 bottom-0 w-px bg-[var(--color-border)]" />
               <div className="space-y-0">
                 {[...operations].reverse().map((op, idx) => (
                   <OperationTimelineItem
