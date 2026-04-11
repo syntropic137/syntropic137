@@ -11,6 +11,7 @@ from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoActio
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
+    ExecutionStatus,
     PhaseDefinition,
     PhaseResult,
 )
@@ -181,6 +182,14 @@ class WorkflowExecutionProcessor:
                     phase_outputs=phase_outputs,
                     repos=repos,
                 )
+            if aggregate.status == ExecutionStatus.CANCELLED:
+                return await self._cancel_execution(
+                    execution_id,
+                    workflow_id,
+                    phase_results,
+                    all_artifact_ids,
+                    started_at,
+                )
             return await self._complete_execution(
                 aggregate,
                 execution_id,
@@ -244,6 +253,33 @@ class WorkflowExecutionProcessor:
                 phase_results,
                 completed_phase_ids,
             )
+
+    async def _cancel_execution(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        phase_results: list[PhaseResult],
+        all_artifact_ids: list[str],
+        started_at: datetime,
+    ) -> WorkflowExecutionResult:
+        """Close open sessions as cancelled and return cancelled result.
+
+        Called when the to-do list empties due to ExecutionCancelledEvent.
+        The aggregate is already in CANCELLED status — no new command needed.
+        """
+        for _pid, mgr in list(self._session_managers.items()):
+            await mgr.complete_cancelled(reason="Cancelled by user")
+        self._session_managers.clear()
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="cancelled",
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            phase_results=phase_results,
+            artifact_ids=all_artifact_ids,
+            metrics=ExecutionMetrics.from_results(phase_results),
+        )
 
     async def _complete_execution(
         self,

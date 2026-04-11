@@ -99,13 +99,23 @@ def _build_auth_error_detail(repo_full_name: str, exc: Exception) -> str:
 
 
 def _apply_repo_substitution(repos: list[str], merged: dict[str, str]) -> list[str]:
-    """Substitute {{key}} patterns in each repo URL; skip entries with remaining placeholders."""
+    """Substitute {{key}} patterns in each repo URL; raise ValueError if any placeholders remain."""
     resolved = []
     for repo_url in repos:
         for key, value in merged.items():
             repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
-        if "{{" not in repo_url:
-            resolved.append(repo_url)
+        if "{{" in repo_url:
+            unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
+            if not unresolved:
+                raise ValueError(
+                    "Malformed placeholder in repos field. "
+                    "Expected {{name}} with alphanumeric/underscore characters."
+                )
+            raise ValueError(
+                f"Unresolved placeholders in repos field: {unresolved}. "
+                f"Provide them via --input {', '.join(f'{k}=<value>' for k in unresolved)}."
+            )
+        resolved.append(repo_url)
     return resolved
 
 
@@ -141,7 +151,10 @@ def _get_preflight_repos(
     # repository_url (which defaults to example/repo), producing a misleading auth error.
     if workflow.repos:
         merged = _build_merged_inputs(workflow, effective_inputs, task)
-        resolved = _apply_repo_substitution(workflow.repos, merged)
+        try:
+            resolved = _apply_repo_substitution(workflow.repos, merged)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if resolved:
             return resolved
 

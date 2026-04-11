@@ -65,9 +65,14 @@ def _substitute_repo_vars(repo_url: str, merged_inputs: dict[str, str]) -> str:
         repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
     if "{{" in repo_url:
         unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
+        if not unresolved:
+            raise ValueError(
+                "Malformed placeholders in repos field. "
+                "Expected placeholders in the form {{name}} with alphanumeric/underscore characters."
+            )
         raise ValueError(
             f"Unresolved placeholders in repos field: {unresolved}. "
-            f"Provide them via --input {unresolved[0]}=<value>."
+            f"Provide them via --input {', '.join(f'{k}=<value>' for k in unresolved)}."
         )
     return repo_url
 
