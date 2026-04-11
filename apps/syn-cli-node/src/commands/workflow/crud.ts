@@ -31,7 +31,7 @@ export const createCommand: CommandDef = {
     ref: { type: "string", description: "Repository ref/branch", default: "main" },
     description: { type: "string", short: "d", description: "Workflow description" },
     repos: { type: "string", short: "R", description: "Default GitHub URLs for workspace hydration (repeatable). ADR-058.", multiple: true },
-    from: { type: "string", short: "f", description: "Path to workflow.yaml or directory containing it — registers phases from YAML" },
+    from: { type: "string", short: "f", description: "Path to workflow.yaml or directory containing it. Registers phases from YAML." },
   },
   handler: async (parsed: ParsedArgs) => {
     const name = parsed.positionals[0];
