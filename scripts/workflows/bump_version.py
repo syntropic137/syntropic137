@@ -54,12 +54,11 @@ PACKAGE_JSON_FILES = [
     ROOT / "apps/syn-docs/package.json",
 ]
 
-# Semver-ish: 0.19.0, 0.20.0-beta.1, 1.0.0-rc.2, etc.
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
-
 PYPROJECT_VERSION_RE = re.compile(r'^(version\s*=\s*")[^"]*(")', re.MULTILINE)
 PACKAGE_JSON_VERSION_RE = re.compile(r'^(\s*"version"\s*:\s*")[^"]*(")', re.MULTILINE)
 
+# Strict semver: 0.19.0, 0.20.0-beta.1, 1.0.0-rc.2, etc.
+# Used for both format validation and version comparison.
 SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
@@ -221,7 +220,7 @@ def bump(target: str) -> None:
     Pre-validates all files before writing any changes. If any file
     is missing a version field, fails without modifying anything.
     """
-    if not VERSION_RE.match(target):
+    if not SEMVER_RE.fullmatch(target):
         print(
             f"ERROR: Invalid version '{target}'. Expected semver (e.g., 0.20.0 or 0.20.0-beta.1)",
             file=sys.stderr,

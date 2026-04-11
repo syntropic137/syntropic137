@@ -119,23 +119,6 @@ def _apply_repo_substitution(repos: list[str], merged: dict[str, str]) -> list[s
     return resolved
 
 
-def _build_merged_inputs(
-    workflow: WorkflowTemplateAggregate,
-    effective_inputs: dict[str, str],
-    task: str | None,
-) -> dict[str, str]:
-    """Merge input declaration defaults, effective inputs, and task into one dict."""
-    merged: dict[str, str] = {
-        decl.name: str(decl.default)
-        for decl in workflow.input_declarations
-        if decl.default is not None
-    }
-    merged.update(effective_inputs)
-    if task is not None:
-        merged["task"] = task
-    return merged
-
-
 def _get_preflight_repos(
     effective_inputs: dict[str, str],
     workflow: WorkflowTemplateAggregate,
@@ -150,7 +133,7 @@ def _get_preflight_repos(
     # Without this, unresolved {{variable}} patterns in repos silently fall through to
     # repository_url (which defaults to example/repo), producing a misleading auth error.
     if workflow.repos:
-        merged = _build_merged_inputs(workflow, effective_inputs, task)
+        merged = _merge_inputs(workflow, effective_inputs, task)
         try:
             return _apply_repo_substitution(workflow.repos, merged)
         except ValueError as exc:

@@ -293,6 +293,15 @@ class WorkflowExecutionProcessor:
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_cancelled(reason="Cancelled by user")
         self._session_managers.clear()
+        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
+            try:
+                await workspace_cm.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Error cleaning up workspace during cancel")
+        self._active_workspace_cms.clear()
+        self._active_workspaces.clear()
+        self._active_envs.clear()
+        self._active_cmds.clear()
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -355,6 +364,15 @@ class WorkflowExecutionProcessor:
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_failure(error_message=str(error))
         self._session_managers.clear()
+        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
+            try:
+                await workspace_cm.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Error cleaning up workspace during failure")
+        self._active_workspace_cms.clear()
+        self._active_workspaces.clear()
+        self._active_envs.clear()
+        self._active_cmds.clear()
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
             error=str(error),

@@ -29,8 +29,14 @@ from pathlib import Path
 
 def check_drift(paths: list[str]) -> bool:
     """Return True if all paths are clean, False if any drift detected."""
-    changed = _git_diff(paths)
-    untracked = _git_untracked(paths)
+    try:
+        changed = _git_diff(paths)
+        untracked = _git_untracked(paths)
+    except subprocess.CalledProcessError as exc:
+        print(f"::error::git command failed: {exc.cmd} (exit {exc.returncode})", file=sys.stderr)
+        if exc.stderr:
+            print(exc.stderr.strip(), file=sys.stderr)
+        return False
 
     if not changed and not untracked:
         print("✓ All generated artifacts are in sync.")
@@ -84,10 +90,12 @@ def main() -> None:
 
     paths = sys.argv[1:]
 
-    # Validate paths exist (warn only - they may not exist on first run)
-    for p in paths:
-        if not Path(p).exists():
-            print(f"::warning::Path does not exist: {p}", file=sys.stderr)
+    # Validate paths exist - fail hard so CI catches misconfigured path args
+    missing = [p for p in paths if not Path(p).exists()]
+    if missing:
+        for p in missing:
+            print(f"::error::Path does not exist: {p}", file=sys.stderr)
+        sys.exit(1)
 
     sys.exit(0 if check_drift(paths) else 1)
 
