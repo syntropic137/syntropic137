@@ -59,6 +59,24 @@ def _resolve_repo_url(
     return repo_url
 
 
+def _substitute_repo_vars(repo_url: str, merged_inputs: dict[str, str]) -> str:
+    """Apply {{key}} substitution to a repo URL; raise ValueError if placeholders remain."""
+    for key, value in merged_inputs.items():
+        repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
+    if "{{" in repo_url:
+        unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
+        if not unresolved:
+            raise ValueError(
+                "Malformed placeholders in repos field. "
+                "Expected placeholders in the form {{name}} with alphanumeric/underscore characters."
+            )
+        raise ValueError(
+            f"Unresolved placeholders in repos field: {unresolved}. "
+            f"Provide them via --input {', '.join(f'{k}=<value>' for k in unresolved)}."
+        )
+    return repo_url
+
+
 def _normalise_repo_url(url: str) -> str:
     """Expand 'owner/repo' slugs to full GitHub HTTPS URLs (trigger preset compat).
 
@@ -153,7 +171,9 @@ class ExecuteWorkflowHandler:
         if repos_raw:
             return [_normalise_repo_url(u.strip()) for u in repos_raw.split(",") if u.strip()]
         if workflow.repos:
-            return list(workflow.repos)
+            return [
+                _normalise_repo_url(_substitute_repo_vars(r, merged_inputs)) for r in workflow.repos
+            ]
         repo_url = _resolve_repo_url(workflow, merged_inputs)
         if repo_url:
             return [repo_url]

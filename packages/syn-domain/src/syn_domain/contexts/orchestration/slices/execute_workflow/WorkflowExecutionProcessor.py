@@ -11,10 +11,12 @@ from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoActio
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
+    ExecutionStatus,
     PhaseDefinition,
     PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    CancelExecutionCommand,
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
@@ -30,6 +32,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecor
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
+    AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
@@ -165,19 +168,23 @@ class WorkflowExecutionProcessor:
         phase_outputs: dict[str, str] = {}
 
         try:
-            while True:
-                todos = await self._todo_projection.get_pending(execution_id)
-                if not todos:
-                    break
-                await self._dispatch(
-                    todo=todos[0],
-                    aggregate=aggregate,
-                    phase_map=phase_map,
-                    phase_results=phase_results,
-                    all_artifact_ids=all_artifact_ids,
-                    completed_phase_ids=completed_phase_ids,
-                    phase_outputs=phase_outputs,
-                    repos=repos,
+            await self._drain_todo_list(
+                execution_id=execution_id,
+                aggregate=aggregate,
+                phase_map=phase_map,
+                phase_results=phase_results,
+                all_artifact_ids=all_artifact_ids,
+                completed_phase_ids=completed_phase_ids,
+                phase_outputs=phase_outputs,
+                repos=repos,
+            )
+            if aggregate.status == ExecutionStatus.CANCELLED:
+                return await self._cancel_execution(
+                    execution_id,
+                    workflow_id,
+                    phase_results,
+                    all_artifact_ids,
+                    started_at,
                 )
             return await self._complete_execution(
                 aggregate,
@@ -199,6 +206,33 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids,
                 completed_phase_ids,
                 started_at,
+            )
+
+    async def _drain_todo_list(
+        self,
+        execution_id: str,
+        aggregate: WorkflowExecutionAggregate,
+        phase_map: dict[str, ExecutablePhase],
+        phase_results: list[PhaseResult],
+        all_artifact_ids: list[str],
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+        repos: list[str] | None,
+    ) -> None:
+        """Process to-do items until the list is empty (all phases done or cancelled)."""
+        while True:
+            todos = await self._todo_projection.get_pending(execution_id)
+            if not todos:
+                break
+            await self._dispatch(
+                todo=todos[0],
+                aggregate=aggregate,
+                phase_map=phase_map,
+                phase_results=phase_results,
+                all_artifact_ids=all_artifact_ids,
+                completed_phase_ids=completed_phase_ids,
+                phase_outputs=phase_outputs,
+                repos=repos,
             )
 
     async def _dispatch(
@@ -242,6 +276,33 @@ class WorkflowExecutionProcessor:
                 phase_results,
                 completed_phase_ids,
             )
+
+    async def _cancel_execution(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        phase_results: list[PhaseResult],
+        all_artifact_ids: list[str],
+        started_at: datetime,
+    ) -> WorkflowExecutionResult:
+        """Close open sessions as cancelled and return cancelled result.
+
+        Called when the to-do list empties due to ExecutionCancelledEvent.
+        The aggregate is already in CANCELLED status — no new command needed.
+        """
+        for _pid, mgr in list(self._session_managers.items()):
+            await mgr.complete_cancelled(reason="Cancelled by user")
+        self._session_managers.clear()
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="cancelled",
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            phase_results=phase_results,
+            artifact_ids=all_artifact_ids,
+            metrics=ExecutionMetrics.from_results(phase_results),
+        )
 
     async def _complete_execution(
         self,
@@ -435,6 +496,10 @@ class WorkflowExecutionProcessor:
             result.command.output_tokens,
         )
 
+        if result.stream_result.interrupt_requested:
+            await self._handle_cancel_signal(todo, result, aggregate)
+            return
+
         if result.command.exit_code != 0:
             reason = result.stream_result.error_reason
             base = (
@@ -447,6 +512,22 @@ class WorkflowExecutionProcessor:
             raise RuntimeError(msg)
 
         aggregate._handle_command(result.command)
+        await self._save_and_sync(aggregate)
+
+    async def _handle_cancel_signal(
+        self,
+        todo: TodoItem,
+        result: AgentExecutionResult,
+        aggregate: WorkflowExecutionAggregate,
+    ) -> None:
+        """Dispatch CancelExecutionCommand when the agent stream was interrupted by a cancel signal."""
+        assert todo.phase_id is not None, "phase_id must be set for a running agent todo"
+        cancel_cmd = CancelExecutionCommand(
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            reason=result.stream_result.interrupt_reason or "Cancelled by user",
+        )
+        aggregate._handle_command(cancel_cmd)
         await self._save_and_sync(aggregate)
 
     async def _handle_collect_artifacts(
