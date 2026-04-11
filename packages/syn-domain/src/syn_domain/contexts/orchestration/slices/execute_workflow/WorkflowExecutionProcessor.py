@@ -168,20 +168,16 @@ class WorkflowExecutionProcessor:
         phase_outputs: dict[str, str] = {}
 
         try:
-            while True:
-                todos = await self._todo_projection.get_pending(execution_id)
-                if not todos:
-                    break
-                await self._dispatch(
-                    todo=todos[0],
-                    aggregate=aggregate,
-                    phase_map=phase_map,
-                    phase_results=phase_results,
-                    all_artifact_ids=all_artifact_ids,
-                    completed_phase_ids=completed_phase_ids,
-                    phase_outputs=phase_outputs,
-                    repos=repos,
-                )
+            await self._drain_todo_list(
+                execution_id=execution_id,
+                aggregate=aggregate,
+                phase_map=phase_map,
+                phase_results=phase_results,
+                all_artifact_ids=all_artifact_ids,
+                completed_phase_ids=completed_phase_ids,
+                phase_outputs=phase_outputs,
+                repos=repos,
+            )
             if aggregate.status == ExecutionStatus.CANCELLED:
                 return await self._cancel_execution(
                     execution_id,
@@ -210,6 +206,33 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids,
                 completed_phase_ids,
                 started_at,
+            )
+
+    async def _drain_todo_list(
+        self,
+        execution_id: str,
+        aggregate: WorkflowExecutionAggregate,
+        phase_map: dict[str, ExecutablePhase],
+        phase_results: list[PhaseResult],
+        all_artifact_ids: list[str],
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+        repos: list[str] | None,
+    ) -> None:
+        """Process to-do items until the list is empty (all phases done or cancelled)."""
+        while True:
+            todos = await self._todo_projection.get_pending(execution_id)
+            if not todos:
+                break
+            await self._dispatch(
+                todo=todos[0],
+                aggregate=aggregate,
+                phase_map=phase_map,
+                phase_results=phase_results,
+                all_artifact_ids=all_artifact_ids,
+                completed_phase_ids=completed_phase_ids,
+                phase_outputs=phase_outputs,
+                repos=repos,
             )
 
     async def _dispatch(

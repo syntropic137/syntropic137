@@ -152,11 +152,9 @@ def _get_preflight_repos(
     if workflow.repos:
         merged = _build_merged_inputs(workflow, effective_inputs, task)
         try:
-            resolved = _apply_repo_substitution(workflow.repos, merged)
+            return _apply_repo_substitution(workflow.repos, merged)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if resolved:
-            return resolved
 
     fallback = _resolve_target_repo(workflow, effective_inputs, task)
     if fallback:
