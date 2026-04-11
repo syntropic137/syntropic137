@@ -11,6 +11,7 @@ interface WorkflowExecutionFormProps {
   workflowId: string
   declarations: InputDeclaration[]
   onExecutionStarted?: () => void
+  layout?: 'inline' | 'stacked'
 }
 
 function SubmitButton({ disabled, isExecuting }: { disabled: boolean; isExecuting: boolean }) {
@@ -41,7 +42,7 @@ function ExecutionMessage({ message }: { message: string | null }) {
   )
 }
 
-export function WorkflowExecutionForm({ workflowId, declarations, onExecutionStarted }: WorkflowExecutionFormProps) {
+export function WorkflowExecutionForm({ workflowId, declarations, onExecutionStarted, layout = 'inline' }: WorkflowExecutionFormProps) {
   const [taskInput, setTaskInput] = useState('')
   const [formInputs, setFormInputs] = useState<Record<string, string>>({})
   const { isExecuting, executionMessage, handleSubmit } = useExecutionSubmit(onExecutionStarted)
@@ -60,7 +61,10 @@ export function WorkflowExecutionForm({ workflowId, declarations, onExecutionSta
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col items-end gap-3 min-w-[320px]">
+    <form onSubmit={onSubmit} className={clsx(
+      'flex flex-col gap-3',
+      layout === 'inline' ? 'items-end min-w-[320px]' : 'w-full'
+    )}>
       <div className="w-full">
         <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
           Task {taskRequired && <span className="text-red-400">*</span>}
