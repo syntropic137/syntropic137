@@ -47,6 +47,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilde
     PhaseResultBuilder,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    AgentHandlerProtocol,
     ArtifactRepository,
     CommandBuilder,
     ExecutionRepository,
@@ -99,6 +100,7 @@ class WorkflowExecutionProcessor:
         prompt_builder: PromptBuilder,
         command_builder: CommandBuilder,
         todo_projection: TodoProjection | None = None,
+        agent_handler: AgentHandlerProtocol | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -113,6 +115,7 @@ class WorkflowExecutionProcessor:
         self._command_builder = command_builder
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
+        self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
@@ -462,6 +465,12 @@ class WorkflowExecutionProcessor:
         aggregate._handle_command(result.command)
         await self._save_and_sync(aggregate)
 
+    def _get_agent_handler(self) -> AgentHandlerProtocol:
+        """Return the injected handler, or create a fresh real one (default behaviour)."""
+        if self._agent_handler is not None:
+            return self._agent_handler
+        return AgentExecutionHandler(controller=self._controller)
+
     async def _handle_run_agent(
         self,
         todo: TodoItem,
@@ -473,34 +482,36 @@ class WorkflowExecutionProcessor:
         workspace = self._active_workspaces[todo.phase_id]
         agent_env = self._active_envs[todo.phase_id]
         claude_cmd = self._active_cmds[todo.phase_id]
+        session_id = todo.session_id or ""
+        workflow_id = aggregate.workflow_id or ""
+        timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
 
         collector = ObservabilityCollector(
             writer=self._observability_writer,
-            session_id=todo.session_id or "",
+            session_id=session_id,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             workspace_id=getattr(workspace, "id", None),
             agent_model=phase.agent_config.model,
         )
-        agent_handler = AgentExecutionHandler(controller=self._controller)
-        result = await agent_handler.handle(
+        result = await self._get_agent_handler().handle(
             todo=todo,
             workspace=workspace,
             agent_env=agent_env,
             claude_cmd=claude_cmd,
-            session_id=todo.session_id or "",
+            session_id=session_id,
             agent_model=phase.agent_config.model,
-            timeout_seconds=phase.timeout_seconds or phase.agent_config.timeout_seconds,
+            timeout_seconds=timeout,
             collector=collector,
         )
 
         recorder = ConversationRecorder(self._conversation_storage)
         await recorder.store(
-            session_id=todo.session_id or "",
+            session_id=session_id,
             lines=result.stream_result.conversation_lines,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
-            workflow_id=aggregate.workflow_id or "",
+            workflow_id=workflow_id,
             model=phase.agent_config.model,
             input_tokens=result.tokens.input_tokens,
             output_tokens=result.tokens.output_tokens,
