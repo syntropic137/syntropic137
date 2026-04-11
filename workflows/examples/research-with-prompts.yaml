@@ -15,6 +15,7 @@ type: research
 classification: standard
 
 repository: null
+requires_repos: false
 project_name: null
 
 inputs:

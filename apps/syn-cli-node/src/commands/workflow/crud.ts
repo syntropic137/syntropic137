@@ -31,6 +31,7 @@ export const createCommand: CommandDef = {
     ref: { type: "string", description: "Repository ref/branch", default: "main" },
     description: { type: "string", short: "d", description: "Workflow description" },
     repos: { type: "string", short: "R", description: "Default GitHub URLs for workspace hydration (repeatable). ADR-058.", multiple: true },
+    "no-repos": { type: "boolean", description: "Mark workflow as not requiring repository access (ADR-058 #666)", default: false },
     from: { type: "string", short: "f", description: "Path to workflow.yaml or directory containing it. Registers phases from YAML." },
   },
   handler: async (parsed: ParsedArgs) => {
@@ -46,6 +47,7 @@ export const createCommand: CommandDef = {
     const description = parsed.values["description"] as string | undefined;
     const reposValues = parsed.values["repos"];
     const templateRepos: string[] = Array.isArray(reposValues) ? reposValues as string[] : reposValues ? [reposValues as string] : [];
+    const noRepos = parsed.values["no-repos"] as boolean | undefined;
     const fromPath = parsed.values["from"] as string | undefined;
 
     let phases: Record<string, unknown>[] | undefined;
@@ -89,6 +91,7 @@ export const createCommand: CommandDef = {
           repository_ref: repoRef,
           description: description ?? null,
           ...(templateRepos.length > 0 ? { repos: templateRepos } : {}),
+          ...(noRepos ? { requires_repos: false } : {}),
           ...(phases !== undefined ? { phases } : {}),
           ...(inputDeclarations !== undefined ? { input_declarations: inputDeclarations } : {}),
         },

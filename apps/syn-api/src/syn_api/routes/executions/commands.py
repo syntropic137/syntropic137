@@ -445,12 +445,15 @@ async def execute_workflow_endpoint(
     if request.repos:
         effective_inputs["repos"] = ",".join(request.repos)
 
-    # Validate required inputs before returning 200 (#639)
-    _validate_required_inputs(workflow, effective_inputs, request.task)
+    # Validate required input declarations (always runs)
+    merged = _merge_inputs(workflow, effective_inputs, request.task)
+    _check_missing_declarations(workflow, merged)
 
-    # Multi-repo GitHub App preflight validation
-    preflight_repos = _get_preflight_repos(effective_inputs, workflow, request.task)
-    await _validate_all_repos_access(preflight_repos)
+    # Repo validation only when the workflow requires repos (ADR-058 #666)
+    if workflow.requires_repos:
+        _check_repo_url_placeholders(workflow, merged)
+        preflight_repos = _get_preflight_repos(effective_inputs, workflow, request.task)
+        await _validate_all_repos_access(preflight_repos)
 
     execution_id = f"exec-{uuid4().hex[:12]}"
 

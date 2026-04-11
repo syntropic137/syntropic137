@@ -134,7 +134,7 @@ class ExecuteWorkflowHandler:
 
         phases = self._get_executable_phases(workflow)
         merged_inputs = self._merge_inputs(command, workflow)
-        repos = self._resolve_repos(merged_inputs, workflow)
+        repos = self._resolve_repos(merged_inputs, workflow) if workflow.requires_repos else []
 
         return await self._processor.run(
             workflow_id=command.aggregate_id,

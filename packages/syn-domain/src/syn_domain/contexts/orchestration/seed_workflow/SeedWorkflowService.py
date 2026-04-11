@@ -69,9 +69,19 @@ class SeedReport:
 _DUPLICATE_MARKERS = ("already exists", "precondition failed", "concurrency conflict", "duplicate")
 
 
+def _infer_requires_repos(definition: WorkflowDefinition) -> bool:
+    """Infer requires_repos from the workflow definition.
+
+    Explicit value in YAML always wins.  Otherwise infer from repository
+    presence: if no repository is configured, the workflow does not need repos.
+    """
+    if definition.requires_repos is not None:
+        return definition.requires_repos
+    return definition.repository is not None
+
+
 def _build_create_command(definition: WorkflowDefinition) -> CreateWorkflowTemplateCommand:
     """Build a CreateWorkflowTemplateCommand from a workflow definition."""
-    default_url = "https://github.com/placeholder/not-configured"
     try:
         workflow_type = WorkflowType(definition.type)
     except ValueError:
@@ -81,12 +91,13 @@ def _build_create_command(definition: WorkflowDefinition) -> CreateWorkflowTempl
         name=definition.name,
         workflow_type=workflow_type,
         classification=definition.classification,
-        repository_url=(definition.repository.url if definition.repository else default_url),
+        repository_url=(definition.repository.url if definition.repository else ""),
         repository_ref=(definition.repository.ref if definition.repository else "main"),
         phases=definition.get_domain_phases(),
         project_name=definition.project_name,
         description=definition.description,
         input_declarations=definition.get_domain_input_declarations(),
+        requires_repos=_infer_requires_repos(definition),
     )
 
 

@@ -1895,6 +1895,12 @@ export interface components {
              * @description Default GitHub URLs for this workflow template (ADR-058). Can be overridden at execution time via the repos field on the execute request.
              */
             repos?: string[];
+            /**
+             * Requires Repos
+             * @description Whether this workflow requires repository access at execution time (ADR-058 #666). Set to false for research or analysis workflows that don't need repos.
+             * @default true
+             */
+            requires_repos: boolean;
         };
         /** CreateWorkflowResponse */
         CreateWorkflowResponse: {
@@ -4349,6 +4355,11 @@ export interface components {
             repository_url?: string | null;
             /** Repos */
             repos?: string[];
+            /**
+             * Requires Repos
+             * @default true
+             */
+            requires_repos: boolean;
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -4372,6 +4383,11 @@ export interface components {
              * @default false
              */
             is_archived: boolean;
+            /**
+             * Requires Repos
+             * @default true
+             */
+            requires_repos: boolean;
         };
         /**
          * CostSummaryResponse
