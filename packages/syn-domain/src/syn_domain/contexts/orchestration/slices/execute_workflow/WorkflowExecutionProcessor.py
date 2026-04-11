@@ -47,6 +47,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilde
     PhaseResultBuilder,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    AgentHandlerProtocol,
     ArtifactRepository,
     CommandBuilder,
     ExecutionRepository,
@@ -99,6 +100,7 @@ class WorkflowExecutionProcessor:
         prompt_builder: PromptBuilder,
         command_builder: CommandBuilder,
         todo_projection: TodoProjection | None = None,
+        agent_handler: AgentHandlerProtocol | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -113,6 +115,7 @@ class WorkflowExecutionProcessor:
         self._command_builder = command_builder
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
+        self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
@@ -464,7 +467,7 @@ class WorkflowExecutionProcessor:
             workspace_id=getattr(workspace, "id", None),
             agent_model=phase.agent_config.model,
         )
-        agent_handler = AgentExecutionHandler(controller=self._controller)
+        agent_handler = self._agent_handler or AgentExecutionHandler(controller=self._controller)
         result = await agent_handler.handle(
             todo=todo,
             workspace=workspace,
