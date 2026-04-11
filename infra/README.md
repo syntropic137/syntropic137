@@ -255,7 +255,7 @@ These credentials are loaded by the shared Envoy proxy (`envoy-proxy` service) a
 | `CLOUDFLARE_ACCOUNT_ID` | For tunnel | — | Cloudflare account ID |
 | `CLOUDFLARE_API_TOKEN` | For tunnel setup | — | API token (Zone:Read, DNS:Edit, Tunnel:Edit) |
 | `CLOUDFLARE_ZONE_ID` | For tunnel | — | Zone ID for your domain |
-| `SYN_DOMAIN` | For tunnel | — | Domain (e.g., `syn.yourdomain.com`) |
+| `SYN_PUBLIC_HOSTNAME` | For tunnel | — | Domain (e.g., `syn.yourdomain.com`) |
 | `CLOUDFLARE_TUNNEL_NAME` | No | `syn-selfhost` | Tunnel name |
 | `CLOUDFLARE_TUNNEL_TOKEN` | For tunnel | — | Tunnel token from Cloudflare dashboard |
 
@@ -478,7 +478,7 @@ The `docker-compose.cloudflare.yaml` overlay:
 
 ```bash
 CLOUDFLARE_TUNNEL_TOKEN=<your-tunnel-token>
-SYN_DOMAIN=syn.yourdomain.com
+SYN_PUBLIC_HOSTNAME=syn.yourdomain.com
 ```
 
 **4. Start with the tunnel overlay:**

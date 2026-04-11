@@ -3,6 +3,8 @@
 # Command runner for Syntropic137
 # See https://github.com/casey/just
 
+set dotenv-load := true
+
 # Docker Compose shorthand variables
 compose := "docker compose -f docker/docker-compose.yaml"
 compose_dev := compose + " -f docker/docker-compose.dev.yaml"
@@ -95,19 +97,19 @@ onboard-dev *flags:
         echo ""
         echo "🌐 Setting up Cloudflare tunnel for webhook delivery..."
         uv run python infra/scripts/setup.py --stage configure_cloudflare
-        # Re-source to pick up SYN_DOMAIN
+        # Re-source to pick up SYN_PUBLIC_HOSTNAME
         if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
-        # Clear Smee if previously set — tunnel replaces it
+        # Clear Smee if previously set - tunnel replaces it
         if grep -q '^DEV__SMEE_URL=' .env 2>/dev/null; then
             sed -i.bak 's|^DEV__SMEE_URL=.*|DEV__SMEE_URL=|' .env && rm -f .env.bak
             unset DEV__SMEE_URL 2>/dev/null || true
         fi
-        _DOMAIN="${SYN_DOMAIN:-<domain>}"
-        _DOMAIN="${_DOMAIN#https://}"
-        _DOMAIN="${_DOMAIN#http://}"
-        _DOMAIN="${_DOMAIN%/}"
-        echo "   ✅ Webhooks will be delivered via tunnel (${_DOMAIN})"
-        echo "   Set your GitHub App webhook URL to: https://${_DOMAIN}/webhooks/github"
+        _HOSTNAME="${SYN_PUBLIC_HOSTNAME:-<hostname>}"
+        _HOSTNAME="${_HOSTNAME#https://}"
+        _HOSTNAME="${_HOSTNAME#http://}"
+        _HOSTNAME="${_HOSTNAME%/}"
+        echo "   Webhooks will be delivered via tunnel (${_HOSTNAME})"
+        echo "   Set your GitHub App webhook URL to: https://${_HOSTNAME}/webhooks/github"
     elif [ -z "${DEV__SMEE_URL:-}" ]; then
         echo ""
         echo "🔗 Setting up webhook proxy (smee.io)..."
@@ -137,7 +139,7 @@ onboard-dev *flags:
     fi
 
     # 7b. Resolve 1Password secrets into env (so step 8 sees them)
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
 
     # 8. GitHub App setup (runs by default — skip with --skip-github)
     #    Required for agent workflows to push code.
@@ -171,7 +173,7 @@ onboard-dev *flags:
     echo ""
     if echo "{{flags}}" | grep -q -- "--1password"; then
         # Re-source to pick up any values written during setup + resolve 1Password
-        source scripts/resolve_env.sh
+        eval "$(uv run python scripts/resolve_infra_env.py)"
         # Derive vault name
         case "${APP_ENVIRONMENT:-development}" in
             development) _VAULT="syn137-dev" ;;
@@ -188,7 +190,7 @@ onboard-dev *flags:
         # Audit each secret: show status (in .env, missing, needs vault)
         _HAS_VALUES=""
         _MISSING=""
-        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
+        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
             _VAL="${!_VAR:-}"
             if [ -n "$_VAL" ]; then
                 # Show redacted for secrets, full for non-secrets
@@ -268,7 +270,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# Try edit first; if item doesn't exist, create it"
                 echo -n "op item edit \"$_ITEM\" --vault \"$_VAULT\""
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         echo " \\"
@@ -278,7 +280,7 @@ onboard-dev *flags:
                 echo " 2>/dev/null \\"
                 echo "|| op item create --category=login --title=\"$_ITEM\" --vault=\"$_VAULT\" \\"
                 _FIRST=true
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         if [ "$_FIRST" = true ]; then _FIRST=false; else echo " \\"; fi
@@ -371,7 +373,7 @@ dev: _workspace-check
     echo ""
 
     # Resolve .env + 1Password so Docker Compose inherits secrets
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
 
     echo "1️⃣ Syncing Python dependencies..."
     uv sync
@@ -436,7 +438,7 @@ dev-fresh: _workspace-check
     echo ""
 
     # Resolve .env + 1Password so Docker Compose inherits secrets
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
 
     echo "1️⃣ Stopping any existing processes..."
     lsof -ti:5173 | xargs kill -9 2>/dev/null || true
@@ -1091,19 +1093,8 @@ selfhost-status:
         {{compose_selfhost}} ps
     fi
     echo ""
-    echo "🔗 Access Points:"
-    if [ -n "${SYN_DOMAIN:-}" ]; then
-        _domain=$(echo "${SYN_DOMAIN}" | sed -E 's|^https?://||' | sed 's|/$||')
-        echo "   UI:       https://$_domain"
-        echo "   API:      https://$_domain/api/v1"
-        echo "   API Docs: https://$_domain/api/v1/docs"
-    else
-        _port="${SYN_GATEWAY_PORT:-8137}"
-        echo "   UI:       http://localhost:$_port"
-        echo "   API:      http://localhost:$_port/api/v1"
-        echo "   API Docs: http://localhost:$_port/api/v1/docs"
-        echo "   (Set SYN_DOMAIN in .env for external access)"
-    fi
+    echo "Access Points:"
+    uv run python infra/scripts/print_access_urls.py
 
 # View self-host logs (all services or specific service, auto-detects tunnel)
 selfhost-logs *service:
@@ -1400,19 +1391,16 @@ docs-site-build: codegen
 # Seed workflows from YAML files
 seed-workflows: _ensure-env
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
     uv run python scripts/seed_workflows.py
 
 # Seed trigger presets (self-healing, review-fix)
 seed-triggers: _ensure-env
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
     uv run python scripts/seed_triggers.py
 
 # Seed organization, system, and repos
 seed-organization: _ensure-env
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
     uv run python scripts/seed_organization.py
 
 # Seed all data (workflows + triggers + organization)
@@ -1572,7 +1560,7 @@ proxy-start:
 
 # Build the dev compose command, auto-including cloudflare overlay when tunnel token is set.
 # Usage in bash: _COMPOSE=$(_dev_compose_cmd)
-# Must be called AFTER `source scripts/resolve_env.sh`.
+# Must be called AFTER infra env vars are loaded.
 _dev-compose-cmd:
     @if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then \
         echo "{{compose_dev_cf}}"; \
@@ -1598,7 +1586,7 @@ _ensure-env:
 # Check .env for common misconfigurations and warn loudly
 _env-check: _ensure-env
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
     WARNINGS=0
     ERRORS=0
 
@@ -1632,9 +1620,9 @@ _env-check: _ensure-env
 
     # --- Webhook forwarding ---
     if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
-        _D="${SYN_DOMAIN:-}"; _D="${_D#https://}"; _D="${_D#http://}"; _D="${_D%/}"
-        if [ -n "$_D" ]; then
-            echo "   ✅ Webhook delivery: Cloudflare tunnel (${_D})"
+        _H="${SYN_PUBLIC_HOSTNAME:-}"; _H="${_H#https://}"; _H="${_H#http://}"; _H="${_H%/}"
+        if [ -n "$_H" ]; then
+            echo "   Webhook delivery: Cloudflare tunnel (${_H})"
         else
             echo "   ✅ Webhook delivery: Cloudflare tunnel"
         fi
@@ -1682,21 +1670,21 @@ _env-check: _ensure-env
 # Start webhook delivery — Cloudflare tunnel (if configured) or Smee proxy
 _webhook-start:
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
 
     # Option 1: Cloudflare tunnel — token or domain configured
-    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] || [ -n "${SYN_DOMAIN:-}" ]; then
-        _DOMAIN="${SYN_DOMAIN#https://}"
-        _DOMAIN="${_DOMAIN#http://}"
-        _DOMAIN="${_DOMAIN%/}"
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] || [ -n "${SYN_PUBLIC_HOSTNAME:-}" ]; then
+        _HOSTNAME="${SYN_PUBLIC_HOSTNAME#https://}"
+        _HOSTNAME="${_HOSTNAME#http://}"
+        _HOSTNAME="${_HOSTNAME%/}"
         # Verify tunnel container is running
         if docker ps --format '{{"{{"}}.Names{{"}}"}}' 2>/dev/null | grep -q 'cloudflared'; then
-            echo "5️⃣  Webhooks via Cloudflare tunnel ✅ (${_DOMAIN})"
+            echo "5  Webhooks via Cloudflare tunnel (${_HOSTNAME})"
         else
             echo "5️⃣  ⚠️  Cloudflare tunnel not running — starting it..."
             $(just _dev-compose-cmd) up -d cloudflared
         fi
-        echo "   🔗 Webhook URL: https://${_DOMAIN}/webhooks/github"
+        echo "   Webhook URL: https://${_HOSTNAME}/webhooks/github"
         echo "   💡 Tunnel service URL must be: http://api:8000 (dev) or http://gateway:8081 (selfhost)"
         exit 0
     fi

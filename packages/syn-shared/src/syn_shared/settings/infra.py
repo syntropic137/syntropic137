@@ -4,6 +4,8 @@ These variables live in ``infra/.env`` and control Docker Compose overlays,
 resource limits, secrets, and networking.  They are **not** read by the
 Pydantic ``Settings`` class (which reads root ``.env``).
 
+See ADR-004: Environment Configuration with Pydantic Settings.
+
 The class exists so ``scripts/generate_env_example.py`` can auto-generate
 ``infra/.env.example`` from typed field definitions — same pattern as the
 root settings classes.
@@ -109,12 +111,12 @@ class InfraSettings(BaseSettings):
         ),
     )
 
-    syn_domain: str = Field(
+    syn_public_hostname: str = Field(
         default="",
         description=(
-            "Domain for Syn137 access. [REQUIRED for self-host] "
+            "Public hostname for Syn137 access. [REQUIRED for self-host] "
             "Example: syn.yourdomain.com. "
-            "API will be available at: api.syn.yourdomain.com"
+            "API will be available at: syn.yourdomain.com/api/v1"
         ),
     )
 

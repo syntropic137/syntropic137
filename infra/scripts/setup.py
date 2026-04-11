@@ -62,7 +62,7 @@ from dataclasses import dataclass
 from getpass import getpass
 from pathlib import Path
 
-from shared import (
+from infra_config import (
     COMPOSE_SELFHOST,
     ENV_APP_ENVIRONMENT,
     ENV_CLOUDFLARE_TUNNEL_TOKEN,
@@ -74,7 +74,7 @@ from shared import (
     ENV_GITHUB_WEBHOOK_SECRET,
     ENV_INCLUDE_OP_CLI,
     ENV_SYN_API_PASSWORD,
-    ENV_SYN_DOMAIN,
+    ENV_SYN_PUBLIC_HOSTNAME,
     GATEWAY_API_PREFIX,
     INFRA_DIR,
     INFRA_ENV_FILE,
@@ -118,7 +118,7 @@ class SetupContext:
       github_private_key_file_ref — configure_github_app → configure_env (preferred over b64)
       github_webhook_secret  — configure_github_app → configure_env
       cloudflare_tunnel_token — configure_cloudflare → configure_env, configure_smee
-      syn_domain             — configure_cloudflare → configure_env, print_summary
+      syn_public_hostname             — configure_cloudflare → configure_env, print_summary
       needs_smee_fallback    — configure_cloudflare → configure_smee
       webhook_url            — configure_smee → configure_github_app
       op_vault               — configure_1password → validate_environment, configure_env
@@ -136,7 +136,7 @@ class SetupContext:
     github_private_key_file_ref: str = ""
     github_webhook_secret: str = ""
     cloudflare_tunnel_token: str = ""
-    syn_domain: str = ""
+    syn_public_hostname: str = ""
     needs_smee_fallback: bool = False
     webhook_url: str = ""
     op_vault: str = ""
@@ -599,7 +599,7 @@ def _configure_github_app_manifest(ctx: SetupContext) -> bool:
     # Cloudflare tunnel takes precedence over smee for webhook delivery
     webhook_url = ctx.webhook_url or None
     if not webhook_url:
-        domain = os.environ.get(ENV_SYN_DOMAIN, "")
+        domain = os.environ.get(ENV_SYN_PUBLIC_HOSTNAME, "")
         if domain:
             domain = domain.rstrip("/")
             if not domain.startswith("http"):
@@ -760,8 +760,8 @@ def configure_env(ctx: SetupContext) -> bool:
     infra_subs: dict[str, str] = {}
     if ctx.cloudflare_tunnel_token:
         infra_subs[ENV_CLOUDFLARE_TUNNEL_TOKEN] = ctx.cloudflare_tunnel_token
-    if ctx.syn_domain:
-        infra_subs[ENV_SYN_DOMAIN] = ctx.syn_domain
+    if ctx.syn_public_hostname:
+        infra_subs[ENV_SYN_PUBLIC_HOSTNAME] = ctx.syn_public_hostname
     if ctx.include_op_cli:
         infra_subs[ENV_INCLUDE_OP_CLI] = ctx.include_op_cli
     if infra_subs:
@@ -1081,7 +1081,7 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
 
     if ctx.non_interactive:
         ctx.cloudflare_tunnel_token = os.environ.get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "")
-        ctx.syn_domain = os.environ.get(ENV_SYN_DOMAIN, "")
+        ctx.syn_public_hostname = os.environ.get(ENV_SYN_PUBLIC_HOSTNAME, "")
         if ctx.cloudflare_tunnel_token:
             ok("Cloudflare tunnel token read from environment")
         else:
@@ -1097,7 +1097,7 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
         or parse_env_file(INFRA_ENV_FILE).get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip()
     )
     token_in_op = ENV_CLOUDFLARE_TUNNEL_TOKEN in op_fields
-    existing_domain = ctx.syn_domain or os.environ.get(ENV_SYN_DOMAIN, "")
+    existing_domain = ctx.syn_public_hostname or os.environ.get(ENV_SYN_PUBLIC_HOSTNAME, "")
     reconfiguring = False
     if existing_token or token_in_op:
         source = "1Password" if token_in_op else "infra/.env"
@@ -1109,7 +1109,7 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
             if existing_token:
                 ctx.cloudflare_tunnel_token = existing_token
             if existing_domain:
-                ctx.syn_domain = existing_domain
+                ctx.syn_public_hostname = existing_domain
             return True
         reconfiguring = True
         print()
@@ -1244,13 +1244,13 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     # They just configured this in Cloudflare — just need them to paste it back.
     step("Copy the full public hostname from the Cloudflare page")
     hint(f"e.g., syn137-{env_suffix}.yourdomain.com")
-    ctx.syn_domain = prompt("Hostname", default="")
+    ctx.syn_public_hostname = prompt("Hostname", default="")
 
-    if ctx.syn_domain:
-        ok(f"Domain: {ctx.syn_domain}")
-        _update_env_file({ENV_SYN_DOMAIN: ctx.syn_domain}, target=INFRA_ENV_FILE)
+    if ctx.syn_public_hostname:
+        ok(f"Domain: {ctx.syn_public_hostname}")
+        _update_env_file({ENV_SYN_PUBLIC_HOSTNAME: ctx.syn_public_hostname}, target=INFRA_ENV_FILE)
         # Derive webhook URL from domain
-        domain = ctx.syn_domain.rstrip("/")
+        domain = ctx.syn_public_hostname.rstrip("/")
         if not domain.startswith("http"):
             domain = f"https://{domain}"
         # Dev tunnel goes direct to API; selfhost routes through nginx
@@ -1316,7 +1316,9 @@ def configure_smee(ctx: SetupContext) -> bool:
         or bool(infra_env_vals.get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip())
         or ENV_CLOUDFLARE_TUNNEL_TOKEN in _get_op_fields(ctx)
     )
-    has_domain = bool(ctx.syn_domain) or bool(infra_env_vals.get(ENV_SYN_DOMAIN, "").strip())
+    has_domain = bool(ctx.syn_public_hostname) or bool(
+        infra_env_vals.get(ENV_SYN_PUBLIC_HOSTNAME, "").strip()
+    )
     if has_tunnel and has_domain:
         banner("Stage: Configure Webhook Proxy (Skipped)")
         step("Cloudflare Tunnel is configured — smee.io not needed")
@@ -1373,7 +1375,7 @@ def configure_smee(ctx: SetupContext) -> bool:
     # Try auto-creating a smee channel (zero manual steps)
     smee_url = ""
     try:
-        from shared import create_smee_channel
+        from infra_config import create_smee_channel
 
         step("Auto-creating smee.io channel...")
         smee_url = create_smee_channel()
@@ -1580,7 +1582,7 @@ ENV_AUDIT_GROUPS: list[tuple[str, list[tuple[str, bool]]]] = [
     (
         "Cloudflare (optional — for external access)",
         [
-            (ENV_SYN_DOMAIN, False),
+            (ENV_SYN_PUBLIC_HOSTNAME, False),
             (ENV_CLOUDFLARE_TUNNEL_TOKEN, False),
         ],
     ),
@@ -2111,7 +2113,9 @@ def print_summary(ctx: SetupContext) -> bool:
     banner("Setup Complete!")
 
     # Fall back to infra/.env if ctx doesn't have the domain (infra config)
-    domain = ctx.syn_domain or parse_env_file(INFRA_ENV_FILE).get(ENV_SYN_DOMAIN, "")
+    domain = ctx.syn_public_hostname or parse_env_file(INFRA_ENV_FILE).get(
+        ENV_SYN_PUBLIC_HOSTNAME, ""
+    )
     urls = format_access_urls(domain)
     print(f"  UI:            {urls['ui']}")
     print(f"  API:           {urls['api']}")
@@ -2168,8 +2172,8 @@ def _print_op_summary(ctx: SetupContext) -> None:
         fields.append((ENV_GITHUB_WEBHOOK_SECRET, ctx.github_webhook_secret))
     if ctx.cloudflare_tunnel_token:
         fields.append((ENV_CLOUDFLARE_TUNNEL_TOKEN, ctx.cloudflare_tunnel_token))
-    if ctx.syn_domain:
-        fields.append((ENV_SYN_DOMAIN, ctx.syn_domain))
+    if ctx.syn_public_hostname:
+        fields.append((ENV_SYN_PUBLIC_HOSTNAME, ctx.syn_public_hostname))
     # SYN_API_PASSWORD: pick up from environment if set (not part of interactive flow)
     _api_pw = os.environ.get(ENV_SYN_API_PASSWORD, "")
     if _api_pw:

@@ -1,9 +1,10 @@
-"""
-Shared utilities for Syn137 infrastructure scripts.
+"""Infrastructure configuration and utilities for Syn137 infrastructure scripts.
 
 Canonical implementations of common operations used across setup.py,
 secrets_setup.py, cloudflare_tunnel.py, health_check.py, and friends.
-Import from here — don't re-implement.
+Import from here - don't re-implement.
+
+See ADR-004: Environment Configuration with Pydantic Settings.
 """
 
 from __future__ import annotations
@@ -57,7 +58,7 @@ REQUIRED_SECRETS: dict[str, int] = {
 # .env key constants (used across root .env and infra/.env)
 # ---------------------------------------------------------------------------
 
-ENV_SYN_DOMAIN = "SYN_DOMAIN"
+ENV_SYN_PUBLIC_HOSTNAME = "SYN_PUBLIC_HOSTNAME"
 ENV_OP_SERVICE_ACCOUNT_TOKEN = "OP_SERVICE_ACCOUNT_TOKEN"
 ENV_APP_ENVIRONMENT = "APP_ENVIRONMENT"
 ENV_INCLUDE_OP_CLI = "INCLUDE_OP_CLI"
@@ -170,28 +171,28 @@ def create_smee_channel() -> str:
         return resp.url
 
 
-def normalize_domain(raw: str) -> str:
-    """Strip protocol prefix and trailing slash from a domain string.
+def normalize_hostname(raw: str) -> str:
+    """Strip protocol prefix and trailing slash from a hostname string.
 
     Handles cases where users paste a full URL like ``https://example.com/``
-    into SYN_DOMAIN.  Returns just ``example.com``.
+    into SYN_PUBLIC_HOSTNAME.  Returns just ``example.com``.
     """
     return re.sub(r"^https?://", "", raw).rstrip("/")
 
 
-def format_access_urls(domain: str) -> dict[str, str]:
-    """Build the standard set of access URLs from a domain.
+def format_access_urls(hostname: str) -> dict[str, str]:
+    """Build the standard set of access URLs from a hostname.
 
     Returns a dict with keys: ui, api, api_docs, openapi.
-    If domain is empty, returns localhost URLs.
+    If hostname is empty, returns localhost URLs.
     """
-    if domain:
-        d = normalize_domain(domain)
+    if hostname:
+        h = normalize_hostname(hostname)
         return {
-            "ui": f"https://{d}",
-            "api": f"https://{d}/api/v1",
-            "api_docs": f"https://{d}/api/v1/docs",
-            "openapi": f"https://{d}/api/v1/openapi.json",
+            "ui": f"https://{h}",
+            "api": f"https://{h}/api/v1",
+            "api_docs": f"https://{h}/api/v1/docs",
+            "openapi": f"https://{h}/api/v1/openapi.json",
         }
     return {
         "ui": f"http://localhost:{PORT_UI}",

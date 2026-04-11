@@ -21,6 +21,8 @@ import sys
 
 import httpx
 
+from syn_shared.settings.dev_tooling import get_dev_api_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,7 @@ ORGANIZATION = {
 
 SYSTEM = {
     "name": "syn-engineer",
-    "description": "AI-powered engineering agent — orchestration, observability, and CLI",
+    "description": "AI-powered engineering agent - orchestration, observability, and CLI",
 }
 
 REPOS = [
@@ -51,7 +53,7 @@ REPOS = [
     },
 ]
 
-DEFAULT_API_URL = "http://localhost:8137"
+DEFAULT_API_URL = get_dev_api_url()
 
 
 # --- Seed logic -----------------------------------------------------------

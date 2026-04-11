@@ -351,6 +351,13 @@ Submodules (agentic-primitives, event-sourcing-platform) have independent versio
 - **Docker Compose** for local and selfhost deployment
 - QA: `just qa` runs lint, format, typecheck, test, coverage, vsa-validate
 
+### Configuration (ADR-004)
+
+When working with environment variables or port/URL configuration, review
+ADR-004 first. All env vars are defined in Pydantic Settings classes and
+auto-generated into `.env.example`. Never hardcode ports or URLs - import
+from `syn_shared.settings.constants` (Python) or `constants.ts` (TypeScript).
+
 ## Pre-PR Checklist (mandatory before opening any PR)
 
 CI failures that could have been caught locally waste 8–10 minutes per round-trip and block the release chain. Always run these before pushing:

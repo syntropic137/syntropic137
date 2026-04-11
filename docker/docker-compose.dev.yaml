@@ -77,7 +77,7 @@ services:
       SYN_STORAGE_MINIO_ENDPOINT: minio:9000
       SYN_STORAGE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       SYN_STORAGE_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      # 1Password-managed secrets: shell env (from resolve_env.sh) overrides env_file
+      # 1Password-managed secrets: shell env (from resolve_infra_env.py) overrides env_file
       SYN_GITHUB_APP_ID: ${SYN_GITHUB_APP_ID:-}
       SYN_GITHUB_APP_NAME: ${SYN_GITHUB_APP_NAME:-}
       SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}

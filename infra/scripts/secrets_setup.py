@@ -36,7 +36,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-from shared import REQUIRED_SECRETS, SECRET_GITHUB_KEY, SECRETS_DIR, set_secure_permissions
+from infra_config import REQUIRED_SECRETS, SECRET_GITHUB_KEY, SECRETS_DIR, set_secure_permissions
 
 if TYPE_CHECKING:
     from pathlib import Path
