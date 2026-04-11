@@ -133,6 +133,7 @@ testpaths = [
     "packages/syn-domain/src",  # VSA co-located tests
     "packages/syn-adapters/tests",
     "packages/syn-shared/tests",
+    "scripts/workflows",
 ]
 pythonpath = [
     "apps/syn-api/src",
@@ -140,6 +141,7 @@ pythonpath = [
     "packages/syn-domain/src",
     "packages/syn-adapters/src",
     "packages/syn-shared/src",
+    "scripts/workflows",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]

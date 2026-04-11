@@ -1,0 +1,42 @@
+# =============================================================================
+# Check: Release Notes Present
+# =============================================================================
+# Validates the PR body contains meaningful release notes (min 20 chars).
+# The PR body is used verbatim as the GitHub Release description.
+#
+# Called by: release-gate.yml
+# =============================================================================
+
+name: Check - Release Notes
+
+on:
+  workflow_call:
+    inputs:
+      pr_body:
+        description: Pull request body text
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  changelog-check:
+    name: Release Notes Present
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR body has release notes
+        env:
+          PR_BODY: ${{ inputs.pr_body }}
+        run: |
+          if [ -z "$PR_BODY" ]; then
+            echo "::error::PR body is empty. Add release notes describing what changed."
+            exit 1
+          fi
+
+          BODY_LENGTH=${#PR_BODY}
+          if [ "$BODY_LENGTH" -lt 20 ]; then
+            echo "::error::PR body is too short ($BODY_LENGTH chars). Add meaningful release notes."
+            exit 1
+          fi
+
+          echo "OK: Release notes present ($BODY_LENGTH chars)"
