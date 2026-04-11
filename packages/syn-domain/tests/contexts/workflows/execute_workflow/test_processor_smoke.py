@@ -91,6 +91,7 @@ class FakeArtifactRepository:
 # Shared builder
 # ---------------------------------------------------------------------------
 
+
 async def _noop_prompt_builder(
     phase: ExecutablePhase,
     execution_id: str,
@@ -189,9 +190,7 @@ class TestProcessorSmoke:
             execution_id="exec-smoke-fail-001",
         )
 
-        assert result.status == "failed", (
-            f"Expected 'failed' but got '{result.status}'."
-        )
+        assert result.status == "failed", f"Expected 'failed' but got '{result.status}'."
         assert fake.call_count == 1
 
     async def test_success_returns_completed(self) -> None:
@@ -207,7 +206,5 @@ class TestProcessorSmoke:
             execution_id="exec-smoke-success-001",
         )
 
-        assert result.status == "completed", (
-            f"Expected 'completed' but got '{result.status}'."
-        )
+        assert result.status == "completed", f"Expected 'completed' but got '{result.status}'."
         assert fake.call_count == 1
