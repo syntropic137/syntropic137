@@ -117,22 +117,20 @@ jobs:
           echo "dependency-review:${{ needs.dependency-review.result }}"
 
           FAILED=0
-          for JOB in version-check changelog-check codegen-sync docker-dry-run osv-scan pip-audit dependency-review; do
-            RESULT=$(eval echo "\${{ needs.${JOB}.result }}" 2>/dev/null || echo "unknown")
-            case "$JOB" in
-              version-check)    RESULT="${{ needs.version-check.result }}" ;;
-              changelog-check)  RESULT="${{ needs.changelog-check.result }}" ;;
-              codegen-sync)     RESULT="${{ needs.codegen-sync.result }}" ;;
-              docker-dry-run)   RESULT="${{ needs.docker-dry-run.result }}" ;;
-              osv-scan)         RESULT="${{ needs.osv-scan.result }}" ;;
-              pip-audit)        RESULT="${{ needs.pip-audit.result }}" ;;
-              dependency-review) RESULT="${{ needs.dependency-review.result }}" ;;
-            esac
-            if [[ "$RESULT" != "success" ]]; then
-              echo "::error::$JOB did not pass (result: $RESULT)"
+          check() {
+            local job="$1" result="$2"
+            if [[ "$result" != "success" ]]; then
+              echo "::error::${job} did not pass (result: ${result})"
               FAILED=1
             fi
-          done
+          }
+          check "version-check"    "${{ needs.version-check.result }}"
+          check "changelog-check"  "${{ needs.changelog-check.result }}"
+          check "codegen-sync"     "${{ needs.codegen-sync.result }}"
+          check "docker-dry-run"   "${{ needs.docker-dry-run.result }}"
+          check "osv-scan"         "${{ needs.osv-scan.result }}"
+          check "pip-audit"        "${{ needs.pip-audit.result }}"
+          check "dependency-review" "${{ needs.dependency-review.result }}"
 
           if [[ "$FAILED" == "1" ]]; then
             exit 1

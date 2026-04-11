@@ -2,10 +2,10 @@
 """Bump version across all Syntropic137 packages.
 
 Usage:
-    python scripts/bump_version.py 0.20.0          # Update all 11 files
-    python scripts/bump_version.py --check          # Validate all files match
-    python scripts/bump_version.py --current        # Print current version
-    python scripts/bump_version.py --check-release  # Validate version is bumped vs release branch
+    python scripts/workflows/bump_version.py 0.20.0          # Update all 11 files
+    python scripts/workflows/bump_version.py --check          # Validate all files match
+    python scripts/workflows/bump_version.py --current        # Print current version
+    python scripts/workflows/bump_version.py --check-release  # Validate version is bumped vs release branch
 
 This script updates the 11 tracked version files. Submodule versions
 (event-sourcing-platform, agentic-primitives, openclaw-plugin) are
@@ -33,7 +33,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent  # scripts/workflows/ -> scripts/ -> repo root
 
 # Hardcoded list - matches the 11 files in every "chore: bump version" commit.
 # DO NOT discover dynamically. Submodules must be excluded.
