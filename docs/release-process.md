@@ -91,7 +91,7 @@ Two environments are needed across the two repos:
    gh api repos/syntropic137/syntropic137/git/refs --method POST \
      -f ref=refs/heads/release -f sha=$(git rev-parse main)
    ```
-2. Branch ruleset: PR required, squash-only, Release Gate + CI Success checks, admin bypass.
+2. Branch ruleset: PR required, merge commits only (no squash, no rebase), Release Gate + CI Success checks, admin bypass.
 3. Vercel: set production branch to `release` in project settings.
 
 ### Docker / Container Setup
@@ -141,17 +141,17 @@ The following checks run automatically on the PR:
 
 - **Version consistency** - all 11 files match, version > current release
 - **Release notes** - PR body has content (minimum 20 characters)
-- **Docker dry-run** - all 7 container images build successfully (single-arch, no push)
+- **Docker dry-run** - all 6 container images build successfully (single-arch, no push)
 - **Full CI** - tests, lint, typecheck, security scans (same as any PR)
 
 ### 5. Merge
 
-Squash merge the PR. This triggers `release-create.yml` which:
+Merge the PR as a merge commit (not squash, not rebase). This triggers `release-create.yml` which:
 
 1. Reads version from `pyproject.toml`
 2. Creates git tag `v0.20.0`
 3. Creates GitHub Release with the PR body as release notes
-4. Calls `release-containers.yaml` → builds 8 multi-arch Docker images, signs with cosign, pushes to GHCR, attaches release assets (digest-pinned compose, SHA256SUMS)
+4. Calls `release-containers.yaml` → builds 6 multi-arch Docker images, signs with cosign, pushes to GHCR, attaches release assets (digest-pinned compose, SHA256SUMS)
 5. Calls `release-cli.yaml` → builds and publishes `@syntropic137/cli` to npm with Sigstore provenance
 6. Dispatches template sync to `syntropic137-npx`
 7. Vercel deploys docs from `release` branch
@@ -271,12 +271,13 @@ Merge to release
 | `.github/workflows/release-containers.yaml` | Multi-arch build, cosign sign, push to GHCR, release assets |
 | `.github/workflows/release-cli.yaml` | Build + publish `@syntropic137/cli` to npm (OIDC, provenance) |
 | `scripts/workflows/bump_version.py` | Version bump script; `--check` (consistency) and `--check-release` (semver vs release branch) |
+| `scripts/workflows/check_drift.py` | Drift detection; called by `codegen-sync.yml` to check git diff + untracked files for generated paths |
 
 ## Branch Protection (release)
 
 - Require PR (no direct push)
 - Required status checks: `Release Gate` + `CI Success`
-- Squash merge only
+- Merge commits only (no squash, no rebase — squashing rewrites history and forces rebasing main on every release)
 - No force pushes, no deletions
 - Admin bypass for emergencies
 
