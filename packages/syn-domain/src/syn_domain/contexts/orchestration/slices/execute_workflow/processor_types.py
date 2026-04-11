@@ -15,6 +15,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
@@ -24,6 +25,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+        ObservabilityCollector,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+        AgentExecutionResult,
     )
 
 PromptBuilder = Callable[
@@ -58,6 +65,35 @@ class ArtifactRepository(Protocol):
 
     async def save(self, aggregate: ArtifactAggregate) -> None: ...
     async def get_by_id(self, aggregate_id: str) -> ArtifactAggregate | None: ...
+
+
+class AgentHandlerProtocol(Protocol):
+    """Structural Protocol for AgentExecutionHandler.
+
+    Defines the contract for running an agent phase. Any class that satisfies this
+    Protocol — including ``FakeAgentExecutionHandler`` in tests — will break pyright
+    if ``AgentExecutionHandler.handle()`` ever changes its signature, preventing silent
+    drift between the real handler and its test doubles.
+
+    Usage in tests::
+
+        processor = WorkflowExecutionProcessor(
+            ...
+            agent_handler=FakeAgentExecutionHandler.cancelled(),
+        )
+    """
+
+    async def handle(
+        self,
+        todo: TodoItem,
+        workspace: ManagedWorkspace,
+        agent_env: dict[str, str],
+        claude_cmd: list[str],
+        session_id: str,
+        agent_model: str,
+        timeout_seconds: int,
+        collector: ObservabilityCollector | None = None,
+    ) -> AgentExecutionResult: ...
 
 
 @dataclass(frozen=True)
