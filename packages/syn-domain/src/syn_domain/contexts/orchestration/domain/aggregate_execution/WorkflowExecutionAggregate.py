@@ -126,6 +126,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._total_tokens: int = 0
         self._artifact_ids: list[str] = []
         self._error: str | None = None
+        self._cancel_reason: str | None = None
         self._phase_definitions: list[PhaseDefinition] = []
         self._phase_order_map: dict[str, int] = {}
         self._current_phase_workspace_id: str | None = None
@@ -143,6 +144,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def status(self) -> ExecutionStatus:
         """Get execution status."""
         return self._status
+
+    @property
+    def cancel_reason(self) -> str | None:
+        """Get the cancellation reason, if the execution was cancelled."""
+        return self._cancel_reason
 
     @command_handler("StartExecutionCommand")
     def start_execution(self, command: StartExecutionCommand) -> None:
@@ -528,6 +534,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Apply ExecutionCancelledEvent."""
         self._completed_at = _evt(event, "cancelled_at")
         self._status = ExecutionStatus.CANCELLED
+        self._cancel_reason = event.reason
 
     @event_sourcing_handler("WorkflowInterrupted")
     def on_execution_interrupted(self, event: WorkflowInterruptedEvent) -> None:

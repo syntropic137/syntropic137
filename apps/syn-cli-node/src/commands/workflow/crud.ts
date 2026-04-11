@@ -65,6 +65,10 @@ export const createCommand: CommandDef = {
           printError(`No workflows found in: ${workflowDir}`);
           throw new CLIError("No workflows found", 1);
         }
+        if (workflows.length > 1) {
+          printError(`Multiple workflows found in: ${workflowDir}. Pass a specific workflow.yaml path with --from.`);
+          throw new CLIError("Multiple workflows found", 1);
+        }
         const wf = workflows[0]!;
         phases = wf.phases as Record<string, unknown>[];
         inputDeclarations = wf.input_declarations;

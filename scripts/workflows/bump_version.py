@@ -155,11 +155,8 @@ def check_release_bump(release_ref: str = "origin/release") -> bool:
         print("Ensure 'git fetch origin' has been run.", file=sys.stderr)
         return False
 
-    release_version: str | None = None
-    for line in result.stdout.splitlines():
-        if line.startswith("version = "):
-            release_version = line.split('"')[1]
-            break
+    m = re.search(r'^version\s*=\s*"([^"]*)"', result.stdout, re.MULTILINE)
+    release_version: str | None = m.group(1) if m else None
 
     if release_version is None:
         print(f"ERROR: No version field found in {release_ref}:pyproject.toml", file=sys.stderr)

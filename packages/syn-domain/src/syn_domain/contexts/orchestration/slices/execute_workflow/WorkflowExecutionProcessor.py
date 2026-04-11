@@ -188,6 +188,7 @@ class WorkflowExecutionProcessor:
                     phase_results,
                     all_artifact_ids,
                     started_at,
+                    cancel_reason=aggregate.cancel_reason,
                 )
             return await self._complete_execution(
                 aggregate,
@@ -287,14 +288,16 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult],
         all_artifact_ids: list[str],
         started_at: datetime,
+        cancel_reason: str | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions as cancelled and return cancelled result.
 
         Called when the to-do list empties due to ExecutionCancelledEvent.
-        The aggregate is already in CANCELLED status — no new command needed.
+        The aggregate is already in CANCELLED status - no new command needed.
         """
+        reason = cancel_reason or "Cancelled by user"
         for _pid, mgr in list(self._session_managers.items()):
-            await mgr.complete_cancelled(reason="Cancelled by user")
+            await mgr.complete_cancelled(reason=reason)
         self._session_managers.clear()
         for _pid, workspace_cm in list(self._active_workspace_cms.items()):
             try:
@@ -314,6 +317,7 @@ class WorkflowExecutionProcessor:
             phase_results=phase_results,
             artifact_ids=all_artifact_ids,
             metrics=ExecutionMetrics.from_results(phase_results),
+            error_message=reason,
         )
 
     async def _complete_execution(
