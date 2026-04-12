@@ -166,10 +166,14 @@ class ExecuteWorkflowHandler:
         merged_inputs: dict[str, str],
         workflow: WorkflowTemplateAggregate,
     ) -> list[str]:
-        """Resolve repos: inputs CSV → template-level repos → repository_url fallback."""
+        """Resolve repos: inputs CSV → trigger repository → template-level repos → repository_url fallback."""
         repos_raw = merged_inputs.get("repos", "")
         if repos_raw:
             return [_normalise_repo_url(u.strip()) for u in repos_raw.split(",") if u.strip()]
+        # Trigger presets inject "repository" (owner/repo slug) via input_mapping
+        trigger_repo = merged_inputs.get("repository", "")
+        if trigger_repo:
+            return [_normalise_repo_url(trigger_repo)]
         if workflow.repos:
             return [
                 _normalise_repo_url(_substitute_repo_vars(r, merged_inputs)) for r in workflow.repos

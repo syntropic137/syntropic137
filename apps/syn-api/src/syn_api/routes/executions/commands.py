@@ -408,6 +408,8 @@ async def execute(
         logger.exception("Workflow execution error for %s", workflow_id)
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
+    repos_csv = (inputs or {}).get("repos", "")
+    repos = [r.strip() for r in repos_csv.split(",") if r.strip()] if repos_csv else []
     return Ok(
         ExecutionSummary(
             workflow_execution_id=result.execution_id,
@@ -419,6 +421,7 @@ async def execute(
             total_tokens=result.metrics.total_tokens,
             total_cost_usd=result.metrics.total_cost_usd,
             error_message=result.error_message,
+            repos=repos,
         )
     )
 

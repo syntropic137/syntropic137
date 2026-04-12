@@ -252,6 +252,7 @@ async def list_(
                 total_cost_usd=s.total_cost_usd,
                 tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
                 error_message=s.error_message,
+                repos=list(s.repos),
             )
             for s in domain_summaries
         ]
@@ -296,6 +297,7 @@ async def get(
             total_duration_seconds=total_duration,
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
+            repos=list(detail.repos),
         )
     )
 
@@ -384,6 +386,7 @@ async def list_active(
                 total_tokens=s.total_tokens,
                 total_cost_usd=s.total_cost_usd,
                 error_message=s.error_message,
+                repos=list(s.repos),
             )
             for s in all_execs
             if s.status in ("running", "paused", "pending")

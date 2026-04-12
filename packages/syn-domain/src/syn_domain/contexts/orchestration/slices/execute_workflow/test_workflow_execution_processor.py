@@ -160,3 +160,66 @@ class TestProcessorProjectionSync:
         todos = await processor._todo_projection.get_pending("exec-sync")
         assert len(todos) == 1
         assert todos[0].phase_id == "p-1"
+
+
+@pytest.mark.unit
+class TestProcessorReposPersistence:
+    """Tests that resolved repos are persisted in inputs for the domain event."""
+
+    @pytest.mark.anyio
+    async def test_resolved_repos_written_to_inputs(self) -> None:
+        """Resolved repos list is persisted as CSV in inputs['repos']."""
+        processor = _make_processor()
+        processor._execution_repo.save = AsyncMock()
+
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
+        )
+
+        inputs: dict[str, str] = {"repository": "org/my-repo"}
+        await processor.run(
+            workflow_id="wf-1",
+            workflow_name="Test",
+            phases=[
+                ExecutablePhase(
+                    phase_id="p-1",
+                    name="Phase",
+                    order=1,
+                    prompt_template="do work",
+                ),
+            ],
+            inputs=inputs,
+            execution_id="exec-repos",
+            repos=["https://github.com/org/my-repo"],
+        )
+
+        assert inputs["repos"] == "https://github.com/org/my-repo"
+
+    @pytest.mark.anyio
+    async def test_existing_repos_input_not_overwritten(self) -> None:
+        """If inputs already has 'repos', the processor does not overwrite it."""
+        processor = _make_processor()
+        processor._execution_repo.save = AsyncMock()
+
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
+        )
+
+        inputs: dict[str, str] = {"repos": "https://github.com/org/explicit"}
+        await processor.run(
+            workflow_id="wf-1",
+            workflow_name="Test",
+            phases=[
+                ExecutablePhase(
+                    phase_id="p-1",
+                    name="Phase",
+                    order=1,
+                    prompt_template="do work",
+                ),
+            ],
+            inputs=inputs,
+            execution_id="exec-no-overwrite",
+            repos=["https://github.com/org/resolved"],
+        )
+
+        assert inputs["repos"] == "https://github.com/org/explicit"
