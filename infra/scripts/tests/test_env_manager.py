@@ -4,6 +4,7 @@ Pure logic tests - no Docker, no subprocess, no filesystem side effects.
 Tests cover: slugification, port computation, slot allocation, registry
 serialization, env file generation, and compose argument construction.
 """
+
 from __future__ import annotations
 
 import json
@@ -161,8 +162,11 @@ class TestNextFreeSlot:
 
     def test_skips_used_slots(self) -> None:
         env = em.Environment(
-            name="x", branch="x", slot=2,
-            created_at="", ports={},
+            name="x",
+            branch="x",
+            slot=2,
+            created_at="",
+            ports={},
         )
         registry = em.Registry(environments=[env])
         assert em._next_free_slot(registry) == 3
@@ -239,10 +243,15 @@ class TestWriteEnvFile:
             slot=2,
             created_at="2026-04-11T14:30:00+00:00",
             ports={
-                "gateway": 28137, "api": 29137, "db": 25432,
-                "event_store": 60051, "collector": 28080,
-                "minio": 29000, "minio_console": 29001,
-                "redis": 26379, "envoy": 28081,
+                "gateway": 28137,
+                "api": 29137,
+                "db": 25432,
+                "event_store": 60051,
+                "collector": 28080,
+                "minio": 29000,
+                "minio_console": 29001,
+                "redis": 26379,
+                "envoy": 28081,
             },
         )
         with patch.object(em, "REPO_ROOT", tmp_path):
@@ -278,9 +287,11 @@ class TestComposeArgs:
             created_at="",
             ports={},
         )
-        with patch.object(em, "REPO_ROOT", tmp_path), \
-             patch.object(em, "COMPOSE_BASE", tmp_path / "docker-compose.yaml"), \
-             patch.object(em, "COMPOSE_ONDEMAND", tmp_path / "docker-compose.ondemand.yaml"):
+        with (
+            patch.object(em, "REPO_ROOT", tmp_path),
+            patch.object(em, "COMPOSE_BASE", tmp_path / "docker-compose.yaml"),
+            patch.object(em, "COMPOSE_ONDEMAND", tmp_path / "docker-compose.ondemand.yaml"),
+        ):
             args = em._compose_args(env)
 
         assert args[0] == "docker"
@@ -305,10 +316,15 @@ class TestEnvToDict:
             slot=2,
             created_at="2026-04-11T14:30:00+00:00",
             ports={
-                "gateway": 28137, "api": 29137, "db": 25432,
-                "event_store": 60051, "collector": 28080,
-                "minio": 29000, "minio_console": 29001,
-                "redis": 26379, "envoy": 28081,
+                "gateway": 28137,
+                "api": 29137,
+                "db": 25432,
+                "event_store": 60051,
+                "collector": 28080,
+                "minio": 29000,
+                "minio_console": 29001,
+                "redis": 26379,
+                "envoy": 28081,
             },
         )
         d = em._env_to_dict(env)
@@ -332,8 +348,10 @@ class TestEnvToDict:
 class TestAllocate:
     def test_allocates_new_environment(self, tmp_path: Path) -> None:
         registry_file = tmp_path / "environments.json"
-        with patch.object(em, "REGISTRY_FILE", registry_file), \
-             patch.object(em, "REPO_ROOT", tmp_path):
+        with (
+            patch.object(em, "REGISTRY_FILE", registry_file),
+            patch.object(em, "REPO_ROOT", tmp_path),
+        ):
             _, env = em._allocate("feat/cool-feature")
 
         assert env.name == "cool-feature"
@@ -351,8 +369,10 @@ class TestAllocate:
 
     def test_returns_existing_if_already_allocated(self, tmp_path: Path) -> None:
         registry_file = tmp_path / "environments.json"
-        with patch.object(em, "REGISTRY_FILE", registry_file), \
-             patch.object(em, "REPO_ROOT", tmp_path):
+        with (
+            patch.object(em, "REGISTRY_FILE", registry_file),
+            patch.object(em, "REPO_ROOT", tmp_path),
+        ):
             _, env1 = em._allocate("feat/cool-feature")
             _, env2 = em._allocate("feat/cool-feature")
 
@@ -363,8 +383,10 @@ class TestAllocate:
 
     def test_second_branch_gets_next_slot(self, tmp_path: Path) -> None:
         registry_file = tmp_path / "environments.json"
-        with patch.object(em, "REGISTRY_FILE", registry_file), \
-             patch.object(em, "REPO_ROOT", tmp_path):
+        with (
+            patch.object(em, "REGISTRY_FILE", registry_file),
+            patch.object(em, "REPO_ROOT", tmp_path),
+        ):
             _, env1 = em._allocate("feat/first")
             _, env2 = em._allocate("feat/second")
 
