@@ -177,5 +177,3 @@ def format_access_urls(hostname: str) -> dict[str, str]:
         "api_docs": f"http://localhost:{PORT_UI}/api/v1/docs",
         "openapi": f"http://localhost:{PORT_UI}/api/v1/openapi.json",
     }
-
-
