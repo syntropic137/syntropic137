@@ -31,7 +31,23 @@ function getPrimaryLabel(op: OperationInfo): string {
   return formatStatusLabel(op.operation_type)
 }
 
+function getGitPreview(op: OperationInfo): string | null {
+  if (!op.operation_type.startsWith('git_')) return null
+  const parts: string[] = []
+  if (op.git_sha) parts.push(op.git_sha.slice(0, 7))
+  if (op.git_message) {
+    const firstLine = op.git_message.split('\n')[0]
+    parts.push(firstLine)
+  }
+  if (op.git_branch) parts.push(`on ${op.git_branch}`)
+  return parts.length > 0 ? parts.join(' ') : null
+}
+
 function getPreview(op: OperationInfo): string | null {
+  const gitPreview = getGitPreview(op)
+  if (gitPreview) {
+    return gitPreview.length > 140 ? gitPreview.slice(0, 140) + '...' : gitPreview
+  }
   if (op.tool_input) {
     const input = JSON.stringify(op.tool_input)
     return input.length > 140 ? input.slice(0, 140) + '...' : input
@@ -57,7 +73,8 @@ export function OperationTimelineItem({ op, index, expanded, onToggle }: {
   const color = operationColors[op.operation_type] ?? 'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]'
   const [textColor, bgColor] = color.split(' ')
   const preview = getPreview(op)
-  const hasDetails = !!(op.tool_output || op.tool_input || op.message_content || op.thinking_content)
+  const hasGitDetails = !!(op.git_message || op.git_sha)
+  const hasDetails = !!(op.tool_output || op.tool_input || op.message_content || op.thinking_content || hasGitDetails)
   const isSubagent = op.operation_type === 'subagent_started' || op.operation_type === 'subagent_stopped'
   const showToolIcon = !!op.tool_name && !op.operation_type.startsWith('git_')
   const ToolIcon = isSubagent ? Users : Wrench

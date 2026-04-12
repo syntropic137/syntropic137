@@ -11,14 +11,11 @@ import { formatDurationSeconds } from '../../utils/formatters'
 function GitBadges({ op }: { op: OperationInfo }) {
   return (
     <>
-      {op.git_message && (
-        <span className="flex items-center gap-1 max-w-sm truncate">
-          <GitCommit className="h-3 w-3 shrink-0" />
-          {op.git_message}
-        </span>
-      )}
       {op.git_sha && (
-        <span className="font-mono text-[var(--color-text-muted)]">{op.git_sha.slice(0, 7)}</span>
+        <span className="flex items-center gap-1 font-mono text-[var(--color-text-muted)]">
+          <GitCommit className="h-3 w-3 shrink-0" />
+          {op.git_sha.slice(0, 7)}
+        </span>
       )}
       {(op.git_repo || op.git_branch) && (
         <span className="flex items-center gap-1 font-mono">
