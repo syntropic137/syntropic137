@@ -120,6 +120,10 @@ workflows/custom/*.yml
 !.env.example
 .op-save-secrets.sh
 
+# On-demand environment files (ADR-060) — machine-local, not committed
+.env.ondemand-*
+infra/environments.json
+
 # ISS-259: Private keys and certificates — should never be committed
 *.pem
 *.key

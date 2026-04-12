@@ -342,7 +342,6 @@ def get_event_pipeline() -> EventPipeline:
     from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
         EvaluateWebhookHandler,
     )
-
     from syn_shared.settings import get_settings
 
     settings = get_settings()

@@ -48,6 +48,26 @@ function buildGitHubCommitUrl(repo: string, sha: string): string | null {
   return `https://github.com/${repo}/commit/${sha}`
 }
 
+function GitMetaRow({ sha, branch, repo }: { sha?: string; branch?: string; repo?: string }) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[var(--color-text-secondary)]">
+      {sha && (
+        <span className="flex items-center gap-1 font-mono">
+          <GitCommit className="h-3 w-3" />
+          {sha.slice(0, 7)}
+        </span>
+      )}
+      {branch && (
+        <span className="flex items-center gap-1 font-mono">
+          <GitBranch className="h-3 w-3" />
+          {branch}
+        </span>
+      )}
+      {repo && <span className="font-mono text-[var(--color-text-muted)]">{repo}</span>}
+    </div>
+  )
+}
+
 function GitDetails({ op }: { op: OperationInfo }) {
   if (!op.git_message && !op.git_sha) return null
 
@@ -81,25 +101,7 @@ function GitDetails({ op }: { op: OperationInfo }) {
         </pre>
       )}
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[var(--color-text-secondary)]">
-        {op.git_sha && (
-          <span className="flex items-center gap-1 font-mono">
-            <GitCommit className="h-3 w-3" />
-            {op.git_sha.slice(0, 7)}
-          </span>
-        )}
-        {op.git_branch && (
-          <span className="flex items-center gap-1 font-mono">
-            <GitBranch className="h-3 w-3" />
-            {op.git_branch}
-          </span>
-        )}
-        {op.git_repo && (
-          <span className="font-mono text-[var(--color-text-muted)]">
-            {op.git_repo}
-          </span>
-        )}
-      </div>
+      <GitMetaRow sha={op.git_sha ?? undefined} branch={op.git_branch ?? undefined} repo={op.git_repo ?? undefined} />
     </div>
   )
 }

@@ -137,6 +137,7 @@ testpaths = [
     "packages/syn-adapters/tests",
     "packages/syn-shared/tests",
     "scripts/workflows",
+    "infra/scripts/tests",
 ]
 pythonpath = [
     "apps/syn-api/src",
@@ -145,6 +146,7 @@ pythonpath = [
     "packages/syn-adapters/src",
     "packages/syn-shared/src",
     "scripts/workflows",
+    ".",  # infra/scripts importable from repo root
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]

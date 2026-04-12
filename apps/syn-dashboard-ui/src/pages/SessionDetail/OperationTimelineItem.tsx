@@ -31,36 +31,72 @@ function getPrimaryLabel(op: OperationInfo): string {
   return formatStatusLabel(op.operation_type)
 }
 
+function truncate(text: string, max = 140): string {
+  return text.length > max ? text.slice(0, max) + '...' : text
+}
+
 function getGitPreview(op: OperationInfo): string | null {
   if (!op.operation_type.startsWith('git_')) return null
   const parts: string[] = []
   if (op.git_sha) parts.push(op.git_sha.slice(0, 7))
-  if (op.git_message) {
-    const firstLine = op.git_message.split('\n')[0]
-    parts.push(firstLine)
-  }
+  if (op.git_message) parts.push(op.git_message.split('\n')[0])
   if (op.git_branch) parts.push(`on ${op.git_branch}`)
   return parts.length > 0 ? parts.join(' ') : null
 }
 
 function getPreview(op: OperationInfo): string | null {
   const gitPreview = getGitPreview(op)
-  if (gitPreview) {
-    return gitPreview.length > 140 ? gitPreview.slice(0, 140) + '...' : gitPreview
-  }
-  if (op.tool_input) {
-    const input = JSON.stringify(op.tool_input)
-    return input.length > 140 ? input.slice(0, 140) + '...' : input
-  }
-  if (op.tool_output) {
-    const firstLine = op.tool_output.split('\n')[0]
-    return firstLine.length > 140 ? firstLine.slice(0, 140) + '...' : firstLine
-  }
-  if (op.message_content) {
-    const firstLine = op.message_content.split('\n')[0]
-    return firstLine.length > 140 ? firstLine.slice(0, 140) + '...' : firstLine
-  }
+  if (gitPreview) return truncate(gitPreview)
+  if (op.tool_input) return truncate(JSON.stringify(op.tool_input))
+  if (op.tool_output) return truncate(op.tool_output.split('\n')[0])
+  if (op.message_content) return truncate(op.message_content.split('\n')[0])
   return null
+}
+
+function ExpandToggle({ expanded, preview, onToggle }: {
+  expanded: boolean
+  preview: string | null
+  onToggle: () => void
+}) {
+  const Chevron = expanded ? ChevronDown : ChevronRight
+
+  function getLabel() {
+    if (expanded) return <span className="text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]">Hide details</span>
+    if (preview) {
+      return (
+        <span className="font-mono truncate rounded bg-[var(--color-background)] border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)] group-hover:border-[var(--color-text-muted)]/30 transition-colors">
+          {preview}
+        </span>
+      )
+    }
+    return <span className="text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]">Show details</span>
+  }
+
+  return (
+    <button
+      onClick={onToggle}
+      className="mt-1.5 flex items-center gap-1.5 w-full text-left text-xs cursor-pointer group"
+    >
+      <Chevron className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]" />
+      {getLabel()}
+    </button>
+  )
+}
+
+const SUBAGENT_TYPES = new Set(['subagent_started', 'subagent_stopped'])
+const DEFAULT_COLOR = 'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]'
+
+function deriveOpProps(op: OperationInfo) {
+  const Icon = operationIcons[op.operation_type] ?? Activity
+  const color = operationColors[op.operation_type] ?? DEFAULT_COLOR
+  const [textColor, bgColor] = color.split(' ')
+  const hasGitDetails = !!(op.git_message || op.git_sha)
+  const hasDetails = !!(op.tool_output || op.tool_input || op.message_content || op.thinking_content || hasGitDetails)
+  const showToolIcon = !!op.tool_name && !op.operation_type.startsWith('git_')
+  const ToolIcon = SUBAGENT_TYPES.has(op.operation_type) ? Users : Wrench
+  const StatusIcon = op.success ? CheckCircle2 : XCircle
+  const statusColor = op.success ? 'text-emerald-400' : 'text-red-400'
+  return { Icon, textColor, bgColor, hasDetails, showToolIcon, ToolIcon, StatusIcon, statusColor }
 }
 
 export function OperationTimelineItem({ op, index, expanded, onToggle }: {
@@ -69,15 +105,8 @@ export function OperationTimelineItem({ op, index, expanded, onToggle }: {
   expanded: boolean
   onToggle: () => void
 }) {
-  const Icon = operationIcons[op.operation_type] ?? Activity
-  const color = operationColors[op.operation_type] ?? 'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]'
-  const [textColor, bgColor] = color.split(' ')
+  const { Icon, textColor, bgColor, hasDetails, showToolIcon, ToolIcon, StatusIcon, statusColor } = deriveOpProps(op)
   const preview = getPreview(op)
-  const hasGitDetails = !!(op.git_message || op.git_sha)
-  const hasDetails = !!(op.tool_output || op.tool_input || op.message_content || op.thinking_content || hasGitDetails)
-  const isSubagent = op.operation_type === 'subagent_started' || op.operation_type === 'subagent_stopped'
-  const showToolIcon = !!op.tool_name && !op.operation_type.startsWith('git_')
-  const ToolIcon = isSubagent ? Users : Wrench
 
   return (
     <div
@@ -99,11 +128,7 @@ export function OperationTimelineItem({ op, index, expanded, onToggle }: {
           <span className="text-xs text-[var(--color-text-muted)]">
             ({formatStatusLabel(op.operation_type)})
           </span>
-          {op.success ? (
-            <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-          ) : (
-            <XCircle className="h-3 w-3 text-red-400" />
-          )}
+          <StatusIcon className={clsx('h-3 w-3', statusColor)} />
           <span className="text-xs text-[var(--color-text-muted)] ml-auto shrink-0">
             {formatTime(op.timestamp)}
           </span>
@@ -111,27 +136,7 @@ export function OperationTimelineItem({ op, index, expanded, onToggle }: {
 
         <OperationMetaBadges op={op} />
 
-        {hasDetails && (
-          <button
-            onClick={onToggle}
-            className="mt-1.5 flex items-center gap-1.5 w-full text-left text-xs cursor-pointer group"
-          >
-            {expanded
-              ? <ChevronDown className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]" />
-              : <ChevronRight className="h-3 w-3 shrink-0 text-[var(--color-text-muted)]" />
-            }
-            {!expanded && preview && (
-              <span className="font-mono truncate rounded bg-[var(--color-background)] border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)] group-hover:border-[var(--color-text-muted)]/30 transition-colors">
-                {preview}
-              </span>
-            )}
-            {!expanded && !preview && (
-              <span className="text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]">Show details</span>
-            )}
-            {expanded && <span className="text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]">Hide details</span>}
-          </button>
-        )}
-
+        {hasDetails && <ExpandToggle expanded={expanded} preview={preview} onToggle={onToggle} />}
         {expanded && hasDetails && <OperationDetails op={op} />}
       </div>
     </div>

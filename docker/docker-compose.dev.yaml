@@ -2,8 +2,11 @@
 # Usage: docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up
 # Shortcut: just dev
 #
-# Adds: container names, ports, persistent volumes, restart policies
+# Adds: container names, ports, persistent volumes, restart policies.
+# Service definitions (images, health checks, deps) are in docker-compose.yaml.
+#
 # See: ADR-034 - Test Infrastructure Architecture
+# See: ADR-060 - On-Demand Environment Creation
 #
 # Project name "syn-dev" avoids clashing with the selfhost stack ("syntropic137").
 name: syn-dev
@@ -30,30 +33,10 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
+  # Definition in docker-compose.yaml; only container_name + restart here
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.3.0
     container_name: syn-docker-socket-proxy
-    environment:
-      CONTAINERS: 1     # Allow /containers/* path prefix (inspect, list, rm)
-      ALLOW_START: 1    # docker start → POST /containers/{id}/start
-      ALLOW_STOP: 1     # docker stop  → POST /containers/{id}/stop
-      EXEC: 1           # docker exec  → /exec/* paths
-      POST: 1           # Enable all non-GET verbs (POST, DELETE, PUT)
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETUID
-      - SETGID
-    tmpfs:
-      - /tmp
-    networks:
-      - proxy-net
 
   api:
     container_name: syn-api
@@ -95,19 +78,11 @@ services:
       # Each compose stack gets its own prefix, preventing cross-stack container leakage.
       # Production override: SYN_AGENT_NETWORK=syntropic137_agent-net (or whatever that stack's prefix is)
       SYN_AGENT_NETWORK: syn-dev_agent-net
-      # Docker socket proxy (ISS-164)
-      DOCKER_HOST: tcp://docker-socket-proxy:2375
-    depends_on:
-      docker-socket-proxy:
-        condition: service_started
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
       # Mount workspace directory for container file sharing
       # Host path (${PWD}/workspaces) -> Container path (/workspaces)
       - ../workspaces:/workspaces
-    networks:
-      - default
-      - proxy-net
 
   minio:
     container_name: syn-minio
@@ -145,7 +120,3 @@ volumes:
 networks:
   default:
     name: syn-dev-network
-  proxy-net:
-    name: syn-dev-proxy-net
-    driver: bridge
-    internal: true  # no external routing — proxy ↔ api only
