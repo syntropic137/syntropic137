@@ -249,7 +249,12 @@ class ObservabilityCollector:
         event_type: str,
         enriched: dict[str, Any],
     ) -> None:
-        """Record an embedded event (e.g., git hook events from tool output)."""
+        """Record an embedded event (e.g., git hook events from tool output).
+
+        Flattens context + metadata and renames fields that collide with
+        RESERVED_OBSERVATION_KEYS in record_observation (e.g. "message"
+        becomes "commit_message" so it isn't silently dropped).
+        """
         if self._writer is None:
             return
 
@@ -257,6 +262,12 @@ class ObservabilityCollector:
             **(enriched.get("context") or {}),
             **(enriched.get("metadata") or {}),
         }
+        # "message" is reserved by AgentEvent.from_dict() for Claude CLI
+        # conversation messages (dict with "content" list). Git hooks emit
+        # "message" as a plain string (commit message), which would be
+        # stripped by record_observation. Rename to "commit_message".
+        if "message" in data and isinstance(data["message"], str):
+            data["commit_message"] = data.pop("message")
         await self._writer.record_observation(
             session_id=self._session_id,
             observation_type=event_type,
