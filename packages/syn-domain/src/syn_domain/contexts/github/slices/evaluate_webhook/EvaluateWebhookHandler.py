@@ -60,12 +60,17 @@ class EvaluateWebhookHandler:
         repository: Repository[TriggerRuleAggregate],
         debouncer: TriggerDebouncer | None = None,
         on_fire: OnFireCallback | None = None,
+        dispatch_rate_limit: int = 10,
+        dispatch_rate_window_seconds: float = 60.0,
     ) -> None:
         self._store = store
         self._repository = repository
         self._debouncer = debouncer
         self._on_fire = on_fire
-        self._guards = SafetyGuards()
+        self._guards = SafetyGuards(
+            dispatch_rate_limit=dispatch_rate_limit,
+            dispatch_rate_window_seconds=dispatch_rate_window_seconds,
+        )
         # Per-(trigger, pr) lock: ensures the concurrency guard check and
         # record_fire are atomic — prevents two concurrent webhook handlers
         # from both passing the guard before either records.
@@ -200,7 +205,8 @@ class EvaluateWebhookHandler:
     ) -> TriggerMatchResult:
         """Execute a trigger firing: record command + return result."""
         execution_id = f"exec-{uuid4().hex[:12]}"
-        delivery_id = payload.get("_delivery_id", "")
+        # ADR-060: use dedup_key as fallback for polled events (empty delivery_id)
+        delivery_id = payload.get("_delivery_id", "") or payload.get("_dedup_key", "")
         pr_number = _extract_pr_number(payload)
         workflow_inputs = extract_inputs(payload, rule.input_mapping)
 
@@ -222,6 +228,8 @@ class EvaluateWebhookHandler:
 
         # Mark execution as running for concurrency guard (Guard 6)
         await self._store.record_fire(rule.trigger_id, pr_number, execution_id)
+        # Record dispatch for rate limiting (Guard 7, ADR-060)
+        self._guards.record_dispatch()
 
         result = TriggerMatchResult(trigger_id=rule.trigger_id, execution_id=execution_id)
         logger.info(
@@ -248,7 +256,9 @@ class EvaluateWebhookHandler:
                 trigger_id=rule.trigger_id,
                 guard_name=guard_name,
                 reason=reason,
-                webhook_delivery_id=payload.get("_delivery_id", ""),
+                # ADR-060: use dedup_key as fallback for polled events
+                webhook_delivery_id=payload.get("_delivery_id", "")
+                or payload.get("_dedup_key", ""),
                 event_type=event,
                 repository=repository,
                 pr_number=_extract_pr_number(payload),

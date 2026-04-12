@@ -861,3 +861,27 @@ class TestResolveRepos:
             _make_workflow_stub(),
         )
         assert result == ["https://github.com/syntropic137/syntropic137"]
+
+    def test_trigger_repository_input_used_when_repos_absent(self) -> None:
+        """Trigger preset 'repository' input (owner/repo slug) is used when 'repos' is absent."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        result = ExecuteWorkflowHandler._resolve_repos(
+            {"repository": "syntropic137/sandbox_syn-engineer-beta", "pr_number": "42"},
+            _make_workflow_stub(),
+        )
+        assert result == ["https://github.com/syntropic137/sandbox_syn-engineer-beta"]
+
+    def test_repos_takes_precedence_over_trigger_repository(self) -> None:
+        """Explicit 'repos' input takes precedence over trigger 'repository' input."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        result = ExecuteWorkflowHandler._resolve_repos(
+            {"repos": "org/explicit-repo", "repository": "org/trigger-repo"},
+            _make_workflow_stub(),
+        )
+        assert result == ["https://github.com/org/explicit-repo"]

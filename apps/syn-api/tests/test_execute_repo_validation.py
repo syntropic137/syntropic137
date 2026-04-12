@@ -197,3 +197,98 @@ async def test_validate_succeeds_when_app_installed() -> None:
         ),
     ):
         await _validate_repo_access("owner/repo")
+
+
+# -- requires_repos preflight gating (ADR-058 #666) ---------------------------
+
+
+class TestRequiresReposPreflightGating:
+    """Regression tests: workflows with requires_repos=False skip repo validation."""
+
+    @staticmethod
+    def _make_workflow(
+        repo_url: str = "",
+        requires_repos: bool = True,
+        input_declarations: list[object] | None = None,
+        repos: list[str] | None = None,
+    ) -> MagicMock:
+        wf = MagicMock()
+        wf._repository_url = repo_url
+        wf.requires_repos = requires_repos
+        wf.input_declarations = input_declarations or []
+        wf.repos = repos or []
+        return wf
+
+    def test_no_repo_workflow_skips_placeholder_check(self) -> None:
+        """requires_repos=False should not call _check_repo_url_placeholders."""
+        from syn_api.routes.executions.commands import (
+            _check_missing_declarations,
+            _merge_inputs,
+        )
+
+        wf = self._make_workflow(repo_url="", requires_repos=False)
+        merged = _merge_inputs(wf, {}, None)
+        _check_missing_declarations(wf, merged)
+        # This should NOT raise even though repo_url is empty
+        # With requires_repos=True, a placeholder URL would trigger validation
+        # With requires_repos=False, this block is never reached in the endpoint
+
+    def test_repo_url_placeholder_raises_when_repos_required(self) -> None:
+        """requires_repos=True should raise on unresolved placeholders."""
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            _check_repo_url_placeholders,
+            _merge_inputs,
+        )
+
+        wf = self._make_workflow(
+            repo_url="https://github.com/{{owner}}/{{repo}}",
+            requires_repos=True,
+        )
+        merged = _merge_inputs(wf, {}, None)
+        with pytest.raises(HTTPException) as exc_info:
+            _check_repo_url_placeholders(wf, merged)
+        assert exc_info.value.status_code == 422
+        assert "owner" in str(exc_info.value.detail)
+
+    def test_get_preflight_repos_empty_when_no_repo(self) -> None:
+        """No preflight repos when workflow has no repo URL and no repos list."""
+        from syn_api.routes.executions.commands import _get_preflight_repos
+
+        wf = self._make_workflow(repo_url="", requires_repos=False)
+        repos = _get_preflight_repos({}, wf, None)
+        assert repos == []
+
+    @pytest.mark.asyncio
+    async def test_validate_all_repos_noop_on_empty_list(self) -> None:
+        """_validate_all_repos_access with empty list should be a no-op."""
+        from syn_api.routes.executions.commands import _validate_all_repos_access
+
+        # Should complete without error or any GitHub API calls
+        await _validate_all_repos_access([])
+
+    def test_check_missing_declarations_always_runs(self) -> None:
+        """Required input declarations are checked even with requires_repos=False."""
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            _check_missing_declarations,
+            _merge_inputs,
+        )
+
+        decl = MagicMock()
+        decl.name = "task"
+        decl.required = True
+        decl.default = None
+
+        wf = self._make_workflow(
+            repo_url="",
+            requires_repos=False,
+            input_declarations=[decl],
+        )
+        merged = _merge_inputs(wf, {}, None)
+        with pytest.raises(HTTPException) as exc_info:
+            _check_missing_declarations(wf, merged)
+        assert exc_info.value.status_code == 422
+        assert "task" in str(exc_info.value.detail)

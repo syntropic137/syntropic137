@@ -289,6 +289,9 @@ class WorkflowDefinition(BaseModel):
     # Repository context
     repository: RepositoryConfig | None = None
 
+    # Execution gate (ADR-058 #666): None = infer from repository presence
+    requires_repos: bool | None = None
+
     # Project association
     project_name: str | None = None
 

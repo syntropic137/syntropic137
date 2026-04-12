@@ -47,7 +47,7 @@ function LogModalHeader({ totalLines, sessionId, onClose }: { totalLines: number
   return (
     <div className="flex items-center justify-between border-b border-[var(--color-border)] px-6 py-4">
       <div>
-        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Conversation Log</h2>
+        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Session Transcript</h2>
         <p className="text-sm text-[var(--color-text-muted)]">
           {totalLines} lines &bull; Session: {sessionId.slice(0, 8)}...
         </p>

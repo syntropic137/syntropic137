@@ -31,7 +31,7 @@ class WorkflowListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_summaries"
-    VERSION = 3  # Bumped: added archive support with is_archived field
+    VERSION = 4  # Bumped: added requires_repos field (ADR-058 #666)
 
     def __init__(self, store: ProjectionStoreProtocol):
         """Initialize with a projection store."""
@@ -66,6 +66,7 @@ class WorkflowListProjection(AutoDispatchProjection):
             created_at=event_data.get("created_at"),
             runs_count=0,
             is_archived=False,
+            requires_repos=event_data.get("requires_repos", True),
         )
         await self._store.save(
             self.PROJECTION_NAME,

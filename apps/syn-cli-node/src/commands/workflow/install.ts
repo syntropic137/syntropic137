@@ -130,6 +130,7 @@ export async function installWorkflowsViaApi(
             repository_ref: wf.repository_ref,
             description: wf.description ?? null,
             project_name: wf.project_name ?? null,
+            requires_repos: true,
             phases: wf.phases,
             input_declarations: wf.input_declarations,
           },

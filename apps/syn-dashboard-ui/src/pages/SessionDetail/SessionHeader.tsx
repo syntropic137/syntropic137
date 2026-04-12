@@ -23,6 +23,7 @@ export function SessionHeader({
   session: SessionResponse
   onViewConversationLog: () => void
 }) {
+  const logAvailable = session.status === 'completed' || session.status === 'failed'
   return (
     <div>
       <div className="flex items-start justify-between">
@@ -57,10 +58,16 @@ export function SessionHeader({
 
         <button
           onClick={onViewConversationLog}
-          className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-elevated)] px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-accent)] hover:text-white transition-colors"
+          disabled={!logAvailable}
+          title={logAvailable ? undefined : 'Transcript available after session completes'}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm transition-colors ${
+            logAvailable
+              ? 'bg-[var(--color-surface-elevated)] text-[var(--color-text-secondary)] hover:bg-[var(--color-accent)] hover:text-white cursor-pointer'
+              : 'bg-[var(--color-surface-elevated)] text-[var(--color-text-muted)] opacity-50 cursor-not-allowed'
+          }`}
         >
           <FileText className="h-4 w-4" />
-          View Conversation Log
+          {logAvailable ? 'View Transcript' : 'Transcript available after completion'}
         </button>
       </div>
     </div>

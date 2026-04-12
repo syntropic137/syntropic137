@@ -4,9 +4,10 @@
 #
 # Adds: container names, persistent volumes, secrets, resource limits,
 #        restart policies, log rotation, gateway frontend, syn-internal network.
+# Service definitions (images, health checks, deps) are in docker-compose.yaml.
 #
-# Replaces the former infra/docker/compose/docker-compose.yaml and
-# docker-compose.homelab.yaml files (consolidated per ADR-034).
+# See: ADR-034 - Test Infrastructure Architecture
+# See: ADR-060 - On-Demand Environment Creation
 
 services:
   # ===========================================================================
@@ -116,33 +117,11 @@ services:
       - syn-internal
       - agent-net  # Workspace containers push OTLP metrics here (receive-only, no secrets)
 
-  # ===========================================================================
-  # DOCKER SOCKET PROXY (ISS-164)
-  # ===========================================================================
-  # Restricts api to only the Docker API endpoints it actually uses.
-  # The real socket is mounted ONLY here — api talks to this proxy via TCP.
+  # Definition in docker-compose.yaml; only container_name + production hardening here.
+  # Stays on docker-proxy network (from base) - NOT syn-internal. Only API needs access.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.3.0
     container_name: syn137-docker-socket-proxy
-    environment:
-      CONTAINERS: 1     # Allow /containers/* path prefix (inspect, list, rm)
-      ALLOW_START: 1    # docker start → POST /containers/{id}/start
-      ALLOW_STOP: 1     # docker stop  → POST /containers/{id}/stop
-      EXEC: 1           # docker exec  → /exec/* paths
-      POST: 1           # Enable all non-GET verbs (POST, DELETE, PUT)
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: always
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETUID
-      - SETGID
-    tmpfs:
-      - /tmp
     deploy:
       resources:
         limits:
@@ -153,8 +132,6 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
-    networks:
-      - syn-proxy
 
   # ===========================================================================
   # API
@@ -193,14 +170,10 @@ services:
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
       - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-.}/workspaces
-      # Docker socket proxy (ISS-164)
-      - DOCKER_HOST=tcp://docker-socket-proxy:2375
       - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-production}_agent-net
       # Envoy proxy URL for agent containers (must resolve on agent-net)
       - SYN_PROXY_URL=http://envoy-proxy:8081
     depends_on:
-      docker-socket-proxy:
-        condition: service_started
       minio:
         condition: service_healthy
     secrets:
@@ -228,7 +201,6 @@ services:
         max-file: "3"
     networks:
       - syn-internal
-      - syn-proxy
 
   # ===========================================================================
   # FRONTEND (nginx)
@@ -388,10 +360,6 @@ networks:
   syn-internal:
     name: syn137_internal
     driver: bridge
-  syn-proxy:
-    name: syn137_proxy
-    driver: bridge
-    internal: true  # no external routing — proxy ↔ api only
   agent-net:
     name: syntropic137_${APP_ENVIRONMENT:-production}_agent-net
     driver: bridge

@@ -44,6 +44,9 @@ build-backend = "uv_build"
 # Security floors for transitive dependencies (ISS-259).
 # These don't add new deps — they force minimum versions when resolved.
 [tool.uv]
+# Supply chain safety: only resolve packages published before this date.
+# Bump intentionally when upgrading dependencies: just bump-exclude-newer
+exclude-newer = "2026-04-05T00:14:25Z"
 constraint-dependencies = [
     "requests>=2.33.0",      # GHSA-gc5v-m9x4-r6x2
     "urllib3>=2.6.3",        # GHSA-38jv-5279-wg99
@@ -134,6 +137,7 @@ testpaths = [
     "packages/syn-adapters/tests",
     "packages/syn-shared/tests",
     "scripts/workflows",
+    "infra/scripts/tests",
 ]
 pythonpath = [
     "apps/syn-api/src",
@@ -142,6 +146,7 @@ pythonpath = [
     "packages/syn-adapters/src",
     "packages/syn-shared/src",
     "scripts/workflows",
+    ".",  # infra/scripts importable from repo root
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]

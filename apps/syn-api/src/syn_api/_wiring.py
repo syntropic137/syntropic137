@@ -342,11 +342,16 @@ def get_event_pipeline() -> EventPipeline:
     from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
         EvaluateWebhookHandler,
     )
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
 
     dedup = _create_dedup_adapter()
     evaluator = EvaluateWebhookHandler(
         store=get_trigger_store(),
         repository=get_trigger_repo(),
+        dispatch_rate_limit=settings.polling.dispatch_rate_limit,
+        dispatch_rate_window_seconds=settings.polling.dispatch_rate_window_seconds,
     )
     pipeline = EventPipeline(
         dedup=dedup,
@@ -357,7 +362,10 @@ def get_event_pipeline() -> EventPipeline:
 
 
 def _create_dedup_adapter() -> DedupPort:
-    """Create the appropriate dedup adapter based on environment."""
+    """Create the appropriate dedup adapter based on environment.
+
+    Priority (ADR-060): Postgres (durable) > Redis (cache) > In-memory (tests).
+    """
     from syn_shared.settings import get_settings
 
     settings = get_settings()
@@ -366,6 +374,23 @@ def _create_dedup_adapter() -> DedupPort:
         from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
 
         return InMemoryDedupAdapter()
+
+    # ADR-060: Prefer Postgres for durable dedup that survives restarts
+    if settings.syn_observability_db_url:
+        try:
+            from syn_api._wiring_db import get_shared_db_pool
+
+            pool = get_shared_db_pool()
+            if pool is not None:
+                from syn_adapters.dedup.postgres_dedup import PostgresDedupAdapter
+
+                logger.info("EventPipeline using Postgres dedup (ADR-060)")
+                return PostgresDedupAdapter(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
+        except Exception:
+            logger.warning(
+                "Postgres dedup unavailable — falling back to Redis",
+                exc_info=True,
+            )
 
     try:
         import redis.asyncio as aioredis

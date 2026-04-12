@@ -17,6 +17,7 @@ classification: simple
 
 # No repository needed for this demo
 repository: null
+requires_repos: false
 project_name: null
 
 phases:

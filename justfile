@@ -2,6 +2,11 @@
 #
 # Command runner for Syntropic137
 # See https://github.com/casey/just
+#
+# Adding or updating recipes? Follow ADR-061 (Justfile Script Extraction):
+# - One-liners stay here. Multi-step logic goes to infra/scripts/ or scripts/.
+# - Python over bash for anything non-trivial (testable, type-checked, linted).
+# - Recipes are the public API; scripts are implementation details.
 
 set dotenv-load := true
 
@@ -755,6 +760,41 @@ test-stack-restart: test-stack-down test-stack
 test-stack-logs:
     {{compose_test}} logs -f
 
+# --- On-Demand Environments (ADR-060) ---
+# Branch-based ephemeral environments for parallel testing.
+# All logic lives in infra/scripts/env_manager.py; these are thin wrappers.
+# Registry: infra/environments.json  |  Ports: slots 2-5 (x10000 offset)
+
+_env := "uv run python infra/scripts/env_manager.py"
+
+# Create and start an on-demand environment for a branch
+env-up branch:
+    {{_env}} up "{{branch}}"
+
+# Destroy an on-demand environment (stops containers, removes volumes, frees slot)
+env-down name:
+    {{_env}} down "{{name}}"
+
+# List all on-demand environments with their ports (--json for agent consumption)
+env-list *args:
+    {{_env}} list {{args}}
+
+# Show URLs and port details for one environment (--json for agent consumption)
+env-status name *args:
+    {{_env}} status "{{name}}" {{args}}
+
+# Pause an on-demand environment (slot still held)
+env-stop name:
+    {{_env}} stop "{{name}}"
+
+# Resume a paused environment
+env-start name:
+    {{_env}} start "{{name}}"
+
+# Stream logs from an on-demand environment
+env-logs name:
+    {{_env}} logs "{{name}}"
+
 # --- Quality Assurance ---
 
 # Static checks: lint + format + typecheck + import check (fast, pre-commit)
@@ -800,7 +840,7 @@ setup-hooks:
     @echo "✓ Git hooks configured (.githooks/pre-push active)"
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
-qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate docs-sync
+qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate docs-sync check-compose-overlays
     @echo ""
     @echo "✅ All QA checks passed!"
 
@@ -1364,9 +1404,13 @@ gen-env:
 gen-compose:
     uv run python scripts/generate_published_compose.py
 
-# Check published compose is up to date (CI mode — fails if stale)
+# Check published compose is up to date (CI mode -- fails if stale)
 check-compose:
     uv run python scripts/generate_published_compose.py --check
+
+# Validate all Docker Compose overlay combinations parse correctly
+check-compose-overlays:
+    bash scripts/check_compose_overlays.sh
 
 # Generate llms.txt from API docs
 generate-llms-txt:
@@ -1375,6 +1419,16 @@ generate-llms-txt:
 # Validate event store by querying PostgreSQL for stored events
 validate-events:
     uv run python scripts/validate_event_store.py
+
+# Bump exclude-newer to 7 days ago and re-lock (supply chain safety window)
+bump-exclude-newer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    new_date=$(date -u -v-7d "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "7 days ago" "+%Y-%m-%dT%H:%M:%SZ")
+    echo "📦 Bumping exclude-newer to: $new_date"
+    sed -i '' "s|^exclude-newer = \".*\"|exclude-newer = \"$new_date\"|" pyproject.toml
+    uv lock
+    echo "✅ Lockfile updated. Review changes with: git diff uv.lock"
 
 # Lock dependencies
 lock:

@@ -214,6 +214,108 @@ class TestCreateWorkflowTemplateHandler:
         assert result == "test-id"
 
 
+# === requires_repos Regression Tests (ADR-058 #666) ===
+
+
+@pytest.mark.unit
+class TestRequiresRepos:
+    """Regression tests for the requires_repos execution gate."""
+
+    def test_default_requires_repos_is_true(self) -> None:
+        """New aggregates default to requires_repos=True (backward compat)."""
+        aggregate = WorkflowTemplateAggregate()
+        command = create_test_command()
+        aggregate._handle_command(command)
+        assert aggregate.requires_repos is True
+
+    def test_requires_repos_false_propagates(self) -> None:
+        """Setting requires_repos=False on command propagates to aggregate."""
+        aggregate = WorkflowTemplateAggregate()
+        command = CreateWorkflowTemplateCommand(
+            name="Research Task",
+            workflow_type=WorkflowType.RESEARCH,
+            classification=WorkflowClassification.SIMPLE,
+            repository_url="",
+            phases=[
+                PhaseDefinition(
+                    phase_id="phase-1",
+                    name="Research",
+                    order=1,
+                ),
+            ],
+            requires_repos=False,
+        )
+        aggregate._handle_command(command)
+        assert aggregate.requires_repos is False
+
+    def test_requires_repos_in_emitted_event(self) -> None:
+        """requires_repos value should be present in the emitted event."""
+        aggregate = WorkflowTemplateAggregate()
+        command = CreateWorkflowTemplateCommand(
+            name="No Repos Needed",
+            workflow_type=WorkflowType.RESEARCH,
+            classification=WorkflowClassification.SIMPLE,
+            repository_url="",
+            phases=[
+                PhaseDefinition(
+                    phase_id="phase-1",
+                    name="Phase 1",
+                    order=1,
+                ),
+            ],
+            requires_repos=False,
+        )
+        aggregate._handle_command(command)
+        events = aggregate.get_uncommitted_events()
+        event_data = events[0].event.model_dump()
+        assert event_data["requires_repos"] is False
+
+    def test_backward_compat_old_events_default_true(self) -> None:
+        """Old events without requires_repos field should default to True on rehydration."""
+        aggregate = WorkflowTemplateAggregate()
+        # Simulate rehydrating from an old event that lacks requires_repos
+        old_event_data = {
+            "workflow_id": "legacy-wf",
+            "name": "Legacy Workflow",
+            "workflow_type": "custom",
+            "classification": "standard",
+            "repository_url": "https://github.com/test/repo",
+            "repository_ref": "main",
+            "phases": [{"phase_id": "p1", "name": "Phase 1", "order": 1}],
+            # No requires_repos field -- simulates pre-#666 events
+        }
+
+        class FakeEvent:
+            """Simulate a GenericDomainEvent from the gRPC event store."""
+
+            def __init__(self, data: dict) -> None:
+                self._data = data
+
+            def model_dump(self) -> dict:
+                return dict(self._data)
+
+        aggregate._initialize("legacy-wf")
+        aggregate.on_workflow_created(FakeEvent(old_event_data))  # type: ignore[arg-type]
+        assert aggregate.requires_repos is True
+
+    def test_repository_url_optional_on_command(self) -> None:
+        """repository_url should default to empty string when not provided."""
+        command = CreateWorkflowTemplateCommand(
+            name="Bare Workflow",
+            workflow_type=WorkflowType.RESEARCH,
+            classification=WorkflowClassification.SIMPLE,
+            phases=[
+                PhaseDefinition(
+                    phase_id="phase-1",
+                    name="Phase 1",
+                    order=1,
+                ),
+            ],
+            requires_repos=False,
+        )
+        assert command.repository_url == ""
+
+
 # === Event Tests ===
 
 

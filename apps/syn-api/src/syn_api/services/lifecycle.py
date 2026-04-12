@@ -174,6 +174,15 @@ async def startup(
     if isinstance(result, Err):
         return result
 
+    # ADR-060: Initialize shared DB pool for durable dedup and cursor store.
+    # Best-effort — if it fails, services fall back to Redis/in-memory.
+    try:
+        from syn_api._wiring_db import init_shared_db_pool
+
+        await init_shared_db_pool()
+    except Exception:
+        logger.warning("Shared DB pool init failed — dedup will use Redis fallback", exc_info=True)
+
     await _init_degradable_services(_state)
 
     mode = "degraded" if _state.degraded_reasons else "full"
@@ -200,6 +209,12 @@ async def shutdown() -> Result[None, LifecycleError]:
             if entry.shutdown_fn is not None:
                 with contextlib.suppress(Exception):
                     await entry.shutdown_fn(_state)
+
+        # ADR-060: Close shared DB pool
+        with contextlib.suppress(Exception):
+            from syn_api._wiring_db import close_shared_db_pool
+
+            await close_shared_db_pool()
 
         await disconnect()
         return Ok(None)
@@ -384,7 +399,21 @@ async def _init_event_poller(state: LifecycleState) -> None:
     )
     from syn_api.services.github_event_poller import GitHubEventPoller
 
-    events_client = GitHubEventsAPIClient(get_github_client())
+    # ADR-060: Wire persistent cursor store for restart-safe polling
+    cursor_store = None
+    try:
+        from syn_api._wiring_db import get_shared_db_pool
+
+        pool = get_shared_db_pool()
+        if pool is not None:
+            from syn_adapters.github.poller_cursor_store import PostgresPollerCursorStore
+
+            cursor_store = PostgresPollerCursorStore(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
+            logger.info("Poller cursor store initialized (ADR-060)")
+    except Exception:
+        logger.warning("Cursor store unavailable — poller will re-fetch on restart", exc_info=True)
+
+    events_client = GitHubEventsAPIClient(get_github_client(), cursor_store=cursor_store)
     poller = GitHubEventPoller(
         events_client=events_client,
         pipeline=get_event_pipeline(),

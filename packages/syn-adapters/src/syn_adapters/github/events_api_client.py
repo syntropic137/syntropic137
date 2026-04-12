@@ -1,15 +1,29 @@
-"""GitHub Events API client with ETag caching for efficient polling (ISS-386)."""
+"""GitHub Events API client with ETag caching for efficient polling (ISS-386).
+
+See ADR-060: Restart-safe trigger deduplication (persistent cursor support).
+"""
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    import httpx
+
     from syn_adapters.github.client import GitHubAppClient
+    from syn_adapters.github.poller_cursor_store import PollerCursor
 
 logger = logging.getLogger(__name__)
+
+
+class PollerCursorStore(Protocol):
+    """Protocol for persisting poller ETag/cursor state across restarts."""
+
+    async def save_cursor(self, repo: str, etag: str, last_event_id: str) -> None: ...
+    async def load_cursor(self, repo: str) -> PollerCursor | None: ...
+    async def load_all(self) -> dict[str, PollerCursor]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,9 +47,15 @@ class GitHubEventsAPIClient:
     See: https://docs.github.com/en/rest/activity/events
     """
 
-    def __init__(self, github_client: GitHubAppClient) -> None:
+    def __init__(
+        self,
+        github_client: GitHubAppClient,
+        cursor_store: PollerCursorStore | None = None,
+    ) -> None:
         self._client = github_client
-        self._etags: dict[str, str] = {}  # repo -> ETag
+        self._etags: dict[str, str] = {}  # repo -> ETag (in-memory cache)
+        self._cursor_store = cursor_store
+        self._cursors_loaded = False
 
     async def poll_repo_events(
         self,
@@ -54,6 +74,9 @@ class GitHubEventsAPIClient:
         """
         from syn_adapters.github.client_api import check_response
 
+        # Load persisted cursors on first poll (ADR-060)
+        await self._load_persisted_cursors()
+
         path = f"/repos/{owner}/{repo}/events"
         etag_key = f"{owner}/{repo}"
 
@@ -71,20 +94,55 @@ class GitHubEventsAPIClient:
             return EventsAPIResponse(events=[], poll_interval=poll_interval, has_new_events=False)
 
         if response.status_code == 200:
-            etag = response.headers.get("ETag", "")
-            if etag:
-                self._etags[etag_key] = etag
-
-            data = response.json()
-            events: list[dict[str, Any]] = data if isinstance(data, list) else []
-            return EventsAPIResponse(
-                events=events,
-                poll_interval=poll_interval,
-                has_new_events=bool(events),
-            )
+            return await self._handle_success(response, etag_key, poll_interval)
 
         # Handle errors (rate limit, auth, not found, etc.)
         check_response(response)
 
         # Unreachable if check_response raises, but satisfies type checker
         return EventsAPIResponse(events=[], poll_interval=poll_interval, has_new_events=False)
+
+    async def _handle_success(
+        self,
+        response: httpx.Response,
+        etag_key: str,
+        poll_interval: int,
+    ) -> EventsAPIResponse:
+        """Process a 200 OK response: cache ETag, persist cursor, return events."""
+        etag = response.headers.get("ETag", "")
+        if etag:
+            self._etags[etag_key] = etag
+
+        data = response.json()
+        events: list[dict[str, Any]] = data if isinstance(data, list) else []
+
+        # Persist cursor for restart safety (ADR-060)
+        if etag and self._cursor_store is not None:
+            newest_id = str(events[0].get("id", "")) if events else ""
+            try:
+                await self._cursor_store.save_cursor(etag_key, etag, newest_id)
+            except Exception:
+                logger.warning("Failed to persist poller cursor for %s", etag_key, exc_info=True)
+
+        return EventsAPIResponse(
+            events=events,
+            poll_interval=poll_interval,
+            has_new_events=bool(events),
+        )
+
+    async def _load_persisted_cursors(self) -> None:
+        """Load ETags from persistent store on first call (ADR-060)."""
+        if self._cursors_loaded or self._cursor_store is None:
+            return
+        self._cursors_loaded = True
+        try:
+            cursors = await self._cursor_store.load_all()
+            for repo, cursor in cursors.items():
+                etag = getattr(cursor, "etag", "")
+                if etag:
+                    self._etags[repo] = etag
+            logger.info("Loaded %d persisted ETag(s) from cursor store", len(cursors))
+        except Exception:
+            logger.warning(
+                "Failed to load persisted cursors — polling will re-fetch", exc_info=True
+            )

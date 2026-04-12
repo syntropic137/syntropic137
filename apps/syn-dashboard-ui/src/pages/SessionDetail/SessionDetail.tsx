@@ -8,7 +8,6 @@ import type { SessionResponse } from '../../types'
 import { useSessionData } from '../../hooks'
 import { ConversationLogViewer } from './ConversationLogViewer'
 import { OperationTimeline } from './OperationTimeline'
-import { CliDisclaimerBanner } from './CliDisclaimerBanner'
 import { SessionHeader } from './SessionHeader'
 import { SessionMetrics } from './SessionMetrics'
 
@@ -105,7 +104,6 @@ export function SessionDetail() {
 
       <Breadcrumbs items={buildSessionBreadcrumbs(session)} />
       <SessionHeader session={session} onViewConversationLog={() => setShowConversationLog(true)} />
-      <CliDisclaimerBanner />
       <SessionMetrics session={session} now={now} />
 
       {session.error_message && <SessionErrorCard message={session.error_message} />}
