@@ -117,7 +117,8 @@ services:
       - syn-internal
       - agent-net  # Workspace containers push OTLP metrics here (receive-only, no secrets)
 
-  # Definition in docker-compose.yaml; only container_name + production hardening here
+  # Definition in docker-compose.yaml; only container_name + production hardening here.
+  # Stays on docker-proxy network (from base) - NOT syn-internal. Only API needs access.
   docker-socket-proxy:
     container_name: syn137-docker-socket-proxy
     restart: always
@@ -131,8 +132,6 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
-    networks:
-      - syn-internal
 
   # ===========================================================================
   # API

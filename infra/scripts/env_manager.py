@@ -294,12 +294,26 @@ def _allocate(branch: str) -> tuple[Registry, Environment]:
 # ---------------------------------------------------------------------------
 
 
+def _rollback(env: Environment) -> None:
+    """Remove registry entry and env file after a failed compose up."""
+    registry = _load_registry()
+    registry.environments = [e for e in registry.environments if e.name != env.name]
+    _save_registry(registry)
+
+    env_file = _env_file_path(env.name)
+    if env_file.exists():
+        env_file.unlink()
+
+    print(f"Rolled back slot {env.slot} for '{env.name}'.", file=sys.stderr)
+
+
 def cmd_up(branch: str) -> int:
     """Allocate slot + start the environment."""
     _, env = _allocate(branch)
     print(f"Starting environment '{env.name}'...", file=sys.stderr)
     rc = _compose_run(env, "up", "-d", "--build")
     if rc != 0:
+        _rollback(env)
         return rc
     print("", file=sys.stderr)
     return cmd_status(env.name)

@@ -393,3 +393,47 @@ class TestAllocate:
         assert env1.slot == 2
         assert env2.slot == 3
         assert env1.ports["gateway"] != env2.ports["gateway"]
+
+
+# ---------------------------------------------------------------------------
+# Rollback on failed compose up
+# ---------------------------------------------------------------------------
+
+
+class TestRollback:
+    def test_rollback_removes_registry_entry_and_env_file(self, tmp_path: Path) -> None:
+        registry_file = tmp_path / "environments.json"
+        with (
+            patch.object(em, "REGISTRY_FILE", registry_file),
+            patch.object(em, "REPO_ROOT", tmp_path),
+        ):
+            _, env = em._allocate("feat/doomed")
+            # Verify allocation succeeded
+            assert registry_file.exists()
+            env_file = tmp_path / ".env.ondemand-doomed"
+            assert env_file.exists()
+
+            # Rollback
+            em._rollback(env)
+
+        # Registry should be empty
+        data = json.loads(registry_file.read_text())
+        assert len(data["environments"]) == 0
+
+        # Env file should be gone
+        assert not env_file.exists()
+
+    def test_rollback_preserves_other_environments(self, tmp_path: Path) -> None:
+        registry_file = tmp_path / "environments.json"
+        with (
+            patch.object(em, "REGISTRY_FILE", registry_file),
+            patch.object(em, "REPO_ROOT", tmp_path),
+        ):
+            _, env1 = em._allocate("feat/keeper")
+            _, env2 = em._allocate("feat/doomed")
+
+            em._rollback(env2)
+
+        data = json.loads(registry_file.read_text())
+        assert len(data["environments"]) == 1
+        assert data["environments"][0]["name"] == "keeper"

@@ -802,13 +802,13 @@ env-up branch:
 env-down name:
     {{_env}} down "{{name}}"
 
-# List all on-demand environments with their ports
-env-list:
-    {{_env}} list
+# List all on-demand environments with their ports (--json for agent consumption)
+env-list *args:
+    {{_env}} list {{args}}
 
-# Show URLs and port details for one environment
-env-status name:
-    {{_env}} status "{{name}}"
+# Show URLs and port details for one environment (--json for agent consumption)
+env-status name *args:
+    {{_env}} status "{{name}}" {{args}}
 
 # Pause an on-demand environment (slot still held)
 env-stop name:
@@ -1468,25 +1468,7 @@ check-compose:
 
 # Validate all Docker Compose overlay combinations parse correctly
 check-compose-overlays:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd docker
-    echo "Validating compose overlays..."
-    # Dev overlay
-    docker compose -f docker-compose.yaml -f docker-compose.dev.yaml config --services > /dev/null
-    echo "  dev: ok"
-    # Selfhost overlay
-    docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml config --services > /dev/null
-    echo "  selfhost: ok"
-    # On-demand overlay (needs env vars that would come from .env.ondemand-{name})
-    SYN_ENV_NAME=validate SYN_ENV_PORT_GATEWAY=28137 SYN_ENV_PORT_API=29137 \
-      SYN_ENV_PORT_DB=25432 SYN_ENV_PORT_ES=60051 SYN_ENV_PORT_COLLECTOR=28080 \
-      SYN_ENV_PORT_MINIO=29000 SYN_ENV_PORT_MINIO_CONSOLE=29001 \
-      SYN_ENV_PORT_REDIS=26379 SYN_ENV_PORT_ENVOY=28081 \
-      SYN_AGENT_NETWORK=syn-env-validate_agent-net \
-      docker compose -f docker-compose.yaml -f docker-compose.ondemand.yaml config --services > /dev/null
-    echo "  ondemand: ok"
-    echo "All compose overlays valid."
+    bash scripts/check_compose_overlays.sh
 
 # Generate llms.txt from API docs
 generate-llms-txt:
