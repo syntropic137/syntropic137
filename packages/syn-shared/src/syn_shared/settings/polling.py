@@ -1,4 +1,7 @@
-"""Polling settings for GitHub Events API hybrid ingestion (ISS-386)."""
+"""Polling settings for GitHub Events API hybrid ingestion (ISS-386).
+
+See ADR-060: Restart-safe trigger deduplication (rate limit settings).
+"""
 
 from __future__ import annotations
 
@@ -76,6 +79,23 @@ class PollingSettings(BaseSettings):
         default=7200,
         ge=60,
         description="Max age for pending SHAs before cleanup (seconds). Default 2h.",
+    )
+
+    # -- Dispatch rate limiting (ADR-060) ------------------------------------
+
+    dispatch_rate_limit: int = Field(
+        default=10,
+        ge=0,
+        description=(
+            "Maximum number of workflow dispatches in the rate window. "
+            "Set to 0 to disable rate limiting. Default: 10."
+        ),
+    )
+
+    dispatch_rate_window_seconds: float = Field(
+        default=60.0,
+        ge=10.0,
+        description="Sliding window for dispatch rate limiting (seconds). Default: 60.",
     )
 
     @property

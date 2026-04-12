@@ -1,4 +1,7 @@
-"""EventPipeline — unified ingestion with dedup for webhook and polling sources."""
+"""EventPipeline — unified ingestion with dedup for webhook and polling sources.
+
+See ADR-060: Restart-safe trigger deduplication (dedup_key injection).
+"""
 
 from __future__ import annotations
 
@@ -94,9 +97,13 @@ class EventPipeline:
                 exc_info=True,
             )
 
-        # 2. Build compound event and inject delivery_id for backward compat
+        # 2. Build compound event and inject identifiers for downstream guards
         compound_event = f"{event.event_type}.{event.action}" if event.action else event.event_type
-        payload = {**event.payload, "_delivery_id": event.delivery_id}
+        payload = {
+            **event.payload,
+            "_delivery_id": event.delivery_id,
+            "_dedup_key": event.dedup_key,  # ADR-060: fallback for Guard 4 on polled events
+        }
 
         # 3. Evaluate triggers
         results = await self._evaluator.evaluate(
