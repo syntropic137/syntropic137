@@ -1,4 +1,4 @@
-import { Clipboard, Check, ExternalLink, GitBranch, GitCommit } from 'lucide-react'
+import { Clipboard, Check, ExternalLink } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import type { OperationInfo } from '../../types'
 
@@ -49,7 +49,9 @@ function buildGitHubCommitUrl(repo: string, sha: string): string | null {
 }
 
 function GitDetails({ op }: { op: OperationInfo }) {
-  if (!op.git_message && !op.git_sha) return null
+  // Only show expanded details if there's a commit message or GitHub link.
+  // SHA/branch/repo are already shown in the sub-header badges (GitOperationMeta).
+  if (!op.git_message) return null
 
   const commitUrl = op.git_repo && op.git_sha
     ? buildGitHubCommitUrl(op.git_repo, op.git_sha)
@@ -71,41 +73,19 @@ function GitDetails({ op }: { op: OperationInfo }) {
               View on GitHub
             </a>
           )}
-          {op.git_message && <CopyButton text={op.git_message} label="commit message" />}
+          <CopyButton text={op.git_message} label="commit message" />
         </div>
       </div>
 
-      {op.git_message && (
-        <pre className="whitespace-pre-wrap rounded-md bg-[var(--color-background)] border border-[var(--color-border)] p-2 text-[var(--color-text-muted)] font-mono">
-          {op.git_message}
-        </pre>
-      )}
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[var(--color-text-secondary)]">
-        {op.git_sha && (
-          <span className="flex items-center gap-1 font-mono">
-            <GitCommit className="h-3 w-3" />
-            {op.git_sha.slice(0, 7)}
-          </span>
-        )}
-        {op.git_branch && (
-          <span className="flex items-center gap-1 font-mono">
-            <GitBranch className="h-3 w-3" />
-            {op.git_branch}
-          </span>
-        )}
-        {op.git_repo && (
-          <span className="font-mono text-[var(--color-text-muted)]">
-            {op.git_repo}
-          </span>
-        )}
-      </div>
+      <pre className="whitespace-pre-wrap rounded-md bg-[var(--color-background)] border border-[var(--color-border)] p-2 text-[var(--color-text-muted)] font-mono">
+        {op.git_message}
+      </pre>
     </div>
   )
 }
 
 export function OperationDetails({ op }: { op: OperationInfo }) {
-  const hasGitDetails = !!(op.git_message || op.git_sha)
+  const hasGitDetails = !!op.git_message
 
   return (
     <div className="mt-2 rounded-lg bg-[var(--color-surface)] p-3 text-xs">
