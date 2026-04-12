@@ -1,4 +1,4 @@
-import { Clipboard, Check } from 'lucide-react'
+import { Clipboard, Check, ExternalLink, GitBranch, GitCommit } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import type { OperationInfo } from '../../types'
 
@@ -42,9 +42,76 @@ function DetailBlock({ label, content, mono = false, maxHeight = true }: {
   )
 }
 
+function buildGitHubCommitUrl(repo: string, sha: string): string | null {
+  // repo is "owner/repo" format
+  if (!repo.includes('/')) return null
+  return `https://github.com/${repo}/commit/${sha}`
+}
+
+function GitMetaRow({ sha, branch, repo }: { sha?: string; branch?: string; repo?: string }) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[var(--color-text-secondary)]">
+      {sha && (
+        <span className="flex items-center gap-1 font-mono">
+          <GitCommit className="h-3 w-3" />
+          {sha.slice(0, 7)}
+        </span>
+      )}
+      {branch && (
+        <span className="flex items-center gap-1 font-mono">
+          <GitBranch className="h-3 w-3" />
+          {branch}
+        </span>
+      )}
+      {repo && <span className="font-mono text-[var(--color-text-muted)]">{repo}</span>}
+    </div>
+  )
+}
+
+function GitDetails({ op }: { op: OperationInfo }) {
+  if (!op.git_message && !op.git_sha) return null
+
+  const commitUrl = op.git_repo && op.git_sha
+    ? buildGitHubCommitUrl(op.git_repo, op.git_sha)
+    : null
+
+  return (
+    <div className="mb-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="font-medium text-[var(--color-text-secondary)]">Commit:</span>
+        <div className="flex items-center gap-3">
+          {commitUrl && (
+            <a
+              href={commitUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-[var(--color-text-muted)] hover:text-orange-400 transition-colors"
+            >
+              <ExternalLink className="h-3 w-3" />
+              View on GitHub
+            </a>
+          )}
+          {op.git_message && <CopyButton text={op.git_message} label="commit message" />}
+        </div>
+      </div>
+
+      {op.git_message && (
+        <pre className="whitespace-pre-wrap rounded-md bg-[var(--color-background)] border border-[var(--color-border)] p-2 text-[var(--color-text-muted)] font-mono">
+          {op.git_message}
+        </pre>
+      )}
+
+      <GitMetaRow sha={op.git_sha ?? undefined} branch={op.git_branch ?? undefined} repo={op.git_repo ?? undefined} />
+    </div>
+  )
+}
+
 export function OperationDetails({ op }: { op: OperationInfo }) {
+  const hasGitDetails = !!(op.git_message || op.git_sha)
+
   return (
     <div className="mt-2 rounded-lg bg-[var(--color-surface)] p-3 text-xs">
+      {hasGitDetails && <GitDetails op={op} />}
       {op.tool_input && <DetailBlock label="Input:" content={JSON.stringify(op.tool_input, null, 2)} mono maxHeight={false} />}
       {op.tool_output && <DetailBlock label="Output:" content={op.tool_output} mono />}
       {op.message_content && <DetailBlock label={`Message (${op.message_role}):`} content={op.message_content} />}

@@ -135,6 +135,7 @@ async def create_workflow(
     input_declarations: list[dict[str, Any]] | None = None,
     workflow_id: str | None = None,
     repos: list[str] | None = None,
+    requires_repos: bool = True,
 ) -> Result[str, WorkflowError]:
     """Create a new workflow template.
 
@@ -172,6 +173,7 @@ async def create_workflow(
         project_name=project_name,
         input_declarations=_build_input_declarations(input_declarations),
         repos=repos or [],
+        requires_repos=requires_repos,
     )
 
     await ensure_connected()
@@ -312,6 +314,13 @@ class CreateWorkflowRequest(BaseModel):
             "Can be overridden at execution time via the repos field on the execute request."
         ),
     )
+    requires_repos: bool = Field(
+        default=True,
+        description=(
+            "Whether this workflow requires repository access at execution time (ADR-058 #666). "
+            "Set to false for research or analysis workflows that don't need repos."
+        ),
+    )
 
 
 class ValidateYamlRequest(BaseModel):
@@ -378,6 +387,7 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
         input_declarations=body.input_declarations,
         workflow_id=body.id,
         repos=list(body.repos),
+        requires_repos=body.requires_repos,
     )
 
     if isinstance(result, Err):

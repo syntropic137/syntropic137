@@ -172,6 +172,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._project_name: str | None = None
         self._description: str | None = None
         self._is_archived: bool = False
+        self._requires_repos: bool = True
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -201,6 +202,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def input_declarations(self) -> list[InputDeclaration]:
         """Get workflow input declarations."""
         return list(self._input_declarations)
+
+    @property
+    def requires_repos(self) -> bool:
+        """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
+        return self._requires_repos
 
     @property
     def repos(self) -> list[str]:
@@ -251,6 +257,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             description=command.description,
             input_declarations=command.input_declarations,
             repos=command.repos,
+            requires_repos=command.requires_repos,
         )
 
         self._apply(event)
@@ -319,6 +326,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._description = data["description"]
         self._input_declarations = _parse_typed_list(data["input_declarations"], "InputDeclaration")
         self._repos = [str(r) for r in data.get("repos", [])]
+        self._requires_repos = bool(data.get("requires_repos", True))
 
     @command_handler("ArchiveWorkflowTemplateCommand")
     def archive_workflow(self, command: ArchiveWorkflowTemplateCommand) -> None:

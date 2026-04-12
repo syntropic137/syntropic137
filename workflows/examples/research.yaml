@@ -13,6 +13,7 @@ classification: standard
 
 # No default repository — research workflows don't need repo access.
 repository: null
+requires_repos: false
 
 # Project association (optional)
 project_name: null

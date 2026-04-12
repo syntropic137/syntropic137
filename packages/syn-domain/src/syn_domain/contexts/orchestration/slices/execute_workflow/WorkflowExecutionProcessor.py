@@ -139,6 +139,9 @@ class WorkflowExecutionProcessor:
     ) -> WorkflowExecutionResult:
         """Execute a workflow using the Processor To-Do List pattern."""
         started_at = datetime.now(UTC)
+        # Ensure resolved repos are persisted in inputs for the domain event
+        if repos and "repos" not in inputs:
+            inputs["repos"] = ",".join(repos)
         self._inputs = inputs
         aggregate = WorkflowExecutionAggregate()
 

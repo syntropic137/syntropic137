@@ -408,6 +408,8 @@ async def execute(
         logger.exception("Workflow execution error for %s", workflow_id)
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
+    repos_csv = (inputs or {}).get("repos", "")
+    repos = [r.strip() for r in repos_csv.split(",") if r.strip()] if repos_csv else []
     return Ok(
         ExecutionSummary(
             workflow_execution_id=result.execution_id,
@@ -419,6 +421,7 @@ async def execute(
             total_tokens=result.metrics.total_tokens,
             total_cost_usd=result.metrics.total_cost_usd,
             error_message=result.error_message,
+            repos=repos,
         )
     )
 
@@ -445,12 +448,15 @@ async def execute_workflow_endpoint(
     if request.repos:
         effective_inputs["repos"] = ",".join(request.repos)
 
-    # Validate required inputs before returning 200 (#639)
-    _validate_required_inputs(workflow, effective_inputs, request.task)
+    # Validate required input declarations (always runs)
+    merged = _merge_inputs(workflow, effective_inputs, request.task)
+    _check_missing_declarations(workflow, merged)
 
-    # Multi-repo GitHub App preflight validation
-    preflight_repos = _get_preflight_repos(effective_inputs, workflow, request.task)
-    await _validate_all_repos_access(preflight_repos)
+    # Repo validation only when the workflow requires repos (ADR-058 #666)
+    if workflow.requires_repos:
+        _check_repo_url_placeholders(workflow, merged)
+        preflight_repos = _get_preflight_repos(effective_inputs, workflow, request.task)
+        await _validate_all_repos_access(preflight_repos)
 
     execution_id = f"exec-{uuid4().hex[:12]}"
 

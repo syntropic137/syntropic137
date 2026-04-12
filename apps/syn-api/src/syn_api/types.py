@@ -357,6 +357,8 @@ class WorkflowSummary(BaseModel):
     created_at: datetime | None = None
     runs_count: int = 0
     is_archived: bool = False
+    requires_repos: bool = True
+    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
 class InputDeclarationResponse(BaseModel):
@@ -403,6 +405,8 @@ class WorkflowDetail(BaseModel):
     """Template-level repository URL (single-repo workflows)."""
     repos: list[str] = Field(default_factory=list)
     """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
+    requires_repos: bool = True
+    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
 class ExecutionSummary(BaseModel):
@@ -422,7 +426,7 @@ class ExecutionSummary(BaseModel):
     total_cost_usd: Decimal | str = Decimal("0")
     tool_call_count: int = 0
     error_message: str | None = None
-    repos: list[str] = Field(default_factory=list)
+    repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
 
@@ -441,7 +445,7 @@ class ExecutionDetail(BaseModel):
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
-    repos: list[str] = Field(default_factory=list)
+    repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
 
@@ -685,7 +689,7 @@ class ExecutionDetailFull(BaseModel):
     started_at: datetime | str | None = None
     completed_at: datetime | str | None = None
     error_message: str | None = None
-    repos: list[str] = Field(default_factory=list)
+    repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
 

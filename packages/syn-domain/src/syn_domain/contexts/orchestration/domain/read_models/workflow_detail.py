@@ -118,6 +118,9 @@ class WorkflowDetail:
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
 
+    requires_repos: bool = True
+    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
@@ -165,6 +168,7 @@ class WorkflowDetail:
             runs_count=data.get(WorkflowFields.RUNS_COUNT, 0),
             repository_url=data.get("repository_url"),
             repos=tuple(data.get("repos", [])),
+            requires_repos=data.get("requires_repos", True),
         )
 
     @staticmethod
@@ -222,4 +226,5 @@ class WorkflowDetail:
             WorkflowFields.RUNS_COUNT: self.runs_count,
             "repository_url": self.repository_url,
             "repos": list(self.repos),
+            "requires_repos": self.requires_repos,
         }
