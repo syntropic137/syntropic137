@@ -1,6 +1,7 @@
 export { Breadcrumbs } from './Breadcrumbs'
 export { ChartTooltip } from './ChartTooltip'
 export { Card, CardContent, CardHeader } from './Card'
+export { CliDisclaimerBanner } from './CliDisclaimerBanner'
 export { EmptyState } from './EmptyState'
 export { EventFeed } from './EventFeed'
 export { ExecutionControl } from './ExecutionControl'

@@ -11,7 +11,7 @@ export function LogLoadingState() {
     <ModalOverlay>
       <div className="rounded-xl bg-[var(--color-surface)] p-8">
         <div className="animate-pulse text-[var(--color-text-secondary)]">
-          Loading conversation log...
+          Loading transcript...
         </div>
       </div>
     </ModalOverlay>
@@ -23,7 +23,7 @@ export function LogErrorState({ error, onClose }: { error: string | null; onClos
     <ModalOverlay>
       <div className="max-w-lg rounded-xl bg-[var(--color-surface)] p-8">
         <div className={error ? 'text-red-400' : 'text-[var(--color-text-muted)]'}>
-          {error ? `Error: ${error}` : 'No conversation log available for this session.'}
+          {error ? `Error: ${error}` : 'No transcript available for this session.'}
         </div>
         <button
           onClick={onClose}
