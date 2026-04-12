@@ -257,7 +257,8 @@ class EvaluateWebhookHandler:
                 guard_name=guard_name,
                 reason=reason,
                 # ADR-060: use dedup_key as fallback for polled events
-                webhook_delivery_id=payload.get("_delivery_id", "") or payload.get("_dedup_key", ""),
+                webhook_delivery_id=payload.get("_delivery_id", "")
+                or payload.get("_dedup_key", ""),
                 event_type=event,
                 repository=repository,
                 pr_number=_extract_pr_number(payload),
