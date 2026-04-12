@@ -1434,6 +1434,16 @@ generate-llms-txt:
 validate-events:
     uv run python scripts/validate_event_store.py
 
+# Bump exclude-newer to 7 days ago and re-lock (supply chain safety window)
+bump-exclude-newer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    new_date=$(date -u -v-7d "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "7 days ago" "+%Y-%m-%dT%H:%M:%SZ")
+    echo "📦 Bumping exclude-newer to: $new_date"
+    sed -i '' "s|^exclude-newer = \".*\"|exclude-newer = \"$new_date\"|" pyproject.toml
+    uv lock
+    echo "✅ Lockfile updated. Review changes with: git diff uv.lock"
+
 # Lock dependencies
 lock:
     uv lock
