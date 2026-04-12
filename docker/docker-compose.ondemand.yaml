@@ -1,0 +1,125 @@
+# On-Demand Environment Docker Compose Overlay
+# Mirrors the selfhost stack for full e2e testing (including gateway/UI).
+# Usage: managed via `just env-up <branch>` / `just env-down <name>`
+#
+# Parameterized by environment name and port offsets - never edit port values
+# here directly. Ports and SYN_ENV_NAME come from the generated .env.ondemand-{name} file.
+#
+# Port scheme (see ADR-060):
+#   Slot 2: Gateway=28137, API=29137, DB=25432, ...
+#   Event store uses a separate range: 60051, 61051, 62051, 63051
+#
+# See: ADR-034 - Test Infrastructure Architecture
+# See: ADR-060 - On-Demand Environment Creation
+# Registry: infra/environments.json
+
+services:
+  timescaledb:
+    container_name: syn-env-${SYN_ENV_NAME}-db
+    ports:
+      - "${SYN_ENV_PORT_DB}:5432"
+    volumes:
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    # No persistent volume - ephemeral, clean slate on creation
+
+  event-store:
+    container_name: syn-env-${SYN_ENV_NAME}-event-store
+    ports:
+      - "${SYN_ENV_PORT_ES}:50051"
+
+  collector:
+    container_name: syn-env-${SYN_ENV_NAME}-collector
+    ports:
+      - "${SYN_ENV_PORT_COLLECTOR}:8080"
+
+  # Definition in docker-compose.yaml; only container_name here
+  docker-socket-proxy:
+    container_name: syn-env-${SYN_ENV_NAME}-docker-socket-proxy
+
+  api:
+    container_name: syn-env-${SYN_ENV_NAME}-api
+    build:
+      args:
+        INCLUDE_DOCKER_CLI: "1"
+    ports:
+      - "${SYN_ENV_PORT_API}:8000"
+    entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
+    # root-path /api/v1 matches selfhost - gateway proxies /api/v1/* to here
+    command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000} --root-path /api/v1"]
+    env_file:
+      - ../.env  # Shared secrets (GitHub App, Anthropic, etc.)
+    environment:
+      # Override .env localhost values with Docker service names (ADR-030)
+      SYN_OBSERVABILITY_DB_URL: postgres://syn:syn_dev_password@timescaledb:5432/syn
+      EVENT_STORE_HOST: event-store
+      EVENT_STORE_PORT: "50051"
+      SYN_STORAGE_PROVIDER: minio
+      SYN_STORAGE_MINIO_ENDPOINT: minio:9000
+      SYN_STORAGE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      SYN_STORAGE_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      SYN_GITHUB_APP_ID: ${SYN_GITHUB_APP_ID:-}
+      SYN_GITHUB_APP_NAME: ${SYN_GITHUB_APP_NAME:-}
+      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
+      SYN_GITHUB_WEBHOOK_SECRET: ${SYN_GITHUB_WEBHOOK_SECRET:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      SYN_WORKSPACE_CONTAINER_DIR: /workspaces
+      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-.}/workspaces
+      # Agent network derives from compose project name - set by env_manager.py
+      SYN_AGENT_NETWORK: ${SYN_AGENT_NETWORK}
+      # Envoy proxy URL for agent containers (must resolve on agent-net)
+      SYN_PROXY_URL: http://envoy-proxy:8081
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
+      - ../workspaces:/workspaces
+
+  # Gateway: nginx reverse proxy + built dashboard UI (mirrors selfhost)
+  # Single entry point for the environment - agents and humans hit this port.
+  gateway:
+    build:
+      context: ..
+      dockerfile: infra/docker/images/gateway/Dockerfile
+    container_name: syn-env-${SYN_ENV_NAME}-gateway
+    ports:
+      - "${SYN_ENV_PORT_GATEWAY}:80"
+    environment:
+      # No auth for test environments
+      - SYN_API_PASSWORD=
+      - SYN_API_USER=admin
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      api:
+        condition: service_healthy
+
+  minio:
+    container_name: syn-env-${SYN_ENV_NAME}-minio
+    ports:
+      - "${SYN_ENV_PORT_MINIO}:9000"
+      - "${SYN_ENV_PORT_MINIO_CONSOLE}:9001"
+    # No persistent volume - ephemeral
+
+  redis:
+    container_name: syn-env-${SYN_ENV_NAME}-redis
+    ports:
+      - "${SYN_ENV_PORT_REDIS}:6379"
+    # No persistent volume - ephemeral
+
+  envoy-proxy:
+    container_name: syn-env-${SYN_ENV_NAME}-envoy-proxy
+    ports:
+      - "${SYN_ENV_PORT_ENVOY}:8081"
+
+  token-injector:
+    container_name: syn-env-${SYN_ENV_NAME}-token-injector
+
+networks:
+  default:
+    name: syn-env-${SYN_ENV_NAME}-network

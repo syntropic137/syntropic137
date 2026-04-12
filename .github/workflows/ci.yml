@@ -133,6 +133,9 @@ jobs:
       - name: Published compose consistency
         run: just check-compose
 
+      - name: Compose overlay validation
+        run: just check-compose-overlays
+
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
   #############################################################################
