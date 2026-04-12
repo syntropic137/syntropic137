@@ -91,7 +91,7 @@ export const createCommand: CommandDef = {
           repository_ref: repoRef,
           description: description ?? null,
           ...(templateRepos.length > 0 ? { repos: templateRepos } : {}),
-          ...(noRepos ? { requires_repos: false } : {}),
+          requires_repos: !noRepos,
           ...(phases !== undefined ? { phases } : {}),
           ...(inputDeclarations !== undefined ? { input_declarations: inputDeclarations } : {}),
         },

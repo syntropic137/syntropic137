@@ -47,9 +47,7 @@ Basic auth is enforced when `SYN_API_PASSWORD` is non-empty. An empty password d
 
 ### `SYN_API_PASSWORD` lifecycle
 
-- **Generated**: ~256 bits of entropy, automatically during setup. Format varies by wizard:
-  - **npx wizard** (`npx @syntropic137/setup init`): 64-char hex via `crypto.randomBytes(32).toString("hex")`
-  - **Python wizard** (`infra/scripts/setup.py`): URL-safe base64 via `secrets.token_urlsafe(32)` (~43 chars)
+- **Generated**: 64-char hex (~256 bits of entropy), automatically during setup via `crypto.randomBytes(32).toString("hex")` in the NPX wizard (`npx @syntropic137/setup init`)
 - **Stored**: `~/.syntropic137/.env` with mode `0600`
 - **Rotated**: `npx @syntropic137/setup credentials rotate` — generates new password, updates `.env`, restarts stack
 - **Never printed**: Password is never written to terminal output. Retrieval commands are shown instead.

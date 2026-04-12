@@ -191,31 +191,32 @@ class SafetyGuards:
         """Run all safety checks. Returns first failure or success."""
         pr_number = _extract_pr_number(payload)
 
-        # Guard 6: Concurrency — check first (cheapest, most common catch-up block)
-        result = await _check_concurrency(rule, pr_number, store)
-        if result is not None:
-            return result
+        for result in await self._run_guards(rule, payload, pr_number, store):
+            if result is not None:
+                return result
+
+        return GuardResult(True, "All guards passed")
+
+    async def _run_guards(
+        self,
+        rule: _IndexedTrigger,
+        payload: dict[str, Any],
+        pr_number: int | None,
+        store: TriggerQueryStore,
+    ) -> list[GuardResult | None]:
+        """Evaluate guards in priority order. Short-circuit via caller."""
+        guards: list[GuardResult | None] = [
+            await _check_concurrency(rule, pr_number, store),
+        ]
 
         if pr_number is not None:
             for check in (_check_max_attempts, _check_cooldown, _check_cross_trigger_cooldown):
-                result = await check(rule, pr_number, store)
-                if result is not None:
-                    return result
+                guards.append(await check(rule, pr_number, store))
 
-        result = await _check_daily_limit(rule, store)
-        if result is not None:
-            return result
-
-        result = await _check_idempotency(payload, store)
-        if result is not None:
-            return result
-
-        # Guard 7: Global dispatch rate limit (ADR-060)
-        result = self._check_dispatch_rate()
-        if result is not None:
-            return result
-
-        return GuardResult(True, "All guards passed")
+        guards.append(await _check_daily_limit(rule, store))
+        guards.append(await _check_idempotency(payload, store))
+        guards.append(self._check_dispatch_rate())
+        return guards
 
     def record_dispatch(self) -> None:
         """Record a successful dispatch timestamp for rate limiting."""
