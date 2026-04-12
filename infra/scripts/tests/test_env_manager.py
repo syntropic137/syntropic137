@@ -8,14 +8,17 @@ serialization, env file generation, and compose argument construction.
 from __future__ import annotations
 
 import json
-import pytest
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+import pytest
 
 # Import the module under test - patch REPO_ROOT so file operations
 # use tmp_path instead of the real repo.
 import infra.scripts.env_manager as em
-
 
 # ---------------------------------------------------------------------------
 # Slugification
@@ -429,7 +432,7 @@ class TestRollback:
             patch.object(em, "REGISTRY_FILE", registry_file),
             patch.object(em, "REPO_ROOT", tmp_path),
         ):
-            _, env1 = em._allocate("feat/keeper")
+            _, _env1 = em._allocate("feat/keeper")
             _, env2 = em._allocate("feat/doomed")
 
             em._rollback(env2)

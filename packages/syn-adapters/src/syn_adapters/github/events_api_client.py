@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     import httpx
 
     from syn_adapters.github.client import GitHubAppClient
+    from syn_adapters.github.poller_cursor_store import PollerCursor
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,8 @@ class PollerCursorStore(Protocol):
     """Protocol for persisting poller ETag/cursor state across restarts."""
 
     async def save_cursor(self, repo: str, etag: str, last_event_id: str) -> None: ...
-    async def load_cursor(self, repo: str) -> Any: ...
-    async def load_all(self) -> dict[str, Any]: ...
+    async def load_cursor(self, repo: str) -> PollerCursor | None: ...
+    async def load_all(self) -> dict[str, PollerCursor]: ...
 
 
 @dataclass(frozen=True, slots=True)

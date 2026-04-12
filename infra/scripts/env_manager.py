@@ -26,7 +26,7 @@ import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -267,7 +267,7 @@ def _allocate(branch: str) -> tuple[Registry, Environment]:
         name=slug,
         branch=branch,
         slot=slot,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
         ports={
             "gateway": ports.gateway,
             "api": ports.api,
