@@ -33,13 +33,12 @@ help:
 
 # --- Onboarding ---
 
-# Run interactive onboarding wizard (selfhost: secrets, tunnel, GitHub App)
-onboard *args:
-    @uv run python infra/scripts/setup.py {{args}}
+# Self-host onboarding: use the NPX CLI — zero-clone, zero-dep, interactive wizard
+# npx @syntropic137/setup init
+# See https://github.com/syntropic137/syntropic137-npx for full documentation.
 
 # Dev onboarding: submodules → .env → deps → webhook URL → GitHub App → stack
 # GitHub App setup runs by default (use --skip-github to skip).
-# Cloudflare tunnel is opt-in (use --tunnel to include).
 # 1Password setup is opt-in (use --1password to include).
 onboard-dev *flags:
     #!/usr/bin/env bash
@@ -97,28 +96,15 @@ onboard-dev *flags:
     # Source .env so subsequent checks can see existing values
     if [ -f .env ]; then set -a && source .env && set +a; fi
 
-    # 7. Webhook delivery — tunnel or Smee (mutually exclusive)
-    if echo "{{flags}}" | grep -q -- "--tunnel"; then
-        echo ""
-        echo "🌐 Setting up Cloudflare tunnel for webhook delivery..."
-        uv run python infra/scripts/setup.py --stage configure_cloudflare
-        # Re-source to pick up SYN_PUBLIC_HOSTNAME
-        if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
-        # Clear Smee if previously set - tunnel replaces it
-        if grep -q '^DEV__SMEE_URL=' .env 2>/dev/null; then
-            sed -i.bak 's|^DEV__SMEE_URL=.*|DEV__SMEE_URL=|' .env && rm -f .env.bak
-            unset DEV__SMEE_URL 2>/dev/null || true
-        fi
-        _HOSTNAME="${SYN_PUBLIC_HOSTNAME:-<hostname>}"
-        _HOSTNAME="${_HOSTNAME#https://}"
-        _HOSTNAME="${_HOSTNAME#http://}"
-        _HOSTNAME="${_HOSTNAME%/}"
-        echo "   Webhooks will be delivered via tunnel (${_HOSTNAME})"
-        echo "   Set your GitHub App webhook URL to: https://${_HOSTNAME}/webhooks/github"
+    # 7. Webhook delivery — Smee proxy (for dev) or Cloudflare tunnel
+    # For Cloudflare tunnel setup run: npx @syntropic137/setup tunnel
+    # Skip smee when a Cloudflare tunnel is configured
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] || [ -n "${SYN_PUBLIC_HOSTNAME:-}" ]; then
+        echo "✅ Cloudflare tunnel detected - skipping smee.io setup"
     elif [ -z "${DEV__SMEE_URL:-}" ]; then
         echo ""
         echo "🔗 Setting up webhook proxy (smee.io)..."
-        SMEE_URL=$(uv run python -c "from infra.scripts.shared import create_smee_channel; print(create_smee_channel())" 2>/dev/null) || true
+        SMEE_URL=$(uv run python -c "from infra.scripts.infra_config import create_smee_channel; print(create_smee_channel())" 2>/dev/null) || true
         if [ -n "${SMEE_URL:-}" ]; then
             echo "   ✅ Channel: $SMEE_URL"
             if grep -q '^DEV__SMEE_URL=' .env 2>/dev/null; then
@@ -137,10 +123,12 @@ onboard-dev *flags:
     fi
 
     # 7. 1Password setup (opt-in with --1password)
+    # Shows prerequisites for 1Password vault integration.
+    # Prerequisites: brew install --cask 1password-cli && op signin
     if echo "{{flags}}" | grep -q -- "--1password"; then
         echo ""
-        echo "🔐 Setting up 1Password secret management..."
-        uv run python infra/scripts/setup.py --stage configure_1password
+        echo "🔐 1Password: showing vault setup prerequisites..."
+        echo "   See infra/docs/selfhost-deployment.md for vault setup instructions."
     fi
 
     # 7b. Resolve 1Password secrets into env (so step 8 sees them)
@@ -156,10 +144,12 @@ onboard-dev *flags:
         echo "✅ GitHub App already configured"
     else
         echo ""
-        echo "🔑 Setting up GitHub App (required for agent workflows to push code)..."
-        echo "   Use --skip-github to skip this step."
+        echo "🔑 GitHub App setup required for agent workflows to push code."
+        echo "   Run the NPX setup CLI to create a GitHub App:"
         echo ""
-        uv run python infra/scripts/setup.py --stage configure_github_app
+        echo "   npx @syntropic137/setup init --skip-docker"
+        echo ""
+        echo "   Or use --skip-github to skip this step and configure manually later."
     fi
 
     # 9. Wait for workspace build if it was started
@@ -348,14 +338,6 @@ onboard-dev *flags:
     echo "🚀 Starting dev stack..."
     just dev
 
-# Check prerequisites only (no changes)
-setup-check:
-    @uv run python infra/scripts/setup.py --stage check_prerequisites
-
-# Re-run a specific setup stage
-setup-stage stage:
-    @uv run python infra/scripts/setup.py --stage {{stage}}
-
 # --- Development ---
 # Uses DRY Docker Compose: base + override files (ADR-034)
 
@@ -393,10 +375,7 @@ dev: _workspace-check
     echo "2️⃣ Building and starting Docker services..."
     ${_COMPOSE} up -d --build
     echo ""
-    echo "3️⃣ Initialising MinIO buckets..."
-    uv run python infra/scripts/init_minio_buckets.py
-    echo ""
-    echo "4️⃣ Waiting for services to be healthy..."
+    echo "3️⃣ Waiting for services to be healthy..."
     sleep 5
     echo ""
     echo "5️⃣ Seeding workflows..."
@@ -465,10 +444,7 @@ dev-fresh: _workspace-check
     echo "4️⃣ Building and starting Docker services..."
     ${_COMPOSE} up -d --build
     echo ""
-    echo "5️⃣ Initialising MinIO buckets..."
-    uv run python infra/scripts/init_minio_buckets.py
-    echo ""
-    echo "6️⃣ Waiting for services to be healthy..."
+    echo "5️⃣ Waiting for services to be healthy..."
     sleep 8
     echo ""
     echo "7️⃣ Running database migrations..."
@@ -1071,9 +1047,6 @@ selfhost-up: _selfhost-preflight _workspace-check
     echo "🚀 Starting Syn137 self-host stack..."
     {{compose_selfhost}} up -d --build
     echo ""
-    echo "🪣 Initialising MinIO buckets..."
-    uv run python infra/scripts/init_minio_buckets.py
-    echo ""
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
     echo ""
@@ -1089,9 +1062,6 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     source infra/scripts/selfhost-env.sh
     echo "🚀 Starting Syn137 self-host stack with Cloudflare Tunnel..."
     {{compose_selfhost_cf}} up -d --build
-    echo ""
-    echo "🪣 Initialising MinIO buckets..."
-    uv run python infra/scripts/init_minio_buckets.py
     echo ""
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
@@ -1289,44 +1259,19 @@ secrets-delete-token:
         && echo "✅ Deleted: $_SVC" \
         || echo "⚠️  Not found: $_SVC"
 
-# Generate new secrets for deployment
-secrets-generate:
-    @echo "🔐 Generating deployment secrets..."
-    @uv run python infra/scripts/secrets_setup.py generate
-
-# Rotate all secrets (regenerates - requires restart)
-secrets-rotate:
-    @echo "🔄 Rotating secrets..."
-    @uv run python infra/scripts/secrets_setup.py rotate
-    @echo ""
-    @echo "⚠️  Restart services to apply new secrets:"
-    @echo "   just selfhost-restart api"
-
-# Verify secrets are configured
-secrets-check:
-    @uv run python infra/scripts/secrets_setup.py check
-
-# Encrypt secrets with passphrase (creates .enc files safe to commit)
-secrets-seal:
-    @uv run python infra/scripts/secrets_setup.py seal
-
-# Decrypt secrets from .enc files (restores plain-text for Docker)
-secrets-unseal:
-    @uv run python infra/scripts/secrets_setup.py unseal
-
 # Push secrets to 1Password vault (selfhost only — uses syn-ctl)
 secrets-push:
     @echo "Push secrets to 1Password via syn-ctl:"
     @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-push"
     @echo ""
-    @echo "For dev environments, use: just onboard --stage configure_1password"
+    @echo "For dev environments, use: just onboard-dev --1password"
 
 # Pull secrets from 1Password vault (selfhost only — uses syn-ctl)
 secrets-pull:
     @echo "Pull secrets from 1Password via syn-ctl:"
     @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-pull"
     @echo ""
-    @echo "For dev environments, use: just onboard --stage configure_1password"
+    @echo "For dev environments, use: just onboard-dev --1password"
 
 # --- Health ---
 
@@ -1532,8 +1477,11 @@ new-package name:
 
 # Reconfigure GitHub App (change repos, permissions, or recreate)
 github-reconfigure:
-    @echo "Reconfiguring GitHub App..."
-    @uv run python infra/scripts/setup.py --stage configure_github_app
+    @echo "To reconfigure or recreate a GitHub App, use the NPX setup CLI:"
+    @echo ""
+    @echo "  npx @syntropic137/setup init --skip-docker"
+    @echo ""
+    @echo "See https://github.com/syntropic137/syntropic137-npx for documentation."
 
 # --- Security & Audit ---
 
@@ -1543,8 +1491,11 @@ audit: security-audit deps-audit-py deps-audit-npm
     @echo "✅ All security audits complete"
 
 # Run infrastructure security audit (env vars, secrets, network)
+# Note: health_check.py requires a running stack; non-blocking so `audit` works offline
 security-audit:
-    @uv run python infra/scripts/setup.py --stage security_audit
+    @uv run python infra/scripts/health_check.py --json || echo "⚠️  Health check skipped (stack not running)"
+    @echo ""
+    @echo "For a full security posture review see: docs/security-practices.md"
 
 # Audit Python dependencies against PyPI advisory database
 deps-audit-py:

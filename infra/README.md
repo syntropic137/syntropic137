@@ -1,5 +1,23 @@
 # Syn137 Self-Host Deployment Guide
 
+## Quick Start (Self-Host)
+
+For a frictionless self-host setup, use the NPX CLI - no repo clone required:
+
+```bash
+npx @syntropic137/setup init
+```
+
+This handles Docker prerequisites, secret generation, GitHub App creation, and stack
+provisioning in a single command. See the
+[NPX setup repo](https://github.com/syntropic137/syntropic137-npx) for full documentation.
+
+**The rest of this document** covers advanced deployment topics: compose overlays,
+1Password integration, Cloudflare tunnels, resource tuning, and operational tooling
+for teams who need more control.
+
+---
+
 The definitive guide for self-hosting the Syntropic137 platform. This stack orchestrates AI agent execution in isolated Docker containers and streams every event to a real-time observability dashboard.
 
 **What you get:** A single `just selfhost-up` command that starts a complete agent orchestration platform — API backend, SPA dashboard, event store, object storage, and a reverse proxy — all on your own hardware.
@@ -148,10 +166,10 @@ openssl rand -hex 32 > infra/docker/secrets/db-password.txt
 openssl rand -hex 32 > infra/docker/secrets/redis-password.txt
 ```
 
-Or use the interactive wizard which handles this automatically:
+Or use the NPX setup CLI which handles this automatically:
 
 ```bash
-just onboard
+npx @syntropic137/setup init
 ```
 
 ### Step 4: Start the stack
@@ -558,10 +576,8 @@ All recipes are run from the repository root using `just`.
 
 | Recipe | Description |
 |--------|-------------|
-| `just onboard` | Interactive wizard: checks prerequisites, generates secrets, configures GitHub App |
-| `just secrets-generate` | Generate deployment secrets (non-interactive) |
-| `just secrets-check` | Verify secrets exist |
-| `just secrets-rotate` | Rotate secrets (requires service restart) |
+| `npx @syntropic137/setup init` | Interactive wizard: secret generation, GitHub App creation, stack provisioning |
+| `npx @syntropic137/setup credentials rotate` | Rotate secrets (requires service restart) |
 
 ---
 
@@ -583,7 +599,7 @@ sudo usermod -aG docker $USER
 ### Missing `infra/.env`
 
 ```
-❌ infra/.env not found. Run 'just onboard' or copy from infra/.env.example
+❌ infra/.env not found. Run 'npx @syntropic137/setup init' or copy from infra/.env.example
 ```
 
 ```bash
@@ -745,8 +761,8 @@ infra/
   scripts/
     selfhost-env.sh         # Environment loader (sources .env + 1Password)
     health_check.py         # Service health check utility
-    secrets_setup.py        # Secrets generation and management
-    setup.py                # Interactive setup wizard
+    bootstrap.sh             # Prerequisites installer (Docker, just, uv, etc.)
+    print_access_urls.py     # Print service URLs after deployment
 
 docker/
   docker-compose.yaml            # Base service definitions

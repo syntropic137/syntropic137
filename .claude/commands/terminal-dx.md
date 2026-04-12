@@ -131,7 +131,6 @@ print("    just health-check")
 
 Bad:
 ```
-print("    python infra/scripts/setup.py --stage configure_github_app")
 print("    npx @syntropic137/cli health-check")
 ```
 
