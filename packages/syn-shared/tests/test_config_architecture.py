@@ -73,8 +73,6 @@ class TestSynPublicHostname:
 
     def test_env_override(self) -> None:
         """SYN_PUBLIC_HOSTNAME env var should populate the field."""
-        with patch.dict(
-            os.environ, {"SYN_PUBLIC_HOSTNAME": "syn.example.com"}, clear=True
-        ):
+        with patch.dict(os.environ, {"SYN_PUBLIC_HOSTNAME": "syn.example.com"}, clear=True):
             settings = InfraSettings(_env_file=None)
         assert settings.syn_public_hostname == "syn.example.com"
