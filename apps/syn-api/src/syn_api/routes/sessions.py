@@ -26,6 +26,7 @@ from syn_api._wiring import (
 )
 from syn_api.types import (
     Err,
+    GitEventData,
     Ok,
     Result,
     SessionDetail,
@@ -91,6 +92,9 @@ class OperationInfo(BaseModel):
     message_role: str | None = None
     message_content: str | None = None
     thinking_content: str | None = None
+    # Structured git data (v2 events - preferred)
+    git: GitEventData | None = None
+    # Flat git fields (deprecated - use git sub-object instead)
     git_sha: str | None = None
     git_message: str | None = None
     git_branch: str | None = None
@@ -470,6 +474,7 @@ def _to_operation_info(op: ToolOperation) -> OperationInfo:
         tool_use_id=op.tool_use_id,
         tool_input=_parse_tool_input(op.input_preview),
         tool_output=op.output_preview,
+        git=op.git,
         git_sha=op.git_sha,
         git_message=op.git_message,
         git_branch=op.git_branch,

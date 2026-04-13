@@ -113,14 +113,19 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     artifact_query = ArtifactQueryService(manager.artifact_list)
 
     from syn_adapters.projection_stores import get_projection_store
+    from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
     )
+    from syn_shared.settings.workspace import WorkspaceSettings
+
+    ws_config = WorkspaceServiceConfig(image=WorkspaceSettings().docker_image)
 
     return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
         session_repository=get_session_repository(),
         workspace_service=WorkspaceService.create(
+            config=ws_config,
             environment=_build_workspace_telemetry_env(),
         ),
         artifact_repository=get_artifact_repository(),

@@ -12,7 +12,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -629,6 +629,37 @@ class WorkflowValidation(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class GitEventData(BaseModel):
+    """Structured git event data from observability hooks.
+
+    Field names match agentic_events.payloads dataclasses (single source of truth).
+    This model is the Pydantic equivalent for API serialization.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: str | None = None
+    sha: str | None = None
+    branch: str | None = None
+    repo: str | None = None
+    message: str | None = None
+    prev_branch: str | None = None
+    is_clone: bool | None = None
+    remote: str | None = None
+    author: str | None = None
+    files_changed: int | None = None
+    insertions: int | None = None
+    deletions: int | None = None
+    commits_count: int | None = None
+    commit_range: str | None = None
+    remote_url: str | None = None
+    details: str | None = None
+    from_branch: str | None = None
+    to_branch: str | None = None
+    estimated_tokens_added: int | None = None
+    estimated_tokens_removed: int | None = None
+
+
 class ToolOperation(BaseModel):
     """A single timeline event within a session.
 
@@ -648,7 +679,14 @@ class ToolOperation(BaseModel):
     tool_use_id: str | None = None
     input_preview: str | None = None
     output_preview: str | None = None
-    # Git-specific fields (populated for git_commit, git_push, git_branch_changed, git_operation)
+    # Structured git data (v2 events - preferred).
+    # AliasChoices: JSON clients send "git", from_attributes reads "git_data"
+    # from the projection dataclass (which uses git_data to avoid shadowing).
+    git: GitEventData | None = Field(
+        None,
+        validation_alias=AliasChoices("git", "git_data"),
+    )
+    # Flat git fields (deprecated - use git sub-object instead)
     git_sha: str | None = None
     git_message: str | None = None
     git_branch: str | None = None

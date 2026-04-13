@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import UTC
+from typing import ClassVar
 
 import pytest
 
@@ -58,16 +59,27 @@ class TestAdaptersToApiParity:
     will be silently dropped at the API layer.
     """
 
+    # Intentional renames: dataclass field -> Pydantic field (via validation_alias)
+    _KNOWN_RENAMES: ClassVar[dict[str, str]] = {"git_data": "git"}
+
     def test_all_dataclass_fields_present_in_api_model(self):
         adapters_fields = _dataclass_field_names(AdaptersToolOperation)
         api_fields = _pydantic_field_names(ApiToolOperation)
 
-        missing = adapters_fields - api_fields
+        # Account for intentional renames (dataclass name -> Pydantic alias)
+        renamed = set(self._KNOWN_RENAMES.keys())
+        missing = adapters_fields - api_fields - renamed
         assert missing == set(), (
             f"Fields present in syn_adapters.ToolOperation (dataclass) but missing "
             f"from syn_api.types.ToolOperation (Pydantic): {missing}\n"
             f"Add them to apps/syn-api/src/syn_api/types.py"
         )
+        # Verify renamed fields have their Pydantic counterpart
+        for dc_name, pydantic_name in self._KNOWN_RENAMES.items():
+            assert dc_name in adapters_fields, f"Rename source {dc_name!r} not in dataclass"
+            assert pydantic_name in api_fields, (
+                f"Rename target {pydantic_name!r} not in Pydantic model"
+            )
 
     def test_git_fields_present_in_api_model(self):
         git_fields = {"git_sha", "git_message", "git_branch", "git_repo"}
@@ -129,6 +141,63 @@ class TestAdaptersToApiParity:
         assert result.duration_ms == 42.0  # int → float is fine
         assert result.success is True
 
+    def test_model_validate_roundtrip_preserves_git_data(self):
+        """git_data dict on the dataclass maps to git: GitEventData on the Pydantic model."""
+        from datetime import datetime
+
+        source = AdaptersToolOperation(
+            observation_id="git-push-2026",
+            tool_name="push",
+            tool_use_id=None,
+            operation_type="git_push",
+            timestamp=datetime(2026, 4, 12, 12, 0, 0, tzinfo=UTC),
+            success=True,
+            input_preview=None,
+            output_preview=None,
+            duration_ms=None,
+            git_sha="abc123",
+            git_branch="main",
+            git_repo="syntropic137",
+            git_data={
+                "operation": "push",
+                "sha": "abc123",
+                "branch": "main",
+                "repo": "syntropic137",
+                "remote": "origin",
+            },
+        )
+
+        result = ApiToolOperation.model_validate(source, from_attributes=True)
+
+        assert result.git is not None
+        assert result.git.operation == "push"
+        assert result.git.sha == "abc123"
+        assert result.git.branch == "main"
+        assert result.git.repo == "syntropic137"
+        assert result.git.remote == "origin"
+        # Flat fields still populated for backward compat
+        assert result.git_sha == "abc123"
+        assert result.git_branch == "main"
+
+    def test_model_validate_roundtrip_none_git_data_gives_none_git(self):
+        """When git_data is None on the dataclass, git on the Pydantic model is None."""
+        from datetime import datetime
+
+        source = AdaptersToolOperation(
+            observation_id="tool-123",
+            tool_name="Bash",
+            tool_use_id="toolu_abc",
+            operation_type="tool_execution_completed",
+            timestamp=datetime(2026, 4, 12, 12, 0, 0, tzinfo=UTC),
+            success=True,
+            input_preview=None,
+            output_preview=None,
+            duration_ms=None,
+        )
+
+        result = ApiToolOperation.model_validate(source, from_attributes=True)
+        assert result.git is None
+
     def test_model_validate_roundtrip_none_git_fields_stay_none(self):
         """Git fields that are None on the source must remain None (not vanish)."""
         from datetime import datetime
@@ -167,7 +236,7 @@ class TestApiToOperationInfoGitFields:
     """
 
     def test_git_fields_present_in_operation_info(self):
-        git_fields = {"git_sha", "git_message", "git_branch", "git_repo"}
+        git_fields = {"git", "git_sha", "git_message", "git_branch", "git_repo"}
         operation_info_fields = _pydantic_field_names(OperationInfo)
         missing = git_fields - operation_info_fields
         assert missing == set(), (

@@ -74,18 +74,7 @@ async def _load_phase_operations(
     """Load tool operations for a session, returning [] on failure."""
     try:
         tool_data = await manager.session_tools.get(session_id)
-        return [
-            ToolOperation(
-                observation_id=op.observation_id,
-                operation_type=op.operation_type,
-                timestamp=op.timestamp,
-                duration_ms=op.duration_ms,
-                success=op.success,
-                tool_name=op.tool_name,
-                tool_use_id=op.tool_use_id,
-            )
-            for op in (tool_data or [])
-        ]
+        return [ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])]
     except Exception:
         logger.exception("Failed to load tool ops for session %s", session_id)
         return []
