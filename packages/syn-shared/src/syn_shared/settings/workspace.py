@@ -17,7 +17,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Re-export from sub-modules for backwards compatibility
@@ -69,6 +69,14 @@ class WorkspaceSettings(BaseSettings):
         default_factory=lambda: get_default_isolation_backend(),
         description="Isolation backend to use.",
     )
+
+    @field_validator("isolation_backend", mode="before")
+    @classmethod
+    def _empty_str_to_default(cls, v: object) -> object:
+        """Treat empty-string env vars as 'use the default'."""
+        if v == "":
+            return get_default_isolation_backend()
+        return v
 
     pool_size: int = Field(
         default=100,
