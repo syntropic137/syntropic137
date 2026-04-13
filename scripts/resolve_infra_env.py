@@ -57,7 +57,9 @@ def main() -> None:
     # Check both os.environ and parsed env_vars so the bridge works
     # regardless of whether SYN_DOMAIN is set in the shell or in infra/.env.
     old_val = os.environ.get(_DEPRECATED_SYN_DOMAIN, "") or env_vars.get(_DEPRECATED_SYN_DOMAIN, "")
-    new_val = os.environ.get(_NEW_SYN_PUBLIC_HOSTNAME, "") or env_vars.get(_NEW_SYN_PUBLIC_HOSTNAME, "")
+    new_val = os.environ.get(_NEW_SYN_PUBLIC_HOSTNAME, "") or env_vars.get(
+        _NEW_SYN_PUBLIC_HOSTNAME, ""
+    )
     if old_val and not new_val:
         safe_val = old_val.replace("'", "'\\''")
         print(f"{_NEW_SYN_PUBLIC_HOSTNAME}='{safe_val}'")
