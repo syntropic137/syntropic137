@@ -87,6 +87,8 @@ class ToolOperation:
     git_message: str | None = None
     git_branch: str | None = None
     git_repo: str | None = None
+    # Full structured git payload from v2 events (see agentic_events.payloads)
+    git_data: dict[str, object] | None = None
 
     @property
     def is_started(self) -> bool:

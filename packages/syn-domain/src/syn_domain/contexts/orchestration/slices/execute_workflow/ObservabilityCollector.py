@@ -24,6 +24,40 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _build_embedded_data(enriched: dict[str, Any]) -> dict[str, Any]:
+    """Build observation data dict from an embedded event.
+
+    For structured events (v2, context contains a "git" sub-object),
+    preserves the structure so downstream projections can read typed
+    fields directly.
+
+    For legacy flat events, flattens context + metadata and renames
+    "message" to "commit_message" to avoid RESERVED_OBSERVATION_KEYS
+    collision.
+    """
+    context = enriched.get("context") or {}
+    metadata = enriched.get("metadata") or {}
+
+    if "git" in context:
+        # Structured payload (v2) - preserve context.git sub-object.
+        # "message" lives at data.git.message, not data.message,
+        # so no collision with RESERVED_OBSERVATION_KEYS.
+        data: dict[str, Any] = {**context}
+        if metadata:
+            data.update(metadata)
+        return data
+
+    # Legacy flat format - flatten + rename reserved keys
+    data = {**context, **metadata}
+    # "message" is reserved by AgentEvent.from_dict() for Claude CLI
+    # conversation messages (dict with "content" list). Git hooks emit
+    # "message" as a plain string (commit message), which would be
+    # stripped by record_observation. Rename to "commit_message".
+    if "message" in data and isinstance(data["message"], str):
+        data["commit_message"] = data.pop("message")
+    return data
+
+
 class ObservabilityCollector:
     """Lane 2: Records telemetry to observability backend.
 
@@ -57,10 +91,20 @@ class ObservabilityCollector:
         if self._writer is None:
             return
 
-        hook_data = {
-            **(enriched.get("context") or {}),
-            **(enriched.get("metadata") or {}),
-        }
+        context = enriched.get("context") or {}
+        metadata = enriched.get("metadata") or {}
+
+        if "git" in context:
+            # Structured payload (v2) - preserve context.git sub-object.
+            # No field collision with RESERVED_OBSERVATION_KEYS because
+            # git data is namespaced under a "git" key.
+            hook_data: dict[str, Any] = {**context}
+            if metadata:
+                hook_data.update(metadata)
+        else:
+            # Legacy flat format - merge context + metadata
+            hook_data = {**context, **metadata}
+
         await self._writer.record_observation(
             session_id=self._session_id,
             observation_type=enriched.get("event_type", "unknown"),
@@ -249,29 +293,14 @@ class ObservabilityCollector:
         event_type: str,
         enriched: dict[str, Any],
     ) -> None:
-        """Record an embedded event (e.g., git hook events from tool output).
-
-        Flattens context + metadata and renames fields that collide with
-        RESERVED_OBSERVATION_KEYS in record_observation (e.g. "message"
-        becomes "commit_message" so it isn't silently dropped).
-        """
+        """Record an embedded event (e.g., git hook events from tool output)."""
         if self._writer is None:
             return
 
-        data = {
-            **(enriched.get("context") or {}),
-            **(enriched.get("metadata") or {}),
-        }
-        # "message" is reserved by AgentEvent.from_dict() for Claude CLI
-        # conversation messages (dict with "content" list). Git hooks emit
-        # "message" as a plain string (commit message), which would be
-        # stripped by record_observation. Rename to "commit_message".
-        if "message" in data and isinstance(data["message"], str):
-            data["commit_message"] = data.pop("message")
         await self._writer.record_observation(
             session_id=self._session_id,
             observation_type=event_type,
-            data=data,
+            data=_build_embedded_data(enriched),
             execution_id=self._execution_id,
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,
