@@ -45,8 +45,7 @@ function getGitPreview(op: OperationInfo): string | null {
 }
 
 function getPreview(op: OperationInfo): string | null {
-  const gitPreview = getGitPreview(op)
-  if (gitPreview) return truncate(gitPreview)
+  if (op.operation_type.startsWith('git_')) return getGitPreview(op)
   if (op.tool_input) return truncate(JSON.stringify(op.tool_input))
   if (op.tool_output) return truncate(op.tool_output.split('\n')[0])
   if (op.message_content) return truncate(op.message_content.split('\n')[0])
@@ -90,8 +89,11 @@ function deriveOpProps(op: OperationInfo) {
   const Icon = operationIcons[op.operation_type] ?? Activity
   const color = operationColors[op.operation_type] ?? DEFAULT_COLOR
   const [textColor, bgColor] = color.split(' ')
+  const isGitOp = op.operation_type.startsWith('git_')
   const hasGitDetails = !!op.git_message
-  const hasDetails = !!(op.tool_output || op.tool_input || op.message_content || op.thinking_content || hasGitDetails)
+  const hasDetails = isGitOp
+    ? hasGitDetails
+    : !!(op.tool_output || op.tool_input || op.message_content || op.thinking_content)
   const showToolIcon = !!op.tool_name && !op.operation_type.startsWith('git_')
   const ToolIcon = SUBAGENT_TYPES.has(op.operation_type) ? Users : Wrench
   const StatusIcon = op.success ? CheckCircle2 : XCircle
