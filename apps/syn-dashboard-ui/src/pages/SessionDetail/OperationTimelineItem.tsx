@@ -132,7 +132,7 @@ export function OperationTimelineItem({ op, index, expanded, onToggle }: {
           </span>
           <StatusIcon className={clsx('h-3 w-3', statusColor)} />
           <span className="text-xs text-[var(--color-text-muted)] ml-auto shrink-0">
-            {formatTime(op.timestamp)}
+            {op.timestamp ? formatTime(op.timestamp) : ''}
           </span>
         </div>
 

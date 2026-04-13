@@ -191,6 +191,7 @@ function loadWorkflowYaml(
     repository_ref: repository ? String(repository["ref"] ?? "main") : "main",
     description: data["description"] ? String(data["description"]) : null,
     project_name: data["project_name"] ? String(data["project_name"]) : null,
+    requires_repos: data["requires_repos"] !== false,
     phases: resolvedPhases as Record<string, unknown>[],
     input_declarations: parseInputDeclarations(data),
     source_path: sourcePath,
@@ -331,6 +332,7 @@ function resolveStandaloneYaml(
       repository_ref: "main",
       description: data["description"] ? String(data["description"]) : null,
       project_name: data["project_name"] ? String(data["project_name"]) : null,
+      requires_repos: data["requires_repos"] !== false,
       phases: Array.isArray(data["phases"])
         ? (data["phases"] as Record<string, unknown>[])
         : [],

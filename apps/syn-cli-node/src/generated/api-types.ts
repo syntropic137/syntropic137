@@ -2376,6 +2376,55 @@ export interface components {
             last_seen: string;
         };
         /**
+         * GitEventData
+         * @description Structured git event data from observability hooks.
+         *
+         *     Field names match agentic_events.payloads dataclasses (single source of truth).
+         *     This model is the Pydantic equivalent for API serialization.
+         */
+        GitEventData: {
+            /** Operation */
+            operation?: string | null;
+            /** Sha */
+            sha?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /** Repo */
+            repo?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Prev Branch */
+            prev_branch?: string | null;
+            /** Is Clone */
+            is_clone?: boolean | null;
+            /** Remote */
+            remote?: string | null;
+            /** Author */
+            author?: string | null;
+            /** Files Changed */
+            files_changed?: number | null;
+            /** Insertions */
+            insertions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /** Commits Count */
+            commits_count?: number | null;
+            /** Commit Range */
+            commit_range?: string | null;
+            /** Remote Url */
+            remote_url?: string | null;
+            /** Details */
+            details?: string | null;
+            /** From Branch */
+            from_branch?: string | null;
+            /** To Branch */
+            to_branch?: string | null;
+            /** Estimated Tokens Added */
+            estimated_tokens_added?: number | null;
+            /** Estimated Tokens Removed */
+            estimated_tokens_removed?: number | null;
+        };
+        /**
          * GitHubRepoListResponse
          * @description List of repositories accessible to the GitHub App.
          */
@@ -2649,6 +2698,7 @@ export interface components {
             message_content?: string | null;
             /** Thinking Content */
             thinking_content?: string | null;
+            git?: components["schemas"]["GitEventData"] | null;
             /** Git Sha */
             git_sha?: string | null;
             /** Git Message */

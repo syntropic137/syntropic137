@@ -42,8 +42,8 @@ function GitOperationMeta({ op }: { op: OperationInfo }) {
 
 function StandardMeta({ op }: { op: OperationInfo }) {
   const hasAny = op.message_role
-    || (op.total_tokens !== null && op.total_tokens > 0)
-    || op.duration_seconds !== null
+    || (op.total_tokens != null && op.total_tokens > 0)
+    || op.duration_seconds != null
   if (!hasAny) return null
 
   return (
@@ -54,7 +54,7 @@ function StandardMeta({ op }: { op: OperationInfo }) {
           {op.message_role}
         </span>
       )}
-      {op.total_tokens !== null && op.total_tokens > 0 && (
+      {op.total_tokens != null && op.total_tokens > 0 && (
         <span className="flex items-center gap-1">
           <Zap className="h-3 w-3" />
           {op.total_tokens.toLocaleString()} tokens

@@ -26,11 +26,11 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-        ObservabilityCollector,
-    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
         AgentExecutionResult,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
+        ObservabilityCollector,
     )
 
 PromptBuilder = Callable[

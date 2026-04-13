@@ -113,7 +113,7 @@ def _apply_repo_substitution(repos: list[str], merged: dict[str, str]) -> list[s
                 )
             raise ValueError(
                 f"Unresolved placeholders in repos field: {unresolved}. "
-                f"Provide them via --input {', '.join(f'{k}=<value>' for k in unresolved)}."
+                f"Provide them via inputs: {', '.join(f'{k}=<value>' for k in unresolved)}."
             )
         resolved.append(repo_url)
     return resolved

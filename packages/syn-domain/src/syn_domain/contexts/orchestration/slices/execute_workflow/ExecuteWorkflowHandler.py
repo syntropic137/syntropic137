@@ -48,7 +48,7 @@ def _resolve_repo_url(
         if unresolved:
             msg = (
                 f"Repository URL contains unresolved placeholders: {unresolved}. "
-                f"Provide them via inputs (e.g., --input {unresolved[0]}=<value>)."
+                f"Provide them via inputs (e.g., {unresolved[0]}=<value>)."
             )
         else:
             msg = (
@@ -72,7 +72,7 @@ def _substitute_repo_vars(repo_url: str, merged_inputs: dict[str, str]) -> str:
             )
         raise ValueError(
             f"Unresolved placeholders in repos field: {unresolved}. "
-            f"Provide them via --input {', '.join(f'{k}=<value>' for k in unresolved)}."
+            f"Provide them via inputs: {', '.join(f'{k}=<value>' for k in unresolved)}."
         )
     return repo_url
 
