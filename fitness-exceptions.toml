@@ -42,3 +42,33 @@ issue = "#624"
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum LOC (file-level, threshold: 750)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Untyped Dicts — dict[str, Any] and dict[str, object] in Python packages
+# Default is 0 (clean). Every non-zero entry is grandfathered tech debt.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[untyped-dicts.syn-domain]
+path = "packages/syn-domain"
+value = 367
+issue = "#673"
+
+[untyped-dicts.syn-adapters]
+path = "packages/syn-adapters"
+value = 195
+issue = "#673"
+
+[untyped-dicts.syn-api]
+path = "apps/syn-api"
+value = 87
+issue = "#673"
+
+[untyped-dicts.syn-collector]
+path = "packages/syn-collector"
+value = 22
+issue = "#673"
+
+[untyped-dicts.syn-shared]
+path = "packages/syn-shared"
+value = 10
+issue = "#673"

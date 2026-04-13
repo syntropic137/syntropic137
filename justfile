@@ -864,19 +864,39 @@ format:
 format-check:
     uv run ruff format --check .
 
-# Ratchet: no untyped dicts in API types (dict[str, Any] or dict[str, object] in Pydantic models)
+# Ratchet: count dict[str, Any] and dict[str, object] per package - never let them grow
+# Config lives in fitness-exceptions.toml [untyped-dicts.*] (default threshold: 0)
 check-untyped-dicts:
     #!/usr/bin/env python3
     import re, sys
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib  # type: ignore[no-redef]
     from pathlib import Path
-    threshold = int(Path(".ratchets/untyped-dicts").read_text().strip() or 0)
-    text = Path("apps/syn-api/src/syn_api/types.py").read_text()
-    count = len(re.findall(r"dict\[str, (?:Any|object)\]", text))
-    if count > threshold:
-        print(f"❌ Untyped dict ratchet exceeded: {count} occurrences (threshold: {threshold})")
-        print("   Fix dict[str, Any] and dict[str, object] in apps/syn-api/src/syn_api/types.py")
+    config = tomllib.loads(Path("fitness-exceptions.toml").read_text())
+    entries = config.get("untyped-dicts", {})
+    if not entries:
+        print("  No [untyped-dicts.*] entries in fitness-exceptions.toml")
+        sys.exit(0)
+    failed = False
+    for name, entry in entries.items():
+        pkg_path = entry["path"]
+        threshold = entry.get("value", 0)
+        issue = entry.get("issue", "")
+        count = 0
+        for py_file in Path(pkg_path).rglob("*.py"):
+            count += len(re.findall(r"dict\[str, (?:Any|object)\]", py_file.read_text()))
+        if count > threshold:
+            print(f"  FAIL {name}: {count} occurrences (threshold: {threshold}) [{issue}]")
+            failed = True
+        elif threshold > 0:
+            print(f"  WARN {name}: {count}/{threshold} - tech debt, ratchet to 0 [{issue}]")
+        else:
+            print(f"  ok {name}: clean")
+    if failed:
+        print("\nRatchet exceeded! Reduce untyped dicts or lower value in fitness-exceptions.toml.")
         sys.exit(1)
-    print(f"✓ Untyped dict check: {count}/{threshold}")
 
 # Run type checker (strict mode)
 typecheck:
@@ -1347,8 +1367,8 @@ docs-sync:
         echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
-    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
-        echo "✅ API docs and CLI types are up-to-date"; \
+    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
+        echo "✅ API docs, CLI types, and dashboard types are up-to-date"; \
     else \
         echo "❌ API artifacts need to be committed:"; \
         echo "   Run 'just codegen' and commit the changes."; \
@@ -1365,6 +1385,8 @@ codegen: docs-cli-gen
     cd apps/syn-docs && pnpm run generate:openapi
     @echo "📄 Generating CLI TypeScript types..."
     cd apps/syn-cli-node && pnpm run generate:types
+    @echo "📄 Generating Dashboard TypeScript types..."
+    cd apps/syn-dashboard-ui && pnpm run generate:types
     @echo "✅ All generated artifacts up to date"
 
 # Build docs site (codegen + Next.js build, for deployment)
