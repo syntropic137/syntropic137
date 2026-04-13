@@ -220,6 +220,8 @@ class SafetyGuards:
 
     def record_dispatch(self) -> None:
         """Record a successful dispatch timestamp for rate limiting."""
+        if self._dispatch_rate_limit <= 0:
+            return
         import time
 
         self._dispatch_timestamps.append(time.monotonic())

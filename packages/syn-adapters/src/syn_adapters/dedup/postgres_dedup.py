@@ -100,10 +100,11 @@ class PostgresDedupAdapter:
 
         # Run initial cleanup and start periodic cleanup
         await self._cleanup_expired()
-        self._cleanup_task = asyncio.create_task(
-            self._periodic_cleanup(),
-            name="dedup-key-cleanup",
-        )
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(
+                self._periodic_cleanup(),
+                name="dedup-key-cleanup",
+            )
 
     async def is_duplicate(self, dedup_key: str) -> bool:
         """Return ``True`` if this key was already seen (duplicate).

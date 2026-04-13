@@ -47,15 +47,17 @@ def _parse_env_file(path: Path) -> dict[str, str]:
 
 def main() -> None:
     # 1. Load infra/.env
-    if INFRA_ENV.exists():
-        for key, value in _parse_env_file(INFRA_ENV).items():
-            # Shell-safe output for eval
-            safe_value = value.replace("'", "'\\''")
-            print(f"{key}='{safe_value}'")
+    env_vars = _parse_env_file(INFRA_ENV) if INFRA_ENV.exists() else {}
+    for key, value in env_vars.items():
+        # Shell-safe output for eval
+        safe_value = value.replace("'", "'\\''")
+        print(f"{key}='{safe_value}'")
 
     # 2. Backwards-compat bridge: SYN_DOMAIN -> SYN_PUBLIC_HOSTNAME
-    old_val = os.environ.get(_DEPRECATED_SYN_DOMAIN, "")
-    new_val = os.environ.get(_NEW_SYN_PUBLIC_HOSTNAME, "")
+    # Check both os.environ and parsed env_vars so the bridge works
+    # regardless of whether SYN_DOMAIN is set in the shell or in infra/.env.
+    old_val = os.environ.get(_DEPRECATED_SYN_DOMAIN, "") or env_vars.get(_DEPRECATED_SYN_DOMAIN, "")
+    new_val = os.environ.get(_NEW_SYN_PUBLIC_HOSTNAME, "") or env_vars.get(_NEW_SYN_PUBLIC_HOSTNAME, "")
     if old_val and not new_val:
         safe_val = old_val.replace("'", "'\\''")
         print(f"{_NEW_SYN_PUBLIC_HOSTNAME}='{safe_val}'")

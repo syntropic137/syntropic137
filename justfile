@@ -1451,7 +1451,8 @@ bump-exclude-newer:
     set -euo pipefail
     new_date=$(date -u -v-7d "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "7 days ago" "+%Y-%m-%dT%H:%M:%SZ")
     echo "📦 Bumping exclude-newer to: $new_date"
-    sed -i '' "s|^exclude-newer = \".*\"|exclude-newer = \"$new_date\"|" pyproject.toml
+    tmpfile=$(mktemp)
+    sed "s|^exclude-newer = \".*\"|exclude-newer = \"$new_date\"|" pyproject.toml > "$tmpfile" && mv "$tmpfile" pyproject.toml
     uv lock
     echo "✅ Lockfile updated. Review changes with: git diff uv.lock"
 
