@@ -179,9 +179,7 @@ class GitHubEventsAPIClient:
     ) -> tuple[list[GitHubEventPayload] | None, str | None]:
         """Fetch a single pagination page. Returns (events, next_url) or (None, None) on failure."""
         try:
-            resp = await self._client._http.get(
-                url, headers={"Authorization": auth_header}
-            )
+            resp = await self._client._http.get(url, headers={"Authorization": auth_header})
             if resp.status_code != 200:
                 logger.warning(
                     "Events API pagination stopped: page %d returned %d for %s",
@@ -203,7 +201,9 @@ class GitHubEventsAPIClient:
             )
             return None, None
 
-    async def _persist_cursor(self, etag_key: str, etag: str, events: list[GitHubEventPayload]) -> None:
+    async def _persist_cursor(
+        self, etag_key: str, etag: str, events: list[GitHubEventPayload]
+    ) -> None:
         """Persist ETag cursor for restart safety (ADR-060)."""
         if not etag or self._cursor_store is None:
             return
