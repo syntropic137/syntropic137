@@ -1,4 +1,5 @@
 # Grandfathered violations for REMAINING Python-based fitness checks.
+# See: docs/adrs/ADR-062-cross-context-public-api-enforcement.md
 # Cognitive complexity and file size checks migrated to APSS fitness.toml.
 # This file only tracks structural & ES invariant exceptions.
 #

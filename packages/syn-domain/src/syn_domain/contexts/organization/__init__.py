@@ -1,7 +1,7 @@
 """Organization bounded context - organizations, systems, and repos.
 
-Public API for cross-context consumers. Import from here, not from internal
-subpackages (slices/, domain/aggregate_*/, etc.).
+Public API for cross-context consumers (ADR-062). Import from here, not from
+internal subpackages (slices/, domain/aggregate_*/, etc.).
 
 Usage:
     from syn_domain.contexts.organization import (

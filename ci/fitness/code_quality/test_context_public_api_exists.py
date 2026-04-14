@@ -1,4 +1,4 @@
-"""Fitness function: every bounded context must have a public API.
+"""Fitness function: every bounded context must have a public API (ADR-062).
 
 Each active bounded context must have a non-empty ``__init__.py`` with at
 least one re-export (``from ... import``) or an ``__all__`` assignment.

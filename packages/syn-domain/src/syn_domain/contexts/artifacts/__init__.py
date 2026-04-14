@@ -1,7 +1,8 @@
 """Artifacts bounded context - stores workflow phase outputs.
 
-This context provides aggregates, commands, and events for storing
-artifacts produced by workflow phases.
+Public API for cross-context consumers (ADR-062). This context provides
+aggregates, commands, and events for storing artifacts produced by workflow
+phases.
 
 Usage:
     from syn_domain.contexts.artifacts import (

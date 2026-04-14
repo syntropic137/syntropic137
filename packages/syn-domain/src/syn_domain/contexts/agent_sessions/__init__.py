@@ -1,7 +1,8 @@
 """Sessions bounded context - tracks agent execution sessions.
 
-This context provides aggregates, commands, and events for tracking
-agent sessions including token usage, operations, and costs.
+Public API for cross-context consumers (ADR-062). This context provides
+aggregates, commands, and events for tracking agent sessions including
+token usage, operations, and costs.
 
 Usage:
     from syn_domain.contexts.agent_sessions import (

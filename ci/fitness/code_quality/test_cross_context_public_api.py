@@ -1,4 +1,4 @@
-"""Fitness function: cross-context public API enforcement.
+"""Fitness function: cross-context public API enforcement (ADR-062).
 
 When a file imports from a foreign bounded context, the import path must
 go through the context's public API package (contexts/<ctx>) or its ports
@@ -11,6 +11,8 @@ Exemptions:
 - Projection classes (names ending with "Projection") are exempt - they are
   slice-owned read models that the adapter composition root legitimately
   imports for subscription wiring (ADR-008, coordinator pattern).
+
+See: docs/adrs/ADR-062-cross-context-public-api-enforcement.md
 """
 
 from __future__ import annotations
