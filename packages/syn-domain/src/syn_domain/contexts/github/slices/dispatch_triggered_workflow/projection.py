@@ -154,60 +154,70 @@ class WorkflowDispatchProjection(ProcessManager):
         processed = 0
 
         for record in pending:
-            execution_id = str(record.get("execution_id", ""))
-            workflow_id = str(record.get("workflow_id", ""))
-            trigger_id = record.get("trigger_id", "")
-
-            if not workflow_id:
-                logger.warning(
-                    "Pending dispatch %s has no workflow_id, marking failed",
-                    trigger_id,
-                )
-                record["status"] = "failed"
-                record["failure_reason"] = "no_workflow_id"
-                if execution_id:
-                    await self._store.save(self.PROJECTION_NAME, execution_id, record)
-                continue
-
-            try:
-                str_inputs = record.get("workflow_inputs", {})
-                if not isinstance(str_inputs, dict):
-                    str_inputs = {}
-
-                await self._execution_service.run_workflow(
-                    workflow_id=workflow_id,
-                    inputs=str_inputs,
-                    execution_id=execution_id,
-                )
-
-                record["status"] = "dispatched"
-                record["dispatched_at"] = datetime.now(UTC).isoformat()
-                if execution_id:
-                    await self._store.save(self.PROJECTION_NAME, execution_id, record)
+            if await self._dispatch_record(record):
                 processed += 1
-
-                logger.info(
-                    "Dispatched workflow %s for trigger %s -> execution %s",
-                    workflow_id,
-                    trigger_id,
-                    execution_id,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to dispatch workflow %s for trigger %s",
-                    workflow_id,
-                    trigger_id,
-                )
-                record["status"] = "failed"
-                record["failure_reason"] = "dispatch_exception"
-                if execution_id:
-                    await self._store.save(self.PROJECTION_NAME, execution_id, record)
 
         return processed
 
-    def get_idempotency_key(
-        self, todo_item: dict[str, str | int | float | bool | None]
-    ) -> str:
+    async def _dispatch_record(self, record: dict[str, str | int | float | bool | None]) -> bool:
+        """Dispatch a single pending record. Returns True if dispatched."""
+        assert self._store is not None
+        assert self._execution_service is not None
+
+        execution_id = str(record.get("execution_id", ""))
+        workflow_id = str(record.get("workflow_id", ""))
+        trigger_id = record.get("trigger_id", "")
+
+        if not workflow_id:
+            logger.warning("Pending dispatch %s has no workflow_id, marking failed", trigger_id)
+            await self._save_record_status(execution_id, record, "failed", "no_workflow_id")
+            return False
+
+        try:
+            str_inputs = record.get("workflow_inputs", {})
+            if not isinstance(str_inputs, dict):
+                str_inputs = {}
+
+            await self._execution_service.run_workflow(
+                workflow_id=workflow_id,
+                inputs=str_inputs,
+                execution_id=execution_id,
+            )
+
+            record["status"] = "dispatched"
+            record["dispatched_at"] = datetime.now(UTC).isoformat()
+            if execution_id:
+                await self._store.save(self.PROJECTION_NAME, execution_id, record)
+
+            logger.info(
+                "Dispatched workflow %s for trigger %s -> execution %s",
+                workflow_id,
+                trigger_id,
+                execution_id,
+            )
+            return True
+        except Exception:
+            logger.exception(
+                "Failed to dispatch workflow %s for trigger %s", workflow_id, trigger_id
+            )
+            await self._save_record_status(execution_id, record, "failed", "dispatch_exception")
+            return False
+
+    async def _save_record_status(
+        self,
+        execution_id: str,
+        record: dict[str, str | int | float | bool | None],
+        status: str,
+        reason: str,
+    ) -> None:
+        """Update a record's status and persist it."""
+        assert self._store is not None
+        record["status"] = status
+        record["failure_reason"] = reason
+        if execution_id:
+            await self._store.save(self.PROJECTION_NAME, execution_id, record)
+
+    def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
         """Dedup key is the execution_id - globally unique per dispatch."""
         return str(todo_item.get("execution_id", ""))
 
@@ -219,9 +229,7 @@ class WorkflowDispatchProjection(ProcessManager):
                 if key:
                     await self._store.delete(self.PROJECTION_NAME, key)
 
-    async def _write_dispatch_record(
-        self, event_data: dict[str, _EventValue]
-    ) -> None:
+    async def _write_dispatch_record(self, event_data: dict[str, _EventValue]) -> None:
         """Write a pending dispatch record. No side effects."""
         workflow_id = str(event_data.get("workflow_id", ""))
         str_inputs = _to_str_dict(event_data.get("workflow_inputs", {}))

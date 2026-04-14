@@ -7,16 +7,15 @@ structure validation using the ESP-provided fitness checks.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
-
 from ci.fitness.conftest import repo_root
-
-# ESP fitness module
 from event_sourcing.fitness import check_projection_purity
 from event_sourcing.fitness.process_manager_check import check_process_manager
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Project-specific allowed import prefixes (beyond ESP defaults)
 _PROJECT_ALLOWED_PREFIXES: frozenset[str] = frozenset(
@@ -126,9 +125,9 @@ class TestProcessManagerStructure:
             WorkflowDispatchProjection,
         )
 
-        assert issubclass(
-            WorkflowDispatchProjection, ProcessManager
-        ), "WorkflowDispatchProjection must extend ProcessManager, not CheckpointedProjection"
+        assert issubclass(WorkflowDispatchProjection, ProcessManager), (
+            "WorkflowDispatchProjection must extend ProcessManager, not CheckpointedProjection"
+        )
 
     def test_workflow_dispatch_allows_side_effects(self) -> None:
         """WorkflowDispatchProjection.SIDE_EFFECTS_ALLOWED must be True."""
@@ -136,6 +135,6 @@ class TestProcessManagerStructure:
             WorkflowDispatchProjection,
         )
 
-        assert (
-            WorkflowDispatchProjection.SIDE_EFFECTS_ALLOWED is True
-        ), "ProcessManager subclasses must have SIDE_EFFECTS_ALLOWED = True"
+        assert WorkflowDispatchProjection.SIDE_EFFECTS_ALLOWED is True, (
+            "ProcessManager subclasses must have SIDE_EFFECTS_ALLOWED = True"
+        )
