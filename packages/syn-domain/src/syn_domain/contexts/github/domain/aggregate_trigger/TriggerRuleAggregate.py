@@ -8,6 +8,7 @@ for compatibility with EventStoreRepository.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -22,6 +23,8 @@ from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import (
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
     TriggerStatus,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
@@ -219,6 +222,14 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
 
     @command_handler("RecordTriggerFiredCommand")
     def record_fired(self, command: RecordTriggerFiredCommand) -> None:
+        if not self.can_fire():
+            logger.warning(
+                "Trigger %s cannot fire (status=%s), rejecting command",
+                self.trigger_id,
+                self._status.value if self._status else "unknown",
+            )
+            return
+
         from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
             TriggerFiredEvent,
         )
