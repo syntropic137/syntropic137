@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
+    DispatchContext,
     EventEnvelope,
     ProjectionCheckpoint,
     ProjectionCheckpointStore,
@@ -64,6 +65,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump(mode="json")
@@ -123,6 +125,7 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type
         if not event_type:
@@ -239,6 +242,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         event_data = envelope.event.model_dump()
         event_type = envelope.metadata.event_type or "Unknown"

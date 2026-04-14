@@ -1,6 +1,6 @@
 # Restart Safety Audit - Task List
 
-Last updated: 2026-04-14T11:00
+Last updated: 2026-04-14T11:30
 
 ## Completed
 
@@ -35,7 +35,7 @@ Last updated: 2026-04-14T11:00
 - [ ] Syn137 Phase C: Cost safety (SpendTracker, rate limit, ExpectedVersion.NoStream)
 - [ ] Syn137 Phase D: Error handling (silent swallowing, trigger lifecycle events)
 - [ ] Syn137 Phase E: Hygiene (distributed locks, pagination, TTL fix, persist SHAs)
-- [ ] Wire ESP fitness into `just fitness-check`
+- [x] Wire ESP fitness into ci/fitness (11 new tests: purity, ProcessManager, regression guard)
 
 ## Completed (this session)
 
