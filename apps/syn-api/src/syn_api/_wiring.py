@@ -580,9 +580,9 @@ class BackgroundWorkflowDispatcher:
         execution_id: str,
         task: str | None = None,
     ) -> None:
-        from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
-        from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+        from syn_domain.contexts.orchestration import (
             DuplicateExecutionError,
+            ExecuteWorkflowCommand,
         )
 
         try:

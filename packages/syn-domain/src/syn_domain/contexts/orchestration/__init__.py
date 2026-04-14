@@ -60,6 +60,7 @@ from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWor
     CreateWorkflowTemplateHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    DuplicateExecutionError,
     WorkflowNotFoundError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
