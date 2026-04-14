@@ -389,7 +389,7 @@ def _create_dedup_adapter() -> DedupPort:
             if pool is not None:
                 from syn_adapters.dedup.postgres_dedup import PostgresDedupAdapter
 
-                ttl_days = max(1, settings.polling.dedup_ttl_seconds // 86400)
+                ttl_days = max(1, -(-settings.polling.dedup_ttl_seconds // 86400))
                 logger.info("EventPipeline using Postgres dedup (ADR-060)")
                 return PostgresDedupAdapter(pool, ttl_days=ttl_days)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
         except Exception:

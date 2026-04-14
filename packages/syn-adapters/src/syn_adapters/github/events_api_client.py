@@ -163,6 +163,12 @@ class GitHubEventsAPIClient:
                     next_url, headers={"Authorization": auth_header}
                 )
                 if resp.status_code != 200:
+                    logger.warning(
+                        "Events API pagination stopped: page %d returned %d for %s",
+                        pages_fetched + 1,
+                        resp.status_code,
+                        etag_key,
+                    )
                     break
                 page_data = resp.json()
                 if not isinstance(page_data, list) or not page_data:
