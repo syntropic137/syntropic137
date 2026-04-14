@@ -234,7 +234,8 @@ class WorkflowDispatchProjection(ProcessManager):
             if execution_id:
                 await self._store.save(self.PROJECTION_NAME, execution_id, record)
 
-            self._dispatch_timestamps.append(time.monotonic())
+            if self._max_dispatches_per_hour > 0:
+                self._dispatch_timestamps.append(time.monotonic())
 
             logger.info(
                 "Dispatched workflow %s for trigger %s -> execution %s",
@@ -255,15 +256,22 @@ class WorkflowDispatchProjection(ProcessManager):
         if self._budget_checker is None:
             return None
         try:
-            await self._budget_checker.allocate_budget(
-                execution_id=execution_id,
-                workflow_type="custom",
-            )
             result = await self._budget_checker.check_budget(
                 execution_id=execution_id,
                 input_tokens=0,
                 output_tokens=0,
             )
+            # Allocate only if no budget exists yet (idempotent on retry)
+            if getattr(result, "budget", None) is None:
+                await self._budget_checker.allocate_budget(
+                    execution_id=execution_id,
+                    workflow_type="custom",
+                )
+                result = await self._budget_checker.check_budget(
+                    execution_id=execution_id,
+                    input_tokens=0,
+                    output_tokens=0,
+                )
             if getattr(result, "allowed", True) is False:
                 reason = str(getattr(result, "reason", "budget_exceeded"))
                 logger.warning("Budget check failed for execution %s: %s", execution_id, reason)

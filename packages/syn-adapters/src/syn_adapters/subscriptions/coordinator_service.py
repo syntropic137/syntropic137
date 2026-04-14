@@ -175,10 +175,10 @@ def create_coordinator_service(
     event_store: EventStoreClient,
     projection_store: ProjectionStoreProtocol,
     realtime_projection: RealTimeProjection | None = None,
-    execution_service: object | None = None,
+    execution_service: _ExecutionService | None = None,
     checkpoint_store: ProjectionCheckpointStore | None = None,
     pool: asyncpg.Pool | None = None,
-    budget_checker: object | None = None,
+    budget_checker: _BudgetChecker | None = None,
     max_dispatches_per_hour: int = 50,
 ) -> CoordinatorSubscriptionService:
     """Factory to create the coordinator subscription service.

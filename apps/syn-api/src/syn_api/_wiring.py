@@ -21,6 +21,10 @@ if TYPE_CHECKING:
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+    from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
+        _BudgetChecker,
+        _ExecutionService,
+    )
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
@@ -709,7 +713,7 @@ def get_realtime() -> RealTimeProjection:
     return get_realtime_projection()
 
 
-def _get_budget_checker() -> object | None:
+def _get_budget_checker() -> _BudgetChecker | None:
     """Return the SpendTracker as a budget checker, or None if unavailable."""
     try:
         from syn_tokens.singletons import get_spend_tracker
@@ -722,7 +726,7 @@ def _get_budget_checker() -> object | None:
 
 def get_subscription_coordinator(
     realtime_projection: RealTimeProjection | None = None,
-    execution_service: object | None = None,
+    execution_service: _ExecutionService | None = None,
 ) -> CoordinatorSubscriptionService:
     """Create the CoordinatorSubscriptionService.
 
