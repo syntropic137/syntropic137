@@ -104,6 +104,8 @@ __all__ = [
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
+    # Errors
+    "DuplicateExecutionError",
     # Value objects - execution
     "ExecutablePhase",
     "ExecuteCommandCommand",
