@@ -213,33 +213,10 @@ class WorkflowDispatchProjection(ProcessManager):
             await self._save_record_status(execution_id, record, "failed", "no_workflow_id")
             return False
 
-        # Budget gate: allocate and check budget before dispatch
-        if self._budget_checker is not None:
-            try:
-                await self._budget_checker.allocate_budget(
-                    execution_id=execution_id,
-                    workflow_type="custom",
-                )
-                result = await self._budget_checker.check_budget(
-                    execution_id=execution_id,
-                    input_tokens=0,
-                    output_tokens=0,
-                )
-                if getattr(result, "allowed", True) is False:
-                    reason = str(getattr(result, "reason", "budget_exceeded"))
-                    logger.warning(
-                        "Budget check failed for execution %s: %s",
-                        execution_id,
-                        reason,
-                    )
-                    await self._save_record_status(
-                        execution_id, record, "failed", f"budget_exceeded: {reason}"
-                    )
-                    return False
-            except Exception:
-                logger.exception("Budget check error for execution %s", execution_id)
-                # Fail-open: allow dispatch if budget check errors
-                # TODO(#XXX): Consider fail-closed after SpendTracker is proven stable
+        budget_ok = await self._check_budget(execution_id)
+        if budget_ok is False:
+            await self._save_record_status(execution_id, record, "failed", "budget_exceeded")
+            return False
 
         try:
             str_inputs = record.get("workflow_inputs", {})
@@ -272,6 +249,28 @@ class WorkflowDispatchProjection(ProcessManager):
             )
             await self._save_record_status(execution_id, record, "failed", "dispatch_exception")
             return False
+
+    async def _check_budget(self, execution_id: str) -> bool | None:
+        """Check budget before dispatch. Returns False if blocked, None if no checker."""
+        if self._budget_checker is None:
+            return None
+        try:
+            await self._budget_checker.allocate_budget(
+                execution_id=execution_id,
+                workflow_type="custom",
+            )
+            result = await self._budget_checker.check_budget(
+                execution_id=execution_id,
+                input_tokens=0,
+                output_tokens=0,
+            )
+            if getattr(result, "allowed", True) is False:
+                reason = str(getattr(result, "reason", "budget_exceeded"))
+                logger.warning("Budget check failed for execution %s: %s", execution_id, reason)
+                return False
+        except Exception:
+            logger.exception("Budget check error for execution %s", execution_id)
+        return None
 
     async def _save_record_status(
         self,
