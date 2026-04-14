@@ -5,8 +5,12 @@ go through the context's public API package (contexts/<ctx>) or its ports
 subpackage (contexts/<ctx>/ports). Reaching into slices/, domain/,
 _shared/, or other internal subpaths is a violation.
 
-TYPE_CHECKING imports are exempt.
-Files in _shared/ directories are exempt (they serve multiple contexts by design).
+Exemptions:
+- TYPE_CHECKING imports are exempt.
+- Files in _shared/ directories are exempt (they serve multiple contexts by design).
+- Projection classes (names ending with "Projection") are exempt - they are
+  slice-owned read models that the adapter composition root legitimately
+  imports for subscription wiring (ADR-008, coordinator pattern).
 """
 
 from __future__ import annotations
@@ -64,6 +68,16 @@ def _has_private_names(names: list[str]) -> bool:
     return any(n.startswith("_") for n in names)
 
 
+def _is_projection_import(names: list[str]) -> bool:
+    """Return True if all imported names are projection classes.
+
+    Projection classes follow the naming convention ``*Projection`` (ADR-008).
+    The composition root (coordinator, manager) legitimately imports these
+    from foreign context slices for subscription wiring.
+    """
+    return bool(names) and all(n.endswith("Projection") for n in names)
+
+
 def _get_params() -> list[tuple[str, int, int]]:
     """Return (rel_path, violation_count, budget) for files with deep imports."""
     root = repo_root()
@@ -105,6 +119,8 @@ def _get_params() -> list[tuple[str, int, int]]:
             violation_count = 0
             for imp in imps:
                 if imp.module in type_checking_modules:
+                    continue
+                if _is_projection_import(imp.names):
                     continue
                 for ctx in _CONTEXT_NAMES:
                     if ctx == own_ctx:
