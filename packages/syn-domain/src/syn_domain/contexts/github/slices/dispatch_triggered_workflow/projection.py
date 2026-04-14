@@ -77,8 +77,10 @@ class WorkflowDispatchProjection(ProcessManager):
     PROCESSOR SIDE (process_pending):
       Reads pending dispatch records and dispatches workflows.
       Called by the coordinator ONLY for live events.
-      Must be idempotent - dispatching the same record twice is safe
-      because the handler checks for existing execution streams.
+      NOTE: dispatch is not yet fully idempotent - Phase A1 will add
+      execution_id dedup at the handler level. Until then, the status
+      field on dispatch records prevents re-processing of already-dispatched
+      items within the same process lifecycle.
     """
 
     PROJECTION_NAME = WORKFLOW_DISPATCH
@@ -149,8 +151,9 @@ class WorkflowDispatchProjection(ProcessManager):
         if self._store is None or self._execution_service is None:
             return 0
 
-        records = await self._store.get_all(self.PROJECTION_NAME)
-        pending = [r for r in records if r.get("status") == "pending"]
+        pending = await self._store.query(
+            self.PROJECTION_NAME, filters={"status": "pending"}
+        )
         processed = 0
 
         for record in pending:
@@ -223,11 +226,7 @@ class WorkflowDispatchProjection(ProcessManager):
 
     async def clear_all_data(self) -> None:
         if self._store is not None:
-            records = await self._store.get_all(self.PROJECTION_NAME)
-            for record in records:
-                key = record.get("execution_id")
-                if key:
-                    await self._store.delete(self.PROJECTION_NAME, key)
+            await self._store.delete_all(self.PROJECTION_NAME)
 
     async def _write_dispatch_record(self, event_data: dict[str, _EventValue]) -> None:
         """Write a pending dispatch record. No side effects."""
