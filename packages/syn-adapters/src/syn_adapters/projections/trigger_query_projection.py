@@ -94,7 +94,7 @@ class TriggerQueryProjection(CheckpointedProjection):
         self,
         envelope: EventEnvelope[GenericDomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
-        _context: DispatchContext | None = None,
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump()
