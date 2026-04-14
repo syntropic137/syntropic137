@@ -151,9 +151,7 @@ class WorkflowDispatchProjection(ProcessManager):
         if self._store is None or self._execution_service is None:
             return 0
 
-        pending = await self._store.query(
-            self.PROJECTION_NAME, filters={"status": "pending"}
-        )
+        pending = await self._store.query(self.PROJECTION_NAME, filters={"status": "pending"})
         processed = 0
 
         for record in pending:
