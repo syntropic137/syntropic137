@@ -178,6 +178,7 @@ class SafetyGuards:
         dispatch_rate_limit: int = 10,
         dispatch_rate_window_seconds: float = 60.0,
     ) -> None:
+        # ACKNOWLEDGED: per-instance rate limit, resets on restart. Multi-instance: effective limit multiplied by instance count (acceptable safety net)
         self._dispatch_timestamps: list[float] = []
         self._dispatch_rate_limit = dispatch_rate_limit
         self._dispatch_rate_window = dispatch_rate_window_seconds

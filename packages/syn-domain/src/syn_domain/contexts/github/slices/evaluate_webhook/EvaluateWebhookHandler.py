@@ -74,6 +74,7 @@ class EvaluateWebhookHandler:
         # Per-(trigger, pr) lock: ensures the concurrency guard check and
         # record_fire are atomic — prevents two concurrent webhook handlers
         # from both passing the guard before either records.
+        # CORRECTNESS: requires distributed lock for multi-instance (E1)
         self._fire_locks: dict[tuple[str, int | None], asyncio.Lock] = {}
 
     async def evaluate(
@@ -93,6 +94,11 @@ class EvaluateWebhookHandler:
             result = await self._evaluate_rule(rule, event, repository, installation_id, payload)
             if result is not None:
                 results.append(result)
+
+        # Prune _fire_locks to prevent unbounded growth
+        if len(self._fire_locks) > 1000:
+            self._fire_locks = {k: v for k, v in self._fire_locks.items() if v.locked()}
+
         return results
 
     async def _evaluate_rule(

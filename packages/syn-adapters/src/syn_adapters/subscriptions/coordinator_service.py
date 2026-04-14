@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
+        _BudgetChecker,
         _ExecutionService,
     )
 
@@ -174,9 +175,11 @@ def create_coordinator_service(
     event_store: EventStoreClient,
     projection_store: ProjectionStoreProtocol,
     realtime_projection: RealTimeProjection | None = None,
-    execution_service: object | None = None,
+    execution_service: _ExecutionService | None = None,
     checkpoint_store: ProjectionCheckpointStore | None = None,
     pool: asyncpg.Pool | None = None,
+    budget_checker: _BudgetChecker | None = None,
+    max_dispatches_per_hour: int = 50,
 ) -> CoordinatorSubscriptionService:
     """Factory to create the coordinator subscription service.
 
@@ -200,6 +203,8 @@ def create_coordinator_service(
         pool: Optional asyncpg Pool for TimescaleDB direct queries.
             Cost projections use this to bypass empty projection stores
             and read from the actual observability data source (Lane 2).
+        budget_checker: Optional budget checker for pre-dispatch cost validation.
+        max_dispatches_per_hour: Maximum dispatches per hour (0 to disable).
 
     Returns:
         Configured CoordinatorSubscriptionService
@@ -269,40 +274,45 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
     # Create all checkpointed projections (21 total)
-    projections: list[CheckpointedProjection] = [
-        # --- Orchestration context (AutoDispatchProjection — direct) ---
-        WorkflowListProjection(projection_store),
-        WorkflowDetailProjection(projection_store),
-        WorkflowExecutionListProjection(projection_store),
-        WorkflowExecutionDetailProjection(projection_store),
-        DashboardMetricsProjection(projection_store),
-        WorkflowPhaseMetricsProjection(projection_store),
-        ExecutionTodoProjection(store=projection_store),
-        WorkflowDispatchProjection(
-            execution_service=cast("_ExecutionService | None", execution_service),
-            store=projection_store,
-        ),
-        TriggerQueryProjection(projection_store),
-        # --- Agent sessions context ---
-        SessionListProjection(projection_store),
-        # --- Artifacts context ---
-        ArtifactListProjection(projection_store),
-        # --- Organization context — namespace-qualified events require adapters ---
-        _OrganizationListAdapter(OrganizationProjection(projection_store)),
-        _SystemListAdapter(SystemProjection(projection_store)),
-        _RepoListAdapter(RepoProjection(projection_store)),
-        # Organization insight projections (AutoDispatchProjection — direct)
-        RepoHealthProjection(projection_store),
-        RepoCostProjection(projection_store, pool=pool),
-        # RepoCorrelation handles mixed namespaces (github.* + unnamespaced)
-        _RepoCorrelationAdapter(RepoCorrelationProjection(projection_store)),
-        # Trigger history — github.TriggerFired → fire log entries
-        _TriggerHistoryAdapter(TriggerHistoryProjection(projection_store)),
-        # --- Observability projections — plain classes wrapped via adapters ---
-        ToolTimelineAdapter(ToolTimelineProjection(projection_store)),
-        ExecutionCostAdapter(ExecutionCostProjection(projection_store, pool=pool)),
-        SessionCostAdapter(create_session_cost_projection(projection_store)),
-    ]
+    projections: list[CheckpointedProjection] = cast(
+        "list[CheckpointedProjection]",
+        [
+            # --- Orchestration context (AutoDispatchProjection — direct) ---
+            WorkflowListProjection(projection_store),
+            WorkflowDetailProjection(projection_store),
+            WorkflowExecutionListProjection(projection_store),
+            WorkflowExecutionDetailProjection(projection_store),
+            DashboardMetricsProjection(projection_store),
+            WorkflowPhaseMetricsProjection(projection_store),
+            ExecutionTodoProjection(store=projection_store),
+            WorkflowDispatchProjection(
+                execution_service=cast("_ExecutionService | None", execution_service),
+                store=projection_store,
+                budget_checker=cast("_BudgetChecker | None", budget_checker),
+                max_dispatches_per_hour=max_dispatches_per_hour,
+            ),
+            TriggerQueryProjection(projection_store),
+            # --- Agent sessions context ---
+            SessionListProjection(projection_store),
+            # --- Artifacts context ---
+            ArtifactListProjection(projection_store),
+            # --- Organization context — namespace-qualified events require adapters ---
+            _OrganizationListAdapter(OrganizationProjection(projection_store)),
+            _SystemListAdapter(SystemProjection(projection_store)),
+            _RepoListAdapter(RepoProjection(projection_store)),
+            # Organization insight projections (AutoDispatchProjection — direct)
+            RepoHealthProjection(projection_store),
+            RepoCostProjection(projection_store, pool=pool),
+            # RepoCorrelation handles mixed namespaces (github.* + unnamespaced)
+            _RepoCorrelationAdapter(RepoCorrelationProjection(projection_store)),
+            # Trigger history — github.TriggerFired → fire log entries
+            _TriggerHistoryAdapter(TriggerHistoryProjection(projection_store)),
+            # --- Observability projections — plain classes wrapped via adapters ---
+            ToolTimelineAdapter(ToolTimelineProjection(projection_store)),
+            ExecutionCostAdapter(ExecutionCostProjection(projection_store, pool=pool)),
+            SessionCostAdapter(create_session_cost_projection(projection_store)),
+        ],
+    )
 
     return CoordinatorSubscriptionService(
         event_store=event_store,

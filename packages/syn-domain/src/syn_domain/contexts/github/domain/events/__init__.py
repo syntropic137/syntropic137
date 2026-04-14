@@ -22,6 +22,12 @@ from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
 from syn_domain.contexts.github.domain.events.TriggerDeletedEvent import (
     TriggerDeletedEvent,
 )
+from syn_domain.contexts.github.domain.events.TriggerDispatchCompletedEvent import (
+    TriggerDispatchCompletedEvent,
+)
+from syn_domain.contexts.github.domain.events.TriggerDispatchFailedEvent import (
+    TriggerDispatchFailedEvent,
+)
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
     TriggerFiredEvent,
 )
@@ -42,6 +48,8 @@ __all__ = [
     "TokenRefreshedEvent",
     "TriggerBlockedEvent",
     "TriggerDeletedEvent",
+    "TriggerDispatchCompletedEvent",
+    "TriggerDispatchFailedEvent",
     "TriggerFiredEvent",
     "TriggerPausedEvent",
     "TriggerRegisteredEvent",

@@ -37,6 +37,10 @@
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py" = { max_calls = 9, issue = "#196" }
 "apps/syn-api/src/syn_api/routes/artifacts.py" = { max_calls = 1, issue = "#277" }
 
+[error_propagation]
+# path = { issue = "#NNN" }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/docker/docker_container_ops.py" = { issue = "#664" }
+
 [event_construction_outside_aggregate]
 # Production files that construct DomainEvent subclasses outside aggregate_*/ dirs.
 # Legitimate uses: deserialization / rehydration from stored data.

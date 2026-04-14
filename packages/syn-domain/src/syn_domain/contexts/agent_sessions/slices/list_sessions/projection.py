@@ -5,6 +5,7 @@ Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -17,6 +18,8 @@ from event_sourcing import AutoDispatchProjection
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _calculate_duration(
@@ -318,5 +321,5 @@ class SessionListProjection(AutoDispatchProjection):
                     await self._store.save(self.PROJECTION_NAME, session.id, data)
                     count += 1
             except Exception:
-                pass
+                logger.exception("Failed to reconcile session %s", session.id)
         return count
