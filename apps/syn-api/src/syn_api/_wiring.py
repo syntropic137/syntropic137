@@ -593,6 +593,9 @@ class BackgroundWorkflowDispatcher:
         from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
             ExecuteWorkflowCommand,
         )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+            DuplicateExecutionError,
+        )
 
         try:
             cmd = ExecuteWorkflowCommand(
@@ -602,6 +605,11 @@ class BackgroundWorkflowDispatcher:
                 task=task,
             )
             await self._handler.handle(cmd)
+        except DuplicateExecutionError:
+            logger.info(
+                "Duplicate dispatch for execution %s, already running",
+                execution_id,
+            )
         except Exception:
             logger.exception(
                 "Background workflow execution raised exception",

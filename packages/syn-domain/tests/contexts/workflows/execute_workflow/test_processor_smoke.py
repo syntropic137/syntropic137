@@ -66,6 +66,13 @@ class FakeExecutionRepository:
         self._aggregates[aggregate.id] = aggregate
         aggregate._uncommitted_events.clear()
 
+    async def save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
+        if aggregate.id in self._aggregates:
+            from event_sourcing import StreamAlreadyExistsError
+
+            raise StreamAlreadyExistsError(aggregate.id, 0)
+        await self.save(aggregate)
+
     async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
         return self._aggregates.get(aggregate_id)
 
