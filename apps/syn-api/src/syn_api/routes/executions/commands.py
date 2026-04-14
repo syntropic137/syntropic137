@@ -461,19 +461,28 @@ async def execute_workflow_endpoint(
     execution_id = f"exec-{uuid4().hex[:12]}"
 
     async def _run() -> None:
-        result = await execute(
-            workflow_id=workflow_id,
-            inputs=effective_inputs,
-            execution_id=execution_id,
-            task=request.task,
-        )
-        if isinstance(result, Err):
-            logger.error(
-                "Workflow execution failed",
+        try:
+            result = await execute(
+                workflow_id=workflow_id,
+                inputs=effective_inputs,
+                execution_id=execution_id,
+                task=request.task,
+            )
+            if isinstance(result, Err):
+                logger.error(
+                    "Workflow execution failed",
+                    extra={
+                        "execution_id": execution_id,
+                        "workflow_id": workflow_id,
+                        "error": result.message,
+                    },
+                )
+        except Exception:
+            logger.exception(
+                "Workflow execution raised exception",
                 extra={
                     "execution_id": execution_id,
                     "workflow_id": workflow_id,
-                    "error": result.message,
                 },
             )
 

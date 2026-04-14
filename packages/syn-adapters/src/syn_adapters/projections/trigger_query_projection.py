@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 from event_sourcing import (
     CheckpointedProjection,
+    DispatchContext,
     EventEnvelope,
     GenericDomainEvent,
     ProjectionCheckpoint,
@@ -92,6 +93,7 @@ class TriggerQueryProjection(CheckpointedProjection):
         self,
         envelope: EventEnvelope[GenericDomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump()

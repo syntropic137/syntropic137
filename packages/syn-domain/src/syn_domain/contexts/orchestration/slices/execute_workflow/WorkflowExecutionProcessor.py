@@ -166,7 +166,7 @@ class WorkflowExecutionProcessor:
             phase_definitions=phase_definitions,
         )
         aggregate._handle_command(start_cmd)
-        await self._save_and_sync(aggregate)
+        await self._save_new_and_sync(aggregate)
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
@@ -678,6 +678,23 @@ class WorkflowExecutionProcessor:
         workspace_cm = self._active_workspace_cms.pop(phase_id, None)
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
+
+    async def _save_new_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:
+        """Save a NEW aggregate (fails if stream exists) and sync events.
+
+        Uses save_new() with ExpectedVersion.NoStream to prevent duplicate
+        execution streams. Raises StreamAlreadyExistsError on conflict.
+        """
+        uncommitted = list(aggregate._uncommitted_events)
+        await self._execution_repo.save_new(aggregate)
+        for envelope in uncommitted:
+            event = envelope.event
+            event_type = getattr(event, "event_type", type(event).__name__)
+            event_data = self._serialize_event(event)
+            handler_name = self._event_type_to_handler(event_type)
+            handler = getattr(self._todo_projection, handler_name, None)
+            if handler:
+                await handler(event_data)
 
     async def _save_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:
         """Save aggregate and sync uncommitted events to local projection."""
