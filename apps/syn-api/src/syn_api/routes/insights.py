@@ -34,18 +34,9 @@ router = APIRouter(prefix="/insights", tags=["insights"])
 async def get_global_overview() -> dict[str, Any]:
     """Get global overview of all systems and repos."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization.domain.queries.get_global_overview import (
-        GetGlobalOverviewQuery,
-    )
-    from syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler import (
-        GetGlobalOverviewHandler,
-    )
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
-        get_repo_projection,
-    )
-    from syn_domain.contexts.organization.slices.list_systems.projection import (
-        get_system_projection,
-    )
+    from syn_domain.contexts.organization import GetGlobalOverviewHandler, GetGlobalOverviewQuery
+    from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
+    from syn_domain.contexts.organization.slices.list_systems.projection import get_system_projection
 
     await ensure_connected()
 
@@ -154,15 +145,8 @@ async def get_contribution_heatmap(
     """Get daily contribution heatmap data."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_api._wiring import get_event_store_instance
-    from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
-        GetContributionHeatmapQuery,
-    )
-    from syn_domain.contexts.organization.slices.contribution_heatmap.GetContributionHeatmapHandler import (
-        GetContributionHeatmapHandler,
-    )
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
-        get_repo_projection,
-    )
+    from syn_domain.contexts.organization import GetContributionHeatmapHandler, GetContributionHeatmapQuery
+    from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
 
     await ensure_connected()
 

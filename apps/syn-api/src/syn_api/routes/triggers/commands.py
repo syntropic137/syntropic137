@@ -23,13 +23,10 @@ from syn_api.types import (
     TriggerActionResponse,
     TriggerError,
 )
-from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
+from syn_domain.contexts.github import TriggerStatus
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
-    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
-        TriggerRuleAggregate,
-    )
+    from syn_domain.contexts.github import TriggerQueryStore, TriggerRuleAggregate
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +65,7 @@ async def register_trigger(
     created_by: str = "",
 ) -> Result[str, TriggerError]:
     """Register a new GitHub event trigger for a workflow."""
-    from syn_domain.contexts.github import RegisterTriggerCommand
-    from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-        RegisterTriggerHandler,
-    )
+    from syn_domain.contexts.github import RegisterTriggerCommand, RegisterTriggerHandler
 
     await ensure_connected()
     installation_id = await _resolve_installation_id(installation_id, repository)
@@ -165,10 +159,7 @@ async def enable_preset(
     workflow_id: str = "",
 ) -> Result[str, TriggerError]:
     """Enable a built-in trigger preset for a repository."""
-    from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
-    from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-        RegisterTriggerHandler,
-    )
+    from syn_domain.contexts.github import RegisterTriggerHandler, create_preset_command
 
     await ensure_connected()
     installation_id = await _resolve_installation_id(installation_id, repository)
@@ -213,10 +204,7 @@ async def pause_trigger(
     paused_by: str = "",
 ) -> Result[None, TriggerError]:
     """Pause an active trigger."""
-    from syn_domain.contexts.github import PauseTriggerCommand
-    from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-        ManageTriggerHandler,
-    )
+    from syn_domain.contexts.github import ManageTriggerHandler, PauseTriggerCommand
 
     await ensure_connected()
     store = get_trigger_store()
@@ -247,10 +235,7 @@ async def resume_trigger(
     resumed_by: str = "",
 ) -> Result[None, TriggerError]:
     """Resume a paused trigger."""
-    from syn_domain.contexts.github import ResumeTriggerCommand
-    from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-        ManageTriggerHandler,
-    )
+    from syn_domain.contexts.github import ManageTriggerHandler, ResumeTriggerCommand
 
     await ensure_connected()
     store = get_trigger_store()
@@ -281,10 +266,7 @@ async def delete_trigger(
     deleted_by: str = "",
 ) -> Result[None, TriggerError]:
     """Soft-delete a trigger rule."""
-    from syn_domain.contexts.github import DeleteTriggerCommand
-    from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-        ManageTriggerHandler,
-    )
+    from syn_domain.contexts.github import DeleteTriggerCommand, ManageTriggerHandler
 
     await ensure_connected()
     store = get_trigger_store()

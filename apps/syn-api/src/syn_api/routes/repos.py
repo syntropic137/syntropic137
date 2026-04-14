@@ -63,12 +63,7 @@ async def register_repo(
         get_repo_claim_repository,
         get_repo_repository,
     )
-    from syn_domain.contexts.organization.domain.commands.RegisterRepoCommand import (
-        RegisterRepoCommand,
-    )
-    from syn_domain.contexts.organization.slices.register_repo.RegisterRepoHandler import (
-        RegisterRepoHandler,
-    )
+    from syn_domain.contexts.organization import RegisterRepoCommand, RegisterRepoHandler
 
     await ensure_connected()
 
@@ -182,12 +177,7 @@ async def assign_repo_to_system(
 ) -> Result[None, RepoError]:
     """Assign a repo to a system."""
     from syn_adapters.storage.repositories import get_repo_repository
-    from syn_domain.contexts.organization.domain.commands.AssignRepoToSystemCommand import (
-        AssignRepoToSystemCommand,
-    )
-    from syn_domain.contexts.organization.slices.manage_repo.ManageRepoHandler import (
-        ManageRepoHandler,
-    )
+    from syn_domain.contexts.organization import AssignRepoToSystemCommand, ManageRepoHandler
 
     await ensure_connected()
 
@@ -219,12 +209,7 @@ async def unassign_repo_from_system(
 ) -> Result[None, RepoError]:
     """Unassign a repo from its system."""
     from syn_adapters.storage.repositories import get_repo_repository
-    from syn_domain.contexts.organization.domain.commands.UnassignRepoFromSystemCommand import (
-        UnassignRepoFromSystemCommand,
-    )
-    from syn_domain.contexts.organization.slices.manage_repo.ManageRepoHandler import (
-        ManageRepoHandler,
-    )
+    from syn_domain.contexts.organization import ManageRepoHandler, UnassignRepoFromSystemCommand
 
     await ensure_connected()
 
@@ -256,12 +241,7 @@ async def unassign_repo_from_system(
 async def get_repo_health(repo_id: str) -> Result[dict[str, Any], RepoError]:
     """Get health snapshot for a repo."""
     from syn_api._wiring import get_projection_mgr
-    from syn_domain.contexts.organization.domain.queries.get_repo_health import (
-        GetRepoHealthQuery,
-    )
-    from syn_domain.contexts.organization.slices.repo_health.GetRepoHealthHandler import (
-        GetRepoHealthHandler,
-    )
+    from syn_domain.contexts.organization import GetRepoHealthHandler, GetRepoHealthQuery
 
     await ensure_connected()
 
@@ -280,12 +260,7 @@ async def get_repo_health(repo_id: str) -> Result[dict[str, Any], RepoError]:
 async def get_repo_cost(repo_id: str) -> Result[dict[str, Any], RepoError]:
     """Get cost breakdown for a repo."""
     from syn_api._wiring import get_projection_mgr
-    from syn_domain.contexts.organization.domain.queries.get_repo_cost import (
-        GetRepoCostQuery,
-    )
-    from syn_domain.contexts.organization.slices.repo_cost.GetRepoCostHandler import (
-        GetRepoCostHandler,
-    )
+    from syn_domain.contexts.organization import GetRepoCostHandler, GetRepoCostQuery
 
     await ensure_connected()
 
@@ -306,12 +281,7 @@ async def get_repo_activity(
 ) -> Result[list[dict[str, Any]], RepoError]:
     """Get execution timeline for a repo."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization.domain.queries.get_repo_activity import (
-        GetRepoActivityQuery,
-    )
-    from syn_domain.contexts.organization.slices.repo_activity.GetRepoActivityHandler import (
-        GetRepoActivityHandler,
-    )
+    from syn_domain.contexts.organization import GetRepoActivityHandler, GetRepoActivityQuery
 
     await ensure_connected()
 
@@ -331,12 +301,7 @@ async def get_repo_failures(
 ) -> Result[list[dict[str, Any]], RepoError]:
     """Get recent failures for a repo."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization.domain.queries.get_repo_failures import (
-        GetRepoFailuresQuery,
-    )
-    from syn_domain.contexts.organization.slices.repo_failures.GetRepoFailuresHandler import (
-        GetRepoFailuresHandler,
-    )
+    from syn_domain.contexts.organization import GetRepoFailuresHandler, GetRepoFailuresQuery
 
     await ensure_connected()
 
@@ -354,12 +319,7 @@ async def get_repo_sessions(
 ) -> Result[list[dict[str, Any]], RepoError]:
     """Get agent sessions for a repo."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
-        GetRepoSessionsQuery,
-    )
-    from syn_domain.contexts.organization.slices.repo_sessions.GetRepoSessionsHandler import (
-        GetRepoSessionsHandler,
-    )
+    from syn_domain.contexts.organization import GetRepoSessionsHandler, GetRepoSessionsQuery
 
     await ensure_connected()
 
@@ -385,12 +345,7 @@ async def update_repo(
 ) -> Result[None, RepoError]:
     """Update mutable fields of a repo."""
     from syn_adapters.storage.repositories import get_repo_repository
-    from syn_domain.contexts.organization.domain.commands.UpdateRepoCommand import (
-        UpdateRepoCommand,
-    )
-    from syn_domain.contexts.organization.slices.manage_repo.ManageRepoHandler import (
-        ManageRepoHandler,
-    )
+    from syn_domain.contexts.organization import ManageRepoHandler, UpdateRepoCommand
 
     await ensure_connected()
 
@@ -457,12 +412,7 @@ async def deregister_repo(
     After successful deregister, releases the repo claim to allow re-registration.
     """
     from syn_adapters.storage.repositories import get_repo_repository
-    from syn_domain.contexts.organization.domain.commands.DeregisterRepoCommand import (
-        DeregisterRepoCommand,
-    )
-    from syn_domain.contexts.organization.slices.manage_repo.ManageRepoHandler import (
-        ManageRepoHandler,
-    )
+    from syn_domain.contexts.organization import DeregisterRepoCommand, ManageRepoHandler
 
     await ensure_connected()
 
@@ -520,12 +470,7 @@ async def _try_release_repo_claim(
         return
 
     from syn_adapters.storage.repositories import get_repo_claim_repository
-    from syn_domain.contexts.organization.domain.aggregate_repo_claim.claim_id import (
-        compute_repo_claim_id,
-    )
-    from syn_domain.contexts.organization.domain.commands.ReleaseRepoClaimCommand import (
-        ReleaseRepoClaimCommand,
-    )
+    from syn_domain.contexts.organization import ReleaseRepoClaimCommand, compute_repo_claim_id
 
     try:
         claim_repo = get_repo_claim_repository()

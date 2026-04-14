@@ -42,12 +42,7 @@ async def create_organization(
 ) -> Result[str, OrganizationError]:
     """Create a new organization."""
     from syn_adapters.storage.repositories import get_organization_repository
-    from syn_domain.contexts.organization.domain.commands.CreateOrganizationCommand import (
-        CreateOrganizationCommand,
-    )
-    from syn_domain.contexts.organization.slices.create_organization.CreateOrganizationHandler import (
-        CreateOrganizationHandler,
-    )
+    from syn_domain.contexts.organization import CreateOrganizationCommand, CreateOrganizationHandler
 
     await ensure_connected()
 
@@ -134,12 +129,7 @@ async def update_organization(
 ) -> Result[None, OrganizationError]:
     """Update an organization."""
     from syn_adapters.storage.repositories import get_organization_repository
-    from syn_domain.contexts.organization.domain.commands.UpdateOrganizationCommand import (
-        UpdateOrganizationCommand,
-    )
-    from syn_domain.contexts.organization.slices.manage_organization.ManageOrganizationHandler import (
-        ManageOrganizationHandler,
-    )
+    from syn_domain.contexts.organization import ManageOrganizationHandler, UpdateOrganizationCommand
 
     await ensure_connected()
 
@@ -173,12 +163,7 @@ async def delete_organization(
 ) -> Result[None, OrganizationError]:
     """Soft-delete an organization."""
     from syn_adapters.storage.repositories import get_organization_repository
-    from syn_domain.contexts.organization.domain.commands.DeleteOrganizationCommand import (
-        DeleteOrganizationCommand,
-    )
-    from syn_domain.contexts.organization.slices.manage_organization.ManageOrganizationHandler import (
-        ManageOrganizationHandler,
-    )
+    from syn_domain.contexts.organization import DeleteOrganizationCommand, ManageOrganizationHandler
 
     await ensure_connected()
 

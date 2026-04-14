@@ -227,9 +227,7 @@ async def start_session(
     Returns:
         Ok(session_id) on success, Err(SessionError) on failure.
     """
-    from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler import (
-        StartSessionHandler,
-    )
+    from syn_domain.contexts.agent_sessions import StartSessionHandler
 
     await ensure_connected()
     repository = get_session_repo()
@@ -262,9 +260,7 @@ async def complete_session(
     Returns:
         Ok(None) on success, Err(SessionError) on failure.
     """
-    from syn_domain.contexts.agent_sessions.slices.complete_session.CompleteSessionHandler import (
-        CompleteSessionHandler,
-    )
+    from syn_domain.contexts.agent_sessions import CompleteSessionHandler
 
     await ensure_connected()
     repository = get_session_repo()

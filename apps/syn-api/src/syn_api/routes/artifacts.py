@@ -308,12 +308,7 @@ async def update_artifact(
     """Update mutable metadata of an artifact."""
     await ensure_connected()
     try:
-        from syn_domain.contexts.artifacts.domain.commands.UpdateArtifactCommand import (
-            UpdateArtifactCommand,
-        )
-        from syn_domain.contexts.artifacts.slices.manage_artifact.ManageArtifactHandler import (
-            ManageArtifactHandler,
-        )
+        from syn_domain.contexts.artifacts import ManageArtifactHandler, UpdateArtifactCommand
 
         command = UpdateArtifactCommand(
             aggregate_id=artifact_id,
@@ -344,12 +339,7 @@ async def delete_artifact(
     """Soft-delete an artifact."""
     await ensure_connected()
     try:
-        from syn_domain.contexts.artifacts.domain.commands.DeleteArtifactCommand import (
-            DeleteArtifactCommand,
-        )
-        from syn_domain.contexts.artifacts.slices.manage_artifact.ManageArtifactHandler import (
-            ManageArtifactHandler,
-        )
+        from syn_domain.contexts.artifacts import DeleteArtifactCommand, ManageArtifactHandler
 
         command = DeleteArtifactCommand(
             aggregate_id=artifact_id,

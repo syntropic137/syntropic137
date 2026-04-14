@@ -68,10 +68,7 @@ async def _seed_trigger_presets() -> int:
     Mirrors the logic in routes/triggers/commands.py:enable_preset
     without the cross-layer dependency on the route module.
     """
-    from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
-    from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-        RegisterTriggerHandler,
-    )
+    from syn_domain.contexts.github import RegisterTriggerHandler, create_preset_command
 
     store = get_trigger_store()
     repo = get_trigger_repo()

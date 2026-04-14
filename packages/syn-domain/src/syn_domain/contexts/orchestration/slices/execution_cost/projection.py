@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
+from syn_domain.contexts.agent_sessions import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_shared.pricing import get_model_pricing
 

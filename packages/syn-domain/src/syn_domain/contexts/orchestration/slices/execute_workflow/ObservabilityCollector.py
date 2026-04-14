@@ -11,9 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
-    ObservationType,
-)
+from syn_domain.contexts.agent_sessions import ObservationType
 from syn_shared.events import SESSION_SUMMARY
 
 if TYPE_CHECKING:

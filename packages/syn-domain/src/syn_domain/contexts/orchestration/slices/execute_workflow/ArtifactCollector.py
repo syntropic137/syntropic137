@@ -13,13 +13,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
-from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType
+from syn_domain.contexts.artifacts import ArtifactType
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
+    from syn_domain.contexts.artifacts import (
         ArtifactContentStoragePort,
-    )
-    from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
@@ -268,12 +266,7 @@ class ArtifactCollector:
         title: str,
     ) -> None:
         """Create and save an artifact with two-tier storage (ADR-012)."""
-        from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
-            ArtifactAggregate,
-        )
-        from syn_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
-            CreateArtifactCommand,
-        )
+        from syn_domain.contexts.artifacts import ArtifactAggregate, CreateArtifactCommand
 
         artifact_type_enum = map_artifact_type(artifact_type)
 
