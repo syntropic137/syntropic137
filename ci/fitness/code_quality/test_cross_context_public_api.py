@@ -152,9 +152,7 @@ _PARAMS = _get_params()
     _PARAMS,
     ids=[p[0].split("/")[-1] for p in _PARAMS] if _PARAMS else [],
 )
-def test_cross_context_public_api_only(
-    file_path: str, violation_count: int, budget: int
-) -> None:
+def test_cross_context_public_api_only(file_path: str, violation_count: int, budget: int) -> None:
     """Files must import from foreign contexts only through the public API.
 
     Forbidden: reaching into slices/, domain/, _shared/, or aggregate_*/ paths.

@@ -42,7 +42,10 @@ async def create_organization(
 ) -> Result[str, OrganizationError]:
     """Create a new organization."""
     from syn_adapters.storage.repositories import get_organization_repository
-    from syn_domain.contexts.organization import CreateOrganizationCommand, CreateOrganizationHandler
+    from syn_domain.contexts.organization import (
+        CreateOrganizationCommand,
+        CreateOrganizationHandler,
+    )
 
     await ensure_connected()
 
@@ -125,7 +128,10 @@ async def update_organization(
 ) -> Result[None, OrganizationError]:
     """Update an organization."""
     from syn_adapters.storage.repositories import get_organization_repository
-    from syn_domain.contexts.organization import ManageOrganizationHandler, UpdateOrganizationCommand
+    from syn_domain.contexts.organization import (
+        ManageOrganizationHandler,
+        UpdateOrganizationCommand,
+    )
 
     await ensure_connected()
 
@@ -159,7 +165,10 @@ async def delete_organization(
 ) -> Result[None, OrganizationError]:
     """Soft-delete an organization."""
     from syn_adapters.storage.repositories import get_organization_repository
-    from syn_domain.contexts.organization import DeleteOrganizationCommand, ManageOrganizationHandler
+    from syn_domain.contexts.organization import (
+        DeleteOrganizationCommand,
+        ManageOrganizationHandler,
+    )
 
     await ensure_connected()
 

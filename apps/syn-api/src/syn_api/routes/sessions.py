@@ -234,7 +234,6 @@ async def start_session(
     handler = StartSessionHandler(repository=repository)
 
     try:
-
         command = StartSessionCommand(
             workflow_id=workflow_id,
             phase_id=phase_id or "",
@@ -266,7 +265,6 @@ async def complete_session(
     handler = CompleteSessionHandler(repository=repository)
 
     try:
-
         command = CompleteSessionCommand(aggregate_id=session_id)
         await handler.handle(command)
         return Ok(None)
