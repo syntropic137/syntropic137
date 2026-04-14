@@ -219,30 +219,7 @@ class WorkflowDispatchProjection(ProcessManager):
             return False
 
         try:
-            str_inputs = record.get("workflow_inputs", {})
-            if not isinstance(str_inputs, dict):
-                str_inputs = {}
-
-            await self._execution_service.run_workflow(
-                workflow_id=workflow_id,
-                inputs=str_inputs,
-                execution_id=execution_id,
-            )
-
-            record["status"] = "dispatched"
-            record["dispatched_at"] = datetime.now(UTC).isoformat()
-            if execution_id:
-                await self._store.save(self.PROJECTION_NAME, execution_id, record)
-
-            if self._max_dispatches_per_hour > 0:
-                self._dispatch_timestamps.append(time.monotonic())
-
-            logger.info(
-                "Dispatched workflow %s for trigger %s -> execution %s",
-                workflow_id,
-                trigger_id,
-                execution_id,
-            )
+            await self._execute_and_record(record, execution_id, workflow_id, trigger_id)
             return True
         except Exception:
             logger.exception(
@@ -250,6 +227,46 @@ class WorkflowDispatchProjection(ProcessManager):
             )
             await self._save_record_status(execution_id, record, "failed", "dispatch_exception")
             return False
+
+    async def _execute_and_record(
+        self,
+        record: dict[str, str | int | float | bool | None],
+        execution_id: str,
+        workflow_id: str,
+        trigger_id: object,
+    ) -> None:
+        """Execute the workflow dispatch and record success."""
+        assert self._store is not None
+        assert self._execution_service is not None
+
+        str_inputs = record.get("workflow_inputs", {})
+        if not isinstance(str_inputs, dict):
+            str_inputs = {}
+
+        await self._execution_service.run_workflow(
+            workflow_id=workflow_id,
+            inputs=str_inputs,
+            execution_id=execution_id,
+        )
+
+        record["status"] = "dispatched"
+        record["dispatched_at"] = datetime.now(UTC).isoformat()
+        if execution_id:
+            await self._store.save(self.PROJECTION_NAME, execution_id, record)
+
+        self._record_dispatch_timestamp()
+
+        logger.info(
+            "Dispatched workflow %s for trigger %s -> execution %s",
+            workflow_id,
+            trigger_id,
+            execution_id,
+        )
+
+    def _record_dispatch_timestamp(self) -> None:
+        """Track dispatch timestamp for rate limiting."""
+        if self._max_dispatches_per_hour > 0:
+            self._dispatch_timestamps.append(time.monotonic())
 
     async def _check_budget(self, execution_id: str) -> bool | None:
         """Check budget before dispatch. Returns False if blocked, None if no checker."""
