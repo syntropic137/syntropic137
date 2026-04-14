@@ -55,7 +55,18 @@ class TriggerDebouncer:
             except asyncio.CancelledError:
                 pass
 
-        self._pending[key] = asyncio.create_task(_fire())
+        task = asyncio.create_task(_fire())
+        task.add_done_callback(self._handle_task_exception)
+        self._pending[key] = task
+
+    @staticmethod
+    def _handle_task_exception(task: asyncio.Task[None]) -> None:
+        """Log exceptions from fire-and-forget debounce tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Debounce task failed: %s", exc, exc_info=exc)
 
     @property
     def pending_count(self) -> int:

@@ -101,10 +101,21 @@ class PostgresDedupAdapter:
         # Run initial cleanup and start periodic cleanup
         await self._cleanup_expired()
         if self._cleanup_task is None:
-            self._cleanup_task = asyncio.create_task(
+            task = asyncio.create_task(
                 self._periodic_cleanup(),
                 name="dedup-key-cleanup",
             )
+            task.add_done_callback(self._handle_cleanup_exception)
+            self._cleanup_task = task
+
+    @staticmethod
+    def _handle_cleanup_exception(task: asyncio.Task[None]) -> None:
+        """Log exceptions from the periodic cleanup background task."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Dedup cleanup task crashed: %s", exc, exc_info=exc)
 
     async def is_duplicate(self, dedup_key: str) -> bool:
         """Return ``True`` if this key was already seen (duplicate).
