@@ -161,33 +161,47 @@ class GitHubEventsAPIClient:
         next_url = _parse_next_link(link_header)
         pages_fetched = 1
         while next_url and pages_fetched < _MAX_PAGES:
-            try:
-                resp = await self._client._http.get(
-                    next_url, headers={"Authorization": auth_header}
-                )
-                if resp.status_code != 200:
-                    logger.warning(
-                        "Events API pagination stopped: page %d returned %d for %s",
-                        pages_fetched + 1,
-                        resp.status_code,
-                        etag_key,
-                    )
-                    break
-                page_data = resp.json()
-                if not isinstance(page_data, list) or not page_data:
-                    break
-                extra_events.extend(page_data)
-                next_url = _parse_next_link(resp.headers.get("Link", ""))
-                pages_fetched += 1
-            except Exception:
-                logger.warning(
-                    "Failed to fetch events page %d for %s",
-                    pages_fetched + 1,
-                    etag_key,
-                    exc_info=True,
-                )
+            page_events, next_url = await self._fetch_single_page(
+                next_url, auth_header, etag_key, pages_fetched + 1
+            )
+            if page_events is None:
                 break
+            extra_events.extend(page_events)
+            pages_fetched += 1
         return extra_events
+
+    async def _fetch_single_page(
+        self,
+        url: str,
+        auth_header: str,
+        etag_key: str,
+        page_number: int,
+    ) -> tuple[list[GitHubEventPayload] | None, str | None]:
+        """Fetch a single pagination page. Returns (events, next_url) or (None, None) on failure."""
+        try:
+            resp = await self._client._http.get(
+                url, headers={"Authorization": auth_header}
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "Events API pagination stopped: page %d returned %d for %s",
+                    page_number,
+                    resp.status_code,
+                    etag_key,
+                )
+                return None, None
+            page_data = resp.json()
+            if not isinstance(page_data, list) or not page_data:
+                return None, None
+            return page_data, _parse_next_link(resp.headers.get("Link", ""))
+        except Exception:
+            logger.warning(
+                "Failed to fetch events page %d for %s",
+                page_number,
+                etag_key,
+                exc_info=True,
+            )
+            return None, None
 
     async def _persist_cursor(self, etag_key: str, etag: str, events: list[GitHubEventPayload]) -> None:
         """Persist ETag cursor for restart safety (ADR-060)."""
