@@ -1,6 +1,6 @@
 # Restart Safety Audit - Task List
 
-Last updated: 2026-04-14T11:30
+Last updated: 2026-04-14T18:32
 
 ## Completed
 
@@ -36,6 +36,9 @@ Last updated: 2026-04-14T11:30
 - [ ] Syn137 Phase D: Error handling (silent swallowing, trigger lifecycle events)
 - [ ] Syn137 Phase E: Hygiene (distributed locks, pagination, TTL fix, persist SHAs)
 - [x] Wire ESP fitness into ci/fitness (11 new tests: purity, ProcessManager, regression guard)
+- [x] Fix handle_event override signatures (DispatchContext parameter on all 6 adapter overrides)
+- [x] Address Copilot review comments: query() for pending records, delete_all(), honest docstring, ValueError on can_fire()
+- [x] Ignore pytest 9.0.2 vulnerability in CI (GHSA-6w46-j5rx-g56g, tracked in #677)
 
 ## Completed (this session)
 
