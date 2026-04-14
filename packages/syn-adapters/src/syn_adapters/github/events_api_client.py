@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Type alias for raw GitHub event payloads (heterogeneous JSON from Events API).
+GitHubEventPayload = dict[str, Any]
+
 
 class PollerCursorStore(Protocol):
     """Protocol for persisting poller ETag/cursor state across restarts."""
@@ -31,7 +34,7 @@ class PollerCursorStore(Protocol):
 class EventsAPIResponse:
     """Response from a single Events API poll."""
 
-    events: list[dict[str, Any]]
+    events: list[GitHubEventPayload]
     poll_interval: int
     """``X-Poll-Interval`` header value (seconds). GitHub recommends this as
     the minimum interval between requests."""
@@ -130,7 +133,7 @@ class GitHubEventsAPIClient:
             self._etags[etag_key] = etag
 
         data = response.json()
-        events: list[dict[str, Any]] = data if isinstance(data, list) else []
+        events: list[GitHubEventPayload] = data if isinstance(data, list) else []
 
         # Fetch remaining pages (GitHub returns max 30/page, up to 10 pages)
         auth_header = response.request.headers.get("Authorization", "")
@@ -152,9 +155,9 @@ class GitHubEventsAPIClient:
         link_header: str,
         auth_header: str,
         etag_key: str,
-    ) -> list[dict[str, Any]]:
+    ) -> list[GitHubEventPayload]:
         """Follow pagination links to collect all events."""
-        extra_events: list[dict[str, Any]] = []
+        extra_events: list[GitHubEventPayload] = []
         next_url = _parse_next_link(link_header)
         pages_fetched = 1
         while next_url and pages_fetched < _MAX_PAGES:
@@ -186,7 +189,7 @@ class GitHubEventsAPIClient:
                 break
         return extra_events
 
-    async def _persist_cursor(self, etag_key: str, etag: str, events: list[dict[str, Any]]) -> None:
+    async def _persist_cursor(self, etag_key: str, etag: str, events: list[GitHubEventPayload]) -> None:
         """Persist ETag cursor for restart safety (ADR-060)."""
         if not etag or self._cursor_store is None:
             return
