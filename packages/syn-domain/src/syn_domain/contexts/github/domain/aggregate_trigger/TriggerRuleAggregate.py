@@ -219,6 +219,10 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
 
     @command_handler("RecordTriggerFiredCommand")
     def record_fired(self, command: RecordTriggerFiredCommand) -> None:
+        if not self.can_fire():
+            msg = f"Cannot fire trigger {self.trigger_id} in status {self._status}"
+            raise ValueError(msg)
+
         from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
             TriggerFiredEvent,
         )

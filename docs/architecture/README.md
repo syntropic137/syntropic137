@@ -56,6 +56,23 @@ claude generate-architecture-docs
 
 **These are educational/design docs - edit as needed:**
 
+#### Fitness and Review
+
+- **[Architectural Fitness](./architectural-fitness.md)** 📝 Manual
+  - **What:** Standing reference for reviewing structural health
+  - **Why:** Defines the 9 principles (single ownership, separation of concerns,
+    replay safety, idempotency, startup contract, temporal clarity, cost
+    boundaries, boundary clarity, scalability) with concrete tests for each
+  - **When to update:** When new architectural principles are established
+  - **Use for:** Feature development, code review, incident post-mortems, audits
+
+- **[Event Sourcing Glossary](./es-glossary.md)** - Manual
+  - **What:** Definitions, patterns, and non-negotiable rules for building on ESP
+  - **Why:** Shared vocabulary for all contributors - Aggregate, Projection,
+    ProcessManager (To-Do List pattern), anti-patterns, safety patterns
+  - **When to update:** When new patterns are adopted or rules change
+  - **Use for:** Onboarding, code review, architectural discussions
+
 #### Core Concepts
 
 - **[Event Architecture](./event-architecture.md)** 📝 Manual

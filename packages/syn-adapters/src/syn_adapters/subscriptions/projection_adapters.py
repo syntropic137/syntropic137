@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
+    DispatchContext,
     EventEnvelope,
     ProjectionCheckpoint,
     ProjectionCheckpointStore,

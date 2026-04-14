@@ -10,11 +10,14 @@ import re
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
+from event_sourcing import StreamAlreadyExistsError
+
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    DuplicateExecutionError,
     WorkflowNotFoundError,
 )
 
@@ -136,16 +139,27 @@ class ExecuteWorkflowHandler:
         merged_inputs = self._merge_inputs(command, workflow)
         repos = self._resolve_repos(merged_inputs, workflow) if workflow.requires_repos else []
 
-        return await self._processor.run(
-            workflow_id=command.aggregate_id,
-            workflow_name=workflow.name or "",
-            phases=phases,
-            inputs=merged_inputs,
-            execution_id=command.execution_id
+        execution_id = (
+            command.execution_id
             if command.execution_id and command.execution_id.startswith("exec-")
-            else f"exec-{uuid4().hex[:12]}",
-            repos=repos,
+            else f"exec-{uuid4().hex[:12]}"
         )
+
+        try:
+            return await self._processor.run(
+                workflow_id=command.aggregate_id,
+                workflow_name=workflow.name or "",
+                phases=phases,
+                inputs=merged_inputs,
+                execution_id=execution_id,
+                repos=repos,
+            )
+        except StreamAlreadyExistsError:
+            logger.warning(
+                "Duplicate dispatch detected for execution %s, skipping",
+                execution_id,
+            )
+            raise DuplicateExecutionError(execution_id) from None
 
     @staticmethod
     def _merge_inputs(

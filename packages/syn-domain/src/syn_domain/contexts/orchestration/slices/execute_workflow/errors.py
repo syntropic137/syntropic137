@@ -14,6 +14,19 @@ class WorkflowNotFoundError(Exception):
         self.workflow_id = workflow_id
 
 
+class DuplicateExecutionError(Exception):
+    """Raised when an execution with this ID already exists.
+
+    This is the idempotency guard: if the event store already has a stream
+    for this execution_id, a duplicate dispatch was attempted. Callers
+    should treat this as a no-op (the execution is already running).
+    """
+
+    def __init__(self, execution_id: str) -> None:
+        super().__init__(f"Execution already exists: {execution_id}")
+        self.execution_id = execution_id
+
+
 class WorkflowExecutionError(Exception):
     """Raised when workflow execution fails."""
 

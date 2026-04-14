@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 from event_sourcing import (
     CheckpointedProjection,
+    DispatchContext,
     EventEnvelope,
     GenericDomainEvent,
     ProjectionCheckpoint,

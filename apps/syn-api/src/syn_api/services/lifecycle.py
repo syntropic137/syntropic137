@@ -43,6 +43,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _handle_recovery_task_exception(task: asyncio.Task[None]) -> None:
+    """Log exceptions from the lifecycle recovery background task."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "Lifecycle recovery task crashed: %s",
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+
 class DegradedReason(StrEnum):
     """Reasons the API may enter degraded mode.
 
@@ -126,10 +139,12 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # Spawn a background recovery loop for any recoverable degradations.
     recoverable = [r for r in state.degraded_reasons if _is_recoverable(r)]
     if recoverable:
-        state._recovery_task = asyncio.create_task(
+        task = asyncio.create_task(
             _recovery_loop(state),
             name="lifecycle-recovery",
         )
+        task.add_done_callback(_handle_recovery_task_exception)
+        state._recovery_task = task
 
 
 async def startup(

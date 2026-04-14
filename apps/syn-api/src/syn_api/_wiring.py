@@ -399,8 +399,10 @@ def _create_dedup_adapter() -> DedupPort:
             ttl_seconds=settings.polling.dedup_ttl_seconds,
         )
     except Exception:
-        logger.warning(
-            "Redis unavailable for dedup — using in-memory fallback",
+        logger.error(
+            "No durable dedup backend available (Postgres and Redis both failed). "
+            "Using in-memory fallback - dedup state will be lost on restart. "
+            "Configure SYN_OBSERVABILITY_DB_URL or REDIS_URL for production use.",
             exc_info=True,
         )
         from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
@@ -537,11 +539,15 @@ class BackgroundWorkflowDispatcher:
     - run_workflow() → handler.handle() bridge
     - Fire-and-forget via asyncio.Task (never blocks projection loop)
     - Tracks tasks for graceful shutdown
+    - Semaphore-bounded concurrency (Phase A2)
     """
+
+    MAX_CONCURRENT = 10
 
     def __init__(self, handler: ExecuteWorkflowHandler) -> None:
         self._handler = handler
         self._tasks: set[asyncio.Task[None]] = set()
+        self._semaphore = asyncio.Semaphore(self.MAX_CONCURRENT)
 
     async def run_workflow(
         self,
@@ -551,11 +557,21 @@ class BackgroundWorkflowDispatcher:
         task: str | None = None,
     ) -> None:
         asyncio_task = asyncio.create_task(
-            self._run(workflow_id, inputs, execution_id, task=task),
+            self._run_with_semaphore(workflow_id, inputs, execution_id, task=task),
             name=f"workflow-exec-{execution_id or workflow_id}",
         )
         self._tasks.add(asyncio_task)
         asyncio_task.add_done_callback(self._tasks.discard)
+
+    async def _run_with_semaphore(
+        self,
+        workflow_id: str,
+        inputs: dict[str, str],
+        execution_id: str,
+        task: str | None = None,
+    ) -> None:
+        async with self._semaphore:
+            await self._run(workflow_id, inputs, execution_id, task=task)
 
     async def _run(
         self,
@@ -565,6 +581,9 @@ class BackgroundWorkflowDispatcher:
         task: str | None = None,
     ) -> None:
         from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
+        from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+            DuplicateExecutionError,
+        )
 
         try:
             cmd = ExecuteWorkflowCommand(
@@ -574,9 +593,14 @@ class BackgroundWorkflowDispatcher:
                 task=task,
             )
             await self._handler.handle(cmd)
+        except DuplicateExecutionError:
+            logger.info(
+                "Duplicate dispatch for execution %s, already running",
+                execution_id,
+            )
         except Exception:
             logger.exception(
-                "Background workflow failed",
+                "Background workflow execution raised exception",
                 extra={"workflow_id": workflow_id, "execution_id": execution_id},
             )
 
