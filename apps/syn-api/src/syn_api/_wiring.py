@@ -709,6 +709,17 @@ def get_realtime() -> RealTimeProjection:
     return get_realtime_projection()
 
 
+def _get_budget_checker() -> object | None:
+    """Return the SpendTracker as a budget checker, or None if unavailable."""
+    try:
+        from syn_tokens.singletons import get_spend_tracker
+
+        return get_spend_tracker()
+    except Exception:
+        logger.warning("SpendTracker unavailable, dispatch budget checks disabled")
+        return None
+
+
 def get_subscription_coordinator(
     realtime_projection: RealTimeProjection | None = None,
     execution_service: object | None = None,
@@ -719,11 +730,14 @@ def get_subscription_coordinator(
     """
     from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.subscriptions import create_coordinator_service
+    from syn_shared.settings import get_settings
 
     # Pass TimescaleDB pool to cost projections (#505, #507)
     timescale_pool = None
     with contextlib.suppress(Exception):
         timescale_pool = get_event_store_instance().pool
+
+    settings = get_settings()
 
     return create_coordinator_service(
         event_store=get_event_store_client(),
@@ -731,6 +745,8 @@ def get_subscription_coordinator(
         realtime_projection=realtime_projection,
         execution_service=execution_service,
         pool=timescale_pool,
+        budget_checker=_get_budget_checker(),
+        max_dispatches_per_hour=settings.polling.max_dispatches_per_hour,
     )
 
 

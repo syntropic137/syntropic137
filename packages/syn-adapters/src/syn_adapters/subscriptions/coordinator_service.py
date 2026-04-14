@@ -177,6 +177,8 @@ def create_coordinator_service(
     execution_service: object | None = None,
     checkpoint_store: ProjectionCheckpointStore | None = None,
     pool: asyncpg.Pool | None = None,
+    budget_checker: object | None = None,
+    max_dispatches_per_hour: int = 50,
 ) -> CoordinatorSubscriptionService:
     """Factory to create the coordinator subscription service.
 
@@ -200,6 +202,8 @@ def create_coordinator_service(
         pool: Optional asyncpg Pool for TimescaleDB direct queries.
             Cost projections use this to bypass empty projection stores
             and read from the actual observability data source (Lane 2).
+        budget_checker: Optional budget checker for pre-dispatch cost validation.
+        max_dispatches_per_hour: Maximum dispatches per hour (0 to disable).
 
     Returns:
         Configured CoordinatorSubscriptionService
@@ -281,6 +285,8 @@ def create_coordinator_service(
         WorkflowDispatchProjection(
             execution_service=cast("_ExecutionService | None", execution_service),
             store=projection_store,
+            budget_checker=budget_checker,
+            max_dispatches_per_hour=max_dispatches_per_hour,
         ),
         TriggerQueryProjection(projection_store),
         # --- Agent sessions context ---
