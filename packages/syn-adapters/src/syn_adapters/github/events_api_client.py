@@ -132,22 +132,43 @@ class GitHubEventsAPIClient:
         data = response.json()
         events: list[dict[str, Any]] = data if isinstance(data, list) else []
 
-        # Fetch additional pages (GitHub returns max 30/page, up to 10 pages)
-        next_url = _parse_next_link(response.headers.get("Link", ""))
+        # Fetch remaining pages (GitHub returns max 30/page, up to 10 pages)
+        auth_header = response.request.headers.get("Authorization", "")
+        link_header = response.headers.get("Link", "")
+        extra = await self._fetch_remaining_pages(link_header, auth_header, etag_key)
+        events.extend(extra)
+
+        # Persist cursor for restart safety (ADR-060)
+        await self._persist_cursor(etag_key, etag, events)
+
+        return EventsAPIResponse(
+            events=events,
+            poll_interval=poll_interval,
+            has_new_events=bool(events),
+        )
+
+    async def _fetch_remaining_pages(
+        self,
+        link_header: str,
+        auth_header: str,
+        etag_key: str,
+    ) -> list[dict[str, Any]]:
+        """Follow pagination links to collect all events."""
+        extra_events: list[dict[str, Any]] = []
+        next_url = _parse_next_link(link_header)
         pages_fetched = 1
         while next_url and pages_fetched < _MAX_PAGES:
             try:
-                next_resp = await self._client._http.get(
-                    next_url,
-                    headers={"Authorization": response.request.headers.get("Authorization", "")},
+                resp = await self._client._http.get(
+                    next_url, headers={"Authorization": auth_header}
                 )
-                if next_resp.status_code != 200:
+                if resp.status_code != 200:
                     break
-                page_data = next_resp.json()
+                page_data = resp.json()
                 if not isinstance(page_data, list) or not page_data:
                     break
-                events.extend(page_data)
-                next_url = _parse_next_link(next_resp.headers.get("Link", ""))
+                extra_events.extend(page_data)
+                next_url = _parse_next_link(resp.headers.get("Link", ""))
                 pages_fetched += 1
             except Exception:
                 logger.warning(
@@ -157,20 +178,17 @@ class GitHubEventsAPIClient:
                     exc_info=True,
                 )
                 break
+        return extra_events
 
-        # Persist cursor for restart safety (ADR-060)
-        if etag and self._cursor_store is not None:
-            newest_id = str(events[0].get("id", "")) if events else ""
-            try:
-                await self._cursor_store.save_cursor(etag_key, etag, newest_id)
-            except Exception:
-                logger.warning("Failed to persist poller cursor for %s", etag_key, exc_info=True)
-
-        return EventsAPIResponse(
-            events=events,
-            poll_interval=poll_interval,
-            has_new_events=bool(events),
-        )
+    async def _persist_cursor(self, etag_key: str, etag: str, events: list[dict[str, Any]]) -> None:
+        """Persist ETag cursor for restart safety (ADR-060)."""
+        if not etag or self._cursor_store is None:
+            return
+        newest_id = str(events[0].get("id", "")) if events else ""
+        try:
+            await self._cursor_store.save_cursor(etag_key, etag, newest_id)
+        except Exception:
+            logger.warning("Failed to persist poller cursor for %s", etag_key, exc_info=True)
 
     async def _load_persisted_cursors(self) -> None:
         """Load ETags from persistent store on first call (ADR-060)."""
