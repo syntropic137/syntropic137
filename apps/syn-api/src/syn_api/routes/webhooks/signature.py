@@ -21,8 +21,15 @@ _WINDOW_SECONDS = 60
 _sig_failures: dict[str, list[float]] = defaultdict(list)
 
 
+_MAX_TRACKED_IPS = 10_000
+
+
 def _check_sig_rate_limit(client_ip: str) -> None:
     """Raise 429 if this IP has too many recent signature failures."""
+    if len(_sig_failures) > _MAX_TRACKED_IPS:
+        _sig_failures.clear()
+        logger.warning("Signature failure tracker reset (exceeded %d unique IPs)", _MAX_TRACKED_IPS)
+
     now = time.monotonic()
     attempts = _sig_failures[client_ip]
     _sig_failures[client_ip] = [t for t in attempts if now - t < _WINDOW_SECONDS]

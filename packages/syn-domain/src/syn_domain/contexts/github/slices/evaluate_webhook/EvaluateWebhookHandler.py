@@ -93,6 +93,11 @@ class EvaluateWebhookHandler:
             result = await self._evaluate_rule(rule, event, repository, installation_id, payload)
             if result is not None:
                 results.append(result)
+
+        # Prune _fire_locks to prevent unbounded growth
+        if len(self._fire_locks) > 1000:
+            self._fire_locks = {k: v for k, v in self._fire_locks.items() if v.locked()}
+
         return results
 
     async def _evaluate_rule(

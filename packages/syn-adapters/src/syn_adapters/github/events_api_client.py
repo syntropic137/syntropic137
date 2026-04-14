@@ -6,6 +6,7 @@ See ADR-060: Restart-safe trigger deduplication (persistent cursor support).
 from __future__ import annotations
 
 import logging
+import re as _re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -36,6 +37,21 @@ class EventsAPIResponse:
     the minimum interval between requests."""
     has_new_events: bool
     """``False`` when GitHub returned 304 Not Modified."""
+
+
+def _parse_next_link(link_header: str) -> str | None:
+    """Extract the 'next' URL from a GitHub Link header."""
+    if not link_header:
+        return None
+    for part in link_header.split(","):
+        if 'rel="next"' in part:
+            match = _re.search(r"<([^>]+)>", part)
+            if match:
+                return match.group(1)
+    return None
+
+
+_MAX_PAGES = 10
 
 
 class GitHubEventsAPIClient:
@@ -115,6 +131,32 @@ class GitHubEventsAPIClient:
 
         data = response.json()
         events: list[dict[str, Any]] = data if isinstance(data, list) else []
+
+        # Fetch additional pages (GitHub returns max 30/page, up to 10 pages)
+        next_url = _parse_next_link(response.headers.get("Link", ""))
+        pages_fetched = 1
+        while next_url and pages_fetched < _MAX_PAGES:
+            try:
+                next_resp = await self._client._http.get(
+                    next_url,
+                    headers={"Authorization": response.request.headers.get("Authorization", "")},
+                )
+                if next_resp.status_code != 200:
+                    break
+                page_data = next_resp.json()
+                if not isinstance(page_data, list) or not page_data:
+                    break
+                events.extend(page_data)
+                next_url = _parse_next_link(next_resp.headers.get("Link", ""))
+                pages_fetched += 1
+            except Exception:
+                logger.warning(
+                    "Failed to fetch events page %d for %s",
+                    pages_fetched + 1,
+                    etag_key,
+                    exc_info=True,
+                )
+                break
 
         # Persist cursor for restart safety (ADR-060)
         if etag and self._cursor_store is not None:
