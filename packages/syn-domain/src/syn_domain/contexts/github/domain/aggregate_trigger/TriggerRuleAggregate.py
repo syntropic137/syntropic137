@@ -33,6 +33,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.domain.commands.RecordTriggerBlockedCommand import (
         RecordTriggerBlockedCommand,
     )
+    from syn_domain.contexts.github.domain.commands.RecordTriggerDispatchCompletedCommand import (
+        RecordTriggerDispatchCompletedCommand,
+    )
+    from syn_domain.contexts.github.domain.commands.RecordTriggerDispatchFailedCommand import (
+        RecordTriggerDispatchFailedCommand,
+    )
     from syn_domain.contexts.github.domain.commands.RecordTriggerFiredCommand import (
         RecordTriggerFiredCommand,
     )
@@ -47,6 +53,12 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.github.domain.events.TriggerDeletedEvent import (
         TriggerDeletedEvent,
+    )
+    from syn_domain.contexts.github.domain.events.TriggerDispatchCompletedEvent import (
+        TriggerDispatchCompletedEvent,
+    )
+    from syn_domain.contexts.github.domain.events.TriggerDispatchFailedEvent import (
+        TriggerDispatchFailedEvent,
     )
     from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
         TriggerFiredEvent,
@@ -258,6 +270,33 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
         )
         self._apply(event)
 
+    @command_handler("RecordTriggerDispatchCompletedCommand")
+    def record_dispatch_completed(self, command: RecordTriggerDispatchCompletedCommand) -> None:
+        from syn_domain.contexts.github.domain.events.TriggerDispatchCompletedEvent import (
+            TriggerDispatchCompletedEvent,
+        )
+
+        event = TriggerDispatchCompletedEvent(
+            trigger_id=self.trigger_id,
+            execution_id=command.execution_id,
+            workflow_id=command.workflow_id,
+        )
+        self._apply(event)
+
+    @command_handler("RecordTriggerDispatchFailedCommand")
+    def record_dispatch_failed(self, command: RecordTriggerDispatchFailedCommand) -> None:
+        from syn_domain.contexts.github.domain.events.TriggerDispatchFailedEvent import (
+            TriggerDispatchFailedEvent,
+        )
+
+        event = TriggerDispatchFailedEvent(
+            trigger_id=self.trigger_id,
+            execution_id=command.execution_id,
+            workflow_id=command.workflow_id,
+            failure_reason=command.failure_reason,
+        )
+        self._apply(event)
+
     def can_fire(self) -> bool:
         """Check if this trigger is in a state that allows firing."""
         return self._status == TriggerStatus.ACTIVE
@@ -360,4 +399,12 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
 
     @event_sourcing_handler("github.TriggerBlocked")
     def on_trigger_blocked(self, _event: TriggerBlockedEvent) -> None:
-        pass  # Audit-only event — no aggregate state change
+        pass  # Audit-only event - no aggregate state change
+
+    @event_sourcing_handler("github.TriggerDispatchCompleted")
+    def on_dispatch_completed(self, _event: TriggerDispatchCompletedEvent) -> None:
+        pass  # Audit-only event - no aggregate state change
+
+    @event_sourcing_handler("github.TriggerDispatchFailed")
+    def on_dispatch_failed(self, _event: TriggerDispatchFailedEvent) -> None:
+        pass  # Audit-only event - no aggregate state change

@@ -98,6 +98,14 @@ class PollingSettings(BaseSettings):
         description="Sliding window for dispatch rate limiting (seconds). Default: 60.",
     )
 
+    max_dispatches_per_hour: int = Field(
+        default=50,
+        ge=0,
+        description=(
+            "Maximum workflow dispatches per hour across all triggers. 0 to disable. Default: 50."
+        ),
+    )
+
     @property
     def enabled(self) -> bool:
         """Whether polling is enabled (inverse of ``disabled``)."""

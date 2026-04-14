@@ -9,6 +9,12 @@ from syn_domain.contexts.github.domain.commands.PauseTriggerCommand import (
 from syn_domain.contexts.github.domain.commands.RecordTriggerBlockedCommand import (
     RecordTriggerBlockedCommand,
 )
+from syn_domain.contexts.github.domain.commands.RecordTriggerDispatchCompletedCommand import (
+    RecordTriggerDispatchCompletedCommand,
+)
+from syn_domain.contexts.github.domain.commands.RecordTriggerDispatchFailedCommand import (
+    RecordTriggerDispatchFailedCommand,
+)
 from syn_domain.contexts.github.domain.commands.RecordTriggerFiredCommand import (
     RecordTriggerFiredCommand,
 )
@@ -26,6 +32,8 @@ __all__ = [
     "DeleteTriggerCommand",
     "PauseTriggerCommand",
     "RecordTriggerBlockedCommand",
+    "RecordTriggerDispatchCompletedCommand",
+    "RecordTriggerDispatchFailedCommand",
     "RecordTriggerFiredCommand",
     "RefreshTokenCommand",
     "RegisterTriggerCommand",
