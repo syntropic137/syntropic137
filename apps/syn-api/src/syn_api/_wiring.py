@@ -389,8 +389,9 @@ def _create_dedup_adapter() -> DedupPort:
             if pool is not None:
                 from syn_adapters.dedup.postgres_dedup import PostgresDedupAdapter
 
+                ttl_days = max(1, -(-settings.polling.dedup_ttl_seconds // 86400))
                 logger.info("EventPipeline using Postgres dedup (ADR-060)")
-                return PostgresDedupAdapter(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
+                return PostgresDedupAdapter(pool, ttl_days=ttl_days)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
         except Exception:
             logger.warning(
                 "Postgres dedup unavailable — falling back to Redis",
@@ -447,16 +448,40 @@ _pending_sha_store_singleton: object | None = None
 
 def get_pending_sha_store() -> PendingSHAStore:
     """Return the singleton PendingSHAStore for check-run polling."""
-    from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
-
     global _pending_sha_store_singleton
     if _pending_sha_store_singleton is not None:
-        assert isinstance(_pending_sha_store_singleton, InMemoryPendingSHAStore)
-        return _pending_sha_store_singleton
+        return _pending_sha_store_singleton  # type: ignore[return-value]
 
-    store = InMemoryPendingSHAStore()
-    _pending_sha_store_singleton = store
-    return store
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+
+    # Prefer Postgres for restart durability
+    if not settings.uses_in_memory_stores and settings.syn_observability_db_url:
+        try:
+            from syn_api._wiring_db import get_shared_db_pool
+
+            pool = get_shared_db_pool()
+            if pool is not None:
+                from syn_adapters.github.postgres_pending_sha_store import (
+                    PostgresPendingSHAStore,
+                )
+
+                store: PendingSHAStore = PostgresPendingSHAStore(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
+                _pending_sha_store_singleton = store
+                logger.info("PendingSHAStore using Postgres (restart-durable)")
+                return store
+        except Exception:
+            logger.warning(
+                "Postgres PendingSHAStore unavailable, falling back to in-memory",
+                exc_info=True,
+            )
+
+    from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
+
+    mem_store: PendingSHAStore = InMemoryPendingSHAStore()
+    _pending_sha_store_singleton = mem_store
+    return mem_store
 
 
 async def sync_published_events_to_projections() -> None:
