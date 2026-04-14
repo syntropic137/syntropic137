@@ -51,9 +51,7 @@ async def _seed_workflow_templates() -> int:
     count = 0
     for wf_def in _OFFLINE_WORKFLOW_DEFS:
         try:
-            from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
-                CreateWorkflowTemplateCommand,
-            )
+            from syn_domain.contexts.orchestration import CreateWorkflowTemplateCommand
 
             command = CreateWorkflowTemplateCommand(**wf_def)
             await handler.handle(command)

@@ -236,9 +236,7 @@ async def start_session(
     handler = StartSessionHandler(repository=repository)
 
     try:
-        from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
-            StartSessionCommand,
-        )
+        from syn_domain.contexts.agent_sessions import StartSessionCommand
 
         command = StartSessionCommand(
             workflow_id=workflow_id,
@@ -273,9 +271,7 @@ async def complete_session(
     handler = CompleteSessionHandler(repository=repository)
 
     try:
-        from syn_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
-            CompleteSessionCommand,
-        )
+        from syn_domain.contexts.agent_sessions import CompleteSessionCommand
 
         command = CompleteSessionCommand(aggregate_id=session_id)
         await handler.handle(command)

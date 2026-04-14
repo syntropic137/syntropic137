@@ -30,9 +30,7 @@ from syn_api.types import (
 )
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
-        WorkflowTemplateAggregate,
-    )
+    from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
 
 logger = logging.getLogger(__name__)
 
@@ -371,9 +369,7 @@ async def execute(
     Returns:
         Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
-        ExecuteWorkflowCommand,
-    )
+    from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
         WorkflowNotFoundError,
     )

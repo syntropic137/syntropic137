@@ -154,9 +154,7 @@ async def create_workflow(
     Returns:
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
-        CreateWorkflowTemplateCommand,
-    )
+    from syn_domain.contexts.orchestration import CreateWorkflowTemplateCommand
     from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
         CreateWorkflowTemplateHandler,
     )
@@ -491,9 +489,7 @@ async def update_phase_prompt(
     Returns:
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
-        UpdatePhasePromptCommand,
-    )
+    from syn_domain.contexts.orchestration import UpdatePhasePromptCommand
     from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
         UpdateWorkflowPhaseHandler,
     )

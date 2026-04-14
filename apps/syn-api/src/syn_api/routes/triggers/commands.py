@@ -68,9 +68,7 @@ async def register_trigger(
     created_by: str = "",
 ) -> Result[str, TriggerError]:
     """Register a new GitHub event trigger for a workflow."""
-    from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
-        RegisterTriggerCommand,
-    )
+    from syn_domain.contexts.github import RegisterTriggerCommand
     from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
         RegisterTriggerHandler,
     )
@@ -215,7 +213,7 @@ async def pause_trigger(
     paused_by: str = "",
 ) -> Result[None, TriggerError]:
     """Pause an active trigger."""
-    from syn_domain.contexts.github.domain.commands.PauseTriggerCommand import PauseTriggerCommand
+    from syn_domain.contexts.github import PauseTriggerCommand
     from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
         ManageTriggerHandler,
     )
@@ -249,7 +247,7 @@ async def resume_trigger(
     resumed_by: str = "",
 ) -> Result[None, TriggerError]:
     """Resume a paused trigger."""
-    from syn_domain.contexts.github.domain.commands.ResumeTriggerCommand import ResumeTriggerCommand
+    from syn_domain.contexts.github import ResumeTriggerCommand
     from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
         ManageTriggerHandler,
     )
@@ -283,7 +281,7 @@ async def delete_trigger(
     deleted_by: str = "",
 ) -> Result[None, TriggerError]:
     """Soft-delete a trigger rule."""
-    from syn_domain.contexts.github.domain.commands.DeleteTriggerCommand import DeleteTriggerCommand
+    from syn_domain.contexts.github import DeleteTriggerCommand
     from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
         ManageTriggerHandler,
     )

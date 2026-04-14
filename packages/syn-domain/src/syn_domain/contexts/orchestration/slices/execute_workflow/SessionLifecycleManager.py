@@ -10,20 +10,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions._shared.value_objects import (
-    OperationType,
-    SessionStatus,
-)
-from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+from syn_domain.contexts.agent_sessions import (
     AgentSessionAggregate,
-)
-from syn_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
     CompleteSessionCommand,
-)
-from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
+    OperationType,
     RecordOperationCommand,
-)
-from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
+    SessionStatus,
     StartSessionCommand,
 )
 

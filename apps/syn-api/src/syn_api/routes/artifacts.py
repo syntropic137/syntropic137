@@ -230,13 +230,7 @@ async def create_artifact(
 
     await ensure_connected()
     try:
-        from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType
-        from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
-            ArtifactAggregate,
-        )
-        from syn_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
-            CreateArtifactCommand,
-        )
+        from syn_domain.contexts.artifacts import ArtifactAggregate, ArtifactType, CreateArtifactCommand
 
         try:
             art_type = ArtifactType(artifact_type.lower())
