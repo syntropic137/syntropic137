@@ -41,3 +41,9 @@ class TriggerDispatchFailedEvent(DomainEvent):
         if not v:
             raise ValueError("execution_id is required")
         return v
+
+    @field_validator("failure_reason")
+    @classmethod
+    def validate_failure_reason(cls, v: str) -> str:
+        """Default empty failure_reason to 'unknown'."""
+        return v if v else "unknown"

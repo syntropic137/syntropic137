@@ -11,6 +11,12 @@ from syn_domain.contexts.github.domain.commands import (
     RecordTriggerFiredCommand,
     RegisterTriggerCommand,
 )
+from syn_domain.contexts.github.domain.events.TriggerDispatchCompletedEvent import (
+    TriggerDispatchCompletedEvent,
+)
+from syn_domain.contexts.github.domain.events.TriggerDispatchFailedEvent import (
+    TriggerDispatchFailedEvent,
+)
 
 
 def _make_active_trigger(trigger_id: str = "trig-1") -> TriggerRuleAggregate:
@@ -41,7 +47,7 @@ class TestTriggerDispatchCompleted:
         )
         agg.record_dispatch_completed(cmd)
         envelopes = agg.get_uncommitted_events()
-        assert any(e.event.__class__.__name__ == "TriggerDispatchCompletedEvent" for e in envelopes)
+        assert any(isinstance(e.event, TriggerDispatchCompletedEvent) for e in envelopes)
 
     def test_completed_event_fields(self) -> None:
         agg = _make_active_trigger()
@@ -79,7 +85,7 @@ class TestTriggerDispatchFailed:
         )
         agg.record_dispatch_failed(cmd)
         envelopes = agg.get_uncommitted_events()
-        assert any(e.event.__class__.__name__ == "TriggerDispatchFailedEvent" for e in envelopes)
+        assert any(isinstance(e.event, TriggerDispatchFailedEvent) for e in envelopes)
 
     def test_failed_event_contains_reason(self) -> None:
         agg = _make_active_trigger()
@@ -97,7 +103,7 @@ class TestTriggerDispatchFailed:
         envelope = next(
             e
             for e in agg.get_uncommitted_events()
-            if e.event.__class__.__name__ == "TriggerDispatchFailedEvent"
+            if isinstance(e.event, TriggerDispatchFailedEvent)
         )
         evt = envelope.event
         assert evt.failure_reason == "budget_exceeded"
