@@ -25,6 +25,7 @@ class TriggerDebouncer:
 
     def __init__(self) -> None:
         """Initialize the debouncer."""
+        # ACKNOWLEDGED: triggers deferred on restart, acceptable for debounce use case
         self._pending: dict[str, asyncio.Task] = {}
 
     async def debounce(
