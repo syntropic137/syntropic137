@@ -33,6 +33,8 @@ from syn_shared.events import (
 )
 
 if TYPE_CHECKING:
+    from event_sourcing.core.checkpoint import DispatchContext
+
     from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
         SessionCostProjection,
     )
@@ -83,6 +85,7 @@ class _ObservationProjectionAdapter(CheckpointedProjection):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        _context: DispatchContext | None = None,
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump()

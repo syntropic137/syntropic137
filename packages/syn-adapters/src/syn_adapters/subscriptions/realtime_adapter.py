@@ -19,6 +19,8 @@ from event_sourcing import (
 )
 
 if TYPE_CHECKING:
+    from event_sourcing.core.checkpoint import DispatchContext
+
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_domain.contexts.github.slices.trigger_history.projection import (
         TriggerHistoryProjection,
@@ -64,6 +66,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        _context: DispatchContext | None = None,
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump(mode="json")
@@ -123,6 +126,7 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        _context: DispatchContext | None = None,
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type
         if not event_type:
@@ -239,6 +243,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        _context: DispatchContext | None = None,
     ) -> ProjectionResult:
         event_data = envelope.event.model_dump()
         event_type = envelope.metadata.event_type or "Unknown"
