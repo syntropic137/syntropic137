@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # --- Signature-failure rate limiter ---
 _MAX_FAILURES = 5
 _WINDOW_SECONDS = 60
+# PERFORMANCE: per-instance tracking, resets on restart. Multi-instance: effective limit multiplied by instance count (acceptable for rate limiting)
 _sig_failures: dict[str, list[float]] = {}
 
 _MAX_TRACKED_IPS = 10_000
