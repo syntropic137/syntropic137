@@ -18,6 +18,7 @@ from syn_domain.contexts.github._shared.trigger_evaluation_types import (
 )
 from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
 from syn_domain.contexts.github._shared.trigger_query_store import (
+    IndexedTrigger,
     TriggerQueryStore,
     get_trigger_query_store,
 )
@@ -88,6 +89,9 @@ from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler impor
 from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
     RegisterTriggerHandler,
 )
+from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
+    InMemoryTriggerQueryStore,
+)
 from syn_domain.contexts.github.slices.trigger_history.GetTriggerHistoryHandler import (
     get_trigger_history_handler,
 )
@@ -105,6 +109,8 @@ __all__ = [
     "EventSource",
     # Queries
     "GetTriggerHistoryQuery",
+    "InMemoryTriggerQueryStore",
+    "IndexedTrigger",
     # Read models
     "Installation",
     # Aggregates

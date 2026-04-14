@@ -221,9 +221,7 @@ def get_trigger_repository() -> Any:  # noqa: ANN401
 
     settings = get_settings()
     if settings.is_test:
-        from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-            InMemoryTriggerQueryStore,
-        )
+        from syn_domain.contexts.github import InMemoryTriggerQueryStore
 
         return InMemoryTriggerQueryStore()
 

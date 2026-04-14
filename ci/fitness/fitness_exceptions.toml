@@ -45,11 +45,7 @@
 # Projection class imports (*Projection) are exempt (ADR-008 composition root pattern).
 # path = { deep_imports = N, issue = "#NNN" }
 
-# --- syn-adapters (2 files) ---
-# InMemoryTriggerQueryStore: in-memory test implementation, coupled to github internals
-"packages/syn-adapters/src/syn_adapters/storage/repositories.py" = { deep_imports = 1, issue = "#197" }
-# _IndexedTrigger: private type used by adapter implementation of TriggerQueryStore
-"packages/syn-adapters/src/syn_adapters/storage/trigger_query_store.py" = { deep_imports = 1, issue = "#197" }
+# All cross-context violations resolved - clean ratchet achieved.
 
 [event_construction_outside_aggregate]
 # Production files that construct DomainEvent subclasses outside aggregate_*/ dirs.

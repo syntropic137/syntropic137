@@ -60,12 +60,12 @@ class TriggerQueryStore(ABC):
         ...
 
     @abstractmethod
-    async def get(self, trigger_id: str) -> _IndexedTrigger | None:
+    async def get(self, trigger_id: str) -> IndexedTrigger | None:
         """Get a trigger by ID from the index."""
         ...
 
     @abstractmethod
-    async def list_by_event_and_repo(self, event: str, repository: str) -> list[_IndexedTrigger]:
+    async def list_by_event_and_repo(self, event: str, repository: str) -> list[IndexedTrigger]:
         """List active triggers matching an event and repository."""
         ...
 
@@ -74,7 +74,7 @@ class TriggerQueryStore(ABC):
         self,
         repository: str | None = None,
         status: str | None = None,
-    ) -> list[_IndexedTrigger]:
+    ) -> list[IndexedTrigger]:
         """List all triggers with optional filters."""
         ...
 
@@ -153,7 +153,7 @@ class _FireRecord:
         self.fired_at = fired_at
 
 
-class _IndexedTrigger:
+class IndexedTrigger:
     """Lightweight indexed trigger for query store."""
 
     def __init__(
@@ -195,7 +195,7 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
     """
 
     def __init__(self) -> None:
-        self._triggers: dict[str, _IndexedTrigger] = {}
+        self._triggers: dict[str, IndexedTrigger] = {}
         self._fire_records: list[_FireRecord] = []
         self._processed_deliveries: set[str] = set()
         # Concurrency guard (Guard 6): in-memory running-execution tracking.
@@ -219,7 +219,7 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         status: str,
         created_at: datetime | None = None,
     ) -> None:
-        trigger = _IndexedTrigger(
+        trigger = IndexedTrigger(
             trigger_id=trigger_id,
             name=name,
             event=event,
@@ -240,10 +240,10 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         if trigger:
             trigger.status = status
 
-    async def get(self, trigger_id: str) -> _IndexedTrigger | None:
+    async def get(self, trigger_id: str) -> IndexedTrigger | None:
         return self._triggers.get(trigger_id)
 
-    async def list_by_event_and_repo(self, event: str, repository: str) -> list[_IndexedTrigger]:
+    async def list_by_event_and_repo(self, event: str, repository: str) -> list[IndexedTrigger]:
         return [
             t
             for t in self._triggers.values()
@@ -254,7 +254,7 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
         self,
         repository: str | None = None,
         status: str | None = None,
-    ) -> list[_IndexedTrigger]:
+    ) -> list[IndexedTrigger]:
         results = list(self._triggers.values())
         if repository:
             results = [t for t in results if t.repository == repository]
