@@ -10,7 +10,7 @@ Or via Just: `just fitness-invariants`
 
 ## Categories
 
-### Code Quality (`code_quality/`)
+### Code Quality (`ci/fitness/code_quality/`)
 
 Enforce bounded context isolation, dependency direction, and layer separation.
 
@@ -22,7 +22,7 @@ Enforce bounded context isolation, dependency direction, and layer separation.
 | Layer separation | `test_layer_separation.py` | Domain layer must not import from adapter or API layers | `[layer_separation]` |
 | Dependency direction | `test_dependency_direction.py` | Dependencies flow inward: API -> Adapters -> Domain, never reversed | (zero tolerance) |
 
-### Event Sourcing (`event_sourcing/`)
+### Event Sourcing (`ci/fitness/event_sourcing/`)
 
 Enforce event sourcing invariants and aggregate purity.
 
@@ -35,7 +35,7 @@ Enforce event sourcing invariants and aggregate purity.
 | Projection registry | `test_projection_registry.py` | All projections registered in the coordinator service | (zero tolerance) |
 | Projection wiring | `test_projection_wiring.py` | Projection subscriptions match aggregate event types | (zero tolerance) |
 
-### API (`api/`)
+### API (`ci/fitness/api/`)
 
 Enforce API layer conventions.
 
@@ -45,7 +45,7 @@ Enforce API layer conventions.
 | Cost query separation | `test_cost_query_separation.py` | Cost queries use dedicated query services, not raw DB access | (zero tolerance) |
 | Prefix resolver coverage | `test_prefix_resolver_coverage.py` | API route prefixes match resolver configuration | (zero tolerance) |
 
-### Infrastructure (`infrastructure/`)
+### Infrastructure (`ci/fitness/infrastructure/`)
 
 Enforce deployment and configuration consistency.
 
@@ -57,13 +57,15 @@ Enforce deployment and configuration consistency.
 
 ## Exception Budget System
 
-Grandfathered violations are tracked in `fitness_exceptions.toml`. Each entry has:
+Grandfathered violations are tracked in [`ci/fitness/fitness_exceptions.toml`](../ci/fitness/fitness_exceptions.toml). Each entry has:
 - A **budget** (maximum allowed violations) - ratcheted to current count
 - An **issue** reference for the planned fix
 
 Budgets can only shrink. Adding code that exceeds a budget fails CI. The goal is to drive all budgets to zero over time.
 
 ## Shared Infrastructure
+
+All shared helpers live in `ci/fitness/`:
 
 | File | Purpose |
 |------|---------|
