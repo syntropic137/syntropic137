@@ -49,7 +49,9 @@ class TriggerDebouncer:
         async def _fire() -> None:
             try:
                 await asyncio.sleep(delay_seconds)
-                del self._pending[key]
+                # Only remove our own entry; a newer debounce may have replaced it
+                if self._pending.get(key) is task:
+                    del self._pending[key]
                 await callback()
                 logger.info(f"Debounce timer fired for {key}")
             except asyncio.CancelledError:
@@ -66,7 +68,11 @@ class TriggerDebouncer:
             return
         exc = task.exception()
         if exc is not None:
-            logger.error("Debounce task failed: %s", exc, exc_info=exc)
+            logger.error(
+                "Debounce task failed: %s",
+                exc,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
 
     @property
     def pending_count(self) -> int:

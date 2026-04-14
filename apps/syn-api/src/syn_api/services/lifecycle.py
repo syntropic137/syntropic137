@@ -49,7 +49,11 @@ def _handle_recovery_task_exception(task: asyncio.Task[None]) -> None:
         return
     exc = task.exception()
     if exc is not None:
-        logger.error("Lifecycle recovery task crashed: %s", exc, exc_info=exc)
+        logger.error(
+            "Lifecycle recovery task crashed: %s",
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
 
 
 class DegradedReason(StrEnum):

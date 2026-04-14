@@ -115,7 +115,11 @@ class PostgresDedupAdapter:
             return
         exc = task.exception()
         if exc is not None:
-            logger.error("Dedup cleanup task crashed: %s", exc, exc_info=exc)
+            logger.error(
+                "Dedup cleanup task crashed: %s",
+                exc,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
 
     async def is_duplicate(self, dedup_key: str) -> bool:
         """Return ``True`` if this key was already seen (duplicate).
