@@ -6,6 +6,7 @@ See ADR-060: Restart-safe trigger deduplication (persistent cursor support).
 from __future__ import annotations
 
 import logging
+import re as _re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
     from syn_adapters.github.poller_cursor_store import PollerCursor
 
 logger = logging.getLogger(__name__)
+
+# Type alias for raw GitHub event payloads (heterogeneous JSON from Events API).
+GitHubEventPayload = dict[str, Any]
 
 
 class PollerCursorStore(Protocol):
@@ -30,12 +34,27 @@ class PollerCursorStore(Protocol):
 class EventsAPIResponse:
     """Response from a single Events API poll."""
 
-    events: list[dict[str, Any]]
+    events: list[GitHubEventPayload]
     poll_interval: int
     """``X-Poll-Interval`` header value (seconds). GitHub recommends this as
     the minimum interval between requests."""
     has_new_events: bool
     """``False`` when GitHub returned 304 Not Modified."""
+
+
+def _parse_next_link(link_header: str) -> str | None:
+    """Extract the 'next' URL from a GitHub Link header."""
+    if not link_header:
+        return None
+    for part in link_header.split(","):
+        if 'rel="next"' in part:
+            match = _re.search(r"<([^>]+)>", part)
+            if match:
+                return match.group(1)
+    return None
+
+
+_MAX_PAGES = 10
 
 
 class GitHubEventsAPIClient:
@@ -114,21 +133,85 @@ class GitHubEventsAPIClient:
             self._etags[etag_key] = etag
 
         data = response.json()
-        events: list[dict[str, Any]] = data if isinstance(data, list) else []
+        events: list[GitHubEventPayload] = data if isinstance(data, list) else []
+
+        # Fetch remaining pages (GitHub returns max 30/page, up to 10 pages)
+        auth_header = response.request.headers.get("Authorization", "")
+        link_header = response.headers.get("Link", "")
+        extra = await self._fetch_remaining_pages(link_header, auth_header, etag_key)
+        events.extend(extra)
 
         # Persist cursor for restart safety (ADR-060)
-        if etag and self._cursor_store is not None:
-            newest_id = str(events[0].get("id", "")) if events else ""
-            try:
-                await self._cursor_store.save_cursor(etag_key, etag, newest_id)
-            except Exception:
-                logger.warning("Failed to persist poller cursor for %s", etag_key, exc_info=True)
+        await self._persist_cursor(etag_key, etag, events)
 
         return EventsAPIResponse(
             events=events,
             poll_interval=poll_interval,
             has_new_events=bool(events),
         )
+
+    async def _fetch_remaining_pages(
+        self,
+        link_header: str,
+        auth_header: str,
+        etag_key: str,
+    ) -> list[GitHubEventPayload]:
+        """Follow pagination links to collect all events."""
+        extra_events: list[GitHubEventPayload] = []
+        next_url = _parse_next_link(link_header)
+        pages_fetched = 1
+        while next_url and pages_fetched < _MAX_PAGES:
+            page_events, next_url = await self._fetch_single_page(
+                next_url, auth_header, etag_key, pages_fetched + 1
+            )
+            if page_events is None:
+                break
+            extra_events.extend(page_events)
+            pages_fetched += 1
+        return extra_events
+
+    async def _fetch_single_page(
+        self,
+        url: str,
+        auth_header: str,
+        etag_key: str,
+        page_number: int,
+    ) -> tuple[list[GitHubEventPayload] | None, str | None]:
+        """Fetch a single pagination page. Returns (events, next_url) or (None, None) on failure."""
+        try:
+            resp = await self._client._http.get(url, headers={"Authorization": auth_header})
+            if resp.status_code != 200:
+                logger.warning(
+                    "Events API pagination stopped: page %d returned %d for %s",
+                    page_number,
+                    resp.status_code,
+                    etag_key,
+                )
+                return None, None
+            page_data = resp.json()
+            if not isinstance(page_data, list) or not page_data:
+                return None, None
+            return page_data, _parse_next_link(resp.headers.get("Link", ""))
+        except Exception:
+            logger.warning(
+                "Failed to fetch events page %d for %s",
+                page_number,
+                etag_key,
+                exc_info=True,
+            )
+            return None, None
+
+    async def _persist_cursor(
+        self, etag_key: str, etag: str, events: list[GitHubEventPayload]
+    ) -> None:
+        """Persist ETag cursor for restart safety (ADR-060)."""
+        if not etag or self._cursor_store is None:
+            return
+        newest_id = str(events[0].get("id", "")) if events else ""
+        try:
+            await self._cursor_store.save_cursor(etag_key, etag, newest_id)
+        except Exception:
+            logger.warning("Failed to persist poller cursor for %s", etag_key, exc_info=True)
 
     async def _load_persisted_cursors(self) -> None:
         """Load ETags from persistent store on first call (ADR-060)."""
