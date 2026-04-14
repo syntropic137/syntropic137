@@ -15,6 +15,8 @@ import ast
 import pytest
 from ci.fitness.conftest import repo_root
 
+# Note: "agents" is excluded - it is a deprecated stub (docstring-only __init__.py,
+# no slices/domain/aggregates). The real context is "agent_sessions". VSA205 tracks it.
 _CONTEXT_NAMES = [
     "orchestration",
     "agent_sessions",
@@ -26,11 +28,16 @@ _CONTEXT_NAMES = [
 _CONTEXTS_DIR = "packages/syn-domain/src/syn_domain/contexts"
 
 
-def _has_public_api(init_path: ast.Module) -> bool:
-    """Check if an __init__.py AST has at least one re-export or __all__."""
-    for node in init_path.body:
-        # from foo import bar
-        if isinstance(node, ast.ImportFrom):
+def _has_public_api(tree: ast.Module) -> bool:
+    """Check if an __init__.py AST has at least one re-export or __all__.
+
+    Only ``from`` imports that re-export from within ``syn_domain.contexts``
+    count as public API.  Standard-library imports (``__future__``, ``typing``,
+    etc.) are not re-exports.
+    """
+    for node in tree.body:
+        # from syn_domain.contexts.<ctx>.something import bar
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("syn_domain.contexts."):
             return True
         # __all__ = [...]
         if isinstance(node, ast.Assign):

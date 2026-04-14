@@ -3,7 +3,7 @@
 # Cognitive complexity and file size checks migrated to APSS fitness.toml.
 # This file only tracks structural & ES invariant exceptions.
 #
-# Budgets are set to current value rounded up to nearest 5.
+# Budgets are set to exact current violation counts.
 # Adding new code that exceeds these budgets will fail CI.
 
 [layer_separation]

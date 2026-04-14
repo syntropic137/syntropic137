@@ -92,6 +92,9 @@ def _get_params() -> list[tuple[str, int, int]]:
             continue
 
         for py_file in sorted(src_dir.rglob("*.py")):
+            # __init__.py files ARE the public API - they must import from
+            # internals to re-export, so cross-context deep imports there are
+            # by design (see test_context_public_api_exists.py).
             if py_file.name.startswith("test_") or py_file.name in (
                 "conftest.py",
                 "__init__.py",
@@ -104,6 +107,9 @@ def _get_params() -> list[tuple[str, int, int]]:
             own_ctx = _get_own_context(rp)
 
             # Build set of TYPE_CHECKING-guarded modules to exempt.
+            # Note: parses twice (top-level + body imports) - acceptable for
+            # CI test performance (~2s total). extract_imports() provides
+            # TYPE_CHECKING context; all_imports() catches lazy body imports.
             try:
                 typed_imps = extract_imports(py_file)
             except SyntaxError:
@@ -112,7 +118,6 @@ def _get_params() -> list[tuple[str, int, int]]:
                 imp.module for imp in typed_imps if imp.is_type_checking
             }
 
-            # Use all_imports() to also catch function-body lazy imports.
             try:
                 imps = all_imports(py_file)
             except SyntaxError:
