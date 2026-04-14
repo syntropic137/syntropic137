@@ -220,8 +220,7 @@ async def get_trigger_history(
     limit: int = 50,
 ) -> Result[list[TriggerHistoryEntry], TriggerError]:
     """Get execution history for a trigger rule."""
-    from syn_domain.contexts.github import GetTriggerHistoryQuery
-    from syn_domain.contexts.github import get_trigger_history_handler
+    from syn_domain.contexts.github import GetTriggerHistoryQuery, get_trigger_history_handler
 
     try:
         query = GetTriggerHistoryQuery(trigger_id=trigger_id, limit=limit)

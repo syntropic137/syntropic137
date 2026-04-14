@@ -22,9 +22,8 @@ if TYPE_CHECKING:
         TriggerCondition,
     )
 
-from syn_domain.contexts.github import TriggerQueryStore
+from syn_domain.contexts.github import TriggerConfig, TriggerQueryStore
 from syn_domain.contexts.github._shared.trigger_query_store import _IndexedTrigger
-from syn_domain.contexts.github import TriggerConfig
 
 logger = logging.getLogger(__name__)
 

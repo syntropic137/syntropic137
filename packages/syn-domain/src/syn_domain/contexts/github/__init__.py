@@ -11,6 +11,16 @@ Usage:
 """
 
 # Aggregates
+# Shared types
+from syn_domain.contexts.github._shared.trigger_evaluation_types import (
+    TriggerDeferredResult,
+    TriggerMatchResult,
+)
+from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
+from syn_domain.contexts.github._shared.trigger_query_store import (
+    TriggerQueryStore,
+    get_trigger_query_store,
+)
 from syn_domain.contexts.github.domain import InstallationAggregate
 from syn_domain.contexts.github.domain.aggregate_trigger import TriggerCondition
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
@@ -35,15 +45,16 @@ from syn_domain.contexts.github.domain.events.AppInstalledEvent import AppInstal
 from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import TriggerBlockedEvent
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 
+# Queries
+from syn_domain.contexts.github.domain.queries.get_trigger_history import GetTriggerHistoryQuery
+
+# Read models
+from syn_domain.contexts.github.domain.read_models.installation import Installation
+from syn_domain.contexts.github.domain.read_models.trigger_rule import TriggerRule
+
 # Handlers
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
-)
-from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-    ManageTriggerHandler,
-)
-from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-    RegisterTriggerHandler,
 )
 
 # Event pipeline types
@@ -71,76 +82,64 @@ from syn_domain.contexts.github.slices.get_installation.projection import (
     get_installation_projection,
 )
 from syn_domain.contexts.github.slices.list_triggers.projection import get_trigger_rule_projection
+from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
+    ManageTriggerHandler,
+)
+from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
+    RegisterTriggerHandler,
+)
 from syn_domain.contexts.github.slices.trigger_history.GetTriggerHistoryHandler import (
     get_trigger_history_handler,
 )
 
-# Queries
-from syn_domain.contexts.github.domain.queries.get_trigger_history import GetTriggerHistoryQuery
-
-# Read models
-from syn_domain.contexts.github.domain.read_models.installation import Installation
-from syn_domain.contexts.github.domain.read_models.trigger_rule import TriggerRule
-
-# Shared types
-from syn_domain.contexts.github._shared.trigger_evaluation_types import (
-    TriggerDeferredResult,
-    TriggerMatchResult,
-)
-from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
-from syn_domain.contexts.github._shared.trigger_query_store import (
-    TriggerQueryStore,
-    get_trigger_query_store,
-)
-
 __all__ = [
-    # Aggregates
-    "InstallationAggregate",
-    "TriggerCondition",
-    "TriggerConfig",
-    "TriggerRuleAggregate",
-    "TriggerStatus",
-    # Commands
-    "DeleteTriggerCommand",
-    "PauseTriggerCommand",
-    "RecordTriggerBlockedCommand",
-    "RecordTriggerFiredCommand",
-    "RefreshTokenCommand",
-    "RegisterTriggerCommand",
-    "ResumeTriggerCommand",
     # Events
     "AppInstalledEvent",
-    "TriggerBlockedEvent",
-    "TriggerFiredEvent",
-    # Handlers
-    "EvaluateWebhookHandler",
-    "ManageTriggerHandler",
-    "RegisterTriggerHandler",
     # Event pipeline types
     "DedupPort",
+    # Commands
+    "DeleteTriggerCommand",
+    # Handlers
+    "EvaluateWebhookHandler",
     "EventPipeline",
     "EventSource",
+    # Queries
+    "GetTriggerHistoryQuery",
+    # Read models
+    "Installation",
+    # Aggregates
+    "InstallationAggregate",
+    "ManageTriggerHandler",
     "NormalizedEvent",
+    "PauseTriggerCommand",
     "PendingSHA",
     "PendingSHAStore",
     "PollerMode",
     "PollerState",
+    "RecordTriggerBlockedCommand",
+    "RecordTriggerFiredCommand",
+    "RefreshTokenCommand",
+    "RegisterTriggerCommand",
+    "RegisterTriggerHandler",
+    "ResumeTriggerCommand",
+    "TriggerBlockedEvent",
+    "TriggerCondition",
+    "TriggerConfig",
+    # Shared types
+    "TriggerDeferredResult",
+    "TriggerFiredEvent",
+    "TriggerMatchResult",
+    "TriggerQueryStore",
+    "TriggerRule",
+    "TriggerRuleAggregate",
+    "TriggerStatus",
     "compute_dedup_key",
-    "map_events_api_to_normalized",
-    "synthesize_check_run_event",
+    "create_preset_command",
     # Projections
     "get_installation_projection",
     "get_trigger_history_handler",
     "get_trigger_query_store",
     "get_trigger_rule_projection",
-    # Queries
-    "GetTriggerHistoryQuery",
-    # Read models
-    "Installation",
-    "TriggerRule",
-    # Shared types
-    "TriggerDeferredResult",
-    "TriggerMatchResult",
-    "TriggerQueryStore",
-    "create_preset_command",
+    "map_events_api_to_normalized",
+    "synthesize_check_run_event",
 ]

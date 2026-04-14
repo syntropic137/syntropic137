@@ -14,6 +14,8 @@ Usage:
 """
 
 # Aggregates
+# Projections
+from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain import HandlerResult
 from syn_domain.contexts.organization.domain.aggregate_organization import (
     OrganizationAggregate,
@@ -106,6 +108,11 @@ from syn_domain.contexts.organization.domain.queries.get_system_status import (
     GetSystemStatusQuery,
 )
 
+# Query handlers
+from syn_domain.contexts.organization.slices.contribution_heatmap.GetContributionHeatmapHandler import (
+    GetContributionHeatmapHandler,
+)
+
 # Command handlers
 from syn_domain.contexts.organization.slices.create_organization.CreateOrganizationHandler import (
     CreateOrganizationHandler,
@@ -113,6 +120,14 @@ from syn_domain.contexts.organization.slices.create_organization.CreateOrganizat
 from syn_domain.contexts.organization.slices.create_system.CreateSystemHandler import (
     CreateSystemHandler,
 )
+from syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler import (
+    GetGlobalOverviewHandler,
+)
+from syn_domain.contexts.organization.slices.list_organizations.projection import (
+    get_organization_projection,
+)
+from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
+from syn_domain.contexts.organization.slices.list_systems.projection import get_system_projection
 from syn_domain.contexts.organization.slices.manage_organization.ManageOrganizationHandler import (
     ManageOrganizationHandler,
 )
@@ -124,22 +139,6 @@ from syn_domain.contexts.organization.slices.manage_system.ManageSystemHandler i
 )
 from syn_domain.contexts.organization.slices.register_repo.RegisterRepoHandler import (
     RegisterRepoHandler,
-)
-
-# Projections
-from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
-from syn_domain.contexts.organization.slices.list_organizations.projection import (
-    get_organization_projection,
-)
-from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
-from syn_domain.contexts.organization.slices.list_systems.projection import get_system_projection
-
-# Query handlers
-from syn_domain.contexts.organization.slices.contribution_heatmap.GetContributionHeatmapHandler import (
-    GetContributionHeatmapHandler,
-)
-from syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler import (
-    GetGlobalOverviewHandler,
 )
 from syn_domain.contexts.organization.slices.repo_activity.GetRepoActivityHandler import (
     GetRepoActivityHandler,
@@ -173,64 +172,64 @@ from syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandle
 )
 
 __all__ = [
-    # Aggregates
-    "HandlerResult",
-    "OrganizationAggregate",
-    "RepoAggregate",
-    "RepoClaimAggregate",
-    "SystemAggregate",
-    # Utility
-    "compute_repo_claim_id",
+    # Projections
+    "REPO_CORRELATION",
     # Commands
     "AssignRepoToSystemCommand",
     "ClaimRepoCommand",
     "CreateOrganizationCommand",
+    # Command handlers
+    "CreateOrganizationHandler",
     "CreateSystemCommand",
+    "CreateSystemHandler",
     "DeleteOrganizationCommand",
     "DeleteSystemCommand",
     "DeregisterRepoCommand",
+    # Query handlers
+    "GetContributionHeatmapHandler",
+    # Query types
+    "GetContributionHeatmapQuery",
+    "GetGlobalOverviewHandler",
+    "GetGlobalOverviewQuery",
+    "GetRepoActivityHandler",
+    "GetRepoActivityQuery",
+    "GetRepoCostHandler",
+    "GetRepoCostQuery",
+    "GetRepoFailuresHandler",
+    "GetRepoFailuresQuery",
+    "GetRepoHealthHandler",
+    "GetRepoHealthQuery",
+    "GetRepoSessionsHandler",
+    "GetRepoSessionsQuery",
+    "GetSystemActivityHandler",
+    "GetSystemActivityQuery",
+    "GetSystemCostHandler",
+    "GetSystemCostQuery",
+    "GetSystemHistoryHandler",
+    "GetSystemHistoryQuery",
+    "GetSystemPatternsHandler",
+    "GetSystemPatternsQuery",
+    "GetSystemStatusHandler",
+    "GetSystemStatusQuery",
+    # Aggregates
+    "HandlerResult",
+    "ManageOrganizationHandler",
+    "ManageRepoHandler",
+    "ManageSystemHandler",
+    "OrganizationAggregate",
     "RegisterRepoCommand",
+    "RegisterRepoHandler",
     "ReleaseRepoClaimCommand",
+    "RepoAggregate",
+    "RepoClaimAggregate",
+    "SystemAggregate",
     "UnassignRepoFromSystemCommand",
     "UpdateOrganizationCommand",
     "UpdateRepoCommand",
     "UpdateSystemCommand",
-    # Query types
-    "GetContributionHeatmapQuery",
-    "GetGlobalOverviewQuery",
-    "GetRepoActivityQuery",
-    "GetRepoCostQuery",
-    "GetRepoFailuresQuery",
-    "GetRepoHealthQuery",
-    "GetRepoSessionsQuery",
-    "GetSystemActivityQuery",
-    "GetSystemCostQuery",
-    "GetSystemHistoryQuery",
-    "GetSystemPatternsQuery",
-    "GetSystemStatusQuery",
-    # Projections
-    "REPO_CORRELATION",
+    # Utility
+    "compute_repo_claim_id",
     "get_organization_projection",
     "get_repo_projection",
     "get_system_projection",
-    # Command handlers
-    "CreateOrganizationHandler",
-    "CreateSystemHandler",
-    "ManageOrganizationHandler",
-    "ManageRepoHandler",
-    "ManageSystemHandler",
-    "RegisterRepoHandler",
-    # Query handlers
-    "GetContributionHeatmapHandler",
-    "GetGlobalOverviewHandler",
-    "GetRepoActivityHandler",
-    "GetRepoCostHandler",
-    "GetRepoFailuresHandler",
-    "GetRepoHealthHandler",
-    "GetRepoSessionsHandler",
-    "GetSystemActivityHandler",
-    "GetSystemCostHandler",
-    "GetSystemHistoryHandler",
-    "GetSystemPatternsHandler",
-    "GetSystemStatusHandler",
 ]

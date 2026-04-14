@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 
 async def _apply_installation_created(payload: dict[str, Any]) -> None:
     """Create and persist an AppInstalledEvent from webhook payload."""
-    from syn_domain.contexts.github import AppInstalledEvent
-    from syn_domain.contexts.github import get_installation_projection
+    from syn_domain.contexts.github import AppInstalledEvent, get_installation_projection
 
     event = AppInstalledEvent.from_webhook(payload)
     projection = get_installation_projection()

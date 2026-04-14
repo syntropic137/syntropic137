@@ -145,8 +145,10 @@ async def create_workflow(
     Returns:
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration import CreateWorkflowTemplateCommand
-    from syn_domain.contexts.orchestration import CreateWorkflowTemplateHandler
+    from syn_domain.contexts.orchestration import (
+        CreateWorkflowTemplateCommand,
+        CreateWorkflowTemplateHandler,
+    )
 
     command = CreateWorkflowTemplateCommand(
         aggregate_id=workflow_id or str(uuid4()),
@@ -473,8 +475,10 @@ async def update_phase_prompt(
     Returns:
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration import UpdatePhasePromptCommand
-    from syn_domain.contexts.orchestration import UpdateWorkflowPhaseHandler
+    from syn_domain.contexts.orchestration import (
+        UpdatePhasePromptCommand,
+        UpdateWorkflowPhaseHandler,
+    )
 
     command = UpdatePhasePromptCommand(
         aggregate_id=workflow_id,

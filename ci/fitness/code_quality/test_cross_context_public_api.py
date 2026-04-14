@@ -129,10 +129,7 @@ def _get_params() -> list[tuple[str, int, int]]:
                         continue
                     if f"contexts.{ctx}" not in imp.module:
                         continue
-                    if _is_deep_import(imp.module, ctx):
-                        violation_count += 1
-                        break
-                    elif _has_private_names(imp.names):
+                    if _is_deep_import(imp.module, ctx) or _has_private_names(imp.names):
                         violation_count += 1
                         break
 
