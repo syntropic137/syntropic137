@@ -126,6 +126,14 @@ from syn_domain.contexts.organization.slices.register_repo.RegisterRepoHandler i
     RegisterRepoHandler,
 )
 
+# Projections
+from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
+from syn_domain.contexts.organization.slices.list_organizations.projection import (
+    get_organization_projection,
+)
+from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
+from syn_domain.contexts.organization.slices.list_systems.projection import get_system_projection
+
 # Query handlers
 from syn_domain.contexts.organization.slices.contribution_heatmap.GetContributionHeatmapHandler import (
     GetContributionHeatmapHandler,
@@ -200,6 +208,11 @@ __all__ = [
     "GetSystemHistoryQuery",
     "GetSystemPatternsQuery",
     "GetSystemStatusQuery",
+    # Projections
+    "REPO_CORRELATION",
+    "get_organization_projection",
+    "get_repo_projection",
+    "get_system_projection",
     # Command handlers
     "CreateOrganizationHandler",
     "CreateSystemHandler",

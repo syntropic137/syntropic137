@@ -69,6 +69,9 @@ from syn_domain.contexts.agent_sessions.slices.record_operation import (
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import (
     CostCalculator,
 )
+from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
+    SessionCostQueryService,
+)
 from syn_domain.contexts.agent_sessions.slices.start_session import (
     SessionStartedEvent,
     StartSessionCommand,
@@ -82,6 +85,7 @@ __all__ = [
     "CompleteSessionCommand",
     "CompleteSessionHandler",
     "CostCalculator",
+    "SessionCostQueryService",
     "CostMetrics",
     "ObservationType",
     "OperationRecord",

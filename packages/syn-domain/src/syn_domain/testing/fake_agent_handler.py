@@ -21,19 +21,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+from syn_domain.contexts.orchestration import (
     AgentExecutionCompletedCommand,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-    StreamResult,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
+    StreamResult,
     SubagentTracker,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
 )
 

@@ -51,9 +51,7 @@ from syn_adapters.storage.repositories import (
 )
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
-from syn_domain.contexts.orchestration.slices.execute_workflow import (
-    WorkflowExecutionProcessor,
-)
+from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -234,9 +232,7 @@ async def _build_workspace_prompt(
     2d. $ARGUMENTS → task string from inputs["task"]
     3. Context appendix: previous phase outputs appended as fallback section
     """
-    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
-        SYN_WORKSPACE_PROMPT,
-    )
+    from syn_domain.contexts.orchestration import SYN_WORKSPACE_PROMPT
 
     phase_prompt = _substitute_builtins(phase.prompt_template, execution_id, workflow_id, repo_url)
     phase_prompt = _substitute_inputs(phase_prompt, phase, inputs, phase_outputs)
@@ -320,9 +316,7 @@ def get_trigger_repo():
 
 def get_trigger_store():
     """Return the trigger query store."""
-    from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_query_store,
-    )
+    from syn_domain.contexts.github import get_trigger_query_store
 
     return get_trigger_query_store()
 
@@ -337,16 +331,12 @@ _webhook_health_tracker_singleton: object | None = None
 
 def get_event_pipeline() -> EventPipeline:
     """Return the singleton EventPipeline with Redis dedup (in-memory fallback)."""
-    from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+    from syn_domain.contexts.github import EvaluateWebhookHandler, EventPipeline
 
     global _event_pipeline_singleton
     if _event_pipeline_singleton is not None:
         assert isinstance(_event_pipeline_singleton, EventPipeline)
         return _event_pipeline_singleton
-
-    from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
-        EvaluateWebhookHandler,
-    )
     from syn_shared.settings import get_settings
 
     settings = get_settings()
@@ -574,9 +564,7 @@ class BackgroundWorkflowDispatcher:
         execution_id: str,
         task: str | None = None,
     ) -> None:
-        from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
-            ExecuteWorkflowCommand,
-        )
+        from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
 
         try:
             cmd = ExecuteWorkflowCommand(
@@ -601,9 +589,7 @@ class BackgroundWorkflowDispatcher:
 
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
-    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
-        ExecuteWorkflowHandler,
-    )
+    from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
 
     processor = await get_execution_processor()
     handler = ExecuteWorkflowHandler(
@@ -640,9 +626,7 @@ def get_session_cost_query():
     Raises:
         RuntimeError: If the TimescaleDB pool is not yet initialized.
     """
-    from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
-        SessionCostQueryService,
-    )
+    from syn_domain.contexts.agent_sessions import SessionCostQueryService
 
     pool = get_event_store_instance().pool
     if pool is None:
@@ -661,9 +645,7 @@ def get_execution_cost_query():
     Raises:
         RuntimeError: If the TimescaleDB pool is not yet initialized.
     """
-    from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
-        ExecutionCostQueryService,
-    )
+    from syn_domain.contexts.orchestration import ExecutionCostQueryService
 
     pool = get_event_store_instance().pool
     if pool is None:

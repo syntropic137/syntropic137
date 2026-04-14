@@ -66,6 +66,15 @@ from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import (
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 from syn_domain.contexts.github.slices.event_pipeline.poller_state import PollerMode, PollerState
 
+# Projections
+from syn_domain.contexts.github.slices.get_installation.projection import (
+    get_installation_projection,
+)
+from syn_domain.contexts.github.slices.list_triggers.projection import get_trigger_rule_projection
+from syn_domain.contexts.github.slices.trigger_history.GetTriggerHistoryHandler import (
+    get_trigger_history_handler,
+)
+
 # Queries
 from syn_domain.contexts.github.domain.queries.get_trigger_history import GetTriggerHistoryQuery
 
@@ -79,7 +88,10 @@ from syn_domain.contexts.github._shared.trigger_evaluation_types import (
     TriggerMatchResult,
 )
 from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
-from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
+from syn_domain.contexts.github._shared.trigger_query_store import (
+    TriggerQueryStore,
+    get_trigger_query_store,
+)
 
 __all__ = [
     # Aggregates
@@ -116,6 +128,11 @@ __all__ = [
     "compute_dedup_key",
     "map_events_api_to_normalized",
     "synthesize_check_run_event",
+    # Projections
+    "get_installation_projection",
+    "get_trigger_history_handler",
+    "get_trigger_query_store",
+    "get_trigger_rule_projection",
     # Queries
     "GetTriggerHistoryQuery",
     # Read models

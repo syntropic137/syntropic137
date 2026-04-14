@@ -84,9 +84,7 @@ async def list_systems(
     organization_id: str | None = None,
 ) -> Result[list[SystemSummaryResponse], SystemErrorCode]:
     """List systems with optional organization filter."""
-    from syn_domain.contexts.organization.slices.list_systems.projection import (
-        get_system_projection,
-    )
+    from syn_domain.contexts.organization import get_system_projection
 
     await ensure_connected()
 
@@ -113,9 +111,7 @@ async def get_system(
     system_id: str,
 ) -> Result[SystemSummaryResponse, SystemErrorCode]:
     """Get system details."""
-    from syn_domain.contexts.organization.slices.list_systems.projection import (
-        get_system_projection,
-    )
+    from syn_domain.contexts.organization import get_system_projection
 
     await ensure_connected()
 
@@ -214,9 +210,12 @@ async def delete_system(
 async def get_system_status(system_id: str) -> Result[dict[str, Any], SystemErrorCode]:
     """Get cross-repo health overview for a system."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization import GetSystemStatusHandler, GetSystemStatusQuery
-    from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
-    from syn_domain.contexts.organization.slices.list_systems.projection import get_system_projection
+    from syn_domain.contexts.organization import (
+        GetSystemStatusHandler,
+        GetSystemStatusQuery,
+        get_repo_projection,
+        get_system_projection,
+    )
 
     await ensure_connected()
 
@@ -236,9 +235,12 @@ async def get_system_status(system_id: str) -> Result[dict[str, Any], SystemErro
 async def get_system_cost(system_id: str) -> Result[dict[str, Any], SystemErrorCode]:
     """Get cost breakdown for a system."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization import GetSystemCostHandler, GetSystemCostQuery
-    from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
-    from syn_domain.contexts.organization.slices.list_systems.projection import get_system_projection
+    from syn_domain.contexts.organization import (
+        GetSystemCostHandler,
+        GetSystemCostQuery,
+        get_repo_projection,
+        get_system_projection,
+    )
 
     await ensure_connected()
 
@@ -260,9 +262,12 @@ async def get_system_activity(
 ) -> Result[list[dict[str, Any]], SystemErrorCode]:
     """Get execution timeline for a system."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization import GetSystemActivityHandler, GetSystemActivityQuery
-    from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
-    from syn_domain.contexts.organization.slices.list_systems.projection import get_system_projection
+    from syn_domain.contexts.organization import (
+        GetSystemActivityHandler,
+        GetSystemActivityQuery,
+        get_repo_projection,
+        get_system_projection,
+    )
 
     await ensure_connected()
 
@@ -285,9 +290,12 @@ async def get_system_patterns(
 ) -> Result[dict[str, Any], SystemErrorCode]:
     """Get recurring failure and cost patterns for a system."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization import GetSystemPatternsHandler, GetSystemPatternsQuery
-    from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
-    from syn_domain.contexts.organization.slices.list_systems.projection import get_system_projection
+    from syn_domain.contexts.organization import (
+        GetSystemPatternsHandler,
+        GetSystemPatternsQuery,
+        get_repo_projection,
+        get_system_projection,
+    )
 
     await ensure_connected()
 
@@ -309,9 +317,12 @@ async def get_system_history(
 ) -> Result[list[dict[str, Any]], SystemErrorCode]:
     """Get historical execution timeline for a system."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization import GetSystemHistoryHandler, GetSystemHistoryQuery
-    from syn_domain.contexts.organization.slices.list_repos.projection import get_repo_projection
-    from syn_domain.contexts.organization.slices.list_systems.projection import get_system_projection
+    from syn_domain.contexts.organization import (
+        GetSystemHistoryHandler,
+        GetSystemHistoryQuery,
+        get_repo_projection,
+        get_system_projection,
+    )
 
     await ensure_connected()
 

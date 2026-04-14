@@ -44,27 +44,11 @@
 # Projection class imports (*Projection) are exempt (ADR-008 composition root pattern).
 # path = { deep_imports = N, issue = "#NNN" }
 
-# --- syn-domain (2 files) ---
-"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/execution_cost.py" = { deep_imports = 1, issue = "#197" }
-"packages/syn-domain/src/syn_domain/testing/fake_agent_handler.py" = { deep_imports = 5, issue = "#197" }
-
-# --- syn-adapters (4 files) ---
+# --- syn-adapters (2 files) ---
+# InMemoryTriggerQueryStore: in-memory test implementation, coupled to github internals
 "packages/syn-adapters/src/syn_adapters/storage/repositories.py" = { deep_imports = 1, issue = "#197" }
-"packages/syn-adapters/src/syn_adapters/storage/trigger_query_store.py" = { deep_imports = 2, issue = "#197" }
-"packages/syn-adapters/src/syn_adapters/subscriptions/realtime_adapter.py" = { deep_imports = 3, issue = "#197" }
-"packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py" = { deep_imports = 3, issue = "#197" }
-
-# --- syn-api (10 files) ---
-"apps/syn-api/src/syn_api/_wiring.py" = { deep_imports = 7, issue = "#197" }
-"apps/syn-api/src/syn_api/routes/executions/commands.py" = { deep_imports = 2, issue = "#197" }
-"apps/syn-api/src/syn_api/routes/insights.py" = { deep_imports = 5, issue = "#197" }
-"apps/syn-api/src/syn_api/routes/organizations.py" = { deep_imports = 2, issue = "#197" }
-"apps/syn-api/src/syn_api/routes/repos.py" = { deep_imports = 3, issue = "#197" }
-"apps/syn-api/src/syn_api/routes/systems.py" = { deep_imports = 12, issue = "#197" }
-"apps/syn-api/src/syn_api/routes/triggers/queries.py" = { deep_imports = 2, issue = "#197" }
-"apps/syn-api/src/syn_api/routes/webhooks/handlers.py" = { deep_imports = 2, issue = "#197" }
-"apps/syn-api/src/syn_api/routes/workflows/commands.py" = { deep_imports = 8, issue = "#197" }
-"apps/syn-api/src/syn_api/services/seeding.py" = { deep_imports = 1, issue = "#197" }
+# _IndexedTrigger: private type used by adapter implementation of TriggerQueryStore
+"packages/syn-adapters/src/syn_adapters/storage/trigger_query_store.py" = { deep_imports = 1, issue = "#197" }
 
 [event_construction_outside_aggregate]
 # Production files that construct DomainEvent subclasses outside aggregate_*/ dirs.

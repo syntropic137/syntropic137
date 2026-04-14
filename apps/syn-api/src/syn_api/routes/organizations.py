@@ -68,9 +68,7 @@ async def create_organization(
 
 async def list_organizations() -> Result[list[OrganizationSummaryResponse], OrganizationError]:
     """List all organizations."""
-    from syn_domain.contexts.organization.slices.list_organizations.projection import (
-        get_organization_projection,
-    )
+    from syn_domain.contexts.organization import get_organization_projection
 
     await ensure_connected()
 
@@ -97,9 +95,7 @@ async def get_organization(
     organization_id: str,
 ) -> Result[OrganizationSummaryResponse, OrganizationError]:
     """Get organization details."""
-    from syn_domain.contexts.organization.slices.list_organizations.projection import (
-        get_organization_projection,
-    )
+    from syn_domain.contexts.organization import get_organization_projection
 
     await ensure_connected()
 

@@ -104,9 +104,7 @@ async def list_repos(
     unassigned: bool = False,
 ) -> Result[list[RepoSummaryResponse], RepoError]:
     """List repos with optional filters."""
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
-        get_repo_projection,
-    )
+    from syn_domain.contexts.organization import get_repo_projection
 
     await ensure_connected()
 
@@ -142,9 +140,7 @@ async def get_repo(
     repo_id: str,
 ) -> Result[RepoSummaryResponse, RepoError]:
     """Get repo details."""
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
-        get_repo_projection,
-    )
+    from syn_domain.contexts.organization import get_repo_projection
 
     await ensure_connected()
 
@@ -380,9 +376,7 @@ async def _check_active_triggers(repo_id: str, full_name: str | None) -> Result[
     if full_name is None:
         return Ok(None)
     try:
-        from syn_domain.contexts.github.slices.list_triggers.projection import (
-            get_trigger_rule_projection,
-        )
+        from syn_domain.contexts.github import get_trigger_rule_projection
 
         trigger_projection = get_trigger_rule_projection()
         triggers = await trigger_projection.list_all()

@@ -39,9 +39,7 @@ router = APIRouter(prefix="/workflows", tags=["workflows"])
 
 
 def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
-    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
-        WorkflowType,
-    )
+    from syn_domain.contexts.orchestration import WorkflowType
 
     type_map: dict[str, WorkflowType] = {
         "research": WorkflowType.RESEARCH,
@@ -55,9 +53,7 @@ def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
 
 
 def _resolve_classification(classification: str) -> WorkflowClassification:
-    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
-        WorkflowClassification,
-    )
+    from syn_domain.contexts.orchestration import WorkflowClassification
 
     classification_map: dict[str, WorkflowClassification] = {
         "simple": WorkflowClassification.SIMPLE,
@@ -69,10 +65,7 @@ def _resolve_classification(classification: str) -> WorkflowClassification:
 
 
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
-    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
-        PhaseDefinition,
-        PhaseExecutionType,
-    )
+    from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
 
     if phases:
         return [
@@ -106,9 +99,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
 def _build_input_declarations(
     inputs: list[dict[str, Any]] | None,
 ) -> list[InputDeclaration]:
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-        InputDeclaration,
-    )
+    from syn_domain.contexts.orchestration import InputDeclaration
 
     if not inputs:
         return []
@@ -155,9 +146,7 @@ async def create_workflow(
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
     """
     from syn_domain.contexts.orchestration import CreateWorkflowTemplateCommand
-    from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
-        CreateWorkflowTemplateHandler,
-    )
+    from syn_domain.contexts.orchestration import CreateWorkflowTemplateHandler
 
     command = CreateWorkflowTemplateCommand(
         aggregate_id=workflow_id or str(uuid4()),
@@ -201,10 +190,7 @@ async def validate_yaml(
     Returns:
         Ok(WorkflowValidation) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration._shared.workflow_definition import (
-        WorkflowDefinition,
-        validate_workflow_yaml,
-    )
+    from syn_domain.contexts.orchestration import WorkflowDefinition, validate_workflow_yaml
 
     is_valid, error_msg = validate_workflow_yaml(yaml_content)
 
@@ -248,10 +234,8 @@ async def delete_workflow(
     Returns:
         Ok(None) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
+    from syn_domain.contexts.orchestration import (
         ArchiveWorkflowTemplateCommand,
-    )
-    from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
         ArchiveWorkflowTemplateHandler,
     )
 
@@ -490,9 +474,7 @@ async def update_phase_prompt(
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
     """
     from syn_domain.contexts.orchestration import UpdatePhasePromptCommand
-    from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
-        UpdateWorkflowPhaseHandler,
-    )
+    from syn_domain.contexts.orchestration import UpdateWorkflowPhaseHandler
 
     command = UpdatePhasePromptCommand(
         aggregate_id=workflow_id,

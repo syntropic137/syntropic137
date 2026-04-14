@@ -44,6 +44,9 @@ from syn_domain.contexts.artifacts.slices.create_artifact import (
     ArtifactCreatedEvent,
     CreateArtifactCommand,
 )
+from syn_domain.contexts.artifacts.slices.create_artifact.CreateArtifactHandler import (
+    CreateArtifactHandler,
+)
 from syn_domain.contexts.artifacts.slices.manage_artifact.ManageArtifactHandler import (
     ManageArtifactHandler,
 )
@@ -62,6 +65,7 @@ __all__ = [
     "ArtifactUploadedEvent",
     "ContentType",
     "CreateArtifactCommand",
+    "CreateArtifactHandler",
     "DeleteArtifactCommand",
     "ManageArtifactHandler",
     "UpdateArtifactCommand",

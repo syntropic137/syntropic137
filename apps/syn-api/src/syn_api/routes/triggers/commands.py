@@ -26,7 +26,10 @@ from syn_api.types import (
 from syn_domain.contexts.github import TriggerStatus
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.github import TriggerQueryStore, TriggerRuleAggregate
+    from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
+    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
+        TriggerRuleAggregate,
+    )
 
 logger = logging.getLogger(__name__)
 

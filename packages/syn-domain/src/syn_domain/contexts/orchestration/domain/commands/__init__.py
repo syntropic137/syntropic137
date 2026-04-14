@@ -3,6 +3,9 @@
 All commands for workflow execution and workspace management.
 """
 
+from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
+    ArchiveWorkflowTemplateCommand,
+)
 from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
     CreateWorkflowTemplateCommand,
 )
@@ -26,6 +29,7 @@ from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand 
 )
 
 __all__ = [
+    "ArchiveWorkflowTemplateCommand",
     "CreateWorkflowTemplateCommand",
     "CreateWorkspaceCommand",
     "ExecuteCommandCommand",

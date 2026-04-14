@@ -39,9 +39,7 @@ async def seed_offline_data() -> None:
 async def _seed_workflow_templates() -> int:
     """Seed workflow templates, returning the count of newly created ones."""
     from syn_adapters.storage import get_event_publisher, get_workflow_repository
-    from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
-        CreateWorkflowTemplateHandler,
-    )
+    from syn_domain.contexts.orchestration import CreateWorkflowTemplateHandler
 
     handler = CreateWorkflowTemplateHandler(
         repository=get_workflow_repository(),

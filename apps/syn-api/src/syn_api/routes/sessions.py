@@ -227,14 +227,13 @@ async def start_session(
     Returns:
         Ok(session_id) on success, Err(SessionError) on failure.
     """
-    from syn_domain.contexts.agent_sessions import StartSessionHandler
+    from syn_domain.contexts.agent_sessions import StartSessionCommand, StartSessionHandler
 
     await ensure_connected()
     repository = get_session_repo()
     handler = StartSessionHandler(repository=repository)
 
     try:
-        from syn_domain.contexts.agent_sessions import StartSessionCommand
 
         command = StartSessionCommand(
             workflow_id=workflow_id,
@@ -260,14 +259,13 @@ async def complete_session(
     Returns:
         Ok(None) on success, Err(SessionError) on failure.
     """
-    from syn_domain.contexts.agent_sessions import CompleteSessionHandler
+    from syn_domain.contexts.agent_sessions import CompleteSessionCommand, CompleteSessionHandler
 
     await ensure_connected()
     repository = get_session_repo()
     handler = CompleteSessionHandler(repository=repository)
 
     try:
-        from syn_domain.contexts.agent_sessions import CompleteSessionCommand
 
         command = CompleteSessionCommand(aggregate_id=session_id)
         await handler.handle(command)

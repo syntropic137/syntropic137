@@ -369,12 +369,10 @@ async def execute(
     Returns:
         Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
-    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-        WorkflowNotFoundError,
-    )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+    from syn_domain.contexts.orchestration import (
+        ExecuteWorkflowCommand,
         ExecuteWorkflowHandler,
+        WorkflowNotFoundError,
     )
 
     await ensure_connected()

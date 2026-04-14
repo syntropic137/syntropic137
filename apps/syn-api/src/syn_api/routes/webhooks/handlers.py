@@ -13,9 +13,7 @@ logger = logging.getLogger(__name__)
 async def _apply_installation_created(payload: dict[str, Any]) -> None:
     """Create and persist an AppInstalledEvent from webhook payload."""
     from syn_domain.contexts.github import AppInstalledEvent
-    from syn_domain.contexts.github.slices.get_installation.projection import (
-        get_installation_projection,
-    )
+    from syn_domain.contexts.github import get_installation_projection
 
     event = AppInstalledEvent.from_webhook(payload)
     projection = get_installation_projection()
@@ -27,9 +25,7 @@ async def _apply_installation_repositories_changed(
     action: str,  # noqa: ARG001 — reserved for future per-action logic
 ) -> None:
     """Update the projection when repos are added or removed from an installation."""
-    from syn_domain.contexts.github.slices.get_installation.projection import (
-        get_installation_projection,
-    )
+    from syn_domain.contexts.github import get_installation_projection
 
     installation_id = str(payload.get("installation", {}).get("id", ""))
     if not installation_id:

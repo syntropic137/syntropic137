@@ -148,9 +148,7 @@ def get_workflow_repository() -> RepositoryAdapter[WorkflowTemplateAggregate]:
     if _workflow_repository is not None:
         return _workflow_repository
 
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
-        WorkflowTemplateAggregate,
-    )
+    from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -167,9 +165,7 @@ def get_workflow_execution_repository() -> RepositoryAdapter[WorkflowExecutionAg
     if _workflow_execution_repository is not None:
         return _workflow_execution_repository
 
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-        WorkflowExecutionAggregate,
-    )
+    from syn_domain.contexts.orchestration import WorkflowExecutionAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -186,9 +182,7 @@ def get_session_repository() -> RepositoryAdapter[AgentSessionAggregate]:
     if _session_repository is not None:
         return _session_repository
 
-    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-        AgentSessionAggregate,
-    )
+    from syn_domain.contexts.agent_sessions import AgentSessionAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -205,9 +199,7 @@ def get_artifact_repository() -> RepositoryAdapter[ArtifactAggregate]:
     if _artifact_repository is not None:
         return _artifact_repository
 
-    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
-        ArtifactAggregate,
-    )
+    from syn_domain.contexts.artifacts import ArtifactAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -239,9 +231,7 @@ def get_trigger_repository() -> Any:  # noqa: ANN401
     if _trigger_repository is not None:
         return _trigger_repository
 
-    from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
-        TriggerRuleAggregate,
-    )
+    from syn_domain.contexts.github import TriggerRuleAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -258,9 +248,7 @@ def get_organization_repository() -> RepositoryAdapter[OrganizationAggregate]:
     if _organization_repository is not None:
         return _organization_repository
 
-    from syn_domain.contexts.organization.domain.aggregate_organization.OrganizationAggregate import (
-        OrganizationAggregate,
-    )
+    from syn_domain.contexts.organization import OrganizationAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -277,9 +265,7 @@ def get_system_repository() -> RepositoryAdapter[SystemAggregate]:
     if _system_repository is not None:
         return _system_repository
 
-    from syn_domain.contexts.organization.domain.aggregate_system.SystemAggregate import (
-        SystemAggregate,
-    )
+    from syn_domain.contexts.organization import SystemAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -296,9 +282,7 @@ def get_repo_repository() -> RepositoryAdapter[RepoAggregate]:
     if _repo_repository is not None:
         return _repo_repository
 
-    from syn_domain.contexts.organization.domain.aggregate_repo.RepoAggregate import (
-        RepoAggregate,
-    )
+    from syn_domain.contexts.organization import RepoAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -315,9 +299,7 @@ def get_repo_claim_repository() -> RepositoryAdapter[RepoClaimAggregate]:
     if _repo_claim_repository is not None:
         return _repo_claim_repository
 
-    from syn_domain.contexts.organization.domain.aggregate_repo_claim.RepoClaimAggregate import (
-        RepoClaimAggregate,
-    )
+    from syn_domain.contexts.organization import RepoClaimAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
