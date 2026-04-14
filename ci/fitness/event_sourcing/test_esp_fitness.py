@@ -23,6 +23,7 @@ _PROJECT_ALLOWED_PREFIXES: frozenset[str] = frozenset(
         "syn_domain.contexts",
         "syn_shared",
         "syn_adapters.projection_stores",
+        "time",
     }
 )
 
