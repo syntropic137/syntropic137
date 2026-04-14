@@ -52,17 +52,20 @@ _KNOWN_STATE: list[tuple[str, str, str]] = [
 def _has_classification(content: str, variable: str) -> bool:
     """Check if the variable declaration has a classification comment nearby.
 
-    Looks for a classification marker in the 3 lines preceding the variable
-    declaration, which covers both inline and above-line comments.
+    Looks for a classification marker in the 3 lines preceding the FIRST
+    occurrence of the variable (its declaration), which avoids false positives
+    from later usages that happen to sit near an unrelated comment.
     """
     lines = content.splitlines()
     for i, line in enumerate(lines):
         if variable in line:
-            # Check the line itself and the 3 preceding lines
+            # Only check the first occurrence (the declaration)
             window = lines[max(0, i - 3) : i + 1]
             for window_line in window:
                 if any(marker in window_line for marker in _CLASSIFICATION_MARKERS):
                     return True
+            # First occurrence checked - stop scanning
+            return False
     return False
 
 

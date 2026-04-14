@@ -5,8 +5,9 @@ Ensures no production code silently swallows exceptions with bare
 any logging or re-raise. Silent swallowing hides bugs in production
 and makes debugging impossible.
 
-Phase D of the architecture audit fixed all known violations, so
-the expected violation count is zero.
+Violations are tracked via fitness_exceptions.toml with issue
+references. Phase D of the architecture audit fixed all known
+violations; any remaining exceptions are ratcheted there.
 """
 
 from __future__ import annotations

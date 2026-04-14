@@ -25,7 +25,7 @@ class TriggerDebouncer:
 
     def __init__(self) -> None:
         """Initialize the debouncer."""
-        # ACKNOWLEDGED: triggers deferred on restart, acceptable for debounce use case
+        # ACKNOWLEDGED: pending debounces lost on restart (tasks are in-memory). Acceptable for debounce use case - next webhook re-triggers evaluation
         self._pending: dict[str, asyncio.Task] = {}
 
     async def debounce(
