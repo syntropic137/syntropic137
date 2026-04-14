@@ -1,9 +1,35 @@
-"""GitHub App bounded context for secure credential management.
+"""GitHub bounded context - App integration, triggers, and event pipeline.
 
-This context handles:
-- GitHub App installation lifecycle
-- Installation token generation and refresh
-- Secure, auditable credentials for agent commits
+Public API for cross-context consumers. Import from here, not from internal
+subpackages (slices/, domain/aggregate_*/, etc.).
 
-See ADR (TBD): GitHub App Integration for architecture details.
+Usage:
+    from syn_domain.contexts.github import (
+        InstallationAggregate,
+        RegisterTriggerCommand,
+    )
 """
+
+from syn_domain.contexts.github.domain import InstallationAggregate
+from syn_domain.contexts.github.domain.aggregate_trigger import TriggerCondition
+from syn_domain.contexts.github.domain.commands import (
+    DeleteTriggerCommand,
+    PauseTriggerCommand,
+    RecordTriggerBlockedCommand,
+    RecordTriggerFiredCommand,
+    RefreshTokenCommand,
+    RegisterTriggerCommand,
+    ResumeTriggerCommand,
+)
+
+__all__ = [
+    "DeleteTriggerCommand",
+    "InstallationAggregate",
+    "PauseTriggerCommand",
+    "RecordTriggerBlockedCommand",
+    "RecordTriggerFiredCommand",
+    "RefreshTokenCommand",
+    "RegisterTriggerCommand",
+    "ResumeTriggerCommand",
+    "TriggerCondition",
+]

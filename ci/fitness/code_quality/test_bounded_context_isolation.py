@@ -26,6 +26,7 @@ _CONTEXT_NAMES = frozenset(
 _CHECK_DIRS = [
     "packages/syn-domain/src",
     "packages/syn-adapters/src",
+    "apps/syn-api/src",
 ]
 
 

@@ -23,6 +23,7 @@
 # path = { max_contexts = N, issue = "#NNN" }
 "packages/syn-adapters/src/syn_adapters/projections/manager.py" = { max_contexts = 4, issue = "#197" }
 "packages/syn-adapters/src/syn_adapters/projections/manager_registry.py" = { max_contexts = 4, issue = "#276" }
+"apps/syn-api/src/syn_api/_wiring.py" = { max_contexts = 2, issue = "#197" }
 
 [event_sourcing_handle_command]
 # Production files calling _handle_command() directly (anti-pattern).
@@ -36,6 +37,50 @@
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/update_workflow_phase/UpdateWorkflowPhaseHandler.py" = { max_calls = 1, issue = "#402" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py" = { max_calls = 9, issue = "#196" }
 "apps/syn-api/src/syn_api/routes/artifacts.py" = { max_calls = 1, issue = "#277" }
+
+[cross_context_public_api]
+# Files that import from foreign contexts through internal paths (slices/, domain/, etc.)
+# instead of through the public API (contexts.<ctx> or contexts.<ctx>.ports).
+# path = { deep_imports = N, issue = "#NNN" }
+
+# --- syn-domain (8 files, cross-context domain coupling) ---
+"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/execution_cost.py" = { deep_imports = 1, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py" = { deep_imports = 3, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ObservabilityCollector.py" = { deep_imports = 1, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/SessionLifecycleManager.py" = { deep_imports = 5, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/projection.py" = { deep_imports = 1, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/query_service.py" = { deep_imports = 1, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/timescale_query.py" = { deep_imports = 1, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/contribution_heatmap/TimescaleHeatmapQuery.py" = { deep_imports = 1, issue = "#197" }
+"packages/syn-domain/src/syn_domain/testing/fake_agent_handler.py" = { deep_imports = 5, issue = "#197" }
+
+# --- syn-adapters (8 files, wiring layer) ---
+"packages/syn-adapters/src/syn_adapters/control/adapters/projection.py" = { deep_imports = 1, issue = "#197" }
+"packages/syn-adapters/src/syn_adapters/projections/manager.py" = { deep_imports = 14, issue = "#197" }
+"packages/syn-adapters/src/syn_adapters/projections/manager_registry.py" = { deep_imports = 18, issue = "#276" }
+"packages/syn-adapters/src/syn_adapters/storage/repositories.py" = { deep_imports = 1, issue = "#197" }
+"packages/syn-adapters/src/syn_adapters/storage/trigger_query_store.py" = { deep_imports = 2, issue = "#197" }
+"packages/syn-adapters/src/syn_adapters/subscriptions/coordinator_service.py" = { deep_imports = 19, issue = "#197" }
+"packages/syn-adapters/src/syn_adapters/subscriptions/realtime_adapter.py" = { deep_imports = 3, issue = "#197" }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py" = { deep_imports = 3, issue = "#197" }
+
+# --- syn-api (16 files, routes reaching into context internals) ---
+"apps/syn-api/src/syn_api/_wiring.py" = { deep_imports = 8, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/artifacts.py" = { deep_imports = 7, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/executions/commands.py" = { deep_imports = 3, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/insights.py" = { deep_imports = 9, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/organizations.py" = { deep_imports = 8, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/repos.py" = { deep_imports = 25, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/sessions.py" = { deep_imports = 5, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/systems.py" = { deep_imports = 28, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/triggers/commands.py" = { deep_imports = 11, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/triggers/queries.py" = { deep_imports = 3, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/webhooks/handlers.py" = { deep_imports = 5, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/webhooks/processing.py" = { deep_imports = 2, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/workflows/commands.py" = { deep_imports = 10, issue = "#197" }
+"apps/syn-api/src/syn_api/services/check_run_poller.py" = { deep_imports = 2, issue = "#197" }
+"apps/syn-api/src/syn_api/services/github_event_poller.py" = { deep_imports = 2, issue = "#197" }
+"apps/syn-api/src/syn_api/services/seeding.py" = { deep_imports = 4, issue = "#197" }
 
 [event_construction_outside_aggregate]
 # Production files that construct DomainEvent subclasses outside aggregate_*/ dirs.
