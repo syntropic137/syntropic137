@@ -32,6 +32,12 @@ validation:
   # Commands live at domain/commands/ with handlers in slices/ (DDD convention per ADR-020)
   domain_level_commands: true
 
+# Cross-context public API enforcement (ADR-062)
+# Scan adapter and API layers for deep cross-context imports
+cross_context_scan_paths:
+  - "packages/syn-adapters/src"
+  - "apps/syn-api/src"
+
 # Pattern definitions (Python conventions)
 patterns:
   command: "*Command"
