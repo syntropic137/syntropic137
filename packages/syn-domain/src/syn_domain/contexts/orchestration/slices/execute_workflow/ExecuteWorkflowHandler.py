@@ -95,6 +95,34 @@ def _normalise_repo_url(url: str) -> str:
     return url
 
 
+def _resolve_repos_legacy(
+    merged_inputs: dict[str, str],
+    workflow: WorkflowTemplateAggregate,
+) -> list[str]:
+    """Legacy repo resolution chain (pre-ADR-063 backward compat)."""
+    # CSV in inputs
+    repos_raw = merged_inputs.get("repos", "")
+    if repos_raw:
+        return [_normalise_repo_url(u.strip()) for u in repos_raw.split(",") if u.strip()]
+
+    # Trigger preset "repository" slug in inputs
+    trigger_repo = merged_inputs.get("repository", "")
+    if trigger_repo:
+        return [_normalise_repo_url(trigger_repo)]
+
+    # Template-level repos with variable substitution
+    if workflow.repos:
+        return [
+            _normalise_repo_url(_substitute_repo_vars(r, merged_inputs)) for r in workflow.repos
+        ]
+
+    # Single-repo template fallback
+    repo_url = _resolve_repo_url(workflow, merged_inputs)
+    if repo_url:
+        return [repo_url]
+    return []
+
+
 class WorkflowRepository(Protocol):
     """Repository protocol for Workflow aggregates."""
 
@@ -183,7 +211,7 @@ class ExecuteWorkflowHandler:
         merged_inputs: dict[str, str],
         workflow: WorkflowTemplateAggregate,
     ) -> list[str]:
-        """Resolve repos: typed command repos → inputs CSV → template-level → repository_url fallback.
+        """Resolve repos: typed command repos -> inputs CSV -> template-level -> repository_url fallback.
 
         ADR-063: typed ``command.repos`` (populated at context boundaries)
         takes precedence over implicit dict-key conventions.
@@ -193,27 +221,8 @@ class ExecuteWorkflowHandler:
         if command.repos:
             return [r.https_url for r in command.repos]
 
-        # 2. Legacy: CSV in inputs (for backward compat with existing callers)
-        repos_raw = merged_inputs.get("repos", "")
-        if repos_raw:
-            return [_normalise_repo_url(u.strip()) for u in repos_raw.split(",") if u.strip()]
-
-        # 3. Legacy: trigger preset "repository" slug in inputs
-        trigger_repo = merged_inputs.get("repository", "")
-        if trigger_repo:
-            return [_normalise_repo_url(trigger_repo)]
-
-        # 4. Template-level repos with variable substitution
-        if workflow.repos:
-            return [
-                _normalise_repo_url(_substitute_repo_vars(r, merged_inputs)) for r in workflow.repos
-            ]
-
-        # 5. Single-repo template fallback
-        repo_url = _resolve_repo_url(workflow, merged_inputs)
-        if repo_url:
-            return [repo_url]
-        return []
+        # 2-5. Legacy resolution chain (backward compat)
+        return _resolve_repos_legacy(merged_inputs, workflow)
 
     @staticmethod
     def _get_executable_phases(

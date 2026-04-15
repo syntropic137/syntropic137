@@ -427,14 +427,11 @@ async def execute(
 # -- HTTP Endpoints -----------------------------------------------------------
 
 
-@router.post("/{workflow_id}/execute", response_model=ExecuteWorkflowResponse)
-async def execute_workflow_endpoint(
+async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
-    background_tasks: BackgroundTasks,
-) -> ExecuteWorkflowResponse:
-    """Start workflow execution in background."""
-    # Pre-validate GitHub App access before creating the execution (#598)
+) -> tuple[WorkflowTemplateAggregate, dict[str, str], list[RepositoryRef]]:
+    """Validate and prepare execution request. Returns (workflow, effective_inputs, typed_repos)."""
     await ensure_connected()
     workflow_repo = get_workflow_repo()
     workflow = await workflow_repo.get_by_id(workflow_id)
@@ -459,6 +456,17 @@ async def execute_workflow_endpoint(
         preflight_repos = _get_preflight_repos(effective_inputs, workflow, request.task)
         await _validate_all_repos_access(preflight_repos)
 
+    return workflow, effective_inputs, typed_repos
+
+
+@router.post("/{workflow_id}/execute", response_model=ExecuteWorkflowResponse)
+async def execute_workflow_endpoint(
+    workflow_id: str,
+    request: ExecuteWorkflowRequest,
+    background_tasks: BackgroundTasks,
+) -> ExecuteWorkflowResponse:
+    """Start workflow execution in background."""
+    _, effective_inputs, typed_repos = await _validate_execution_request(workflow_id, request)
     execution_id = f"exec-{uuid4().hex[:12]}"
 
     async def _run() -> None:
