@@ -144,6 +144,52 @@ class InMemoryAdapter:
 
 This exception is intentional and documented. The file carries a comment explaining why it differs from other in-memory stores.
 
+### 7. Cold-Start Fence (HistoricalPoller)
+
+Sections 1-6 protect against **warm restart** (state existed, was lost). But on **cold start** (fresh install, empty database), there is no state to lose -- the poller has no cursor, dedup table is empty, Guard 4 has no history, and Guard 6 tracks no running executions. All 300 historical events from the GitHub Events API pass every layer and fire triggers.
+
+This caused 9 duplicate "Self-Heal PR" executions on the sandbox repo after a fresh install (9/10 OOM-killed: 10 x 4GB containers on a 7.65GB Docker VM).
+
+**The fix: timestamp-based cold-start fence.** On first poll with no persisted cursor, only events created *after* the poller's start time are processed. Historical events are skipped but the cursor is persisted, so subsequent polls resume correctly (warm start).
+
+This is implemented as a base class in the Event Sourcing Platform: `HistoricalPoller`. The template method pattern ensures subclasses cannot bypass the fence:
+
+- `poll()` is concrete (non-overridable) -- enforces the cold-start fence
+- `fetch()` and `process()` are abstract -- subclasses implement these
+- `check_historical_poller_structure()` fitness function catches subclasses that override `poll()`
+
+**Why timestamp filtering, not blanket skip:** Events that arrive between startup and first poll are genuinely new and should be processed. A blanket "skip everything on first poll" would lose them. The `created_at >= started_at` comparison preserves these events.
+
+**Cold start vs warm restart:**
+
+| Scenario | Cursor exists? | Behavior |
+|----------|---------------|----------|
+| Warm restart (state lost) | No (was lost) | Cold-start fence: skip historical, keep post-startup |
+| Warm restart (state intact) | Yes | Warm start: process all events |
+| Fresh install | No (never existed) | Cold-start fence: skip historical, keep post-startup |
+
+**Location:** `lib/event-sourcing-platform/event-sourcing/python/src/event_sourcing/core/historical_poller.py`
+
+### 8. Pipeline Safety Net (source_primed)
+
+Belt-and-suspenders with the HistoricalPoller fence. Even if someone bypasses the base class and calls `pipeline.ingest()` directly with historical events, the pipeline checks `NormalizedEvent.source_primed`:
+
+- Default `True` for webhooks (always live) and backwards compatibility
+- Set to `False` by the HistoricalPoller during cold start
+- Pipeline skips trigger evaluation when `source_primed=False` but still marks dedup
+
+This second layer protects against implementation mistakes where historical events reach the pipeline through a path that doesn't use `HistoricalPoller`.
+
+**Location:** `packages/syn-domain/.../event_pipeline/normalized_event.py` and `pipeline.py`
+
+### 9. Configurable dispatch concurrency
+
+`BackgroundWorkflowDispatcher.MAX_CONCURRENT` was hardcoded at 10. On a Docker host with limited memory (e.g., 8GB), 10 simultaneous 4GB containers cause OOM kills.
+
+Now configurable via `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` (default 5). This is distinct from `WorkspaceSettings.max_concurrent` (workspace pool capacity) -- dispatch concurrency is a safety limit on how many workflows fire simultaneously from triggers.
+
+**Location:** `packages/syn-shared/src/syn_shared/settings/polling.py`, `apps/syn-api/src/syn_api/_wiring.py`
+
 ## Consequences
 
 ### Positive
@@ -162,14 +208,17 @@ This exception is intentional and documented. The file carries a comment explain
 
 ## Defense in Depth Summary
 
-After this ADR, a restart is protected by four independent layers:
+After this ADR, both warm restart and cold start are protected by seven independent layers:
 
-| Layer | Component | What it prevents | Persistent? |
-|-------|-----------|-----------------|-------------|
-| 1 | Poller cursor (Postgres) | Re-fetching events from GitHub | Yes |
-| 2 | Dedup (Postgres) | Re-processing known events | Yes |
-| 3 | Guard 4 (fixed) | Re-evaluating triggers for known events | Yes (event store) |
-| 4 | Guard 7 (new) | Runaway dispatch from any cause | Stateless (sliding window) |
+| Layer | Component | What it prevents | Persistent? | Cold start? |
+|-------|-----------|-----------------|-------------|-------------|
+| 0 | HistoricalPoller fence (section 7) | Processing historical events on first poll | Yes (cursor) | Yes |
+| 0b | Pipeline source_primed (section 8) | Trigger eval for unprimed events (belt-and-suspenders) | N/A (per-event flag) | Yes |
+| 1 | Poller cursor (Postgres) | Re-fetching events from GitHub | Yes | After first poll |
+| 2 | Dedup (Postgres) | Re-processing known events | Yes | After first event |
+| 3 | Guard 4 (fixed) | Re-evaluating triggers for known events | Yes (event store) | After first fire |
+| 4 | Guard 7 (rate limiter) | Runaway dispatch from any cause | Stateless (sliding window) | Yes |
+| 5 | Dispatch concurrency (section 9) | OOM from too many concurrent containers | Config (default 5) | Yes |
 
 ## Related ADRs
 
