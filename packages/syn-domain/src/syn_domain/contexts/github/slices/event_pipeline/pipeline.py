@@ -97,7 +97,16 @@ class EventPipeline:
                 exc_info=True,
             )
 
-        # 2. Build compound event and inject identifiers for downstream guards
+        # 2. Safety net: skip trigger evaluation for unprimed sources (ADR-060)
+        if not event.source_primed:
+            logger.info(
+                "Skipping trigger evaluation for unprimed event %s from %s (cold-start fence)",
+                event.dedup_key,
+                event.source.value,
+            )
+            return PipelineResult(status="processed", event_type=event.event_type)
+
+        # 3. Build compound event and inject identifiers for downstream guards
         compound_event = f"{event.event_type}.{event.action}" if event.action else event.event_type
         payload = {
             **event.payload,
@@ -105,7 +114,7 @@ class EventPipeline:
             "_dedup_key": event.dedup_key,  # ADR-060: fallback for Guard 4 on polled events
         }
 
-        # 3. Evaluate triggers
+        # 4. Evaluate triggers
         results = await self._evaluator.evaluate(
             event=compound_event,
             repository=event.repository,
@@ -113,7 +122,7 @@ class EventPipeline:
             payload=payload,
         )
 
-        # 4. Notify observers — best-effort, non-blocking (#602)
+        # 5. Notify observers - best-effort, non-blocking (#602)
         for observer in self._observers:
             task = asyncio.create_task(
                 _safe_observer_call(observer, event),

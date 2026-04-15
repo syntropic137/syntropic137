@@ -8,26 +8,18 @@ from __future__ import annotations
 import logging
 import re as _re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import httpx
+    from event_sourcing.core.historical_poller import CursorStore
 
     from syn_adapters.github.client import GitHubAppClient
-    from syn_adapters.github.poller_cursor_store import PollerCursor
 
 logger = logging.getLogger(__name__)
 
 # Type alias for raw GitHub event payloads (heterogeneous JSON from Events API).
 GitHubEventPayload = dict[str, Any]
-
-
-class PollerCursorStore(Protocol):
-    """Protocol for persisting poller ETag/cursor state across restarts."""
-
-    async def save_cursor(self, repo: str, etag: str, last_event_id: str) -> None: ...
-    async def load_cursor(self, repo: str) -> PollerCursor | None: ...
-    async def load_all(self) -> dict[str, PollerCursor]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +61,7 @@ class GitHubEventsAPIClient:
     def __init__(
         self,
         github_client: GitHubAppClient,
-        cursor_store: PollerCursorStore | None = None,
+        cursor_store: CursorStore | None = None,
     ) -> None:
         self._client = github_client
         self._etags: dict[str, str] = {}  # repo -> ETag (in-memory cache)
@@ -207,9 +199,14 @@ class GitHubEventsAPIClient:
         """Persist ETag cursor for restart safety (ADR-060)."""
         if not etag or self._cursor_store is None:
             return
+        from event_sourcing.core.historical_poller import CursorData
+
         newest_id = str(events[0].get("id", "")) if events else ""
         try:
-            await self._cursor_store.save_cursor(etag_key, etag, newest_id)
+            await self._cursor_store.save(
+                etag_key,
+                CursorData(value=etag, metadata={"last_event_id": newest_id}),
+            )
         except Exception:
             logger.warning("Failed to persist poller cursor for %s", etag_key, exc_info=True)
 
@@ -221,11 +218,10 @@ class GitHubEventsAPIClient:
         try:
             cursors = await self._cursor_store.load_all()
             for repo, cursor in cursors.items():
-                etag = getattr(cursor, "etag", "")
-                if etag:
-                    self._etags[repo] = etag
+                if cursor.value:
+                    self._etags[repo] = cursor.value
             logger.info("Loaded %d persisted ETag(s) from cursor store", len(cursors))
         except Exception:
             logger.warning(
-                "Failed to load persisted cursors — polling will re-fetch", exc_info=True
+                "Failed to load persisted cursors - polling will re-fetch", exc_info=True
             )

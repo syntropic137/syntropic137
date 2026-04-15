@@ -569,12 +569,10 @@ class BackgroundWorkflowDispatcher:
     - Semaphore-bounded concurrency (Phase A2)
     """
 
-    MAX_CONCURRENT = 10
-
-    def __init__(self, handler: ExecuteWorkflowHandler) -> None:
+    def __init__(self, handler: ExecuteWorkflowHandler, max_concurrent: int = 5) -> None:
         self._handler = handler
         self._tasks: set[asyncio.Task[None]] = set()
-        self._semaphore = asyncio.Semaphore(self.MAX_CONCURRENT)
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
     async def run_workflow(
         self,
@@ -647,7 +645,10 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         processor=processor,
         workflow_repository=get_workflow_repository(),
     )
-    return BackgroundWorkflowDispatcher(handler)
+    from syn_shared.settings import get_settings
+
+    max_concurrent = get_settings().polling.max_concurrent_dispatches
+    return BackgroundWorkflowDispatcher(handler, max_concurrent=max_concurrent)
 
 
 class _NullSignalQueueAdapter:

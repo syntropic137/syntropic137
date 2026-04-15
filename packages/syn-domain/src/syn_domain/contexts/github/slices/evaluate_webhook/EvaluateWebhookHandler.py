@@ -234,6 +234,8 @@ class EvaluateWebhookHandler:
 
         # Mark execution as running for concurrency guard (Guard 6)
         await self._store.record_fire(rule.trigger_id, pr_number, execution_id)
+        # Record delivery for Guard 4 idempotency (ADR-060) - immediate, not via projection
+        await self._store.record_delivery(delivery_id, rule.trigger_id)
         # Record dispatch for rate limiting (Guard 7, ADR-060)
         self._guards.record_dispatch()
 

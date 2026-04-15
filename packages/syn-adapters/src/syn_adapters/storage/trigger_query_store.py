@@ -190,7 +190,18 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         pass  # Writes come from TriggerQueryProjection
 
     async def record_delivery(self, delivery_id: str, trigger_id: str) -> None:
-        pass  # Writes come from TriggerQueryProjection
+        """Record delivery for Guard 4 idempotency (ADR-060).
+
+        Called in the live fire path for immediate dedup. The projection
+        also writes this; the second write is idempotent (same key/value).
+        """
+        if not delivery_id:
+            return
+        await self._store.save(
+            NS_DELIVERIES,
+            delivery_id,
+            {"trigger_id": trigger_id, "recorded_at": datetime.now(UTC).isoformat()},
+        )
 
     async def record_fire(
         self,
