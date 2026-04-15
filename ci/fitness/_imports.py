@@ -81,3 +81,39 @@ def extract_imports(path: Path) -> list[ImportInfo]:
 def runtime_imports(path: Path) -> list[ImportInfo]:
     """Extract only runtime (non-TYPE_CHECKING) imports from a file."""
     return [imp for imp in extract_imports(path) if not imp.is_type_checking]
+
+
+def all_imports(path: Path) -> list[ImportInfo]:
+    """Extract ALL imports including those inside function/method bodies.
+
+    Uses ast.walk to traverse the entire AST, catching lazy imports that
+    runtime_imports() misses (it only sees module-level statements).
+    All returned imports have is_type_checking=False since TYPE_CHECKING
+    status cannot be reliably determined for nested imports.
+    """
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    imports: list[ImportInfo] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imports.append(
+                    ImportInfo(
+                        module=alias.name,
+                        names=[alias.asname or alias.name.split(".")[-1]],
+                        is_type_checking=False,
+                        lineno=node.lineno,
+                    )
+                )
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            names = [alias.name for alias in node.names]
+            imports.append(
+                ImportInfo(
+                    module=module,
+                    names=names,
+                    is_type_checking=False,
+                    lineno=node.lineno,
+                )
+            )
+    return imports

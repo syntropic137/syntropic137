@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
@@ -40,11 +40,11 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workflow_execution_details"
     VERSION = 4  # Bumped: resilient on_workflow_failed for orphaned failure events (#598)
 
-    def __init__(self, store: ProjectionStoreProtocol):
+    def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
 
         Args:
-            store: A ProjectionStoreProtocol implementation
+            store: A ProjectionStore implementation
         """
         self._store = store
 

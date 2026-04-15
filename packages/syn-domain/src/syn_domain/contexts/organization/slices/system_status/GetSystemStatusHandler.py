@@ -16,7 +16,8 @@ from syn_domain.contexts.organization.domain.read_models.system_status import (
 )
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionReadStore
+
     from syn_domain.contexts.organization.domain.queries.get_system_status import (
         GetSystemStatusQuery,
     )
@@ -92,7 +93,7 @@ class GetSystemStatusHandler:
 
     def __init__(
         self,
-        store: ProjectionStoreProtocol,
+        store: ProjectionReadStore,
         system_projection: SystemProjection,
         repo_projection: RepoProjection,
     ) -> None:

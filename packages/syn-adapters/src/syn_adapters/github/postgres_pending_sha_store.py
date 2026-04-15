@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
+from syn_domain.contexts.github import PendingSHA
 
 logger = logging.getLogger(__name__)
 

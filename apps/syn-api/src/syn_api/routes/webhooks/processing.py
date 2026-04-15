@@ -12,11 +12,7 @@ from syn_api.routes.webhooks.acknowledgments import _post_trigger_acknowledgment
 from syn_api.routes.webhooks.handlers import _handle_installation_event
 from syn_api.routes.webhooks.signature import verify_webhook_signature
 from syn_api.types import Err, GitHubError, Ok, Result, WebhookResult
-from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key
-from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
-    EventSource,
-    NormalizedEvent,
-)
+from syn_domain.contexts.github import EventSource, NormalizedEvent, compute_dedup_key
 
 logger = logging.getLogger(__name__)
 

@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import (
+        IndexedTrigger,
         TriggerQueryStore,
-        _IndexedTrigger,
     )
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class GuardResult:
 
 
 async def _check_max_attempts(
-    rule: _IndexedTrigger,
+    rule: IndexedTrigger,
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -64,7 +64,7 @@ async def _check_max_attempts(
 
 
 async def _check_cooldown(
-    rule: _IndexedTrigger,
+    rule: IndexedTrigger,
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -87,7 +87,7 @@ async def _check_cooldown(
     return None
 
 
-async def _check_daily_limit(rule: _IndexedTrigger, store: TriggerQueryStore) -> GuardResult | None:
+async def _check_daily_limit(rule: IndexedTrigger, store: TriggerQueryStore) -> GuardResult | None:
     """Guard 3: Daily fire limit."""
     today_count = await store.get_daily_fire_count(rule.trigger_id)
     if today_count >= rule.config.daily_limit:
@@ -119,7 +119,7 @@ async def _check_idempotency(
 
 
 async def _check_cross_trigger_cooldown(
-    rule: _IndexedTrigger,
+    rule: IndexedTrigger,
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -140,7 +140,7 @@ async def _check_cross_trigger_cooldown(
 
 
 async def _check_concurrency(
-    rule: _IndexedTrigger,
+    rule: IndexedTrigger,
     pr_number: int | None,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -185,7 +185,7 @@ class SafetyGuards:
 
     async def check_all(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         payload: dict[str, Any],
         store: TriggerQueryStore,
     ) -> GuardResult:
@@ -200,7 +200,7 @@ class SafetyGuards:
 
     async def _run_guards(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         payload: dict[str, Any],
         pr_number: int | None,
         store: TriggerQueryStore,

@@ -13,20 +13,14 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+from syn_domain.contexts.orchestration import (
+    CreateWorkspaceCommand,
     ImageManifest,
     IsolationConfig,
     SecurityPolicy,
     SidecarConfig,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
-    WorkspaceAggregate,
-)
-from syn_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
-    CreateWorkspaceCommand,
-)
-from syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
+    WorkspaceAggregate,
 )
 
 if TYPE_CHECKING:

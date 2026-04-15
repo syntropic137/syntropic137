@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
@@ -88,11 +88,11 @@ class WorkspaceMetricsProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workspace_metrics"
     VERSION = 2  # Bumped: migrated to AutoDispatchProjection, renamed on_command_executed
 
-    def __init__(self, store: ProjectionStoreProtocol):
+    def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
 
         Args:
-            store: A ProjectionStoreProtocol implementation
+            store: A ProjectionStore implementation
         """
         self._store = store
 

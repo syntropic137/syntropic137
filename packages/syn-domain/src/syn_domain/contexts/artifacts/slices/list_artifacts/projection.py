@@ -34,7 +34,7 @@ class ArtifactListProjection(AutoDispatchProjection):
         """Initialize with a projection store.
 
         Args:
-            store: A ProjectionStoreProtocol implementation
+            store: A ProjectionStore implementation
         """
         self._store = store
 

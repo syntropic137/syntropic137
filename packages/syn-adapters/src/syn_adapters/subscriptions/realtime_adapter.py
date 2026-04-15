@@ -20,6 +20,8 @@ from event_sourcing import (
 )
 
 if TYPE_CHECKING:
+    from event_sourcing.core.checkpoint import DispatchContext
+
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_domain.contexts.github.slices.trigger_history.projection import (
         TriggerHistoryProjection,
@@ -276,12 +278,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         if event_type in ("WorkflowCompleted", "WorkflowFailed"):
             await self._handle_execution_terminal(event_data, event_type)
             return
-        from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
-            TriggerBlockedEvent,
-        )
-        from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
-            TriggerFiredEvent,
-        )
+        from syn_domain.contexts.github import TriggerBlockedEvent, TriggerFiredEvent
 
         if event_type == "github.TriggerBlocked":
             blocked = TriggerBlockedEvent.model_validate(event_data)
@@ -309,9 +306,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         if not execution_id:
             return
         try:
-            from syn_domain.contexts.github._shared.trigger_query_store import (
-                get_trigger_query_store,
-            )
+            from syn_domain.contexts.github import get_trigger_query_store
 
             store = get_trigger_query_store()
             await store.complete_execution(execution_id)

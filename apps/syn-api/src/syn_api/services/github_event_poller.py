@@ -13,10 +13,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.github.slices.event_pipeline.event_type_mapper import (
-    map_events_api_to_normalized,
-)
-from syn_domain.contexts.github.slices.event_pipeline.poller_state import PollerState
+from syn_domain.contexts.github import PollerState, map_events_api_to_normalized
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine

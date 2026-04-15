@@ -10,20 +10,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions._shared.value_objects import (
-    OperationType,
-    SessionStatus,
-)
-from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+from syn_domain.contexts.agent_sessions import (
     AgentSessionAggregate,
-)
-from syn_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
     CompleteSessionCommand,
-)
-from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
+    OperationType,
     RecordOperationCommand,
-)
-from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
+    SessionStatus,
     StartSessionCommand,
 )
 
@@ -79,7 +71,7 @@ class SessionLifecycleManager:
             agent_provider=self._agent_provider,
             agent_model=self._agent_model,
         )
-        self._session._handle_command(cmd)
+        self._session.start_session(cmd)
         await self._repo.save(self._session)
         logger.debug("Session started: %s (phase: %s)", self._session_id, self._phase_id)
 
@@ -107,13 +99,13 @@ class SessionLifecycleManager:
                 duration_seconds=duration_seconds,
                 metadata={"phase_id": self._phase_id, "source": source},
             )
-            self._session._handle_command(record_cmd)
+            self._session.record_operation(record_cmd)
 
         complete_cmd = CompleteSessionCommand(
             aggregate_id=self._session_id,
             success=True,
         )
-        self._session._handle_command(complete_cmd)
+        self._session.complete_session(complete_cmd)
         await self._repo.save(self._session)
         logger.debug("Session completed: %s (success, tokens: %d)", self._session_id, total_tokens)
 
@@ -128,7 +120,7 @@ class SessionLifecycleManager:
                 success=False,
                 error_message=error_message,
             )
-            self._session._handle_command(complete_cmd)
+            self._session.complete_session(complete_cmd)
             await self._repo.save(self._session)
             logger.debug("Session completed: %s (failed: %s)", self._session_id, error_message)
         except Exception as session_err:
@@ -146,7 +138,7 @@ class SessionLifecycleManager:
                 final_status=SessionStatus.CANCELLED,
                 error_message=reason,
             )
-            self._session._handle_command(complete_cmd)
+            self._session.complete_session(complete_cmd)
             await self._repo.save(self._session)
             logger.debug("Session completed (cancelled): %s", self._session_id)
         except Exception as sess_err:

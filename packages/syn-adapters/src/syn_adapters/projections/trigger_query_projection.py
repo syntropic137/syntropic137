@@ -15,6 +15,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
+    from event_sourcing.core.checkpoint import DispatchContext
+
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import (

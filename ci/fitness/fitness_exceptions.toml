@@ -3,43 +3,32 @@
 # and FITNESS-MANIFEST.md for the principle-to-test mapping.
 #
 # Grandfathered violations for REMAINING Python-based fitness checks.
+# See: docs/adrs/ADR-062-cross-context-public-api-enforcement.md
 # Cognitive complexity and file size checks migrated to APSS fitness.toml.
 # This file only tracks structural & ES invariant exceptions.
 #
-# Budgets are set to current value rounded up to nearest 5.
+# Budgets are set to exact current violation counts.
 # Adding new code that exceeds these budgets will fail CI.
 
 [layer_separation]
-# path = { imports = ["module.that.is.imported"], issue = "#NNN" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/global_cost/GetGlobalCostHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/global_overview/GetGlobalOverviewHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_activity/GetRepoActivityHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_failures/GetRepoFailuresHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_sessions/GetRepoSessionsHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/system_activity/GetSystemActivityHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/system_cost/GetSystemCostHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/system_history/GetSystemHistoryHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/system_patterns/GetSystemPatternsHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/system_status/GetSystemStatusHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/organization/slices/contribution_heatmap/GetContributionHeatmapHandler.py" = { imports = ["syn_adapters.projection_stores.protocol"], issue = "#197" }
+# All layer separation violations resolved - clean ratchet achieved.
 
 [bounded_context_isolation]
 # path = { max_contexts = N, issue = "#NNN" }
 "packages/syn-adapters/src/syn_adapters/projections/manager.py" = { max_contexts = 4, issue = "#197" }
 "packages/syn-adapters/src/syn_adapters/projections/manager_registry.py" = { max_contexts = 4, issue = "#276" }
+"apps/syn-api/src/syn_api/_wiring.py" = { max_contexts = 2, issue = "#197" }
 
 [event_sourcing_handle_command]
-# Production files calling _handle_command() directly (anti-pattern).
-# These should migrate to calling @command_handler methods on the aggregate.
-# path = { max_calls = N, issue = "#NNN" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionEngine.py" = { max_calls = 8, issue = "#138" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/SessionLifecycleManager.py" = { max_calls = 5, issue = "#138" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py" = { max_calls = 1, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/cleanup/stale_execution_cleaner.py" = { max_calls = 1, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/create_workflow_template/CreateWorkflowTemplateHandler.py" = { max_calls = 1, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/update_workflow_phase/UpdateWorkflowPhaseHandler.py" = { max_calls = 1, issue = "#402" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py" = { max_calls = 9, issue = "#196" }
-"apps/syn-api/src/syn_api/routes/artifacts.py" = { max_calls = 1, issue = "#277" }
+# All _handle_command() violations resolved - clean ratchet achieved.
+
+[cross_context_public_api]
+# Files that import from foreign contexts through internal paths (slices/, domain/, etc.)
+# instead of through the public API (contexts.<ctx> or contexts.<ctx>.ports).
+# Projection class imports (*Projection) are exempt (ADR-008 composition root pattern).
+# path = { deep_imports = N, issue = "#NNN" }
+
+# All cross-context violations resolved - clean ratchet achieved.
 
 [projection_purity]
 # Project-specific allowed import prefixes for projection files.

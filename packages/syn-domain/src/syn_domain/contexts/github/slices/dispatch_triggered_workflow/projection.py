@@ -19,7 +19,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
+    from event_sourcing.core.checkpoint import DispatchContext
 
 from event_sourcing import (
     DispatchContext,
@@ -107,7 +108,7 @@ class WorkflowDispatchProjection(ProcessManager):
     def __init__(
         self,
         execution_service: _ExecutionService | None = None,
-        store: ProjectionStoreProtocol | None = None,
+        store: ProjectionStore | None = None,
         budget_checker: _BudgetChecker | None = None,
         max_dispatches_per_hour: int = 50,
     ) -> None:
@@ -130,7 +131,7 @@ class WorkflowDispatchProjection(ProcessManager):
         self,
         envelope: EventEnvelope[DomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
-        context: DispatchContext | None = None,  # noqa: ARG002  # protocol signature
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         """PROJECTION SIDE: Write dispatch records. No side effects.
 

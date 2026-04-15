@@ -34,16 +34,10 @@ router = APIRouter(prefix="/insights", tags=["insights"])
 async def get_global_overview() -> dict[str, Any]:
     """Get global overview of all systems and repos."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization.domain.queries.get_global_overview import (
-        GetGlobalOverviewQuery,
-    )
-    from syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler import (
+    from syn_domain.contexts.organization import (
         GetGlobalOverviewHandler,
-    )
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        GetGlobalOverviewQuery,
         get_repo_projection,
-    )
-    from syn_domain.contexts.organization.slices.list_systems.projection import (
         get_system_projection,
     )
 
@@ -61,10 +55,7 @@ async def get_global_overview() -> dict[str, Any]:
 async def _get_execution_ids_for_system(system_id: str) -> set[str]:
     """Look up execution IDs correlated with repos in a system."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
-        get_repo_projection,
-    )
+    from syn_domain.contexts.organization import REPO_CORRELATION, get_repo_projection
 
     repo_projection = get_repo_projection()
     repos = await repo_projection.list_all(system_id=system_id)
@@ -154,13 +145,9 @@ async def get_contribution_heatmap(
     """Get daily contribution heatmap data."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_api._wiring import get_event_store_instance
-    from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
-        GetContributionHeatmapQuery,
-    )
-    from syn_domain.contexts.organization.slices.contribution_heatmap.GetContributionHeatmapHandler import (
+    from syn_domain.contexts.organization import (
         GetContributionHeatmapHandler,
-    )
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        GetContributionHeatmapQuery,
         get_repo_projection,
     )
 

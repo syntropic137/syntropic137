@@ -94,7 +94,7 @@ class MockAggregate:
 
         self.status = ExecutionStatus(status)
 
-    def _handle_command(self, command) -> None:
+    def fail_execution(self, command) -> None:
         """Record commands for verification."""
         self.commands.append(command)
         # Update status to failed

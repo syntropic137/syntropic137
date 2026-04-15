@@ -35,8 +35,8 @@ from syn_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
 
 if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import (
+        IndexedTrigger,
         TriggerQueryStore,
-        _IndexedTrigger,
     )
     from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
         TriggerRuleAggregate,
@@ -103,7 +103,7 @@ class EvaluateWebhookHandler:
 
     async def _evaluate_rule(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         event: str,
         repository: str,
         installation_id: str,
@@ -140,7 +140,7 @@ class EvaluateWebhookHandler:
 
     async def _guarded_evaluate(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         event: str,
         repository: str,
         installation_id: str,
@@ -174,7 +174,7 @@ class EvaluateWebhookHandler:
 
     async def _handle_guard_block(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         guard_result: GuardResult,
         event: str,
         repository: str,
@@ -204,7 +204,7 @@ class EvaluateWebhookHandler:
 
     async def _fire_trigger(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         event: str,
         repository: str,
         payload: dict[str, Any],
@@ -248,7 +248,7 @@ class EvaluateWebhookHandler:
 
     async def _record_block(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         guard_name: str,
         reason: str,
         event: str,
@@ -281,7 +281,7 @@ class EvaluateWebhookHandler:
 
     async def _schedule_deferred(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         event: str,
         repository: str,
         installation_id: str,

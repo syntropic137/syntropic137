@@ -42,10 +42,8 @@ async def create_organization(
 ) -> Result[str, OrganizationError]:
     """Create a new organization."""
     from syn_adapters.storage.repositories import get_organization_repository
-    from syn_domain.contexts.organization.domain.commands.CreateOrganizationCommand import (
+    from syn_domain.contexts.organization import (
         CreateOrganizationCommand,
-    )
-    from syn_domain.contexts.organization.slices.create_organization.CreateOrganizationHandler import (
         CreateOrganizationHandler,
     )
 
@@ -73,9 +71,7 @@ async def create_organization(
 
 async def list_organizations() -> Result[list[OrganizationSummaryResponse], OrganizationError]:
     """List all organizations."""
-    from syn_domain.contexts.organization.slices.list_organizations.projection import (
-        get_organization_projection,
-    )
+    from syn_domain.contexts.organization import get_organization_projection
 
     await ensure_connected()
 
@@ -102,9 +98,7 @@ async def get_organization(
     organization_id: str,
 ) -> Result[OrganizationSummaryResponse, OrganizationError]:
     """Get organization details."""
-    from syn_domain.contexts.organization.slices.list_organizations.projection import (
-        get_organization_projection,
-    )
+    from syn_domain.contexts.organization import get_organization_projection
 
     await ensure_connected()
 
@@ -134,11 +128,9 @@ async def update_organization(
 ) -> Result[None, OrganizationError]:
     """Update an organization."""
     from syn_adapters.storage.repositories import get_organization_repository
-    from syn_domain.contexts.organization.domain.commands.UpdateOrganizationCommand import (
-        UpdateOrganizationCommand,
-    )
-    from syn_domain.contexts.organization.slices.manage_organization.ManageOrganizationHandler import (
+    from syn_domain.contexts.organization import (
         ManageOrganizationHandler,
+        UpdateOrganizationCommand,
     )
 
     await ensure_connected()
@@ -173,10 +165,8 @@ async def delete_organization(
 ) -> Result[None, OrganizationError]:
     """Soft-delete an organization."""
     from syn_adapters.storage.repositories import get_organization_repository
-    from syn_domain.contexts.organization.domain.commands.DeleteOrganizationCommand import (
+    from syn_domain.contexts.organization import (
         DeleteOrganizationCommand,
-    )
-    from syn_domain.contexts.organization.slices.manage_organization.ManageOrganizationHandler import (
         ManageOrganizationHandler,
     )
 

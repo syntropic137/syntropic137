@@ -1,7 +1,8 @@
 """Sessions bounded context - tracks agent execution sessions.
 
-This context provides aggregates, commands, and events for tracking
-agent sessions including token usage, operations, and costs.
+Public API for cross-context consumers (ADR-062). This context provides
+aggregates, commands, and events for tracking agent sessions including
+token usage, operations, and costs.
 
 Usage:
     from syn_domain.contexts.agent_sessions import (
@@ -44,9 +45,15 @@ from syn_domain.contexts.agent_sessions._shared import (
     SessionStatus,
     TokenMetrics,
 )
+from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+    ObservationType,
+)
 from syn_domain.contexts.agent_sessions.slices.complete_session import (
     CompleteSessionCommand,
     SessionCompletedEvent,
+)
+from syn_domain.contexts.agent_sessions.slices.complete_session.CompleteSessionHandler import (
+    CompleteSessionHandler,
 )
 from syn_domain.contexts.agent_sessions.slices.record_operation import (
     OperationRecordedEvent,
@@ -60,23 +67,37 @@ from syn_domain.contexts.agent_sessions.slices.record_operation import (
     record_tool_completed,
     record_tool_started,
 )
+from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import (
+    CostCalculator,
+)
+from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
+    SessionCostQueryService,
+)
 from syn_domain.contexts.agent_sessions.slices.start_session import (
     SessionStartedEvent,
     StartSessionCommand,
+)
+from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler import (
+    StartSessionHandler,
 )
 
 __all__ = [
     "AgentSessionAggregate",
     "CompleteSessionCommand",
+    "CompleteSessionHandler",
+    "CostCalculator",
     "CostMetrics",
+    "ObservationType",
     "OperationRecord",
     "OperationRecordedEvent",
     "OperationType",
     "RecordOperationCommand",
     "SessionCompletedEvent",
+    "SessionCostQueryService",
     "SessionStartedEvent",
     "SessionStatus",
     "StartSessionCommand",
+    "StartSessionHandler",
     "TokenMetrics",
     "record_error",
     "record_message_request",

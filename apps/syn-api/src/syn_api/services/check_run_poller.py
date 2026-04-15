@@ -19,11 +19,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.github.slices.event_pipeline.check_run_synthesizer import (
-    synthesize_check_run_event,
-)
-from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
-from syn_domain.contexts.github.slices.event_pipeline.poller_state import PollerState
+from syn_domain.contexts.github import PendingSHA, PollerState, synthesize_check_run_event
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
