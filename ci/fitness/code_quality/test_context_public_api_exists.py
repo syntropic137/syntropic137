@@ -37,7 +37,11 @@ def _has_public_api(tree: ast.Module) -> bool:
     """
     for node in tree.body:
         # from syn_domain.contexts.<ctx>.something import bar
-        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("syn_domain.contexts."):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.startswith("syn_domain.contexts.")
+        ):
             return True
         # __all__ = [...]
         if isinstance(node, ast.Assign):
