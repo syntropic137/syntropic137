@@ -8,7 +8,8 @@ from decimal import Decimal
 from statistics import median
 from typing import Any
 
-from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from event_sourcing import ProjectionReadStore
+
 from syn_domain.contexts.organization._shared.projection_names import (
     REPO_CORRELATION,
     REPO_COST,
@@ -84,7 +85,7 @@ class GetSystemPatternsHandler:
 
     def __init__(
         self,
-        store: ProjectionStoreProtocol,
+        store: ProjectionReadStore,
         system_projection: SystemProjection,
         repo_projection: RepoProjection,
     ) -> None:

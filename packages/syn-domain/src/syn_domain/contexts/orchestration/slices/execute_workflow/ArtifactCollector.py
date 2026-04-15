@@ -320,5 +320,5 @@ class ArtifactCollector:
             title=title,
             storage_uri=storage_uri,
         )
-        aggregate._handle_command(command)
+        aggregate.create_artifact(command)
         await self._repository.save(aggregate)

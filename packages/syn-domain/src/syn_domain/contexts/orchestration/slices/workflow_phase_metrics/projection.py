@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
@@ -28,7 +28,7 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workflow_phase_metrics"
     VERSION = 1
 
-    def __init__(self, store: ProjectionStoreProtocol) -> None:
+    def __init__(self, store: ProjectionStore) -> None:
         self._store = store
 
     def get_name(self) -> str:

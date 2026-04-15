@@ -69,7 +69,7 @@ class UpdateWorkflowPhaseHandler:
             raise ValueError(msg)
 
         # Dispatch command to aggregate (uses @command_handler decorator)
-        aggregate._handle_command(command)
+        aggregate.update_phase_prompt(command)
 
         # Persist via repository
         await self._repository.save(aggregate)

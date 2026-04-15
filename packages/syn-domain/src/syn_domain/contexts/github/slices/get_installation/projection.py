@@ -16,7 +16,8 @@ from syn_domain.contexts.github.domain.read_models.installation import (
 )
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
+
     from syn_domain.contexts.github.domain.events.AppInstalledEvent import (
         AppInstalledEvent,
     )
@@ -106,7 +107,7 @@ def _inst_from_dict(data: dict[str, Any]) -> Installation:
 class InstallationProjection:
     """Projects installation events into the Installation read model."""
 
-    def __init__(self, store: ProjectionStoreProtocol) -> None:
+    def __init__(self, store: ProjectionStore) -> None:
         """Initialize the projection."""
         self._store = store
 

@@ -15,7 +15,8 @@ from syn_domain.contexts.github.domain.read_models.trigger_history_entry import 
 )
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
+
     from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
         TriggerBlockedEvent,
     )
@@ -72,7 +73,7 @@ def _entry_key(entry: TriggerHistoryEntry) -> str:
 class TriggerHistoryProjection:
     """Projects TriggerFired events into TriggerHistoryEntry read models."""
 
-    def __init__(self, store: ProjectionStoreProtocol) -> None:
+    def __init__(self, store: ProjectionStore) -> None:
         """Initialize the projection."""
         self._store = store
 

@@ -6,7 +6,8 @@ membership, sorted chronologically (oldest first).
 
 from datetime import UTC
 
-from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from event_sourcing import ProjectionReadStore
+
 from syn_domain.contexts.organization._shared.projection_names import (
     REPO_CORRELATION,
     WORKFLOW_EXECUTIONS,
@@ -42,7 +43,7 @@ class GetSystemHistoryHandler:
 
     def __init__(
         self,
-        store: ProjectionStoreProtocol,
+        store: ProjectionReadStore,
         repo_projection: RepoProjection,
     ) -> None:
         self._store = store

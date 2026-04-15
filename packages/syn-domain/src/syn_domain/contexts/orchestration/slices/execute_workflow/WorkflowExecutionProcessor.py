@@ -165,7 +165,7 @@ class WorkflowExecutionProcessor:
             expected_completion_at=expected_completion_at,
             phase_definitions=phase_definitions,
         )
-        aggregate._handle_command(start_cmd)
+        aggregate.start_execution(start_cmd)
         await self._save_new_and_sync(aggregate)
 
         phase_results: list[PhaseResult] = []
@@ -345,7 +345,7 @@ class WorkflowExecutionProcessor:
             duration_seconds=metrics.total_duration_seconds,
             artifact_ids=all_artifact_ids,
         )
-        aggregate._handle_command(complete_cmd)
+        aggregate.complete_execution(complete_cmd)
         await self._save_and_sync(aggregate)
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
@@ -392,7 +392,7 @@ class WorkflowExecutionProcessor:
             total_phases=len(phases),
         )
         try:
-            aggregate._handle_command(fail_cmd)
+            aggregate.fail_execution(fail_cmd)
             await self._save_and_sync(aggregate)
         except Exception as save_err:
             logger.error("Failed to save failure event: %s", save_err)
@@ -428,7 +428,7 @@ class WorkflowExecutionProcessor:
             phase_order=phase.order,
             session_id=session_id,
         )
-        aggregate._handle_command(start_cmd)
+        aggregate.start_phase(start_cmd)
 
         session_mgr = SessionLifecycleManager(
             repository=self._session_repo,
@@ -469,7 +469,7 @@ class WorkflowExecutionProcessor:
         self._active_workspace_cms[todo.phase_id] = result.workspace_cm
         self._active_envs[todo.phase_id] = result.agent_env
         self._active_cmds[todo.phase_id] = result.claude_cmd
-        aggregate._handle_command(result.command)
+        aggregate.provision_workspace_completed(result.command)
         await self._save_and_sync(aggregate)
 
     def _get_agent_handler(self) -> AgentHandlerProtocol:
@@ -547,7 +547,7 @@ class WorkflowExecutionProcessor:
             logger.error(msg)
             raise RuntimeError(msg)
 
-        aggregate._handle_command(result.command)
+        aggregate.agent_execution_completed(result.command)
         await self._save_and_sync(aggregate)
 
     async def _handle_cancel_signal(
@@ -563,7 +563,7 @@ class WorkflowExecutionProcessor:
             phase_id=todo.phase_id,
             reason=result.stream_result.interrupt_reason or "Cancelled by user",
         )
-        aggregate._handle_command(cancel_cmd)
+        aggregate.cancel_execution(cancel_cmd)
         await self._save_and_sync(aggregate)
 
     async def _handle_collect_artifacts(
@@ -595,7 +595,7 @@ class WorkflowExecutionProcessor:
         self._phase_artifact_ids[todo.phase_id] = result.artifact_ids
         if result.first_content:
             phase_outputs[todo.phase_id] = result.first_content
-        aggregate._handle_command(result.command)
+        aggregate.artifacts_collected(result.command)
         await self._save_and_sync(aggregate)
 
     async def _handle_complete_phase(
@@ -648,7 +648,7 @@ class WorkflowExecutionProcessor:
             cost_usd=tokens.estimate_cost(),
             duration_seconds=duration,
         )
-        aggregate._handle_command(complete_cmd)
+        aggregate.complete_phase(complete_cmd)
         await self._save_and_sync(aggregate)
 
         await self._finalize_phase(todo.phase_id, final_input, final_output, final_total, duration)

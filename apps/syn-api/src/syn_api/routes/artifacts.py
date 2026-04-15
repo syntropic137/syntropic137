@@ -257,7 +257,7 @@ async def create_artifact(
 
         repo = get_artifact_repo()
         aggregate = ArtifactAggregate()
-        aggregate._handle_command(command)
+        aggregate.create_artifact(command)
         await repo.save(aggregate)
         await sync_published_events_to_projections()
 

@@ -19,7 +19,8 @@ from syn_domain.contexts.organization.domain.read_models.repo_cost import RepoCo
 if TYPE_CHECKING:
     import asyncpg
 
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from event_sourcing import ProjectionStore
+
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
 
 # Aggregate cost per execution from session_summary (authoritative)
@@ -64,7 +65,7 @@ class TimescaleRepoCostQuery:
     belong to which repos (repo_correlation projection).
     """
 
-    def __init__(self, pool: asyncpg.Pool, projection_store: ProjectionStoreProtocol) -> None:
+    def __init__(self, pool: asyncpg.Pool, projection_store: ProjectionStore) -> None:
         self._pool = pool
         self._store = projection_store
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
@@ -33,7 +33,7 @@ class WorkflowListProjection(AutoDispatchProjection):
     PROJECTION_NAME = "workflow_summaries"
     VERSION = 4  # Bumped: added requires_repos field (ADR-058 #666)
 
-    def __init__(self, store: ProjectionStoreProtocol):
+    def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
         self._store = store
 

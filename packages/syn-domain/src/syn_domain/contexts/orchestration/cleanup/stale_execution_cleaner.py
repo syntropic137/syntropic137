@@ -236,7 +236,7 @@ class StaleExecutionCleaner:
             completed_phases=completed_phases,
             total_phases=total_phases,
         )
-        aggregate._handle_command(fail_cmd)
+        aggregate.fail_execution(fail_cmd)
         await self._executions.save(aggregate)
 
     async def get_stale_count(

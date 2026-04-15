@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
@@ -143,11 +143,11 @@ class SessionListProjection(AutoDispatchProjection):
     PROJECTION_NAME = "session_summaries"
     VERSION = 2  # Bumped: migrated to AutoDispatchProjection
 
-    def __init__(self, store: ProjectionStoreProtocol):
+    def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
 
         Args:
-            store: A ProjectionStoreProtocol implementation
+            store: A ProjectionStore implementation
         """
         self._store = store
 

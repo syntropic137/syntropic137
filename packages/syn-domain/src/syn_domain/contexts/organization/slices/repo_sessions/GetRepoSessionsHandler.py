@@ -17,7 +17,8 @@ from syn_domain.contexts.organization.domain.read_models.repo_session import (
 )
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionReadStore
+
     from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
         GetRepoSessionsQuery,
     )
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 class GetRepoSessionsHandler:
     """Query handler: get agent sessions for a repo."""
 
-    def __init__(self, store: ProjectionStoreProtocol) -> None:
+    def __init__(self, store: ProjectionReadStore) -> None:
         """Initialize with the shared ProjectionStore."""
         self._store = store
 

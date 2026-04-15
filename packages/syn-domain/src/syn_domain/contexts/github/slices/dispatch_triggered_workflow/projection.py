@@ -19,9 +19,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from event_sourcing import ProjectionStore
     from event_sourcing.core.checkpoint import DispatchContext
-
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from event_sourcing import (
     DispatchContext,
@@ -109,7 +108,7 @@ class WorkflowDispatchProjection(ProcessManager):
     def __init__(
         self,
         execution_service: _ExecutionService | None = None,
-        store: ProjectionStoreProtocol | None = None,
+        store: ProjectionStore | None = None,
         budget_checker: _BudgetChecker | None = None,
         max_dispatches_per_hour: int = 50,
     ) -> None:
