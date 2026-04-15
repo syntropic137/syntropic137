@@ -127,26 +127,15 @@ class InMemoryAdapter:
 ```
 
 - Uses `settings.uses_in_memory_stores` (= `is_test or is_offline`), the canonical check
-- All 11 in-memory adapters now inherit from `InMemoryAdapter` or call `assert_test_only()` (for dataclasses that can't inherit `__init__`)
-- `_create_dedup_adapter()` raises `RuntimeError` instead of falling back to in-memory -- belt-and-suspenders with the base class guard
+- All in-memory adapters now inherit from `InMemoryAdapter` or call `assert_test_only()` (for dataclasses that can't inherit `__init__`). No exceptions.
+- `_create_dedup_adapter()` and `get_pending_sha_store()` raise `RuntimeError` instead of falling back to in-memory -- belt-and-suspenders with the base class guard
 - A standalone `assert_test_only()` function is exported for dataclasses (`InMemoryEventStore`, `InMemoryProjectionStore`) that use `__post_init__`
 
 **Location:** `packages/syn-adapters/src/syn_adapters/in_memory.py`
 
-### 6. InMemoryPendingSHAStore: intentional production exception
+### 6. Cold-Start Fence (HistoricalPoller)
 
-`InMemoryPendingSHAStore` (`packages/syn-adapters/src/syn_adapters/github/pending_sha_store.py`) is the one in-memory store that intentionally does NOT inherit from `InMemoryAdapter`. It is allowed in production because:
-
-- **Purpose:** Tracks commit SHAs pending check-run polling (#602). When a `pull_request` event arrives, the head SHA is registered. The Checks API poller reads pending SHAs and polls for CI results.
-- **Loss on restart is acceptable:** The next `pull_request` event (or Events API poll) re-registers the SHA. Worst case is a delayed check-run poll, not a duplicate execution.
-- **No correctness impact:** Unlike dedup state (where loss causes duplicates) or control state (where loss causes orphaned executions), PendingSHA loss causes a temporary gap in check-run awareness that self-heals.
-- **No billing impact:** No workflow execution is triggered by PendingSHA alone -- it only enables polling. The dedup layer (section 1) prevents duplicate trigger fires from the polled results.
-
-This exception is intentional and documented. The file carries a comment explaining why it differs from other in-memory stores.
-
-### 7. Cold-Start Fence (HistoricalPoller)
-
-Sections 1-6 protect against **warm restart** (state existed, was lost). But on **cold start** (fresh install, empty database), there is no state to lose -- the poller has no cursor, dedup table is empty, Guard 4 has no history, and Guard 6 tracks no running executions. All 300 historical events from the GitHub Events API pass every layer and fire triggers.
+Sections 1-5 protect against **warm restart** (state existed, was lost). But on **cold start** (fresh install, empty database), there is no state to lose -- the poller has no cursor, dedup table is empty, Guard 4 has no history, and Guard 6 tracks no running executions. All 300 historical events from the GitHub Events API pass every layer and fire triggers.
 
 This caused 9 duplicate "Self-Heal PR" executions on the sandbox repo after a fresh install (9/10 OOM-killed: 10 x 4GB containers on a 7.65GB Docker VM).
 
@@ -170,7 +159,7 @@ This is implemented as a base class in the Event Sourcing Platform: `HistoricalP
 
 **Location:** `lib/event-sourcing-platform/event-sourcing/python/src/event_sourcing/core/historical_poller.py`
 
-### 8. Pipeline Safety Net (source_primed)
+### 7. Pipeline Safety Net (source_primed)
 
 Belt-and-suspenders with the HistoricalPoller fence. Even if someone bypasses the base class and calls `pipeline.ingest()` directly with historical events, the pipeline checks `NormalizedEvent.source_primed`:
 
@@ -182,7 +171,7 @@ This second layer protects against implementation mistakes where historical even
 
 **Location:** `packages/syn-domain/.../event_pipeline/normalized_event.py` and `pipeline.py`
 
-### 9. Configurable dispatch concurrency
+### 8. Configurable dispatch concurrency
 
 `BackgroundWorkflowDispatcher.MAX_CONCURRENT` was hardcoded at 10. On a Docker host with limited memory (e.g., 8GB), 10 simultaneous 4GB containers cause OOM kills.
 
@@ -212,13 +201,13 @@ After this ADR, both warm restart and cold start are protected by seven independ
 
 | Layer | Component | What it prevents | Persistent? | Cold start? |
 |-------|-----------|-----------------|-------------|-------------|
-| 0 | HistoricalPoller fence (section 7) | Processing historical events on first poll | Yes (cursor) | Yes |
-| 0b | Pipeline source_primed (section 8) | Trigger eval for unprimed events (belt-and-suspenders) | N/A (per-event flag) | Yes |
+| 0 | HistoricalPoller fence (section 6) | Processing historical events on first poll | Yes (cursor) | Yes |
+| 0b | Pipeline source_primed (section 7) | Trigger eval for unprimed events (belt-and-suspenders) | N/A (per-event flag) | Yes |
 | 1 | Poller cursor (Postgres) | Re-fetching events from GitHub | Yes | After first poll |
 | 2 | Dedup (Postgres) | Re-processing known events | Yes | After first event |
 | 3 | Guard 4 (fixed) | Re-evaluating triggers for known events | Yes (event store) | After first fire |
 | 4 | Guard 7 (rate limiter) | Runaway dispatch from any cause | Stateless (sliding window) | Yes |
-| 5 | Dispatch concurrency (section 9) | OOM from too many concurrent containers | Config (default 5) | Yes |
+| 5 | Dispatch concurrency (section 8) | OOM from too many concurrent containers | Config (default 5) | Yes |
 
 ## Related ADRs
 
