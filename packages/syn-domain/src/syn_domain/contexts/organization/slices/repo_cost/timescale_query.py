@@ -19,7 +19,7 @@ from syn_domain.contexts.organization.domain.read_models.repo_cost import RepoCo
 if TYPE_CHECKING:
     import asyncpg
 
-from event_sourcing import ProjectionStore
+    from event_sourcing import ProjectionStore
 
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
 
