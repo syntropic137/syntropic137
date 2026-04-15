@@ -870,9 +870,7 @@ class TestResolveRepos:
             ExecuteWorkflowHandler,
         )
 
-        result = ExecuteWorkflowHandler._resolve_repos(
-            _make_cmd(), {}, _make_workflow_stub()
-        )
+        result = ExecuteWorkflowHandler._resolve_repos(_make_cmd(), {}, _make_workflow_stub())
         assert result == []
 
     def test_repos_takes_precedence_over_template_repos_and_repo_url(self) -> None:

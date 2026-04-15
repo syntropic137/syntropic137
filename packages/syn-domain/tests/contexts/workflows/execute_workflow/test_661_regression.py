@@ -228,7 +228,9 @@ class TestReposVariableSubstitution:
         """{{owner}}/app + merged_inputs["owner"] = acme -> full GitHub URL."""
         wf = _make_workflow_with_repos(["{{owner}}/app"])
         result = ExecuteWorkflowHandler._resolve_repos(
-            _empty_cmd(), {"owner": "acme"}, wf  # type: ignore[arg-type]
+            _empty_cmd(),
+            {"owner": "acme"},
+            wf,  # type: ignore[arg-type]
         )
 
         assert result == ["https://github.com/acme/app"]
@@ -237,7 +239,9 @@ class TestReposVariableSubstitution:
         """Full URL template resolves correctly."""
         wf = _make_workflow_with_repos(["https://github.com/{{org}}/{{repo}}"])
         result = ExecuteWorkflowHandler._resolve_repos(
-            _empty_cmd(), {"org": "myorg", "repo": "myapp"}, wf  # type: ignore[arg-type]
+            _empty_cmd(),
+            {"org": "myorg", "repo": "myapp"},
+            wf,  # type: ignore[arg-type]
         )
 
         assert result == ["https://github.com/myorg/myapp"]
@@ -248,7 +252,9 @@ class TestReposVariableSubstitution:
 
         with pytest.raises(ValueError, match="Unresolved placeholders"):
             ExecuteWorkflowHandler._resolve_repos(
-                _empty_cmd(), {}, wf  # type: ignore[arg-type]
+                _empty_cmd(),
+                {},
+                wf,  # type: ignore[arg-type]
             )
 
     def test_unresolved_placeholder_error_names_the_variable(self):
@@ -257,14 +263,18 @@ class TestReposVariableSubstitution:
 
         with pytest.raises(ValueError, match="repository"):
             ExecuteWorkflowHandler._resolve_repos(
-                _empty_cmd(), {}, wf  # type: ignore[arg-type]
+                _empty_cmd(),
+                {},
+                wf,  # type: ignore[arg-type]
             )
 
     def test_static_url_passes_through_unchanged(self):
         """Static repos without {{}} are returned as-is (no normalisation change)."""
         wf = _make_workflow_with_repos(["https://github.com/acme/app"])
         result = ExecuteWorkflowHandler._resolve_repos(
-            _empty_cmd(), {}, wf  # type: ignore[arg-type]
+            _empty_cmd(),
+            {},
+            wf,  # type: ignore[arg-type]
         )
 
         assert result == ["https://github.com/acme/app"]
@@ -273,7 +283,9 @@ class TestReposVariableSubstitution:
         """All repos in the list get substitution applied."""
         wf = _make_workflow_with_repos(["{{owner}}/app1", "{{owner}}/app2"])
         result = ExecuteWorkflowHandler._resolve_repos(
-            _empty_cmd(), {"owner": "acme"}, wf  # type: ignore[arg-type]
+            _empty_cmd(),
+            {"owner": "acme"},
+            wf,  # type: ignore[arg-type]
         )
 
         assert result == [
@@ -300,7 +312,9 @@ class TestReposVariableSubstitution:
         wf.input_declarations = []
 
         result = ExecuteWorkflowHandler._resolve_repos(
-            _empty_cmd(), {}, wf  # type: ignore[arg-type]
+            _empty_cmd(),
+            {},
+            wf,  # type: ignore[arg-type]
         )
 
         assert result == ["https://github.com/acme/fallback"]
