@@ -56,10 +56,11 @@ class RepositoryRef:
 
     @classmethod
     def from_url(cls, url: str) -> RepositoryRef:
-        """Construct from a GitHub HTTPS URL.
+        """Construct from a GitHub HTTP(S) URL.
 
-        Accepts ``https://github.com/owner/repo``, with optional
-        trailing slash or ``.git`` suffix.
+        Accepts ``https://github.com/owner/repo`` or ``http://...``,
+        with optional trailing slash or ``.git`` suffix.
+        The canonical output (via ``.https_url``) always uses HTTPS.
 
         Raises:
             ValueError: If URL doesn't match expected GitHub format.

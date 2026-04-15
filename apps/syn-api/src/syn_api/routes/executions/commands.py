@@ -439,7 +439,15 @@ async def _validate_execution_request(
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
     # ADR-063: convert string URLs to typed RepositoryRef at the API boundary
-    typed_repos = [RepositoryRef.parse(r) for r in request.repos] if request.repos else []
+    typed_repos: list[RepositoryRef] = []
+    for repo in request.repos:
+        try:
+            typed_repos.append(RepositoryRef.parse(repo))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid repository entry '{repo}': {exc}",
+            ) from exc
 
     # Build effective inputs (legacy CSV preserved for backward compat)
     effective_inputs: dict[str, str] = dict(request.inputs)

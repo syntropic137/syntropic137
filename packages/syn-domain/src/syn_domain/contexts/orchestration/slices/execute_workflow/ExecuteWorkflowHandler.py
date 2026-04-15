@@ -211,7 +211,7 @@ class ExecuteWorkflowHandler:
         merged_inputs: dict[str, str],
         workflow: WorkflowTemplateAggregate,
     ) -> list[str]:
-        """Resolve repos: typed command repos -> inputs CSV -> template-level -> repository_url fallback.
+        """Resolve repos: typed command repos -> inputs CSV -> trigger repository -> template repos -> repository_url fallback.
 
         ADR-063: typed ``command.repos`` (populated at context boundaries)
         takes precedence over implicit dict-key conventions.

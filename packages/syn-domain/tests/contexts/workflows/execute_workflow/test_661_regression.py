@@ -21,6 +21,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+    ExecuteWorkflowCommand,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
     ExecutionCancelledEvent,
 )
@@ -209,12 +212,8 @@ def _make_workflow_with_repos(repos: list[str]) -> MagicMock:
     return wf
 
 
-def _empty_cmd(inputs: dict[str, str] | None = None) -> object:
+def _empty_cmd(inputs: dict[str, str] | None = None) -> ExecuteWorkflowCommand:
     """Create a minimal ExecuteWorkflowCommand with no typed repos."""
-    from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
-        ExecuteWorkflowCommand,
-    )
-
     return ExecuteWorkflowCommand(
         aggregate_id="wf-test",
         inputs=inputs or {},
@@ -297,7 +296,7 @@ class TestReposVariableSubstitution:
         """If merged_inputs contains 'repos' CSV, workflow.repos is ignored entirely."""
         wf = _make_workflow_with_repos(["https://github.com/stored/repo"])
         result = ExecuteWorkflowHandler._resolve_repos(
-            _empty_cmd(),  # type: ignore[arg-type]
+            _empty_cmd(),
             {"repos": "https://github.com/runtime/repo"},
             wf,
         )

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
     TodoAction,
     TodoItem,
@@ -17,6 +18,9 @@ from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+    ExecuteWorkflowCommand,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     StreamResult,
@@ -770,17 +774,13 @@ def _make_workflow_stub(
 
 def _make_cmd(
     inputs: dict[str, str] | None = None,
-    repos: list[object] | None = None,
-) -> object:
+    repos: list[RepositoryRef] | None = None,
+) -> ExecuteWorkflowCommand:
     """Create a minimal ExecuteWorkflowCommand for _resolve_repos tests."""
-    from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
-        ExecuteWorkflowCommand,
-    )
-
     return ExecuteWorkflowCommand(
         aggregate_id="wf-test",
         inputs=inputs or {},
-        repos=repos or [],  # type: ignore[arg-type]  # test helper accepts generic list
+        repos=repos or [],
     )
 
 
@@ -790,7 +790,6 @@ class TestResolveRepos:
 
     def test_typed_repos_take_precedence(self) -> None:
         """Typed RepositoryRef on command takes precedence over everything (ADR-063)."""
-        from syn_domain.contexts._shared.repository_ref import RepositoryRef
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
