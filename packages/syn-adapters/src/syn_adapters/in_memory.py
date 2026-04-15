@@ -5,9 +5,6 @@ InMemoryAdapter. The environment check runs once at instantiation.
 
 See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)
 for why in-memory state is dangerous in production (restart storms).
-
-The one intentional exception is InMemoryPendingSHAStore, which is
-ephemeral by design -- see ADR-060 section 6 for the rationale.
 """
 
 from __future__ import annotations

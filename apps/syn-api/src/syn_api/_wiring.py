@@ -439,7 +439,11 @@ _pending_sha_store_singleton: object | None = None
 
 
 def get_pending_sha_store() -> PendingSHAStore:
-    """Return the singleton PendingSHAStore for check-run polling."""
+    """Return the singleton PendingSHAStore for check-run polling.
+
+    ADR-060: production requires a durable backend. Never silently
+    falls back to in-memory -- raises RuntimeError instead.
+    """
     global _pending_sha_store_singleton
     if _pending_sha_store_singleton is not None:
         return _pending_sha_store_singleton  # type: ignore[return-value]
@@ -448,8 +452,16 @@ def get_pending_sha_store() -> PendingSHAStore:
 
     settings = get_settings()
 
-    # Prefer Postgres for restart durability
-    if not settings.uses_in_memory_stores and settings.syn_observability_db_url:
+    # Test/offline: use in-memory (guarded by InMemoryAdapter base class)
+    if settings.uses_in_memory_stores:
+        from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
+
+        mem_store: PendingSHAStore = InMemoryPendingSHAStore()
+        _pending_sha_store_singleton = mem_store
+        return mem_store
+
+    # Production: Postgres required (ADR-060)
+    if settings.syn_observability_db_url:
         try:
             from syn_api._wiring_db import get_shared_db_pool
 
@@ -465,15 +477,16 @@ def get_pending_sha_store() -> PendingSHAStore:
                 return store
         except Exception:
             logger.warning(
-                "Postgres PendingSHAStore unavailable, falling back to in-memory",
+                "Postgres PendingSHAStore unavailable",
                 exc_info=True,
             )
 
-    from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
-
-    mem_store: PendingSHAStore = InMemoryPendingSHAStore()
-    _pending_sha_store_singleton = mem_store
-    return mem_store
+    # ADR-060: NEVER silent fallback to in-memory in production
+    msg = (
+        "No durable PendingSHAStore backend available. "
+        "Configure SYN_OBSERVABILITY_DB_URL for production use."
+    )
+    raise RuntimeError(msg)
 
 
 async def sync_published_events_to_projections() -> None:

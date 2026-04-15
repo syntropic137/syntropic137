@@ -3,6 +3,8 @@
 When a pull_request event arrives, the CheckRunPoller registers the head SHA
 as pending. The poller then polls the Checks API for each pending SHA until
 all check runs complete, synthesizing check_run.completed events for failures.
+
+See ADR-060: Restart-safe trigger deduplication (InMemoryAdapter guard).
 """
 
 from __future__ import annotations
@@ -40,8 +42,8 @@ class PendingSHA:
 class PendingSHAStore(Protocol):
     """Port: tracks commit SHAs whose check runs need polling.
 
-    In-memory by default. SHAs are ephemeral — a restart just means a
-    brief gap until the next PR event re-registers the SHA.
+    Production uses PostgresPendingSHAStore for restart durability.
+    In-memory implementation is test/offline only (InMemoryAdapter guard).
     """
 
     async def register(self, pending: PendingSHA) -> None:
