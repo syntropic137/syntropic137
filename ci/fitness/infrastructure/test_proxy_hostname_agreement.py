@@ -6,6 +6,8 @@ and DEFAULT_PROXY_URL all agree on the same proxy hostname.
 Drift between these three sources caused a production bug (ISS-405) where
 the selfhost stack used a different container name than what the code expected,
 breaking credential injection for all agents.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

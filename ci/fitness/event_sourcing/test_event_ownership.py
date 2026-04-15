@@ -5,6 +5,8 @@ Enforces core event sourcing rules:
 2. _apply() and _raise_event() must only be called from aggregate_*/ files.
 3. State mutation (self._field = ...) in aggregates must only occur in
    @event_sourcing_handler or __init__ methods, never in @command_handler methods.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

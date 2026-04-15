@@ -11,12 +11,16 @@ and multi-instance implications:
 
 This test enforces that known in-memory state locations carry one of
 these classification markers.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
-from ci.fitness.conftest import repo_root
+from ci.fitness.conftest import load_exceptions, repo_root
 
 _CLASSIFICATION_MARKERS = (
     "# CORRECTNESS:",
@@ -24,29 +28,19 @@ _CLASSIFICATION_MARKERS = (
     "# PERFORMANCE:",
 )
 
-# Known in-memory state locations: (relative path, variable pattern, description)
-_KNOWN_STATE: list[tuple[str, str, str]] = [
-    (
-        "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/EvaluateWebhookHandler.py",
-        "_fire_locks",
-        "per-(trigger, pr) asyncio.Lock dict for concurrency guard",
-    ),
-    (
-        "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/debouncer.py",
-        "_pending",
-        "pending debounce task dict",
-    ),
-    (
-        "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/safety_guards.py",
-        "_dispatch_timestamps",
-        "dispatch rate limit timestamp list",
-    ),
-    (
-        "apps/syn-api/src/syn_api/routes/webhooks/signature.py",
-        "_sig_failures",
-        "signature failure rate limiter dict",
-    ),
-]
+
+def _load_known_state() -> list[tuple[str, str, str]]:
+    """Load in-memory state registry from fitness_exceptions.toml [in_memory_state]."""
+    section: dict[str, Any] = load_exceptions().get("in_memory_state", {})
+    entries: list[tuple[str, str, str]] = []
+    for path, config in section.items():
+        entries.append((path, config["variable"], config["description"]))
+    return entries
+
+
+# Known in-memory state locations - loaded from fitness_exceptions.toml
+# so all fitness config lives in one place.
+_KNOWN_STATE: list[tuple[str, str, str]] = _load_known_state()
 
 
 def _has_classification(content: str, variable: str) -> bool:

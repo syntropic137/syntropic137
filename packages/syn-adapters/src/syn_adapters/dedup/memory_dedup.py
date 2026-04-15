@@ -1,23 +1,30 @@
-"""In-memory LRU dedup adapter for tests and Redis-unavailable fallback."""
+"""In-memory LRU dedup adapter -- test/offline only.
+
+See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)
+for why in-memory dedup must never run in production (restart storms).
+"""
 
 from __future__ import annotations
 
 import time
 from collections import OrderedDict
 
+from syn_adapters.in_memory import InMemoryAdapter
+
 _DEFAULT_MAX_SIZE = 10_000
 
 
-class InMemoryDedupAdapter:
+class InMemoryDedupAdapter(InMemoryAdapter):
     """In-memory LRU dedup adapter.
 
     Implements :class:`~syn_domain.contexts.github.slices.event_pipeline.dedup_port.DedupPort`.
 
-    Uses :class:`OrderedDict` for O(1) LRU eviction. Suitable for
-    tests, offline mode, and as a fallback when Redis is unavailable.
+    Uses :class:`OrderedDict` for O(1) LRU eviction. Test/offline only --
+    inherits environment guard from :class:`InMemoryAdapter`.
     """
 
     def __init__(self, max_size: int = _DEFAULT_MAX_SIZE) -> None:
+        super().__init__()
         self._seen: OrderedDict[str, float] = OrderedDict()
         self._max_size = max_size
 

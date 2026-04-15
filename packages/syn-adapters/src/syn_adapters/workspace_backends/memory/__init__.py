@@ -2,25 +2,15 @@
 
 ⚠️  TEST ENVIRONMENT ONLY ⚠️
 
-All adapters in this module will raise TestEnvironmentRequiredError
-if used outside of APP_ENVIRONMENT=test or APP_ENVIRONMENT=testing.
+All adapters inherit from InMemoryAdapter, which enforces
+test/offline-only usage via settings.uses_in_memory_stores.
 
-This is enforced per ADR-004 and ADR-023.
-
-Usage:
-    # Set environment
-    os.environ["APP_ENVIRONMENT"] = "test"
-
-    # Then use adapters
-    from syn_adapters.workspace_backends.memory import MemoryIsolationAdapter
-
-    adapter = MemoryIsolationAdapter()
-    handle = await adapter.create(config)
+See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
+from syn_adapters.in_memory import InMemoryAdapterError as TestEnvironmentRequiredError
 from syn_adapters.workspace_backends.memory.memory_adapter import (
     MemoryIsolationAdapter,
-    TestEnvironmentRequiredError,
 )
 from syn_adapters.workspace_backends.memory.memory_artifact import (
     MemoryArtifactAdapter,

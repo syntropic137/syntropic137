@@ -403,16 +403,14 @@ def _create_dedup_adapter() -> DedupPort:
             redis_client,
             ttl_seconds=settings.polling.dedup_ttl_seconds,
         )
-    except Exception:
-        logger.error(
+    except Exception as exc:
+        # ADR-060: Never fall back to in-memory dedup in production --
+        # dedup state is lost on restart, causing duplicate workflow executions.
+        raise RuntimeError(
             "No durable dedup backend available (Postgres and Redis both failed). "
-            "Using in-memory fallback - dedup state will be lost on restart. "
-            "Configure SYN_OBSERVABILITY_DB_URL or REDIS_URL for production use.",
-            exc_info=True,
-        )
-        from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
-
-        return InMemoryDedupAdapter()
+            "Configure SYN_OBSERVABILITY_DB_URL or REDIS_URL for production. "
+            "See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)."
+        ) from exc
 
 
 def get_webhook_health_tracker() -> WebhookHealthTracker:

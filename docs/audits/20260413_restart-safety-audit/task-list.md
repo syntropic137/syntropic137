@@ -1,6 +1,6 @@
 # Restart Safety Audit - Task List
 
-Last updated: 2026-04-14T18:32
+Last updated: 2026-04-14T15:52
 
 ## Completed
 
@@ -28,17 +28,30 @@ Last updated: 2026-04-14T18:32
   - [x] A2: Semaphore-bounded concurrency (MAX_CONCURRENT=10) on BackgroundWorkflowDispatcher
   - [x] A3: Background task exception wrapper in execute_workflow_endpoint
   - [x] A4: InMemoryDedupAdapter fallback logs ERROR (fail-open with warning)
-  - [ ] A1: Dispatch idempotency check in ExecuteWorkflowHandler (deferred - needs execution repo query pattern)
+  - [x] A1: Dispatch idempotency via save_new() + StreamAlreadyExistsError -> DuplicateExecutionError
 - [x] Syn137 Phase B: Structural fix
   - [x] B1+B2: WorkflowDispatchProjection converted to ProcessManager (handle_event pure, process_pending live-only)
   - [x] B3: TriggerRuleAggregate.record_fired() now guards with can_fire()
-- [ ] Syn137 Phase C: Cost safety (SpendTracker, rate limit, ExpectedVersion.NoStream)
-- [ ] Syn137 Phase D: Error handling (silent swallowing, trigger lifecycle events)
-- [ ] Syn137 Phase E: Hygiene (distributed locks, pagination, TTL fix, persist SHAs)
+- [x] Syn137 Phase C: Cost safety - PR #681
+  - [x] C1: SpendTracker budget check wired into dispatch chain (_BudgetChecker protocol)
+  - [x] C2: Per-hour dispatch rate limit (50/hr default, SYN_POLLING_MAX_DISPATCHES_PER_HOUR)
+  - [x] C3: ExpectedVersion.NoStream (done in PR #676 via save_new)
+- [x] Syn137 Phase D: Error handling - PR #679
+  - [x] D1a: reconcile_running_sessions exception logging
+  - [x] D1b: debouncer task done callback
+  - [x] D1c: lifecycle recovery task done callback
+  - [x] D1d: postgres_dedup cleanup task done callback
+- [x] Syn137 Phase E: Hygiene - PR #680
+  - [x] E2: Events API pagination (up to 10 pages)
+  - [x] E3: Dedup TTL alignment (Postgres now uses settings value)
+  - [x] E4: PostgresPendingSHAStore (durable across restarts)
+  - [x] E5: Prune _fire_locks dict (bounded to 1000)
+  - [x] E5-adj: Bound _sig_failures dict (bounded to 10k IPs)
+  - Deferred: E1 (distributed locks - multi-instance only)
 - [x] Wire ESP fitness into ci/fitness (11 new tests: purity, ProcessManager, regression guard)
 - [x] Fix handle_event override signatures (DispatchContext parameter on all 6 adapter overrides)
 - [x] Address Copilot review comments: query() for pending records, delete_all(), honest docstring, ValueError on can_fire()
-- [x] Ignore pytest 9.0.2 vulnerability in CI (GHSA-6w46-j5rx-g56g, tracked in #677)
+- [x] Upgrade pytest 9.0.2 -> 9.0.3 (GHSA-6w46-j5rx-g56g fixed, #677 closed)
 
 ## Completed (this session)
 
@@ -47,26 +60,33 @@ Last updated: 2026-04-14T18:32
 - [x] Deep audit: in-memory state patterns (12 components, 5 critical/high)
 - [x] Consolidated findings in [14-deep-audit-findings.md](14-deep-audit-findings.md)
 - [x] Multi-instance readiness assessment (not safe today - 7 components need work)
+- [x] PR #679 (Phase D - error handling) merged
+- [x] PR #680 (Phase E - hygiene) merged
+- [x] PR #681 (Phase C - cost safety) merged
+- [x] PR #689 (D3 - trigger lifecycle events) merged
+- [x] PR #690 (Fitness functions F5, F6) merged
+- [x] GitHub issues created for all deferred gaps (#682-#688)
+- [x] All Copilot review comments addressed on all PRs
 
 ## Remaining Work (not blocked)
 
-- [ ] Create GitHub issues for each fix (Phases A-E)
-- [ ] Update AGENTS.md with three-way split principle
+- [x] Create GitHub issues for deferred gaps (#682-#688)
+- [x] Update AGENTS.md with three-way split principle (#688)
 - [ ] Commit Syn137 audit documents to this branch
-- [ ] Add InMemoryDedupAdapter fail-closed fix to Phase A
+- [x] Add InMemoryDedupAdapter fail-closed fix (InMemoryAdapter base class, ADR-060 s5+s6)
 
 ## Fitness Functions
 
 - [x] F1: Projection purity (shipped in ESP fitness module)
+- [x] F2: Restart safety (test_restart_safety.py - ProcessManagerScenario replay test)
+- [x] F3: Dedup durability (test_dedup_durability.py - structural pipeline wiring checks)
 - [x] F4: Replay safety (shipped in ESP fitness module)
-- [ ] F2: Restart safety integration test (with Phase B)
-- [ ] F3: Dedup durability check (with Phase C)
-- [ ] F5: Error propagation check (quick win, Syn137-specific)
-- [ ] F6: In-memory correctness guard audit (quick win, Syn137-specific)
-- [ ] F7: Cost ceiling check (with Phase C)
-- [ ] F8: Aggregate guard check (with Phase B)
-- [ ] F9: Background task exception wrapper (quick win, Syn137-specific)
-- [ ] F10: Bounded context independence check (quick win, Syn137-specific)
+- [x] F5: Error propagation check (PR #690)
+- [x] F6: In-memory correctness guard audit (PR #690)
+- [x] F7: Cost ceiling (test_cost_ceiling.py - rate limit + budget wiring + config defaults)
+- [x] F8: Aggregate guard (test_aggregate_guards.py - @command_handler precondition checks)
+- [x] F9: Background task exception wrapper (already covered by existing test)
+- [x] F10: Bounded context independence check (already covered by existing test)
 
 ## Architecture Gaps Found (from audit)
 

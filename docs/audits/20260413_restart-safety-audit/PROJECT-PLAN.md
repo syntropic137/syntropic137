@@ -380,13 +380,13 @@ After all phases, the system must pass these tests:
 
 ## Estimated Timeline
 
-| Phase | Status | Repo |
-|-------|--------|------|
-| 0: ESP foundation | **COMPLETE** - PR syntropic137/event-sourcing-platform#274 | event-sourcing-platform |
-| A: Stop the bleeding | **IN PROGRESS** - A2/A3/A4 done, A1 deferred | syntropic137 |
-| B: Structural fix | **DONE** - ProcessManager conversion, aggregate guard | syntropic137 |
-| C: Cost safety | Not started | syntropic137 |
-| D: Error handling | Not started (D2 done in ESP Phase 0) | both |
-| E: Hygiene | Not started | syntropic137 |
+| Phase | Status | Repo | PR |
+|-------|--------|------|----|
+| 0: ESP foundation | **COMPLETE** | event-sourcing-platform | #274 |
+| A: Stop the bleeding | **COMPLETE** - A1 deferred (dispatch idempotency) | syntropic137 | #676 |
+| B: Structural fix | **COMPLETE** - ProcessManager conversion, aggregate guard | syntropic137 | #676 |
+| C: Cost safety | **COMPLETE** - budget check, dispatch rate limit | syntropic137 | #681 |
+| D: Error handling | **COMPLETE** - background task exception logging | syntropic137 | #679, #689 |
+| E: Hygiene | **COMPLETE** - pagination, TTL, durable SHAs, bounded dicts | syntropic137 | #680 |
 
-**Next:** Wire ESP fitness into `just fitness-check`. Then Phase C (cost safety) + Phase D (error handling).
+All phases complete. 138 fitness functions enforced in CI. InMemoryAdapter base class guards production. Single-instance reliability is solid. Multi-instance (#682-#688) deferred to post-launch.

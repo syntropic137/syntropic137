@@ -3,6 +3,8 @@
 Each production file should reference at most 1 foreign bounded context.
 Files in _shared/ directories are exempt (they serve multiple contexts by design).
 TYPE_CHECKING imports are exempt.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

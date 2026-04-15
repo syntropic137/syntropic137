@@ -1,4 +1,7 @@
-"""Shared fixtures and helpers for architectural fitness functions."""
+"""Shared fixtures and helpers for architectural fitness functions.
+
+See ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md).
+"""
 
 from __future__ import annotations
 

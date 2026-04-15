@@ -3,8 +3,10 @@
 Validates:
 1. All docker-compose*.yaml files are valid YAML (parse without error).
 2. Build args declared in compose files are a subset of ARGs in the corresponding
-   Dockerfile — build-args that don't exist in the Dockerfile are silently ignored
+   Dockerfile -- build-args that don't exist in the Dockerfile are silently ignored
    by Docker, masking configuration drift.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

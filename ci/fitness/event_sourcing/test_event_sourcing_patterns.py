@@ -11,6 +11,8 @@ Rules:
 
 2. Aggregate files must have matching @command_handler and @event_sourcing_handler
    decorators (every command should produce at least one event).
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

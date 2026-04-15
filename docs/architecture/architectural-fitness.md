@@ -11,6 +11,9 @@ Use this document as the lens for every architectural review, every PR
 that touches the trigger or execution pipeline, and every incident
 post-mortem.
 
+Enforcement standard: [ADR-062](../adrs/ADR-062-architectural-fitness-function-standard.md) |
+Test index: [FITNESS-MANIFEST.md](../../ci/fitness/FITNESS-MANIFEST.md)
+
 ---
 
 ## The Fundamental Principle
