@@ -7,7 +7,6 @@ Verifies:
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -22,8 +21,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     SidecarConfig,
     TokenType,
 )
+from syn_shared.settings.config import AppEnvironment, Settings
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from syn_adapters.workspace_backends.memory import (
         MemoryArtifactAdapter,
         MemoryEventStreamAdapter,
@@ -35,6 +37,12 @@ if TYPE_CHECKING:
         IsolationHandle,
     )
 
+
+def _mock_settings(env: AppEnvironment) -> Settings:
+    """Build a Settings object for the given environment without touching os.environ."""
+    return Settings(app_environment=env)  # type: ignore[call-arg]
+
+
 # =============================================================================
 # TEST ENVIRONMENT ENFORCEMENT
 # =============================================================================
@@ -42,93 +50,114 @@ if TYPE_CHECKING:
 
 @pytest.mark.unit
 class TestEnvironmentEnforcement:
-    """Tests for test environment enforcement per ADR-004."""
+    """Tests for test environment enforcement (ADR-060)."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_settings_cache(self) -> Iterator[None]:
+        """Reset cached settings after each test.
+
+        Environment enforcement tests override get_settings() which
+        poisons the lru_cache. Without this cleanup, subsequent tests
+        see stale settings.
+        """
+        yield
+        from syn_shared.settings import reset_settings
+
+        reset_settings()
 
     def test_memory_isolation_adapter_fails_in_development(self) -> None:
         """Test that MemoryIsolationAdapter fails in development environment."""
+        from syn_adapters.in_memory import InMemoryAdapterError
         from syn_adapters.workspace_backends.memory.memory_adapter import (
             MemoryIsolationAdapter,
-            TestEnvironmentRequiredError,
         )
 
-        with patch.dict(os.environ, {"APP_ENVIRONMENT": "development"}):
-            with pytest.raises(TestEnvironmentRequiredError) as exc_info:
-                MemoryIsolationAdapter()
-
-            assert "development" in str(exc_info.value)
-            assert "TESTS ONLY" in str(exc_info.value)
-            assert "ADR-004" in str(exc_info.value)
+        with (
+            patch(
+                "syn_adapters.in_memory.get_settings",
+                return_value=_mock_settings(AppEnvironment.DEVELOPMENT),
+            ),
+            pytest.raises(InMemoryAdapterError, match="test/offline only"),
+        ):
+            MemoryIsolationAdapter()
 
     def test_memory_isolation_adapter_fails_in_production(self) -> None:
         """Test that MemoryIsolationAdapter fails in production environment."""
+        from syn_adapters.in_memory import InMemoryAdapterError
         from syn_adapters.workspace_backends.memory.memory_adapter import (
             MemoryIsolationAdapter,
-            TestEnvironmentRequiredError,
         )
 
-        with patch.dict(os.environ, {"APP_ENVIRONMENT": "production"}):
-            with pytest.raises(TestEnvironmentRequiredError) as exc_info:
-                MemoryIsolationAdapter()
-
-            assert "production" in str(exc_info.value)
+        with (
+            patch(
+                "syn_adapters.in_memory.get_settings",
+                return_value=_mock_settings(AppEnvironment.PRODUCTION),
+            ),
+            pytest.raises(InMemoryAdapterError),
+        ):
+            MemoryIsolationAdapter()
 
     def test_memory_sidecar_adapter_fails_outside_test(self) -> None:
         """Test that MemorySidecarAdapter fails outside test environment."""
-        from syn_adapters.workspace_backends.memory.memory_adapter import (
-            TestEnvironmentRequiredError,
-        )
+        from syn_adapters.in_memory import InMemoryAdapterError
         from syn_adapters.workspace_backends.memory.memory_sidecar import (
             MemorySidecarAdapter,
         )
 
         with (
-            patch.dict(os.environ, {"APP_ENVIRONMENT": "staging"}),
-            pytest.raises(TestEnvironmentRequiredError),
+            patch(
+                "syn_adapters.in_memory.get_settings",
+                return_value=_mock_settings(AppEnvironment.STAGING),
+            ),
+            pytest.raises(InMemoryAdapterError),
         ):
             MemorySidecarAdapter()
 
     def test_memory_token_injection_adapter_fails_outside_test(self) -> None:
         """Test that MemoryTokenInjectionAdapter fails outside test environment."""
-        from syn_adapters.workspace_backends.memory.memory_adapter import (
-            TestEnvironmentRequiredError,
-        )
+        from syn_adapters.in_memory import InMemoryAdapterError
         from syn_adapters.workspace_backends.memory.memory_token import (
             MemoryTokenInjectionAdapter,
         )
 
         with (
-            patch.dict(os.environ, {"APP_ENVIRONMENT": "development"}),
-            pytest.raises(TestEnvironmentRequiredError),
+            patch(
+                "syn_adapters.in_memory.get_settings",
+                return_value=_mock_settings(AppEnvironment.DEVELOPMENT),
+            ),
+            pytest.raises(InMemoryAdapterError),
         ):
             MemoryTokenInjectionAdapter()
 
     def test_memory_artifact_adapter_fails_outside_test(self) -> None:
         """Test that MemoryArtifactAdapter fails outside test environment."""
-        from syn_adapters.workspace_backends.memory.memory_adapter import (
-            TestEnvironmentRequiredError,
-        )
+        from syn_adapters.in_memory import InMemoryAdapterError
         from syn_adapters.workspace_backends.memory.memory_artifact import (
             MemoryArtifactAdapter,
         )
 
         with (
-            patch.dict(os.environ, {"APP_ENVIRONMENT": "development"}),
-            pytest.raises(TestEnvironmentRequiredError),
+            patch(
+                "syn_adapters.in_memory.get_settings",
+                return_value=_mock_settings(AppEnvironment.DEVELOPMENT),
+            ),
+            pytest.raises(InMemoryAdapterError),
         ):
             MemoryArtifactAdapter()
 
     def test_memory_event_stream_adapter_fails_outside_test(self) -> None:
         """Test that MemoryEventStreamAdapter fails outside test environment."""
-        from syn_adapters.workspace_backends.memory.memory_adapter import (
-            TestEnvironmentRequiredError,
-        )
+        from syn_adapters.in_memory import InMemoryAdapterError
         from syn_adapters.workspace_backends.memory.memory_stream import (
             MemoryEventStreamAdapter,
         )
 
         with (
-            patch.dict(os.environ, {"APP_ENVIRONMENT": "development"}),
-            pytest.raises(TestEnvironmentRequiredError),
+            patch(
+                "syn_adapters.in_memory.get_settings",
+                return_value=_mock_settings(AppEnvironment.DEVELOPMENT),
+            ),
+            pytest.raises(InMemoryAdapterError),
         ):
             MemoryEventStreamAdapter()
 

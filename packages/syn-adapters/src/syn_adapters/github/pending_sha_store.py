@@ -1,7 +1,12 @@
 """In-memory PendingSHAStore implementation (#602).
 
-Tracks commit SHAs whose check runs need polling. Ephemeral — SHAs are
+Tracks commit SHAs whose check runs need polling. Ephemeral -- SHAs are
 lost on restart, but the next PR event re-registers them.
+
+NOTE: This store intentionally does NOT inherit from InMemoryAdapter.
+It is allowed in production because loss on restart has no correctness
+impact -- only a delayed check-run poll until the next PR event.
+See ADR-060 section 6 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
 from __future__ import annotations

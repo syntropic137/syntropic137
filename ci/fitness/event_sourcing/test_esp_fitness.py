@@ -3,6 +3,8 @@
 Integrates event-sourcing-platform's built-in fitness module into Syn137 CI.
 Checks projection purity (whitelist-based import checking) and ProcessManager
 structure validation using the ESP-provided fitness checks.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations
@@ -10,21 +12,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from ci.fitness.conftest import repo_root
+from ci.fitness.conftest import load_exceptions, repo_root
 from event_sourcing.fitness import check_projection_purity
 from event_sourcing.fitness.process_manager_check import check_process_manager
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Project-specific allowed import prefixes (beyond ESP defaults)
+# Project-specific allowed import prefixes - loaded from fitness_exceptions.toml
+# so all fitness config lives in one place.
 _PROJECT_ALLOWED_PREFIXES: frozenset[str] = frozenset(
-    {
-        "syn_domain.contexts",
-        "syn_shared",
-        "syn_adapters.projection_stores",
-        "time",
-    }
+    load_exceptions().get("projection_purity", {}).get("allowed_prefixes", [])
 )
 
 

@@ -16,6 +16,8 @@ returning function:
 
 Reference: issue #497 — workflow execution errors were invisible because
 the background task closure discarded the Result return value.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

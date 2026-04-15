@@ -1,40 +1,19 @@
 """In-memory artifact storage adapter - FOR TESTS ONLY.
 
-CRITICAL: This adapter throws TestOnlyAdapterError if SYN_ENVIRONMENT != 'test'.
-This prevents accidental use in production/development where data would be lost.
-
-Usage:
-    # In tests only
-    os.environ["SYN_ENVIRONMENT"] = "test"
-    storage = InMemoryArtifactStorage()
-
-See ADR-013: Integration Testing Strategy
+See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from syn_adapters.in_memory import InMemoryAdapter, InMemoryAdapterError
 
-class TestOnlyAdapterError(Exception):
-    """Raised when a test-only adapter is used outside test environment.
-
-    This is a safety guard to prevent false positives in production.
-    Memory implementations lose data on restart and should never be
-    used outside of unit/integration tests.
-    """
-
-    def __init__(self, adapter_name: str) -> None:
-        env = os.environ.get("SYN_ENVIRONMENT", "not set")
-        super().__init__(
-            f"{adapter_name} can only be used when SYN_ENVIRONMENT='test'. "
-            f"Current value: '{env}'. "
-            "This adapter is for testing only and would lose data in production."
-        )
+# Re-export for backwards compatibility
+TestOnlyAdapterError = InMemoryAdapterError
 
 
 @dataclass(frozen=True)
@@ -55,35 +34,16 @@ class ArtifactNotFoundError(Exception):
         super().__init__(f"Artifact not found: {artifact_id}")
 
 
-class InMemoryArtifactStorage:
+class InMemoryArtifactStorage(InMemoryAdapter):
     """In-memory artifact storage for unit tests.
 
-    CRITICAL: Throws TestOnlyAdapterError if SYN_ENVIRONMENT != 'test'.
-
-    This implementation:
-    - Stores artifacts in a dict (lost on process exit)
-    - Is fast for unit tests
-    - Must NEVER be used in production
-
-    Usage:
-        # Ensure test environment
-        os.environ["SYN_ENVIRONMENT"] = "test"
-
-        storage = InMemoryArtifactStorage()
-        result = await storage.upload("artifact-123", b"content")
-        content = await storage.download("artifact-123")
+    Inherits environment guard from InMemoryAdapter.
+    Stores artifacts in a dict (lost on process exit).
     """
 
     def __init__(self) -> None:
-        """Initialize in-memory storage.
-
-        Raises:
-            TestOnlyAdapterError: If SYN_ENVIRONMENT is not 'test'
-        """
-        env = os.environ.get("SYN_ENVIRONMENT", "")
-        if env != "test":
-            raise TestOnlyAdapterError("InMemoryArtifactStorage")
-
+        """Initialize in-memory storage."""
+        super().__init__()
         self._storage: dict[str, tuple[bytes, StorageResult]] = {}
 
     async def upload(

@@ -3,6 +3,8 @@
 Ensures domain packages don't import from adapter/API layers at runtime,
 and adapter packages don't import from API/CLI layers.
 TYPE_CHECKING imports are exempt (they have no runtime effect).
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

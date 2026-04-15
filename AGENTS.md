@@ -223,6 +223,44 @@ Key properties:
 | Querying derived state | Projection (read model) | Dashboard metrics, execution list, session tools |
 | Time-based triggers (timeouts, SLA deadlines) | Passage of Time (clock events) | Stale execution detection, phase timeout enforcement |
 
+### Event Consumer Types (Three-Way Split)
+
+> Reference: [CONSUMER-PATTERNS.md](lib/event-sourcing-platform/docs/CONSUMER-PATTERNS.md), [ADR-025](lib/event-sourcing-platform/docs/adrs/ADR-025-process-manager-pattern.md)
+
+Every event consumer must be exactly one of these types. The distinction is critical for restart safety.
+
+| Type | Base class | Side effects? | Replay-safe? | Purpose |
+|------|-----------|---------------|-------------|---------|
+| **Projection** | `CheckpointedProjection` | Never | Yes | Build read models (dashboards, query views, metrics) |
+| **ProcessManager** | `ProcessManager` | Yes (live only) | Yes | React to events with commands (dispatch workflows, call APIs) |
+
+**Projection** builds derived state from events. Pure, idempotent, replay-safe. `SIDE_EFFECTS_ALLOWED = False`. Replaying the entire event store 1000 times must produce the same result with zero external calls.
+
+**ProcessManager** uses the Processor To-Do List pattern with a hard boundary:
+- `handle_event()` -- writes to-do records (pure, runs during replay AND live)
+- `process_pending()` -- executes pending items (idempotent, runs ONLY when live)
+- `SIDE_EFFECTS_ALLOWED = True`
+- The coordinator enforces the boundary: `process_pending()` is never called while `is_catching_up` is True
+
+**The critical anti-pattern:** A projection that dispatches commands or calls external APIs in `handle_event()`. This fires side effects during replay, causing duplicate executions on every restart. Use `ProcessManager` instead.
+
+### In-Memory Adapter Safety (ADR-060)
+
+> Reference: [ADR-060](docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)
+
+In-memory state is dangerous in production -- it's lost on restart, causing duplicate work, lost dedup keys, or orphaned executions. All in-memory adapters inherit from `InMemoryAdapter` (`packages/syn-adapters/src/syn_adapters/in_memory.py`), which raises `InMemoryAdapterError` outside test/offline environments.
+
+**Rules:**
+- All test-only in-memory adapters MUST inherit `InMemoryAdapter` (or call `assert_test_only()` for dataclasses)
+- The canonical check is `settings.uses_in_memory_stores` (= `is_test or is_offline`)
+- Production wiring MUST fail-fast if no durable backend is available -- never silently fall back to in-memory
+- One intentional exception: `InMemoryPendingSHAStore` is allowed in production because loss on restart only delays a check-run poll (self-heals on next PR event, no correctness impact)
+
+**Key files:**
+- `packages/syn-adapters/src/syn_adapters/in_memory.py` -- Base class and standalone check
+- `apps/syn-api/src/syn_api/_wiring.py` -- Adapter selection (Postgres > Redis > fail-fast)
+- `packages/syn-adapters/src/syn_adapters/github/pending_sha_store.py` -- Intentional exception
+
 ### Projection Consistency in Processor Loops
 
 When a processor needs immediate feedback from its own commands (e.g., "I just completed phase 1, what's the next todo?"), the event subscription pipeline introduces eventual consistency delays. Two strategies:

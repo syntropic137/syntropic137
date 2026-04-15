@@ -6,6 +6,8 @@ name, and carry a valid version.
 
 These tests use no infrastructure — they import classes and inspect
 structural properties only.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

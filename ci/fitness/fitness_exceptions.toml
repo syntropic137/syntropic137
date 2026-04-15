@@ -1,3 +1,7 @@
+# Fitness exception registries and grandfathered violations.
+# See ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
+# and FITNESS-MANIFEST.md for the principle-to-test mapping.
+#
 # Grandfathered violations for REMAINING Python-based fitness checks.
 # Cognitive complexity and file size checks migrated to APSS fitness.toml.
 # This file only tracks structural & ES invariant exceptions.
@@ -36,6 +40,33 @@
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/update_workflow_phase/UpdateWorkflowPhaseHandler.py" = { max_calls = 1, issue = "#402" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py" = { max_calls = 9, issue = "#196" }
 "apps/syn-api/src/syn_api/routes/artifacts.py" = { max_calls = 1, issue = "#277" }
+
+[projection_purity]
+# Project-specific allowed import prefixes for projection files.
+# Extends ESP's default PROJECTION_ALLOWED_PREFIXES (stdlib + event_sourcing).
+# Adding a prefix here is a conscious decision - review before merging.
+allowed_prefixes = [
+    "syn_domain.contexts",
+    "syn_shared",
+    "syn_adapters.projection_stores",
+    "time",
+]
+
+[in_memory_state]
+# Registry of known in-memory state that must carry classification comments.
+# Every entry here must have a CORRECTNESS/ACKNOWLEDGED/PERFORMANCE comment
+# near the variable declaration in the source file.
+# Format: path = { variable = "name", description = "what it is" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/EvaluateWebhookHandler.py" = { variable = "_fire_locks", description = "per-(trigger, pr) asyncio.Lock dict for concurrency guard" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/debouncer.py" = { variable = "_pending", description = "pending debounce task dict" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/safety_guards.py" = { variable = "_dispatch_timestamps", description = "dispatch rate limit timestamp list" }
+"apps/syn-api/src/syn_api/routes/webhooks/signature.py" = { variable = "_sig_failures", description = "signature failure rate limiter dict" }
+
+[aggregate_guards]
+# @command_handler methods exempt from the guard requirement.
+# Only for audit-only handlers that record observations without state transitions.
+# path = { exempt_methods = ["method_name"], issue = "#NNN" }
+"packages/syn-domain/src/syn_domain/contexts/github/domain/aggregate_trigger/TriggerRuleAggregate.py" = { exempt_methods = ["record_blocked", "record_dispatch_completed", "record_dispatch_failed"], issue = "#686" }
 
 [error_propagation]
 # path = { issue = "#NNN" }

@@ -8,6 +8,8 @@ and makes debugging impossible.
 Violations are tracked via fitness_exceptions.toml with issue
 references. Phase D of the architecture audit fixed all known
 violations; any remaining exceptions are ratcheted there.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

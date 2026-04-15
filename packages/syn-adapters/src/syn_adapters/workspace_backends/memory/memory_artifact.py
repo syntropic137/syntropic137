@@ -2,14 +2,14 @@
 
 ⚠️  TEST ENVIRONMENT ONLY ⚠️
 
-See ADR-004 (Mock Objects: Test Environment Only) and ADR-023 (Workspace-First Execution).
+See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from syn_adapters.workspace_backends.memory.memory_adapter import _assert_test_environment
+from syn_adapters.in_memory import InMemoryAdapter
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -19,17 +19,18 @@ if TYPE_CHECKING:
     )
 
 
-class MemoryArtifactAdapter:
+class MemoryArtifactAdapter(InMemoryAdapter):
     """In-memory implementation of ArtifactCollectionPort.
 
     ⚠️  TEST ENVIRONMENT ONLY ⚠️
 
     Simulates artifact collection without filesystem access.
+    Inherits environment guard from InMemoryAdapter.
     """
 
     def __init__(self) -> None:
         """Initialize adapter - validates test environment."""
-        _assert_test_environment()
+        super().__init__()
         self._artifacts: dict[str, list[Artifact]] = {}  # isolation_id -> artifacts
 
     async def collect(

@@ -101,6 +101,49 @@ A safety-net circuit breaker that caps the number of workflow dispatches in a sl
 
 This provides protection against novel failure modes we haven't anticipated — any bug that causes a flood of trigger evaluations will be capped before it causes a billing catastrophe.
 
+### 5. InMemoryAdapter base class (production guard)
+
+All in-memory adapters that must NOT run in production inherit from a single base class: `InMemoryAdapter` in `packages/syn-adapters/src/syn_adapters/in_memory.py`.
+
+**The problem:** Before this change, the environment check was copy-pasted 7 times across 7 files, with 3 different strategies:
+
+| Strategy | Files | Allowed environments |
+|----------|-------|---------------------|
+| `settings.uses_in_memory_stores` | `storage/in_memory.py`, `projection_stores/memory_store.py` | test, offline |
+| `os.getenv("APP_ENVIRONMENT")` | `control/adapters/memory.py`, `workspace_backends/memory/memory_adapter.py` | test, testing (but not offline) |
+| `os.getenv("SYN_ENVIRONMENT")` | `storage/artifact_storage/memory.py` | test only (wrong env var) |
+| **None** | `dedup/memory_dedup.py` | **anything (the bug)** |
+
+The inconsistency meant some adapters worked in offline mode and others didn't, and the dedup adapter had no guard at all -- allowing `_create_dedup_adapter()` to silently fall back to in-memory dedup in production when both Postgres and Redis failed.
+
+**The fix:** A single `InMemoryAdapter` base class with one canonical check:
+
+```python
+class InMemoryAdapter:
+    def __init__(self) -> None:
+        settings = get_settings()
+        if not settings.uses_in_memory_stores:
+            raise InMemoryAdapterError(...)
+```
+
+- Uses `settings.uses_in_memory_stores` (= `is_test or is_offline`), the canonical check
+- All 11 in-memory adapters now inherit from `InMemoryAdapter` or call `assert_test_only()` (for dataclasses that can't inherit `__init__`)
+- `_create_dedup_adapter()` raises `RuntimeError` instead of falling back to in-memory -- belt-and-suspenders with the base class guard
+- A standalone `assert_test_only()` function is exported for dataclasses (`InMemoryEventStore`, `InMemoryProjectionStore`) that use `__post_init__`
+
+**Location:** `packages/syn-adapters/src/syn_adapters/in_memory.py`
+
+### 6. InMemoryPendingSHAStore: intentional production exception
+
+`InMemoryPendingSHAStore` (`packages/syn-adapters/src/syn_adapters/github/pending_sha_store.py`) is the one in-memory store that intentionally does NOT inherit from `InMemoryAdapter`. It is allowed in production because:
+
+- **Purpose:** Tracks commit SHAs pending check-run polling (#602). When a `pull_request` event arrives, the head SHA is registered. The Checks API poller reads pending SHAs and polls for CI results.
+- **Loss on restart is acceptable:** The next `pull_request` event (or Events API poll) re-registers the SHA. Worst case is a delayed check-run poll, not a duplicate execution.
+- **No correctness impact:** Unlike dedup state (where loss causes duplicates) or control state (where loss causes orphaned executions), PendingSHA loss causes a temporary gap in check-run awareness that self-heals.
+- **No billing impact:** No workflow execution is triggered by PendingSHA alone -- it only enables polling. The dedup layer (section 1) prevents duplicate trigger fires from the polled results.
+
+This exception is intentional and documented. The file carries a comment explaining why it differs from other in-memory stores.
+
 ## Consequences
 
 ### Positive
