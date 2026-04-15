@@ -61,6 +61,27 @@ allowed_prefixes = [
 # path = { issue = "#NNN" }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/docker/docker_container_ops.py" = { issue = "#664" }
 
+[typed_cross_context_boundaries]
+# Protocol methods with dict[str, str/Any/object] parameters at context boundaries.
+# New protocols MUST use typed value objects instead (ADR-063).
+# Existing violations grandfathered with budget=1; reduce toward zero.
+
+# Webhook payloads are inherently untyped (GitHub JSON) - typing these would
+# require a full webhook payload model, which is out of scope.
+"packages/syn-domain/src/syn_domain/contexts/github/_shared/trigger_evaluator.py:TriggerEvaluator.payload" = { budget = 1, issue = "#671" }
+
+# Workflow inputs dict carries arbitrary user-defined key/value pairs.
+# Repository identity was extracted to typed RepositoryRef (ADR-063),
+# but the general-purpose inputs dict remains.
+"packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py:_ExecutionService.inputs" = { budget = 1, issue = "#671" }
+
+# Observability data is inherently schemaless (varying event shapes).
+"packages/syn-domain/src/syn_domain/contexts/orchestration/ports/ObservabilityServicePort.py:ObservabilityServicePort.data" = { budget = 1, issue = "#671" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py:ObservabilityRecorder.data" = { budget = 1, issue = "#671" }
+
+# Agent environment variables are inherently a string->string map.
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/processor_types.py:AgentHandlerProtocol.agent_env" = { budget = 1, issue = "#671" }
+
 [event_construction_outside_aggregate]
 # Production files that construct DomainEvent subclasses outside aggregate_*/ dirs.
 # Legitimate uses: deserialization / rehydration from stored data.
