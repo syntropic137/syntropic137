@@ -209,20 +209,36 @@ def _make_workflow_with_repos(repos: list[str]) -> MagicMock:
     return wf
 
 
+def _empty_cmd(inputs: dict[str, str] | None = None) -> object:
+    """Create a minimal ExecuteWorkflowCommand with no typed repos."""
+    from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+        ExecuteWorkflowCommand,
+    )
+
+    return ExecuteWorkflowCommand(
+        aggregate_id="wf-test",
+        inputs=inputs or {},
+    )
+
+
 class TestReposVariableSubstitution:
     """ExecuteWorkflowHandler._resolve_repos must apply {{variable}} substitution."""
 
     def test_variable_in_repos_resolves_with_input(self):
-        """{{owner}}/app + merged_inputs["owner"] = acme → full GitHub URL."""
+        """{{owner}}/app + merged_inputs["owner"] = acme -> full GitHub URL."""
         wf = _make_workflow_with_repos(["{{owner}}/app"])
-        result = ExecuteWorkflowHandler._resolve_repos({"owner": "acme"}, wf)
+        result = ExecuteWorkflowHandler._resolve_repos(
+            _empty_cmd(), {"owner": "acme"}, wf  # type: ignore[arg-type]
+        )
 
         assert result == ["https://github.com/acme/app"]
 
     def test_variable_in_full_url_resolves(self):
         """Full URL template resolves correctly."""
         wf = _make_workflow_with_repos(["https://github.com/{{org}}/{{repo}}"])
-        result = ExecuteWorkflowHandler._resolve_repos({"org": "myorg", "repo": "myapp"}, wf)
+        result = ExecuteWorkflowHandler._resolve_repos(
+            _empty_cmd(), {"org": "myorg", "repo": "myapp"}, wf  # type: ignore[arg-type]
+        )
 
         assert result == ["https://github.com/myorg/myapp"]
 
@@ -231,26 +247,34 @@ class TestReposVariableSubstitution:
         wf = _make_workflow_with_repos(["{{owner}}/app"])
 
         with pytest.raises(ValueError, match="Unresolved placeholders"):
-            ExecuteWorkflowHandler._resolve_repos({}, wf)
+            ExecuteWorkflowHandler._resolve_repos(
+                _empty_cmd(), {}, wf  # type: ignore[arg-type]
+            )
 
     def test_unresolved_placeholder_error_names_the_variable(self):
         """Error message must name the unresolved variable to aid debugging."""
         wf = _make_workflow_with_repos(["{{repository}}/app"])
 
         with pytest.raises(ValueError, match="repository"):
-            ExecuteWorkflowHandler._resolve_repos({}, wf)
+            ExecuteWorkflowHandler._resolve_repos(
+                _empty_cmd(), {}, wf  # type: ignore[arg-type]
+            )
 
     def test_static_url_passes_through_unchanged(self):
         """Static repos without {{}} are returned as-is (no normalisation change)."""
         wf = _make_workflow_with_repos(["https://github.com/acme/app"])
-        result = ExecuteWorkflowHandler._resolve_repos({}, wf)
+        result = ExecuteWorkflowHandler._resolve_repos(
+            _empty_cmd(), {}, wf  # type: ignore[arg-type]
+        )
 
         assert result == ["https://github.com/acme/app"]
 
     def test_multiple_repos_all_resolved(self):
         """All repos in the list get substitution applied."""
         wf = _make_workflow_with_repos(["{{owner}}/app1", "{{owner}}/app2"])
-        result = ExecuteWorkflowHandler._resolve_repos({"owner": "acme"}, wf)
+        result = ExecuteWorkflowHandler._resolve_repos(
+            _empty_cmd(), {"owner": "acme"}, wf  # type: ignore[arg-type]
+        )
 
         assert result == [
             "https://github.com/acme/app1",
@@ -261,7 +285,9 @@ class TestReposVariableSubstitution:
         """If merged_inputs contains 'repos' CSV, workflow.repos is ignored entirely."""
         wf = _make_workflow_with_repos(["https://github.com/stored/repo"])
         result = ExecuteWorkflowHandler._resolve_repos(
-            {"repos": "https://github.com/runtime/repo"}, wf
+            _empty_cmd(),  # type: ignore[arg-type]
+            {"repos": "https://github.com/runtime/repo"},
+            wf,
         )
 
         assert result == ["https://github.com/runtime/repo"]
@@ -273,6 +299,8 @@ class TestReposVariableSubstitution:
         wf._repository_url = "https://github.com/acme/fallback"
         wf.input_declarations = []
 
-        result = ExecuteWorkflowHandler._resolve_repos({}, wf)
+        result = ExecuteWorkflowHandler._resolve_repos(
+            _empty_cmd(), {}, wf  # type: ignore[arg-type]
+        )
 
         assert result == ["https://github.com/acme/fallback"]

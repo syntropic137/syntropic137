@@ -28,6 +28,7 @@ from syn_api.types import (
     Result,
     WorkflowError,
 )
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
@@ -356,6 +357,7 @@ async def execute(
     execution_id: str | None = None,
     task: str | None = None,
     tenant_id: str | None = None,  # noqa: ARG001
+    repos: list[RepositoryRef] | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 
@@ -365,6 +367,7 @@ async def execute(
         execution_id: Optional execution ID (auto-generated if omitted).
         task: Optional primary task description.
         tenant_id: Optional tenant ID for multi-tenant deployments.
+        repos: Typed repository refs (ADR-063 anti-corruption layer).
 
     Returns:
         Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.
@@ -392,6 +395,7 @@ async def execute(
         cmd = ExecuteWorkflowCommand(
             aggregate_id=workflow_id,
             inputs=inputs or {},
+            repos=repos or [],
             execution_id=execution_id,
             task=task,
         )
@@ -403,7 +407,7 @@ async def execute(
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
     repos_csv = (inputs or {}).get("repos", "")
-    repos = [r.strip() for r in repos_csv.split(",") if r.strip()] if repos_csv else []
+    repo_urls = [r.strip() for r in repos_csv.split(",") if r.strip()] if repos_csv else []
     return Ok(
         ExecutionSummary(
             workflow_execution_id=result.execution_id,
@@ -415,7 +419,7 @@ async def execute(
             total_tokens=result.metrics.total_tokens,
             total_cost_usd=result.metrics.total_cost_usd,
             error_message=result.error_message,
-            repos=repos,
+            repos=repo_urls,
         )
     )
 
@@ -437,7 +441,10 @@ async def execute_workflow_endpoint(
     if workflow is None:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-    # Build effective inputs — repos field takes precedence over inputs["repos"] CSV
+    # ADR-063: convert string URLs to typed RepositoryRef at the API boundary
+    typed_repos = [RepositoryRef.parse(r) for r in request.repos] if request.repos else []
+
+    # Build effective inputs (legacy CSV preserved for backward compat)
     effective_inputs: dict[str, str] = dict(request.inputs)
     if request.repos:
         effective_inputs["repos"] = ",".join(request.repos)
@@ -461,6 +468,7 @@ async def execute_workflow_endpoint(
                 inputs=effective_inputs,
                 execution_id=execution_id,
                 task=request.task,
+                repos=typed_repos,
             )
             if isinstance(result, Err):
                 logger.error(

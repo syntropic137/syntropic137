@@ -137,7 +137,7 @@ class ExecuteWorkflowHandler:
 
         phases = self._get_executable_phases(workflow)
         merged_inputs = self._merge_inputs(command, workflow)
-        repos = self._resolve_repos(merged_inputs, workflow) if workflow.requires_repos else []
+        repos = self._resolve_repos(command, merged_inputs, workflow) if workflow.requires_repos else []
 
         execution_id = (
             command.execution_id
@@ -177,21 +177,37 @@ class ExecuteWorkflowHandler:
 
     @staticmethod
     def _resolve_repos(
+        command: ExecuteWorkflowCommand,
         merged_inputs: dict[str, str],
         workflow: WorkflowTemplateAggregate,
     ) -> list[str]:
-        """Resolve repos: inputs CSV → trigger repository → template-level repos → repository_url fallback."""
+        """Resolve repos: typed command repos → inputs CSV → template-level → repository_url fallback.
+
+        ADR-063: typed ``command.repos`` (populated at context boundaries)
+        takes precedence over implicit dict-key conventions.
+        """
+        # 1. Typed repos from command (trigger path via ADR-063 anti-corruption layer,
+        #    or API path via ExecuteWorkflowRequest.repos conversion)
+        if command.repos:
+            return [r.https_url for r in command.repos]
+
+        # 2. Legacy: CSV in inputs (for backward compat with existing callers)
         repos_raw = merged_inputs.get("repos", "")
         if repos_raw:
             return [_normalise_repo_url(u.strip()) for u in repos_raw.split(",") if u.strip()]
-        # Trigger presets inject "repository" (owner/repo slug) via input_mapping
+
+        # 3. Legacy: trigger preset "repository" slug in inputs
         trigger_repo = merged_inputs.get("repository", "")
         if trigger_repo:
             return [_normalise_repo_url(trigger_repo)]
+
+        # 4. Template-level repos with variable substitution
         if workflow.repos:
             return [
                 _normalise_repo_url(_substitute_repo_vars(r, merged_inputs)) for r in workflow.repos
             ]
+
+        # 5. Single-repo template fallback
         repo_url = _resolve_repo_url(workflow, merged_inputs)
         if repo_url:
             return [repo_url]

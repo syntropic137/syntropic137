@@ -768,9 +768,43 @@ def _make_workflow_stub(
     return wf
 
 
+def _make_cmd(
+    inputs: dict[str, str] | None = None,
+    repos: list[object] | None = None,
+) -> object:
+    """Create a minimal ExecuteWorkflowCommand for _resolve_repos tests."""
+    from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+        ExecuteWorkflowCommand,
+    )
+
+    return ExecuteWorkflowCommand(
+        aggregate_id="wf-test",
+        inputs=inputs or {},
+        repos=repos or [],  # type: ignore[arg-type]  # test helper accepts generic list
+    )
+
+
 @pytest.mark.unit
 class TestResolveRepos:
     """Tests for ExecuteWorkflowHandler._resolve_repos."""
+
+    def test_typed_repos_take_precedence(self) -> None:
+        """Typed RepositoryRef on command takes precedence over everything (ADR-063)."""
+        from syn_domain.contexts._shared.repository_ref import RepositoryRef
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        cmd = _make_cmd(
+            inputs={"repos": "https://github.com/org/input-repo"},
+            repos=[RepositoryRef.from_slug("org/typed-repo")],
+        )
+        result = ExecuteWorkflowHandler._resolve_repos(
+            cmd,
+            {"repos": "https://github.com/org/input-repo"},
+            _make_workflow_stub(repos=["https://github.com/org/template-repo"]),
+        )
+        assert result == ["https://github.com/org/typed-repo"]
 
     def test_comma_separated_repos_parsed(self) -> None:
         """Comma-separated repos string is split into a list."""
@@ -779,6 +813,7 @@ class TestResolveRepos:
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {"repos": "https://github.com/org/repo-a,https://github.com/org/repo-b"},
             _make_workflow_stub(),
         )
@@ -794,6 +829,7 @@ class TestResolveRepos:
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {"repos": " https://github.com/org/repo-a , https://github.com/org/repo-b "},
             _make_workflow_stub(),
         )
@@ -809,6 +845,7 @@ class TestResolveRepos:
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {},
             _make_workflow_stub(repos=["https://github.com/org/repo-a"]),
         )
@@ -821,18 +858,21 @@ class TestResolveRepos:
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {},
             _make_workflow_stub(repository_url="https://github.com/org/repo-a"),
         )
         assert result == ["https://github.com/org/repo-a"]
 
     def test_empty_inputs_and_no_repos_returns_empty(self) -> None:
-        """Empty inputs, no template repos, no repository_url → empty list."""
+        """Empty inputs, no template repos, no repository_url -> empty list."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
-        result = ExecuteWorkflowHandler._resolve_repos({}, _make_workflow_stub())
+        result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(), {}, _make_workflow_stub()
+        )
         assert result == []
 
     def test_repos_takes_precedence_over_template_repos_and_repo_url(self) -> None:
@@ -842,6 +882,7 @@ class TestResolveRepos:
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {"repos": "https://github.com/org/repo-a"},
             _make_workflow_stub(
                 repos=["https://github.com/org/template-repo"],
@@ -857,6 +898,7 @@ class TestResolveRepos:
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {"repos": "syntropic137/syntropic137"},
             _make_workflow_stub(),
         )
@@ -869,6 +911,7 @@ class TestResolveRepos:
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {"repository": "syntropic137/sandbox_syn-engineer-beta", "pr_number": "42"},
             _make_workflow_stub(),
         )
@@ -881,6 +924,7 @@ class TestResolveRepos:
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {"repos": "org/explicit-repo", "repository": "org/trigger-repo"},
             _make_workflow_stub(),
         )
