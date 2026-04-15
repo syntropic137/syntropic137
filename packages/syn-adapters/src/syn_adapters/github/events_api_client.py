@@ -1,6 +1,9 @@
 """GitHub Events API client with ETag caching for efficient polling (ISS-386).
 
-See ADR-060: Restart-safe trigger deduplication (persistent cursor support).
+Stateless HTTP adapter -- all cursor/ETag state management is handled by
+the caller (GitHubRepoPoller via HistoricalPoller base class).
+
+See ADR-060: Restart-safe trigger deduplication.
 """
 
 from __future__ import annotations
@@ -12,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import httpx
-    from event_sourcing.core.historical_poller import CursorStore
 
     from syn_adapters.github.client import GitHubAppClient
 
@@ -32,6 +34,9 @@ class EventsAPIResponse:
     the minimum interval between requests."""
     has_new_events: bool
     """``False`` when GitHub returned 304 Not Modified."""
+    etag: str
+    """ETag from the response. Caller should persist this and pass it
+    back on the next poll via the ``etag`` parameter."""
 
 
 def _parse_next_link(link_header: str) -> str | None:
@@ -50,34 +55,39 @@ _MAX_PAGES = 10
 
 
 class GitHubEventsAPIClient:
-    """Client for GitHub's repository Events API with ETag caching.
+    """Stateless client for GitHub's repository Events API.
 
-    Uses conditional requests (``If-None-Match``) to minimize API calls
-    and respects the ``X-Poll-Interval`` header from GitHub.
+    Uses conditional requests (``If-None-Match``) when the caller
+    provides a stored ETag, and respects the ``X-Poll-Interval``
+    header from GitHub.
+
+    All state management (ETag persistence, cursor tracking) is
+    handled by the caller -- this client is a pure HTTP adapter.
 
     See: https://docs.github.com/en/rest/activity/events
     """
 
-    def __init__(
-        self,
-        github_client: GitHubAppClient,
-        cursor_store: CursorStore | None = None,
-    ) -> None:
+    def __init__(self, github_client: GitHubAppClient) -> None:
         self._client = github_client
-        self._etags: dict[str, str] = {}  # repo -> ETag (in-memory cache)
-        self._cursor_store = cursor_store
-        self._cursors_loaded = False
 
     async def poll_repo_events(
         self,
         owner: str,
         repo: str,
         installation_id: str,
+        etag: str | None = None,
     ) -> EventsAPIResponse:
         """Fetch new events for a repository.
 
         Uses ETag caching: returns empty list with ``has_new_events=False``
         on 304 Not Modified.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            installation_id: GitHub App installation ID.
+            etag: ETag from a previous poll. If provided, sends
+                ``If-None-Match`` header for conditional request.
 
         Raises:
             GitHubRateLimitError: If rate limited (caller should back off).
@@ -85,44 +95,41 @@ class GitHubEventsAPIClient:
         """
         from syn_adapters.github.client_api import check_response
 
-        # Load persisted cursors on first poll (ADR-060)
-        await self._load_persisted_cursors()
-
         path = f"/repos/{owner}/{repo}/events"
-        etag_key = f"{owner}/{repo}"
 
         token = await self._client.get_installation_token(installation_id)
         headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
 
-        if etag_key in self._etags:
-            headers["If-None-Match"] = self._etags[etag_key]
+        if etag:
+            headers["If-None-Match"] = etag
 
         response = await self._client._http.get(path, headers=headers)
 
         poll_interval = int(response.headers.get("X-Poll-Interval", "60"))
 
         if response.status_code == 304:
-            return EventsAPIResponse(events=[], poll_interval=poll_interval, has_new_events=False)
+            return EventsAPIResponse(
+                events=[], poll_interval=poll_interval, has_new_events=False, etag=etag or ""
+            )
 
         if response.status_code == 200:
-            return await self._handle_success(response, etag_key, poll_interval)
+            return await self._handle_success(response, poll_interval)
 
         # Handle errors (rate limit, auth, not found, etc.)
         check_response(response)
 
         # Unreachable if check_response raises, but satisfies type checker
-        return EventsAPIResponse(events=[], poll_interval=poll_interval, has_new_events=False)
+        return EventsAPIResponse(
+            events=[], poll_interval=poll_interval, has_new_events=False, etag=etag or ""
+        )
 
     async def _handle_success(
         self,
         response: httpx.Response,
-        etag_key: str,
         poll_interval: int,
     ) -> EventsAPIResponse:
-        """Process a 200 OK response: cache ETag, persist cursor, return events."""
-        etag = response.headers.get("ETag", "")
-        if etag:
-            self._etags[etag_key] = etag
+        """Process a 200 OK response: extract ETag, paginate, return events."""
+        response_etag = response.headers.get("ETag", "")
 
         data = response.json()
         events: list[GitHubEventPayload] = data if isinstance(data, list) else []
@@ -130,23 +137,20 @@ class GitHubEventsAPIClient:
         # Fetch remaining pages (GitHub returns max 30/page, up to 10 pages)
         auth_header = response.request.headers.get("Authorization", "")
         link_header = response.headers.get("Link", "")
-        extra = await self._fetch_remaining_pages(link_header, auth_header, etag_key)
+        extra = await self._fetch_remaining_pages(link_header, auth_header)
         events.extend(extra)
-
-        # Persist cursor for restart safety (ADR-060)
-        await self._persist_cursor(etag_key, etag, events)
 
         return EventsAPIResponse(
             events=events,
             poll_interval=poll_interval,
             has_new_events=bool(events),
+            etag=response_etag,
         )
 
     async def _fetch_remaining_pages(
         self,
         link_header: str,
         auth_header: str,
-        etag_key: str,
     ) -> list[GitHubEventPayload]:
         """Follow pagination links to collect all events."""
         extra_events: list[GitHubEventPayload] = []
@@ -154,7 +158,7 @@ class GitHubEventsAPIClient:
         pages_fetched = 1
         while next_url and pages_fetched < _MAX_PAGES:
             page_events, next_url = await self._fetch_single_page(
-                next_url, auth_header, etag_key, pages_fetched + 1
+                next_url, auth_header, pages_fetched + 1
             )
             if page_events is None:
                 break
@@ -166,7 +170,6 @@ class GitHubEventsAPIClient:
         self,
         url: str,
         auth_header: str,
-        etag_key: str,
         page_number: int,
     ) -> tuple[list[GitHubEventPayload] | None, str | None]:
         """Fetch a single pagination page. Returns (events, next_url) or (None, None) on failure."""
@@ -174,10 +177,9 @@ class GitHubEventsAPIClient:
             resp = await self._client._http.get(url, headers={"Authorization": auth_header})
             if resp.status_code != 200:
                 logger.warning(
-                    "Events API pagination stopped: page %d returned %d for %s",
+                    "Events API pagination stopped: page %d returned %d",
                     page_number,
                     resp.status_code,
-                    etag_key,
                 )
                 return None, None
             page_data = resp.json()
@@ -186,42 +188,8 @@ class GitHubEventsAPIClient:
             return page_data, _parse_next_link(resp.headers.get("Link", ""))
         except Exception:
             logger.warning(
-                "Failed to fetch events page %d for %s",
+                "Failed to fetch events page %d",
                 page_number,
-                etag_key,
                 exc_info=True,
             )
             return None, None
-
-    async def _persist_cursor(
-        self, etag_key: str, etag: str, events: list[GitHubEventPayload]
-    ) -> None:
-        """Persist ETag cursor for restart safety (ADR-060)."""
-        if not etag or self._cursor_store is None:
-            return
-        from event_sourcing.core.historical_poller import CursorData
-
-        newest_id = str(events[0].get("id", "")) if events else ""
-        try:
-            await self._cursor_store.save(
-                etag_key,
-                CursorData(value=etag, metadata={"last_event_id": newest_id}),
-            )
-        except Exception:
-            logger.warning("Failed to persist poller cursor for %s", etag_key, exc_info=True)
-
-    async def _load_persisted_cursors(self) -> None:
-        """Load ETags from persistent store on first call (ADR-060)."""
-        if self._cursors_loaded or self._cursor_store is None:
-            return
-        self._cursors_loaded = True
-        try:
-            cursors = await self._cursor_store.load_all()
-            for repo, cursor in cursors.items():
-                if cursor.value:
-                    self._etags[repo] = cursor.value
-            logger.info("Loaded %d persisted ETag(s) from cursor store", len(cursors))
-        except Exception:
-            logger.warning(
-                "Failed to load persisted cursors - polling will re-fetch", exc_info=True
-            )

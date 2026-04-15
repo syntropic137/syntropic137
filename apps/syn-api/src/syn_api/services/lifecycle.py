@@ -392,7 +392,10 @@ async def _shutdown_subscriptions(state: LifecycleState) -> None:
 
 
 async def _init_event_poller(state: LifecycleState) -> None:
-    """Start the GitHub Events API poller."""
+    """Start the GitHub Events API poller.
+
+    See ADR-060: Restart-safe trigger deduplication (cold-start fence, cursor persistence).
+    """
     from syn_shared.settings import get_settings
 
     settings = get_settings()
@@ -412,9 +415,10 @@ async def _init_event_poller(state: LifecycleState) -> None:
         get_trigger_store,
         get_webhook_health_tracker,
     )
-    from syn_api.services.github_event_poller import GitHubEventPoller
+    from syn_api.services.github_event_poller import GitHubEventPoller, GitHubRepoPoller
 
-    # ADR-060: Wire persistent cursor store for restart-safe polling
+    # ADR-060: Wire persistent cursor store for restart-safe polling.
+    # HistoricalPoller base class uses this for cold-start fence + ETag persistence.
     cursor_store = None
     try:
         from syn_api._wiring_db import get_shared_db_pool
@@ -426,12 +430,24 @@ async def _init_event_poller(state: LifecycleState) -> None:
             cursor_store = PostgresPollerCursorStore(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
             logger.info("Poller cursor store initialized (ADR-060)")
     except Exception:
-        logger.warning("Cursor store unavailable — poller will re-fetch on restart", exc_info=True)
+        logger.warning("Cursor store unavailable - poller will re-fetch on restart", exc_info=True)
 
-    events_client = GitHubEventsAPIClient(get_github_client(), cursor_store=cursor_store)
-    poller = GitHubEventPoller(
+    if cursor_store is None:
+        # In-memory fallback for dev/offline - cold-start fence still works
+        # but cursor state is lost on restart
+        from syn_adapters.github.poller_cursor_store import InMemoryPollerCursorStore
+
+        cursor_store = InMemoryPollerCursorStore()
+        logger.warning("Using in-memory cursor store - cold-start fence resets on restart")
+
+    events_client = GitHubEventsAPIClient(get_github_client())
+    repo_poller = GitHubRepoPoller(
         events_client=events_client,
         pipeline=get_event_pipeline(),
+        cursor_store=cursor_store,
+    )
+    poller = GitHubEventPoller(
+        repo_poller=repo_poller,
         health_tracker=get_webhook_health_tracker(),
         trigger_store=get_trigger_store(),
         settings=settings.polling,

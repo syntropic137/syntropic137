@@ -1,11 +1,11 @@
-"""Persistent poller cursor store - survives restarts.
+"""Poller cursor stores - persistent (Postgres) and in-memory (test/offline).
 
 See ADR-060: Restart-safe trigger deduplication.
 
 Implements the ESP ``CursorStore`` protocol for persisting GitHub Events
-API ETags and last-seen event IDs in Postgres. On startup, the poller
-loads stored ETags and sends ``If-None-Match`` headers to GitHub,
-avoiding re-fetching events it already processed.
+API ETags and last-seen event IDs. On startup, the poller loads stored
+ETags and sends ``If-None-Match`` headers to GitHub, avoiding
+re-fetching events it already processed.
 """
 
 from __future__ import annotations
@@ -143,3 +143,28 @@ class PostgresPollerCursorStore:
             )
         logger.info("Loaded %d poller cursor(s) from database", len(cursors))
         return cursors
+
+
+class InMemoryPollerCursorStore:
+    """In-memory cursor store for dev/offline use.
+
+    Cold-start fence still works within a single process lifetime,
+    but cursor state is lost on restart. Acceptable for dev/offline
+    where restart storms are not a concern.
+
+    Not guarded by InMemoryAdapter because this is a legitimate
+    dev/offline fallback when Postgres is unavailable, not a test-only
+    adapter. The lifecycle wiring logs a warning when this is used.
+    """
+
+    def __init__(self) -> None:
+        self._cursors: dict[str, CursorData] = {}
+
+    async def load(self, source_key: str) -> CursorData | None:
+        return self._cursors.get(source_key)
+
+    async def save(self, source_key: str, cursor: CursorData) -> None:
+        self._cursors[source_key] = cursor
+
+    async def load_all(self) -> dict[str, CursorData]:
+        return dict(self._cursors)
