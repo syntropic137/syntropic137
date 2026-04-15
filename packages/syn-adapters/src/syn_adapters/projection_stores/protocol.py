@@ -30,10 +30,10 @@ class ProjectionStoreProtocol(ProjectionStore, Protocol):
         """Get the last update timestamp for a projection."""
         ...
 
-    async def get_position(self, key: str) -> int | None:
+    async def get_position(self, projection: str) -> int | None:
         """Get saved subscription position (deprecated - use ProjectionCheckpointStore)."""
         ...
 
-    async def set_position(self, key: str, position: int) -> None:
+    async def set_position(self, projection: str, position: int) -> None:
         """Save subscription position (deprecated - use ProjectionCheckpointStore)."""
         ...
