@@ -504,7 +504,7 @@ wheels = [
 
 [[package]]
 name = "event-sourcing-python"
-version = "0.13.0"
+version = "0.14.0"
 source = { editable = "lib/event-sourcing-platform/event-sourcing/python" }
 dependencies = [
     { name = "protobuf" },

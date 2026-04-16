@@ -512,6 +512,16 @@ dev-doctor: _env-check
     @echo ""
     @echo "💡 Run 'just dev' to start the development stack."
 
+# Smoke test: regression check for bug #694 (cold-start GitHub Events flood).
+# Assumes a freshly wiped stack (run `just dev-fresh` first).
+# Usage: just smoke-test-694 owner/repo 12345678
+smoke-test-694 repo install_id:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    uv run python infra/scripts/smoke_test_694.py \
+        --repo "{{repo}}" \
+        --install-id "{{install_id}}"
+
 # --- CLI Node ---
 
 # Build the Node.js CLI
@@ -770,9 +780,9 @@ test-stack-logs:
 
 _env := "uv run python infra/scripts/env_manager.py"
 
-# Create and start an on-demand environment for a branch
+# Create and start an on-demand environment for a branch ("current" = current branch)
 env-up branch:
-    {{_env}} up "{{branch}}"
+    {{_env}} up "$(if [ '{{branch}}' = 'current' ]; then git rev-parse --abbrev-ref HEAD; else echo '{{branch}}'; fi)"
 
 # Destroy an on-demand environment (stops containers, removes volumes, frees slot)
 env-down name:
