@@ -518,8 +518,10 @@ class TestRepoPollerColdStartFence:
 
         # Post-startup events pass the fence and get processed
         assert len(tracking.ingested) == 1, "Post-startup event should pass cold-start fence"
-        # Source is primed by _prime() before process() runs on cold start
-        assert tracking.ingested[0].source_primed is True
+        # Cold-start replay events are marked source_primed=False (ADR-060 §9 Layer 4):
+        # the ESP base class signals is_replay=True, which the poller propagates
+        # by un-priming the event so the pipeline skips trigger evaluation.
+        assert tracking.ingested[0].source_primed is False
 
     async def test_etag_threaded_to_client(self) -> None:
         """Stored ETag from cursor is passed to the client on subsequent polls."""

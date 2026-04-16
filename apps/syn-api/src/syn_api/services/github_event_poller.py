@@ -152,23 +152,30 @@ class GitHubRepoPoller(HistoricalPoller):
 
         return PollResult(events=poll_events, cursor=cursor, has_new=result.has_new)
 
-    async def process(self, source_key: str, events: list[PollEvent]) -> None:
+    async def process(
+        self,
+        source_key: str,
+        events: list[PollEvent],
+        is_replay: bool = False,
+    ) -> None:
         """Normalize events and ingest through the EventPipeline.
 
-        On cold start, events are injected with ``source_primed=False``
-        so the pipeline skips trigger evaluation (belt-and-suspenders
-        with the HistoricalPoller timestamp fence).
+        On cold start (``is_replay=True``), events are injected with
+        ``source_primed=False`` so the pipeline skips trigger evaluation
+        (belt-and-suspenders with the HistoricalPoller timestamp fence).
+        ``is_replay`` is the authoritative signal from the ESP base class;
+        the legacy ``primed_sources`` check was dead code (see ADR-060 §9
+        Layer 4).
         """
         inst_id = self._installation_ids.get(source_key, "")
-        is_primed = source_key in self.primed_sources
 
         for poll_event in events:
             normalized = map_events_api_to_normalized(poll_event.data, inst_id)
             if normalized is None:
                 continue
 
-            # Cold-start events get source_primed=False as a safety net
-            if not is_primed:
+            # Cold-start replay events get source_primed=False as a safety net
+            if is_replay:
                 normalized = dataclasses.replace(normalized, source_primed=False)
 
             try:
