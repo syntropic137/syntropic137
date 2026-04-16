@@ -28,9 +28,7 @@ import asyncpg
 import httpx
 
 
-async def _get_trigger_fire_count(
-    client: httpx.AsyncClient, trigger_name: str
-) -> int | None:
+async def _get_trigger_fire_count(client: httpx.AsyncClient, trigger_name: str) -> int | None:
     resp = await client.get("/triggers")
     resp.raise_for_status()
     body = resp.json()
@@ -40,18 +38,11 @@ async def _get_trigger_fire_count(
     return None
 
 
-async def _assert_cold_state(
-    pool: asyncpg.Pool, repo: str
-) -> None:
+async def _assert_cold_state(pool: asyncpg.Pool, repo: str) -> None:
     async with pool.acquire() as conn:
-        count = await conn.fetchval(
-            "SELECT count(*) FROM poller_cursors WHERE repo = $1", repo
-        )
+        count = await conn.fetchval("SELECT count(*) FROM poller_cursors WHERE repo = $1", repo)
     if count and count > 0:
-        msg = (
-            f"Stack is not fresh: cursor already exists for {repo}. "
-            "Run `just dev-fresh` first."
-        )
+        msg = f"Stack is not fresh: cursor already exists for {repo}. Run `just dev-fresh` first."
         raise SystemExit(msg)
     print(f"OK fresh state: 0 cursors for {repo}")
 
@@ -80,19 +71,14 @@ async def _register_trigger(
     print(f"OK registered trigger '{name}' against {repo}")
 
 
-async def _assert_hwm_persisted(
-    pool: asyncpg.Pool, repo: str
-) -> tuple[str, str]:
+async def _assert_hwm_persisted(pool: asyncpg.Pool, repo: str) -> tuple[str, str]:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT etag, last_event_id FROM poller_cursors WHERE repo = $1",
             repo,
         )
     if row is None:
-        msg = (
-            f"FAIL: no cursor persisted for {repo} after poll cycle. "
-            "Poller may not be running."
-        )
+        msg = f"FAIL: no cursor persisted for {repo} after poll cycle. Poller may not be running."
         raise SystemExit(msg)
     etag = str(row["etag"] or "")
     last_event_id = str(row["last_event_id"] or "")
@@ -122,14 +108,9 @@ async def main(
     try:
         async with httpx.AsyncClient(base_url=api_url, timeout=30.0) as client:
             await _assert_cold_state(pool, repo)
-            await _register_trigger(
-                client, trigger_name, repo, install_id, workflow_id
-            )
+            await _register_trigger(client, trigger_name, repo, install_id, workflow_id)
 
-            print(
-                f"Waiting {wait_seconds}s for poll cycle "
-                "(default interval 60s + margin)..."
-            )
+            print(f"Waiting {wait_seconds}s for poll cycle (default interval 60s + margin)...")
             await asyncio.sleep(wait_seconds)
 
             etag, last_event_id = await _assert_hwm_persisted(pool, repo)
@@ -146,9 +127,7 @@ async def main(
                 raise SystemExit(msg)
 
         etag_preview = etag[:32] + "..." if len(etag) > 32 else etag
-        print(
-            f"OK: etag={etag_preview} last_event_id={last_event_id} fires=0"
-        )
+        print(f"OK: etag={etag_preview} last_event_id={last_event_id} fires=0")
         print("PASS: bug #694 regression check clean.")
         return 0
     finally:
