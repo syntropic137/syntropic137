@@ -1,4 +1,9 @@
-"""Integration tests for GitHubEventsAPIClient — ETag caching, polling, error handling."""
+"""Tests for ``GitHubEventsAPIClient`` -- the ``GitHubEventsAPIPort`` adapter.
+
+The adapter is now stateless (the cursor lives in the domain), and rate-limit
+errors are translated into ``EventsAPIResult.rate_limited=True`` rather than
+raised.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,7 @@ from syn_adapters.github.events_api_client import GitHubEventsAPIClient
 
 
 def _make_mock_client() -> MagicMock:
-    """Create a mock GitHubAppClient with async HTTP and token methods."""
+    """Create a mock ``GitHubAppClient`` with async HTTP and token methods."""
     client = MagicMock()
     client.get_installation_token = AsyncMock(return_value="test-token-123")
     client._http = MagicMock()
@@ -33,6 +38,8 @@ def _make_response(
     }
     resp.json.return_value = json_data or []
     resp.text = ""
+    resp.request = MagicMock()
+    resp.request.headers = {"Authorization": "Bearer test-token-123"}
     return resp
 
 
@@ -47,11 +54,12 @@ class TestEventsAPIClient200:
         mock_gh._http.get.return_value = _make_response(json_data=events)
 
         client = GitHubEventsAPIClient(mock_gh)
-        result = await client.poll_repo_events("owner", "repo", "inst-1")
+        result = await client.fetch_repo_events("owner", "repo", "inst-1")
 
-        assert result.has_new_events is True
+        assert result.has_new is True
         assert result.events == events
-        assert result.poll_interval == 60
+        assert result.poll_interval_hint == 60
+        assert result.rate_limited is False
 
     @pytest.mark.asyncio
     async def test_uses_installation_token(self) -> None:
@@ -59,7 +67,7 @@ class TestEventsAPIClient200:
         mock_gh._http.get.return_value = _make_response()
 
         client = GitHubEventsAPIClient(mock_gh)
-        await client.poll_repo_events("owner", "repo", "inst-1")
+        await client.fetch_repo_events("owner", "repo", "inst-1")
 
         mock_gh.get_installation_token.assert_awaited_once_with("inst-1")
         actual_headers = mock_gh._http.get.call_args.kwargs.get("headers", {})
@@ -73,9 +81,9 @@ class TestEventsAPIClient200:
         )
 
         client = GitHubEventsAPIClient(mock_gh)
-        result = await client.poll_repo_events("owner", "repo", "inst-1")
+        result = await client.fetch_repo_events("owner", "repo", "inst-1")
 
-        assert result.poll_interval == 120
+        assert result.poll_interval_hint == 120
 
 
 @pytest.mark.unit
@@ -85,19 +93,15 @@ class TestEventsAPIClient304:
     @pytest.mark.asyncio
     async def test_returns_no_events_on_304(self) -> None:
         mock_gh = _make_mock_client()
-        # First call: 200 with ETag
-        mock_gh._http.get.return_value = _make_response(
-            json_data=[{"id": "1", "type": "PushEvent", "payload": {}}]
-        )
-        client = GitHubEventsAPIClient(mock_gh)
-        await client.poll_repo_events("owner", "repo", "inst-1")
-
-        # Second call: 304 Not Modified
         mock_gh._http.get.return_value = _make_response(status_code=304)
-        result = await client.poll_repo_events("owner", "repo", "inst-1")
 
-        assert result.has_new_events is False
+        client = GitHubEventsAPIClient(mock_gh)
+        result = await client.fetch_repo_events("owner", "repo", "inst-1", etag='"prev"')
+
+        assert result.has_new is False
         assert result.events == []
+        # ETag is echoed back so the caller can persist it.
+        assert result.etag == '"prev"'
 
     @pytest.mark.asyncio
     async def test_poll_interval_preserved_on_304(self) -> None:
@@ -107,85 +111,58 @@ class TestEventsAPIClient304:
         )
 
         client = GitHubEventsAPIClient(mock_gh)
-        result = await client.poll_repo_events("owner", "repo", "inst-1")
+        result = await client.fetch_repo_events("owner", "repo", "inst-1")
 
-        assert result.poll_interval == 90
+        assert result.poll_interval_hint == 90
 
 
 @pytest.mark.unit
-class TestEventsAPIClientETagCaching:
-    """Tests for ETag conditional request handling."""
+class TestEventsAPIClientETagConditional:
+    """The adapter is stateless; the cursor is supplied by the caller."""
 
     @pytest.mark.asyncio
-    async def test_stores_etag_from_200_response(self) -> None:
+    async def test_returns_etag_from_response(self) -> None:
         mock_gh = _make_mock_client()
         mock_gh._http.get.return_value = _make_response(
             json_data=[{"id": "1"}], headers={"ETag": '"etag-v1"', "X-Poll-Interval": "60"}
         )
 
         client = GitHubEventsAPIClient(mock_gh)
-        await client.poll_repo_events("owner", "repo", "inst-1")
+        result = await client.fetch_repo_events("owner", "repo", "inst-1")
 
-        assert client._etags["owner/repo"] == '"etag-v1"'
+        assert result.etag == '"etag-v1"'
 
     @pytest.mark.asyncio
-    async def test_sends_if_none_match_on_subsequent_request(self) -> None:
+    async def test_sends_if_none_match_when_caller_supplies_etag(self) -> None:
         mock_gh = _make_mock_client()
-        mock_gh._http.get.return_value = _make_response(
-            json_data=[{"id": "1"}], headers={"ETag": '"etag-v1"', "X-Poll-Interval": "60"}
-        )
-
-        client = GitHubEventsAPIClient(mock_gh)
-        # First call stores the ETag
-        await client.poll_repo_events("owner", "repo", "inst-1")
-
-        # Second call should include If-None-Match
         mock_gh._http.get.return_value = _make_response(status_code=304)
-        await client.poll_repo_events("owner", "repo", "inst-1")
 
-        second_call_kwargs = mock_gh._http.get.call_args
-        headers = second_call_kwargs.kwargs.get("headers", second_call_kwargs[1].get("headers", {}))
+        client = GitHubEventsAPIClient(mock_gh)
+        await client.fetch_repo_events("owner", "repo", "inst-1", etag='"etag-v1"')
+
+        call = mock_gh._http.get.call_args
+        headers = call.kwargs.get("headers", call[1].get("headers", {}))
         assert headers.get("If-None-Match") == '"etag-v1"'
 
     @pytest.mark.asyncio
-    async def test_no_if_none_match_on_first_request(self) -> None:
+    async def test_no_if_none_match_when_caller_omits_etag(self) -> None:
         mock_gh = _make_mock_client()
         mock_gh._http.get.return_value = _make_response()
 
         client = GitHubEventsAPIClient(mock_gh)
-        await client.poll_repo_events("owner", "repo", "inst-1")
+        await client.fetch_repo_events("owner", "repo", "inst-1")
 
-        first_call_kwargs = mock_gh._http.get.call_args
-        headers = first_call_kwargs.kwargs.get("headers", first_call_kwargs[1].get("headers", {}))
+        call = mock_gh._http.get.call_args
+        headers = call.kwargs.get("headers", call[1].get("headers", {}))
         assert "If-None-Match" not in headers
-
-    @pytest.mark.asyncio
-    async def test_etags_scoped_per_repo(self) -> None:
-        mock_gh = _make_mock_client()
-        mock_gh._http.get.return_value = _make_response(
-            json_data=[{"id": "1"}], headers={"ETag": '"etag-repo-a"', "X-Poll-Interval": "60"}
-        )
-
-        client = GitHubEventsAPIClient(mock_gh)
-        await client.poll_repo_events("owner", "repo-a", "inst-1")
-
-        mock_gh._http.get.return_value = _make_response(
-            json_data=[{"id": "2"}], headers={"ETag": '"etag-repo-b"', "X-Poll-Interval": "60"}
-        )
-        await client.poll_repo_events("owner", "repo-b", "inst-1")
-
-        assert client._etags["owner/repo-a"] == '"etag-repo-a"'
-        assert client._etags["owner/repo-b"] == '"etag-repo-b"'
 
 
 @pytest.mark.unit
-class TestEventsAPIClientErrors:
-    """Tests for error responses (rate limits, auth errors)."""
+class TestEventsAPIClientRateLimit:
+    """Rate-limit translation: port returns rate_limited=True, never raises."""
 
     @pytest.mark.asyncio
-    async def test_rate_limit_raises_error(self) -> None:
-        from syn_adapters.github.client import GitHubRateLimitError
-
+    async def test_rate_limit_returns_rate_limited_result(self) -> None:
         mock_gh = _make_mock_client()
         resp = _make_response(status_code=403)
         resp.text = "API rate limit exceeded"
@@ -193,18 +170,9 @@ class TestEventsAPIClientErrors:
         mock_gh._http.get.return_value = resp
 
         client = GitHubEventsAPIClient(mock_gh)
-        with pytest.raises(GitHubRateLimitError):
-            await client.poll_repo_events("owner", "repo", "inst-1")
+        result = await client.fetch_repo_events("owner", "repo", "inst-1")
 
-    @pytest.mark.asyncio
-    async def test_404_raises_app_error(self) -> None:
-        from syn_adapters.github.client import GitHubAppError
-
-        mock_gh = _make_mock_client()
-        resp = _make_response(status_code=404)
-        resp.text = "Not Found"
-        mock_gh._http.get.return_value = resp
-
-        client = GitHubEventsAPIClient(mock_gh)
-        with pytest.raises(GitHubAppError):
-            await client.poll_repo_events("owner", "repo", "inst-1")
+        assert result.rate_limited is True
+        assert result.events == []
+        assert result.has_new is False
+        assert result.retry_after_seconds >= 0.0

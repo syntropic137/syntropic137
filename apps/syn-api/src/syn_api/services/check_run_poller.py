@@ -24,12 +24,12 @@ from syn_domain.contexts.github import PendingSHA, PollerState, synthesize_check
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-    from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
     from syn_api.services.webhook_health_tracker import WebhookHealthTracker
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+    from syn_domain.contexts.github.slices.event_pipeline.ports import GitHubChecksAPIPort
     from syn_shared.settings.polling import PollingSettings
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class CheckRunPoller:
 
     def __init__(
         self,
-        checks_client: GitHubChecksAPIClient,
+        checks_client: GitHubChecksAPIPort,
         pipeline: EventPipeline,
         sha_store: PendingSHAStore,
         health_tracker: WebhookHealthTracker,
@@ -141,8 +141,9 @@ class CheckRunPoller:
                 self._state.record_success()
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
-                interval = self._handle_poll_error(exc, interval)
+            except Exception:
+                self._state.record_error()
+                logger.exception("Check-run polling error, backing off")
 
             await self._sleep(interval)
 
@@ -177,21 +178,29 @@ class CheckRunPoller:
             logger.warning("Invalid repository format (no '/'): %s", pending.repository)
             return
         owner, repo = pending.repository.split("/", 1)
-        response = await self._checks_client.get_check_runs_for_ref(
+        result = await self._checks_client.fetch_check_runs(
             owner=owner,
             repo=repo,
             ref=pending.sha,
             installation_id=pending.installation_id,
         )
 
+        if result.rate_limited:
+            self._state.record_error()
+            logger.warning(
+                "Check-run poller rate limited, backing off %.0fs",
+                result.retry_after_seconds,
+            )
+            return
+
         all_completed = True
-        for raw_check_run in response.check_runs:
+        for raw_check_run in result.check_runs:
             if raw_check_run.get("status") != "completed":
                 all_completed = False
                 continue
             await self._ingest_synthesized_event(raw_check_run, pending)
 
-        if all_completed and response.check_runs:
+        if all_completed and result.check_runs:
             await self._sha_store.remove(pending.repository, pending.sha)
             logger.debug(
                 "All check runs completed for %s@%s, removed from pending",
@@ -229,28 +238,3 @@ class CheckRunPoller:
         if removed:
             logger.info("Cleaned up %d stale pending SHA(s)", removed)
 
-    def _handle_poll_error(self, exc: Exception, interval: float) -> float:
-        """Handle a polling error: record backoff and adjust interval."""
-        self._state.record_error()
-        reset_seconds = _extract_rate_limit_wait(exc)
-        if reset_seconds is not None:
-            interval = max(interval, reset_seconds)
-            logger.warning("Check-run poller rate limited, backing off %.0fs", interval)
-        else:
-            logger.exception("Check-run polling error, backing off")
-        return interval
-
-
-def _extract_rate_limit_wait(exc: Exception) -> float | None:
-    """Extract wait seconds from a GitHubRateLimitError, if applicable."""
-    from datetime import UTC, datetime
-
-    try:
-        from syn_adapters.github.client import GitHubRateLimitError
-    except ImportError:
-        return None
-
-    if isinstance(exc, GitHubRateLimitError) and exc.reset_at is not None:
-        wait = (exc.reset_at - datetime.now(UTC)).total_seconds()
-        return max(wait, 0)
-    return None

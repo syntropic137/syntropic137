@@ -319,28 +319,28 @@ class TestColdStartFence:
 def _make_mock_events_client(
     events: list[dict[str, Any]],
 ) -> object:
-    """Create a mock GitHubEventsAPIClient returning the given events."""
-    from syn_adapters.github.events_api_client import EventsAPIResponse
+    """Create an in-memory ``GitHubEventsAPIPort`` implementation for tests."""
+    from syn_domain.contexts.github.slices.event_pipeline.ports import EventsAPIResult
 
     class _MockClient:
         def __init__(self) -> None:
             self.call_count = 0
             self.last_etag: str | None = None
 
-        async def poll_repo_events(
+        async def fetch_repo_events(
             self,
             owner: str,
             repo: str,
             installation_id: str,
             etag: str | None = None,
-        ) -> EventsAPIResponse:
+        ) -> EventsAPIResult:
             self.call_count += 1
             self.last_etag = etag
-            return EventsAPIResponse(
+            return EventsAPIResult(
                 events=events,
-                poll_interval=60,
-                has_new_events=bool(events),
+                has_new=bool(events),
                 etag="response-etag-1",
+                poll_interval_hint=60,
             )
 
     return _MockClient()

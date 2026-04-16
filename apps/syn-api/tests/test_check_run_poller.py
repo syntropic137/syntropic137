@@ -23,7 +23,7 @@ from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import Pe
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 
 if TYPE_CHECKING:
-    from syn_adapters.github.checks_api_client import CheckRunsResponse
+    from syn_domain.contexts.github.slices.event_pipeline.ports import ChecksAPIResult
 
 # -- Test doubles ------------------------------------------------------------
 
@@ -62,22 +62,22 @@ class NullRepository:
 
 
 class MockChecksClient:
-    """Mock GitHub Checks API client."""
+    """In-memory implementation of ``GitHubChecksAPIPort`` for tests."""
 
     def __init__(self, check_runs: list[dict[str, Any]] | None = None) -> None:
-        from syn_adapters.github.checks_api_client import CheckRunsResponse
+        from syn_domain.contexts.github.slices.event_pipeline.ports import ChecksAPIResult
 
         runs = check_runs or []
-        self._response = CheckRunsResponse(check_runs=runs, total_count=len(runs))
+        self._response = ChecksAPIResult(check_runs=runs, total_count=len(runs))
         self.poll_count = 0
 
-    async def get_check_runs_for_ref(
+    async def fetch_check_runs(
         self,
         owner: str,
         repo: str,
         ref: str,
         installation_id: str,
-    ) -> CheckRunsResponse:
+    ) -> ChecksAPIResult:
         self.poll_count += 1
         return self._response
 

@@ -1,4 +1,4 @@
-"""Unit tests for GitHubChecksAPIClient (#602)."""
+"""Tests for ``GitHubChecksAPIClient`` -- the ``GitHubChecksAPIPort`` adapter."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from syn_adapters.github.checks_api_client import CheckRunsResponse, GitHubChecksAPIClient
+from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
+from syn_domain.contexts.github.slices.event_pipeline.ports import ChecksAPIResult
 
 
 def _make_mock_github_client() -> MagicMock:
-    """Create a mock GitHubAppClient with api_get."""
     client = MagicMock()
     client.api_get = AsyncMock()
     return client
@@ -34,7 +34,7 @@ def _make_check_run(
 
 
 @pytest.mark.unit
-class TestGetCheckRunsForRef:
+class TestFetchCheckRuns:
     @pytest.mark.asyncio
     async def test_returns_check_runs(self) -> None:
         mock_gh = _make_mock_github_client()
@@ -42,11 +42,12 @@ class TestGetCheckRunsForRef:
         mock_gh.api_get.return_value = {"check_runs": check_runs, "total_count": 2}
 
         client = GitHubChecksAPIClient(mock_gh)
-        result = await client.get_check_runs_for_ref("owner", "repo", "abc123", "inst-1")
+        result = await client.fetch_check_runs("owner", "repo", "abc123", "inst-1")
 
-        assert isinstance(result, CheckRunsResponse)
+        assert isinstance(result, ChecksAPIResult)
         assert len(result.check_runs) == 2
         assert result.total_count == 2
+        assert result.rate_limited is False
         mock_gh.api_get.assert_awaited_once_with(
             "/repos/owner/repo/commits/abc123/check-runs",
             installation_id="inst-1",
@@ -58,7 +59,7 @@ class TestGetCheckRunsForRef:
         mock_gh.api_get.return_value = {"check_runs": [], "total_count": 0}
 
         client = GitHubChecksAPIClient(mock_gh)
-        result = await client.get_check_runs_for_ref("owner", "repo", "abc123", "inst-1")
+        result = await client.fetch_check_runs("owner", "repo", "abc123", "inst-1")
 
         assert result.check_runs == []
         assert result.total_count == 0
@@ -70,6 +71,20 @@ class TestGetCheckRunsForRef:
         mock_gh.api_get.return_value = {"check_runs": [_make_check_run()]}
 
         client = GitHubChecksAPIClient(mock_gh)
-        result = await client.get_check_runs_for_ref("owner", "repo", "abc123", "inst-1")
+        result = await client.fetch_check_runs("owner", "repo", "abc123", "inst-1")
 
         assert result.total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_returns_rate_limited_result(self) -> None:
+        from syn_adapters.github.client import GitHubRateLimitError
+
+        mock_gh = _make_mock_github_client()
+        mock_gh.api_get.side_effect = GitHubRateLimitError("rate limited")
+
+        client = GitHubChecksAPIClient(mock_gh)
+        result = await client.fetch_check_runs("owner", "repo", "abc123", "inst-1")
+
+        assert result.rate_limited is True
+        assert result.check_runs == []
+        assert result.retry_after_seconds >= 0.0

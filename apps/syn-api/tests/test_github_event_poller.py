@@ -51,25 +51,25 @@ class MemoryCursorStore:
 
 
 class MockEventsClient:
-    """Mock GitHub Events API client for testing."""
+    """In-memory implementation of ``GitHubEventsAPIPort`` for tests."""
 
     def __init__(self, events: list[dict[str, Any]] | None = None) -> None:
-        from syn_adapters.github.events_api_client import EventsAPIResponse
+        from syn_domain.contexts.github.slices.event_pipeline.ports import EventsAPIResult
 
-        self._response = EventsAPIResponse(
+        self._response = EventsAPIResult(
             events=events or [],
-            poll_interval=60,
-            has_new_events=bool(events),
+            has_new=bool(events),
             etag="mock-etag",
+            poll_interval_hint=60,
         )
         self.poll_count = 0
 
-    async def poll_repo_events(
+    async def fetch_repo_events(
         self,
         owner: str,
         repo: str,
         installation_id: str,
-        **kwargs: object,
+        etag: str | None = None,
     ) -> Any:  # noqa: ANN401
         self.poll_count += 1
         return self._response

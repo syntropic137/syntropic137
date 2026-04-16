@@ -37,10 +37,10 @@ if TYPE_CHECKING:
 
     from event_sourcing.core.historical_poller import CursorStore
 
-    from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_api.services.webhook_health_tracker import WebhookHealthTracker
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+    from syn_domain.contexts.github.slices.event_pipeline.ports import GitHubEventsAPIPort
     from syn_shared.settings.polling import PollingSettings
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ class GitHubRepoPoller(HistoricalPoller):
 
     def __init__(
         self,
-        events_client: GitHubEventsAPIClient,
+        events_client: GitHubEventsAPIPort,
         pipeline: EventPipeline,
         cursor_store: CursorStore,
     ) -> None:
@@ -90,6 +90,7 @@ class GitHubRepoPoller(HistoricalPoller):
         self._pipeline = pipeline
         self._installation_ids: dict[str, str] = {}
         self._last_poll_interval: int | None = None
+        self._last_rate_limit_wait: float = 0.0
 
     def set_installation_ids(self, mapping: dict[str, str]) -> None:
         """Update repo -> installation_id mapping for the current poll cycle."""
@@ -100,11 +101,16 @@ class GitHubRepoPoller(HistoricalPoller):
         """GitHub's recommended poll interval from the last response, if any."""
         return self._last_poll_interval
 
+    @property
+    def last_rate_limit_wait(self) -> float:
+        """Seconds the adapter asked us to wait after the last rate-limit hit (0.0 = none)."""
+        return self._last_rate_limit_wait
+
     async def fetch(self, source_key: str) -> PollResult:
         """Fetch events from the GitHub Events API for one repository.
 
         Loads the stored ETag from the cursor store and passes it to the
-        API client for conditional requests (If-None-Match). Returns a
+        port for conditional requests (If-None-Match). Returns a
         ``PollResult`` with events ordered oldest-first.
         """
         inst_id = self._installation_ids.get(source_key, "")
@@ -114,27 +120,37 @@ class GitHubRepoPoller(HistoricalPoller):
         stored_cursor = await self._cursor_store.load(source_key)
         stored_etag = stored_cursor.value if stored_cursor else None
 
-        response = await self._events_client.poll_repo_events(
+        result = await self._events_client.fetch_repo_events(
             owner,
             repo,
             inst_id,
             etag=stored_etag,
         )
 
+        if result.rate_limited:
+            self._last_rate_limit_wait = result.retry_after_seconds
+            return PollResult(
+                events=[],
+                cursor=stored_cursor or CursorData(value=stored_etag or "", metadata={}),
+                has_new=False,
+            )
+        self._last_rate_limit_wait = 0.0
+        self._last_poll_interval = result.poll_interval_hint
+
         # Map raw events to PollEvent (reversed: Events API returns newest-first)
         poll_events: list[PollEvent] = []
-        for raw in reversed(response.events):
+        for raw in reversed(result.events):
             created_at = _parse_event_timestamp(raw)
             poll_events.append(PollEvent(created_at=created_at, data=raw))
 
         # Build cursor from response ETag + newest event ID
-        newest_id = str(response.events[0].get("id", "")) if response.events else ""
+        newest_id = str(result.events[0].get("id", "")) if result.events else ""
         cursor = CursorData(
-            value=response.etag,
+            value=result.etag,
             metadata={"last_event_id": newest_id},
         )
 
-        return PollResult(events=poll_events, cursor=cursor, has_new=response.has_new_events)
+        return PollResult(events=poll_events, cursor=cursor, has_new=result.has_new)
 
     async def process(self, source_key: str, events: list[PollEvent]) -> None:
         """Normalize events and ingest through the EventPipeline.
@@ -227,11 +243,19 @@ class GitHubEventPoller:
 
             try:
                 interval = await self._poll_all_repos(interval)
-                self._state.record_success()
+                # Port surfaces rate-limit as a result field; honor the wait it asked for.
+                if self._repo_poller.last_rate_limit_wait > 0.0:
+                    interval = max(interval, self._repo_poller.last_rate_limit_wait)
+                    logger.warning(
+                        "Rate limited during polling, backing off %.0fs", interval
+                    )
+                else:
+                    self._state.record_success()
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
-                interval = self._handle_poll_error(exc, interval)
+            except Exception:
+                self._state.record_error()
+                logger.exception("Polling error, backing off")
 
             await self._sleep(interval)
 
@@ -257,17 +281,6 @@ class GitHubEventPoller:
 
         return interval
 
-    def _handle_poll_error(self, exc: Exception, interval: float) -> float:
-        """Handle a polling error: record backoff and adjust interval."""
-        self._state.record_error()
-        reset_seconds = _extract_rate_limit_wait(exc)
-        if reset_seconds is not None:
-            interval = max(interval, reset_seconds)
-            logger.warning("Rate limited during polling, backing off %.0fs", interval)
-        else:
-            logger.exception("Polling error, backing off")
-        return interval
-
     async def _get_repos_to_poll(self) -> list[tuple[str, str]]:
         """Get (repo, installation_id) pairs for repos with active triggers.
 
@@ -288,17 +301,3 @@ class GitHubEventPoller:
         return list(seen.items())
 
 
-def _extract_rate_limit_wait(exc: Exception) -> float | None:
-    """Extract wait seconds from a GitHubRateLimitError, if applicable."""
-    from datetime import UTC, datetime
-
-    # Avoid importing at module level to keep this file light
-    try:
-        from syn_adapters.github.client import GitHubRateLimitError
-    except ImportError:
-        return None
-
-    if isinstance(exc, GitHubRateLimitError) and exc.reset_at is not None:
-        wait = (exc.reset_at - datetime.now(UTC)).total_seconds()
-        return max(wait, 0)
-    return None
