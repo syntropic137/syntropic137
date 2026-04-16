@@ -193,14 +193,20 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         """Record delivery for Guard 4 idempotency (ADR-060).
 
         Called in the live fire path for immediate dedup. The projection
-        also writes this; the second write is idempotent (same key/value).
+        (TriggerQueryProjection) also writes the same key from the
+        TriggerFiredEvent; payload shape is aligned so the second write
+        is a true idempotent overwrite.
         """
         if not delivery_id:
             return
         await self._store.save(
             NS_DELIVERIES,
             delivery_id,
-            {"trigger_id": trigger_id, "recorded_at": datetime.now(UTC).isoformat()},
+            {
+                "delivery_id": delivery_id,
+                "trigger_id": trigger_id,
+                "processed_at": datetime.now(UTC).isoformat(),
+            },
         )
 
     async def record_fire(

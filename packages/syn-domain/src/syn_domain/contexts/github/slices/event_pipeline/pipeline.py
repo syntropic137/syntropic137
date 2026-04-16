@@ -64,13 +64,20 @@ class EventPipeline:
         self._background_tasks: set[asyncio.Task[None]] = set()
 
     def add_observer(self, callback: _ObserverCallback) -> None:
-        """Register a callback notified after each non-deduplicated event.
+        """Register a callback notified after each event reaches trigger evaluation.
 
         Used by CheckRunPoller to learn about PR events and register
         pending SHAs for check-run polling (#602).
 
-        Note: observers should be registered during startup, before the
-        first ``ingest()`` call. This is safe in asyncio (single-threaded).
+        Observers fire AFTER trigger evaluation runs and therefore are
+        intentionally NOT called for events that are deduplicated or that
+        are skipped by the cold-start fence (``source_primed=False``).
+        Cold-start replays should not register SHAs for self-healing -- the
+        whole point of the fence is to avoid synthesizing work from
+        historical state. See ADR-060 §9 Layer 5.
+
+        Observers should be registered during startup, before the first
+        ``ingest()`` call. This is safe in asyncio (single-threaded).
         """
         self._observers.append(callback)
 
