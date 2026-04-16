@@ -10,10 +10,13 @@ Standard: ADR-062 (architectural fitness function standard).
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from ci.fitness.conftest import repo_root
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _SERVICES_DIR = repo_root() / "packages/syn-domain/src/syn_domain/contexts/github/services"
 
@@ -42,9 +45,10 @@ class TestGitHubBCPurity:
                 for alias in node.names:
                     if alias.name.startswith("syn_adapters"):
                         violations.append(f"{path.name}:{node.lineno} imports {alias.name}")
-            elif isinstance(node, ast.ImportFrom):
-                if node.module and node.module.startswith("syn_adapters"):
-                    violations.append(f"{path.name}:{node.lineno} imports from {node.module}")
+            elif isinstance(node, ast.ImportFrom) and (
+                node.module and node.module.startswith("syn_adapters")
+            ):
+                violations.append(f"{path.name}:{node.lineno} imports from {node.module}")
         assert not violations, (
             "Domain services must not depend on adapters. Use ports under "
             "slices/event_pipeline/ports/ instead.\n  " + "\n  ".join(violations)

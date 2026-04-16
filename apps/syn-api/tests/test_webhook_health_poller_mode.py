@@ -7,10 +7,12 @@ transitions and that the poller adapts its interval accordingly.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from event_sourcing.core.historical_poller import CursorData
+
+if TYPE_CHECKING:
+    from event_sourcing.core.historical_poller import CursorData
 
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig

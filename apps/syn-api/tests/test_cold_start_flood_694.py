@@ -383,7 +383,7 @@ class TestLayer4IsReplay:
         import syn_domain.contexts.github.services.event_ingestion as ei
 
         original_mapper = ei.map_events_api_to_normalized
-        ei.map_events_api_to_normalized = lambda raw, inst: event  # type: ignore[assignment]
+        ei.map_events_api_to_normalized = lambda _raw, _inst: event  # type: ignore[assignment]
         try:
             await service.process(
                 "owner/repo",
