@@ -11,8 +11,12 @@ Public API:
 - ``WebhookHealthTracker`` -- webhook freshness tracker for poller mode switching.
 - ``GitHubRepoIngestionService`` -- per-repo HistoricalPoller with HWM filter (#694 fix).
 - ``GitHubEventIngestionScheduler`` -- outer scheduler with adaptive intervals.
+- ``CheckRunIngestionService`` -- poll-based self-healing via Checks API (#602).
 """
 
+from syn_domain.contexts.github.services.check_run_ingestion import (
+    CheckRunIngestionService,
+)
 from syn_domain.contexts.github.services.event_ingestion import (
     GitHubEventIngestionScheduler,
     GitHubRepoIngestionService,
@@ -21,6 +25,7 @@ from syn_domain.contexts.github.services.github_events_cursor import GitHubEvent
 from syn_domain.contexts.github.services.webhook_health import WebhookHealthTracker
 
 __all__ = [
+    "CheckRunIngestionService",
     "GitHubEventIngestionScheduler",
     "GitHubEventsCursor",
     "GitHubRepoIngestionService",

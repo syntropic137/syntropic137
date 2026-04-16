@@ -37,8 +37,10 @@ if TYPE_CHECKING:
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api._wiring import BackgroundWorkflowDispatcher
-    from syn_api.services.check_run_poller import CheckRunPoller
-    from syn_domain.contexts.github.services import GitHubEventIngestionScheduler
+    from syn_domain.contexts.github.services import (
+        CheckRunIngestionService,
+        GitHubEventIngestionScheduler,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ class LifecycleState:
     subscription_service: CoordinatorSubscriptionService | None = None
     workflow_dispatcher: BackgroundWorkflowDispatcher | None = None
     event_poller: GitHubEventIngestionScheduler | None = None
-    check_run_poller: CheckRunPoller | None = None
+    check_run_poller: CheckRunIngestionService | None = None
     conversation_storage: MinioConversationStorage | None = None
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
     _recovery_task: asyncio.Task[None] | None = None
@@ -493,10 +495,10 @@ async def _init_check_run_poller(state: LifecycleState) -> None:
         get_trigger_store,
         get_webhook_health_tracker,
     )
-    from syn_api.services.check_run_poller import CheckRunPoller
+    from syn_domain.contexts.github.services import CheckRunIngestionService
 
-    poller = CheckRunPoller(
-        checks_client=GitHubChecksAPIClient(get_github_client()),
+    poller = CheckRunIngestionService(
+        checks_api=GitHubChecksAPIClient(get_github_client()),
         pipeline=get_event_pipeline(),
         sha_store=get_pending_sha_store(),
         health_tracker=get_webhook_health_tracker(),

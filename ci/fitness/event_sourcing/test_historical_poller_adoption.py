@@ -41,9 +41,9 @@ class TestHistoricalPollerAdoption:
         """
         from event_sourcing.core.historical_poller import HistoricalPoller
 
-        from syn_api.services.check_run_poller import CheckRunPoller
+        from syn_domain.contexts.github.services import CheckRunIngestionService
 
-        assert not issubclass(CheckRunPoller, HistoricalPoller), (
-            "CheckRunPoller should NOT extend HistoricalPoller -- "
+        assert not issubclass(CheckRunIngestionService, HistoricalPoller), (
+            "CheckRunIngestionService should NOT extend HistoricalPoller -- "
             "it is reactive (polls registered SHAs), not historical"
         )

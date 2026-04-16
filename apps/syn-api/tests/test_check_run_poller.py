@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from syn_api.services.check_run_poller import CheckRunPoller
+from syn_domain.contexts.github.services import (
+    CheckRunIngestionService as CheckRunPoller,
+)
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.services import WebhookHealthTracker
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
@@ -180,7 +182,7 @@ class TestOnPrEvent:
     async def test_registers_sha_for_synchronize(self) -> None:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
-            checks_client=MockChecksClient(),
+            checks_api=MockChecksClient(),
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(
@@ -204,7 +206,7 @@ class TestOnPrEvent:
     async def test_registers_sha_for_opened(self) -> None:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
-            checks_client=MockChecksClient(),
+            checks_api=MockChecksClient(),
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(
@@ -226,7 +228,7 @@ class TestOnPrEvent:
     async def test_ignores_closed_action(self) -> None:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
-            checks_client=MockChecksClient(),
+            checks_api=MockChecksClient(),
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(
@@ -248,7 +250,7 @@ class TestOnPrEvent:
     async def test_ignores_non_pr_events(self) -> None:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
-            checks_client=MockChecksClient(),
+            checks_api=MockChecksClient(),
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(
@@ -311,7 +313,7 @@ class TestPollLoop:
         )
 
         poller = CheckRunPoller(
-            checks_client=mock_client,
+            checks_api=mock_client,
             pipeline=pipeline,
             sha_store=sha_store,
             health_tracker=WebhookHealthTracker(),
@@ -363,7 +365,7 @@ class TestPollLoop:
         mock_client = MockChecksClient()
 
         poller = CheckRunPoller(
-            checks_client=mock_client,
+            checks_api=mock_client,
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
