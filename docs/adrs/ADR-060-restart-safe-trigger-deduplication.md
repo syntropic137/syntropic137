@@ -169,6 +169,8 @@ Belt-and-suspenders with the HistoricalPoller fence. Even if someone bypasses th
 
 This second layer protects against implementation mistakes where historical events reach the pipeline through a path that doesn't use `HistoricalPoller`.
 
+**Update 2026-04-16 (#694 fix):** The original implementation checked `source_key in self.primed_sources` inside `process()`, but `_prime()` runs before `process()` on the cold-start path, so the check was always `True` -- dead code. The fix uses an explicit `is_replay: bool` kwarg passed from `HistoricalPoller.poll()` directly to `process()`, removing the race-prone state inspection. See Section 9.
+
 **Location:** `packages/syn-domain/.../event_pipeline/normalized_event.py` and `pipeline.py`
 
 ### 8. Configurable dispatch concurrency
@@ -195,19 +197,76 @@ Now configurable via `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` (default 5). This i
 - **Slight latency increase** — Postgres `INSERT ON CONFLICT` is ~1ms vs Redis SETNX ~0.1ms. Negligible for event ingestion rates (<1 event/second typical)
 - **Rate limiter can delay legitimate events** — During high-activity bursts (e.g., mass PR review submission), Guard 7 may throttle. The default limit (10/60s) is generous; adjust via config if needed
 
+## 9. Eight-Layer Defense in Depth (Bug #694 Fix)
+
+After the #694 cold-start flood (2026-04-16), the defense in depth was extended to eight layers. For a spurious execution to fire on cold start, **all eight** must fail simultaneously.
+
+| # | Layer | Owner | Prevents | Persistent? | Test |
+|---|-------|-------|----------|-------------|------|
+| 1 | ETag (HTTP 304) | Adapter (`events_api_client.py`) | Wasted bandwidth + spurious re-delivery when nothing changed | Yes (`cursor.etag` in `poller_cursors`) | adapter unit test |
+| 2 | HWM filter inside `fetch()` | Domain (`event_ingestion.py`) | Re-delivery of seen events when ETag changes (root cause of #694) | Yes (`cursor.last_event_id`) | `test_cold_start_flood_694.py::TestLayer2HWMFilter` |
+| 3 | Cold-start `_started_at` timestamp fence | ESP `HistoricalPoller` | Historical events on first ever poll | N/A (per-instance) | ESP `test_historical_poller.py` |
+| 4 | `is_replay` flag from `poll()` to `process()` | ESP + domain service | Cold-start events bypassing safety nets via dead-code path | N/A | `test_is_replay_signal.py` |
+| 5 | Pipeline `source_primed` check | Domain `pipeline.py` | Trigger evaluation for unprimed events | N/A | `test_cold_start_flood_694.py::TestLayer4IsReplay` |
+| 6 | Content-based dedup (Postgres) | Domain port (`PostgresDedupAdapter`) | Cross-restart re-deliveries | Yes (`dedup_keys`) | dedup integration test |
+| 7 | Guard 7 trigger rate limit | Domain | Damage cap if all above fail | Yes (`trigger_rules.fire_count`) | aggregate guard test |
+| 8 | Guard 6 per-PR concurrency | Domain | Per-PR duplicate executions | Yes | aggregate guard test |
+
+### Why Layer 2 (HWM filter) is the principal fix
+
+GitHub's Events API ETag is "anything changed?" not "what changed?". When even one event arrives, the ETag changes and GitHub returns the **full** recent list (up to 300 events, 30 days retention). Without an HWM filter, warm-start re-delivery floods the pipeline with already-seen events.
+
+The fix: `GitHubEventsCursor.last_event_id` is a **required** dataclass field. Every save through the typed cursor includes the HWM; every fetch consults it before passing events down. This is poka-yoke: bypass requires constructing the dataclass without the field, which is a type error.
+
+### Why Layer 4 (is_replay) replaces dead code
+
+The original `source_primed=False` belt-and-suspenders relied on `source_key in self.primed_sources` inside `process()`. But ESP's `_prime()` mutates `primed_sources` *before* calling `process()`, so the check was always `True` -- the safety net was dead. The fix passes `is_replay: bool` directly from `poll()` to `process()`, sidestepping the mutated state.
+
+## 10. Hexagonal Architecture and Port Boundaries
+
+The GitHub bounded context owns:
+
+- The event pipeline (`slices/event_pipeline/pipeline.py`)
+- The application services (`services/event_ingestion.py`, `services/check_run_ingestion.py`, `services/webhook_health.py`)
+- The ports that adapters implement (`slices/event_pipeline/ports/{events_api_port,checks_api_port}.py`)
+- The typed cursor (`services/github_events_cursor.py`)
+
+The adapter layer (`packages/syn-adapters/src/syn_adapters/github/`) owns:
+
+- HTTP plumbing (`client.py`, `client_api.py`, `client_jwt.py`, `client_token.py`, `client_endpoints.py`)
+- Implementations of the domain ports (`events_api_client.py`, `checks_api_client.py`)
+- Persistent storage (`poller_cursor_store.py`, `postgres_pending_sha_store.py`)
+- Internal exception types (`GitHubRateLimitError`, `GitHubAppError`)
+
+The application layer (`apps/syn-api/`) owns:
+
+- HTTP routes (`routes/webhooks/processing.py`)
+- Composition root (`_wiring.py`)
+- Lifecycle management (`services/lifecycle.py`)
+- Nothing else.
+
+Architectural fitness functions (CI-enforced):
+
+- `TestGitHubBCPurity` -- `services/` contains no `syn_adapters` imports
+- `TestEventsAPIPortAdoption` -- `GitHubEventsAPIClient` explicitly inherits its port
+- `TestChecksAPIPortAdoption` -- `GitHubChecksAPIClient` explicitly inherits its port
+- `TestGitHubCursorTyped` -- `GitHubEventsCursor.last_event_id` is required
+- `TestHistoricalPollerIsReplay` -- `process()` accepts `is_replay` kwarg
+
 ## Defense in Depth Summary
 
-After this ADR, both warm restart and cold start are protected by seven independent layers:
+After this ADR + the #694 fix, both warm restart and cold start are protected by **eight** independent layers (see Section 9 for detail):
 
 | Layer | Component | What it prevents | Persistent? | Cold start? |
 |-------|-----------|-----------------|-------------|-------------|
-| 0 | HistoricalPoller fence (section 6) | Processing historical events on first poll | Yes (cursor) | Yes |
-| 0b | Pipeline source_primed (section 7) | Trigger eval for unprimed events (belt-and-suspenders) | N/A (per-event flag) | Yes |
-| 1 | Poller cursor (Postgres) | Re-fetching events from GitHub | Yes | After first poll |
-| 2 | Dedup (Postgres) | Re-processing known events | Yes | After first event |
-| 3 | Guard 4 (fixed) | Re-evaluating triggers for known events | Yes (event store) | After first fire |
-| 4 | Guard 7 (rate limiter) | Runaway dispatch from any cause | Stateless (sliding window) | Yes |
-| 5 | Dispatch concurrency (section 8) | OOM from too many concurrent containers | Config (default 5) | Yes |
+| 1 | ETag (HTTP 304) | Re-delivery when nothing changed | Yes (cursor) | After first poll |
+| 2 | HWM filter (`fetch()`) | Re-delivery when ETag churns -- **#694 fix** | Yes (`last_event_id`) | After first poll |
+| 3 | Cold-start fence (`_started_at`) | Historical events on first poll | N/A | Yes |
+| 4 | `is_replay` -> `source_primed=False` | Cold-start events bypassing safety nets | N/A | Yes |
+| 5 | Pipeline `source_primed` | Trigger eval for unprimed events | N/A | Yes |
+| 6 | Dedup (Postgres) | Re-processing known events | Yes | After first event |
+| 7 | Guard 7 rate limiter | Runaway dispatch | Stateless | Yes |
+| 8 | Guard 6 per-PR concurrency | Per-PR duplicate executions | Yes | Yes |
 
 ## Related ADRs
 
