@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
-    from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+    from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
         _ExecutionService,
@@ -415,7 +415,7 @@ def _create_dedup_adapter() -> DedupPort:
 
 def get_webhook_health_tracker() -> WebhookHealthTracker:
     """Return the singleton WebhookHealthTracker."""
-    from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+    from syn_domain.contexts.github.services import WebhookHealthTracker
 
     global _webhook_health_tracker_singleton
     if _webhook_health_tracker_singleton is not None:

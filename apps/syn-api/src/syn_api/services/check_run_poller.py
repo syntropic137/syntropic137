@@ -24,8 +24,8 @@ from syn_domain.contexts.github import PendingSHA, PollerState, synthesize_check
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-    from syn_api.services.webhook_health_tracker import WebhookHealthTracker
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
+    from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline

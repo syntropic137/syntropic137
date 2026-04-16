@@ -37,8 +37,8 @@ if TYPE_CHECKING:
 
     from event_sourcing.core.historical_poller import CursorStore
 
-    from syn_api.services.webhook_health_tracker import WebhookHealthTracker
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
+    from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
     from syn_domain.contexts.github.slices.event_pipeline.ports import GitHubEventsAPIPort
     from syn_shared.settings.polling import PollingSettings
