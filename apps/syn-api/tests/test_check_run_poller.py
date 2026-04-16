@@ -25,7 +25,7 @@ from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import Pe
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.github.slices.event_pipeline.ports import ChecksAPIResult
+    from syn_domain.contexts.github.ports import ChecksAPIResult
 
 # -- Test doubles ------------------------------------------------------------
 
@@ -67,7 +67,7 @@ class MockChecksClient:
     """In-memory implementation of ``GitHubChecksAPIPort`` for tests."""
 
     def __init__(self, check_runs: list[dict[str, Any]] | None = None) -> None:
-        from syn_domain.contexts.github.slices.event_pipeline.ports import ChecksAPIResult
+        from syn_domain.contexts.github.ports import ChecksAPIResult
 
         runs = check_runs or []
         self._response = ChecksAPIResult(check_runs=runs, total_count=len(runs))

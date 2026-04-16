@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
-from syn_domain.contexts.github.slices.event_pipeline.ports import ChecksAPIResult
+from syn_domain.contexts.github.ports import ChecksAPIResult
 
 
 def _make_mock_github_client() -> MagicMock:

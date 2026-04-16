@@ -53,7 +53,7 @@ class MockEventsAPI:
     """In-memory ``GitHubEventsAPIPort`` returning a fixed set of events."""
 
     def __init__(self, events: list[dict[str, Any]] | None = None) -> None:
-        from syn_domain.contexts.github.slices.event_pipeline.ports import (
+        from syn_domain.contexts.github.ports import (
             EventsAPIResult,
         )
 

@@ -17,7 +17,7 @@ import pytest
 class TestEventsAPIPortAdoption:
     def test_client_implements_port(self) -> None:
         from syn_adapters.github.events_api_client import GitHubEventsAPIClient
-        from syn_domain.contexts.github.slices.event_pipeline.ports import (
+        from syn_domain.contexts.github.ports import (
             GitHubEventsAPIPort,
         )
 
@@ -33,7 +33,7 @@ class TestEventsAPIPortAdoption:
 class TestChecksAPIPortAdoption:
     def test_client_implements_port(self) -> None:
         from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
-        from syn_domain.contexts.github.slices.event_pipeline.ports import (
+        from syn_domain.contexts.github.ports import (
             GitHubChecksAPIPort,
         )
 

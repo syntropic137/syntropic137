@@ -16,7 +16,7 @@ import re as _re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from syn_domain.contexts.github.slices.event_pipeline.ports.events_api_port import (
+from syn_domain.contexts.github.ports.events_api_port import (
     EventsAPIResult,
     GitHubEventsAPIPort,
 )
@@ -44,6 +44,16 @@ def _parse_next_link(link_header: str) -> str | None:
             if match:
                 return match.group(1)
     return None
+
+
+def _empty_result(etag: str | None, poll_interval: int) -> EventsAPIResult:
+    """Empty result preserving the caller's etag so the next request stays conditional."""
+    return EventsAPIResult(
+        events=[],
+        has_new=False,
+        etag=etag or "",
+        poll_interval_hint=poll_interval,
+    )
 
 
 def _rate_limited_result(etag: str | None, reset_at: datetime | None) -> EventsAPIResult:
@@ -80,34 +90,42 @@ class GitHubEventsAPIClient(GitHubEventsAPIPort):
         etag: str | None = None,
     ) -> EventsAPIResult:
         from syn_adapters.github.client import GitHubRateLimitError
-        from syn_adapters.github.client_api import check_response
 
         path = f"/repos/{owner}/{repo}/events"
 
         try:
-            token = await self._client.get_installation_token(installation_id)
+            response = await self._send_events_request(path, installation_id, etag)
         except GitHubRateLimitError as exc:
             return _rate_limited_result(etag, exc.reset_at)
 
+        return await self._translate_response(response, etag)
+
+    async def _send_events_request(
+        self,
+        path: str,
+        installation_id: str,
+        etag: str | None,
+    ) -> httpx.Response:
+        """Build headers, get a token, and issue the conditional GET."""
+        token = await self._client.get_installation_token(installation_id)
         headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
         if etag:
             headers["If-None-Match"] = etag
+        return await self._client._http.get(path, headers=headers)
 
-        try:
-            response = await self._client._http.get(path, headers=headers)
-        except GitHubRateLimitError as exc:
-            return _rate_limited_result(etag, exc.reset_at)
+    async def _translate_response(
+        self,
+        response: httpx.Response,
+        etag: str | None,
+    ) -> EventsAPIResult:
+        """Map an HTTP response to an ``EventsAPIResult``, honoring rate limits."""
+        from syn_adapters.github.client import GitHubRateLimitError
+        from syn_adapters.github.client_api import check_response
 
         poll_interval = int(response.headers.get("X-Poll-Interval", "60"))
 
         if response.status_code == 304:
-            return EventsAPIResult(
-                events=[],
-                has_new=False,
-                etag=etag or "",
-                poll_interval_hint=poll_interval,
-            )
-
+            return _empty_result(etag, poll_interval)
         if response.status_code == 200:
             return await self._handle_success(response, poll_interval)
 
@@ -116,12 +134,7 @@ class GitHubEventsAPIClient(GitHubEventsAPIPort):
         except GitHubRateLimitError as exc:
             return _rate_limited_result(etag, exc.reset_at)
 
-        return EventsAPIResult(
-            events=[],
-            has_new=False,
-            etag=etag or "",
-            poll_interval_hint=poll_interval,
-        )
+        return _empty_result(etag, poll_interval)
 
     async def _handle_success(
         self,

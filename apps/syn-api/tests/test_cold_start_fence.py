@@ -320,7 +320,7 @@ def _make_mock_events_client(
     events: list[dict[str, Any]],
 ) -> object:
     """Create an in-memory ``GitHubEventsAPIPort`` implementation for tests."""
-    from syn_domain.contexts.github.slices.event_pipeline.ports import EventsAPIResult
+    from syn_domain.contexts.github.ports import EventsAPIResult
 
     class _MockClient:
         def __init__(self) -> None:

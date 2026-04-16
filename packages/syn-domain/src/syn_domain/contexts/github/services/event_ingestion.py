@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
     from syn_domain.contexts.github.services.webhook_health import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.github.slices.event_pipeline.ports import (
+    from syn_domain.contexts.github.ports import (
         GitHubEventsAPIPort,
     )
     from syn_shared.settings.polling import PollingSettings
@@ -286,26 +286,32 @@ class GitHubEventIngestionScheduler:
     async def _poll_loop(self) -> None:
         """Main polling loop -- runs until cancelled."""
         while True:
-            self._state.update_mode(webhook_stale=self._health.is_stale)
-            interval = self._state.current_interval
-
-            try:
-                interval = await self._poll_all_repos(interval)
-                if self._repo.last_rate_limit_wait > 0.0:
-                    interval = max(interval, self._repo.last_rate_limit_wait)
-                    logger.warning(
-                        "Rate limited during polling, backing off %.0fs",
-                        interval,
-                    )
-                else:
-                    self._state.record_success()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self._state.record_error()
-                logger.exception("Polling error, backing off")
-
+            interval = await self._run_poll_cycle()
             await self._sleep(interval)
+
+    async def _run_poll_cycle(self) -> float:
+        """One polling cycle. Returns the sleep interval before the next cycle."""
+        self._state.update_mode(webhook_stale=self._health.is_stale)
+        interval = self._state.current_interval
+        try:
+            interval = await self._poll_all_repos(interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._state.record_error()
+            logger.exception("Polling error, backing off")
+            return interval
+        return self._apply_rate_limit_backoff(interval)
+
+    def _apply_rate_limit_backoff(self, interval: float) -> float:
+        """Stretch the next-sleep interval if the inner fetch was rate-limited."""
+        rate_limit_wait = self._repo.last_rate_limit_wait
+        if rate_limit_wait > 0.0:
+            backoff = max(interval, rate_limit_wait)
+            logger.warning("Rate limited during polling, backing off %.0fs", backoff)
+            return backoff
+        self._state.record_success()
+        return interval
 
     async def _poll_all_repos(self, interval: float) -> float:
         """Poll all repos with active triggers, returning the effective interval."""

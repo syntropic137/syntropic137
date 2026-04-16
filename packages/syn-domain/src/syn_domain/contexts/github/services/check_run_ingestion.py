@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.github.slices.event_pipeline.ports import GitHubChecksAPIPort
+    from syn_domain.contexts.github.ports import GitHubChecksAPIPort
     from syn_shared.settings.polling import PollingSettings
 
 logger = logging.getLogger(__name__)

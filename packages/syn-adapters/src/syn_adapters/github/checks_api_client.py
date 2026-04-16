@@ -14,7 +14,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from syn_domain.contexts.github.slices.event_pipeline.ports.checks_api_port import (
+from syn_domain.contexts.github.ports.checks_api_port import (
     ChecksAPIResult,
     GitHubChecksAPIPort,
 )

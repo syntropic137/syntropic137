@@ -66,7 +66,7 @@ class MockEventsClient:
     """In-memory ``GitHubEventsAPIPort`` implementation that tracks calls."""
 
     def __init__(self, poll_interval: int = 0) -> None:
-        from syn_domain.contexts.github.slices.event_pipeline.ports import EventsAPIResult
+        from syn_domain.contexts.github.ports import EventsAPIResult
 
         self._response = EventsAPIResult(
             events=[],
