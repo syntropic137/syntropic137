@@ -362,7 +362,9 @@ class TestRepoPollerColdStartFence:
         events with created_at < started_at.
         """
 
-        from syn_api.services.github_event_poller import GitHubRepoPoller
+        from syn_domain.contexts.github.services import (
+            GitHubRepoIngestionService as GitHubRepoPoller,
+        )
 
         # 10 events, all from 10-60 minutes ago (historical)
         historical_events = [
@@ -376,7 +378,7 @@ class TestRepoPollerColdStartFence:
         mock_client = _make_mock_events_client(historical_events)
 
         repo_poller = GitHubRepoPoller(
-            events_client=mock_client,  # type: ignore[arg-type]
+            events_api=mock_client,  # type: ignore[arg-type]
             pipeline=tracking,  # type: ignore[arg-type]
             cursor_store=MemoryCursorStore(),
         )
@@ -400,7 +402,9 @@ class TestRepoPollerColdStartFence:
         """
         from event_sourcing.core.historical_poller import CursorData
 
-        from syn_api.services.github_event_poller import GitHubRepoPoller
+        from syn_domain.contexts.github.services import (
+            GitHubRepoIngestionService as GitHubRepoPoller,
+        )
 
         # Event from 30 minutes ago -- would be filtered on cold start
         old_events = [
@@ -415,7 +419,7 @@ class TestRepoPollerColdStartFence:
         # Pre-populate cursor: this is a warm start
         cursor_store = MemoryCursorStore(initial={"owner/repo": CursorData(value="old-etag")})
         repo_poller = GitHubRepoPoller(
-            events_client=mock_client,  # type: ignore[arg-type]
+            events_api=mock_client,  # type: ignore[arg-type]
             pipeline=tracking,  # type: ignore[arg-type]
             cursor_store=cursor_store,
         )
@@ -432,14 +436,21 @@ class TestRepoPollerColdStartFence:
         # Warm start events should have source_primed=True
         assert tracking.ingested[0].source_primed is True
 
-    async def test_second_poll_after_cold_start_is_warm(self) -> None:
-        """After cold-start priming, the second poll processes all events.
+    async def test_second_poll_after_cold_start_blocks_redelivery(self) -> None:
+        """After cold-start priming, the second poll's HWM filter blocks re-delivered events.
 
-        The state machine transition: cold start -> _prime() -> primed.
-        Subsequent polls behave as warm start.
+        This is the principal #694 fix. GitHub's Events API ETag does not
+        provide deltas - on any change, GitHub returns the full recent list.
+        The HWM filter (Layer 2 in ADR-060 §9) rejects events with
+        id <= cursor.last_event_id BEFORE process() sees them.
+
+        Scenario: cold-start primes HWM with id="evt-1". GitHub re-delivers
+        the same "evt-1" on the next poll. The HWM filter drops it.
         """
 
-        from syn_api.services.github_event_poller import GitHubRepoPoller
+        from syn_domain.contexts.github.services import (
+            GitHubRepoIngestionService as GitHubRepoPoller,
+        )
 
         historical_events = [
             _make_raw_event("evt-1", "PushEvent", "owner/repo", minutes_ago=30),
@@ -451,7 +462,7 @@ class TestRepoPollerColdStartFence:
         mock_client = _make_mock_events_client(historical_events)
 
         repo_poller = GitHubRepoPoller(
-            events_client=mock_client,  # type: ignore[arg-type]
+            events_api=mock_client,  # type: ignore[arg-type]
             pipeline=tracking,  # type: ignore[arg-type]
             cursor_store=MemoryCursorStore(),
         )
@@ -459,7 +470,7 @@ class TestRepoPollerColdStartFence:
 
         await repo_poller.initialize()
 
-        # First poll: cold start, historical events filtered
+        # First poll: cold start, historical events filtered by ESP timestamp fence
         await repo_poller.poll("owner/repo")
         assert tracking.ingested == [], "First poll (cold start) must skip historical events"
 
@@ -468,11 +479,13 @@ class TestRepoPollerColdStartFence:
             "After cold-start poll, source must be in primed_sources"
         )
 
-        # Second poll: warm start, same historical events now pass through
+        # Second poll: HWM filter rejects re-delivered "evt-1" (id <= last_event_id).
+        # This is the #694 fix: warm-start re-delivery is structurally blocked.
         tracking.ingested.clear()
         await repo_poller.poll("owner/repo")
-        assert len(tracking.ingested) == 1, (
-            f"Second poll (warm) must process events, got {len(tracking.ingested)}"
+        assert tracking.ingested == [], (
+            "Second poll must NOT re-process events filtered on cold start "
+            "(HWM filter blocks re-delivery - principal #694 fix)"
         )
 
     async def test_cold_start_passes_post_startup_events(self) -> None:
@@ -485,7 +498,9 @@ class TestRepoPollerColdStartFence:
         only applies when pipeline.ingest() is called outside the
         HistoricalPoller path.
         """
-        from syn_api.services.github_event_poller import GitHubRepoPoller
+        from syn_domain.contexts.github.services import (
+            GitHubRepoIngestionService as GitHubRepoPoller,
+        )
 
         tracking = TrackingPipeline(
             EventPipeline(dedup=InMemoryDedup(), evaluator=TrackingEvaluator())  # type: ignore[arg-type]
@@ -507,7 +522,7 @@ class TestRepoPollerColdStartFence:
         mock_client = _make_mock_events_client(recent_events)
 
         repo_poller = GitHubRepoPoller(
-            events_client=mock_client,  # type: ignore[arg-type]
+            events_api=mock_client,  # type: ignore[arg-type]
             pipeline=tracking,  # type: ignore[arg-type]
             cursor_store=MemoryCursorStore(),
         )
@@ -527,7 +542,9 @@ class TestRepoPollerColdStartFence:
         """Stored ETag from cursor is passed to the client on subsequent polls."""
         from event_sourcing.core.historical_poller import CursorData
 
-        from syn_api.services.github_event_poller import GitHubRepoPoller
+        from syn_domain.contexts.github.services import (
+            GitHubRepoIngestionService as GitHubRepoPoller,
+        )
 
         mock_client = _make_mock_events_client([])
 
@@ -535,7 +552,7 @@ class TestRepoPollerColdStartFence:
             initial={"owner/repo": CursorData(value="stored-etag-abc")}
         )
         repo_poller = GitHubRepoPoller(
-            events_client=mock_client,  # type: ignore[arg-type]
+            events_api=mock_client,  # type: ignore[arg-type]
             pipeline=EventPipeline(dedup=InMemoryDedup(), evaluator=TrackingEvaluator()),  # type: ignore[arg-type]
             cursor_store=cursor_store,
         )

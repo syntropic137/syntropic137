@@ -11,7 +11,10 @@ from typing import Any
 import pytest
 from event_sourcing.core.historical_poller import CursorData
 
-from syn_api.services.github_event_poller import GitHubEventPoller, GitHubRepoPoller
+from syn_domain.contexts.github.services import (
+    GitHubEventIngestionScheduler as GitHubEventPoller,
+    GitHubRepoIngestionService as GitHubRepoPoller,
+)
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.services import WebhookHealthTracker
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
@@ -146,13 +149,13 @@ def _make_poller(
     clock: FakeClock,
 ) -> GitHubEventPoller:
     """Create GitHubEventPoller with the new GitHubRepoPoller composition."""
-    repo_poller = GitHubRepoPoller(
-        events_client=mock_client,  # type: ignore[arg-type]
+    repo_service = GitHubRepoPoller(
+        events_api=mock_client,  # type: ignore[arg-type]
         pipeline=pipeline,
         cursor_store=MemoryCursorStore(),
     )
     return GitHubEventPoller(
-        repo_poller=repo_poller,
+        repo_service=repo_service,
         health_tracker=WebhookHealthTracker(clock=clock),
         trigger_store=store,
         settings=MockPollingSettings(),  # type: ignore[arg-type]
@@ -250,13 +253,13 @@ class TestPollerStartStop:
         cursor_store = MemoryCursorStore()
         await cursor_store.save("owner/repo", CursorData(value="prev-etag"))
 
-        repo_poller = GitHubRepoPoller(
-            events_client=mock_client,  # type: ignore[arg-type]
+        repo_service = GitHubRepoPoller(
+            events_api=mock_client,  # type: ignore[arg-type]
             pipeline=pipeline,
             cursor_store=cursor_store,
         )
         poller = GitHubEventPoller(
-            repo_poller=repo_poller,
+            repo_service=repo_service,
             health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,
             settings=MockPollingSettings(),  # type: ignore[arg-type]

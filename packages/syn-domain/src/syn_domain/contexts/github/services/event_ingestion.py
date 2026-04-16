@@ -1,16 +1,25 @@
-"""GitHub Events API poller -- background task for hybrid event ingestion (ISS-386).
+"""GitHub event ingestion application service (ADR-060 Layers 2 + 4).
 
-Architecture: composition of two classes:
+Domain-owned ingestion logic for the GitHub bounded context. Replaces
+the old ``apps/syn-api/services/github_event_poller.py`` shim. Two
+classes:
 
-- ``GitHubRepoPoller(HistoricalPoller)`` -- per-repo cold-start-safe polling.
-  Extends ESP's HistoricalPoller base class so the cold-start fence is
-  structural and non-bypassable (``poll()`` is ``@final``).
+- ``GitHubRepoIngestionService(HistoricalPoller)`` -- per-repo, cold-start
+  -safe, HWM-filtering ingestion. Subclasses ESP's ``HistoricalPoller``
+  so the cold-start fence (Layer 3) and ``is_replay`` propagation
+  (Layer 4) come for free. Adds Layer 2 HWM filtering inside
+  ``fetch()`` so warm-start re-delivery of historical events
+  (the #694 root cause) is rejected before ``process()`` ever sees them.
 
-- ``GitHubEventPoller`` -- outer loop that manages adaptive intervals,
-  trigger store queries, rate-limit backoff, and background task lifecycle.
-  Calls ``GitHubRepoPoller.poll(source_key)`` for each repo.
+- ``GitHubEventIngestionScheduler`` -- the outer loop. Adaptive
+  intervals (active polling vs safety net), trigger-store gated
+  repo discovery, rate-limit aware backoff, lifecycle.
 
-See ADR-060: Restart-safe trigger deduplication (cold-start fence).
+All adapter dependencies enter through domain ports
+(``GitHubEventsAPIPort``). The composition root in ``apps/syn-api/_wiring.py``
+binds the concrete adapter to the port.
+
+See ADR-060 Section 9 for the eight-layer defense in depth.
 """
 
 from __future__ import annotations
@@ -20,35 +29,31 @@ import contextlib
 import dataclasses
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from event_sourcing.core.historical_poller import (
-    CursorData,
     HistoricalPoller,
     PollEvent,
     PollResult,
 )
 
 from syn_domain.contexts.github import PollerState, map_events_api_to_normalized
+from syn_domain.contexts.github.services.github_events_cursor import GitHubEventsCursor
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
-    from typing import Any
 
     from event_sourcing.core.historical_poller import CursorStore
 
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
-    from syn_domain.contexts.github.services import WebhookHealthTracker
+    from syn_domain.contexts.github.services.webhook_health import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.github.slices.event_pipeline.ports import GitHubEventsAPIPort
+    from syn_domain.contexts.github.slices.event_pipeline.ports import (
+        GitHubEventsAPIPort,
+    )
     from syn_shared.settings.polling import PollingSettings
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Timestamp parsing
-# ---------------------------------------------------------------------------
 
 
 def _parse_event_timestamp(raw_event: dict[str, Any]) -> datetime:
@@ -61,34 +66,39 @@ def _parse_event_timestamp(raw_event: dict[str, Any]) -> datetime:
     return datetime.now(UTC)
 
 
+def _id_gt(a: str, b: str) -> bool:
+    """Compare GitHub event IDs (numeric strings) as integers."""
+    try:
+        return int(a) > int(b)
+    except (TypeError, ValueError):
+        return False
+
+
 # ---------------------------------------------------------------------------
-# GitHubRepoPoller -- per-repo, cold-start-safe (HistoricalPoller subclass)
+# Per-repo ingestion service (HistoricalPoller subclass)
 # ---------------------------------------------------------------------------
 
 
-class GitHubRepoPoller(HistoricalPoller):
-    """Per-repo poller with cold-start safety via HistoricalPoller.
+class GitHubRepoIngestionService(HistoricalPoller):
+    """Per-repo, port-typed, HWM-filtering, cold-start-safe ingestion.
 
-    ``fetch()`` calls the GitHub Events API client and maps the response
-    to ``PollResult``. ``process()`` normalizes events and ingests them
-    through the ``EventPipeline``.
-
-    On cold start (no persisted cursor), historical events are filtered
-    by the base class ``poll()`` method. Events that pass the fence are
-    ingested with ``source_primed=False`` as a belt-and-suspenders check
-    (the pipeline skips trigger evaluation for unprimed events).
+    Subclasses ``HistoricalPoller`` so cold-start fence (Layer 3) and
+    ``is_replay`` propagation (Layer 4) come for free. Adds Layer 2
+    HWM filtering inside ``fetch()`` so warm-start re-delivery of
+    historical events (the #694 root cause) is rejected.
     """
 
     def __init__(
         self,
-        events_client: GitHubEventsAPIPort,
+        events_api: GitHubEventsAPIPort,
         pipeline: EventPipeline,
         cursor_store: CursorStore,
     ) -> None:
         super().__init__(cursor_store)
-        self._events_client = events_client
+        self._events_api = events_api
         self._pipeline = pipeline
         self._installation_ids: dict[str, str] = {}
+        self._high_water_marks: dict[str, GitHubEventsCursor] = {}
         self._last_poll_interval: int | None = None
         self._last_rate_limit_wait: float = 0.0
 
@@ -103,54 +113,87 @@ class GitHubRepoPoller(HistoricalPoller):
 
     @property
     def last_rate_limit_wait(self) -> float:
-        """Seconds the adapter asked us to wait after the last rate-limit hit (0.0 = none)."""
+        """Seconds the adapter asked us to wait after the last rate-limit hit."""
         return self._last_rate_limit_wait
 
-    async def fetch(self, source_key: str) -> PollResult:
-        """Fetch events from the GitHub Events API for one repository.
+    async def initialize(self) -> None:
+        """Load persisted cursors AND seed the in-memory HWM cache.
 
-        Loads the stored ETag from the cursor store and passes it to the
-        port for conditional requests (If-None-Match). Returns a
-        ``PollResult`` with events ordered oldest-first.
+        Critical for the cold->crash->warm scenario: the cold-start poll
+        primed the cursor with ``last_event_id`` but then crashed before
+        the next steady-state poll. On restart, without HWM seeding, the
+        warm-start poll would have no HWM to filter against and would
+        re-deliver everything (#694 again).
+        """
+        await super().initialize()
+        cursors = await self._cursor_store.load_all()
+        for source_key, raw in cursors.items():
+            self._high_water_marks[source_key] = GitHubEventsCursor.from_cursor_data(raw)
+        if self._high_water_marks:
+            logger.info(
+                "Seeded HWM cache for %d source(s) from persisted cursors",
+                len(self._high_water_marks),
+            )
+
+    async def fetch(self, source_key: str) -> PollResult:
+        """Fetch events from GitHub, applying Layer 2 HWM filter.
+
+        Re-delivered historical events (id <= cursor.last_event_id) are
+        dropped here, BEFORE ``process()`` sees them. This is the primary
+        fix for #694: GitHub's ETag is "anything changed?" not "what
+        changed?", so a warm-start re-delivery returns the full recent
+        list (up to 300 events). Without an HWM filter the pipeline
+        would flood.
         """
         inst_id = self._installation_ids.get(source_key, "")
         owner, repo = source_key.split("/", 1)
 
-        # Load stored ETag from cursor (set by HistoricalPoller on previous poll)
-        stored_cursor = await self._cursor_store.load(source_key)
-        stored_etag = stored_cursor.value if stored_cursor else None
+        cursor = self._high_water_marks.get(
+            source_key,
+            GitHubEventsCursor(etag="", last_event_id=""),
+        )
 
-        result = await self._events_client.fetch_repo_events(
+        result = await self._events_api.fetch_repo_events(
             owner,
             repo,
             inst_id,
-            etag=stored_etag,
+            etag=cursor.etag or None,
         )
 
         if result.rate_limited:
             self._last_rate_limit_wait = result.retry_after_seconds
             return PollResult(
                 events=[],
-                cursor=stored_cursor or CursorData(value=stored_etag or "", metadata={}),
+                cursor=cursor.to_cursor_data(),
                 has_new=False,
             )
         self._last_rate_limit_wait = 0.0
         self._last_poll_interval = result.poll_interval_hint
 
-        # Map raw events to PollEvent (reversed: Events API returns newest-first)
-        poll_events: list[PollEvent] = []
-        for raw in reversed(result.events):
-            created_at = _parse_event_timestamp(raw)
-            poll_events.append(PollEvent(created_at=created_at, data=raw))
+        # LAYER 2: HWM filter. Re-delivered historical events (id <= HWM)
+        # are dropped here, BEFORE process() sees them.
+        new_events: list[PollEvent] = []
+        max_seen = cursor.last_event_id
+        for raw in reversed(result.events):  # reversed = oldest-first
+            event_id = str(raw.get("id", ""))
+            if not cursor.is_newer_than(event_id):
+                continue
+            new_events.append(
+                PollEvent(created_at=_parse_event_timestamp(raw), data=raw),
+            )
+            if not max_seen or _id_gt(event_id, max_seen):
+                max_seen = event_id
 
-        # Build cursor from response ETag + newest event ID
-        newest_id = str(result.events[0].get("id", "")) if result.events else ""
-        cursor = CursorData(
-            value=result.etag,
-            metadata={"last_event_id": newest_id},
+        new_cursor = GitHubEventsCursor(etag=result.etag, last_event_id=max_seen)
+        # Update in-memory cache so subsequent fetch() in the same poll
+        # cycle (multi-repo) sees the latest HWM.
+        self._high_water_marks[source_key] = new_cursor
+
+        return PollResult(
+            events=new_events,
+            cursor=new_cursor.to_cursor_data(),
+            has_new=bool(new_events) or result.has_new,
         )
-
-        return PollResult(events=poll_events, cursor=cursor, has_new=result.has_new)
 
     async def process(
         self,
@@ -161,11 +204,10 @@ class GitHubRepoPoller(HistoricalPoller):
         """Normalize events and ingest through the EventPipeline.
 
         On cold start (``is_replay=True``), events are injected with
-        ``source_primed=False`` so the pipeline skips trigger evaluation
-        (belt-and-suspenders with the HistoricalPoller timestamp fence).
-        ``is_replay`` is the authoritative signal from the ESP base class;
-        the legacy ``primed_sources`` check was dead code (see ADR-060 §9
-        Layer 4).
+        ``source_primed=False`` so the pipeline (Layer 5) skips trigger
+        evaluation but still records dedup. ``is_replay`` is the
+        authoritative signal from the ESP base class -- the legacy
+        ``primed_sources`` check was dead code (ADR-060 §9 Layer 4).
         """
         inst_id = self._installation_ids.get(source_key, "")
 
@@ -174,7 +216,6 @@ class GitHubRepoPoller(HistoricalPoller):
             if normalized is None:
                 continue
 
-            # Cold-start replay events get source_primed=False as a safety net
             if is_replay:
                 normalized = dataclasses.replace(normalized, source_primed=False)
 
@@ -188,27 +229,27 @@ class GitHubRepoPoller(HistoricalPoller):
 
 
 # ---------------------------------------------------------------------------
-# GitHubEventPoller -- outer loop (adaptive intervals, trigger store, lifecycle)
+# Outer scheduler (adaptive intervals, trigger store, lifecycle)
 # ---------------------------------------------------------------------------
 
 
-class GitHubEventPoller:
-    """Background poller that feeds GitHub Events API data into the EventPipeline.
+class GitHubEventIngestionScheduler:
+    """Background scheduler that drives ``GitHubRepoIngestionService``.
 
     Runs as an ``asyncio.Task`` inside syn-api -- no new container needed.
-    Delegates per-repo polling to ``GitHubRepoPoller(HistoricalPoller)``
-    for cold-start safety.
+    Adapts polling cadence based on webhook health (active vs safety net)
+    and honors rate-limit backoff signals from the per-repo service.
     """
 
     def __init__(
         self,
-        repo_poller: GitHubRepoPoller,
+        repo_service: GitHubRepoIngestionService,
         health_tracker: WebhookHealthTracker,
         trigger_store: TriggerQueryStore,
         settings: PollingSettings,
         sleep: Callable[[float], Coroutine[object, object, None]] | None = None,
     ) -> None:
-        self._repo_poller = repo_poller
+        self._repo = repo_service
         self._health = health_tracker
         self._trigger_store = trigger_store
         self._state = PollerState(
@@ -221,12 +262,12 @@ class GitHubEventPoller:
     async def start(self) -> None:
         """Start the polling background task.
 
-        Calls ``repo_poller.initialize()`` to load persisted cursors
-        before starting the poll loop.
+        Calls ``repo_service.initialize()`` to load persisted cursors
+        and seed the HWM cache before the first poll.
         """
-        await self._repo_poller.initialize()
+        await self._repo.initialize()
         self._task = asyncio.create_task(self._poll_loop(), name="github-event-poller")
-        logger.info("GitHub event poller started")
+        logger.info("GitHub event ingestion scheduler started")
 
     async def stop(self) -> None:
         """Stop the polling background task gracefully."""
@@ -235,7 +276,7 @@ class GitHubEventPoller:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
-            logger.info("GitHub event poller stopped")
+            logger.info("GitHub event ingestion scheduler stopped")
 
     @property
     def is_running(self) -> bool:
@@ -250,11 +291,11 @@ class GitHubEventPoller:
 
             try:
                 interval = await self._poll_all_repos(interval)
-                # Port surfaces rate-limit as a result field; honor the wait it asked for.
-                if self._repo_poller.last_rate_limit_wait > 0.0:
-                    interval = max(interval, self._repo_poller.last_rate_limit_wait)
+                if self._repo.last_rate_limit_wait > 0.0:
+                    interval = max(interval, self._repo.last_rate_limit_wait)
                     logger.warning(
-                        "Rate limited during polling, backing off %.0fs", interval
+                        "Rate limited during polling, backing off %.0fs",
+                        interval,
                     )
                 else:
                     self._state.record_success()
@@ -276,24 +317,18 @@ class GitHubEventPoller:
                 self._state.mode.value,
             )
 
-        # Update installation ID mapping for this cycle
-        self._repo_poller.set_installation_ids(dict(repos))
+        self._repo.set_installation_ids(dict(repos))
 
         for repo_full_name, _ in repos:
             if "/" not in repo_full_name:
                 logger.warning("Skipping malformed repo name: %s", repo_full_name)
                 continue
-            # HistoricalPoller.poll() is @final -- cold-start fence is enforced
-            await self._repo_poller.poll(repo_full_name)
+            await self._repo.poll(repo_full_name)
 
         return interval
 
     async def _get_repos_to_poll(self) -> list[tuple[str, str]]:
-        """Get (repo, installation_id) pairs for repos with active triggers.
-
-        Only polls repos that have at least one active trigger --
-        no wasted API calls for repos without triggers.
-        """
+        """Get (repo, installation_id) pairs for repos with active triggers."""
         all_triggers = await self._trigger_store.list_all(status="active")
         seen: dict[str, str] = {}
         for t in all_triggers:
@@ -306,5 +341,3 @@ class GitHubEventPoller:
                 continue
             seen[repo] = inst_id
         return list(seen.items())
-
-

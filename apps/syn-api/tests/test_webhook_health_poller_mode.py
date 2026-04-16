@@ -13,7 +13,10 @@ import pytest
 
 from event_sourcing.core.historical_poller import CursorData
 
-from syn_api.services.github_event_poller import GitHubEventPoller, GitHubRepoPoller
+from syn_domain.contexts.github.services import (
+    GitHubEventIngestionScheduler as GitHubEventPoller,
+    GitHubRepoIngestionService as GitHubRepoPoller,
+)
 from syn_domain.contexts.github.services import WebhookHealthTracker
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
@@ -105,13 +108,13 @@ def _make_poller(
     store: InMemoryTriggerQueryStore,
 ) -> GitHubEventPoller:
     """Compose a GitHubEventPoller wrapping a per-repo HistoricalPoller."""
-    repo_poller = GitHubRepoPoller(
-        events_client=events_client,  # type: ignore[arg-type]
+    repo_service = GitHubRepoPoller(
+        events_api=events_client,  # type: ignore[arg-type]
         pipeline=pipeline,
         cursor_store=MemoryCursorStore(),
     )
     return GitHubEventPoller(
-        repo_poller=repo_poller,
+        repo_service=repo_service,
         health_tracker=tracker,
         trigger_store=store,
         settings=MockPollingSettings(),  # type: ignore[arg-type]

@@ -142,9 +142,9 @@ class TestProcessManagerStructure:
 
 def _find_historical_pollers() -> list[type]:
     """Find all HistoricalPoller subclasses in the project."""
-    from syn_api.services.github_event_poller import GitHubRepoPoller
+    from syn_domain.contexts.github.services import GitHubRepoIngestionService
 
-    return [GitHubRepoPoller]
+    return [GitHubRepoIngestionService]
 
 
 @pytest.mark.architecture

@@ -18,17 +18,17 @@ class TestHistoricalPollerAdoption:
     """HistoricalPoller subclasses must not bypass the cold-start fence."""
 
     def test_github_repo_poller_preserves_cold_start_fence(self) -> None:
-        """GitHubRepoPoller must pass ESP's structural fitness check.
+        """GitHubRepoIngestionService must pass ESP's structural fitness check.
 
         The cold-start fence (poll() is @final) prevents subclasses from
         bypassing timestamp filtering on fresh install. This test ensures
         the fence is structurally intact.
         """
-        from syn_api.services.github_event_poller import GitHubRepoPoller
+        from syn_domain.contexts.github.services import GitHubRepoIngestionService
 
-        violations = check_historical_poller_structure(GitHubRepoPoller)
+        violations = check_historical_poller_structure(GitHubRepoIngestionService)
         assert violations == [], (
-            f"GitHubRepoPoller violates HistoricalPoller structure: {violations}"
+            f"GitHubRepoIngestionService violates HistoricalPoller structure: {violations}"
         )
 
     def test_check_run_poller_is_not_historical(self) -> None:
