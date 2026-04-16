@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
+from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
 from syn_domain.contexts.github.services import (
     CheckRunIngestionService as CheckRunPoller,
 )
-from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.services import WebhookHealthTracker
-from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
 )

@@ -46,11 +46,11 @@ if TYPE_CHECKING:
     from event_sourcing.core.historical_poller import CursorStore
 
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
-    from syn_domain.contexts.github.services.webhook_health import WebhookHealthTracker
-    from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
     from syn_domain.contexts.github.ports import (
         GitHubEventsAPIPort,
     )
+    from syn_domain.contexts.github.services.webhook_health import WebhookHealthTracker
+    from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
     from syn_shared.settings.polling import PollingSettings
 
 logger = logging.getLogger(__name__)

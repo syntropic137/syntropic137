@@ -29,7 +29,6 @@ from syn_domain.contexts.github.services import (
     GitHubRepoIngestionService,
 )
 
-
 # -- Test doubles ------------------------------------------------------------
 
 
@@ -68,10 +67,10 @@ class MockEventsAPI:
 
     async def fetch_repo_events(
         self,
-        owner: str,  # noqa: ARG002
-        repo: str,  # noqa: ARG002
-        installation_id: str,  # noqa: ARG002
-        etag: str | None = None,  # noqa: ARG002
+        owner: str,
+        repo: str,
+        installation_id: str,
+        etag: str | None = None,
     ) -> Any:  # noqa: ANN401
         self.fetch_count += 1
         return self._result_cls(
@@ -148,16 +147,19 @@ class TestLayer2HWMFilter:
         store = MemoryCursorStore(
             initial={
                 "owner/repo": GitHubEventsCursor(
-                    etag="prev-etag", last_event_id="100",
+                    etag="prev-etag",
+                    last_event_id="100",
                 ).to_cursor_data(),
             }
         )
         # GitHub re-delivers historical events with ids 50, 75, 100 -- all <= HWM
-        api = MockEventsAPI(events=[
-            _future_raw_event("100"),
-            _future_raw_event("75"),
-            _future_raw_event("50"),
-        ])
+        api = MockEventsAPI(
+            events=[
+                _future_raw_event("100"),
+                _future_raw_event("75"),
+                _future_raw_event("50"),
+            ]
+        )
         pipeline = CapturingPipeline()
         service = _make_service(api, pipeline, store)
         await service.initialize()
@@ -165,8 +167,7 @@ class TestLayer2HWMFilter:
         await service.poll("owner/repo")
 
         assert pipeline.ingested == [], (
-            "HWM filter must drop all events with id <= cursor.last_event_id "
-            "(principal #694 fix)"
+            "HWM filter must drop all events with id <= cursor.last_event_id (principal #694 fix)"
         )
 
     async def test_hwm_filter_keeps_events_with_id_greater_than_hwm(self) -> None:
@@ -174,17 +175,20 @@ class TestLayer2HWMFilter:
         store = MemoryCursorStore(
             initial={
                 "owner/repo": GitHubEventsCursor(
-                    etag="prev-etag", last_event_id="100",
+                    etag="prev-etag",
+                    last_event_id="100",
                 ).to_cursor_data(),
             }
         )
         # Mix: 50/100 should drop, 150/200 should pass
-        api = MockEventsAPI(events=[
-            _future_raw_event("200"),
-            _future_raw_event("150"),
-            _future_raw_event("100"),
-            _future_raw_event("50"),
-        ])
+        api = MockEventsAPI(
+            events=[
+                _future_raw_event("200"),
+                _future_raw_event("150"),
+                _future_raw_event("100"),
+                _future_raw_event("50"),
+            ]
+        )
         pipeline = CapturingPipeline()
         service = _make_service(api, pipeline, store)
         await service.initialize()
@@ -207,7 +211,8 @@ class TestLayer2HWMFilter:
         store = MemoryCursorStore(
             initial={
                 "owner/repo": GitHubEventsCursor(
-                    etag="persisted", last_event_id="42",
+                    etag="persisted",
+                    last_event_id="42",
                 ).to_cursor_data(),
             }
         )
@@ -217,7 +222,7 @@ class TestLayer2HWMFilter:
 
         await service.initialize()
 
-        seeded = service._high_water_marks.get("owner/repo")  # noqa: SLF001
+        seeded = service._high_water_marks.get("owner/repo")
         assert seeded is not None
         assert seeded.last_event_id == "42"
         assert seeded.etag == "persisted"
@@ -227,46 +232,51 @@ class TestLayer2HWMFilter:
         store = MemoryCursorStore(
             initial={
                 "owner/repo-a": GitHubEventsCursor(
-                    etag="a", last_event_id="100",
+                    etag="a",
+                    last_event_id="100",
                 ).to_cursor_data(),
                 "owner/repo-b": GitHubEventsCursor(
-                    etag="b", last_event_id="200",
+                    etag="b",
+                    last_event_id="200",
                 ).to_cursor_data(),
             }
         )
         api = MockEventsAPI()
         pipeline = CapturingPipeline()
         service = _make_service(api, pipeline, store)
-        service.set_installation_ids({
-            "owner/repo-a": "inst-1",
-            "owner/repo-b": "inst-1",
-        })
+        service.set_installation_ids(
+            {
+                "owner/repo-a": "inst-1",
+                "owner/repo-b": "inst-1",
+            }
+        )
         await service.initialize()
 
-        assert service._high_water_marks["owner/repo-a"].last_event_id == "100"  # noqa: SLF001
-        assert service._high_water_marks["owner/repo-b"].last_event_id == "200"  # noqa: SLF001
+        assert service._high_water_marks["owner/repo-a"].last_event_id == "100"
+        assert service._high_water_marks["owner/repo-b"].last_event_id == "200"
 
     async def test_malformed_event_id_does_not_get_through_hwm(self) -> None:
         """Malformed event IDs are rejected (safer than re-process)."""
         store = MemoryCursorStore(
             initial={
                 "owner/repo": GitHubEventsCursor(
-                    etag="prev", last_event_id="42",
+                    etag="prev",
+                    last_event_id="42",
                 ).to_cursor_data(),
             }
         )
-        api = MockEventsAPI(events=[
-            _future_raw_event("not-a-number"),
-        ])
+        api = MockEventsAPI(
+            events=[
+                _future_raw_event("not-a-number"),
+            ]
+        )
         pipeline = CapturingPipeline()
         service = _make_service(api, pipeline, store)
         await service.initialize()
 
         await service.poll("owner/repo")
 
-        assert pipeline.ingested == [], (
-            "Malformed event ID must not bypass the HWM filter"
-        )
+        assert pipeline.ingested == [], "Malformed event ID must not bypass the HWM filter"
 
 
 # -- Layer 3: Cold-start timestamp fence -------------------------------------
@@ -278,18 +288,18 @@ class TestLayer3ColdStartFence:
 
     async def test_cold_start_skips_historical_events(self) -> None:
         """First-ever poll filters events created before _started_at."""
-        api = MockEventsAPI(events=[
-            _raw_event("evt-old", minutes_ago=30),
-        ])
+        api = MockEventsAPI(
+            events=[
+                _raw_event("evt-old", minutes_ago=30),
+            ]
+        )
         pipeline = CapturingPipeline()
         service = _make_service(api, pipeline)
         await service.initialize()
 
         await service.poll("owner/repo")
 
-        assert pipeline.ingested == [], (
-            "Cold-start fence must filter events older than _started_at"
-        )
+        assert pipeline.ingested == [], "Cold-start fence must filter events older than _started_at"
 
 
 # -- Layers 4 + 5: is_replay -> source_primed=False --------------------------
@@ -301,9 +311,11 @@ class TestLayer4IsReplay:
 
     async def test_replay_events_carry_source_primed_false(self) -> None:
         """A post-startup event on cold-start path must be marked unprimed."""
-        api = MockEventsAPI(events=[
-            _future_raw_event("evt-now"),
-        ])
+        api = MockEventsAPI(
+            events=[
+                _future_raw_event("evt-now"),
+            ]
+        )
         pipeline = CapturingPipeline()
         service = _make_service(api, pipeline)
         await service.initialize()
@@ -321,13 +333,16 @@ class TestLayer4IsReplay:
         store = MemoryCursorStore(
             initial={
                 "owner/repo": GitHubEventsCursor(
-                    etag="prev", last_event_id="0",
+                    etag="prev",
+                    last_event_id="0",
                 ).to_cursor_data(),
             }
         )
-        api = MockEventsAPI(events=[
-            _raw_event("100", minutes_ago=30),
-        ])
+        api = MockEventsAPI(
+            events=[
+                _raw_event("100", minutes_ago=30),
+            ]
+        )
         pipeline = CapturingPipeline()
         service = _make_service(api, pipeline, store)
         await service.initialize()
@@ -400,10 +415,7 @@ class TestFull694Scenario:
 
         Without the #694 fix this second poll would flood the pipeline.
         """
-        historical = [
-            _raw_event(str(100 + i), minutes_ago=60 * (24 + i))
-            for i in range(5)
-        ]
+        historical = [_raw_event(str(100 + i), minutes_ago=60 * (24 + i)) for i in range(5)]
         api = MockEventsAPI(events=historical)
         pipeline = CapturingPipeline()
         service = _make_service(api, pipeline)

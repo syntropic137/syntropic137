@@ -13,13 +13,9 @@ import ast
 from pathlib import Path
 
 import pytest
-
 from ci.fitness.conftest import repo_root
 
-_SERVICES_DIR = (
-    repo_root()
-    / "packages/syn-domain/src/syn_domain/contexts/github/services"
-)
+_SERVICES_DIR = repo_root() / "packages/syn-domain/src/syn_domain/contexts/github/services"
 
 
 def _service_files() -> list[Path]:
@@ -33,7 +29,9 @@ class TestGitHubBCPurity:
     """github bounded context services must not import syn_adapters."""
 
     @pytest.mark.parametrize(
-        "path", _service_files(), ids=lambda p: p.name,
+        "path",
+        _service_files(),
+        ids=lambda p: p.name,
     )
     def test_no_adapter_imports(self, path: Path) -> None:
         """No `from syn_adapters` or `import syn_adapters` in service files."""
@@ -43,16 +41,11 @@ class TestGitHubBCPurity:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name.startswith("syn_adapters"):
-                        violations.append(
-                            f"{path.name}:{node.lineno} imports {alias.name}"
-                        )
+                        violations.append(f"{path.name}:{node.lineno} imports {alias.name}")
             elif isinstance(node, ast.ImportFrom):
                 if node.module and node.module.startswith("syn_adapters"):
-                    violations.append(
-                        f"{path.name}:{node.lineno} imports from {node.module}"
-                    )
+                    violations.append(f"{path.name}:{node.lineno} imports from {node.module}")
         assert not violations, (
             "Domain services must not depend on adapters. Use ports under "
-            "slices/event_pipeline/ports/ instead.\n  "
-            + "\n  ".join(violations)
+            "slices/event_pipeline/ports/ instead.\n  " + "\n  ".join(violations)
         )

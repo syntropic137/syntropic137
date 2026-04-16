@@ -28,11 +28,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
+    from syn_domain.contexts.github.ports import GitHubChecksAPIPort
     from syn_domain.contexts.github.services.webhook_health import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
-    from syn_domain.contexts.github.ports import GitHubChecksAPIPort
     from syn_shared.settings.polling import PollingSettings
 
 logger = logging.getLogger(__name__)

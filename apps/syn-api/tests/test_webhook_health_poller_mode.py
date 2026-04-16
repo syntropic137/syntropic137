@@ -10,16 +10,17 @@ import asyncio
 from typing import Any
 
 import pytest
-
 from event_sourcing.core.historical_poller import CursorData
 
+from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
+from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
 from syn_domain.contexts.github.services import (
     GitHubEventIngestionScheduler as GitHubEventPoller,
+)
+from syn_domain.contexts.github.services import (
     GitHubRepoIngestionService as GitHubRepoPoller,
 )
 from syn_domain.contexts.github.services import WebhookHealthTracker
-from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
-from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
 )
