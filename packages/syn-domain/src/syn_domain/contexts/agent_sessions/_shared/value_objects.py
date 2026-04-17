@@ -1,10 +1,12 @@
-"""Value objects for agent sessions bounded context."""
+"""Value objects for agent sessions bounded context.
+
+Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry (#695).
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003
-from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
@@ -51,18 +53,31 @@ class TokenMetrics:
     """Token usage metrics.
 
     Immutable to ensure metrics are not accidentally modified.
+    ``total_tokens`` is always computed from the four component fields.
     """
 
     input_tokens: int = 0
     output_tokens: int = 0
-    total_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        """Total tokens (input + output + cache_creation + cache_read)."""
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_tokens
+            + self.cache_read_tokens
+        )
 
     def __add__(self, other: TokenMetrics) -> TokenMetrics:
         """Add two TokenMetrics together."""
         return TokenMetrics(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
-            total_tokens=self.total_tokens + other.total_tokens,
+            cache_creation_tokens=self.cache_creation_tokens + other.cache_creation_tokens,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
         )
 
 
@@ -98,50 +113,5 @@ class OperationRecord:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class CostMetrics:
-    """Cost metrics for a session.
-
-    All costs in USD.
-    """
-
-    input_cost_usd: Decimal = Decimal("0")
-    output_cost_usd: Decimal = Decimal("0")
-    total_cost_usd: Decimal = Decimal("0")
-
-    def __add__(self, other: CostMetrics) -> CostMetrics:
-        """Add two CostMetrics together."""
-        return CostMetrics(
-            input_cost_usd=self.input_cost_usd + other.input_cost_usd,
-            output_cost_usd=self.output_cost_usd + other.output_cost_usd,
-            total_cost_usd=self.total_cost_usd + other.total_cost_usd,
-        )
-
-    @classmethod
-    def from_tokens(
-        cls,
-        input_tokens: int,
-        output_tokens: int,
-        input_price_per_1k: Decimal = Decimal("0.01"),
-        output_price_per_1k: Decimal = Decimal("0.03"),
-    ) -> CostMetrics:
-        """Calculate cost from token counts.
-
-        Default prices are conservative estimates for premium models.
-
-        Args:
-            input_tokens: Number of input tokens.
-            output_tokens: Number of output tokens.
-            input_price_per_1k: Price per 1000 input tokens.
-            output_price_per_1k: Price per 1000 output tokens.
-
-        Returns:
-            CostMetrics with calculated costs.
-        """
-        input_cost = (Decimal(input_tokens) / 1000) * input_price_per_1k
-        output_cost = (Decimal(output_tokens) / 1000) * output_price_per_1k
-        return cls(
-            input_cost_usd=input_cost,
-            output_cost_usd=output_cost,
-            total_cost_usd=input_cost + output_cost,
-        )
+# CostMetrics removed (#695): cost is Lane 2 telemetry.
+# See session_cost projection for authoritative session cost.

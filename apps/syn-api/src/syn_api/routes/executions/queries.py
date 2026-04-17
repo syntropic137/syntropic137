@@ -130,7 +130,7 @@ async def _map_phase_detail(
         output_tokens=phase.output_tokens,
         cache_creation_tokens=sc.cache_creation,
         cache_read_tokens=sc.cache_read,
-        cost_usd=Decimal(str(phase.cost_usd)),
+        cost_usd=Decimal("0"),  # Lane 2: enriched via _enrich_costs from execution_cost (#695)
         duration_seconds=phase.duration_seconds,
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
@@ -175,6 +175,21 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
         operations=operations,
     )
+
+
+async def _load_execution_costs(
+    manager: ProjectionManager, execution_ids: list[str]
+) -> dict[str, Decimal]:
+    """Load per-execution total_cost_usd from the Lane 2 execution_cost projection (#695)."""
+    costs: dict[str, Decimal] = {}
+    for eid in execution_ids:
+        try:
+            ec = await manager.execution_cost.get_execution_cost(eid)
+            if ec is not None:
+                costs[eid] = ec.total_cost_usd
+        except Exception:
+            logger.debug("Failed to load execution cost for %s", eid, exc_info=True)
+    return costs
 
 
 async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
@@ -226,6 +241,10 @@ async def list_(
         if domain_summaries
         else {}
     )
+    # Enrich each execution's total_cost_usd from the Lane 2 execution_cost projection (#695)
+    cost_by_execution = await _load_execution_costs(
+        manager, [s.workflow_execution_id for s in domain_summaries]
+    )
     return Ok(
         [
             ExecutionSummary(
@@ -238,7 +257,11 @@ async def list_(
                 completed_phases=s.completed_phases,
                 total_phases=s.total_phases,
                 total_tokens=s.total_tokens,
-                total_cost_usd=s.total_cost_usd,
+                total_input_tokens=s.total_input_tokens,
+                total_output_tokens=s.total_output_tokens,
+                total_cache_creation_tokens=s.total_cache_creation_tokens,
+                total_cache_read_tokens=s.total_cache_read_tokens,
+                total_cost_usd=cost_by_execution.get(s.workflow_execution_id, Decimal("0")),
                 tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
                 error_message=s.error_message,
                 repos=list(s.repos),
@@ -257,10 +280,12 @@ async def get(
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
 
-    # Enrich with TimescaleDB cost data when available (#505)
+    # Enrich with TimescaleDB cost data when available (#505, #695: cost is Lane 2)
     total_input = detail.total_input_tokens
     total_output = detail.total_output_tokens
-    total_cost = detail.total_cost_usd
+    total_cache_creation = detail.total_cache_creation_tokens
+    total_cache_read = detail.total_cache_read_tokens
+    total_cost: Decimal | str = Decimal("0")
     total_duration = detail.total_duration_seconds
 
     with contextlib.suppress(Exception):
@@ -268,6 +293,8 @@ async def get(
         if exec_cost is not None and exec_cost.total_tokens > 0:
             total_input = exec_cost.input_tokens
             total_output = exec_cost.output_tokens
+            total_cache_creation = exec_cost.cache_creation_tokens or total_cache_creation
+            total_cache_read = exec_cost.cache_read_tokens or total_cache_read
             total_cost = exec_cost.total_cost_usd
             if exec_cost.duration_ms > 0:
                 total_duration = exec_cost.duration_ms / 1000.0
@@ -282,6 +309,8 @@ async def get(
             completed_at=detail.completed_at,
             total_input_tokens=total_input,
             total_output_tokens=total_output,
+            total_cache_creation_tokens=total_cache_creation,
+            total_cache_read_tokens=total_cache_read,
             total_cost_usd=total_cost,
             total_duration_seconds=total_duration,
             artifact_ids=list(detail.artifact_ids),
@@ -332,7 +361,7 @@ async def get_detail(
         manager,
         phases,
         fallback_tokens=detail.total_input_tokens + detail.total_output_tokens,
-        fallback_cost=detail.total_cost_usd,
+        fallback_cost=Decimal("0"),
     )
 
     return Ok(
@@ -357,9 +386,15 @@ async def list_active(
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     """List currently running or paused executions."""
     await ensure_connected()
-    all_execs = await get_projection_mgr().workflow_execution_list.get_all(
+    manager = get_projection_mgr()
+    all_execs = await manager.workflow_execution_list.get_all(
         limit=limit,
         status_filter=None,
+    )
+    active = [s for s in all_execs if s.status in ("running", "paused", "pending")]
+    # Enrich cost from Lane 2 execution_cost projection (#695)
+    cost_by_execution = await _load_execution_costs(
+        manager, [s.workflow_execution_id for s in active]
     )
     return Ok(
         [
@@ -373,12 +408,11 @@ async def list_active(
                 completed_phases=s.completed_phases,
                 total_phases=s.total_phases,
                 total_tokens=s.total_tokens,
-                total_cost_usd=s.total_cost_usd,
+                total_cost_usd=cost_by_execution.get(s.workflow_execution_id, Decimal("0")),
                 error_message=s.error_message,
                 repos=list(s.repos),
             )
-            for s in all_execs
-            if s.status in ("running", "paused", "pending")
+            for s in active
         ]
     )
 
@@ -409,6 +443,10 @@ async def list_executions_endpoint(
                 completed_phases=e.completed_phases,
                 total_phases=e.total_phases,
                 total_tokens=e.total_tokens,
+                total_input_tokens=e.total_input_tokens,
+                total_output_tokens=e.total_output_tokens,
+                total_cache_creation_tokens=e.total_cache_creation_tokens,
+                total_cache_read_tokens=e.total_cache_read_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 tool_call_count=e.tool_call_count,
                 error_message=e.error_message,
@@ -452,8 +490,8 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         phases=phases,
         total_input_tokens=total_input,
         total_output_tokens=total_output,
-        cache_creation_tokens=total_cache_creation,
-        cache_read_tokens=total_cache_read,
+        total_cache_creation_tokens=total_cache_creation,
+        total_cache_read_tokens=total_cache_read,
         total_tokens=max(
             detail.total_tokens,
             total_input + total_output + total_cache_creation + total_cache_read,

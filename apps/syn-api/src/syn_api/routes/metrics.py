@@ -11,7 +11,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api._wiring import ensure_connected, get_execution_cost_query, get_projection_mgr
 from syn_api.types import (
     DashboardMetrics,
     Err,
@@ -51,9 +51,11 @@ class MetricsResponse(BaseModel):
     completed_workflows: int = 0
     failed_workflows: int = 0
     total_sessions: int = 0
-    total_input_tokens: int = 0
-    total_output_tokens: int = 0
-    total_tokens: int = 0
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_creation_tokens: int
+    total_cache_read_tokens: int
+    total_tokens: int
     total_cost_usd: Decimal = Decimal("0")
     total_artifacts: int = 0
     total_artifact_bytes: int = 0
@@ -90,8 +92,11 @@ async def get_dashboard_metrics(
                 total_sessions=data.total_sessions,
                 total_input_tokens=data.total_input_tokens,
                 total_output_tokens=data.total_output_tokens,
+                total_cache_creation_tokens=data.total_cache_creation_tokens,
+                total_cache_read_tokens=data.total_cache_read_tokens,
                 total_tokens=data.total_tokens,
-                total_cost_usd=Decimal(str(data.total_cost_usd)),
+                # Lane 2: cost is enriched at the endpoint from execution_cost (#695)
+                total_cost_usd=Decimal("0"),
                 total_artifacts=data.total_artifacts,
                 total_artifact_bytes=data.total_artifact_bytes,
             )
@@ -119,7 +124,8 @@ async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
                 input_tokens=d.get("input_tokens", 0),
                 output_tokens=d.get("output_tokens", 0),
                 total_tokens=d.get("total_tokens", 0),
-                cost_usd=Decimal(str(d.get("cost_usd", "0"))),
+                # Lane 2: phase cost is enriched at the endpoint from execution_cost (#695)
+                cost_usd=Decimal("0"),
                 duration_seconds=d.get("duration_seconds", 0.0),
                 artifact_count=d.get("artifact_count", 0),
             )
@@ -130,6 +136,24 @@ async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
         return []
 
 
+async def _aggregate_total_cost(workflow_id: str | None) -> Decimal:
+    """Sum total_cost_usd across all executions from the Lane 2 execution_cost query service (#695)."""
+    try:
+        query_svc = get_execution_cost_query()
+        costs = await query_svc.list_all()
+    except Exception:
+        logger.debug("Failed to aggregate execution costs", exc_info=True)
+        return Decimal("0")
+
+    if workflow_id is not None:
+        manager = get_projection_mgr()
+        summaries = await manager.workflow_execution_list.get_by_workflow_id(workflow_id)
+        ids_in_workflow = {s.workflow_execution_id for s in summaries}
+        costs = [c for c in costs if c.execution_id in ids_in_workflow]
+
+    return sum((c.total_cost_usd for c in costs), Decimal("0"))
+
+
 @router.get("", response_model=MetricsResponse)
 async def get_metrics_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
@@ -138,10 +162,17 @@ async def get_metrics_endpoint(
     result = await get_dashboard_metrics(workflow_id=workflow_id)
 
     if isinstance(result, Err):
-        return MetricsResponse()
+        return MetricsResponse(
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_cache_creation_tokens=0,
+            total_cache_read_tokens=0,
+            total_tokens=0,
+        )
 
     m = result.value
     phases = await _build_phase_metrics(workflow_id) if workflow_id else []
+    total_cost = await _aggregate_total_cost(workflow_id)
 
     return MetricsResponse(
         total_workflows=m.total_workflows,
@@ -150,8 +181,11 @@ async def get_metrics_endpoint(
         total_sessions=m.total_sessions,
         total_input_tokens=m.total_input_tokens,
         total_output_tokens=m.total_output_tokens,
+        total_cache_creation_tokens=m.total_cache_creation_tokens,
+        total_cache_read_tokens=m.total_cache_read_tokens,
         total_tokens=m.total_tokens,
-        total_cost_usd=Decimal(str(m.total_cost_usd)),
+        # Lane 2: cost enriched from execution_cost query service (#695)
+        total_cost_usd=total_cost,
         total_artifacts=m.total_artifacts,
         total_artifact_bytes=m.total_artifact_bytes,
         phases=phases,

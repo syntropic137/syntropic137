@@ -20,14 +20,21 @@ See: ADR-060 - On-Demand Environment Creation
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -35,9 +42,110 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 REGISTRY_FILE = REPO_ROOT / "infra" / "environments.json"
+REGISTRY_LOCK_FILE = REPO_ROOT / "infra" / ".environments.lock"
 DOCKER_DIR = REPO_ROOT / "docker"
 COMPOSE_BASE = DOCKER_DIR / "docker-compose.yaml"
 COMPOSE_ONDEMAND = DOCKER_DIR / "docker-compose.ondemand.yaml"
+RESOLVE_SCRIPT = REPO_ROOT / "scripts" / "resolve_infra_env.py"
+
+# Env var keys that must NOT leak from the parent shell into `docker compose`.
+# Docker Compose precedence puts shell env > --env-file, so a stale
+# SYN_ENV_PORT_ENVOY in the user's shell (e.g. sourced from a prior
+# .env.ondemand-*) would override the slot-correct values in the generated
+# env-file and create containers with wrong port bindings.
+_LEAK_PREFIXES: tuple[str, ...] = (
+    "SYN_ENV_PORT_",
+    "SYN_ENV_NAME",
+    "SYN_AGENT_NETWORK",
+    # SYN_INSTALL_DIR resolves workspace bind mounts. If the justfile's
+    # dotenv-load pulls it from a different repo's .env (common when working
+    # across worktrees), the API container writes workspaces to one path and
+    # mounts them into agents from another - setup.sh never lands.
+    "SYN_INSTALL_DIR",
+)
+
+# ---------------------------------------------------------------------------
+# Environment sanitization
+# ---------------------------------------------------------------------------
+
+
+def _sanitized_env() -> dict[str, str]:
+    """Copy os.environ with leak-prone keys stripped.
+
+    Keeps secrets (ANTHROPIC_API_KEY, SYN_GITHUB_*, etc.) flowing through to
+    docker compose, but prevents a stale SYN_ENV_PORT_* in the user's shell
+    from overriding the generated --env-file.
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith(_LEAK_PREFIXES)}
+
+
+def _warn_if_shell_leaks() -> None:
+    """Print a visible warning if the user's shell has leak-prone vars set.
+
+    Our _sanitized_env() protects the docker compose call, but a user who
+    runs `docker compose ...` manually afterwards (or `just env-logs`) from
+    the same shell could still hit surprises. Surface this early.
+    """
+    offenders = sorted(k for k in os.environ if k.startswith(_LEAK_PREFIXES))
+    if not offenders:
+        return
+    print(
+        "  [warn] Shell has leak-prone env vars set (will be stripped from docker "
+        "compose, but may affect manual invocations):",
+        file=sys.stderr,
+    )
+    for key in offenders:
+        print(f"    {key}={os.environ[key]}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Port availability
+# ---------------------------------------------------------------------------
+
+
+def _port_free(port: int) -> bool:
+    """Return True if the port can be bound on localhost right now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def _occupied_ports(ports: SlotPorts) -> list[tuple[str, int]]:
+    """Return [(service, port), ...] for every port in `ports` not currently free."""
+    busy: list[tuple[str, int]] = []
+    for field_name in ports.__dataclass_fields__:
+        port = getattr(ports, field_name)
+        if not _port_free(port):
+            busy.append((field_name, port))
+    return busy
+
+
+# ---------------------------------------------------------------------------
+# Registry locking
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def _registry_lock() -> Iterator[None]:
+    """Exclusive advisory lock around a read-modify-write on the registry.
+
+    Prevents two concurrent `env-up` invocations (e.g. from different
+    worktrees) from both allocating the same slot. fcntl.flock is cooperative
+    and confined to processes on the same host, which matches the scope of
+    the on-demand env system.
+    """
+    REGISTRY_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with REGISTRY_LOCK_FILE.open("w") as lock_fh:
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+
 
 # ---------------------------------------------------------------------------
 # Port allocation
@@ -129,19 +237,12 @@ def _load_registry() -> Registry:
 
 
 def _save_registry(registry: Registry) -> None:
+    """Atomically write the registry via temp-file + rename."""
     REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
     payload = {"environments": [asdict(e) for e in registry.environments]}
-    REGISTRY_FILE.write_text(json.dumps(payload, indent=2) + "\n")
-
-
-def _next_free_slot(registry: Registry) -> int:
-    used = registry.used_slots()
-    for slot in range(2, 2 + _MAX_SLOTS):
-        if slot not in used:
-            return slot
-    raise RuntimeError(
-        f"All {_MAX_SLOTS} on-demand slots are in use. Run `just env-down <name>` to free a slot."
-    )
+    tmp = REGISTRY_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n")
+    tmp.replace(REGISTRY_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -190,11 +291,75 @@ def _write_env_file(env: Environment) -> Path:
                 "",
                 "# Agent network - must match compose project name: syn-env-{name}_agent-net",
                 f"SYN_AGENT_NETWORK=syn-env-{env.name}_agent-net",
+                "",
+                "# Host repo root - used by workspace bind mounts. Must match the",
+                "# worktree compose is running from so agents see workspaces the API wrote.",
+                f"SYN_INSTALL_DIR={REPO_ROOT}",
             ]
         )
         + "\n"
     )
     return path
+
+
+# ---------------------------------------------------------------------------
+# Secret resolution (shared with `just dev`)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_secrets() -> None:
+    """Resolve infra/.env + 1Password secrets into os.environ.
+
+    Calls the same ``scripts/resolve_infra_env.py`` that ``just dev`` uses so
+    Docker Compose inherits credentials (GitHub App PEM, tokens, etc.).
+    Without this, on-demand environments start in degraded mode.
+    """
+    if not RESOLVE_SCRIPT.exists():
+        print("  [secrets] resolve_infra_env.py not found - skipping", file=sys.stderr)
+        return
+
+    print("  [secrets] Resolving infra env + 1Password secrets...", file=sys.stderr)
+    try:
+        result = subprocess.run(
+            ["uv", "run", "python", str(RESOLVE_SCRIPT)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(REPO_ROOT),
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        print(f"  [secrets] Failed to resolve secrets: {exc}", file=sys.stderr)
+        return
+
+    if result.returncode != 0:
+        print(f"  [secrets] resolve_infra_env.py exited {result.returncode}", file=sys.stderr)
+        if result.stderr.strip():
+            print(f"  [secrets] {result.stderr.strip()}", file=sys.stderr)
+        return
+
+    count = 0
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, raw_value = line.partition("=")
+        key = key.strip()
+        value = raw_value.strip()
+        # Strip surrounding quotes produced by resolve_infra_env.py
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if key:
+            os.environ[key] = value
+            count += 1
+
+    print(f"  [secrets] Loaded {count} env vars", file=sys.stderr)
+
+    # Surface any warnings from the script (e.g. deprecated SYN_DOMAIN)
+    if result.stderr.strip():
+        for warn_line in result.stderr.strip().splitlines():
+            print(f"  [secrets] {warn_line}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -220,16 +385,21 @@ def _compose_args(env: Environment) -> list[str]:
 
 
 def _compose_run(env: Environment, *args: str) -> int:
-    """Run a docker compose command, inheriting stdin/stdout/stderr."""
+    """Run a docker compose command, inheriting stdin/stdout/stderr.
+
+    Passes a sanitized env dict so stale SYN_ENV_PORT_* / SYN_ENV_NAME in
+    the parent shell cannot override --env-file values (Docker Compose's
+    shell > env-file precedence rule).
+    """
     cmd = [*_compose_args(env), *args]
-    result = subprocess.run(cmd, cwd=str(DOCKER_DIR))
+    result = subprocess.run(cmd, cwd=str(DOCKER_DIR), env=_sanitized_env())
     return result.returncode
 
 
 def _compose_exec(env: Environment, *args: str) -> None:
     """Replace this process with a docker compose command (for logs -f)."""
     cmd = [*_compose_args(env), *args]
-    os.execvp(cmd[0], cmd)
+    os.execvpe(cmd[0], cmd, _sanitized_env())
 
 
 # ---------------------------------------------------------------------------
@@ -250,43 +420,85 @@ def _ensure_env(name: str) -> tuple[Registry, Environment] | None:
     return registry, env
 
 
-def _allocate(branch: str) -> tuple[Registry, Environment]:
-    """Allocate a slot for a branch. Returns existing env if already allocated."""
-    registry = _load_registry()
-    slug = _slugify(branch)
+def _find_free_slot_with_preflight(registry: Registry) -> int:
+    """Return the lowest slot whose ports are all free on the host.
 
-    existing = registry.find(slug)
-    if existing is not None:
-        print(f"Environment '{slug}' already allocated (slot {existing.slot})", file=sys.stderr)
-        return registry, existing
-
-    slot = _next_free_slot(registry)
-    ports = _compute_ports(slot)
-
-    env = Environment(
-        name=slug,
-        branch=branch,
-        slot=slot,
-        created_at=datetime.now(UTC).isoformat(),
-        ports={
-            "gateway": ports.gateway,
-            "api": ports.api,
-            "db": ports.db,
-            "event_store": ports.event_store,
-            "collector": ports.collector,
-            "minio": ports.minio,
-            "minio_console": ports.minio_console,
-            "redis": ports.redis,
-            "envoy": ports.envoy,
-        },
+    Skips slots where a port is occupied by something outside our registry
+    (e.g. `just dev`, `just selfhost`, unrelated processes). Raises if no
+    slot in the 2-5 range has a fully clean set.
+    """
+    used = registry.used_slots()
+    first_skip: tuple[int, list[tuple[str, int]]] | None = None
+    for slot in range(2, 2 + _MAX_SLOTS):
+        if slot in used:
+            continue
+        ports = _compute_ports(slot)
+        busy = _occupied_ports(ports)
+        if not busy:
+            return slot
+        if first_skip is None:
+            first_skip = (slot, busy)
+        print(
+            f"  [preflight] slot {slot} has occupied ports, skipping: "
+            + ", ".join(f"{name}={port}" for name, port in busy),
+            file=sys.stderr,
+        )
+    if first_skip is not None:
+        slot, busy = first_skip
+        busy_str = ", ".join(f"{name}={port}" for name, port in busy)
+        raise RuntimeError(
+            f"All free on-demand slots have port conflicts. Slot {slot} wants: "
+            f"{busy_str}. Stop the offending process (try `lsof -iTCP:PORT`) "
+            f"or free a slot with `just env-down <name>`."
+        )
+    raise RuntimeError(
+        f"All {_MAX_SLOTS} on-demand slots are in use. Run `just env-down <name>` to free a slot."
     )
 
-    _write_env_file(env)
-    registry.environments.append(env)
-    _save_registry(registry)
 
-    print(f"Allocated slot {slot} for '{slug}' (branch: {branch})", file=sys.stderr)
-    return registry, env
+def _allocate(branch: str) -> tuple[Registry, Environment]:
+    """Allocate a slot for a branch. Returns existing env if already allocated.
+
+    The read-modify-write of the registry runs under an exclusive file lock
+    so concurrent env-up invocations (e.g. from different worktrees) cannot
+    race into the same slot.
+    """
+    with _registry_lock():
+        registry = _load_registry()
+        slug = _slugify(branch)
+
+        existing = registry.find(slug)
+        if existing is not None:
+            print(f"Environment '{slug}' already allocated (slot {existing.slot})", file=sys.stderr)
+            return registry, existing
+
+        slot = _find_free_slot_with_preflight(registry)
+        ports = _compute_ports(slot)
+
+        env = Environment(
+            name=slug,
+            branch=branch,
+            slot=slot,
+            created_at=datetime.now(UTC).isoformat(),
+            ports={
+                "gateway": ports.gateway,
+                "api": ports.api,
+                "db": ports.db,
+                "event_store": ports.event_store,
+                "collector": ports.collector,
+                "minio": ports.minio,
+                "minio_console": ports.minio_console,
+                "redis": ports.redis,
+                "envoy": ports.envoy,
+            },
+        )
+
+        _write_env_file(env)
+        registry.environments.append(env)
+        _save_registry(registry)
+
+        print(f"Allocated slot {slot} for '{slug}' (branch: {branch})", file=sys.stderr)
+        return registry, env
 
 
 # ---------------------------------------------------------------------------
@@ -295,10 +507,20 @@ def _allocate(branch: str) -> tuple[Registry, Environment]:
 
 
 def _rollback(env: Environment) -> None:
-    """Remove registry entry and env file after a failed compose up."""
-    registry = _load_registry()
-    registry.environments = [e for e in registry.environments if e.name != env.name]
-    _save_registry(registry)
+    """Tear down docker state AND remove registry entry + env file.
+
+    Called when `docker compose up` fails partway through. We explicitly run
+    `compose down -v --remove-orphans` so the slot starts clean on the next
+    attempt (no leftover volumes, partial containers, or networks).
+    """
+    # Best-effort docker teardown. If this fails (e.g. nothing was created),
+    # we still proceed with registry cleanup.
+    _compose_run(env, "down", "-v", "--remove-orphans")
+
+    with _registry_lock():
+        registry = _load_registry()
+        registry.environments = [e for e in registry.environments if e.name != env.name]
+        _save_registry(registry)
 
     env_file = _env_file_path(env.name)
     if env_file.exists():
@@ -309,7 +531,9 @@ def _rollback(env: Environment) -> None:
 
 def cmd_up(branch: str) -> int:
     """Allocate slot + start the environment."""
+    _warn_if_shell_leaks()
     _, env = _allocate(branch)
+    _resolve_secrets()
     print(f"Starting environment '{env.name}'...", file=sys.stderr)
     rc = _compose_run(env, "up", "-d", "--build")
     if rc != 0:
@@ -327,12 +551,14 @@ def cmd_down(name: str) -> int:
     registry, env = result
 
     print(f"Destroying environment '{name}'...", file=sys.stderr)
-    rc = _compose_run(env, "down", "-v")
+    rc = _compose_run(env, "down", "-v", "--remove-orphans")
     if rc != 0:
         return rc
 
-    registry.environments = [e for e in registry.environments if e.name != name]
-    _save_registry(registry)
+    with _registry_lock():
+        registry = _load_registry()
+        registry.environments = [e for e in registry.environments if e.name != name]
+        _save_registry(registry)
 
     env_file = _env_file_path(name)
     if env_file.exists():
@@ -357,6 +583,7 @@ def cmd_start(name: str) -> int:
     if result is None:
         return 1
     _, env = result
+    _resolve_secrets()
     return _compose_run(env, "start")
 
 

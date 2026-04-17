@@ -6,7 +6,6 @@ Keyed by workflow_id; accumulates token/cost/duration per phase_id.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,7 +25,7 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_phase_metrics"
-    VERSION = 1
+    VERSION = 2  # Bumped: cost moved to Lane 2 — API enriches from execution_cost (#695)
 
     def __init__(self, store: ProjectionStore) -> None:
         self._store = store
@@ -71,7 +70,6 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "total_tokens": 0,
-                "cost_usd": "0",
                 "duration_seconds": 0.0,
                 "artifact_count": 0,
                 "status": "running",
@@ -100,7 +98,6 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "total_tokens": 0,
-                "cost_usd": "0",
                 "duration_seconds": 0.0,
                 "artifact_count": 0,
                 "status": "running",
@@ -113,10 +110,6 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
         entry["duration_seconds"] = entry.get("duration_seconds", 0.0) + event_data.get(
             "duration_seconds", 0.0
         )
-
-        existing_cost = Decimal(str(entry.get("cost_usd", "0")))
-        phase_cost = Decimal(str(event_data.get("cost_usd", "0")))
-        entry["cost_usd"] = str(existing_cost + phase_cost)
 
         if event_data.get("artifact_id"):
             entry["artifact_count"] = entry.get("artifact_count", 0) + 1

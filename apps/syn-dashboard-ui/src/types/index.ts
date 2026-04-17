@@ -291,8 +291,8 @@ export interface ExecutionDetailResponse {
   phases: PhaseExecutionDetail[]
   total_input_tokens: number
   total_output_tokens: number
-  cache_creation_tokens: number
-  cache_read_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
   total_tokens: number
   total_cost_usd: number
   artifact_ids: string[]

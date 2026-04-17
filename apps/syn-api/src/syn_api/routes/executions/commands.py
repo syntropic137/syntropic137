@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -413,7 +414,8 @@ async def execute(
             completed_phases=result.metrics.completed_phases,
             total_phases=result.metrics.total_phases,
             total_tokens=result.metrics.total_tokens,
-            total_cost_usd=result.metrics.total_cost_usd,
+            # Lane 2: cost is enriched via execution_cost projection at query time (#695)
+            total_cost_usd=Decimal("0"),
             error_message=result.error_message,
             repos=repos,
         )

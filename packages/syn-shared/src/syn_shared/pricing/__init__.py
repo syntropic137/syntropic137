@@ -112,14 +112,27 @@ MODEL_PRICING_TABLE: dict[str, ModelPricing] = {
 # Default model for cost estimation when model is unknown
 DEFAULT_MODEL_ID = "claude-sonnet-4-20250514"
 
+# CLI alias → canonical model ID.
+# The workflow YAML and AgentConfiguration use short names like
+# ``sonnet``/``opus``/``haiku``; resolve them so pricing lookups don't
+# silently fall back to the default.
+MODEL_ALIASES: dict[str, str] = {
+    "opus": "claude-opus-4-20250514",
+    "sonnet": "claude-sonnet-4-20250514",
+    "haiku": "claude-3-5-haiku-20241022",
+    "claude-sonnet-4": "claude-sonnet-4-20250514",
+    "claude-opus-4": "claude-opus-4-20250514",
+}
+
 
 def get_model_pricing(model_id: str) -> ModelPricing:
-    """Get pricing for a model, with prefix-match fallback.
+    """Get pricing for a model, with alias and prefix-match fallback.
 
     Resolution order:
-    1. Exact match on model_id
-    2. Prefix match (e.g., ``claude-sonnet-4-`` matches ``claude-sonnet-4-20250514``)
-    3. Default to Sonnet 4 pricing
+    1. CLI alias (``sonnet``, ``opus``, ``haiku``) → canonical ID
+    2. Exact match on model_id
+    3. Prefix match (e.g., ``claude-sonnet-4-`` matches ``claude-sonnet-4-20250514``)
+    4. Default to Sonnet 4 pricing
 
     Args:
         model_id: The model identifier (e.g., ``claude-sonnet-4-20250514``).
@@ -127,6 +140,9 @@ def get_model_pricing(model_id: str) -> ModelPricing:
     Returns:
         ModelPricing for the model.
     """
+    if model_id in MODEL_ALIASES:
+        return MODEL_PRICING_TABLE[MODEL_ALIASES[model_id]]
+
     if model_id in MODEL_PRICING_TABLE:
         return MODEL_PRICING_TABLE[model_id]
 
@@ -164,6 +180,7 @@ def calculate_cost(
 
 
 __all__ = [
+    "MODEL_ALIASES",
     "MODEL_PRICING_TABLE",
     "ModelPricing",
     "calculate_cost",

@@ -6,17 +6,11 @@ Static factory methods for building PhaseResult in success/failure paths.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     PhaseResult,
     PhaseStatus,
 )
-
-if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
-        TokenAccumulator,
-    )
 
 
 class PhaseResultBuilder:
@@ -28,10 +22,21 @@ class PhaseResultBuilder:
         started_at: datetime,
         session_id: str,
         artifact_ids: list[str],
-        tokens: TokenAccumulator,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation_tokens: int,
+        cache_read_tokens: int,
+        total_tokens: int,
         warnings: list[str] | None = None,
     ) -> PhaseResult:
         """Build a successful PhaseResult.
+
+        Token counts MUST be the authoritative final values (e.g. from Claude
+        CLI's terminal `result` event when available), not cumulative streaming
+        deltas — otherwise ExecutionMetrics.from_results double-counts.
+
+        Cost is Lane 2 telemetry and is not carried on PhaseResult — see
+        session_cost / execution_cost projections.
 
         Args:
             warnings: Optional health signals (e.g. "zero_tokens", "no_artifacts").
@@ -48,10 +53,11 @@ class PhaseResultBuilder:
             completed_at=completed_at,
             artifact_id=artifact_ids[0] if artifact_ids else None,
             session_id=session_id,
-            input_tokens=tokens.input_tokens,
-            output_tokens=tokens.output_tokens,
-            total_tokens=tokens.total_tokens,
-            cost_usd=tokens.estimate_cost(),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
+            total_tokens=total_tokens,
             metadata=metadata,
         )
 

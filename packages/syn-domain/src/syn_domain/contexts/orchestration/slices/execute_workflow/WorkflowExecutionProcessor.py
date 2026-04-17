@@ -59,9 +59,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
-    TokenAccumulator,
-)
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -78,6 +75,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+        TokenAccumulator,
     )
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,9 @@ class WorkflowExecutionProcessor:
         self._active_cmds: dict[str, list[str]] = {}
         self._session_managers: dict[str, SessionLifecycleManager] = {}
         self._phase_tokens: dict[str, TokenAccumulator] = {}
-        self._phase_auth_tokens: dict[str, tuple[int, int]] = {}  # authoritative (input, output)
+        self._phase_auth_tokens: dict[
+            str, tuple[int, int, int, int]
+        ] = {}  # (input, output, cache_creation, cache_read)
         self._phase_artifact_ids: dict[str, list[str]] = {}
         self._phase_started_at: dict[str, datetime] = {}
 
@@ -341,7 +343,8 @@ class WorkflowExecutionProcessor:
             total_phases=len(phases),
             total_input_tokens=metrics.total_input_tokens,
             total_output_tokens=metrics.total_output_tokens,
-            total_cost_usd=metrics.total_cost_usd,
+            total_cache_creation_tokens=metrics.total_cache_creation_tokens,
+            total_cache_read_tokens=metrics.total_cache_read_tokens,
             duration_seconds=metrics.total_duration_seconds,
             artifact_ids=all_artifact_ids,
         )
@@ -530,6 +533,8 @@ class WorkflowExecutionProcessor:
         self._phase_auth_tokens[todo.phase_id] = (
             result.command.input_tokens,
             result.command.output_tokens,
+            result.command.cache_creation_tokens,
+            result.command.cache_read_tokens,
         )
 
         if result.stream_result.interrupt_requested:
@@ -608,15 +613,21 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Dispatch COMPLETE_PHASE."""
         assert todo.phase_id is not None
-        tokens = self._phase_tokens.pop(todo.phase_id, TokenAccumulator())
+        self._phase_tokens.pop(todo.phase_id, None)
         auth_tokens = self._phase_auth_tokens.pop(todo.phase_id, None)
         artifact_ids = self._phase_artifact_ids.pop(todo.phase_id, [])
         started_at = self._phase_started_at.pop(todo.phase_id, datetime.now(UTC))
 
-        # Prefer authoritative CLI result totals over per-turn accumulation
-        final_input = auth_tokens[0] if auth_tokens else tokens.input_tokens
-        final_output = auth_tokens[1] if auth_tokens else tokens.output_tokens
-        final_total = final_input + final_output
+        # Authoritative token counts come from the CLI result event; fall back
+        # to zeros when the result is missing (partial/interrupted phases) —
+        # Lane 2 observability holds the definitive cost either way.
+        final_input, final_output, final_cache_creation, final_cache_read = auth_tokens or (
+            0,
+            0,
+            0,
+            0,
+        )
+        final_total = final_input + final_output + final_cache_creation + final_cache_read
 
         warnings: list[str] = []
         if final_input == 0 and final_output == 0:
@@ -629,7 +640,11 @@ class WorkflowExecutionProcessor:
             started_at=started_at,
             session_id=todo.session_id or "",
             artifact_ids=artifact_ids,
-            tokens=tokens,
+            input_tokens=final_input,
+            output_tokens=final_output,
+            cache_creation_tokens=final_cache_creation,
+            cache_read_tokens=final_cache_read,
+            total_tokens=final_total,
             warnings=warnings,
         )
         phase_results.append(result)
@@ -644,20 +659,31 @@ class WorkflowExecutionProcessor:
             artifact_id=artifact_ids[0] if artifact_ids else None,
             input_tokens=final_input,
             output_tokens=final_output,
+            cache_creation_tokens=final_cache_creation,
+            cache_read_tokens=final_cache_read,
             total_tokens=final_total,
-            cost_usd=tokens.estimate_cost(),
             duration_seconds=duration,
         )
         aggregate.complete_phase(complete_cmd)
         await self._save_and_sync(aggregate)
 
-        await self._finalize_phase(todo.phase_id, final_input, final_output, final_total, duration)
+        await self._finalize_phase(
+            todo.phase_id,
+            final_input,
+            final_output,
+            final_cache_creation,
+            final_cache_read,
+            final_total,
+            duration,
+        )
 
     async def _finalize_phase(
         self,
         phase_id: str,
         input_tokens: int,
         output_tokens: int,
+        cache_creation_tokens: int,
+        cache_read_tokens: int,
         total_tokens: int,
         duration: float,
     ) -> None:
@@ -667,6 +693,8 @@ class WorkflowExecutionProcessor:
             await session_mgr.complete_success(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
                 total_tokens=total_tokens,
                 duration_seconds=duration,
                 source="processor",

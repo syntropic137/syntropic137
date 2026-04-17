@@ -423,6 +423,10 @@ class ExecutionSummary(BaseModel):
     completed_phases: int = 0
     total_phases: int = 0
     total_tokens: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     tool_call_count: int = 0
     error_message: str | None = None
@@ -441,6 +445,8 @@ class ExecutionDetail(BaseModel):
     completed_at: datetime | str | None = None
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
@@ -460,6 +466,10 @@ class SessionSummary(BaseModel):
     phase_id: str | None = None
     status: str = ""
     agent_type: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     started_at: datetime | None = None
@@ -807,6 +817,8 @@ class DashboardMetrics(BaseModel):
     total_sessions: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     total_artifacts: int = 0

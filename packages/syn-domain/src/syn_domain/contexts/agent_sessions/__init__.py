@@ -2,7 +2,8 @@
 
 Public API for cross-context consumers (ADR-062). This context provides
 aggregates, commands, and events for tracking agent sessions including
-token usage, operations, and costs.
+token usage and operations. Cost is Lane 2 telemetry — use
+``SessionCostQueryService`` for per-session cost (#695).
 
 Usage:
     from syn_domain.contexts.agent_sessions import (
@@ -39,7 +40,6 @@ Usage:
 
 from syn_domain.contexts.agent_sessions._shared import (
     AgentSessionAggregate,
-    CostMetrics,
     OperationRecord,
     OperationType,
     SessionStatus,
@@ -86,7 +86,6 @@ __all__ = [
     "CompleteSessionCommand",
     "CompleteSessionHandler",
     "CostCalculator",
-    "CostMetrics",
     "ObservationType",
     "OperationRecord",
     "OperationRecordedEvent",

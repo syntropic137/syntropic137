@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
@@ -109,7 +107,8 @@ class TestCommandsImportable:
             total_phases=1,
             total_input_tokens=100,
             total_output_tokens=50,
-            total_cost_usd=Decimal("0.01"),
+            total_cache_creation_tokens=0,
+            total_cache_read_tokens=0,
             duration_seconds=10.0,
             artifact_ids=["a-1"],
         )

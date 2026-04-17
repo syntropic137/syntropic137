@@ -14,7 +14,6 @@ This prevents the class of bugs where:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -43,6 +42,9 @@ class TestWorkflowExecutionEventProjectionConsistency:
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
+        from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+            WorkflowExecutionStartedEvent,
+        )
 
         aggregate = WorkflowExecutionAggregate()
         command = StartExecutionCommand(
@@ -58,10 +60,11 @@ class TestWorkflowExecutionEventProjectionConsistency:
         # Verify event was emitted
         events = aggregate.get_uncommitted_events()
         assert len(events) == 1
-        assert events[0].event.__class__.__name__ == "WorkflowExecutionStartedEvent"
-        assert events[0].event.workflow_id == "workflow-1"
-        assert events[0].event.execution_id == "exec-1"
-        assert events[0].event.total_phases == 5
+        event = events[0].event
+        assert isinstance(event, WorkflowExecutionStartedEvent)
+        assert event.workflow_id == "workflow-1"
+        assert event.execution_id == "exec-1"
+        assert event.total_phases == 5
 
     @pytest.mark.asyncio
     async def test_complete_phase_emits_event(self) -> None:
@@ -70,6 +73,9 @@ class TestWorkflowExecutionEventProjectionConsistency:
             CompletePhaseCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
+        )
+        from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+            PhaseCompletedEvent,
         )
 
         aggregate = WorkflowExecutionAggregate()
@@ -87,7 +93,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
         # Mark events as committed to clear them
         aggregate.mark_events_as_committed()
 
-        # Now complete a phase
+        # Now complete a phase with non-zero cache tokens (#695)
         phase_cmd = CompletePhaseCommand(
             execution_id="exec-1",
             workflow_id="workflow-1",
@@ -96,24 +102,26 @@ class TestWorkflowExecutionEventProjectionConsistency:
             artifact_id="artifact-1",
             input_tokens=100,
             output_tokens=200,
-            total_tokens=300,
-            cost_usd=Decimal("0.05"),
+            cache_creation_tokens=5000,
+            cache_read_tokens=12000,
+            total_tokens=17300,
             duration_seconds=10.5,
         )
         aggregate._handle_command(phase_cmd)
 
-        # Verify PhaseCompleted event was emitted
+        # Verify PhaseCompleted event was emitted with all 4 token components
         events = aggregate.get_uncommitted_events()
         assert len(events) == 1
         event = events[0].event
-        assert event.__class__.__name__ == "PhaseCompletedEvent"
+        assert isinstance(event, PhaseCompletedEvent)
         assert event.workflow_id == "workflow-1"
         assert event.execution_id == "exec-1"
         assert event.phase_id == "phase-1"
         assert event.input_tokens == 100
         assert event.output_tokens == 200
-        assert event.total_tokens == 300
-        assert event.cost_usd == Decimal("0.05")
+        assert event.cache_creation_tokens == 5000
+        assert event.cache_read_tokens == 12000
+        assert event.total_tokens == 17300
         assert event.duration_seconds == 10.5
 
     @pytest.mark.asyncio
@@ -123,6 +131,9 @@ class TestWorkflowExecutionEventProjectionConsistency:
             CompleteExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
+        )
+        from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+            WorkflowCompletedEvent,
         )
 
         aggregate = WorkflowExecutionAggregate()
@@ -138,14 +149,15 @@ class TestWorkflowExecutionEventProjectionConsistency:
         aggregate._handle_command(start_cmd)
         aggregate.mark_events_as_committed()
 
-        # Complete execution
+        # Complete execution with non-zero cache tokens (#695)
         complete_cmd = CompleteExecutionCommand(
             execution_id="exec-1",
             completed_phases=5,
             total_phases=5,
             total_input_tokens=500,
             total_output_tokens=1000,
-            total_cost_usd=Decimal("0.50"),
+            total_cache_creation_tokens=8000,
+            total_cache_read_tokens=25000,
             duration_seconds=120.0,
             artifact_ids=["a1", "a2"],
         )
@@ -153,9 +165,14 @@ class TestWorkflowExecutionEventProjectionConsistency:
 
         events = aggregate.get_uncommitted_events()
         assert len(events) == 1
-        assert events[0].event.__class__.__name__ == "WorkflowCompletedEvent"
-        assert events[0].event.total_input_tokens == 500
-        assert events[0].event.total_output_tokens == 1000
+        event = events[0].event
+        assert isinstance(event, WorkflowCompletedEvent)
+        assert event.total_input_tokens == 500
+        assert event.total_output_tokens == 1000
+        assert event.total_cache_creation_tokens == 8000
+        assert event.total_cache_read_tokens == 25000
+        # total_tokens = input + output + cache_creation + cache_read
+        assert event.total_tokens == 500 + 1000 + 8000 + 25000
 
     @pytest.mark.asyncio
     async def test_fail_execution_emits_event(self) -> None:
@@ -164,6 +181,9 @@ class TestWorkflowExecutionEventProjectionConsistency:
             FailExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
+        )
+        from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+            WorkflowFailedEvent,
         )
 
         aggregate = WorkflowExecutionAggregate()
@@ -192,8 +212,9 @@ class TestWorkflowExecutionEventProjectionConsistency:
 
         events = aggregate.get_uncommitted_events()
         assert len(events) == 1
-        assert events[0].event.__class__.__name__ == "WorkflowFailedEvent"
-        assert events[0].event.error_message == "Something went wrong"
+        event = events[0].event
+        assert isinstance(event, WorkflowFailedEvent)
+        assert event.error_message == "Something went wrong"
 
 
 class TestWorkflowTemplateProjectionHandlesTemplateEvents:
@@ -270,6 +291,9 @@ class TestSessionEventProjectionConsistency:
         from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
+        from syn_domain.contexts.agent_sessions.domain.events.SessionStartedEvent import (
+            SessionStartedEvent,
+        )
 
         aggregate = AgentSessionAggregate()
         command = StartSessionCommand(
@@ -282,9 +306,10 @@ class TestSessionEventProjectionConsistency:
 
         events = aggregate.get_uncommitted_events()
         assert len(events) == 1
-        assert events[0].event.__class__.__name__ == "SessionStartedEvent"
-        assert events[0].event.workflow_id == "workflow-1"
-        assert events[0].event.phase_id == "phase-1"
+        event = events[0].event
+        assert isinstance(event, SessionStartedEvent)
+        assert event.workflow_id == "workflow-1"
+        assert event.phase_id == "phase-1"
 
     @pytest.mark.asyncio
     async def test_record_operation_emits_event(self) -> None:
@@ -298,6 +323,9 @@ class TestSessionEventProjectionConsistency:
         )
         from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
+        )
+        from syn_domain.contexts.agent_sessions.domain.events.OperationRecordedEvent import (
+            OperationRecordedEvent,
         )
 
         aggregate = AgentSessionAggregate()
@@ -328,9 +356,10 @@ class TestSessionEventProjectionConsistency:
 
         events = aggregate.get_uncommitted_events()
         assert len(events) == 1
-        assert events[0].event.__class__.__name__ == "OperationRecordedEvent"
+        event = events[0].event
+        assert isinstance(event, OperationRecordedEvent)
         # OperationRecordedEvent stores total_tokens, not tokens_used
-        assert events[0].event.total_tokens == 300
+        assert event.total_tokens == 300
 
     @pytest.mark.asyncio
     async def test_complete_session_emits_event(self) -> None:
@@ -343,6 +372,9 @@ class TestSessionEventProjectionConsistency:
         )
         from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
+        )
+        from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent import (
+            SessionCompletedEvent,
         )
 
         aggregate = AgentSessionAggregate()
@@ -367,9 +399,10 @@ class TestSessionEventProjectionConsistency:
 
         events = aggregate.get_uncommitted_events()
         assert len(events) == 1
-        assert events[0].event.__class__.__name__ == "SessionCompletedEvent"
+        event = events[0].event
+        assert isinstance(event, SessionCompletedEvent)
         # SessionCompletedEvent uses status enum, not success boolean
-        assert events[0].event.status.value == "completed"
+        assert event.status.value == "completed"
 
 
 class TestSessionListProjectionHandlesAllEvents:
@@ -403,23 +436,28 @@ class TestSessionListProjectionHandlesAllEvents:
 
         projection = SessionListProjection(mock_store)
 
-        # Process OperationRecorded event
+        # Process OperationRecorded event with cache tokens (#695)
         await projection.on_operation_recorded(
             {
                 "session_id": "session-1",
                 "operation_type": "agent_request",
-                "tokens_used": 300,
+                "tokens_used": 17300,
                 "input_tokens": 100,
                 "output_tokens": 200,
-                "cost_usd": Decimal("0.05"),
+                "cache_creation_tokens": 5000,
+                "cache_read_tokens": 12000,
                 "recorded_at": datetime.now(UTC).isoformat(),
             }
         )
 
-        # Verify save was called with updated data including operations
+        # Verify save was called with updated data including operations and cache tokens
         mock_store.save.assert_called_once()
         saved_data = mock_store.save.call_args[0][2]
-        assert saved_data["total_tokens"] == 300
+        assert saved_data["total_tokens"] == 17300
+        assert saved_data["input_tokens"] == 100
+        assert saved_data["output_tokens"] == 200
+        assert saved_data["cache_creation_tokens"] == 5000
+        assert saved_data["cache_read_tokens"] == 12000
         assert len(saved_data["operations"]) == 1
         assert saved_data["operations"][0]["input_tokens"] == 100
         assert saved_data["operations"][0]["output_tokens"] == 200
@@ -557,12 +595,12 @@ class TestWorkflowExecutionListProjection:
 
     @pytest.mark.asyncio
     async def test_handles_phase_completed_updates_metrics(self, mock_store: AsyncMock) -> None:
-        """REGRESSION: Projection must update metrics when phase completes."""
+        """REGRESSION: Projection must update metrics including cache tokens (#695)."""
         from syn_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
-        # Setup existing execution
+        # Setup existing execution with prior cache tokens
         mock_store.get = AsyncMock(
             return_value={
                 "execution_id": "exec-1",
@@ -571,26 +609,37 @@ class TestWorkflowExecutionListProjection:
                 "completed_phases": 1,
                 "total_phases": 5,
                 "total_tokens": 500,
-                "total_cost_usd": "0.10",
+                "total_input_tokens": 100,
+                "total_output_tokens": 50,
+                "total_cache_creation_tokens": 150,
+                "total_cache_read_tokens": 200,
             }
         )
 
         projection = WorkflowExecutionListProjection(mock_store)
 
+        # Cost is Lane 2 (#695) — projection ignores cost_usd on event
         await projection.on_phase_completed(
             {
                 "execution_id": "exec-1",
                 "phase_id": "phase-2",
-                "total_tokens": 300,
-                "cost_usd": Decimal("0.05"),
+                "total_tokens": 17300,
+                "input_tokens": 100,
+                "output_tokens": 200,
+                "cache_creation_tokens": 5000,
+                "cache_read_tokens": 12000,
             }
         )
 
         mock_store.save.assert_called_once()
         saved_data = mock_store.save.call_args[0][2]
         assert saved_data["completed_phases"] == 2
-        assert saved_data["total_tokens"] == 800  # 500 + 300
-        assert saved_data["total_cost_usd"] == "0.15"  # 0.10 + 0.05
+        assert saved_data["total_tokens"] == 500 + 17300
+        assert saved_data["total_input_tokens"] == 100 + 100
+        assert saved_data["total_output_tokens"] == 50 + 200
+        assert saved_data["total_cache_creation_tokens"] == 150 + 5000
+        assert saved_data["total_cache_read_tokens"] == 200 + 12000
+        assert "total_cost_usd" not in saved_data
 
     @pytest.mark.asyncio
     async def test_handles_workflow_completed(self, mock_store: AsyncMock) -> None:
@@ -761,7 +810,8 @@ class TestWorkflowExecutionDetailProjection:
                 "phases": [],
                 "total_input_tokens": 0,
                 "total_output_tokens": 0,
-                "total_cost_usd": "0",
+                "total_cache_creation_tokens": 0,
+                "total_cache_read_tokens": 0,
                 "artifact_ids": [],
             }
         )
@@ -777,7 +827,8 @@ class TestWorkflowExecutionDetailProjection:
                 "artifact_id": "artifact-1",
                 "input_tokens": 100,
                 "output_tokens": 200,
-                "cost_usd": Decimal("0.05"),
+                "cache_creation_tokens": 5000,
+                "cache_read_tokens": 12000,
                 "duration_seconds": 10.5,
             }
         )
@@ -792,8 +843,12 @@ class TestWorkflowExecutionDetailProjection:
         assert phase["session_id"] == "session-1"
         assert phase["input_tokens"] == 100
         assert phase["output_tokens"] == 200
+        assert phase["cache_creation_tokens"] == 5000
+        assert phase["cache_read_tokens"] == 12000
         assert saved_data["total_input_tokens"] == 100
         assert saved_data["total_output_tokens"] == 200
+        assert saved_data["total_cache_creation_tokens"] == 5000
+        assert saved_data["total_cache_read_tokens"] == 12000
 
 
 class TestSessionExecutionLinkage:
@@ -807,6 +862,9 @@ class TestSessionExecutionLinkage:
         )
         from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
+        )
+        from syn_domain.contexts.agent_sessions.domain.events.SessionStartedEvent import (
+            SessionStartedEvent,
         )
 
         aggregate = AgentSessionAggregate()
@@ -822,7 +880,7 @@ class TestSessionExecutionLinkage:
         events = aggregate.get_uncommitted_events()
         assert len(events) == 1
         event = events[0].event
-        assert event.__class__.__name__ == "SessionStartedEvent"
+        assert isinstance(event, SessionStartedEvent)
         assert event.execution_id == "exec-1"
 
     @pytest.mark.asyncio

@@ -2123,30 +2123,15 @@ export interface components {
             completed_at?: string | null;
             /** Phases */
             phases?: components["schemas"]["PhaseExecutionInfo"][];
-            /**
-             * Total Input Tokens
-             * @default 0
-             */
+            /** Total Input Tokens */
             total_input_tokens: number;
-            /**
-             * Total Output Tokens
-             * @default 0
-             */
+            /** Total Output Tokens */
             total_output_tokens: number;
-            /**
-             * Cache Creation Tokens
-             * @default 0
-             */
-            cache_creation_tokens: number;
-            /**
-             * Cache Read Tokens
-             * @default 0
-             */
-            cache_read_tokens: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
+            /** Total Tokens */
             total_tokens: number;
             /**
              * Total Cost Usd
@@ -2300,11 +2285,16 @@ export interface components {
              * @default 0
              */
             total_phases: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Tokens */
             total_tokens: number;
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Total Output Tokens */
+            total_output_tokens: number;
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
             /**
              * Total Cost Usd
              * @default 0
@@ -2625,20 +2615,15 @@ export interface components {
              * @default 0
              */
             total_sessions: number;
-            /**
-             * Total Input Tokens
-             * @default 0
-             */
+            /** Total Input Tokens */
             total_input_tokens: number;
-            /**
-             * Total Output Tokens
-             * @default 0
-             */
+            /** Total Output Tokens */
             total_output_tokens: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
+            /** Total Tokens */
             total_tokens: number;
             /**
              * Total Cost Usd
@@ -2813,30 +2798,15 @@ export interface components {
             session_id?: string | null;
             /** Artifact Id */
             artifact_id?: string | null;
-            /**
-             * Input Tokens
-             * @default 0
-             */
+            /** Input Tokens */
             input_tokens: number;
-            /**
-             * Output Tokens
-             * @default 0
-             */
+            /** Output Tokens */
             output_tokens: number;
-            /**
-             * Cache Creation Tokens
-             * @default 0
-             */
+            /** Cache Creation Tokens */
             cache_creation_tokens: number;
-            /**
-             * Cache Read Tokens
-             * @default 0
-             */
+            /** Cache Read Tokens */
             cache_read_tokens: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Tokens */
             total_tokens: number;
             /**
              * Duration Seconds
@@ -3592,6 +3562,26 @@ export interface components {
             status: string;
             /** Agent Provider */
             agent_provider: string | null;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
             /**
              * Total Tokens
              * @default 0

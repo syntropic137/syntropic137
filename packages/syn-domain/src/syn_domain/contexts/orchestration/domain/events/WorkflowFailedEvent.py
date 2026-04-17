@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
-from decimal import Decimal
 
 from event_sourcing import DomainEvent, event
 
@@ -13,6 +12,7 @@ class WorkflowFailedEvent(DomainEvent):
     """Event emitted when workflow execution fails.
 
     Contains information about the failure and any partial progress.
+    Cost is Lane 2 telemetry — see execution_cost projection.
     """
 
     workflow_id: str
@@ -28,8 +28,7 @@ class WorkflowFailedEvent(DomainEvent):
     completed_phases: int
     total_phases: int
 
-    # Partial metrics (from completed phases)
+    # Partial metrics (from completed phases — cost lives in Lane 2)
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_tokens: int = 0
-    total_cost_usd: Decimal = Decimal("0")

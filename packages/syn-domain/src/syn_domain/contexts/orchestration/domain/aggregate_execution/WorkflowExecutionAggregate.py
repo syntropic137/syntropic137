@@ -206,8 +206,14 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             completed_phases=command.completed_phases,
             total_input_tokens=command.total_input_tokens,
             total_output_tokens=command.total_output_tokens,
-            total_tokens=command.total_input_tokens + command.total_output_tokens,
-            total_cost_usd=command.total_cost_usd,
+            total_cache_creation_tokens=command.total_cache_creation_tokens,
+            total_cache_read_tokens=command.total_cache_read_tokens,
+            total_tokens=(
+                command.total_input_tokens
+                + command.total_output_tokens
+                + command.total_cache_creation_tokens
+                + command.total_cache_read_tokens
+            ),
             total_duration_seconds=command.duration_seconds,
             artifact_ids=command.artifact_ids,
         )
@@ -279,8 +285,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             session_id=command.session_id,
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
+            cache_creation_tokens=command.cache_creation_tokens,
+            cache_read_tokens=command.cache_read_tokens,
             total_tokens=command.total_tokens,
-            cost_usd=command.cost_usd,
             duration_seconds=command.duration_seconds,
         )
         self._apply(event)
