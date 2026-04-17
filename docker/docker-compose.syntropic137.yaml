@@ -230,7 +230,7 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       SYN_WORKSPACE_CONTAINER_DIR: /workspaces
-      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-.}/workspaces
+      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-${PWD}}/workspaces
       SYN_AGENT_NETWORK: syntropic137_selfhost_agent-net
       SYN_PROXY_URL: http://envoy-proxy:8081
       SYN_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
