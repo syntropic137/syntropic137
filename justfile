@@ -1639,6 +1639,23 @@ _env-check: _ensure-env
         ERRORS=$((ERRORS + 1))
     fi
 
+    # --- Worktree footgun: stale SYN_INSTALL_DIR ---
+    # SYN_INSTALL_DIR pins the host path that workspace containers bind-mount.
+    # When .env is copied between worktrees, this absolute path follows along
+    # and silently points to the wrong directory, so syn-api writes setup
+    # files to one path and workspace containers mount a different one.
+    # Compose now defaults to ${PWD}, so the right fix is usually to clear it.
+    if [ -n "${SYN_INSTALL_DIR:-}" ] && [ "${SYN_INSTALL_DIR}" != "$(pwd)" ]; then
+        echo "   ❌ ERROR: SYN_INSTALL_DIR points to a different directory!"
+        echo "            SYN_INSTALL_DIR = ${SYN_INSTALL_DIR}"
+        echo "            \$PWD            = $(pwd)"
+        echo "            Workspace containers will bind-mount the wrong host path."
+        echo "            Fix: clear SYN_INSTALL_DIR in .env (recommended for worktrees)"
+        echo "                 or set it to: $(pwd)"
+        echo ""
+        ERRORS=$((ERRORS + 1))
+    fi
+
     # --- GitHub App ---
     # installation_id is intentionally NOT required here — installations are discovered
     # dynamically from webhook payloads (multi-org/multi-account support).

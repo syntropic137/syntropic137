@@ -169,7 +169,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
-      - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-.}/workspaces
+      - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-${PWD}}/workspaces
       - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-production}_agent-net
       # Envoy proxy URL for agent containers (must resolve on agent-net)
       - SYN_PROXY_URL=http://envoy-proxy:8081
