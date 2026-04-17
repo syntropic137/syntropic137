@@ -489,14 +489,16 @@ class TestRepoPollerColdStartFence:
         )
 
     async def test_cold_start_passes_post_startup_events(self) -> None:
-        """Events created AFTER started_at pass the cold-start fence.
+        """Events created AFTER started_at pass the cold-start timestamp fence.
 
-        On cold start, HistoricalPoller._prime() runs before process(),
-        so the source is primed when process() runs. Events that pass
-        the timestamp fence get source_primed=True (the source was
-        primed by _prime()). The belt-and-suspenders source_primed=False
-        only applies when pipeline.ingest() is called outside the
-        HistoricalPoller path.
+        During cold start, events that make it past the timestamp fence are
+        still delivered through the replay path. They are processed, but
+        they remain marked ``source_primed=False`` so the pipeline
+        (Layer 5) suppresses trigger evaluation for replayed cold-start
+        events. See ADR-060 §9 Layer 4: the ESP base class signals
+        ``is_replay=True`` on the cold-start path, which the ingestion
+        service propagates by un-priming each event before
+        ``pipeline.ingest()``.
         """
         from syn_domain.contexts.github.services import (
             GitHubRepoIngestionService as GitHubRepoPoller,

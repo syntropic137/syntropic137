@@ -51,5 +51,5 @@ class TestGitHubBCPurity:
                 violations.append(f"{path.name}:{node.lineno} imports from {node.module}")
         assert not violations, (
             "Domain services must not depend on adapters. Use ports under "
-            "slices/event_pipeline/ports/ instead.\n  " + "\n  ".join(violations)
+            "syn_domain.contexts.github.ports instead.\n  " + "\n  ".join(violations)
         )

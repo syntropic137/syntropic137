@@ -66,8 +66,8 @@ class EventPipeline:
     def add_observer(self, callback: _ObserverCallback) -> None:
         """Register a callback notified after each event reaches trigger evaluation.
 
-        Used by CheckRunPoller to learn about PR events and register
-        pending SHAs for check-run polling (#602).
+        Used by ``CheckRunIngestionService`` to learn about PR events and
+        register pending SHAs for check-run polling (#602).
 
         Observers fire AFTER trigger evaluation runs and therefore are
         intentionally NOT called for events that are deduplicated or that

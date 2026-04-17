@@ -228,7 +228,7 @@ The GitHub bounded context owns:
 
 - The event pipeline (`slices/event_pipeline/pipeline.py`)
 - The application services (`services/event_ingestion.py`, `services/check_run_ingestion.py`, `services/webhook_health.py`)
-- The ports that adapters implement (`slices/event_pipeline/ports/{events_api_port,checks_api_port}.py`)
+- The ports that adapters implement (`syn_domain.contexts.github.ports.{events_api_port,checks_api_port}`)
 - The typed cursor (`services/github_events_cursor.py`)
 
 The adapter layer (`packages/syn-adapters/src/syn_adapters/github/`) owns:
