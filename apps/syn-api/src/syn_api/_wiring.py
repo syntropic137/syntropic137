@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+    from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
         _ExecutionService,
@@ -582,9 +583,10 @@ class BackgroundWorkflowDispatcher:
         inputs: dict[str, str],
         execution_id: str = "",
         task: str | None = None,
+        repos: list[RepositoryRef] | None = None,
     ) -> None:
         asyncio_task = asyncio.create_task(
-            self._run_with_semaphore(workflow_id, inputs, execution_id, task=task),
+            self._run_with_semaphore(workflow_id, inputs, execution_id, task=task, repos=repos),
             name=f"workflow-exec-{execution_id or workflow_id}",
         )
         self._tasks.add(asyncio_task)
@@ -596,9 +598,10 @@ class BackgroundWorkflowDispatcher:
         inputs: dict[str, str],
         execution_id: str,
         task: str | None = None,
+        repos: list[RepositoryRef] | None = None,
     ) -> None:
         async with self._semaphore:
-            await self._run(workflow_id, inputs, execution_id, task=task)
+            await self._run(workflow_id, inputs, execution_id, task=task, repos=repos)
 
     async def _run(
         self,
@@ -606,6 +609,7 @@ class BackgroundWorkflowDispatcher:
         inputs: dict[str, str],
         execution_id: str,
         task: str | None = None,
+        repos: list[RepositoryRef] | None = None,
     ) -> None:
         from syn_domain.contexts.orchestration import (
             DuplicateExecutionError,
@@ -616,6 +620,7 @@ class BackgroundWorkflowDispatcher:
             cmd = ExecuteWorkflowCommand(
                 aggregate_id=workflow_id,
                 inputs=inputs or {},
+                repos=repos or [],
                 execution_id=execution_id or None,
                 task=task,
             )

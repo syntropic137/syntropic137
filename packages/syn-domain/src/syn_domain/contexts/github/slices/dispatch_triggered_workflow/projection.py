@@ -32,11 +32,18 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 
 
 class _ExecutionService(Protocol):
-    """Protocol for the execution service dependency."""
+    """Protocol for the execution service dependency.
+
+    This is the anti-corruption boundary between the GitHub and
+    Orchestration contexts (ADR-063). Repository identity is passed
+    as typed ``RepositoryRef`` values, not smuggled through the
+    ``inputs`` dict.
+    """
 
     async def run_workflow(
         self,
@@ -44,6 +51,7 @@ class _ExecutionService(Protocol):
         inputs: dict[str, str],
         execution_id: str,
         task: str | None = None,
+        repos: list[RepositoryRef] | None = None,
     ) -> None: ...
 
 
@@ -236,7 +244,12 @@ class WorkflowDispatchProjection(ProcessManager):
         workflow_id: str,
         trigger_id: object,
     ) -> None:
-        """Execute the workflow dispatch and record success."""
+        """Execute the workflow dispatch and record success.
+
+        Translates GitHub-context repository identity (slug in
+        ``workflow_inputs["repository"]``) to typed ``RepositoryRef``
+        at the context boundary (ADR-063 anti-corruption layer).
+        """
         assert self._store is not None
         assert self._execution_service is not None
 
@@ -244,10 +257,23 @@ class WorkflowDispatchProjection(ProcessManager):
         if not isinstance(str_inputs, dict):
             str_inputs = {}
 
+        # ADR-063: extract repository identity at the boundary
+        repos: list[RepositoryRef] = []
+        repo_slug = str_inputs.get("repository", "")
+        if isinstance(repo_slug, str) and repo_slug:
+            try:
+                repos = [RepositoryRef.from_slug(repo_slug)]
+            except ValueError:
+                logger.warning(
+                    "Invalid repository slug '%s' in trigger inputs, skipping typed conversion",
+                    repo_slug,
+                )
+
         await self._execution_service.run_workflow(
             workflow_id=workflow_id,
             inputs=str_inputs,
             execution_id=execution_id,
+            repos=repos,
         )
 
         record["status"] = "dispatched"

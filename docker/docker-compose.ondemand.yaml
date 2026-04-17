@@ -64,7 +64,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       SYN_WORKSPACE_CONTAINER_DIR: /workspaces
-      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-.}/workspaces
+      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-${PWD}}/workspaces
       # Agent network derives from compose project name - set by env_manager.py
       SYN_AGENT_NETWORK: ${SYN_AGENT_NETWORK}
       # Envoy proxy URL for agent containers (must resolve on agent-net)
