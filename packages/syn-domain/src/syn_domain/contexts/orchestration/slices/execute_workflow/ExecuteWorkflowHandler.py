@@ -81,11 +81,11 @@ def _substitute_repo_vars(repo_url: str, merged_inputs: dict[str, str]) -> str:
 
 
 def _normalise_repo_url(url: str) -> str:
-    """Expand 'owner/repo' slugs to full GitHub HTTPS URLs (trigger preset compat).
+    """Expand 'owner/repo' slugs (left over in template fields) to full HTTPS URLs.
 
-    Trigger presets inject ``repository.full_name`` (``owner/repo``) rather than
-    the full ``https://github.com/owner/repo`` URL that ``git clone`` expects.
-    This helper normalises slugs so both forms are accepted transparently.
+    Workflow YAML templates often declare ``repos: [owner/repo]`` rather than full
+    URLs. Cross-context callers (API route, trigger dispatcher) translate to typed
+    ``RepositoryRef`` at the boundary - those callers don't go through this helper.
     """
     if url.startswith(("https://", "http://", "git@")):
         return url
@@ -93,6 +93,36 @@ def _normalise_repo_url(url: str) -> str:
     if len(parts) == 2:  # owner/repo slug
         return f"https://github.com/{url}"
     return url
+
+
+# ADR-063 §3: keys reserved for repository identity at cross-context boundaries.
+# If these appear in ``command.inputs`` it means a producer skipped the typed
+# translation step (API route or BackgroundWorkflowDispatcher) and tried to smuggle
+# repo identity through the generic inputs dict. We fail loudly instead of silently
+# resolving them - the loud error makes the missed translation obvious in tests
+# rather than letting "zero repos" propagate silently into a workflow execution.
+_RESERVED_REPO_INPUT_KEYS: frozenset[str] = frozenset({"repos", "repository"})
+
+
+def _resolve_repos_from_template(
+    merged_inputs: dict[str, str],
+    workflow: WorkflowTemplateAggregate,
+) -> list[str]:
+    """Resolve repos from workflow template fields (NOT from inputs dict).
+
+    Two template-level sources are checked, in order:
+    1. ``workflow.repos`` - list with optional ``{{var}}`` substitution
+    2. ``workflow.repository_url`` - single-repo template fallback
+    """
+    if workflow.repos:
+        return [
+            _normalise_repo_url(_substitute_repo_vars(r, merged_inputs)) for r in workflow.repos
+        ]
+
+    repo_url = _resolve_repo_url(workflow, merged_inputs)
+    if repo_url:
+        return [repo_url]
+    return []
 
 
 class WorkflowRepository(Protocol):
@@ -137,7 +167,9 @@ class ExecuteWorkflowHandler:
 
         phases = self._get_executable_phases(workflow)
         merged_inputs = self._merge_inputs(command, workflow)
-        repos = self._resolve_repos(merged_inputs, workflow) if workflow.requires_repos else []
+        repos = (
+            self._resolve_repos(command, merged_inputs, workflow) if workflow.requires_repos else []
+        )
 
         execution_id = (
             command.execution_id
@@ -177,25 +209,32 @@ class ExecuteWorkflowHandler:
 
     @staticmethod
     def _resolve_repos(
+        command: ExecuteWorkflowCommand,
         merged_inputs: dict[str, str],
         workflow: WorkflowTemplateAggregate,
     ) -> list[str]:
-        """Resolve repos: inputs CSV → trigger repository → template-level repos → repository_url fallback."""
-        repos_raw = merged_inputs.get("repos", "")
-        if repos_raw:
-            return [_normalise_repo_url(u.strip()) for u in repos_raw.split(",") if u.strip()]
-        # Trigger presets inject "repository" (owner/repo slug) via input_mapping
-        trigger_repo = merged_inputs.get("repository", "")
-        if trigger_repo:
-            return [_normalise_repo_url(trigger_repo)]
-        if workflow.repos:
-            return [
-                _normalise_repo_url(_substitute_repo_vars(r, merged_inputs)) for r in workflow.repos
-            ]
-        repo_url = _resolve_repo_url(workflow, merged_inputs)
-        if repo_url:
-            return [repo_url]
-        return []
+        """Resolve repos: typed ``command.repos`` first, else workflow template fields.
+
+        Per ADR-063, repository identity must be passed across context boundaries
+        as typed ``RepositoryRef`` on the command. This handler does NOT inspect
+        ``inputs`` for repo keys - that path was removed when boundaries were typed.
+        Producers (API route, ``BackgroundWorkflowDispatcher``) own the translation.
+        """
+        if command.repos:
+            return [r.https_url for r in command.repos]
+
+        # Guard: if a producer left repo identity in inputs without populating
+        # command.repos, that's a missed boundary translation - fail loud (ADR-063).
+        leaked = _RESERVED_REPO_INPUT_KEYS & merged_inputs.keys()
+        if leaked:
+            keys = ", ".join(sorted(leaked))
+            raise ValueError(
+                f"inputs[{keys}] is set but command.repos is empty. "
+                f"Repository identity must be passed as RepositoryRef on the command "
+                f"(ADR-063); the producing context skipped the boundary translation."
+            )
+
+        return _resolve_repos_from_template(merged_inputs, workflow)
 
     @staticmethod
     def _get_executable_phases(
