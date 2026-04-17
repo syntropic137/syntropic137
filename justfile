@@ -512,16 +512,6 @@ dev-doctor: _env-check
     @echo ""
     @echo "💡 Run 'just dev' to start the development stack."
 
-# Smoke test: regression check for bug #694 (cold-start GitHub Events flood).
-# Assumes a freshly wiped stack (run `just dev-fresh` first).
-# Usage: just smoke-test-694 owner/repo 12345678
-smoke-test-694 repo install_id:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    uv run python infra/scripts/smoke_test_694.py \
-        --repo "{{repo}}" \
-        --install-id "{{install_id}}"
-
 # --- CLI Node ---
 
 # Build the Node.js CLI
