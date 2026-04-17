@@ -138,20 +138,24 @@ class CheckRunIngestionService:
             interval = self._state.current_interval
             self._last_rate_limit_wait = 0.0
 
-            try:
-                if await self._has_check_run_triggers():
-                    await self._poll_pending_shas()
-                await self._cleanup_stale_shas()
-                if self._last_rate_limit_wait == 0.0:
-                    self._state.record_success()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self._state.record_error()
-                logger.exception("Check-run polling error, backing off")
+            await self._run_iteration()
 
             sleep_for = max(interval, self._last_rate_limit_wait)
             await self._sleep(sleep_for)
+
+    async def _run_iteration(self) -> None:
+        """Run one poll iteration; catches and logs non-cancellation errors."""
+        try:
+            if await self._has_check_run_triggers():
+                await self._poll_pending_shas()
+            await self._cleanup_stale_shas()
+            if self._last_rate_limit_wait == 0.0:
+                self._state.record_success()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._state.record_error()
+            logger.exception("Check-run polling error, backing off")
 
     async def _has_check_run_triggers(self) -> bool:
         """Check if any active triggers listen for check_run events."""
