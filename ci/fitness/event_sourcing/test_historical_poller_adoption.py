@@ -31,13 +31,13 @@ class TestHistoricalPollerAdoption:
             f"GitHubRepoIngestionService violates HistoricalPoller structure: {violations}"
         )
 
-    def test_check_run_poller_is_not_historical(self) -> None:
-        """CheckRunPoller is reactive (not historical) -- must NOT extend HistoricalPoller.
+    def test_check_run_ingestion_service_is_not_historical(self) -> None:
+        """CheckRunIngestionService is reactive (not historical) -- must NOT extend HistoricalPoller.
 
-        CheckRunPoller only polls SHAs registered by incoming PR events,
-        so it doesn't need cold-start protection. If someone changes it
-        to extend HistoricalPoller, this test will catch it and prompt
-        a review of whether that's the right pattern.
+        CheckRunIngestionService only polls SHAs registered by incoming
+        PR events, so it doesn't need cold-start protection. If someone
+        changes it to extend HistoricalPoller, this test will catch it
+        and prompt a review of whether that's the right pattern.
         """
         from event_sourcing.core.historical_poller import HistoricalPoller
 

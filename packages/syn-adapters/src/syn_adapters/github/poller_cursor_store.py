@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from event_sourcing.core.historical_poller import CursorData
 
+from syn_adapters.in_memory import InMemoryAdapter
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -145,19 +147,18 @@ class PostgresPollerCursorStore:
         return cursors
 
 
-class InMemoryPollerCursorStore:
-    """In-memory cursor store for dev/offline use.
+class InMemoryPollerCursorStore(InMemoryAdapter):
+    """In-memory cursor store for test/offline use only.
 
     Cold-start fence still works within a single process lifetime,
-    but cursor state is lost on restart. Acceptable for dev/offline
-    where restart storms are not a concern.
-
-    Not guarded by InMemoryAdapter because this is a legitimate
-    dev/offline fallback when Postgres is unavailable, not a test-only
-    adapter. The lifecycle wiring logs a warning when this is used.
+    but cursor state is lost on restart. Guarded by ``InMemoryAdapter``
+    so it raises ``InMemoryAdapterError`` if instantiated outside
+    test/offline environments. Production wiring must use
+    ``PostgresPollerCursorStore``; see AGENTS.md in-memory adapter policy.
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._cursors: dict[str, CursorData] = {}
 
     async def load(self, source_key: str) -> CursorData | None:

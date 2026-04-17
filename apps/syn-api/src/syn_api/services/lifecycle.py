@@ -438,8 +438,12 @@ async def _init_event_poller(state: LifecycleState) -> None:
         logger.warning("Cursor store unavailable - poller will re-fetch on restart", exc_info=True)
 
     if cursor_store is None:
-        # In-memory fallback for dev/offline - cold-start fence still works
-        # but cursor state is lost on restart
+        if not settings.uses_in_memory_stores:
+            logger.error(
+                "Durable poller cursor store unavailable in production - "
+                "disabling event poller to prevent cold-start restart storms (ADR-060)"
+            )
+            return
         from syn_adapters.github.poller_cursor_store import InMemoryPollerCursorStore
 
         cursor_store = InMemoryPollerCursorStore()
