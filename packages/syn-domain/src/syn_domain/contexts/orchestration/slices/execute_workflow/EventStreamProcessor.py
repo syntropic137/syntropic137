@@ -13,7 +13,6 @@ import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
@@ -31,7 +30,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser i
 from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
 
     from syn_adapters.control import ExecutionController
     from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
