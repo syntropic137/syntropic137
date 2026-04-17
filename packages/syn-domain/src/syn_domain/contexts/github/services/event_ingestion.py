@@ -314,7 +314,12 @@ class GitHubEventIngestionScheduler:
         return interval
 
     async def _poll_all_repos(self, interval: float) -> float:
-        """Poll all repos with active triggers, returning the effective interval."""
+        """Poll all repos with active triggers, returning the effective interval.
+
+        Tracks the max ``X-Poll-Interval`` hint observed across the cycle
+        and stretches the returned interval to ``max(interval, hint)`` so
+        the scheduler never polls faster than GitHub recommends.
+        """
         repos = await self._get_repos_to_poll()
         if repos:
             logger.debug(
@@ -325,12 +330,18 @@ class GitHubEventIngestionScheduler:
 
         self._repo.set_installation_ids(dict(repos))
 
+        max_hint = 0
         for repo_full_name, _ in repos:
             if "/" not in repo_full_name:
                 logger.warning("Skipping malformed repo name: %s", repo_full_name)
                 continue
             await self._repo.poll(repo_full_name)
+            hint = self._repo.last_poll_interval
+            if hint is not None and hint > max_hint:
+                max_hint = hint
 
+        if max_hint > 0:
+            return max(interval, float(max_hint))
         return interval
 
     async def _get_repos_to_poll(self) -> list[tuple[str, str]]:

@@ -360,3 +360,56 @@ def _make_failing_poll():
         raise RuntimeError(msg)
 
     return _failing_poll
+
+
+@pytest.mark.asyncio
+class TestPollIntervalHintHonored:
+    """Scheduler stretches the next-sleep interval to honor X-Poll-Interval."""
+
+    async def test_sleep_stretches_to_poll_interval_hint(self) -> None:
+        """If GitHub returns ``X-Poll-Interval: 120``, the next sleep must be >= 120s,
+        not the 60s base interval. Regression against the old poller's
+        ``max(interval, response.poll_interval)`` behavior.
+        """
+        store = InMemoryTriggerQueryStore()
+        await _setup_trigger(store)
+
+        tracker = WebhookHealthTracker()
+        mock_client = MockEventsClient(poll_interval=120)
+
+        pipeline = EventPipeline(
+            dedup=InMemoryDedup(),
+            evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),  # type: ignore[arg-type]
+        )
+
+        recorded_sleeps: list[float] = []
+
+        async def _recording_sleep(seconds: float) -> None:
+            recorded_sleeps.append(seconds)
+            raise asyncio.CancelledError
+
+        repo_service = GitHubRepoPoller(
+            events_api=mock_client,  # type: ignore[arg-type]
+            pipeline=pipeline,
+            cursor_store=MemoryCursorStore(),
+        )
+        poller = GitHubEventPoller(
+            repo_service=repo_service,
+            health_tracker=tracker,
+            trigger_store=store,
+            settings=MockPollingSettings(),  # type: ignore[arg-type]
+            sleep=_recording_sleep,
+        )
+
+        await poller.start()
+        assert poller._task is not None
+        import contextlib
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await poller._task
+        poller._task = None
+
+        assert recorded_sleeps, "poll loop must reach the sleep step"
+        assert recorded_sleeps[0] >= 120.0, (
+            f"expected sleep >= 120s (X-Poll-Interval hint), got {recorded_sleeps[0]}"
+        )
