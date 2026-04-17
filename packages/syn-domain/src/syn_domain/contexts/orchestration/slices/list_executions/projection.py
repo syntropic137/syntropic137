@@ -32,7 +32,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_executions"
-    VERSION = 4  # Bumped: resilient on_workflow_failed for orphaned failure events (#598)
+    VERSION = 6  # Bumped: cost moved to Lane 2 — API enriches from execution_cost (#695)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -82,7 +82,10 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             completed_phases=0,
             total_phases=event_data.get("total_phases", 0),
             total_tokens=0,
-            total_cost_usd="0",
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_cache_creation_tokens=0,
+            total_cache_read_tokens=0,
             tool_call_count=0,
             expected_completion_at=event_data.get("expected_completion_at"),
             repos=repos,
@@ -103,20 +106,26 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             # Increment completed phases
             existing["completed_phases"] = existing.get("completed_phases", 0) + 1
 
-            # Add tokens from this phase
-            phase_tokens = event_data.get("total_tokens", 0)
-            existing["total_tokens"] = existing.get("total_tokens", 0) + phase_tokens
+            # Add tokens from this phase (all 4 components + total)
+            existing["total_tokens"] = existing.get("total_tokens", 0) + event_data.get(
+                "total_tokens", 0
+            )
+            existing["total_input_tokens"] = existing.get("total_input_tokens", 0) + event_data.get(
+                "input_tokens", 0
+            )
+            existing["total_output_tokens"] = existing.get(
+                "total_output_tokens", 0
+            ) + event_data.get("output_tokens", 0)
+            existing["total_cache_creation_tokens"] = existing.get(
+                "total_cache_creation_tokens", 0
+            ) + event_data.get("cache_creation_tokens", 0)
+            existing["total_cache_read_tokens"] = existing.get(
+                "total_cache_read_tokens", 0
+            ) + event_data.get("cache_read_tokens", 0)
 
             # Add tool calls from this phase
             phase_tool_calls = event_data.get("tool_call_count", 0)
             existing["tool_call_count"] = existing.get("tool_call_count", 0) + phase_tool_calls
-
-            # Add cost from this phase
-            from decimal import Decimal
-
-            phase_cost = Decimal(str(event_data.get("cost_usd", "0")))
-            existing_cost = Decimal(str(existing.get("total_cost_usd", "0")))
-            existing["total_cost_usd"] = str(existing_cost + phase_cost)
 
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
@@ -139,10 +148,6 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             existing["total_tokens"] = event_data.get(
                 "total_tokens", existing.get("total_tokens", 0)
             )
-
-            # Update cost if provided
-            if "total_cost_usd" in event_data:
-                existing["total_cost_usd"] = str(event_data.get("total_cost_usd", "0"))
 
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
@@ -168,7 +173,6 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
                 completed_phases=event_data.get("completed_phases", 0),
                 total_phases=event_data.get("total_phases", 0),
                 total_tokens=event_data.get("total_tokens", 0),
-                total_cost_usd=event_data.get("total_cost_usd", "0"),
                 tool_call_count=0,
                 error_message=event_data.get("error_message"),
             ).to_dict()

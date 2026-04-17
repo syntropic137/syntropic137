@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 
 import pytest
 
@@ -51,7 +50,6 @@ class MockExecutionSummary:
             total_phases=1,
             completed_phases=0,
             total_tokens=0,
-            total_cost_usd=Decimal("0"),
             expected_completion_at=self.expected_completion_at,
         )
 

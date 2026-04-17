@@ -82,8 +82,8 @@ function ExecutionHeader({ execution, executionId, isConnected, now, refreshExec
 
 function ExecutionMetricsGrid({ execution }: { execution: ExecutionDetailResponse }) {
   const completedPhases = execution.phases.filter(p => p.status === 'completed').length
-  const cacheCreation = execution.cache_creation_tokens ?? 0
-  const cacheRead = execution.cache_read_tokens ?? 0
+  const cacheCreation = execution.total_cache_creation_tokens
+  const cacheRead = execution.total_cache_read_tokens
   const totalTokens = execution.total_input_tokens + execution.total_output_tokens + cacheCreation + cacheRead
 
   return (
@@ -147,8 +147,8 @@ export function ExecutionDetail() {
       <TokenBreakdownChart
         inputTokens={execution.total_input_tokens}
         outputTokens={execution.total_output_tokens}
-        cacheCreationTokens={execution.cache_creation_tokens ?? 0}
-        cacheReadTokens={execution.cache_read_tokens ?? 0}
+        cacheCreationTokens={execution.total_cache_creation_tokens}
+        cacheReadTokens={execution.total_cache_read_tokens}
         phases={execution.phases}
       />
       <PhaseTimeline phases={execution.phases} now={now} />

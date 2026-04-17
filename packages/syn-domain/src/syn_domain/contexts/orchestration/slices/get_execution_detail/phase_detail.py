@@ -1,4 +1,8 @@
-"""Typed phase detail for execution projection."""
+"""Typed phase detail for execution projection.
+
+Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
+at the API boundary from the execution_cost projection (#695).
+"""
 
 from __future__ import annotations
 
@@ -21,7 +25,6 @@ class PhaseDetail:
     cache_read_tokens: int = 0
     total_tokens: int = 0
     duration_seconds: float = 0.0
-    cost_usd: str = "0"
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
@@ -59,7 +62,6 @@ class PhaseDetail:
             cache_read_tokens=event_data.get("cache_read_tokens", 0),
             total_tokens=event_data.get("total_tokens", 0),
             duration_seconds=event_data.get("duration_seconds", 0.0),
-            cost_usd=str(event_data.get("cost_usd", "0")),
             completed_at=event_data.get("completed_at"),
         )
 
@@ -77,7 +79,6 @@ class PhaseDetail:
             "cache_read_tokens": self.cache_read_tokens,
             "total_tokens": self.total_tokens,
             "duration_seconds": self.duration_seconds,
-            "cost_usd": self.cost_usd,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "error_message": self.error_message,
@@ -98,7 +99,6 @@ class PhaseDetail:
             cache_read_tokens=data.get("cache_read_tokens", 0),
             total_tokens=data.get("total_tokens", 0),
             duration_seconds=data.get("duration_seconds", 0.0),
-            cost_usd=data.get("cost_usd", "0"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),

@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 from syn_domain.contexts.agent_sessions._shared.value_objects import (
-    CostMetrics,
     OperationRecord,
     SessionStatus,
     TokenMetrics,
@@ -62,7 +60,6 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._agent_model: str | None = None
         self._status: SessionStatus = SessionStatus.RUNNING
         self._tokens: TokenMetrics = TokenMetrics()
-        self._cost: CostMetrics = CostMetrics()
         self._operations: list[OperationRecord] = []
         self._started_at: datetime | None = None
         self._completed_at: datetime | None = None
@@ -95,11 +92,6 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
     def tokens(self) -> TokenMetrics:
         """Get accumulated token metrics."""
         return self._tokens
-
-    @property
-    def cost(self) -> CostMetrics:
-        """Get accumulated cost metrics."""
-        return self._cost
 
     @property
     def operations(self) -> list[OperationRecord]:
@@ -189,6 +181,8 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             # Token metrics
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
+            cache_creation_tokens=command.cache_creation_tokens,
+            cache_read_tokens=command.cache_read_tokens,
             total_tokens=command.total_tokens,
             # Tool details
             tool_name=command.tool_name,
@@ -234,8 +228,9 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             completed_at=datetime.now(UTC),
             total_input_tokens=self._tokens.input_tokens,
             total_output_tokens=self._tokens.output_tokens,
+            total_cache_creation_tokens=self._tokens.cache_creation_tokens,
+            total_cache_read_tokens=self._tokens.cache_read_tokens,
             total_tokens=self._tokens.total_tokens,
-            total_cost_usd=self._cost.total_cost_usd,
             operation_count=len(self._operations),
             error_message=command.error_message,
         )
@@ -272,15 +267,11 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             tokens = TokenMetrics(
                 input_tokens=event.input_tokens or 0,
                 output_tokens=event.output_tokens or 0,
-                total_tokens=event.total_tokens,
+                cache_creation_tokens=event.cache_creation_tokens or 0,
+                cache_read_tokens=event.cache_read_tokens or 0,
             )
             # Update accumulated tokens
             self._tokens = self._tokens + tokens
-            # Update cost estimate
-            self._cost = self._cost + CostMetrics.from_tokens(
-                input_tokens=event.input_tokens or 0,
-                output_tokens=event.output_tokens or 0,
-            )
 
         # Create operation record with all fields (new fields default to None for v1 events)
         operation = OperationRecord(
@@ -310,14 +301,10 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         """Apply SessionCompletedEvent."""
         self._status = event.status
         self._completed_at = event.completed_at
-        # Final token and cost values are stored in event for consistency
+        # Final token values are stored in event for consistency (cost is Lane 2, #695)
         self._tokens = TokenMetrics(
             input_tokens=event.total_input_tokens,
             output_tokens=event.total_output_tokens,
-            total_tokens=event.total_tokens,
-        )
-        self._cost = CostMetrics(
-            total_cost_usd=event.total_cost_usd,
-            input_cost_usd=Decimal("0"),  # Could be calculated from tokens
-            output_cost_usd=Decimal("0"),
+            cache_creation_tokens=getattr(event, "total_cache_creation_tokens", 0) or 0,
+            cache_read_tokens=getattr(event, "total_cache_read_tokens", 0) or 0,
         )

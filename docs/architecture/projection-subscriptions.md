@@ -10,21 +10,21 @@
 
 This diagram shows which events feed which projections in the Syn137 system.
 
-**Total Relationships:** 56 events → 22 projections
+**Total Relationships:** 57 events → 22 projections
 
 ```mermaid
 graph LR
     subgraph events["Key Events"]
         e1[workflow_execution_started]
-        e2[workflow_failed]
-        e3[workflow_completed]
+        e2[workflow_completed]
+        e3[workflow_failed]
         e4[phase_completed]
-        e5[trigger_fired]
-        e6[phase_started]
-        e7[execution_cancelled]
+        e5[phase_started]
+        e6[trigger_fired]
+        e7[workflow_template_created]
         e8[workflow_interrupted]
-        e9[workflow_template_created]
-        e10[session_cost_finalized]
+        e9[execution_cancelled]
+        e10[session_started]
     end
 
     subgraph projections["Projections"]
@@ -45,12 +45,11 @@ graph LR
         p15[TriggerHistoryProjection]
     end
 
-    e5 --> p6
-    e5 --> p15
-    e6 --> p2
-    e7 --> p4
-    e10 --> p10
-    e10 --> p3
+    e10 --> p11
+    e10 --> p2
+    e5 --> p2
+    e6 --> p6
+    e6 --> p15
     e2 --> p8
     e2 --> p7
     e2 --> p4
@@ -59,21 +58,22 @@ graph LR
     e3 --> p7
     e3 --> p4
     e3 --> p2
+    e7 --> p2
+    e8 --> p4
+    e9 --> p4
     e1 --> p6
     e1 --> p4
     e1 --> p2
     e4 --> p4
-    e8 --> p4
-    e9 --> p2
 ```
 
 ---
 
 ## Statistics
 
-- **Events with projections:** 56
+- **Events with projections:** 57
 - **Unique projections:** 22
-- **Total event-to-projection mappings:** 91
+- **Total event-to-projection mappings:** 92
 
 ---
 
@@ -82,15 +82,15 @@ graph LR
 | Event | Projections | Count |
 |-------|-------------|-------|
 | workflow_execution_started | RepoCorrelationProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 7 |
-| workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | workflow_completed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
+| workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
-| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
-| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
-| workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
-| session_cost_finalized | SessionCostProjection, ExecutionCostProjection | 2 |
+| workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| session_started | SessionListProjection, DashboardMetricsProjection | 2 |
 
 ---
 

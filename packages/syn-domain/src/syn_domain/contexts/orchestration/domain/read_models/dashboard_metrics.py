@@ -1,9 +1,12 @@
-"""Read model for dashboard metrics."""
+"""Read model for dashboard metrics.
+
+Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
+at the API boundary from the execution_cost projection.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from decimal import Decimal
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -44,8 +47,11 @@ class DashboardMetrics:
     total_output_tokens: int = 0
     """Total output tokens used across all sessions."""
 
-    total_cost_usd: Decimal = field(default_factory=lambda: Decimal("0"))
-    """Total cost in USD."""
+    total_cache_creation_tokens: int = 0
+    """Total cache creation tokens used across all sessions."""
+
+    total_cache_read_tokens: int = 0
+    """Total cache read tokens used across all sessions."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DashboardMetrics:
@@ -61,7 +67,8 @@ class DashboardMetrics:
             total_tokens=data.get("total_tokens", 0),
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),
-            total_cost_usd=Decimal(str(data.get("total_cost_usd", 0))),
+            total_cache_creation_tokens=data.get("total_cache_creation_tokens", 0),
+            total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -77,5 +84,6 @@ class DashboardMetrics:
             "total_tokens": self.total_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
-            "total_cost_usd": str(self.total_cost_usd),
+            "total_cache_creation_tokens": self.total_cache_creation_tokens,
+            "total_cache_read_tokens": self.total_cache_read_tokens,
         }

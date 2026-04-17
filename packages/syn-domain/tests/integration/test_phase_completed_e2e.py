@@ -11,7 +11,6 @@ This is a critical regression test for the phase metrics feature.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -37,6 +36,9 @@ class TestPhaseCompletedE2EFlow:
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
+        from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+            PhaseCompletedEvent,
+        )
 
         # Create and start execution
         aggregate = WorkflowExecutionAggregate()
@@ -59,8 +61,9 @@ class TestPhaseCompletedE2EFlow:
             artifact_id="artifact-e2e-1",
             input_tokens=500,
             output_tokens=1500,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
             total_tokens=2000,
-            cost_usd=Decimal("0.15"),
             duration_seconds=45.5,
         )
         aggregate._handle_command(phase_cmd)
@@ -70,7 +73,7 @@ class TestPhaseCompletedE2EFlow:
         assert len(events) == 1, "Expected exactly one PhaseCompleted event"
 
         event = events[0].event
-        assert event.__class__.__name__ == "PhaseCompletedEvent"
+        assert isinstance(event, PhaseCompletedEvent)
         assert event.workflow_id == "workflow-e2e-1"
         assert event.execution_id == "exec-e2e-1"
         assert event.phase_id == "research"
@@ -79,7 +82,6 @@ class TestPhaseCompletedE2EFlow:
         assert event.input_tokens == 500
         assert event.output_tokens == 1500
         assert event.total_tokens == 2000
-        assert event.cost_usd == Decimal("0.15")
         assert event.duration_seconds == 45.5
         assert event.success is True
 
@@ -107,7 +109,6 @@ class TestPhaseCompletedE2EFlow:
             "phases": [],
             "total_input_tokens": 0,
             "total_output_tokens": 0,
-            "total_cost_usd": "0",
             "artifact_ids": [],
             "error_message": None,
         }
@@ -129,7 +130,6 @@ class TestPhaseCompletedE2EFlow:
             "input_tokens": 500,
             "output_tokens": 1500,
             "total_tokens": 2000,
-            "cost_usd": Decimal("0.15"),
             "duration_seconds": 45.5,
         }
 
@@ -195,6 +195,9 @@ class TestPhaseCompletedE2EFlow:
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
+        from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+            PhaseCompletedEvent,
+        )
         from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
             WorkflowExecutionDetailProjection,
         )
@@ -222,8 +225,9 @@ class TestPhaseCompletedE2EFlow:
             artifact_id="artifact-full-1",
             input_tokens=1000,
             output_tokens=3000,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
             total_tokens=4000,
-            cost_usd=Decimal("0.25"),
             duration_seconds=60.0,
         )
         aggregate._handle_command(phase_cmd)
@@ -233,12 +237,15 @@ class TestPhaseCompletedE2EFlow:
         assert len(events) == 1
 
         emitted_event = events[0].event
+        assert isinstance(emitted_event, PhaseCompletedEvent)
 
         # Step 3: Convert event to dict (as subscription service does)
         if hasattr(emitted_event, "model_dump"):
             event_data = emitted_event.model_dump()
         elif hasattr(emitted_event, "to_dict"):
-            event_data = emitted_event.to_dict()
+            # Defensive fallback for non-pydantic event shapes; current
+            # DomainEvent is a pydantic BaseModel so this branch is unreachable.
+            event_data = emitted_event.to_dict()  # type: ignore[attr-defined]
         else:
             event_data = {
                 "workflow_id": emitted_event.workflow_id,
@@ -250,7 +257,6 @@ class TestPhaseCompletedE2EFlow:
                 "input_tokens": emitted_event.input_tokens,
                 "output_tokens": emitted_event.output_tokens,
                 "total_tokens": emitted_event.total_tokens,
-                "cost_usd": emitted_event.cost_usd,
                 "duration_seconds": emitted_event.duration_seconds,
             }
 
@@ -269,7 +275,6 @@ class TestPhaseCompletedE2EFlow:
             "phases": [],
             "total_input_tokens": 0,
             "total_output_tokens": 0,
-            "total_cost_usd": "0",
             "artifact_ids": [],
             "error_message": None,
         }
@@ -312,15 +317,22 @@ class TestEventStoreIntegration:
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
+        from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+            PhaseCompletedEvent,
+        )
 
         # Create in-memory event store
         client = EventStoreClientFactory.create_memory_client()
         await client.connect()
 
-        # Create repository
+        # Create repository.
+        # Type-ignore: BaseAggregate's TEvent is invariant in the platform SDK, so
+        # WorkflowExecutionAggregate (typed as AggregateRoot[WorkflowExecutionStartedEvent])
+        # is not assignable to type[BaseAggregate[DomainEvent]]. All aggregates in this
+        # codebase follow the same convention; this is a platform-level variance issue.
         factory = RepositoryFactory(client)
         repository = factory.create_repository(
-            WorkflowExecutionAggregate,
+            WorkflowExecutionAggregate,  # type: ignore[arg-type]
             aggregate_type="WorkflowExecution",
         )
 
@@ -347,8 +359,9 @@ class TestEventStoreIntegration:
             artifact_id="artifact-store-1",
             input_tokens=800,
             output_tokens=2400,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
             total_tokens=3200,
-            cost_usd=Decimal("0.20"),
             duration_seconds=55.0,
         )
         aggregate._handle_command(phase_cmd)
@@ -366,7 +379,8 @@ class TestEventStoreIntegration:
         assert "PhaseCompletedEvent" in event_types
 
         # Verify PhaseCompleted event data
-        phase_event = next(e for e in events if e.event.__class__.__name__ == "PhaseCompletedEvent")
+        phase_event = next(e for e in events if isinstance(e.event, PhaseCompletedEvent))
+        assert isinstance(phase_event.event, PhaseCompletedEvent)
         assert phase_event.event.input_tokens == 800
         assert phase_event.event.output_tokens == 2400
         assert phase_event.event.total_tokens == 3200
@@ -388,10 +402,11 @@ class TestEventStoreIntegration:
         client = EventStoreClientFactory.create_memory_client()
         await client.connect()
 
-        # Create repository
+        # Create repository.
+        # Type-ignore: see explanation in test_events_persisted_to_event_store.
         factory = RepositoryFactory(client)
         repository = factory.create_repository(
-            WorkflowExecutionAggregate,
+            WorkflowExecutionAggregate,  # type: ignore[arg-type]
             aggregate_type="WorkflowExecution",
         )
 
@@ -418,8 +433,9 @@ class TestEventStoreIntegration:
                 artifact_id=f"artifact-{i}",
                 input_tokens=100 * i,
                 output_tokens=300 * i,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
                 total_tokens=400 * i,
-                cost_usd=Decimal(f"0.0{i}"),
                 duration_seconds=10.0 * i,
             )
             aggregate._handle_command(phase_cmd)

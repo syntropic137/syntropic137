@@ -31,6 +31,8 @@ class RecordOperationCommand(BaseModel):
     # Token metrics (for MESSAGE_* types)
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    cache_read_tokens: int | None = None
     total_tokens: int | None = None
 
     # Tool execution details (for TOOL_* types)

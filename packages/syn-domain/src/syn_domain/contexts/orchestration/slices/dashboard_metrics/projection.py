@@ -5,7 +5,6 @@ Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -30,7 +29,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
 
     PROJECTION_NAME = "dashboard_metrics"
     METRICS_KEY = "global"  # Single record for global metrics
-    VERSION = 2  # Bumped: migrated to AutoDispatchProjection, renamed on_workflow_created
+    VERSION = 4  # Bumped: cost moved to Lane 2 — API enriches from execution_cost (#695)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -110,18 +109,19 @@ class DashboardMetricsProjection(AutoDispatchProjection):
         # Add total tokens from this session
         metrics["total_tokens"] = metrics.get("total_tokens", 0) + event_data.get("total_tokens", 0)
 
-        # Add input/output token breakdown
+        # Add input/output/cache token breakdown
         metrics["total_input_tokens"] = metrics.get("total_input_tokens", 0) + event_data.get(
             "total_input_tokens", 0
         )
         metrics["total_output_tokens"] = metrics.get("total_output_tokens", 0) + event_data.get(
             "total_output_tokens", 0
         )
-
-        # Add cost from this session
-        existing_cost = Decimal(str(metrics.get("total_cost_usd", 0)))
-        session_cost = Decimal(str(event_data.get("total_cost_usd", 0)))
-        metrics["total_cost_usd"] = str(existing_cost + session_cost)
+        metrics["total_cache_creation_tokens"] = metrics.get(
+            "total_cache_creation_tokens", 0
+        ) + event_data.get("total_cache_creation_tokens", 0)
+        metrics["total_cache_read_tokens"] = metrics.get(
+            "total_cache_read_tokens", 0
+        ) + event_data.get("total_cache_read_tokens", 0)
 
         await self._save_metrics(metrics)
 

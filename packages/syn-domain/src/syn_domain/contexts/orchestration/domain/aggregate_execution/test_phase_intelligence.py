@@ -158,8 +158,6 @@ class TestProvisionWorkspaceCompleted:
 
     def test_rejected_when_not_running(self) -> None:
         """Provision rejected when execution is not RUNNING."""
-        from decimal import Decimal
-
         from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
         )
@@ -172,7 +170,8 @@ class TestProvisionWorkspaceCompleted:
                 total_phases=2,
                 total_input_tokens=0,
                 total_output_tokens=0,
-                total_cost_usd=Decimal("0"),
+                total_cache_creation_tokens=0,
+                total_cache_read_tokens=0,
                 duration_seconds=0.0,
                 artifact_ids=[],
             )
@@ -357,8 +356,6 @@ class TestBackwardCompatibility:
 
     def test_start_complete_phase_still_works(self) -> None:
         """StartPhase + CompletePhase still works alongside new events."""
-        from decimal import Decimal
-
         agg = _make_started_aggregate(phase_definitions=TWO_PHASE_DEFS)
 
         # Start and complete phase using existing commands
@@ -381,8 +378,9 @@ class TestBackwardCompatibility:
                 artifact_id="art-1",
                 input_tokens=100,
                 output_tokens=50,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
                 total_tokens=150,
-                cost_usd=Decimal("0.01"),
                 duration_seconds=10.0,
             )
         )

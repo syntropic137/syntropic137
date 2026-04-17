@@ -154,6 +154,8 @@ class AgentExecutionHandler:
         # Prefer result event totals (authoritative) over accumulated per-turn counts
         final_input = stream_result.result_input_tokens or tokens.input_tokens
         final_output = stream_result.result_output_tokens or tokens.output_tokens
+        final_cache_creation = stream_result.result_cache_creation or tokens.cache_creation_tokens
+        final_cache_read = stream_result.result_cache_read or tokens.cache_read_tokens
 
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -162,6 +164,8 @@ class AgentExecutionHandler:
             exit_code=exit_code,
             input_tokens=final_input,
             output_tokens=final_output,
+            cache_creation_tokens=final_cache_creation,
+            cache_read_tokens=final_cache_read,
         )
 
         return AgentExecutionResult(

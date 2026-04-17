@@ -220,3 +220,4 @@ HANDOFF-*.md
 # Secret files
 *.secret
 infra/docker/secrets/*.secret
+infra/.environments.lock

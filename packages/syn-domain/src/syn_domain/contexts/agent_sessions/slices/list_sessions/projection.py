@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -45,7 +44,7 @@ def _calculate_duration(
 
 
 def _accumulate_tokens(existing: dict[str, Any], event_data: dict) -> None:
-    """Accumulate token counts and cost from an operation event."""
+    """Accumulate token counts from an operation event."""
     op_tokens = event_data.get("total_tokens", 0) or event_data.get("tokens_used", 0)
     if op_tokens:
         existing["total_tokens"] = existing.get("total_tokens", 0) + op_tokens
@@ -55,11 +54,12 @@ def _accumulate_tokens(existing: dict[str, Any], event_data: dict) -> None:
         existing["output_tokens"] = existing.get("output_tokens", 0) + (
             event_data.get("output_tokens", 0) or 0
         )
-
-    existing["total_cost_usd"] = float(
-        Decimal(str(existing.get("total_cost_usd", 0)))
-        + Decimal(str(event_data.get("cost_usd", 0)))
-    )
+        existing["cache_creation_tokens"] = existing.get("cache_creation_tokens", 0) + (
+            event_data.get("cache_creation_tokens", 0) or 0
+        )
+        existing["cache_read_tokens"] = existing.get("cache_read_tokens", 0) + (
+            event_data.get("cache_read_tokens", 0) or 0
+        )
 
 
 _OPERATION_FIELDS = [
@@ -89,10 +89,9 @@ def _apply_session_completed(existing: dict[str, Any], event_data: dict) -> None
     existing["completed_at"] = event_data.get("completed_at")
     existing["input_tokens"] = event_data.get("total_input_tokens", 0)
     existing["output_tokens"] = event_data.get("total_output_tokens", 0)
+    existing["cache_creation_tokens"] = event_data.get("total_cache_creation_tokens", 0)
+    existing["cache_read_tokens"] = event_data.get("total_cache_read_tokens", 0)
     existing["total_tokens"] = event_data.get("total_tokens", existing.get("total_tokens", 0))
-    existing["total_cost_usd"] = float(
-        Decimal(str(event_data.get("total_cost_usd", existing.get("total_cost_usd", 0))))
-    )
     started_at = existing.get("started_at")
     completed_at = event_data.get("completed_at")
     if started_at and completed_at:
@@ -141,7 +140,7 @@ class SessionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "session_summaries"
-    VERSION = 2  # Bumped: migrated to AutoDispatchProjection
+    VERSION = 3  # Bumped: unified token counting - cache tokens (#695)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -173,14 +172,13 @@ class SessionListProjection(AutoDispatchProjection):
             agent_type=event_data.get("agent_provider", "unknown"),
             status="running",
             total_tokens=0,
-            total_cost_usd=Decimal("0"),
             started_at=event_data.get("started_at"),
             completed_at=None,
             input_tokens=0,
             output_tokens=0,
             duration_seconds=None,
             phase_id=event_data.get("phase_id"),
-            execution_id=event_data.get("execution_id"),  # Link to workflow execution
+            execution_id=event_data.get("execution_id"),
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
 

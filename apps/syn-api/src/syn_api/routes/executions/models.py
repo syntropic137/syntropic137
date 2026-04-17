@@ -22,11 +22,11 @@ class PhaseExecutionInfo(BaseModel):
     status: str
     session_id: str | None = None
     artifact_id: str | None = None
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_creation_tokens: int = 0
-    cache_read_tokens: int = 0
-    total_tokens: int = 0
+    input_tokens: int
+    output_tokens: int
+    cache_creation_tokens: int
+    cache_read_tokens: int
+    total_tokens: int
     duration_seconds: float = 0.0
     cost_usd: Decimal = Decimal("0")
     started_at: str | None = None
@@ -45,11 +45,11 @@ class ExecutionDetailResponse(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     phases: list[PhaseExecutionInfo] = Field(default_factory=list)
-    total_input_tokens: int = 0
-    total_output_tokens: int = 0
-    cache_creation_tokens: int = 0
-    cache_read_tokens: int = 0
-    total_tokens: int = 0
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_creation_tokens: int
+    total_cache_read_tokens: int
+    total_tokens: int
     total_cost_usd: Decimal = Decimal("0")
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
@@ -66,7 +66,11 @@ class ExecutionSummaryResponse(BaseModel):
     completed_at: str | None = None
     completed_phases: int = 0
     total_phases: int = 0
-    total_tokens: int = 0
+    total_tokens: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_creation_tokens: int
+    total_cache_read_tokens: int
     total_cost_usd: Decimal = Decimal("0")
     tool_call_count: int = 0
     error_message: str | None = None

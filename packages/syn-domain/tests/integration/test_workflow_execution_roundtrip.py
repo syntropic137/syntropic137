@@ -17,7 +17,6 @@ Run with:
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
@@ -110,8 +109,9 @@ class TestWorkflowExecutionRoundtrip:
                 artifact_id=None,
                 input_tokens=1000,
                 output_tokens=500,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
                 total_tokens=1500,
-                cost_usd=Decimal("0.015"),
                 duration_seconds=30.5,
             )
         )
@@ -162,7 +162,8 @@ class TestWorkflowExecutionRoundtrip:
                 total_phases=1,
                 total_input_tokens=5000,
                 total_output_tokens=2500,
-                total_cost_usd=Decimal("0.075"),
+                total_cache_creation_tokens=0,
+                total_cache_read_tokens=0,
                 duration_seconds=120.0,
                 artifact_ids=["artifact-1", "artifact-2"],
             )
@@ -360,8 +361,9 @@ class TestWorkflowExecutionMultipleEvents:
                 artifact_id="artifact-1",
                 input_tokens=1000,
                 output_tokens=500,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
                 total_tokens=1500,
-                cost_usd=Decimal("0.01"),
                 duration_seconds=60.0,
             )
         )
@@ -389,8 +391,9 @@ class TestWorkflowExecutionMultipleEvents:
                 artifact_id="artifact-2",
                 input_tokens=2000,
                 output_tokens=1000,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
                 total_tokens=3000,
-                cost_usd=Decimal("0.02"),
                 duration_seconds=90.0,
             )
         )
@@ -406,7 +409,8 @@ class TestWorkflowExecutionMultipleEvents:
                 total_phases=2,
                 total_input_tokens=3000,
                 total_output_tokens=1500,
-                total_cost_usd=Decimal("0.03"),
+                total_cache_creation_tokens=0,
+                total_cache_read_tokens=0,
                 duration_seconds=150.0,
                 artifact_ids=["artifact-1", "artifact-2"],
             )
