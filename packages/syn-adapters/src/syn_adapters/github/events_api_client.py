@@ -57,7 +57,13 @@ def _empty_result(etag: str | None, poll_interval: int) -> EventsAPIResult:
 
 
 def _rate_limited_result(etag: str | None, reset_at: datetime | None) -> EventsAPIResult:
-    """Translate a rate-limit error into an empty ``EventsAPIResult``."""
+    """Translate a rate-limit error into an empty ``EventsAPIResult``.
+
+    ``poll_interval_hint`` is the port's X-Poll-Interval minimum (seconds
+    between polls in steady state) and is kept at the constant default so
+    callers never treat a multi-minute rate-limit reset as the recommended
+    cadence. The actual backoff is carried on ``retry_after_seconds``.
+    """
     wait = _DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
     if reset_at is not None:
         wait = max((reset_at - datetime.now(UTC)).total_seconds(), 0.0)
@@ -65,7 +71,7 @@ def _rate_limited_result(etag: str | None, reset_at: datetime | None) -> EventsA
         events=[],
         has_new=False,
         etag=etag or "",
-        poll_interval_hint=int(wait) or 1,
+        poll_interval_hint=int(_DEFAULT_RATE_LIMIT_BACKOFF_SECONDS),
         rate_limited=True,
         retry_after_seconds=wait,
     )
@@ -118,8 +124,14 @@ class GitHubEventsAPIClient(GitHubEventsAPIPort):
         response: httpx.Response,
         etag: str | None,
     ) -> EventsAPIResult:
-        """Map an HTTP response to an ``EventsAPIResult``, honoring rate limits."""
-        from syn_adapters.github.client import GitHubRateLimitError
+        """Map an HTTP response to an ``EventsAPIResult``, honoring rate limits.
+
+        The port is total: ``GitHubRateLimitError`` surfaces as
+        ``rate_limited=True`` and any other ``GitHubAppError`` (auth, 404,
+        5xx) is logged and translated into an empty result so no adapter
+        exception type leaks across the hexagonal boundary.
+        """
+        from syn_adapters.github.client import GitHubAppError, GitHubRateLimitError
         from syn_adapters.github.client_api import check_response
 
         poll_interval = int(response.headers.get("X-Poll-Interval", "60"))
@@ -133,6 +145,13 @@ class GitHubEventsAPIClient(GitHubEventsAPIPort):
             check_response(response)
         except GitHubRateLimitError as exc:
             return _rate_limited_result(etag, exc.reset_at)
+        except GitHubAppError as exc:
+            logger.warning(
+                "Events API returned %s (non-rate-limit); returning empty result: %s",
+                response.status_code,
+                exc,
+            )
+            return _empty_result(etag, poll_interval)
 
         return _empty_result(etag, poll_interval)
 

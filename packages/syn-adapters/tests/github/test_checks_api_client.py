@@ -88,3 +88,23 @@ class TestFetchCheckRuns:
         assert result.rate_limited is True
         assert result.check_runs == []
         assert result.retry_after_seconds >= 0.0
+
+    @pytest.mark.asyncio
+    async def test_fetch_returns_empty_on_github_app_error(self) -> None:
+        """Non-rate-limit adapter errors must not leak across the port.
+
+        ``GitHubAppError`` (401/404/5xx) is logged and translated into an
+        empty ``ChecksAPIResult`` so the domain never imports adapter
+        exception types.
+        """
+        from syn_adapters.github.client import GitHubAppError
+
+        mock_gh = _make_mock_github_client()
+        mock_gh.api_get.side_effect = GitHubAppError("404 Not Found")
+
+        client = GitHubChecksAPIClient(mock_gh)
+        result = await client.fetch_check_runs("owner", "repo", "abc123", "inst-1")
+
+        assert result.rate_limited is False
+        assert result.check_runs == []
+        assert result.total_count == 0

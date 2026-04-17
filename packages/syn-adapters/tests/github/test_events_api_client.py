@@ -176,3 +176,45 @@ class TestEventsAPIClientRateLimit:
         assert result.events == []
         assert result.has_new is False
         assert result.retry_after_seconds >= 0.0
+
+
+@pytest.mark.unit
+class TestEventsAPIClientPortTotality:
+    """The port must not leak adapter exception types to the domain.
+
+    Rate-limit errors translate to ``rate_limited=True``; any other
+    ``GitHubAppError`` (auth, 404, 5xx) translates to an empty result
+    with a warning log -- never a raised exception.
+    """
+
+    @pytest.mark.asyncio
+    async def test_fetch_returns_empty_on_github_app_error(self) -> None:
+        """A 404 (non-rate-limit) must not raise; must return an empty result."""
+        mock_gh = _make_mock_client()
+        resp = _make_response(status_code=404)
+        resp.text = "Not Found"
+        mock_gh._http.get.return_value = resp
+
+        client = GitHubEventsAPIClient(mock_gh)
+        result = await client.fetch_repo_events("owner", "repo", "inst-1")
+
+        assert result.rate_limited is False
+        assert result.has_new is False
+        assert result.events == []
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_result_uses_constant_poll_interval_hint(self) -> None:
+        """``poll_interval_hint`` on rate-limit is the steady-state minimum,
+        not the reset-derived backoff; ``retry_after_seconds`` carries the
+        real wait."""
+        from datetime import UTC, datetime, timedelta
+
+        from syn_adapters.github.events_api_client import _rate_limited_result
+
+        reset_at = datetime.now(UTC) + timedelta(seconds=300)
+        result = _rate_limited_result(etag='"e"', reset_at=reset_at)
+
+        assert result.rate_limited is True
+        assert result.poll_interval_hint == 60
+        assert result.retry_after_seconds >= 299.0
+        assert result.retry_after_seconds <= 301.0

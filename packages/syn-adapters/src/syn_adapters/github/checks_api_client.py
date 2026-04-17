@@ -27,6 +27,19 @@ logger = logging.getLogger(__name__)
 _DEFAULT_RATE_LIMIT_BACKOFF_SECONDS = 60.0
 
 
+def _rate_limited_result(reset_at: datetime | None) -> ChecksAPIResult:
+    """Translate a rate-limit error into an empty ``ChecksAPIResult``."""
+    wait = _DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
+    if reset_at is not None:
+        wait = max((reset_at - datetime.now(UTC)).total_seconds(), 0.0)
+    return ChecksAPIResult(
+        check_runs=[],
+        total_count=0,
+        rate_limited=True,
+        retry_after_seconds=wait,
+    )
+
+
 class GitHubChecksAPIClient(GitHubChecksAPIPort):
     """Stateless adapter implementing ``GitHubChecksAPIPort``.
 
@@ -44,21 +57,29 @@ class GitHubChecksAPIClient(GitHubChecksAPIPort):
         ref: str,
         installation_id: str,
     ) -> ChecksAPIResult:
-        from syn_adapters.github.client import GitHubRateLimitError
+        """Fetch check-run results for a commit ref.
+
+        The port is total: ``GitHubRateLimitError`` becomes
+        ``rate_limited=True`` and any other ``GitHubAppError`` (401/404/5xx)
+        is logged and translated into an empty result so no adapter
+        exception type crosses the hexagonal boundary.
+        """
+        from syn_adapters.github.client import GitHubAppError, GitHubRateLimitError
 
         path = f"/repos/{owner}/{repo}/commits/{ref}/check-runs"
         try:
             data = await self._client.api_get(path, installation_id=installation_id)
         except GitHubRateLimitError as exc:
-            wait = _DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
-            if exc.reset_at is not None:
-                wait = max((exc.reset_at - datetime.now(UTC)).total_seconds(), 0.0)
-            return ChecksAPIResult(
-                check_runs=[],
-                total_count=0,
-                rate_limited=True,
-                retry_after_seconds=wait,
+            return _rate_limited_result(exc.reset_at)
+        except GitHubAppError as exc:
+            logger.warning(
+                "Checks API for %s/%s@%s returned non-rate-limit error; returning empty: %s",
+                owner,
+                repo,
+                ref[:8],
+                exc,
             )
+            return ChecksAPIResult(check_runs=[], total_count=0)
 
         check_runs: list[dict[str, Any]] = data.get("check_runs", [])
         total_count: int = data.get("total_count", len(check_runs))
