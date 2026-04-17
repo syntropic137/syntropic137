@@ -680,59 +680,69 @@ e2e-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    API_URL="http://localhost:9137"
+    API_URL="http://127.0.0.1:9137"
+    CLI="node apps/syn-cli-node/dist/syn.js"
+    export SYN_API_URL="${API_URL}"
+    export SYN_NO_PREFIX=1
 
     # 1. Check if the dev stack is already running; start it if not
     if ! curl -sf "${API_URL}/health" > /dev/null 2>&1; then
-        echo "🔧 Dev stack not running — starting it..."
+        echo "Dev stack not running - starting it..."
         just dev
         echo ""
     fi
 
     # 2. Wait briefly for services to stabilise
-    echo "⏳ Waiting for services..."
+    echo "Waiting for services..."
     for i in $(seq 1 30); do
         if curl -sf "${API_URL}/health" > /dev/null 2>&1; then
             break
         fi
         if [ "$i" -eq 30 ]; then
-            echo "❌ Health endpoint did not respond within 30 seconds"
+            echo "Health endpoint did not respond within 30 seconds"
             exit 1
         fi
         sleep 1
     done
 
-    # 3. Health endpoint
-    echo "🏥 Checking health endpoint..."
+    # 3. Build the Node CLI if not already built
+    if [ ! -f "apps/syn-cli-node/dist/syn.js" ]; then
+        echo "Building Node CLI..."
+        just cli-node-build
+        echo ""
+    fi
+
+    # 4. Health endpoint
+    echo "Checking health endpoint..."
     curl -sf "${API_URL}/health" | python3 -m json.tool
     echo ""
 
-    # 4. Core CLI smoke tests
-    echo "🔍 Running CLI smoke tests..."
+    # 5. Core CLI smoke tests
+    echo "Running CLI smoke tests..."
     echo ""
 
-    echo "  → syn workflow list"
-    just cli workflow list
+    echo "  -> syn workflow list"
+    ${CLI} workflow list
     echo ""
 
-    echo "  → syn session list"
-    just cli session list
+    echo "  -> syn sessions list"
+    ${CLI} sessions list
     echo ""
 
-    echo "  → syn events recent --limit 5"
-    just cli events recent --limit 5
+    echo "  -> syn events recent --limit 5"
+    ${CLI} events recent --limit 5
     echo ""
 
-    echo "  → syn org list"
-    just cli org list
+    echo "  -> syn org list"
+    ${CLI} org list
     echo ""
 
-    echo "  → syn status"
-    just cli status
+    echo "  -> syn health"
+    ${CLI} health
     echo ""
 
-    # 5. Success
-    echo "✅ E2E smoke test passed — full stack is operational"
+    # 6. Success
+    echo "E2E smoke test passed - full stack is operational"
 
 # Check for test debt (xfail, skip, TODO in tests)
 test-debt:
@@ -770,9 +780,9 @@ test-stack-logs:
 
 _env := "uv run python infra/scripts/env_manager.py"
 
-# Create and start an on-demand environment for a branch
+# Create and start an on-demand environment for a branch ("current" = current branch)
 env-up branch:
-    {{_env}} up "{{branch}}"
+    {{_env}} up "$(if [ '{{branch}}' = 'current' ]; then git rev-parse --abbrev-ref HEAD; else echo '{{branch}}'; fi)"
 
 # Destroy an on-demand environment (stops containers, removes volumes, frees slot)
 env-down name:

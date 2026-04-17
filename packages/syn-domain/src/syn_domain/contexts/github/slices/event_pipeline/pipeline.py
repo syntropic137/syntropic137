@@ -64,13 +64,20 @@ class EventPipeline:
         self._background_tasks: set[asyncio.Task[None]] = set()
 
     def add_observer(self, callback: _ObserverCallback) -> None:
-        """Register a callback notified after each non-deduplicated event.
+        """Register a callback notified after each event reaches trigger evaluation.
 
-        Used by CheckRunPoller to learn about PR events and register
-        pending SHAs for check-run polling (#602).
+        Used by ``CheckRunIngestionService`` to learn about PR events and
+        register pending SHAs for check-run polling (#602).
 
-        Note: observers should be registered during startup, before the
-        first ``ingest()`` call. This is safe in asyncio (single-threaded).
+        Observers fire AFTER trigger evaluation runs and therefore are
+        intentionally NOT called for events that are deduplicated or that
+        are skipped by the cold-start fence (``source_primed=False``).
+        Cold-start replays should not register SHAs for self-healing -- the
+        whole point of the fence is to avoid synthesizing work from
+        historical state. See ADR-060 §9 Layer 5.
+
+        Observers should be registered during startup, before the first
+        ``ingest()`` call. This is safe in asyncio (single-threaded).
         """
         self._observers.append(callback)
 
@@ -97,7 +104,16 @@ class EventPipeline:
                 exc_info=True,
             )
 
-        # 2. Build compound event and inject identifiers for downstream guards
+        # 2. Safety net: skip trigger evaluation for unprimed sources (ADR-060)
+        if not event.source_primed:
+            logger.info(
+                "Skipping trigger evaluation for unprimed event %s from %s (cold-start fence)",
+                event.dedup_key,
+                event.source.value,
+            )
+            return PipelineResult(status="processed", event_type=event.event_type)
+
+        # 3. Build compound event and inject identifiers for downstream guards
         compound_event = f"{event.event_type}.{event.action}" if event.action else event.event_type
         payload = {
             **event.payload,
@@ -105,7 +121,7 @@ class EventPipeline:
             "_dedup_key": event.dedup_key,  # ADR-060: fallback for Guard 4 on polled events
         }
 
-        # 3. Evaluate triggers
+        # 4. Evaluate triggers
         results = await self._evaluator.evaluate(
             event=compound_event,
             repository=event.repository,
@@ -113,7 +129,7 @@ class EventPipeline:
             payload=payload,
         )
 
-        # 4. Notify observers — best-effort, non-blocking (#602)
+        # 5. Notify observers - best-effort, non-blocking (#602)
         for observer in self._observers:
             task = asyncio.create_task(
                 _safe_observer_call(observer, event),

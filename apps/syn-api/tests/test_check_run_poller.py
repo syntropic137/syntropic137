@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from syn_api.services.check_run_poller import CheckRunPoller
-from syn_api.services.webhook_health_tracker import WebhookHealthTracker
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
+from syn_domain.contexts.github.services import (
+    CheckRunIngestionService as CheckRunPoller,
+)
+from syn_domain.contexts.github.services import WebhookHealthTracker
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
 )
@@ -23,7 +26,7 @@ from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import Pe
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 
 if TYPE_CHECKING:
-    from syn_adapters.github.checks_api_client import CheckRunsResponse
+    from syn_domain.contexts.github.ports import ChecksAPIResult
 
 # -- Test doubles ------------------------------------------------------------
 
@@ -62,22 +65,22 @@ class NullRepository:
 
 
 class MockChecksClient:
-    """Mock GitHub Checks API client."""
+    """In-memory implementation of ``GitHubChecksAPIPort`` for tests."""
 
     def __init__(self, check_runs: list[dict[str, Any]] | None = None) -> None:
-        from syn_adapters.github.checks_api_client import CheckRunsResponse
+        from syn_domain.contexts.github.ports import ChecksAPIResult
 
         runs = check_runs or []
-        self._response = CheckRunsResponse(check_runs=runs, total_count=len(runs))
+        self._response = ChecksAPIResult(check_runs=runs, total_count=len(runs))
         self.poll_count = 0
 
-    async def get_check_runs_for_ref(
+    async def fetch_check_runs(
         self,
         owner: str,
         repo: str,
         ref: str,
         installation_id: str,
-    ) -> CheckRunsResponse:
+    ) -> ChecksAPIResult:
         self.poll_count += 1
         return self._response
 
@@ -180,7 +183,7 @@ class TestOnPrEvent:
     async def test_registers_sha_for_synchronize(self) -> None:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
-            checks_client=MockChecksClient(),
+            checks_api=MockChecksClient(),
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(
@@ -204,7 +207,7 @@ class TestOnPrEvent:
     async def test_registers_sha_for_opened(self) -> None:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
-            checks_client=MockChecksClient(),
+            checks_api=MockChecksClient(),
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(
@@ -226,7 +229,7 @@ class TestOnPrEvent:
     async def test_ignores_closed_action(self) -> None:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
-            checks_client=MockChecksClient(),
+            checks_api=MockChecksClient(),
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(
@@ -248,7 +251,7 @@ class TestOnPrEvent:
     async def test_ignores_non_pr_events(self) -> None:
         sha_store = InMemoryPendingSHAStore()
         poller = CheckRunPoller(
-            checks_client=MockChecksClient(),
+            checks_api=MockChecksClient(),
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(
@@ -311,7 +314,7 @@ class TestPollLoop:
         )
 
         poller = CheckRunPoller(
-            checks_client=mock_client,
+            checks_api=mock_client,
             pipeline=pipeline,
             sha_store=sha_store,
             health_tracker=WebhookHealthTracker(),
@@ -363,7 +366,7 @@ class TestPollLoop:
         mock_client = MockChecksClient()
 
         poller = CheckRunPoller(
-            checks_client=mock_client,
+            checks_api=mock_client,
             pipeline=EventPipeline(
                 dedup=InMemoryDedup(),
                 evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
@@ -382,6 +385,83 @@ class TestPollLoop:
 
         # Should NOT have polled — no check_run triggers
         assert mock_client.poll_count == 0
+
+
+class TestRateLimit:
+    @pytest.mark.asyncio
+    async def test_rate_limit_stretches_poll_interval(self) -> None:
+        """When the Checks API returns ``rate_limited=True``, the loop must
+        sleep at least ``retry_after_seconds`` instead of its base interval.
+
+        Otherwise the poller hot-loops back into the same 403.
+        """
+        from syn_domain.contexts.github.ports import ChecksAPIResult
+
+        class RateLimitedChecksClient:
+            def __init__(self) -> None:
+                self.poll_count = 0
+
+            async def fetch_check_runs(
+                self,
+                owner: str,
+                repo: str,
+                ref: str,
+                installation_id: str,
+            ) -> ChecksAPIResult:
+                self.poll_count += 1
+                return ChecksAPIResult(
+                    check_runs=[],
+                    total_count=0,
+                    rate_limited=True,
+                    retry_after_seconds=120.0,
+                )
+
+        store = InMemoryTriggerQueryStore()
+        await _index_check_run_trigger(store)
+
+        sha_store = InMemoryPendingSHAStore()
+        await sha_store.register(
+            PendingSHA(
+                repository="owner/repo",
+                sha="abc123",
+                pr_number=42,
+                branch="feat/test",
+                installation_id="inst-1",
+                registered_at=datetime.now(UTC),
+            )
+        )
+
+        recorded_sleeps: list[float] = []
+
+        async def _recording_sleep(seconds: float) -> None:
+            recorded_sleeps.append(seconds)
+            raise asyncio.CancelledError
+
+        mock_client = RateLimitedChecksClient()
+        poller = CheckRunPoller(
+            checks_api=mock_client,
+            pipeline=EventPipeline(
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
+            ),
+            sha_store=sha_store,
+            health_tracker=WebhookHealthTracker(),
+            trigger_store=store,
+            settings=MockPollingSettings(),
+            sleep=_recording_sleep,
+        )
+
+        await poller.start()
+        assert poller._task is not None
+        with contextlib.suppress(asyncio.CancelledError):
+            await poller._task
+        poller._task = None
+
+        assert mock_client.poll_count == 1
+        assert recorded_sleeps, "poll loop must reach the sleep step"
+        assert recorded_sleeps[0] >= 120.0, (
+            f"expected sleep >= 120s (rate-limit wait), got {recorded_sleeps[0]}"
+        )
 
 
 class TestDedup:

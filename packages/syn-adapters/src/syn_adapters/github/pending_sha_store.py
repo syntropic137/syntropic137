@@ -1,12 +1,9 @@
 """In-memory PendingSHAStore implementation (#602).
 
-Tracks commit SHAs whose check runs need polling. Ephemeral -- SHAs are
-lost on restart, but the next PR event re-registers them.
+Tracks commit SHAs whose check runs need polling. Test/offline only --
+production uses PostgresPendingSHAStore for restart durability.
 
-NOTE: This store intentionally does NOT inherit from InMemoryAdapter.
-It is allowed in production because loss on restart has no correctness
-impact -- only a delayed check-run poll until the next PR event.
-See ADR-060 section 6 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
+See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
 from __future__ import annotations
@@ -14,11 +11,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from syn_adapters.in_memory import InMemoryAdapter
+
 if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
 
 
-class InMemoryPendingSHAStore:
+class InMemoryPendingSHAStore(InMemoryAdapter):
     """In-memory implementation of the PendingSHAStore protocol.
 
     Keyed by ``(repository, sha)`` — a SHA is registered at most once.
@@ -26,6 +25,7 @@ class InMemoryPendingSHAStore:
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._pending: dict[tuple[str, str], PendingSHA] = {}
 
     async def register(self, pending: PendingSHA) -> None:

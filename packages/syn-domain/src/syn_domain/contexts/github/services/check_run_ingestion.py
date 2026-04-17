@@ -1,14 +1,17 @@
-"""Check-run poller — poll-based self-healing without webhooks (#602).
+"""Check-run ingestion application service (#602).
 
-When a pull_request event arrives (via Events API or webhook), the pipeline
-observer registers the head SHA. This poller periodically checks the GitHub
-Checks API for those SHAs. When a check run completes with failure, it
-synthesizes a check_run.completed NormalizedEvent and feeds it through the
-EventPipeline, triggering self-healing workflows.
+Poll-based self-healing pipeline. Listens for PR events via the
+EventPipeline observer hook, registers head SHAs, polls the GitHub
+Checks API per pending SHA, synthesizes ``check_run.completed`` events
+on completion, and ingests them through the unified pipeline.
 
-Runs as an ``asyncio.Task`` inside syn-api alongside the Events API poller.
-Adapts its polling interval based on webhook health (30s when stale, 120s
-when healthy — webhooks deliver check_run events faster).
+This service is reactive (not historical) -- it only polls SHAs that
+arrived from PR events ingested by ``GitHubRepoIngestionService``. The
+cold-start protection is transitive: PR events from cold-start carry
+``source_primed=False`` so the pipeline (Layer 5) skips trigger eval.
+The principal #694 fix lives in the upstream ingestion service; this
+service depends only on Protocols (``GitHubChecksAPIPort``) so the
+hexagonal boundary is preserved.
 """
 
 from __future__ import annotations
@@ -24,9 +27,9 @@ from syn_domain.contexts.github import PendingSHA, PollerState, synthesize_check
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-    from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
-    from syn_api.services.webhook_health_tracker import WebhookHealthTracker
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
+    from syn_domain.contexts.github.ports import GitHubChecksAPIPort
+    from syn_domain.contexts.github.services.webhook_health import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
@@ -35,18 +38,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class CheckRunPoller:
+class CheckRunIngestionService:
     """Background poller that detects CI failures via the GitHub Checks API.
 
     Works in concert with the Events API poller and webhooks:
+
     - Webhooks deliver ``check_run.completed`` in ~1s (when configured)
     - This poller synthesizes equivalent events in 30-90s (zero-config)
-    - Content-based dedup ensures only one trigger fire regardless of source
+    - Content-based dedup ensures one trigger fire regardless of source
     """
 
     def __init__(
         self,
-        checks_client: GitHubChecksAPIClient,
+        checks_api: GitHubChecksAPIPort,
         pipeline: EventPipeline,
         sha_store: PendingSHAStore,
         health_tracker: WebhookHealthTracker,
@@ -54,7 +58,7 @@ class CheckRunPoller:
         settings: PollingSettings,
         sleep: Callable[[float], Coroutine[object, object, None]] | None = None,
     ) -> None:
-        self._checks_client = checks_client
+        self._checks_api = checks_api
         self._pipeline = pipeline
         self._sha_store = sha_store
         self._health = health_tracker
@@ -66,6 +70,7 @@ class CheckRunPoller:
         )
         self._task: asyncio.Task[None] | None = None
         self._sleep = sleep or asyncio.sleep
+        self._last_rate_limit_wait: float = 0.0
 
     async def start(self) -> None:
         """Start the check-run polling background task."""
@@ -90,7 +95,7 @@ class CheckRunPoller:
         return self._task is not None and not self._task.done()
 
     async def on_pr_event(self, event: NormalizedEvent) -> None:
-        """Pipeline observer callback — registers pending SHAs for PR events.
+        """Pipeline observer callback -- registers pending SHAs for PR events.
 
         Called by EventPipeline after each non-deduplicated event. Only acts
         on pull_request events with actions that indicate new code to check.
@@ -126,25 +131,31 @@ class CheckRunPoller:
             pr_number,
         )
 
-    # -- Internal polling loop -----------------------------------------------
-
     async def _poll_loop(self) -> None:
-        """Main polling loop — runs until cancelled."""
+        """Main polling loop -- runs until cancelled."""
         while True:
             self._state.update_mode(webhook_stale=self._health.is_stale)
             interval = self._state.current_interval
+            self._last_rate_limit_wait = 0.0
 
-            try:
-                if await self._has_check_run_triggers():
-                    await self._poll_pending_shas()
-                await self._cleanup_stale_shas()
+            await self._run_iteration()
+
+            sleep_for = max(interval, self._last_rate_limit_wait)
+            await self._sleep(sleep_for)
+
+    async def _run_iteration(self) -> None:
+        """Run one poll iteration; catches and logs non-cancellation errors."""
+        try:
+            if await self._has_check_run_triggers():
+                await self._poll_pending_shas()
+            await self._cleanup_stale_shas()
+            if self._last_rate_limit_wait == 0.0:
                 self._state.record_success()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                interval = self._handle_poll_error(exc, interval)
-
-            await self._sleep(interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._state.record_error()
+            logger.exception("Check-run polling error, backing off")
 
     async def _has_check_run_triggers(self) -> bool:
         """Check if any active triggers listen for check_run events."""
@@ -177,21 +188,30 @@ class CheckRunPoller:
             logger.warning("Invalid repository format (no '/'): %s", pending.repository)
             return
         owner, repo = pending.repository.split("/", 1)
-        response = await self._checks_client.get_check_runs_for_ref(
+        result = await self._checks_api.fetch_check_runs(
             owner=owner,
             repo=repo,
             ref=pending.sha,
             installation_id=pending.installation_id,
         )
 
+        if result.rate_limited:
+            self._state.record_error()
+            self._last_rate_limit_wait = max(self._last_rate_limit_wait, result.retry_after_seconds)
+            logger.warning(
+                "Check-run poller rate limited, backing off %.0fs",
+                result.retry_after_seconds,
+            )
+            return
+
         all_completed = True
-        for raw_check_run in response.check_runs:
+        for raw_check_run in result.check_runs:
             if raw_check_run.get("status") != "completed":
                 all_completed = False
                 continue
             await self._ingest_synthesized_event(raw_check_run, pending)
 
-        if all_completed and response.check_runs:
+        if all_completed and result.check_runs:
             await self._sha_store.remove(pending.repository, pending.sha)
             logger.debug(
                 "All check runs completed for %s@%s, removed from pending",
@@ -210,7 +230,7 @@ class CheckRunPoller:
             result = await self._pipeline.ingest(event)
             if result.status == "processed" and result.triggers_fired:
                 logger.info(
-                    "Synthesized check_run.completed for %s@%s — fired %s",
+                    "Synthesized check_run.completed for %s@%s -- fired %s",
                     pending.repository,
                     pending.sha[:8],
                     result.triggers_fired,
@@ -228,29 +248,3 @@ class CheckRunPoller:
         removed = await self._sha_store.cleanup_stale(max_age)
         if removed:
             logger.info("Cleaned up %d stale pending SHA(s)", removed)
-
-    def _handle_poll_error(self, exc: Exception, interval: float) -> float:
-        """Handle a polling error: record backoff and adjust interval."""
-        self._state.record_error()
-        reset_seconds = _extract_rate_limit_wait(exc)
-        if reset_seconds is not None:
-            interval = max(interval, reset_seconds)
-            logger.warning("Check-run poller rate limited, backing off %.0fs", interval)
-        else:
-            logger.exception("Check-run polling error, backing off")
-        return interval
-
-
-def _extract_rate_limit_wait(exc: Exception) -> float | None:
-    """Extract wait seconds from a GitHubRateLimitError, if applicable."""
-    from datetime import UTC, datetime
-
-    try:
-        from syn_adapters.github.client import GitHubRateLimitError
-    except ImportError:
-        return None
-
-    if isinstance(exc, GitHubRateLimitError) and exc.reset_at is not None:
-        wait = (exc.reset_at - datetime.now(UTC)).total_seconds()
-        return max(wait, 0)
-    return None

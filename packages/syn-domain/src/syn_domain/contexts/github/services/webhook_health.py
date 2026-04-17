@@ -1,4 +1,10 @@
-"""Webhook health tracker — detects stale webhook delivery for poller mode switching."""
+"""Webhook health tracker - detects stale webhook delivery for poller mode switching.
+
+Domain-owned application service (no adapter dependencies). The webhook
+HTTP route records receipts here; the polling scheduler reads ``is_stale``
+to choose between ``ACTIVE_POLLING`` (aggressive) and ``SAFETY_NET``
+(infrequent) modes.
+"""
 
 from __future__ import annotations
 
@@ -35,7 +41,7 @@ class WebhookHealthTracker:
     def is_stale(self) -> bool:
         """``True`` if no webhook received within the stale threshold."""
         if self._last_received_at is None:
-            return True  # Never received → assume stale
+            return True  # Never received -> assume stale
         return (self._clock() - self._last_received_at) > self._stale_threshold
 
     @property

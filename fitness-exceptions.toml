@@ -50,7 +50,7 @@ issue = "#624"
 
 [untyped-dicts.syn-domain]
 path = "packages/syn-domain"
-value = 367
+value = 372
 issue = "#673"
 
 [untyped-dicts.syn-adapters]
@@ -60,7 +60,7 @@ issue = "#673"
 
 [untyped-dicts.syn-api]
 path = "apps/syn-api"
-value = 87
+value = 93
 issue = "#673"
 
 [untyped-dicts.syn-collector]

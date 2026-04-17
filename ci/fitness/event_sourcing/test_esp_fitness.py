@@ -1,10 +1,11 @@
 """Fitness function: ESP consumer pattern invariants.
 
 Integrates event-sourcing-platform's built-in fitness module into Syn137 CI.
-Checks projection purity (whitelist-based import checking) and ProcessManager
-structure validation using the ESP-provided fitness checks.
+Checks projection purity (whitelist-based import checking), ProcessManager
+structure validation, and HistoricalPoller cold-start fence preservation.
 
 Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
+See also: ADR-060 section 6 (Cold-Start Fence / HistoricalPoller)
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from ci.fitness.conftest import load_exceptions, repo_root
-from event_sourcing.fitness import check_projection_purity
+from event_sourcing.fitness import check_historical_poller_structure, check_projection_purity
 from event_sourcing.fitness.process_manager_check import check_process_manager
 
 if TYPE_CHECKING:
@@ -137,3 +138,25 @@ class TestProcessManagerStructure:
         assert WorkflowDispatchProjection.SIDE_EFFECTS_ALLOWED is True, (
             "ProcessManager subclasses must have SIDE_EFFECTS_ALLOWED = True"
         )
+
+
+def _find_historical_pollers() -> list[type]:
+    """Find all HistoricalPoller subclasses in the project."""
+    from syn_domain.contexts.github.services import GitHubRepoIngestionService
+
+    return [GitHubRepoIngestionService]
+
+
+@pytest.mark.architecture
+class TestHistoricalPollerStructure:
+    """Validate HistoricalPoller subclasses preserve cold-start fence (ADR-060 s6)."""
+
+    @pytest.mark.parametrize(
+        "cls",
+        _find_historical_pollers(),
+        ids=lambda c: c.__name__,
+    )
+    def test_preserves_cold_start_fence(self, cls: type) -> None:
+        """HistoricalPoller subclasses must not override @final methods."""
+        violations = check_historical_poller_structure(cls)
+        assert violations == [], f"{cls.__name__} violates HistoricalPoller structure: {violations}"

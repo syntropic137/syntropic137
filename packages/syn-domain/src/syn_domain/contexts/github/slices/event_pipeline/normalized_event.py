@@ -56,3 +56,8 @@ class NormalizedEvent:
 
     events_api_id: str = ""
     """Events API event ID (polling only)."""
+
+    source_primed: bool = True
+    """Whether the event source was primed (had a cursor) when this event
+    was fetched. Default True for webhooks (always live). Set to False by
+    HistoricalPoller on cold start to skip trigger evaluation."""
