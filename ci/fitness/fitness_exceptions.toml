@@ -62,25 +62,33 @@ allowed_prefixes = [
 "packages/syn-adapters/src/syn_adapters/workspace_backends/docker/docker_container_ops.py" = { issue = "#664" }
 
 [typed_cross_context_boundaries]
-# Protocol methods with dict[str, str/Any/object] parameters at context boundaries.
-# New protocols MUST use typed value objects instead (ADR-063).
-# Existing violations grandfathered with budget=1; reduce toward zero.
-
-# Webhook payloads are inherently untyped (GitHub JSON) - typing these would
-# require a full webhook payload model, which is out of scope.
-"packages/syn-domain/src/syn_domain/contexts/github/_shared/trigger_evaluator.py:TriggerEvaluator.payload" = { budget = 1, issue = "#671" }
+# Protocol/ABC methods with dict[str, str/Any/object] in parameters or return types
+# at cross-context boundaries. New boundaries MUST use typed value objects (ADR-063).
+# Existing violations are grandfathered with budget=1; reduce toward zero over time.
+# Key format: "<file>:<ClassName>.<method_name>.<slot>" where slot is "param:<name>" or "return".
 
 # Workflow inputs dict carries arbitrary user-defined key/value pairs.
-# Repository identity was extracted to typed RepositoryRef (ADR-063),
-# but the general-purpose inputs dict remains.
-"packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py:_ExecutionService.inputs" = { budget = 1, issue = "#671" }
-
-# Observability data is inherently schemaless (varying event shapes).
-"packages/syn-domain/src/syn_domain/contexts/orchestration/ports/ObservabilityServicePort.py:ObservabilityServicePort.data" = { budget = 1, issue = "#671" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py:ObservabilityRecorder.data" = { budget = 1, issue = "#671" }
+# Repository identity was extracted to typed RepositoryRef (ADR-063), but the
+# general-purpose inputs dict remains. Future work: type per-input value objects.
+"packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py:_ExecutionService.run_workflow.param:inputs" = { budget = 1, issue = "#671" }
 
 # Agent environment variables are inherently a string->string map.
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/processor_types.py:AgentHandlerProtocol.agent_env" = { budget = 1, issue = "#671" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/processor_types.py:AgentHandlerProtocol.handle.param:agent_env" = { budget = 1, issue = "#671" }
+
+# Trigger condition list accepts raw dict fallback for legacy/dynamic conditions.
+"packages/syn-domain/src/syn_domain/contexts/github/_shared/trigger_query_store.py:TriggerQueryStore.index_trigger.param:conditions" = { budget = 1, issue = "#671" }
+
+# Artifact phase-injection returns {filename: content} - opaque file contents.
+# Typing would require an ArtifactBundle value object - candidate follow-up.
+"packages/syn-domain/src/syn_domain/contexts/artifacts/domain/services/artifact_query_service.py:ArtifactQueryServiceProtocol.get_for_phase_injection.return" = { budget = 1, issue = "#671" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/ports/ArtifactQueryServicePort.py:ArtifactQueryServicePort.get_for_phase_injection.return" = { budget = 1, issue = "#671" }
+
+# Conversation session metadata is opaque session-level annotation map.
+"packages/syn-adapters/src/syn_adapters/conversations/protocol.py:ConversationStoragePort.get_session_metadata.return" = { budget = 1, issue = "#671" }
+
+# ExecutionContext.phase_outputs returns {phase_id: artifact_content} - same opaque
+# content shape as ArtifactQueryServicePort above. Candidate for ArtifactBundle.
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py:ExecutionContext.phase_outputs.return" = { budget = 1, issue = "#671" }
 
 [event_construction_outside_aggregate]
 # Production files that construct DomainEvent subclasses outside aggregate_*/ dirs.

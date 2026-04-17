@@ -292,16 +292,16 @@ class TestReposVariableSubstitution:
             "https://github.com/acme/app2",
         ]
 
-    def test_runtime_input_takes_precedence_over_workflow_repos(self):
-        """If merged_inputs contains 'repos' CSV, workflow.repos is ignored entirely."""
+    def test_inputs_repos_without_typed_command_repos_raises(self):
+        """ADR-063: legacy inputs['repos'] CSV path was removed; producers must pass typed repos."""
         wf = _make_workflow_with_repos(["https://github.com/stored/repo"])
-        result = ExecuteWorkflowHandler._resolve_repos(
-            _empty_cmd(),
-            {"repos": "https://github.com/runtime/repo"},
-            wf,
-        )
 
-        assert result == ["https://github.com/runtime/repo"]
+        with pytest.raises(ValueError, match=r"inputs\[repos\].*command\.repos is empty"):
+            ExecuteWorkflowHandler._resolve_repos(
+                _empty_cmd(),
+                {"repos": "https://github.com/runtime/repo"},
+                wf,
+            )
 
     def test_empty_repos_falls_through_to_repository_url(self):
         """When workflow.repos is empty, falls back to repository_url (existing behaviour)."""

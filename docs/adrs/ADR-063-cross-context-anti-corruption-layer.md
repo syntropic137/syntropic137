@@ -68,13 +68,22 @@ GitHub trigger fires
   -> _resolve_repos() uses command.repos first (no dict fishing)
 ```
 
-### 3. Fitness function enforcement
+### 3. Fitness function enforcement (F8)
 
-`ci/fitness/code_quality/test_typed_cross_context_boundaries.py` scans Protocol definitions for `dict[str, str]`, `dict[str, Any]`, or `dict[str, object]` parameters. New protocols MUST use typed value objects. Legacy violations are grandfathered in `fitness_exceptions.toml` with budgets ratcheting toward zero.
+`ci/fitness/code_quality/test_typed_cross_context_boundaries.py` scans cross-context boundary classes for untyped dict signatures and fails CI on new violations. Coverage:
 
-### 4. Domain events are exempt
+- **Class types scanned**: PEP 544 `Protocol` classes AND abstract base classes (`abc.ABC` or any class with `@abstractmethod` methods).
+- **Signature slots scanned**: Both **parameter** annotations and **return type** annotations.
+- **Patterns flagged**: `dict[str, str]`, `dict[str, Any]`, `dict[str, object]`.
+- **Safe-list**: A small allowlist of slot names that are legitimately opaque (`headers`, `payload`, `metadata`, `config`, `permissions`, `input_mapping`, etc.) - generic key/value maps that don't smuggle domain identity.
 
-Domain events are immutable facts. `TriggerFiredEvent.workflow_inputs` stays `dict[str, object]` - the translation happens when the event is *consumed* at the boundary, not when it's produced.
+New boundaries MUST use typed value objects. Legacy violations are grandfathered in `fitness_exceptions.toml` with budget=1 and ratchet toward zero. The checker explicitly does NOT scan concrete-class methods or module-level functions - the false-positive rate without a clear "boundary" definition is too high to be useful.
+
+### 4. Translation at the consumption boundary
+
+Domain events are immutable facts and stay `dict[str, object]` (e.g. `TriggerFiredEvent.workflow_inputs`). Translation happens when the event is *consumed*, not when it's produced. The consumer (a projection or process manager that crosses into another context) is responsible for converting the dict into the appropriate value object before passing it across the boundary.
+
+This keeps the event store stable across schema evolution: adding a new value object never requires re-shaping historical events.
 
 ## Consequences
 
@@ -98,7 +107,15 @@ Domain events are immutable facts. `TriggerFiredEvent.workflow_inputs` stays `di
 
 ## Implementation
 
-- Value object: `packages/syn-domain/src/syn_domain/contexts/_shared/repository_ref.py`
-- Boundary typed: `_ExecutionService` protocol, `BackgroundWorkflowDispatcher`, `ExecuteWorkflowCommand`
-- Handler simplified: `ExecuteWorkflowHandler._resolve_repos()` prefers `command.repos`
-- Fitness function: `ci/fitness/code_quality/test_typed_cross_context_boundaries.py`
+- **Value object:** `packages/syn-domain/src/syn_domain/contexts/_shared/repository_ref.py`
+- **Boundary typed:** `_ExecutionService` Protocol, `BackgroundWorkflowDispatcher`, `ExecuteWorkflowCommand` all carry `list[RepositoryRef]`
+- **Handler simplified:** `ExecuteWorkflowHandler._resolve_repos()` prefers `command.repos`; legacy `inputs["repos"]` CSV and `inputs["repository"]` slug paths were **removed** (not deprecated). A guard raises `ValueError` if those reserved keys appear in `inputs` while `command.repos` is empty - the loud error catches missed boundary translation rather than silently producing zero repos.
+- **Fitness function:** `ci/fitness/code_quality/test_typed_cross_context_boundaries.py` (F8) - see §3 above for scope.
+
+### Migration note
+
+Before this ADR landed, two paths smuggled repository identity through the inputs dict:
+- API path: `request.repos` -> `inputs["repos"]` CSV
+- Trigger path: webhook `repository.full_name` -> `inputs["repository"]` slug
+
+Both paths now translate to typed `command.repos` at the producing boundary (API route handler / `BackgroundWorkflowDispatcher`). The legacy fallback chain in `_resolve_repos` was removed entirely; the only remaining fallback sources are template-level fields (`workflow.repos` and `workflow.repository_url`), which are workflow definition config, not cross-context data.
