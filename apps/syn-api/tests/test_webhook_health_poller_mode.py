@@ -7,14 +7,22 @@ transitions and that the poller adapts its interval accordingly.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from syn_api.services.github_event_poller import GitHubEventPoller
-from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+if TYPE_CHECKING:
+    from event_sourcing.core.historical_poller import CursorData
+
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
+from syn_domain.contexts.github.services import (
+    GitHubEventIngestionScheduler as GitHubEventPoller,
+)
+from syn_domain.contexts.github.services import (
+    GitHubRepoIngestionService as GitHubRepoPoller,
+)
+from syn_domain.contexts.github.services import WebhookHealthTracker
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
 )
@@ -58,19 +66,63 @@ class NullRepository:
 
 
 class MockEventsClient:
-    """Mock Events API client that tracks calls."""
+    """In-memory ``GitHubEventsAPIPort`` implementation that tracks calls."""
 
     def __init__(self, poll_interval: int = 0) -> None:
-        from syn_adapters.github.events_api_client import EventsAPIResponse
+        from syn_domain.contexts.github.ports import EventsAPIResult
 
-        self._response = EventsAPIResponse(
-            events=[], poll_interval=poll_interval, has_new_events=False
+        self._response = EventsAPIResult(
+            events=[],
+            has_new=False,
+            etag="",
+            poll_interval_hint=poll_interval,
         )
         self.poll_count = 0
 
-    async def poll_repo_events(self, owner: str, repo: str, installation_id: str) -> Any:  # noqa: ANN401
+    async def fetch_repo_events(
+        self,
+        owner: str,
+        repo: str,
+        installation_id: str,
+        etag: str | None = None,
+    ) -> Any:  # noqa: ANN401
         self.poll_count += 1
         return self._response
+
+
+class MemoryCursorStore:
+    def __init__(self) -> None:
+        self._cursors: dict[str, CursorData] = {}
+
+    async def save(self, source_key: str, cursor: CursorData) -> None:
+        self._cursors[source_key] = cursor
+
+    async def load(self, source_key: str) -> CursorData | None:
+        return self._cursors.get(source_key)
+
+    async def load_all(self) -> dict[str, CursorData]:
+        return dict(self._cursors)
+
+
+def _make_poller(
+    events_client: object,
+    pipeline: EventPipeline,
+    tracker: WebhookHealthTracker,
+    store: InMemoryTriggerQueryStore,
+) -> GitHubEventPoller:
+    """Compose a GitHubEventPoller wrapping a per-repo HistoricalPoller."""
+    repo_service = GitHubRepoPoller(
+        events_api=events_client,  # type: ignore[arg-type]
+        pipeline=pipeline,
+        cursor_store=MemoryCursorStore(),
+    )
+    return GitHubEventPoller(
+        repo_service=repo_service,
+        health_tracker=tracker,
+        trigger_store=store,
+        settings=MockPollingSettings(),  # type: ignore[arg-type]
+        sleep=_instant_sleep,
+    )
 
 
 class MockPollingSettings:
@@ -161,17 +213,11 @@ class TestPollerModeTransitions:
         await _setup_trigger(store)
 
         mock_client = MockEventsClient()
-        poller = GitHubEventPoller(
-            events_client=mock_client,
-            pipeline=EventPipeline(
-                dedup=InMemoryDedup(),
-                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
-            ),
-            health_tracker=tracker,
-            trigger_store=store,
-            settings=MockPollingSettings(),  # type: ignore[arg-type]
-            sleep=_instant_sleep,
+        pipeline = EventPipeline(
+            dedup=InMemoryDedup(),
+            evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),  # type: ignore[arg-type]
         )
+        poller = _make_poller(mock_client, pipeline, tracker, store)
 
         await poller.start()
         await _wait_for_poll_count(mock_client, 1)
@@ -187,17 +233,11 @@ class TestPollerModeTransitions:
         await _setup_trigger(store)
 
         mock_client = MockEventsClient()
-        poller = GitHubEventPoller(
-            events_client=mock_client,
-            pipeline=EventPipeline(
-                dedup=InMemoryDedup(),
-                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
-            ),
-            health_tracker=tracker,
-            trigger_store=store,
-            settings=MockPollingSettings(),  # type: ignore[arg-type]
-            sleep=_instant_sleep,
+        pipeline = EventPipeline(
+            dedup=InMemoryDedup(),
+            evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),  # type: ignore[arg-type]
         )
+        poller = _make_poller(mock_client, pipeline, tracker, store)
 
         await poller.start()
         await _wait_for_poll_count(mock_client, 1)
@@ -213,17 +253,11 @@ class TestPollerModeTransitions:
         await _setup_trigger(store)
 
         mock_client = MockEventsClient()
-        poller = GitHubEventPoller(
-            events_client=mock_client,
-            pipeline=EventPipeline(
-                dedup=InMemoryDedup(),
-                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
-            ),
-            health_tracker=tracker,
-            trigger_store=store,
-            settings=MockPollingSettings(),  # type: ignore[arg-type]
-            sleep=_instant_sleep,
+        pipeline = EventPipeline(
+            dedup=InMemoryDedup(),
+            evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),  # type: ignore[arg-type]
         )
+        poller = _make_poller(mock_client, pipeline, tracker, store)
 
         await poller.start()
         # Initially healthy -> SAFETY_NET
@@ -246,17 +280,11 @@ class TestPollerModeTransitions:
         await _setup_trigger(store)
 
         mock_client = MockEventsClient()
-        poller = GitHubEventPoller(
-            events_client=mock_client,
-            pipeline=EventPipeline(
-                dedup=InMemoryDedup(),
-                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
-            ),
-            health_tracker=tracker,
-            trigger_store=store,
-            settings=MockPollingSettings(),  # type: ignore[arg-type]
-            sleep=_instant_sleep,
+        pipeline = EventPipeline(
+            dedup=InMemoryDedup(),
+            evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),  # type: ignore[arg-type]
         )
+        poller = _make_poller(mock_client, pipeline, tracker, store)
 
         await poller.start()
         await _wait_for_poll_count(mock_client, 1)
@@ -271,31 +299,23 @@ class TestPollerErrorBackoff:
     """Verify poller backs off on errors."""
 
     async def test_error_increases_backoff(self) -> None:
-        """Errors should increase the poll interval via exponential backoff."""
+        """Errors raised from the port surface as consecutive_errors via the outer loop."""
         store = InMemoryTriggerQueryStore()
         await _setup_trigger(store)
 
         error_client = MockEventsClient()
-        error_client.poll_repo_events = _make_failing_poll()  # type: ignore[assignment]
+        error_client.fetch_repo_events = _make_failing_poll()  # type: ignore[assignment]
 
         clock = FakeClock(start=1000.0)
         tracker = WebhookHealthTracker(clock=clock)
-        poller = GitHubEventPoller(
-            events_client=error_client,  # type: ignore[arg-type]
-            pipeline=EventPipeline(
-                dedup=InMemoryDedup(),
-                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
-            ),
-            health_tracker=tracker,
-            trigger_store=store,
-            settings=MockPollingSettings(),  # type: ignore[arg-type]
-            sleep=_instant_sleep,
+        pipeline = EventPipeline(
+            dedup=InMemoryDedup(),
+            evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),  # type: ignore[arg-type]
         )
+        poller = _make_poller(error_client, pipeline, tracker, store)
 
         await poller.start()
-        # Wait for at least one poll cycle (the failing poll increments poll_count
-        # on the error_client, but we can't wait on that since it's overridden).
-        # Instead wait for the consecutive_errors to be set.
+        # Wait until the outer loop has registered at least one error.
         deadline = asyncio.get_event_loop().time() + 2.0
         while poller._state.consecutive_errors < 1:
             if asyncio.get_event_loop().time() > deadline:
@@ -314,17 +334,11 @@ class TestPollerErrorBackoff:
         tracker = WebhookHealthTracker(clock=clock)
         mock_client = MockEventsClient()
 
-        poller = GitHubEventPoller(
-            events_client=mock_client,
-            pipeline=EventPipeline(
-                dedup=InMemoryDedup(),
-                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
-            ),
-            health_tracker=tracker,
-            trigger_store=store,
-            settings=MockPollingSettings(),  # type: ignore[arg-type]
-            sleep=_instant_sleep,
+        pipeline = EventPipeline(
+            dedup=InMemoryDedup(),
+            evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),  # type: ignore[arg-type]
         )
+        poller = _make_poller(mock_client, pipeline, tracker, store)
 
         # Manually set some errors
         poller._state.consecutive_errors = 3
@@ -337,10 +351,65 @@ class TestPollerErrorBackoff:
 
 
 def _make_failing_poll():
-    """Create an async function that always raises."""
+    """Create an async function that always raises (simulating a non-rate-limit failure)."""
 
-    async def _failing_poll(owner: str, repo: str, installation_id: str) -> None:
+    async def _failing_poll(
+        owner: str, repo: str, installation_id: str, etag: str | None = None
+    ) -> None:
         msg = "Simulated API error"
         raise RuntimeError(msg)
 
     return _failing_poll
+
+
+@pytest.mark.asyncio
+class TestPollIntervalHintHonored:
+    """Scheduler stretches the next-sleep interval to honor X-Poll-Interval."""
+
+    async def test_sleep_stretches_to_poll_interval_hint(self) -> None:
+        """If GitHub returns ``X-Poll-Interval: 120``, the next sleep must be >= 120s,
+        not the 60s base interval. Regression against the old poller's
+        ``max(interval, response.poll_interval)`` behavior.
+        """
+        store = InMemoryTriggerQueryStore()
+        await _setup_trigger(store)
+
+        tracker = WebhookHealthTracker()
+        mock_client = MockEventsClient(poll_interval=120)
+
+        pipeline = EventPipeline(
+            dedup=InMemoryDedup(),
+            evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),  # type: ignore[arg-type]
+        )
+
+        recorded_sleeps: list[float] = []
+
+        async def _recording_sleep(seconds: float) -> None:
+            recorded_sleeps.append(seconds)
+            raise asyncio.CancelledError
+
+        repo_service = GitHubRepoPoller(
+            events_api=mock_client,  # type: ignore[arg-type]
+            pipeline=pipeline,
+            cursor_store=MemoryCursorStore(),
+        )
+        poller = GitHubEventPoller(
+            repo_service=repo_service,
+            health_tracker=tracker,
+            trigger_store=store,
+            settings=MockPollingSettings(),  # type: ignore[arg-type]
+            sleep=_recording_sleep,
+        )
+
+        await poller.start()
+        assert poller._task is not None
+        import contextlib
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await poller._task
+        poller._task = None
+
+        assert recorded_sleeps, "poll loop must reach the sleep step"
+        assert recorded_sleeps[0] >= 120.0, (
+            f"expected sleep >= 120s (X-Poll-Interval hint), got {recorded_sleeps[0]}"
+        )

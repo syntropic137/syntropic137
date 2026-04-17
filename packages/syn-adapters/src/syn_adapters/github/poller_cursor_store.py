@@ -1,31 +1,27 @@
-"""Persistent poller cursor store — survives restarts.
+"""Poller cursor stores - persistent (Postgres) and in-memory (test/offline).
 
 See ADR-060: Restart-safe trigger deduplication.
 
-Stores GitHub Events API ETags and last-seen event IDs in Postgres
-so the poller doesn't re-fetch all events after a stack restart.
+Implements the ESP ``CursorStore`` protocol for persisting GitHub Events
+API ETags and last-seen event IDs. On startup, the poller loads stored
+ETags and sends ``If-None-Match`` headers to GitHub, avoiding
+re-fetching events it already processed.
 """
 
 from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+from event_sourcing.core.historical_poller import CursorData
+
+from syn_adapters.in_memory import InMemoryAdapter
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class PollerCursor:
-    """Stored cursor state for a polled repository."""
-
-    repo: str
-    etag: str
-    last_event_id: str
 
 
 class _Row(Protocol):
@@ -82,11 +78,16 @@ LOAD_ALL_SQL = """
 
 
 class PostgresPollerCursorStore:
-    """Postgres-backed poller cursor store for production use.
+    """Postgres-backed CursorStore for production use.
 
-    Persists ETag and last-seen event ID per repository. On startup,
-    the poller loads stored ETags and sends ``If-None-Match`` headers
-    to GitHub, avoiding re-fetching events it already processed.
+    Implements the ESP ``CursorStore`` protocol. Persists ETag and
+    last-seen event ID per repository. On startup, the poller loads
+    stored ETags and sends ``If-None-Match`` headers to GitHub,
+    avoiding re-fetching events it already processed.
+
+    CursorData mapping:
+    - ``value`` = ETag string
+    - ``metadata["last_event_id"]`` = newest event ID seen
     """
 
     def __init__(self, pool: AsyncConnectionPool) -> None:
@@ -102,46 +103,69 @@ class PostgresPollerCursorStore:
             self._table_created = True
             logger.info("Ensured poller_cursors table exists")
 
-    async def load_cursor(self, repo: str) -> PollerCursor | None:
-        """Load the stored cursor for a repository.
+    async def load(self, source_key: str) -> CursorData | None:
+        """Load the stored cursor for a source.
 
-        Returns None if no cursor has been saved for this repo.
+        Returns None if no cursor has been saved for this source.
         """
         await self._ensure_table()
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(LOAD_CURSOR_SQL, repo)
+            row = await conn.fetchrow(LOAD_CURSOR_SQL, source_key)
         if row is None:
             return None
-        return PollerCursor(
-            repo=str(row["repo"]),
-            etag=str(row["etag"]),
-            last_event_id=str(row["last_event_id"]),
+        return CursorData(
+            value=str(row["etag"]),
+            metadata={"last_event_id": str(row["last_event_id"])},
         )
 
-    async def save_cursor(self, repo: str, etag: str, last_event_id: str) -> None:
-        """Save or update the cursor for a repository."""
+    async def save(self, source_key: str, cursor: CursorData) -> None:
+        """Save or update the cursor for a source."""
         await self._ensure_table()
+        last_event_id = (cursor.metadata or {}).get("last_event_id", "")
         async with self._pool.acquire() as conn:
-            await conn.execute(SAVE_CURSOR_SQL, repo, etag, last_event_id)
+            await conn.execute(SAVE_CURSOR_SQL, source_key, cursor.value, last_event_id)
         logger.debug(
             "Saved poller cursor for %s (etag=%s, last_event_id=%s)",
-            repo,
-            etag[:16] + "..." if len(etag) > 16 else etag,
+            source_key,
+            cursor.value[:16] + "..." if len(cursor.value) > 16 else cursor.value,
             last_event_id,
         )
 
-    async def load_all(self) -> dict[str, PollerCursor]:
+    async def load_all(self) -> dict[str, CursorData]:
         """Load all stored cursors (used on startup to pre-populate ETags)."""
         await self._ensure_table()
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(LOAD_ALL_SQL)
-        cursors = {}
+        cursors: dict[str, CursorData] = {}
         for row in rows:
-            repo = str(row["repo"])
-            cursors[repo] = PollerCursor(
-                repo=repo,
-                etag=str(row["etag"]),
-                last_event_id=str(row["last_event_id"]),
+            source_key = str(row["repo"])
+            cursors[source_key] = CursorData(
+                value=str(row["etag"]),
+                metadata={"last_event_id": str(row["last_event_id"])},
             )
         logger.info("Loaded %d poller cursor(s) from database", len(cursors))
         return cursors
+
+
+class InMemoryPollerCursorStore(InMemoryAdapter):
+    """In-memory cursor store for test/offline use only.
+
+    Cold-start fence still works within a single process lifetime,
+    but cursor state is lost on restart. Guarded by ``InMemoryAdapter``
+    so it raises ``InMemoryAdapterError`` if instantiated outside
+    test/offline environments. Production wiring must use
+    ``PostgresPollerCursorStore``; see AGENTS.md in-memory adapter policy.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._cursors: dict[str, CursorData] = {}
+
+    async def load(self, source_key: str) -> CursorData | None:
+        return self._cursors.get(source_key)
+
+    async def save(self, source_key: str, cursor: CursorData) -> None:
+        self._cursors[source_key] = cursor
+
+    async def load_all(self) -> dict[str, CursorData]:
+        return dict(self._cursors)

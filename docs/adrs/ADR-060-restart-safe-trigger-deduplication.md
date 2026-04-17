@@ -127,22 +127,59 @@ class InMemoryAdapter:
 ```
 
 - Uses `settings.uses_in_memory_stores` (= `is_test or is_offline`), the canonical check
-- All 11 in-memory adapters now inherit from `InMemoryAdapter` or call `assert_test_only()` (for dataclasses that can't inherit `__init__`)
-- `_create_dedup_adapter()` raises `RuntimeError` instead of falling back to in-memory -- belt-and-suspenders with the base class guard
+- All in-memory adapters now inherit from `InMemoryAdapter` or call `assert_test_only()` (for dataclasses that can't inherit `__init__`). No exceptions.
+- `_create_dedup_adapter()` and `get_pending_sha_store()` raise `RuntimeError` instead of falling back to in-memory -- belt-and-suspenders with the base class guard
 - A standalone `assert_test_only()` function is exported for dataclasses (`InMemoryEventStore`, `InMemoryProjectionStore`) that use `__post_init__`
 
 **Location:** `packages/syn-adapters/src/syn_adapters/in_memory.py`
 
-### 6. InMemoryPendingSHAStore: intentional production exception
+### 6. Cold-Start Fence (HistoricalPoller)
 
-`InMemoryPendingSHAStore` (`packages/syn-adapters/src/syn_adapters/github/pending_sha_store.py`) is the one in-memory store that intentionally does NOT inherit from `InMemoryAdapter`. It is allowed in production because:
+Sections 1-5 protect against **warm restart** (state existed, was lost). But on **cold start** (fresh install, empty database), there is no state to lose -- the poller has no cursor, dedup table is empty, Guard 4 has no history, and Guard 6 tracks no running executions. All 300 historical events from the GitHub Events API pass every layer and fire triggers.
 
-- **Purpose:** Tracks commit SHAs pending check-run polling (#602). When a `pull_request` event arrives, the head SHA is registered. The Checks API poller reads pending SHAs and polls for CI results.
-- **Loss on restart is acceptable:** The next `pull_request` event (or Events API poll) re-registers the SHA. Worst case is a delayed check-run poll, not a duplicate execution.
-- **No correctness impact:** Unlike dedup state (where loss causes duplicates) or control state (where loss causes orphaned executions), PendingSHA loss causes a temporary gap in check-run awareness that self-heals.
-- **No billing impact:** No workflow execution is triggered by PendingSHA alone -- it only enables polling. The dedup layer (section 1) prevents duplicate trigger fires from the polled results.
+This caused 9 duplicate "Self-Heal PR" executions on the sandbox repo after a fresh install (9/10 OOM-killed: 10 x 4GB containers on a 7.65GB Docker VM).
 
-This exception is intentional and documented. The file carries a comment explaining why it differs from other in-memory stores.
+**The fix: timestamp-based cold-start fence.** On first poll with no persisted cursor, only events created *after* the poller's start time are processed. Historical events are skipped but the cursor is persisted, so subsequent polls resume correctly (warm start).
+
+This is implemented as a base class in the Event Sourcing Platform: `HistoricalPoller`. The template method pattern ensures subclasses cannot bypass the fence:
+
+- `poll()` is concrete (non-overridable) -- enforces the cold-start fence
+- `fetch()` and `process()` are abstract -- subclasses implement these
+- `check_historical_poller_structure()` fitness function catches subclasses that override `poll()`
+
+**Why timestamp filtering, not blanket skip:** Events that arrive between startup and first poll are genuinely new and should be processed. A blanket "skip everything on first poll" would lose them. The `created_at >= started_at` comparison preserves these events.
+
+**Cold start vs warm restart:**
+
+| Scenario | Cursor exists? | Behavior |
+|----------|---------------|----------|
+| Warm restart (state lost) | No (was lost) | Cold-start fence: skip historical, keep post-startup |
+| Warm restart (state intact) | Yes | Warm start: process all events |
+| Fresh install | No (never existed) | Cold-start fence: skip historical, keep post-startup |
+
+**Location:** `lib/event-sourcing-platform/event-sourcing/python/src/event_sourcing/core/historical_poller.py`
+
+### 7. Pipeline Safety Net (source_primed)
+
+Belt-and-suspenders with the HistoricalPoller fence. Even if someone bypasses the base class and calls `pipeline.ingest()` directly with historical events, the pipeline checks `NormalizedEvent.source_primed`:
+
+- Default `True` for webhooks (always live) and backwards compatibility
+- Set to `False` by the HistoricalPoller during cold start
+- Pipeline skips trigger evaluation when `source_primed=False` but still marks dedup
+
+This second layer protects against implementation mistakes where historical events reach the pipeline through a path that doesn't use `HistoricalPoller`.
+
+**Update 2026-04-16 (#694 fix):** The original implementation checked `source_key in self.primed_sources` inside `process()`, but `_prime()` runs before `process()` on the cold-start path, so the check was always `True` -- dead code. The fix uses an explicit `is_replay: bool` kwarg passed from `HistoricalPoller.poll()` directly to `process()`, removing the race-prone state inspection. See Section 9.
+
+**Location:** `packages/syn-domain/.../event_pipeline/normalized_event.py` and `pipeline.py`
+
+### 8. Configurable dispatch concurrency
+
+`BackgroundWorkflowDispatcher.MAX_CONCURRENT` was hardcoded at 10. On a Docker host with limited memory (e.g., 8GB), 10 simultaneous 4GB containers cause OOM kills.
+
+Now configurable via `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` (default 5). This is distinct from `WorkspaceSettings.max_concurrent` (workspace pool capacity) -- dispatch concurrency is a safety limit on how many workflows fire simultaneously from triggers.
+
+**Location:** `packages/syn-shared/src/syn_shared/settings/polling.py`, `apps/syn-api/src/syn_api/_wiring.py`
 
 ## Consequences
 
@@ -160,16 +197,76 @@ This exception is intentional and documented. The file carries a comment explain
 - **Slight latency increase** — Postgres `INSERT ON CONFLICT` is ~1ms vs Redis SETNX ~0.1ms. Negligible for event ingestion rates (<1 event/second typical)
 - **Rate limiter can delay legitimate events** — During high-activity bursts (e.g., mass PR review submission), Guard 7 may throttle. The default limit (10/60s) is generous; adjust via config if needed
 
+## 9. Eight-Layer Defense in Depth (Bug #694 Fix)
+
+After the #694 cold-start flood (2026-04-16), the defense in depth was extended to eight layers. For a spurious execution to fire on cold start, **all eight** must fail simultaneously.
+
+| # | Layer | Owner | Prevents | Persistent? | Test |
+|---|-------|-------|----------|-------------|------|
+| 1 | ETag (HTTP 304) | Adapter (`events_api_client.py`) | Wasted bandwidth + spurious re-delivery when nothing changed | Yes (`cursor.etag` in `poller_cursors`) | adapter unit test |
+| 2 | HWM filter inside `fetch()` | Domain (`event_ingestion.py`) | Re-delivery of seen events when ETag changes (root cause of #694) | Yes (`cursor.last_event_id`) | `test_cold_start_flood_694.py::TestLayer2HWMFilter` |
+| 3 | Cold-start `_started_at` timestamp fence | ESP `HistoricalPoller` | Historical events on first ever poll | N/A (per-instance) | ESP `test_historical_poller.py` |
+| 4 | `is_replay` flag from `poll()` to `process()` | ESP + domain service | Cold-start events bypassing safety nets via dead-code path | N/A | `test_is_replay_signal.py` |
+| 5 | Pipeline `source_primed` check | Domain `pipeline.py` | Trigger evaluation for unprimed events | N/A | `test_cold_start_flood_694.py::TestLayer4IsReplay` |
+| 6 | Content-based dedup (Postgres) | Domain port (`PostgresDedupAdapter`) | Cross-restart re-deliveries | Yes (`dedup_keys`) | dedup integration test |
+| 7 | Guard 7 trigger rate limit | Domain | Damage cap if all above fail | Yes (`trigger_rules.fire_count`) | aggregate guard test |
+| 8 | Guard 6 per-PR concurrency | Domain | Per-PR duplicate executions | Yes | aggregate guard test |
+
+### Why Layer 2 (HWM filter) is the principal fix
+
+GitHub's Events API ETag is "anything changed?" not "what changed?". When even one event arrives, the ETag changes and GitHub returns the **full** recent list (up to 300 events, 30 days retention). Without an HWM filter, warm-start re-delivery floods the pipeline with already-seen events.
+
+The fix: `GitHubEventsCursor.last_event_id` is a **required** dataclass field. Every save through the typed cursor includes the HWM; every fetch consults it before passing events down. This is poka-yoke: bypass requires constructing the dataclass without the field, which is a type error.
+
+### Why Layer 4 (is_replay) replaces dead code
+
+The original `source_primed=False` belt-and-suspenders relied on `source_key in self.primed_sources` inside `process()`. But ESP's `_prime()` mutates `primed_sources` *before* calling `process()`, so the check was always `True` -- the safety net was dead. The fix passes `is_replay: bool` directly from `poll()` to `process()`, sidestepping the mutated state.
+
+## 10. Hexagonal Architecture and Port Boundaries
+
+The GitHub bounded context owns:
+
+- The event pipeline (`slices/event_pipeline/pipeline.py`)
+- The application services (`services/event_ingestion.py`, `services/check_run_ingestion.py`, `services/webhook_health.py`)
+- The ports that adapters implement (`syn_domain.contexts.github.ports.{events_api_port,checks_api_port}`)
+- The typed cursor (`services/github_events_cursor.py`)
+
+The adapter layer (`packages/syn-adapters/src/syn_adapters/github/`) owns:
+
+- HTTP plumbing (`client.py`, `client_api.py`, `client_jwt.py`, `client_token.py`, `client_endpoints.py`)
+- Implementations of the domain ports (`events_api_client.py`, `checks_api_client.py`)
+- Persistent storage (`poller_cursor_store.py`, `postgres_pending_sha_store.py`)
+- Internal exception types (`GitHubRateLimitError`, `GitHubAppError`)
+
+The application layer (`apps/syn-api/`) owns:
+
+- HTTP routes (`routes/webhooks/processing.py`)
+- Composition root (`_wiring.py`)
+- Lifecycle management (`services/lifecycle.py`)
+- Nothing else.
+
+Architectural fitness functions (CI-enforced):
+
+- `TestGitHubBCPurity` -- `services/` contains no `syn_adapters` imports
+- `TestEventsAPIPortAdoption` -- `GitHubEventsAPIClient` explicitly inherits its port
+- `TestChecksAPIPortAdoption` -- `GitHubChecksAPIClient` explicitly inherits its port
+- `TestGitHubCursorTyped` -- `GitHubEventsCursor.last_event_id` is required
+- `TestHistoricalPollerIsReplay` -- `process()` accepts `is_replay` kwarg
+
 ## Defense in Depth Summary
 
-After this ADR, a restart is protected by four independent layers:
+After this ADR + the #694 fix, both warm restart and cold start are protected by **eight** independent layers (see Section 9 for detail):
 
-| Layer | Component | What it prevents | Persistent? |
-|-------|-----------|-----------------|-------------|
-| 1 | Poller cursor (Postgres) | Re-fetching events from GitHub | Yes |
-| 2 | Dedup (Postgres) | Re-processing known events | Yes |
-| 3 | Guard 4 (fixed) | Re-evaluating triggers for known events | Yes (event store) |
-| 4 | Guard 7 (new) | Runaway dispatch from any cause | Stateless (sliding window) |
+| Layer | Component | What it prevents | Persistent? | Cold start? |
+|-------|-----------|-----------------|-------------|-------------|
+| 1 | ETag (HTTP 304) | Re-delivery when nothing changed | Yes (cursor) | After first poll |
+| 2 | HWM filter (`fetch()`) | Re-delivery when ETag churns -- **#694 fix** | Yes (`last_event_id`) | After first poll |
+| 3 | Cold-start fence (`_started_at`) | Historical events on first poll | N/A | Yes |
+| 4 | `is_replay` -> `source_primed=False` | Cold-start events bypassing safety nets | N/A | Yes |
+| 5 | Pipeline `source_primed` | Trigger eval for unprimed events | N/A | Yes |
+| 6 | Dedup (Postgres) | Re-processing known events | Yes | After first event |
+| 7 | Guard 7 rate limiter | Runaway dispatch | Stateless | Yes |
+| 8 | Guard 6 per-PR concurrency | Per-PR duplicate executions | Yes | Yes |
 
 ## Related ADRs
 

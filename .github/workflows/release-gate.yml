@@ -78,10 +78,12 @@ jobs:
               --ignore-vuln GHSA-5239-wwwm-4pmq \
               --ignore-vuln GHSA-p423-j2cm-9vmq \
               --ignore-vuln GHSA-6w46-j5rx-g56g \
+              --ignore-vuln GHSA-mj87-hwqh-73pj \
               -r /dev/stdin
           # TODO(#345): remove --ignore-vuln once pygments releases a fix
           # TODO(#634): remove --ignore-vuln once cryptography 46.0.7 is available on PyPI
           # TODO(#678): remove --ignore-vuln GHSA-6w46-j5rx-g56g once pytest 9.0.3 is available on PyPI
+          # TODO(#696): remove --ignore-vuln GHSA-mj87-hwqh-73pj once python-multipart 0.0.26 is available on PyPI
 
   dependency-review:
     name: Dependency Review

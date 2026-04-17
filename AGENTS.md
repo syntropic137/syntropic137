@@ -254,12 +254,11 @@ In-memory state is dangerous in production -- it's lost on restart, causing dupl
 - All test-only in-memory adapters MUST inherit `InMemoryAdapter` (or call `assert_test_only()` for dataclasses)
 - The canonical check is `settings.uses_in_memory_stores` (= `is_test or is_offline`)
 - Production wiring MUST fail-fast if no durable backend is available -- never silently fall back to in-memory
-- One intentional exception: `InMemoryPendingSHAStore` is allowed in production because loss on restart only delays a check-run poll (self-heals on next PR event, no correctness impact)
+- No exceptions -- every in-memory adapter is guarded
 
 **Key files:**
 - `packages/syn-adapters/src/syn_adapters/in_memory.py` -- Base class and standalone check
 - `apps/syn-api/src/syn_api/_wiring.py` -- Adapter selection (Postgres > Redis > fail-fast)
-- `packages/syn-adapters/src/syn_adapters/github/pending_sha_store.py` -- Intentional exception
 
 ### Projection Consistency in Processor Loops
 

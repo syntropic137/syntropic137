@@ -106,6 +106,15 @@ class PollingSettings(BaseSettings):
         ),
     )
 
+    max_concurrent_dispatches: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Maximum number of workflow executions running simultaneously. "
+            "Prevents OOM from concurrent container launches. Default: 5."
+        ),
+    )
+
     @property
     def enabled(self) -> bool:
         """Whether polling is enabled (inverse of ``disabled``)."""

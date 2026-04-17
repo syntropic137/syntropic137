@@ -183,7 +183,8 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            msg = f"Setup phase failed: {setup_result.stderr}"
+            detail = setup_result.stderr or f"exit code {setup_result.exit_code} (no stderr output)"
+            msg = f"Setup phase failed: {detail}"
             raise RuntimeError(msg)
         logger.info("Setup phase completed, secrets cleared")
 
