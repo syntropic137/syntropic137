@@ -49,7 +49,6 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/EvaluateWebhookHandler.py" = { variable = "_fire_locks", description = "per-(trigger, pr) asyncio.Lock dict for concurrency guard" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/debouncer.py" = { variable = "_pending", description = "pending debounce task dict" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/safety_guards.py" = { variable = "_dispatch_timestamps", description = "dispatch rate limit timestamp list" }
-"apps/syn-api/src/syn_api/routes/webhooks/signature.py" = { variable = "_sig_failures", description = "signature failure rate limiter dict" }
 
 [aggregate_guards]
 # @command_handler methods exempt from the guard requirement.

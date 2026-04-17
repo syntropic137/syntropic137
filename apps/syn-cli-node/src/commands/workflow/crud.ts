@@ -11,9 +11,11 @@ import { printError, printSuccess, print, printDim } from "../../output/console.
 import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
-import { detectFormat, resolvePackage } from "../../packages/resolver.js";
+import { detectFormat, loadSingleWorkflowFile, resolvePackage } from "../../packages/resolver.js";
 import fs from "node:fs";
 import path from "node:path";
+
+const PLACEHOLDER_REPO_URL = "https://github.com/placeholder/not-configured";
 
 type WorkflowResponse = components["schemas"]["WorkflowResponse"];
 
@@ -27,7 +29,7 @@ export const createCommand: CommandDef = {
   args: [{ name: "name", description: "Name of the workflow", required: true }],
   options: {
     type: { type: "string", short: "t", description: "Workflow type (research, planning, implementation, review, deployment, custom)", default: "custom" },
-    repo: { type: "string", short: "r", description: "Repository URL", default: "https://github.com/example/repo" },
+    repo: { type: "string", short: "r", description: "Repository URL" },
     ref: { type: "string", description: "Repository ref/branch", default: "main" },
     description: { type: "string", short: "d", description: "Workflow description" },
     repos: { type: "string", short: "R", description: "Default GitHub URLs for workspace hydration (repeatable). ADR-058.", multiple: true },
@@ -42,13 +44,17 @@ export const createCommand: CommandDef = {
     }
 
     const workflowType = (parsed.values["type"] as string | undefined) ?? "custom";
-    const repoUrl = (parsed.values["repo"] as string | undefined) ?? "https://github.com/example/repo";
+    const repoUrl = parsed.values["repo"] as string | undefined;
     const repoRef = (parsed.values["ref"] as string | undefined) ?? "main";
     const description = parsed.values["description"] as string | undefined;
     const reposValues = parsed.values["repos"];
     const templateRepos: string[] = Array.isArray(reposValues) ? reposValues as string[] : reposValues ? [reposValues as string] : [];
-    const noRepos = parsed.values["no-repos"] as boolean | undefined;
+    const noRepos = parsed.values["no-repos"] === true;
     const fromPath = parsed.values["from"] as string | undefined;
+
+    if (noRepos && repoUrl !== undefined) {
+      print(style("Warning:", YELLOW) + " --repo is ignored when --no-repos is set");
+    }
 
     let phases: Record<string, unknown>[] | undefined;
     let inputDeclarations: Record<string, unknown>[] | undefined;
@@ -59,21 +65,29 @@ export const createCommand: CommandDef = {
         printError(`Path not found: ${fromPath}`);
         throw new CLIError("Path not found", 1);
       }
-      const stat = fs.statSync(resolved);
-      const workflowDir = stat.isDirectory() ? resolved : path.dirname(resolved);
       try {
-        const { workflows } = resolvePackage(workflowDir);
-        if (workflows.length === 0) {
-          printError(`No workflows found in: ${workflowDir}`);
-          throw new CLIError("No workflows found", 1);
+        const stat = fs.statSync(resolved);
+        if (stat.isFile()) {
+          const wf = loadSingleWorkflowFile(resolved);
+          phases = wf.phases as Record<string, unknown>[];
+          inputDeclarations = wf.input_declarations;
+        } else if (stat.isDirectory()) {
+          const { workflows } = resolvePackage(resolved);
+          if (workflows.length === 0) {
+            printError(`No workflows found in: ${resolved}`);
+            throw new CLIError("No workflows found", 1);
+          }
+          if (workflows.length > 1) {
+            printError(`Multiple workflows found in: ${resolved}. Pass a specific workflow.yaml path with --from.`);
+            throw new CLIError("Multiple workflows found", 1);
+          }
+          const wf = workflows[0]!;
+          phases = wf.phases as Record<string, unknown>[];
+          inputDeclarations = wf.input_declarations;
+        } else {
+          printError(`Path is neither a file nor a directory: ${fromPath}`);
+          throw new CLIError("Invalid path", 1);
         }
-        if (workflows.length > 1) {
-          printError(`Multiple workflows found in: ${workflowDir}. Pass a specific workflow.yaml path with --from.`);
-          throw new CLIError("Multiple workflows found", 1);
-        }
-        const wf = workflows[0]!;
-        phases = wf.phases as Record<string, unknown>[];
-        inputDeclarations = wf.input_declarations;
       } catch (err) {
         if (err instanceof CLIError) throw err;
         printError(`Failed to parse workflow YAML: ${err instanceof Error ? err.message : String(err)}`);
@@ -81,13 +95,19 @@ export const createCommand: CommandDef = {
       }
     }
 
+    const resolvedRepoUrl = noRepos
+      ? ""
+      : repoUrl !== undefined
+        ? repoUrl
+        : PLACEHOLDER_REPO_URL;
+
     const data = unwrap(
       await api.POST("/workflows", {
         body: {
           name,
           workflow_type: workflowType,
           classification: "standard",
-          repository_url: repoUrl,
+          repository_url: resolvedRepoUrl,
           repository_ref: repoRef,
           description: description ?? null,
           ...(templateRepos.length > 0 ? { repos: templateRepos } : {}),

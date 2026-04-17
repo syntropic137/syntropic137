@@ -201,6 +201,7 @@ services:
         max-file: "3"
     networks:
       - syn-internal
+      - docker-proxy
 
   # ===========================================================================
   # FRONTEND (nginx)
