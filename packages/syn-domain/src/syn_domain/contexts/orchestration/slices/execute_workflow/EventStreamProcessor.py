@@ -13,6 +13,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
@@ -487,42 +488,45 @@ class EventStreamProcessor:
         always processed because each block appears on exactly one line (#695).
         """
         message = cli_event.get("message", {})
-        content = message.get("content", [])
+        if not isinstance(message, dict):
+            return
 
-        msg_id = message.get("id") if isinstance(message, dict) else None
-        usage_already_recorded = bool(msg_id) and msg_id in self._seen_message_ids
+        await self._record_turn_usage_once(message)
 
-        # Extract per-turn token usage (dedup'd by message.id)
-        usage = message.get("usage", {})
-        if usage and not usage_already_recorded:
-            input_tokens = usage.get("input_tokens", 0)
-            output_tokens = usage.get("output_tokens", 0)
-
-            cache_creation = usage.get("cache_creation_input_tokens", 0)
-            cache_read = usage.get("cache_read_input_tokens", 0)
-
-            if input_tokens > 0 or output_tokens > 0 or cache_creation > 0 or cache_read > 0:
-                self._tokens.record(input_tokens, output_tokens, cache_creation, cache_read)
-                await self._collector.record_token_usage(
-                    input_tokens,
-                    output_tokens,
-                    cache_creation,
-                    cache_read,
-                )
-                logger.info(
-                    "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
-                    input_tokens,
-                    output_tokens,
-                    cache_read,
-                    cache_creation,
-                )
-            if msg_id:
-                self._seen_message_ids.add(msg_id)
-
-        # Process tool_use items (per-block; always processed)
-        for item in content:
+        for item in message.get("content", []):
             if isinstance(item, dict) and item.get("type") == "tool_use":
                 await self._handle_tool_use(item)
+
+    async def _record_turn_usage_once(self, message: Mapping[str, Any]) -> None:
+        """Record per-turn token usage, deduped by message.id (#695)."""
+        msg_id = message.get("id")
+        if msg_id and msg_id in self._seen_message_ids:
+            return
+
+        usage = message.get("usage") or {}
+        if not usage:
+            return
+
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        cache_creation = usage.get("cache_creation_input_tokens", 0)
+        cache_read = usage.get("cache_read_input_tokens", 0)
+
+        if input_tokens or output_tokens or cache_creation or cache_read:
+            self._tokens.record(input_tokens, output_tokens, cache_creation, cache_read)
+            await self._collector.record_token_usage(
+                input_tokens, output_tokens, cache_creation, cache_read
+            )
+            logger.info(
+                "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
+                input_tokens,
+                output_tokens,
+                cache_read,
+                cache_creation,
+            )
+
+        if msg_id:
+            self._seen_message_ids.add(msg_id)
 
     async def _handle_tool_use(self, item: dict[str, Any]) -> None:
         """Handle a tool_use content block from an assistant message."""
