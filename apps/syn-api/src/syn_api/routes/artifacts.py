@@ -518,6 +518,17 @@ async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResp
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
     a = result.value
+
+    # The metadata projection lists the artifact but object storage hasn't received
+    # the bytes yet — a race between ArtifactCreatedEvent and the MinIO upload (#700).
+    # Signal retry-later instead of a misleading 200-with-null body.
+    if a.content is None and a.size_bytes and a.size_bytes > 0:
+        raise HTTPException(
+            status_code=202,
+            detail=f"Artifact {artifact_id} content not yet available; retry shortly",
+            headers={"Retry-After": "2"},
+        )
+
     return ArtifactContentResponse(
         artifact_id=artifact_id,
         content=a.content,
