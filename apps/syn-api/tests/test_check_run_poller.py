@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -384,6 +385,83 @@ class TestPollLoop:
 
         # Should NOT have polled — no check_run triggers
         assert mock_client.poll_count == 0
+
+
+class TestRateLimit:
+    @pytest.mark.asyncio
+    async def test_rate_limit_stretches_poll_interval(self) -> None:
+        """When the Checks API returns ``rate_limited=True``, the loop must
+        sleep at least ``retry_after_seconds`` instead of its base interval.
+
+        Otherwise the poller hot-loops back into the same 403.
+        """
+        from syn_domain.contexts.github.ports import ChecksAPIResult
+
+        class RateLimitedChecksClient:
+            def __init__(self) -> None:
+                self.poll_count = 0
+
+            async def fetch_check_runs(
+                self,
+                owner: str,
+                repo: str,
+                ref: str,
+                installation_id: str,
+            ) -> ChecksAPIResult:
+                self.poll_count += 1
+                return ChecksAPIResult(
+                    check_runs=[],
+                    total_count=0,
+                    rate_limited=True,
+                    retry_after_seconds=120.0,
+                )
+
+        store = InMemoryTriggerQueryStore()
+        await _index_check_run_trigger(store)
+
+        sha_store = InMemoryPendingSHAStore()
+        await sha_store.register(
+            PendingSHA(
+                repository="owner/repo",
+                sha="abc123",
+                pr_number=42,
+                branch="feat/test",
+                installation_id="inst-1",
+                registered_at=datetime.now(UTC),
+            )
+        )
+
+        recorded_sleeps: list[float] = []
+
+        async def _recording_sleep(seconds: float) -> None:
+            recorded_sleeps.append(seconds)
+            raise asyncio.CancelledError
+
+        mock_client = RateLimitedChecksClient()
+        poller = CheckRunPoller(
+            checks_api=mock_client,
+            pipeline=EventPipeline(
+                dedup=InMemoryDedup(),
+                evaluator=EvaluateWebhookHandler(store=store, repository=NullRepository()),
+            ),
+            sha_store=sha_store,
+            health_tracker=WebhookHealthTracker(),
+            trigger_store=store,
+            settings=MockPollingSettings(),
+            sleep=_recording_sleep,
+        )
+
+        await poller.start()
+        assert poller._task is not None
+        with contextlib.suppress(asyncio.CancelledError):
+            await poller._task
+        poller._task = None
+
+        assert mock_client.poll_count == 1
+        assert recorded_sleeps, "poll loop must reach the sleep step"
+        assert recorded_sleeps[0] >= 120.0, (
+            f"expected sleep >= 120s (rate-limit wait), got {recorded_sleeps[0]}"
+        )
 
 
 class TestDedup:

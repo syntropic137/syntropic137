@@ -70,6 +70,7 @@ class CheckRunIngestionService:
         )
         self._task: asyncio.Task[None] | None = None
         self._sleep = sleep or asyncio.sleep
+        self._last_rate_limit_wait: float = 0.0
 
     async def start(self) -> None:
         """Start the check-run polling background task."""
@@ -135,19 +136,22 @@ class CheckRunIngestionService:
         while True:
             self._state.update_mode(webhook_stale=self._health.is_stale)
             interval = self._state.current_interval
+            self._last_rate_limit_wait = 0.0
 
             try:
                 if await self._has_check_run_triggers():
                     await self._poll_pending_shas()
                 await self._cleanup_stale_shas()
-                self._state.record_success()
+                if self._last_rate_limit_wait == 0.0:
+                    self._state.record_success()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self._state.record_error()
                 logger.exception("Check-run polling error, backing off")
 
-            await self._sleep(interval)
+            sleep_for = max(interval, self._last_rate_limit_wait)
+            await self._sleep(sleep_for)
 
     async def _has_check_run_triggers(self) -> bool:
         """Check if any active triggers listen for check_run events."""
@@ -189,6 +193,7 @@ class CheckRunIngestionService:
 
         if result.rate_limited:
             self._state.record_error()
+            self._last_rate_limit_wait = max(self._last_rate_limit_wait, result.retry_after_seconds)
             logger.warning(
                 "Check-run poller rate limited, backing off %.0fs",
                 result.retry_after_seconds,
