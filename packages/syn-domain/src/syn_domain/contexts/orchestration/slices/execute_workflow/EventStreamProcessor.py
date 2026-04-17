@@ -221,6 +221,12 @@ class EventStreamProcessor:
         self._result_num_turns: int | None = None
         self._error_reason: str | None = None
 
+        # #695: Dedup usage by message.id. Claude CLI emits one assistant event per
+        # content block (text, tool_use, etc.) for a single API response, each carrying
+        # the same message.id and identical usage. Without this, mid-flight totals
+        # overcount by the number of content blocks per turn.
+        self._seen_message_ids: set[str] = set()
+
         # ISS-196: Use collector if provided, else create one from raw writer
         if collector is not None:
             self._collector = collector
@@ -472,13 +478,23 @@ class EventStreamProcessor:
         return task_result
 
     async def _handle_assistant_event(self, cli_event: dict[str, Any]) -> None:
-        """Handle assistant event — extract per-turn tokens and tool_use."""
+        """Handle assistant event — extract per-turn tokens and tool_use.
+
+        Claude CLI emits one assistant JSONL line per content block of a single
+        API response. All lines for the same response share ``message.id`` and
+        carry identical ``usage``. We dedup usage recording by message.id so
+        multi-block responses don't inflate running totals; tool_use blocks are
+        always processed because each block appears on exactly one line (#695).
+        """
         message = cli_event.get("message", {})
         content = message.get("content", [])
 
-        # Extract per-turn token usage
+        msg_id = message.get("id") if isinstance(message, dict) else None
+        usage_already_recorded = bool(msg_id) and msg_id in self._seen_message_ids
+
+        # Extract per-turn token usage (dedup'd by message.id)
         usage = message.get("usage", {})
-        if usage:
+        if usage and not usage_already_recorded:
             input_tokens = usage.get("input_tokens", 0)
             output_tokens = usage.get("output_tokens", 0)
 
@@ -500,8 +516,10 @@ class EventStreamProcessor:
                     cache_read,
                     cache_creation,
                 )
+            if msg_id:
+                self._seen_message_ids.add(msg_id)
 
-        # Process tool_use items
+        # Process tool_use items (per-block; always processed)
         for item in content:
             if isinstance(item, dict) and item.get("type") == "tool_use":
                 await self._handle_tool_use(item)

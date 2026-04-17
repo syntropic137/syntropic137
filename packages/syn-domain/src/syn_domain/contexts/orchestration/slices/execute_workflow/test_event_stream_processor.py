@@ -184,6 +184,57 @@ class TestEventStreamProcessor:
         assert result.total_cost_usd == pytest.approx(0.01)
 
     @pytest.mark.asyncio
+    async def test_multi_block_assistant_dedupes_usage_by_message_id(self) -> None:
+        """Claude CLI emits one assistant line per content block with the same message.id
+        and identical usage; we must record usage exactly once per API response (#695)."""
+        tokens = TokenAccumulator()
+        obs = MockObservability()
+        proc = _make_processor(tokens=tokens, observability=obs)
+
+        text_block_line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg_01ABC",
+                    "content": [{"type": "text", "text": "Analyzing..."}],
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "cache_creation_input_tokens": 22738,
+                        "cache_read_input_tokens": 0,
+                    },
+                },
+            }
+        )
+        tool_use_line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "msg_01ABC",  # same API response, different content block
+                    "content": [{"type": "tool_use", "id": "tu-1", "name": "Read", "input": {}}],
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "cache_creation_input_tokens": 22738,
+                        "cache_read_input_tokens": 0,
+                    },
+                },
+            }
+        )
+        await proc.process_stream(_lines_to_stream(text_block_line, tool_use_line), MockWorkspace())
+
+        # Usage recorded exactly once despite two content-block lines
+        token_obs = [r for r in obs.recordings if r[0] == "token_usage"]
+        assert len(token_obs) == 1
+        assert tokens.input_tokens == 10
+        assert tokens.output_tokens == 5
+        assert tokens.cache_creation_tokens == 22738
+
+        # But tool_use from the second line still processed
+        tool_started = [r for r in obs.recordings if r[0] == "tool_execution_started"]
+        assert len(tool_started) == 1
+
+    @pytest.mark.asyncio
     async def test_assistant_event_tokens(self) -> None:
         tokens = TokenAccumulator()
         obs = MockObservability()
