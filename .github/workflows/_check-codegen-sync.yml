@@ -12,6 +12,10 @@
 # To fix a failure locally: just codegen && git add -A && git commit
 #
 # Called by: release-gate.yml, release-create.yml (pre-publish validation)
+#
+# NOTE: reusable workflows must live at the top of .github/workflows/ — no
+# subdirectories allowed (GitHub rejects with "invalid workflow reference").
+# See _check-version.yml for the full story.
 # =============================================================================
 
 name: Check - Codegen Sync
@@ -48,6 +52,7 @@ jobs:
         run: |
           pnpm --filter @syntropic137/cli install --frozen-lockfile
           pnpm --filter syn-docs install --frozen-lockfile
+          pnpm --filter syn-dashboard-ui install --frozen-lockfile
 
       - name: Regenerate all artifacts
         run: just codegen

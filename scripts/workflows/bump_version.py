@@ -16,7 +16,7 @@ missing a version field, the script fails without modifying anything.
 
 ─────────────────────────────────────────────────────────────────────────────
 CI DEPENDENCY - this script is called directly by the release gate workflow:
-  .github/workflows/checks/version-check.yml
+  .github/workflows/_check-version.yml
     → python3 scripts/workflows/bump_version.py --check          (all 11 files match)
     → python3 scripts/workflows/bump_version.py --check-release  (version > release branch)
 
