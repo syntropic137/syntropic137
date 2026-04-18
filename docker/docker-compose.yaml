@@ -97,6 +97,8 @@ services:
       ALLOW_STOP: 1     # docker stop  -> POST /containers/{id}/stop
       EXEC: 1           # docker exec  -> /exec/* paths
       POST: 1           # Enable all non-GET verbs (POST, DELETE, PUT)
+      NETWORKS: 1       # ADR-021: agentic_isolation provisioning creates/inspects agent-net
+      INFO: 1           # agentic_isolation probes engine capabilities via /info
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     security_opt:

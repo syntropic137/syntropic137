@@ -181,6 +181,8 @@ services:
       ALLOW_STOP: "1"
       EXEC: "1"
       POST: "1"
+      NETWORKS: "1"
+      INFO: "1"
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock:ro
     security_opt:
