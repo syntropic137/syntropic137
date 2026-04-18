@@ -490,6 +490,72 @@
         }
       }
     },
+    "/workflows/from-yaml": {
+      "post": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Create Workflow From Yaml Endpoint",
+        "description": "Create a workflow template by uploading raw YAML.\n\nThe CLI (`syn workflow create --from <file>`) POSTs the file bytes\nhere. Every semantic field (name, classification, repository,\nphases, inputs, requires_repos) comes from the YAML itself.\n\nQuery-string ``name`` and ``workflow_id`` are optional overrides\nintended for scripted bulk installation (e.g. renaming a template\non install). They are *not* a second source of truth for fields\nthat live in the YAML.",
+        "operationId": "create_workflow_from_yaml_endpoint_workflows_from_yaml_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "name": "workflow_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateWorkflowResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/executions": {
       "get": {
         "tags": [
@@ -5439,7 +5505,7 @@
           "repository_url": {
             "type": "string",
             "title": "Repository Url",
-            "default": "https://github.com/example/repo"
+            "default": ""
           },
           "repository_ref": {
             "type": "string",
@@ -5534,6 +5600,18 @@
             "type": "string",
             "title": "Workflow Type"
           },
+          "classification": {
+            "type": "string",
+            "title": "Classification"
+          },
+          "repository_url": {
+            "type": "string",
+            "title": "Repository Url"
+          },
+          "requires_repos": {
+            "type": "boolean",
+            "title": "Requires Repos"
+          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -5544,6 +5622,9 @@
           "id",
           "name",
           "workflow_type",
+          "classification",
+          "repository_url",
+          "requires_repos",
           "status"
         ],
         "title": "CreateWorkflowResponse"

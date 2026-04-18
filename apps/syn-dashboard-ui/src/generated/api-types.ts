@@ -152,6 +152,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/from-yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Workflow From Yaml Endpoint
+         * @description Create a workflow template by uploading raw YAML.
+         *
+         *     The CLI (`syn workflow create --from <file>`) POSTs the file bytes
+         *     here. Every semantic field (name, classification, repository,
+         *     phases, inputs, requires_repos) comes from the YAML itself.
+         *
+         *     Query-string ``name`` and ``workflow_id`` are optional overrides
+         *     intended for scripted bulk installation (e.g. renaming a template
+         *     on install). They are *not* a second source of truth for fields
+         *     that live in the YAML.
+         */
+        post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/executions": {
         parameters: {
             query?: never;
@@ -1870,7 +1899,7 @@ export interface components {
             classification: string;
             /**
              * Repository Url
-             * @default https://github.com/example/repo
+             * @default
              */
             repository_url: string;
             /**
@@ -1910,6 +1939,12 @@ export interface components {
             name: string;
             /** Workflow Type */
             workflow_type: string;
+            /** Classification */
+            classification: string;
+            /** Repository Url */
+            repository_url: string;
+            /** Requires Repos */
+            requires_repos: boolean;
             /** Status */
             status: string;
         };
@@ -4811,6 +4846,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdatePhaseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workflow_from_yaml_endpoint_workflows_from_yaml_post: {
+        parameters: {
+            query?: {
+                name?: string | null;
+                workflow_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateWorkflowResponse"];
                 };
             };
             /** @description Validation Error */

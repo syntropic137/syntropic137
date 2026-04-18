@@ -14,7 +14,6 @@ from syn_adapters.storage import (
 )
 from syn_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
 from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
-    _build_create_command,
     _handle_seed_error,
 )
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
@@ -208,119 +207,9 @@ phases:
 
 
 # =========================================================================
-# Extracted helper tests
+# Extracted helper tests have moved to
+# ``_shared/test_yaml_to_command.py`` alongside the shared module.
 # =========================================================================
-
-
-@pytest.mark.unit
-class TestBuildCreateCommand:
-    """Tests for _build_create_command helper."""
-
-    def test_builds_command_from_definition(self) -> None:
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
-        )
-
-        definition = WorkflowDefinition(
-            id="wf-1",
-            name="Test",
-            type="research",
-            classification="simple",
-            repository={"url": "https://github.com/test/repo", "ref": "main"},
-            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
-        )
-        cmd = _build_create_command(definition)
-        assert cmd.aggregate_id == "wf-1"
-        assert cmd.name == "Test"
-        assert cmd.repository_url == "https://github.com/test/repo"
-
-    def test_uses_empty_url_without_repository(self) -> None:
-        """Workflows without a repository get empty URL and requires_repos=False."""
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
-        )
-
-        definition = WorkflowDefinition(
-            id="wf-2",
-            name="No Repo",
-            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
-        )
-        cmd = _build_create_command(definition)
-        assert cmd.repository_url == ""
-        assert cmd.requires_repos is False
-
-
-@pytest.mark.unit
-class TestInferRequiresRepos:
-    """Regression tests for _infer_requires_repos (ADR-058 #666)."""
-
-    def test_explicit_true_overrides_no_repo(self) -> None:
-        """Explicit requires_repos=True wins even without a repository."""
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
-        )
-        from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
-            _infer_requires_repos,
-        )
-
-        definition = WorkflowDefinition(
-            id="wf-1",
-            name="Explicit True",
-            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
-            requires_repos=True,
-        )
-        assert _infer_requires_repos(definition) is True
-
-    def test_explicit_false_overrides_repo_present(self) -> None:
-        """Explicit requires_repos=False wins even with a repository configured."""
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
-        )
-        from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
-            _infer_requires_repos,
-        )
-
-        definition = WorkflowDefinition(
-            id="wf-2",
-            name="Explicit False",
-            repository={"url": "https://github.com/test/repo", "ref": "main"},
-            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
-            requires_repos=False,
-        )
-        assert _infer_requires_repos(definition) is False
-
-    def test_infer_false_when_no_repository(self) -> None:
-        """No repository and no explicit flag should infer False."""
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
-        )
-        from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
-            _infer_requires_repos,
-        )
-
-        definition = WorkflowDefinition(
-            id="wf-3",
-            name="No Repo",
-            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
-        )
-        assert _infer_requires_repos(definition) is False
-
-    def test_infer_true_when_repository_present(self) -> None:
-        """Repository present and no explicit flag should infer True."""
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
-        )
-        from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
-            _infer_requires_repos,
-        )
-
-        definition = WorkflowDefinition(
-            id="wf-4",
-            name="Has Repo",
-            repository={"url": "https://github.com/test/repo", "ref": "main"},
-            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
-        )
-        assert _infer_requires_repos(definition) is True
 
 
 @pytest.mark.unit

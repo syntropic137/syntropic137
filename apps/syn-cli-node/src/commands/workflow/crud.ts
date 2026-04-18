@@ -7,15 +7,14 @@ import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
 import { api, unwrap } from "../../client/typed.js";
 import type { components } from "../../generated/api-types.js";
+import { postYaml } from "../../client/yaml-upload.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
-import { detectFormat, loadSingleWorkflowFile, resolvePackage } from "../../packages/resolver.js";
+import { detectFormat, resolvePackage } from "../../packages/resolver.js";
 import fs from "node:fs";
 import path from "node:path";
-
-const PLACEHOLDER_REPO_URL = "https://github.com/placeholder/not-configured";
 
 type WorkflowResponse = components["schemas"]["WorkflowResponse"];
 
@@ -34,13 +33,20 @@ export const createCommand: CommandDef = {
     description: { type: "string", short: "d", description: "Workflow description" },
     repos: { type: "string", short: "R", description: "Default GitHub URLs for workspace hydration (repeatable). ADR-058.", multiple: true },
     "no-repos": { type: "boolean", description: "Mark workflow as not requiring repository access (ADR-058 #666)", default: false },
-    from: { type: "string", short: "f", description: "Path to workflow.yaml or directory containing it. Registers phases from YAML." },
+    from: { type: "string", short: "f", description: "Upload a YAML workflow definition. Every semantic field comes from the file - do not combine with --repo/--ref/--type/--description/--repos/--no-repos." },
   },
   handler: async (parsed: ParsedArgs) => {
     const name = parsed.positionals[0];
     if (!name) {
       printError("Missing required argument: name");
       throw new CLIError("Missing argument", 1);
+    }
+
+    const fromPath = parsed.values["from"] as string | undefined;
+
+    if (fromPath) {
+      await createFromYaml(name, fromPath, process.argv.slice(2));
+      return;
     }
 
     const workflowType = (parsed.values["type"] as string | undefined) ?? "custom";
@@ -50,56 +56,12 @@ export const createCommand: CommandDef = {
     const reposValues = parsed.values["repos"];
     const templateRepos: string[] = Array.isArray(reposValues) ? reposValues as string[] : reposValues ? [reposValues as string] : [];
     const noRepos = parsed.values["no-repos"] === true;
-    const fromPath = parsed.values["from"] as string | undefined;
 
     if (noRepos && repoUrl !== undefined) {
       print(style("Warning:", YELLOW) + " --repo is ignored when --no-repos is set");
     }
 
-    let phases: Record<string, unknown>[] | undefined;
-    let inputDeclarations: Record<string, unknown>[] | undefined;
-
-    if (fromPath) {
-      const resolved = path.resolve(fromPath);
-      if (!fs.existsSync(resolved)) {
-        printError(`Path not found: ${fromPath}`);
-        throw new CLIError("Path not found", 1);
-      }
-      try {
-        const stat = fs.statSync(resolved);
-        if (stat.isFile()) {
-          const wf = loadSingleWorkflowFile(resolved);
-          phases = wf.phases as Record<string, unknown>[];
-          inputDeclarations = wf.input_declarations;
-        } else if (stat.isDirectory()) {
-          const { workflows } = resolvePackage(resolved);
-          if (workflows.length === 0) {
-            printError(`No workflows found in: ${resolved}`);
-            throw new CLIError("No workflows found", 1);
-          }
-          if (workflows.length > 1) {
-            printError(`Multiple workflows found in: ${resolved}. Pass a specific workflow.yaml path with --from.`);
-            throw new CLIError("Multiple workflows found", 1);
-          }
-          const wf = workflows[0]!;
-          phases = wf.phases as Record<string, unknown>[];
-          inputDeclarations = wf.input_declarations;
-        } else {
-          printError(`Path is neither a file nor a directory: ${fromPath}`);
-          throw new CLIError("Invalid path", 1);
-        }
-      } catch (err) {
-        if (err instanceof CLIError) throw err;
-        printError(`Failed to parse workflow YAML: ${err instanceof Error ? err.message : String(err)}`);
-        throw new CLIError("YAML parse error", 1);
-      }
-    }
-
-    const resolvedRepoUrl = noRepos
-      ? ""
-      : repoUrl !== undefined
-        ? repoUrl
-        : PLACEHOLDER_REPO_URL;
+    const resolvedRepoUrl = noRepos ? "" : (repoUrl ?? "");
 
     const data = unwrap(
       await api.POST("/workflows", {
@@ -112,22 +74,100 @@ export const createCommand: CommandDef = {
           description: description ?? null,
           ...(templateRepos.length > 0 ? { repos: templateRepos } : {}),
           requires_repos: !noRepos,
-          ...(phases !== undefined ? { phases } : {}),
-          ...(inputDeclarations !== undefined ? { input_declarations: inputDeclarations } : {}),
         },
       }),
       "Failed to create workflow",
     );
 
-    const workflowId = data.id;
-    printSuccess(`Created workflow: ${style(name, CYAN)}`);
-    print(`  ID: ${style(workflowId, DIM)}`);
-    print(`  Type: ${style(workflowType, DIM)}`);
-    if (!fromPath) {
-      printDim(`  Tip: Use --from ./workflow.yaml to register phases from a YAML file`);
-    }
+    printSuccess(`Created workflow: ${style(data.name, CYAN)}`);
+    print(`  ID: ${style(data.id, DIM)}`);
+    print(`  Type: ${style(data.workflow_type, DIM)}`);
+    print(`  Classification: ${style(data.classification, DIM)}`);
+    print(`  Repos required: ${style(data.requires_repos ? "yes" : "no", DIM)}`);
+    printDim(`  Tip: Use --from ./workflow.yaml to upload a fully-defined workflow`);
   },
 };
+
+// ---------------------------------------------------------------------------
+// create --from: dumb YAML upload (server owns all parsing)
+// ---------------------------------------------------------------------------
+
+// Flags that must not be combined with --from. When --from is used, every
+// semantic field lives in the YAML; duplicate flag sources are ambiguous.
+// Short forms (-r, -d, -R, -t) are included so both styles are caught.
+const FROM_CONFLICTING_FLAGS: readonly { long: string; short?: string }[] = [
+  { long: "repo", short: "r" },
+  { long: "ref" },
+  { long: "description", short: "d" },
+  { long: "type", short: "t" },
+  { long: "repos", short: "R" },
+  { long: "no-repos" },
+];
+
+function userSuppliedFlag(argv: readonly string[], long: string, short?: string): boolean {
+  const longFlag = `--${long}`;
+  const shortFlag = short ? `-${short}` : null;
+  return argv.some((a) =>
+    a === longFlag ||
+    a.startsWith(`${longFlag}=`) ||
+    (shortFlag !== null && (a === shortFlag || a.startsWith(`${shortFlag}=`))),
+  );
+}
+
+function collectConflictingFlags(argv: readonly string[]): string[] {
+  const endOfFlags = argv.indexOf("--");
+  const scan = endOfFlags === -1 ? argv : argv.slice(0, endOfFlags);
+  const conflicts: string[] = [];
+  for (const { long, short } of FROM_CONFLICTING_FLAGS) {
+    if (userSuppliedFlag(scan, long, short)) {
+      conflicts.push(`--${long}`);
+    }
+  }
+  return conflicts;
+}
+
+async function createFromYaml(
+  name: string,
+  fromPath: string,
+  argv: readonly string[],
+): Promise<void> {
+  const conflicts = collectConflictingFlags(argv);
+  if (conflicts.length > 0) {
+    printError(
+      `--from cannot be combined with ${conflicts.join(", ")} - those values live in the YAML. Edit the file instead.`,
+    );
+    throw new CLIError("Conflicting flags", 1);
+  }
+
+  const resolved = path.resolve(fromPath);
+  if (!fs.existsSync(resolved)) {
+    printError(`Path not found: ${fromPath}`);
+    throw new CLIError("Path not found", 1);
+  }
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile()) {
+    printError(
+      `--from expects a .yaml file, not a directory. ` +
+        `For marketplace packages, use 'syn workflow install' instead.`,
+    );
+    throw new CLIError("Invalid --from path", 1);
+  }
+
+  const ext = path.extname(resolved).toLowerCase();
+  if (ext !== ".yaml" && ext !== ".yml") {
+    printError(`Workflow file must be .yaml or .yml: ${fromPath}`);
+    throw new CLIError("Invalid file extension", 1);
+  }
+
+  const fileBytes = fs.readFileSync(resolved);
+  const response = await postYaml(fileBytes, { name });
+
+  printSuccess(`Created workflow: ${style(response.name, CYAN)}`);
+  print(`  ID: ${style(response.id, DIM)}`);
+  print(`  Type: ${style(response.workflow_type, DIM)}`);
+  print(`  Classification: ${style(response.classification, DIM)}`);
+  print(`  Repos required: ${style(response.requires_repos ? "yes" : "no", DIM)}`);
+}
 
 // ---------------------------------------------------------------------------
 // list

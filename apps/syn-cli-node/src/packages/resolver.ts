@@ -202,9 +202,7 @@ function loadWorkflowYamlFromPath(
     name: String(data["name"] ?? ""),
     workflow_type: String(data["type"] ?? data["workflow_type"] ?? "custom"),
     classification: String(data["classification"] ?? "standard"),
-    repository_url: repository
-      ? String(repository["url"] ?? "https://github.com/placeholder/not-configured")
-      : "https://github.com/placeholder/not-configured",
+    repository_url: repository ? String(repository["url"] ?? "") : "",
     repository_ref: repository ? String(repository["ref"] ?? "main") : "main",
     description: data["description"] ? String(data["description"]) : null,
     project_name: data["project_name"] ? String(data["project_name"]) : null,
@@ -213,21 +211,6 @@ function loadWorkflowYamlFromPath(
     input_declarations: parseInputDeclarations(data),
     source_path: sourcePath,
   };
-}
-
-export function loadSingleWorkflowFile(absPath: string): ResolvedWorkflow {
-  if (!fs.existsSync(absPath)) {
-    throw new Error(`Workflow file not found: ${absPath}`);
-  }
-  const stat = fs.statSync(absPath);
-  if (!stat.isFile()) {
-    throw new Error(`Path is not a file: ${absPath}`);
-  }
-  const ext = path.extname(absPath).toLowerCase();
-  if (ext !== ".yaml" && ext !== ".yml") {
-    throw new Error(`Workflow file must be .yaml or .yml: ${absPath}`);
-  }
-  return loadWorkflowYamlFromPath(absPath, absPath);
 }
 
 function resolvePhase(
@@ -360,7 +343,7 @@ function resolveStandaloneYaml(
       name: String(data["name"] ?? baseName),
       workflow_type: String(data["type"] ?? data["workflow_type"] ?? "custom"),
       classification: String(data["classification"] ?? "standard"),
-      repository_url: "https://github.com/placeholder/not-configured",
+      repository_url: "",
       repository_ref: "main",
       description: data["description"] ? String(data["description"]) : null,
       project_name: data["project_name"] ? String(data["project_name"]) : null,
