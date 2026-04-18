@@ -247,21 +247,6 @@ def _check_repo_url_placeholders(
     )
 
 
-def _validate_required_inputs(
-    workflow: WorkflowTemplateAggregate,
-    inputs: dict[str, str],
-    task: str | None,
-) -> None:
-    """Eagerly validate that all required inputs are satisfied.
-
-    Checks required InputDeclarations and unresolved {{placeholder}} patterns.
-    Raises HTTPException(422) with a clear message listing what's missing.
-    """
-    merged = _merge_inputs(workflow, inputs, task)
-    _check_missing_declarations(workflow, merged)
-    _check_repo_url_placeholders(workflow, merged)
-
-
 router = APIRouter(prefix="/workflows", tags=["execution"])
 
 
@@ -284,9 +269,10 @@ class ExecuteWorkflowRequest(BaseModel):
     repos: list[str] = Field(
         default_factory=list,
         description=(
-            "GitHub URLs to pre-clone for workspace hydration (ADR-058). "
-            "Overrides the workflow template's repository_url. "
-            "Equivalent to passing inputs={'repos': 'url1,url2'} but type-safe."
+            "GitHub URLs or 'owner/repo' slugs to pre-clone for workspace hydration "
+            "(ADR-058, ADR-063). Typed channel for repository identity: one execution "
+            "can touch 0, 1, or N repos. Passing 'repository' or 'repos' in the `inputs` "
+            "dict is rejected with 422."
         ),
     )
     provider: str = Field(
@@ -407,8 +393,7 @@ async def execute(
         logger.exception("Workflow execution error for %s", workflow_id)
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
-    repos_csv = (inputs or {}).get("repos", "")
-    repo_urls = [r.strip() for r in repos_csv.split(",") if r.strip()] if repos_csv else []
+    repo_urls = [r.https_url for r in (repos or [])]
     return Ok(
         ExecutionSummary(
             workflow_execution_id=result.execution_id,
@@ -429,6 +414,9 @@ async def execute(
 # -- HTTP Endpoints -----------------------------------------------------------
 
 
+_RESERVED_REPO_INPUT_KEYS: frozenset[str] = frozenset({"repos", "repository"})
+
+
 async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
@@ -439,6 +427,20 @@ async def _validate_execution_request(
     workflow = await workflow_repo.get_by_id(workflow_id)
     if workflow is None:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+    # ADR-063: repository identity is typed on `repos[]`, not smuggled through `inputs`.
+    # Reject at the boundary so silent-success-then-BackgroundTask-failure can't happen.
+    leaked = _RESERVED_REPO_INPUT_KEYS & request.inputs.keys()
+    if leaked:
+        keys = ", ".join(f"'{k}'" for k in sorted(leaked))
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{keys} is not a valid input key. "
+                "Pass repositories in the typed 'repos' array "
+                "(CLI: -R <owner/repo>, repeatable)."
+            ),
+        )
 
     # ADR-063: convert string URLs to typed RepositoryRef at the API boundary
     typed_repos: list[RepositoryRef] = []
@@ -451,7 +453,8 @@ async def _validate_execution_request(
                 detail=f"Invalid repository entry '{repo}': {exc}",
             ) from exc
 
-    # Build effective inputs (legacy CSV preserved for backward compat)
+    # Preflight needs the resolved URLs under effective_inputs["repos"]; this is an
+    # internal plumbing channel, not a user-facing input key.
     effective_inputs: dict[str, str] = dict(request.inputs)
     if request.repos:
         effective_inputs["repos"] = ",".join(request.repos)
