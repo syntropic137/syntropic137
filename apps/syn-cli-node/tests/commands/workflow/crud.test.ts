@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   createCommand,
   listCommand,
@@ -55,6 +58,160 @@ describe("workflow crud commands", () => {
       await expect(
         createCommand.handler({ positionals: [], values: {} }),
       ).rejects.toThrow(CLIError);
+    });
+  });
+
+  describe("create --from", () => {
+    let tmpDir: string;
+    let yamlPath: string;
+    const originalArgv = process.argv;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "syn-crud-from-"));
+      yamlPath = path.join(tmpDir, "workflow.yaml");
+      fs.writeFileSync(
+        yamlPath,
+        "id: upload-test\nname: Upload Test\ntype: custom\nphases:\n  - id: p1\n    name: Phase\n    order: 1\n",
+        "utf-8",
+      );
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      process.argv = originalArgv;
+    });
+
+    it("uploads YAML bytes via postYaml and prints created workflow", async () => {
+      process.argv = ["node", "syn", "workflow", "create", "My Upload", "--from", yamlPath];
+      mockFetch.mockResolvedValue(
+        jsonResponse(
+          { id: "upload-test", name: "Upload Test", workflow_type: "custom", status: "created" },
+          201,
+        ),
+      );
+
+      await createCommand.handler({
+        positionals: ["My Upload"],
+        values: { from: yamlPath },
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const call = mockFetch.mock.calls[0]!;
+      const url = String(call[0]);
+      const init = call[1] as RequestInit;
+      expect(url).toContain("/workflows/from-yaml");
+      expect(url).toContain("name=My+Upload");
+      expect(init.method).toBe("POST");
+      const headers = init.headers as Record<string, string>;
+      expect(headers["Content-Type"]).toBe("application/yaml");
+      const body = init.body;
+      const bytes = body instanceof Uint8Array ? body : new Uint8Array(body as ArrayBuffer);
+      expect(Buffer.from(bytes).toString("utf-8")).toContain("upload-test");
+
+      const out = stdout();
+      expect(out).toContain("Created workflow");
+      expect(out).toContain("Upload Test");
+    });
+
+    it("rejects --from combined with --repo", async () => {
+      process.argv = [
+        "node", "syn", "workflow", "create", "X",
+        "--from", yamlPath,
+        "--repo", "https://github.com/foo/bar",
+      ];
+
+      await expect(
+        createCommand.handler({
+          positionals: ["X"],
+          values: { from: yamlPath, repo: "https://github.com/foo/bar" },
+        }),
+      ).rejects.toThrow(CLIError);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("rejects --from combined with --type", async () => {
+      process.argv = [
+        "node", "syn", "workflow", "create", "X",
+        "--from", yamlPath,
+        "--type", "research",
+      ];
+
+      await expect(
+        createCommand.handler({
+          positionals: ["X"],
+          values: { from: yamlPath, type: "research" },
+        }),
+      ).rejects.toThrow(CLIError);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("rejects --from combined with short flag -r", async () => {
+      process.argv = [
+        "node", "syn", "workflow", "create", "X",
+        "--from", yamlPath,
+        "-r", "https://github.com/foo/bar",
+      ];
+
+      await expect(
+        createCommand.handler({
+          positionals: ["X"],
+          values: { from: yamlPath, repo: "https://github.com/foo/bar" },
+        }),
+      ).rejects.toThrow(CLIError);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("rejects --from when file does not exist", async () => {
+      const missing = path.join(tmpDir, "does-not-exist.yaml");
+      process.argv = ["node", "syn", "workflow", "create", "X", "--from", missing];
+
+      await expect(
+        createCommand.handler({
+          positionals: ["X"],
+          values: { from: missing },
+        }),
+      ).rejects.toThrow(CLIError);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("rejects --from pointing at a directory", async () => {
+      process.argv = ["node", "syn", "workflow", "create", "X", "--from", tmpDir];
+
+      await expect(
+        createCommand.handler({
+          positionals: ["X"],
+          values: { from: tmpDir },
+        }),
+      ).rejects.toThrow(CLIError);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("respects -- end-of-options: literal --repo after -- is not a conflict", async () => {
+      process.argv = [
+        "node", "syn", "workflow", "create", "My Upload",
+        "--from", yamlPath,
+        "--", "--repo=ignored-literal",
+      ];
+      mockFetch.mockResolvedValue(
+        jsonResponse(
+          {
+            id: "upload-test",
+            name: "Upload Test",
+            workflow_type: "custom",
+            classification: "standard",
+            repository_url: "",
+            requires_repos: false,
+            status: "created",
+          },
+          201,
+        ),
+      );
+
+      await createCommand.handler({
+        positionals: ["My Upload"],
+        values: { from: yamlPath },
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -29,7 +29,7 @@ syn workflow create <name> [options]
 | `--description`, `-d` | `text` | --- | Workflow description |
 | `--repos`, `-R` | `text` | --- | Default GitHub URLs for workspace hydration (repeatable). ADR-058. |
 | `--no-repos` | `boolean` | `false` | Mark workflow as not requiring repository access (ADR-058 #666) |
-| `--from`, `-f` | `text` | --- | Path to workflow.yaml or directory containing it. Registers phases from YAML. |
+| `--from`, `-f` | `text` | --- | Upload a YAML workflow definition. Every semantic field comes from the file - do not combine with --repo/--ref/--type/--description/--repos/--no-repos. |
 
 ---
 

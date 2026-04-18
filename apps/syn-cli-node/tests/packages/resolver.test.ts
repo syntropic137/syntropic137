@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import {
   parseSource,
-  loadSingleWorkflowFile,
   resolvePackage,
 } from "../../src/packages/resolver.js";
 
@@ -56,56 +55,6 @@ describe("requires_repos inference (ADR-058)", () => {
 
   afterEach(() => {
     if (tmpDir) cleanup(tmpDir);
-  });
-
-  describe("loadSingleWorkflowFile", () => {
-    it("returns true when requires_repos: true is explicit and repository is absent", () => {
-      tmpDir = makeTmpDir();
-      const yamlPath = path.join(tmpDir, "workflow.yaml");
-      fs.writeFileSync(
-        yamlPath,
-        "id: test\nname: Test\nrequires_repos: true\nphases: []\n",
-        "utf-8",
-      );
-      const wf = loadSingleWorkflowFile(yamlPath);
-      expect(wf.requires_repos).toBe(true);
-    });
-
-    it("returns false when requires_repos: false is explicit even with a repository block", () => {
-      tmpDir = makeTmpDir();
-      const yamlPath = path.join(tmpDir, "workflow.yaml");
-      fs.writeFileSync(
-        yamlPath,
-        "id: test\nname: Test\nrequires_repos: false\nrepository:\n  url: https://github.com/org/repo\n  ref: main\nphases: []\n",
-        "utf-8",
-      );
-      const wf = loadSingleWorkflowFile(yamlPath);
-      expect(wf.requires_repos).toBe(false);
-    });
-
-    it("defaults to false when requires_repos is absent and repository is absent (ADR-058)", () => {
-      tmpDir = makeTmpDir();
-      const yamlPath = path.join(tmpDir, "workflow.yaml");
-      fs.writeFileSync(
-        yamlPath,
-        "id: test\nname: Test\nphases: []\n",
-        "utf-8",
-      );
-      const wf = loadSingleWorkflowFile(yamlPath);
-      expect(wf.requires_repos).toBe(false);
-    });
-
-    it("defaults to true when requires_repos is absent but a repository block is present", () => {
-      tmpDir = makeTmpDir();
-      const yamlPath = path.join(tmpDir, "workflow.yaml");
-      fs.writeFileSync(
-        yamlPath,
-        "id: test\nname: Test\nrepository:\n  url: https://github.com/org/repo\n  ref: main\nphases: []\n",
-        "utf-8",
-      );
-      const wf = loadSingleWorkflowFile(yamlPath);
-      expect(wf.requires_repos).toBe(true);
-    });
   });
 
   describe("resolveStandaloneYaml (via resolvePackage)", () => {

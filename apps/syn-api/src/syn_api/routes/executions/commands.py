@@ -131,7 +131,7 @@ def _get_preflight_repos(
 
     # Check workflow.repos with variable substitution (mirrors ExecuteWorkflowHandler._resolve_repos).
     # Without this, unresolved {{variable}} patterns in repos silently fall through to
-    # repository_url (which defaults to example/repo), producing a misleading auth error.
+    # repository_url (empty string by default), producing a misleading auth error.
     if workflow.repos:
         merged = _merge_inputs(workflow, effective_inputs, task)
         try:

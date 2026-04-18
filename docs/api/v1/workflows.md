@@ -90,7 +90,7 @@ async def create_workflow(
     name: str,
     workflow_type: str = "custom",
     classification: str = "standard",
-    repository_url: str = "https://github.com/example/repo",
+    repository_url: str = "",
     repository_ref: str = "main",
     description: str | None = None,
     phases: list[dict[str, Any]] | None = None,
@@ -105,7 +105,7 @@ async def create_workflow(
 | `name` | `str` | required | Workflow name |
 | `workflow_type` | `str` | `"custom"` | Type: research, planning, implementation, review, deployment, custom |
 | `classification` | `str` | `"standard"` | Classification: standard, advanced |
-| `repository_url` | `str` | example URL | Repository URL |
+| `repository_url` | `str` | `""` | Repository URL (empty = no repo configured; ADR-058) |
 | `repository_ref` | `str` | `"main"` | Git ref/branch |
 | `description` | `str \| None` | `None` | Human-readable description |
 | `phases` | `list[dict] \| None` | `None` | Phase definitions (auto-creates one if omitted) |
