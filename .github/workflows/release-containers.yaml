@@ -12,7 +12,7 @@
 #   1. Build container images (multi-arch for servers, amd64-only for UI)
 #   2. Push to GHCR with version tags
 #   3. Sign with cosign (keyless OIDC), SBOM via BuildKit
-#   4. Attach release assets (compose file, syn-ctl, .env.example, SHA256SUMS)
+#   4. Attach release assets (compose file, .env.example, SHA256SUMS)
 #
 # Security scanning happens in CI (OSV Scanner + pip-audit on every push).
 # Release workflow trusts CI — builds, signs, and publishes only.
@@ -274,7 +274,7 @@ jobs:
           retention-days: 1
 
   # ===========================================================================
-  # RELEASE ASSETS — Attach compose file, syn-ctl, .env.example, SHA256SUMS
+  # RELEASE ASSETS — Attach compose file, .env.example, SHA256SUMS
   # ===========================================================================
 
   release-assets:
@@ -328,8 +328,6 @@ jobs:
           cp docker/docker-compose.syntropic137.yaml /tmp/release-assets/
           cp docker/selfhost.env.example /tmp/release-assets/
           cp docker/selfhost-entrypoint.sh /tmp/release-assets/
-          cp syn-ctl /tmp/release-assets/
-          chmod +x /tmp/release-assets/syn-ctl
           chmod +x /tmp/release-assets/selfhost-entrypoint.sh
 
       # -----------------------------------------------------------------------
@@ -392,7 +390,6 @@ jobs:
             docker-compose.syntropic137.yaml \
             selfhost.env.example \
             selfhost-entrypoint.sh \
-            syn-ctl \
             > SHA256SUMS
 
           echo "## SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
@@ -423,7 +420,6 @@ jobs:
             /tmp/release-assets/docker-compose.syntropic137.yaml \
             /tmp/release-assets/selfhost.env.example \
             /tmp/release-assets/selfhost-entrypoint.sh \
-            /tmp/release-assets/syn-ctl \
             /tmp/release-assets/SHA256SUMS \
             /tmp/release-assets/SHA256SUMS.bundle \
             --clobber
@@ -468,7 +464,6 @@ jobs:
           echo "- \`docker-compose.syntropic137.yaml\` (image digests pinned)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`selfhost.env.example\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`selfhost-entrypoint.sh\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`syn-ctl\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`SHA256SUMS\` (cosign-signed)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Verification" >> "$GITHUB_STEP_SUMMARY"
