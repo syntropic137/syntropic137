@@ -258,6 +258,7 @@ services:
       start_period: 15s
     networks:
     - syn-internal
+    - docker-proxy
     container_name: syn137-api
     volumes:
     - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro

@@ -223,3 +223,118 @@ class TestProcessorReposPersistence:
         )
 
         assert inputs["repos"] == "https://github.com/org/explicit"
+
+
+@pytest.mark.unit
+class TestProcessorCancellation:
+    """Tests for cancellation cleanup semantics."""
+
+    @pytest.mark.anyio
+    async def test_cancel_execution_clears_all_active_state_and_sets_error_message(
+        self,
+    ) -> None:
+        """_cancel_execution closes workspace CMs, clears all in-memory state, and
+        propagates the cancel reason into the result's error_message.
+        """
+        from datetime import UTC, datetime
+
+        processor = _make_processor()
+
+        # Seed session managers (expose complete_cancelled as AsyncMock).
+        session_mgr_a = MagicMock()
+        session_mgr_a.complete_cancelled = AsyncMock()
+        session_mgr_b = MagicMock()
+        session_mgr_b.complete_cancelled = AsyncMock()
+        processor._session_managers["phase-a"] = session_mgr_a
+        processor._session_managers["phase-b"] = session_mgr_b
+
+        # Seed workspace context managers (async context manager protocol).
+        workspace_cm_a = MagicMock()
+        workspace_cm_a.__aexit__ = AsyncMock(return_value=None)
+        workspace_cm_b = MagicMock()
+        workspace_cm_b.__aexit__ = AsyncMock(return_value=None)
+        processor._active_workspace_cms["phase-a"] = workspace_cm_a
+        processor._active_workspace_cms["phase-b"] = workspace_cm_b
+
+        # Seed the remaining per-phase state dicts.
+        processor._active_workspaces["phase-a"] = MagicMock()
+        processor._active_workspaces["phase-b"] = MagicMock()
+        processor._active_envs["phase-a"] = {"FOO": "bar"}
+        processor._active_envs["phase-b"] = {"BAZ": "qux"}
+        processor._active_cmds["phase-a"] = ["claude", "--model", "haiku"]
+        processor._active_cmds["phase-b"] = ["claude", "--model", "sonnet"]
+
+        started_at = datetime.now(UTC)
+        result = await processor._cancel_execution(
+            execution_id="exec-cancel",
+            workflow_id="wf-cancel",
+            phase_results=[],
+            all_artifact_ids=[],
+            started_at=started_at,
+            cancel_reason="user requested",
+        )
+
+        # Each workspace CM was closed via the async context manager exit.
+        workspace_cm_a.__aexit__.assert_awaited_once_with(None, None, None)
+        workspace_cm_b.__aexit__.assert_awaited_once_with(None, None, None)
+
+        # Each session manager was told to complete-as-cancelled with the reason.
+        session_mgr_a.complete_cancelled.assert_awaited_once_with(reason="user requested")
+        session_mgr_b.complete_cancelled.assert_awaited_once_with(reason="user requested")
+
+        # All five per-phase state dicts are empty after cancellation.
+        assert processor._session_managers == {}
+        assert processor._active_workspace_cms == {}
+        assert processor._active_workspaces == {}
+        assert processor._active_envs == {}
+        assert processor._active_cmds == {}
+
+        # The result reflects the cancellation with the reason as error_message.
+        assert result.status == "cancelled"
+        assert result.error_message == "user requested"
+        assert result.execution_id == "exec-cancel"
+        assert result.workflow_id == "wf-cancel"
+
+    @pytest.mark.anyio
+    async def test_cancel_execution_survives_workspace_cleanup_failure(self) -> None:
+        """A workspace CM that raises during __aexit__ does not abort the cleanup
+        loop; remaining state is still cleared and the cancelled result is still
+        produced.
+        """
+        from datetime import UTC, datetime
+
+        processor = _make_processor()
+
+        session_mgr = MagicMock()
+        session_mgr.complete_cancelled = AsyncMock()
+        processor._session_managers["phase-a"] = session_mgr
+
+        failing_cm = MagicMock()
+        failing_cm.__aexit__ = AsyncMock(side_effect=RuntimeError("cleanup exploded"))
+        healthy_cm = MagicMock()
+        healthy_cm.__aexit__ = AsyncMock(return_value=None)
+        processor._active_workspace_cms["phase-a"] = failing_cm
+        processor._active_workspace_cms["phase-b"] = healthy_cm
+
+        processor._active_workspaces["phase-a"] = MagicMock()
+        processor._active_envs["phase-a"] = {}
+        processor._active_cmds["phase-a"] = []
+
+        result = await processor._cancel_execution(
+            execution_id="exec-cancel",
+            workflow_id="wf-cancel",
+            phase_results=[],
+            all_artifact_ids=[],
+            started_at=datetime.now(UTC),
+            cancel_reason="timeout",
+        )
+
+        failing_cm.__aexit__.assert_awaited_once_with(None, None, None)
+        healthy_cm.__aexit__.assert_awaited_once_with(None, None, None)
+        assert processor._session_managers == {}
+        assert processor._active_workspace_cms == {}
+        assert processor._active_workspaces == {}
+        assert processor._active_envs == {}
+        assert processor._active_cmds == {}
+        assert result.status == "cancelled"
+        assert result.error_message == "timeout"

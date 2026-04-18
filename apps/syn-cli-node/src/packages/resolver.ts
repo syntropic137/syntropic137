@@ -58,6 +58,16 @@ export function recordInstallation(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// ADR-058: requires_repos default inference
+// ---------------------------------------------------------------------------
+
+function inferRequiresRepos(data: Record<string, unknown>): boolean {
+  if (data["requires_repos"] === true) return true;
+  if (data["requires_repos"] === false) return false;
+  return data["repository"] != null;
+}
+
+// ---------------------------------------------------------------------------
 // Source parsing
 // ---------------------------------------------------------------------------
 
@@ -169,7 +179,14 @@ function loadWorkflowYaml(
   if (!fs.existsSync(yamlPath)) {
     throw new Error(`workflow.yaml not found in ${workflowDir}`);
   }
+  return loadWorkflowYamlFromPath(yamlPath, sourcePath);
+}
 
+function loadWorkflowYamlFromPath(
+  yamlPath: string,
+  sourcePath: string,
+): ResolvedWorkflow {
+  const workflowDir = path.dirname(yamlPath);
   const content = fs.readFileSync(yamlPath, "utf-8");
   const data = parseYaml(content) as Record<string, unknown>;
 
@@ -191,11 +208,26 @@ function loadWorkflowYaml(
     repository_ref: repository ? String(repository["ref"] ?? "main") : "main",
     description: data["description"] ? String(data["description"]) : null,
     project_name: data["project_name"] ? String(data["project_name"]) : null,
-    requires_repos: data["requires_repos"] !== false,
+    requires_repos: inferRequiresRepos(data),
     phases: resolvedPhases as Record<string, unknown>[],
     input_declarations: parseInputDeclarations(data),
     source_path: sourcePath,
   };
+}
+
+export function loadSingleWorkflowFile(absPath: string): ResolvedWorkflow {
+  if (!fs.existsSync(absPath)) {
+    throw new Error(`Workflow file not found: ${absPath}`);
+  }
+  const stat = fs.statSync(absPath);
+  if (!stat.isFile()) {
+    throw new Error(`Path is not a file: ${absPath}`);
+  }
+  const ext = path.extname(absPath).toLowerCase();
+  if (ext !== ".yaml" && ext !== ".yml") {
+    throw new Error(`Workflow file must be .yaml or .yml: ${absPath}`);
+  }
+  return loadWorkflowYamlFromPath(absPath, absPath);
 }
 
 function resolvePhase(
@@ -332,7 +364,7 @@ function resolveStandaloneYaml(
       repository_ref: "main",
       description: data["description"] ? String(data["description"]) : null,
       project_name: data["project_name"] ? String(data["project_name"]) : null,
-      requires_repos: data["requires_repos"] !== false,
+      requires_repos: inferRequiresRepos(data),
       phases: Array.isArray(data["phases"])
         ? (data["phases"] as Record<string, unknown>[])
         : [],
