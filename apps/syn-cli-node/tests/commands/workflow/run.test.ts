@@ -155,6 +155,163 @@ describe("workflow run commands", () => {
         runCommand.handler({ positionals: [], values: {} }),
       ).rejects.toThrow(CLIError);
     });
+
+    it("rejects --input repository=X with migration hint", async () => {
+      await expect(
+        runCommand.handler({
+          positionals: ["wf-x"],
+          values: { input: ["repository=owner/repo"] },
+        }),
+      ).rejects.toThrow(CLIError);
+
+      const errOut = (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .join("");
+      expect(errOut).toContain("'repository' is not a valid --input key");
+
+      const out = stdout();
+      expect(out).toContain("-R <owner/repo>");
+      // No API call should have been made — guard runs before resolveWorkflow
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("rejects --input repos=owner/a,owner/b with migration hint", async () => {
+      await expect(
+        runCommand.handler({
+          positionals: ["wf-x"],
+          values: { input: ["repos=owner/a,owner/b"] },
+        }),
+      ).rejects.toThrow(CLIError);
+
+      const errOut = (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .join("");
+      expect(errOut).toContain("'repos' is not a valid --input key");
+    });
+
+    it("resolves -R repo-* to full_name via /repos/{id}", async () => {
+      mockFetch
+        // 1) repo-* lookup (happens before resolveWorkflow in the handler)
+        .mockResolvedValueOnce(
+          jsonResponse({
+            repo_id: "repo-abc",
+            organization_id: "org-1",
+            system_id: "",
+            provider: "github",
+            full_name: "acme/widgets",
+            owner: "acme",
+            default_branch: "main",
+            installation_id: "",
+            is_private: false,
+            created_by: "",
+            created_at: "2026-01-01T00:00:00Z",
+          }),
+        )
+        // 2) resolveWorkflow list
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-run-ref-1", name: "W", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        // 3) workflow detail
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-run-ref-1",
+            name: "W",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        // 4) execute
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-001" }),
+        );
+
+      await runCommand.handler({
+        positionals: ["wf-run"],
+        values: { repo: ["repo-abc"] },
+      });
+
+      // openapi-fetch uses fetch(Request), so call args come as [Request]
+      const lookupReq = mockFetch.mock.calls[0]![0] as Request;
+      expect(lookupReq.url).toContain("/repos/repo-abc");
+
+      // The execute call (#4) must carry the resolved full_name, not repo-abc
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      expect(executeReq.url).toContain("/workflows/wf-run-ref-1/execute");
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.repos).toEqual(["acme/widgets"]);
+    });
+
+    it("passes owner/repo straight through without lookup", async () => {
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-passthrough-1", name: "W", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-passthrough-1",
+            name: "W",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-002" }),
+        );
+
+      await runCommand.handler({
+        positionals: ["wf-passthrough"],
+        values: { repo: ["acme/widgets"] },
+      });
+
+      // No /repos/ lookup — 3 calls: workflows list, detail, execute
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      const urls = mockFetch.mock.calls.map((c: unknown[]) => (c[0] as Request).url);
+      expect(urls.some((u: string) => u.includes("/repos/"))).toBe(false);
+
+      const executeReq = mockFetch.mock.calls[2]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.repos).toEqual(["acme/widgets"]);
+    });
+
+    it("fails loud when API returns status!=started", async () => {
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-weird-1", name: "W", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-weird-1",
+            name: "W",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "accepted", execution_id: null }),
+        );
+
+      await expect(
+        runCommand.handler({ positionals: ["wf-weird"], values: {} }),
+      ).rejects.toThrow(CLIError);
+    });
   });
 
   describe("status", () => {
