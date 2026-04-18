@@ -264,10 +264,10 @@ Merge to release
 |------|---------|
 | `.github/workflows/release-gate.yml` | Thin orchestrator - calls checks + inline security scans |
 | `.github/workflows/release-create.yml` | Release pipeline - create tag/release, publish containers + CLI |
-| `.github/workflows/checks/version-check.yml` | Version consistency: all 11 files match, bumped vs release |
-| `.github/workflows/checks/changelog-check.yml` | PR body length validation (takes `pr_body` input) |
-| `.github/workflows/checks/codegen-sync.yml` | Runs `just codegen`, checks for drift (CLI types, API docs, CLI docs) |
-| `.github/workflows/checks/docker-dry-run.yml` | All container images build successfully (single-arch, GHA cache) |
+| `.github/workflows/_check-version.yml` | Version consistency: all 11 files match, bumped vs release |
+| `.github/workflows/_check-changelog.yml` | PR body length validation (takes `pr_body` input) |
+| `.github/workflows/_check-codegen-sync.yml` | Runs `just codegen`, checks for drift (CLI types, API docs, CLI docs) |
+| `.github/workflows/_check-docker-dry-run.yml` | All container images build successfully (single-arch, GHA cache) |
 | `.github/workflows/release-containers.yaml` | Multi-arch build, cosign sign, push to GHCR, release assets |
 | `.github/workflows/release-cli.yaml` | Build + publish `@syntropic137/cli` to npm (OIDC, provenance) |
 | `scripts/workflows/bump_version.py` | Version bump script; `--check` (consistency) and `--check-release` (semver vs release branch) |

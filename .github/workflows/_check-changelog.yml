@@ -5,6 +5,10 @@
 # The PR body is used verbatim as the GitHub Release description.
 #
 # Called by: release-gate.yml
+#
+# NOTE: reusable workflows must live at the top of .github/workflows/ — no
+# subdirectories allowed (GitHub rejects with "invalid workflow reference").
+# See _check-version.yml for the full story.
 # =============================================================================
 
 name: Check - Release Notes

@@ -5,6 +5,13 @@
 # what's currently on the release branch.
 #
 # Called by: release-gate.yml
+#
+# NOTE on the `_check-` prefix and flat layout:
+# GitHub Actions does NOT support reusable workflows in subdirectories of
+# .github/workflows/ — they MUST live at the top level. Moving them into a
+# `checks/` subdir produces a cryptic "invalid workflow reference" failure
+# with 0 jobs and the path-as-name in the UI. The `_check-` prefix is our
+# convention for grouping reusable-only (workflow_call) workflows visually.
 # =============================================================================
 
 name: Check - Version Consistency
