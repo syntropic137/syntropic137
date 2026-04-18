@@ -83,7 +83,11 @@ const showCommand: CommandDef = {
   args: [{ name: "execution-id", description: "Execution ID", required: true }],
   handler: async (parsed: ParsedArgs) => {
     const id = parsed.positionals[0];
-    if (!id) { printError("Missing execution-id"); throw new CLIError("Missing argument", 1); }
+    if (!id) {
+      printError("execution-id is required");
+      printDim("Hint: run `syn execution list` to find an execution ID.");
+      throw new CLIError("Missing argument", 1);
+    }
 
     const ex: ExecutionDetail = unwrap(await api.GET("/executions/{execution_id}", {
       params: { path: { execution_id: id } },
