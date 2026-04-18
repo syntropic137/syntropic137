@@ -9,7 +9,7 @@ Exits 1 if any drift is detected, with a summary of what changed.
 
 ─────────────────────────────────────────────────────────────────────────────
 CI DEPENDENCY - called by the codegen sync check:
-  .github/workflows/checks/codegen-sync.yml
+  .github/workflows/_check-codegen-sync.yml
     → python3 scripts/workflows/check_drift.py \\
         apps/syn-cli-node/src/generated/ \\
         apps/syn-docs/content/docs/cli/ \\

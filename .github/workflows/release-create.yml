@@ -120,13 +120,17 @@ jobs:
           echo "Created release: ${{ steps.version.outputs.version }}"
 
   # ---------------------------------------------------------------------------
-  # Step 2: Pre-publish validation — codegen sync (reuses checks/codegen-sync.yml)
+  # Step 2: Pre-publish validation — codegen sync (reuses _check-codegen-sync.yml)
+  #
+  # NOTE: reusable workflows must live at the top of .github/workflows/ — no
+  # subdirectories. The `_check-*` prefix visually groups them. See
+  # _check-codegen-sync.yml for the constraint.
   # ---------------------------------------------------------------------------
   pre-publish-validation:
     name: Pre-Publish Validation
     needs: [create-release]
     if: needs.create-release.outputs.created == 'true'
-    uses: ./.github/workflows/checks/codegen-sync.yml
+    uses: ./.github/workflows/_check-codegen-sync.yml
 
   # ---------------------------------------------------------------------------
   # Step 3: Build, sign, push Docker images + attach release assets

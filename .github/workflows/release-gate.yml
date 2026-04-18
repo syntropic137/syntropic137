@@ -13,7 +13,9 @@
 #
 # Full CI (tests, lint, typecheck) also runs on these PRs via ci.yml.
 #
-# Each check lives in .github/workflows/checks/ as a reusable workflow.
+# Each check lives in .github/workflows/ with the `_check-` prefix as a
+# reusable workflow. (GitHub Actions does not support subdirectories for
+# reusable workflows — they must be at the top level.)
 # =============================================================================
 
 name: Release Gate
@@ -29,20 +31,25 @@ permissions:
 jobs:
   # ---------------------------------------------------------------------------
   # Reusable checks
+  #
+  # NOTE: GitHub Actions does NOT support reusable workflows in subdirectories
+  # of .github/workflows/ — they must live at the top level. The `_check-*`
+  # prefix visually groups them and signals they only fire via workflow_call
+  # (they appear as greyed-out entries in the Actions sidebar).
   # ---------------------------------------------------------------------------
   version-check:
-    uses: ./.github/workflows/checks/version-check.yml
+    uses: ./.github/workflows/_check-version.yml
 
   changelog-check:
-    uses: ./.github/workflows/checks/changelog-check.yml
+    uses: ./.github/workflows/_check-changelog.yml
     with:
       pr_body: ${{ github.event.pull_request.body }}
 
   codegen-sync:
-    uses: ./.github/workflows/checks/codegen-sync.yml
+    uses: ./.github/workflows/_check-codegen-sync.yml
 
   docker-dry-run:
-    uses: ./.github/workflows/checks/docker-dry-run.yml
+    uses: ./.github/workflows/_check-docker-dry-run.yml
 
   # ---------------------------------------------------------------------------
   # Security Scans — inline (not duplicated elsewhere, no extraction needed)
