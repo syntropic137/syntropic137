@@ -52,6 +52,7 @@ jobs:
         run: |
           pnpm --filter @syntropic137/cli install --frozen-lockfile
           pnpm --filter syn-docs install --frozen-lockfile
+          pnpm --filter syn-dashboard-ui install --frozen-lockfile
 
       - name: Regenerate all artifacts
         run: just codegen
