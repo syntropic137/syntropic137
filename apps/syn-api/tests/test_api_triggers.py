@@ -421,3 +421,111 @@ async def test_full_lifecycle():
     assert isinstance(await delete_trigger(tid), Ok)
     detail = await get_trigger(tid)
     assert detail.value.status == "deleted"
+
+
+# -- Installation ID resolver (P0-3 regression) -------------------------------
+
+
+class TestResolveInstallationId:
+    """`_resolve_installation_id` accepts syn `repo-*` IDs and `owner/name` alike."""
+
+    @pytest.mark.asyncio
+    async def test_passthrough_when_installation_id_already_set(self) -> None:
+        from syn_api.routes.triggers.commands import _resolve_installation_id
+
+        assert await _resolve_installation_id("12345", "owner/repo") == "12345"
+
+    @pytest.mark.asyncio
+    async def test_empty_when_repository_empty(self) -> None:
+        from syn_api.routes.triggers.commands import _resolve_installation_id
+
+        assert await _resolve_installation_id("", "") == ""
+
+    @pytest.mark.asyncio
+    async def test_resolves_repo_id_via_projection(self) -> None:
+        """`repo-*` IDs are resolved via repo projection, then passed to the App."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from syn_api.routes.triggers.commands import _resolve_installation_id
+
+        mock_repo = MagicMock()
+        mock_repo.full_name = "acme/widgets"
+        mock_projection = MagicMock()
+        mock_projection.get = AsyncMock(return_value=mock_repo)
+
+        mock_client = MagicMock()
+        mock_client.get_installation_for_repo = AsyncMock(return_value="99999")
+
+        with (
+            patch(
+                "syn_domain.contexts.organization.get_repo_projection",
+                return_value=mock_projection,
+            ),
+            patch(
+                "syn_adapters.github.client.get_github_client",
+                return_value=mock_client,
+            ),
+        ):
+            result = await _resolve_installation_id("", "repo-abc123")
+
+        assert result == "99999"
+        mock_projection.get.assert_awaited_once_with("repo-abc123")
+        mock_client.get_installation_for_repo.assert_awaited_once_with("acme/widgets")
+
+    @pytest.mark.asyncio
+    async def test_owner_name_passes_straight_through(self) -> None:
+        """`owner/name` goes straight to the App — no projection lookup."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from syn_api.routes.triggers.commands import _resolve_installation_id
+
+        mock_client = MagicMock()
+        mock_client.get_installation_for_repo = AsyncMock(return_value="42")
+
+        with patch(
+            "syn_adapters.github.client.get_github_client",
+            return_value=mock_client,
+        ):
+            result = await _resolve_installation_id("", "acme/widgets")
+
+        assert result == "42"
+        mock_client.get_installation_for_repo.assert_awaited_once_with("acme/widgets")
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_repo_id_not_in_projection(self) -> None:
+        """Unknown `repo-*` ID → empty installation_id, poller re-resolves later."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from syn_api.routes.triggers.commands import _resolve_installation_id
+
+        mock_projection = MagicMock()
+        mock_projection.get = AsyncMock(return_value=None)
+
+        with patch(
+            "syn_domain.contexts.organization.get_repo_projection",
+            return_value=mock_projection,
+        ):
+            result = await _resolve_installation_id("", "repo-unknown")
+
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_github_auth_failure(self) -> None:
+        """App not installed on repo → empty installation_id, persist pending."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from syn_adapters.github.client import GitHubAuthError
+        from syn_api.routes.triggers.commands import _resolve_installation_id
+
+        mock_client = MagicMock()
+        mock_client.get_installation_for_repo = AsyncMock(
+            side_effect=GitHubAuthError("not installed")
+        )
+
+        with patch(
+            "syn_adapters.github.client.get_github_client",
+            return_value=mock_client,
+        ):
+            result = await _resolve_installation_id("", "acme/widgets")
+
+        assert result == ""

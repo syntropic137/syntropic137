@@ -36,24 +36,61 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/triggers", tags=["triggers"])
 
 
+async def _resolve_repo_full_name(repository: str) -> str | None:
+    """Resolve a repository identifier to its GitHub `owner/name` form.
+
+    - `repo-*` (syn internal ID): look up via the repo projection.
+    - `owner/name` (GitHub standard): passed through.
+    - Anything else: `None` (caller treats as unresolvable).
+    """
+    if repository.startswith("repo-"):
+        from syn_domain.contexts.organization import get_repo_projection
+
+        projection = get_repo_projection()
+        repo = await projection.get(repository)
+        return repo.full_name if repo is not None else None
+
+    if "/" in repository:
+        return repository
+
+    return None
+
+
 async def _resolve_installation_id(installation_id: str, repository: str) -> str:
-    """Auto-resolve installation_id from the GitHub App if not provided."""
+    """Auto-resolve installation_id from the GitHub App if not provided.
+
+    P0-3: the CLI registers triggers with syn `repo-*` IDs. Those are
+    unknown to the GitHub API, so we first resolve them to `owner/name`
+    via the repo projection, then ask the App which installation owns
+    that repo. Returns `""` if resolution fails at any step — the poller
+    re-resolves on first fire.
+    """
     if installation_id or not repository:
         return installation_id
+
+    full_name = await _resolve_repo_full_name(repository)
+    if full_name is None:
+        logger.warning(
+            "Could not resolve repository identifier '%s' to owner/name; "
+            "trigger will be persisted with installation_id='' and re-resolve later",
+            repository,
+        )
+        return ""
+
     try:
         from syn_adapters.github.client import get_github_client
 
         client = get_github_client()
-        resolved = await client.get_installation_for_repo(repository)
-        logger.info("Auto-resolved installation_id=%s for %s", resolved, repository)
+        resolved = await client.get_installation_for_repo(full_name)
+        logger.info("Auto-resolved installation_id=%s for %s", resolved, full_name)
         return str(resolved)
     except Exception:
         logger.warning(
             "Could not auto-resolve installation_id for %s",
-            repository,
+            full_name,
             exc_info=True,
         )
-        return installation_id
+        return ""
 
 
 async def register_trigger(
