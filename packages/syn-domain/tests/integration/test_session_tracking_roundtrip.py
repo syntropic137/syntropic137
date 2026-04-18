@@ -130,8 +130,7 @@ class TestAgentSessionRoundtrip:
         assert reloaded.tokens.input_tokens == 1500
         assert reloaded.tokens.output_tokens == 800
         assert reloaded.tokens.total_tokens == 2300
-        # Cost is calculated from tokens, not explicitly set
-        assert reloaded.cost.total_cost_usd >= 0
+        # Cost is Lane 2 (#695) — see session_cost projection
 
     async def test_complete_session_persists_to_event_store(
         self,
@@ -255,7 +254,7 @@ class TestAgentSessionTokenAccumulation:
         assert final.tokens.input_tokens == 5000
         assert final.tokens.output_tokens == 2200
         assert final.tokens.total_tokens == 7200
-        assert final.cost.total_cost_usd >= 0  # Cost calculated from tokens
+        # Cost is Lane 2 (#695) — see session_cost projection
         assert final.operation_count == 5
         assert final.version == 6  # 1 start + 5 operations
 

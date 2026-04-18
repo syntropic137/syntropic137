@@ -1,13 +1,12 @@
 """Tests for AgentSession aggregate and value objects.
 
 Tests cover:
-- Session lifecycle (start → record → complete)
-- Token and cost accumulation
+- Session lifecycle (start -> record -> complete)
+- Token accumulation (cost is Lane 2 telemetry, see session_cost projection)
 - Operation recording
 - Event sourcing behavior
 """
 
-from decimal import Decimal
 from typing import cast
 
 import pytest
@@ -15,7 +14,6 @@ import pytest
 from syn_domain.contexts.agent_sessions import (
     AgentSessionAggregate,
     CompleteSessionCommand,
-    CostMetrics,
     OperationType,
     RecordOperationCommand,
     SessionStatus,
@@ -35,14 +33,30 @@ class TestTokenMetrics:
         assert metrics.output_tokens == 0
         assert metrics.total_tokens == 0
 
+    def test_total_includes_cache_tokens(self) -> None:
+        """REGRESSION(#695): total_tokens must include all 4 components."""
+        metrics = TokenMetrics(
+            input_tokens=100,
+            output_tokens=50,
+            cache_creation_tokens=5000,
+            cache_read_tokens=12000,
+        )
+        assert metrics.total_tokens == 100 + 50 + 5000 + 12000
+
     def test_addition(self) -> None:
-        """Test adding token metrics."""
-        m1 = TokenMetrics(input_tokens=100, output_tokens=50, total_tokens=150)
-        m2 = TokenMetrics(input_tokens=200, output_tokens=100, total_tokens=300)
+        """Test adding token metrics with cache tokens (#695)."""
+        m1 = TokenMetrics(
+            input_tokens=100, output_tokens=50, cache_creation_tokens=3000, cache_read_tokens=8000
+        )
+        m2 = TokenMetrics(
+            input_tokens=200, output_tokens=100, cache_creation_tokens=2000, cache_read_tokens=4000
+        )
         result = m1 + m2
         assert result.input_tokens == 300
         assert result.output_tokens == 150
-        assert result.total_tokens == 450
+        assert result.cache_creation_tokens == 5000
+        assert result.cache_read_tokens == 12000
+        assert result.total_tokens == 300 + 150 + 5000 + 12000
 
     def test_immutable(self) -> None:
         """Test that TokenMetrics is immutable."""
@@ -51,44 +65,8 @@ class TestTokenMetrics:
             metrics.input_tokens = 100  # type: ignore[misc]
 
 
-class TestCostMetrics:
-    """Tests for CostMetrics value object."""
-
-    def test_default_values(self) -> None:
-        """Test default cost values."""
-        cost = CostMetrics()
-        assert cost.input_cost_usd == Decimal("0")
-        assert cost.output_cost_usd == Decimal("0")
-        assert cost.total_cost_usd == Decimal("0")
-
-    def test_from_tokens(self) -> None:
-        """Test calculating cost from tokens."""
-        cost = CostMetrics.from_tokens(
-            input_tokens=1000,
-            output_tokens=500,
-            input_price_per_1k=Decimal("0.01"),
-            output_price_per_1k=Decimal("0.03"),
-        )
-        assert cost.input_cost_usd == Decimal("0.01")
-        assert cost.output_cost_usd == Decimal("0.015")
-        assert cost.total_cost_usd == Decimal("0.025")
-
-    def test_addition(self) -> None:
-        """Test adding cost metrics."""
-        c1 = CostMetrics(
-            input_cost_usd=Decimal("0.01"),
-            output_cost_usd=Decimal("0.03"),
-            total_cost_usd=Decimal("0.04"),
-        )
-        c2 = CostMetrics(
-            input_cost_usd=Decimal("0.02"),
-            output_cost_usd=Decimal("0.06"),
-            total_cost_usd=Decimal("0.08"),
-        )
-        result = c1 + c2
-        assert result.input_cost_usd == Decimal("0.03")
-        assert result.output_cost_usd == Decimal("0.09")
-        assert result.total_cost_usd == Decimal("0.12")
+# CostMetrics removed (#695): cost is Lane 2 telemetry.
+# Cost accounting is now tested in slices/session_cost/test_projection.py.
 
 
 class TestAgentSessionAggregate:
@@ -168,7 +146,6 @@ class TestAgentSessionAggregate:
         assert session.tokens.total_tokens == 700
         assert session.tokens.input_tokens == 500
         assert session.tokens.output_tokens == 200
-        assert session.cost.total_cost_usd > 0
 
     def test_record_multiple_operations(self) -> None:
         """Test recording multiple operations accumulates metrics."""
@@ -384,7 +361,6 @@ class TestAgentSessionAggregate:
         # Verify accumulated metrics
         assert session.operation_count == 3
         assert session.tokens.total_tokens == 2600
-        assert session.cost.total_cost_usd > 0
 
         # Complete
         session.complete_session(

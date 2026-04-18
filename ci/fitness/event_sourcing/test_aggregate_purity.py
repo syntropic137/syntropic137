@@ -5,6 +5,8 @@ Aggregates must be pure domain objects:
 - No IO module imports (aiohttp, httpx, asyncio, subprocess, socket, etc.)
 - No infrastructure imports (sqlmodel, asyncpg, psycopg, redis, minio)
 - No open() calls
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

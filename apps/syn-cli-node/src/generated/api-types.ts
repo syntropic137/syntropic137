@@ -152,6 +152,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/from-yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Workflow From Yaml Endpoint
+         * @description Create a workflow template by uploading raw YAML.
+         *
+         *     The CLI (`syn workflow create --from <file>`) POSTs the file bytes
+         *     here. Every semantic field (name, classification, repository,
+         *     phases, inputs, requires_repos) comes from the YAML itself.
+         *
+         *     Query-string ``name`` and ``workflow_id`` are optional overrides
+         *     intended for scripted bulk installation (e.g. renaming a template
+         *     on install). They are *not* a second source of truth for fields
+         *     that live in the YAML.
+         */
+        post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/executions": {
         parameters: {
             query?: never;
@@ -1870,7 +1899,7 @@ export interface components {
             classification: string;
             /**
              * Repository Url
-             * @default https://github.com/example/repo
+             * @default
              */
             repository_url: string;
             /**
@@ -1895,6 +1924,12 @@ export interface components {
              * @description Default GitHub URLs for this workflow template (ADR-058). Can be overridden at execution time via the repos field on the execute request.
              */
             repos?: string[];
+            /**
+             * Requires Repos
+             * @description Whether this workflow requires repository access at execution time (ADR-058 #666). Set to false for research or analysis workflows that don't need repos.
+             * @default true
+             */
+            requires_repos: boolean;
         };
         /** CreateWorkflowResponse */
         CreateWorkflowResponse: {
@@ -1904,6 +1939,12 @@ export interface components {
             name: string;
             /** Workflow Type */
             workflow_type: string;
+            /** Classification */
+            classification: string;
+            /** Repository Url */
+            repository_url: string;
+            /** Requires Repos */
+            requires_repos: boolean;
             /** Status */
             status: string;
         };
@@ -2117,30 +2158,15 @@ export interface components {
             completed_at?: string | null;
             /** Phases */
             phases?: components["schemas"]["PhaseExecutionInfo"][];
-            /**
-             * Total Input Tokens
-             * @default 0
-             */
+            /** Total Input Tokens */
             total_input_tokens: number;
-            /**
-             * Total Output Tokens
-             * @default 0
-             */
+            /** Total Output Tokens */
             total_output_tokens: number;
-            /**
-             * Cache Creation Tokens
-             * @default 0
-             */
-            cache_creation_tokens: number;
-            /**
-             * Cache Read Tokens
-             * @default 0
-             */
-            cache_read_tokens: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
+            /** Total Tokens */
             total_tokens: number;
             /**
              * Total Cost Usd
@@ -2294,11 +2320,16 @@ export interface components {
              * @default 0
              */
             total_phases: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Tokens */
             total_tokens: number;
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Total Output Tokens */
+            total_output_tokens: number;
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
             /**
              * Total Cost Usd
              * @default 0
@@ -2368,6 +2399,55 @@ export interface components {
              * @default
              */
             last_seen: string;
+        };
+        /**
+         * GitEventData
+         * @description Structured git event data from observability hooks.
+         *
+         *     Field names match agentic_events.payloads dataclasses (single source of truth).
+         *     This model is the Pydantic equivalent for API serialization.
+         */
+        GitEventData: {
+            /** Operation */
+            operation?: string | null;
+            /** Sha */
+            sha?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /** Repo */
+            repo?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Prev Branch */
+            prev_branch?: string | null;
+            /** Is Clone */
+            is_clone?: boolean | null;
+            /** Remote */
+            remote?: string | null;
+            /** Author */
+            author?: string | null;
+            /** Files Changed */
+            files_changed?: number | null;
+            /** Insertions */
+            insertions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /** Commits Count */
+            commits_count?: number | null;
+            /** Commit Range */
+            commit_range?: string | null;
+            /** Remote Url */
+            remote_url?: string | null;
+            /** Details */
+            details?: string | null;
+            /** From Branch */
+            from_branch?: string | null;
+            /** To Branch */
+            to_branch?: string | null;
+            /** Estimated Tokens Added */
+            estimated_tokens_added?: number | null;
+            /** Estimated Tokens Removed */
+            estimated_tokens_removed?: number | null;
         };
         /**
          * GitHubRepoListResponse
@@ -2570,20 +2650,15 @@ export interface components {
              * @default 0
              */
             total_sessions: number;
-            /**
-             * Total Input Tokens
-             * @default 0
-             */
+            /** Total Input Tokens */
             total_input_tokens: number;
-            /**
-             * Total Output Tokens
-             * @default 0
-             */
+            /** Total Output Tokens */
             total_output_tokens: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
+            /** Total Tokens */
             total_tokens: number;
             /**
              * Total Cost Usd
@@ -2643,6 +2718,7 @@ export interface components {
             message_content?: string | null;
             /** Thinking Content */
             thinking_content?: string | null;
+            git?: components["schemas"]["GitEventData"] | null;
             /** Git Sha */
             git_sha?: string | null;
             /** Git Message */
@@ -2757,30 +2833,15 @@ export interface components {
             session_id?: string | null;
             /** Artifact Id */
             artifact_id?: string | null;
-            /**
-             * Input Tokens
-             * @default 0
-             */
+            /** Input Tokens */
             input_tokens: number;
-            /**
-             * Output Tokens
-             * @default 0
-             */
+            /** Output Tokens */
             output_tokens: number;
-            /**
-             * Cache Creation Tokens
-             * @default 0
-             */
+            /** Cache Creation Tokens */
             cache_creation_tokens: number;
-            /**
-             * Cache Read Tokens
-             * @default 0
-             */
+            /** Cache Read Tokens */
             cache_read_tokens: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Tokens */
             total_tokens: number;
             /**
              * Duration Seconds
@@ -3536,6 +3597,26 @@ export interface components {
             status: string;
             /** Agent Provider */
             agent_provider: string | null;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
             /**
              * Total Tokens
              * @default 0
@@ -4349,6 +4430,11 @@ export interface components {
             repository_url?: string | null;
             /** Repos */
             repos?: string[];
+            /**
+             * Requires Repos
+             * @default true
+             */
+            requires_repos: boolean;
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -4372,6 +4458,11 @@ export interface components {
              * @default false
              */
             is_archived: boolean;
+            /**
+             * Requires Repos
+             * @default true
+             */
+            requires_repos: boolean;
         };
         /**
          * CostSummaryResponse
@@ -4755,6 +4846,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdatePhaseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workflow_from_yaml_endpoint_workflows_from_yaml_post: {
+        parameters: {
+            query?: {
+                name?: string | null;
+                workflow_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateWorkflowResponse"];
                 };
             };
             /** @description Validation Error */

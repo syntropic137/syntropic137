@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -28,11 +29,10 @@ from syn_api.types import (
     Result,
     WorkflowError,
 )
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
-        WorkflowTemplateAggregate,
-    )
+    from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,27 @@ def _build_auth_error_detail(repo_full_name: str, exc: Exception) -> str:
     return f"GitHub App authentication failed for {repo_full_name}: {exc_message}"
 
 
+def _apply_repo_substitution(repos: list[str], merged: dict[str, str]) -> list[str]:
+    """Substitute {{key}} patterns in each repo URL; raise ValueError if any placeholders remain."""
+    resolved = []
+    for repo_url in repos:
+        for key, value in merged.items():
+            repo_url = repo_url.replace(f"{{{{{key}}}}}", value)
+        if "{{" in repo_url:
+            unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
+            if not unresolved:
+                raise ValueError(
+                    "Malformed placeholder in repos field. "
+                    "Expected {{name}} with alphanumeric/underscore characters."
+                )
+            raise ValueError(
+                f"Unresolved placeholders in repos field: {unresolved}. "
+                f"Provide them via inputs: {', '.join(f'{k}=<value>' for k in unresolved)}."
+            )
+        resolved.append(repo_url)
+    return resolved
+
+
 def _get_preflight_repos(
     effective_inputs: dict[str, str],
     workflow: WorkflowTemplateAggregate,
@@ -107,6 +128,17 @@ def _get_preflight_repos(
     repos_csv = effective_inputs.get("repos", "")
     if repos_csv:
         return [u.strip() for u in repos_csv.split(",") if u.strip()]
+
+    # Check workflow.repos with variable substitution (mirrors ExecuteWorkflowHandler._resolve_repos).
+    # Without this, unresolved {{variable}} patterns in repos silently fall through to
+    # repository_url (empty string by default), producing a misleading auth error.
+    if workflow.repos:
+        merged = _merge_inputs(workflow, effective_inputs, task)
+        try:
+            return _apply_repo_substitution(workflow.repos, merged)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     fallback = _resolve_target_repo(workflow, effective_inputs, task)
     if fallback:
         return [f"https://github.com/{fallback}"]
@@ -326,6 +358,7 @@ async def execute(
     execution_id: str | None = None,
     task: str | None = None,
     tenant_id: str | None = None,  # noqa: ARG001
+    repos: list[RepositoryRef] | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 
@@ -335,18 +368,15 @@ async def execute(
         execution_id: Optional execution ID (auto-generated if omitted).
         task: Optional primary task description.
         tenant_id: Optional tenant ID for multi-tenant deployments.
+        repos: Typed repository refs (ADR-063 anti-corruption layer).
 
     Returns:
         Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+    from syn_domain.contexts.orchestration import (
         ExecuteWorkflowCommand,
-    )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-        WorkflowNotFoundError,
-    )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
         ExecuteWorkflowHandler,
+        WorkflowNotFoundError,
     )
 
     await ensure_connected()
@@ -366,6 +396,7 @@ async def execute(
         cmd = ExecuteWorkflowCommand(
             aggregate_id=workflow_id,
             inputs=inputs or {},
+            repos=repos or [],
             execution_id=execution_id,
             task=task,
         )
@@ -376,6 +407,8 @@ async def execute(
         logger.exception("Workflow execution error for %s", workflow_id)
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
+    repos_csv = (inputs or {}).get("repos", "")
+    repo_urls = [r.strip() for r in repos_csv.split(",") if r.strip()] if repos_csv else []
     return Ok(
         ExecutionSummary(
             workflow_execution_id=result.execution_id,
@@ -385,13 +418,55 @@ async def execute(
             completed_phases=result.metrics.completed_phases,
             total_phases=result.metrics.total_phases,
             total_tokens=result.metrics.total_tokens,
-            total_cost_usd=result.metrics.total_cost_usd,
+            # Lane 2: cost is enriched via execution_cost projection at query time (#695)
+            total_cost_usd=Decimal("0"),
             error_message=result.error_message,
+            repos=repo_urls,
         )
     )
 
 
 # -- HTTP Endpoints -----------------------------------------------------------
+
+
+async def _validate_execution_request(
+    workflow_id: str,
+    request: ExecuteWorkflowRequest,
+) -> tuple[WorkflowTemplateAggregate, dict[str, str], list[RepositoryRef]]:
+    """Validate and prepare execution request. Returns (workflow, effective_inputs, typed_repos)."""
+    await ensure_connected()
+    workflow_repo = get_workflow_repo()
+    workflow = await workflow_repo.get_by_id(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+    # ADR-063: convert string URLs to typed RepositoryRef at the API boundary
+    typed_repos: list[RepositoryRef] = []
+    for repo in request.repos:
+        try:
+            typed_repos.append(RepositoryRef.parse(repo))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid repository entry '{repo}': {exc}",
+            ) from exc
+
+    # Build effective inputs (legacy CSV preserved for backward compat)
+    effective_inputs: dict[str, str] = dict(request.inputs)
+    if request.repos:
+        effective_inputs["repos"] = ",".join(request.repos)
+
+    # Validate required input declarations (always runs)
+    merged = _merge_inputs(workflow, effective_inputs, request.task)
+    _check_missing_declarations(workflow, merged)
+
+    # Repo validation only when the workflow requires repos (ADR-058 #666)
+    if workflow.requires_repos:
+        _check_repo_url_placeholders(workflow, merged)
+        preflight_repos = _get_preflight_repos(effective_inputs, workflow, request.task)
+        await _validate_all_repos_access(preflight_repos)
+
+    return workflow, effective_inputs, typed_repos
 
 
 @router.post("/{workflow_id}/execute", response_model=ExecuteWorkflowResponse)
@@ -401,41 +476,33 @@ async def execute_workflow_endpoint(
     background_tasks: BackgroundTasks,
 ) -> ExecuteWorkflowResponse:
     """Start workflow execution in background."""
-    # Pre-validate GitHub App access before creating the execution (#598)
-    await ensure_connected()
-    workflow_repo = get_workflow_repo()
-    workflow = await workflow_repo.get_by_id(workflow_id)
-    if workflow is None:
-        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
-
-    # Build effective inputs — repos field takes precedence over inputs["repos"] CSV
-    effective_inputs: dict[str, str] = dict(request.inputs)
-    if request.repos:
-        effective_inputs["repos"] = ",".join(request.repos)
-
-    # Validate required inputs before returning 200 (#639)
-    _validate_required_inputs(workflow, effective_inputs, request.task)
-
-    # Multi-repo GitHub App preflight validation
-    preflight_repos = _get_preflight_repos(effective_inputs, workflow, request.task)
-    await _validate_all_repos_access(preflight_repos)
-
+    _, effective_inputs, typed_repos = await _validate_execution_request(workflow_id, request)
     execution_id = f"exec-{uuid4().hex[:12]}"
 
     async def _run() -> None:
-        result = await execute(
-            workflow_id=workflow_id,
-            inputs=effective_inputs,
-            execution_id=execution_id,
-            task=request.task,
-        )
-        if isinstance(result, Err):
-            logger.error(
-                "Workflow execution failed",
+        try:
+            result = await execute(
+                workflow_id=workflow_id,
+                inputs=effective_inputs,
+                execution_id=execution_id,
+                task=request.task,
+                repos=typed_repos,
+            )
+            if isinstance(result, Err):
+                logger.error(
+                    "Workflow execution failed",
+                    extra={
+                        "execution_id": execution_id,
+                        "workflow_id": workflow_id,
+                        "error": result.message,
+                    },
+                )
+        except Exception:
+            logger.exception(
+                "Workflow execution raised exception",
                 extra={
                     "execution_id": execution_id,
                     "workflow_id": workflow_id,
-                    "error": result.message,
                 },
             )
 

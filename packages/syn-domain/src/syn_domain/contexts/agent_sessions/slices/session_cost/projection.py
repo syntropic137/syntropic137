@@ -17,8 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import asyncpg
-
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
@@ -115,14 +114,14 @@ class SessionCostProjection:
 
     def __init__(
         self,
-        store: ProjectionStoreProtocol,
+        store: ProjectionStore,
         pool: asyncpg.Pool | None = None,
         cost_calculator: CostCalculator | None = None,
     ):
         """Initialize with a projection store and optional DB pool.
 
         Args:
-            store: A ProjectionStoreProtocol implementation
+            store: A ProjectionStore implementation
             pool: asyncpg Pool for querying TimescaleDB (ADR-029)
             cost_calculator: Optional CostCalculator for token cost computation
         """

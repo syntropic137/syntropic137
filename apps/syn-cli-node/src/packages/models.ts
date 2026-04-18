@@ -57,6 +57,7 @@ export interface ResolvedWorkflow {
   description: string | null;
   project_name: string | null;
   phases: Record<string, unknown>[];
+  requires_repos: boolean;
   input_declarations: Record<string, unknown>[];
   source_path: string;
 }

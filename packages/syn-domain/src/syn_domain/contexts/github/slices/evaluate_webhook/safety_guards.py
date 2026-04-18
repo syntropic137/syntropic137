@@ -1,6 +1,8 @@
 """Safety guards for trigger evaluation.
 
 Evaluates safety constraints before firing a trigger.
+
+See ADR-060: Restart-safe trigger deduplication (Guard 4 fix, Guard 7).
 """
 
 from __future__ import annotations
@@ -12,8 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import (
+        IndexedTrigger,
         TriggerQueryStore,
-        _IndexedTrigger,
     )
 
 logger = logging.getLogger(__name__)
@@ -46,7 +48,7 @@ class GuardResult:
 
 
 async def _check_max_attempts(
-    rule: _IndexedTrigger,
+    rule: IndexedTrigger,
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -62,7 +64,7 @@ async def _check_max_attempts(
 
 
 async def _check_cooldown(
-    rule: _IndexedTrigger,
+    rule: IndexedTrigger,
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -85,7 +87,7 @@ async def _check_cooldown(
     return None
 
 
-async def _check_daily_limit(rule: _IndexedTrigger, store: TriggerQueryStore) -> GuardResult | None:
+async def _check_daily_limit(rule: IndexedTrigger, store: TriggerQueryStore) -> GuardResult | None:
     """Guard 3: Daily fire limit."""
     today_count = await store.get_daily_fire_count(rule.trigger_id)
     if today_count >= rule.config.daily_limit:
@@ -100,8 +102,13 @@ async def _check_daily_limit(rule: _IndexedTrigger, store: TriggerQueryStore) ->
 async def _check_idempotency(
     payload: dict[str, Any], store: TriggerQueryStore
 ) -> GuardResult | None:
-    """Guard 4: Don't fire twice for same delivery."""
-    delivery_id = payload.get("_delivery_id", "")
+    """Guard 4: Don't fire twice for same delivery.
+
+    Uses ``_delivery_id`` (webhook) or ``_dedup_key`` (polled events) as the
+    idempotency identifier. Before ADR-060, polled events had empty
+    ``_delivery_id`` and silently bypassed this guard.
+    """
+    delivery_id = payload.get("_delivery_id", "") or payload.get("_dedup_key", "")
     if delivery_id and await store.was_delivery_processed(delivery_id):
         return GuardResult(
             False,
@@ -112,7 +119,7 @@ async def _check_idempotency(
 
 
 async def _check_cross_trigger_cooldown(
-    rule: _IndexedTrigger,
+    rule: IndexedTrigger,
     pr_number: int,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -133,7 +140,7 @@ async def _check_cross_trigger_cooldown(
 
 
 async def _check_concurrency(
-    rule: _IndexedTrigger,
+    rule: IndexedTrigger,
     pr_number: int | None,
     store: TriggerQueryStore,
 ) -> GuardResult | None:
@@ -158,37 +165,95 @@ async def _check_concurrency(
 
 
 class SafetyGuards:
-    """Evaluate safety constraints before firing a trigger."""
+    """Evaluate safety constraints before firing a trigger.
+
+    Guard 7 (ADR-060) uses an in-memory sliding window for global rate limiting.
+    This is intentionally in-memory — it's a safety net, not the primary dedup
+    mechanism. If it resets on restart, the durable layers (Postgres dedup,
+    Guard 4) handle correctness.
+    """
+
+    def __init__(
+        self,
+        dispatch_rate_limit: int = 10,
+        dispatch_rate_window_seconds: float = 60.0,
+    ) -> None:
+        # ACKNOWLEDGED: per-instance rate limit, resets on restart. Multi-instance: effective limit multiplied by instance count (acceptable safety net)
+        self._dispatch_timestamps: list[float] = []
+        self._dispatch_rate_limit = dispatch_rate_limit
+        self._dispatch_rate_window = dispatch_rate_window_seconds
 
     async def check_all(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         payload: dict[str, Any],
         store: TriggerQueryStore,
     ) -> GuardResult:
         """Run all safety checks. Returns first failure or success."""
         pr_number = _extract_pr_number(payload)
 
-        # Guard 6: Concurrency — check first (cheapest, most common catch-up block)
-        result = await _check_concurrency(rule, pr_number, store)
-        if result is not None:
-            return result
+        for result in await self._run_guards(rule, payload, pr_number, store):
+            if result is not None:
+                return result
+
+        return GuardResult(True, "All guards passed")
+
+    async def _run_guards(
+        self,
+        rule: IndexedTrigger,
+        payload: dict[str, Any],
+        pr_number: int | None,
+        store: TriggerQueryStore,
+    ) -> list[GuardResult | None]:
+        """Evaluate guards in priority order. Short-circuit via caller."""
+        guards: list[GuardResult | None] = [
+            await _check_concurrency(rule, pr_number, store),
+        ]
 
         if pr_number is not None:
             for check in (_check_max_attempts, _check_cooldown, _check_cross_trigger_cooldown):
-                result = await check(rule, pr_number, store)
-                if result is not None:
-                    return result
+                guards.append(await check(rule, pr_number, store))
 
-        result = await _check_daily_limit(rule, store)
-        if result is not None:
-            return result
+        guards.append(await _check_daily_limit(rule, store))
+        guards.append(await _check_idempotency(payload, store))
+        guards.append(self._check_dispatch_rate())
+        return guards
 
-        result = await _check_idempotency(payload, store)
-        if result is not None:
-            return result
+    def record_dispatch(self) -> None:
+        """Record a successful dispatch timestamp for rate limiting."""
+        if self._dispatch_rate_limit <= 0:
+            return
+        import time
 
-        return GuardResult(True, "All guards passed")
+        self._dispatch_timestamps.append(time.monotonic())
+
+    def _check_dispatch_rate(self) -> GuardResult | None:
+        """Guard 7: Global dispatch rate limit (ADR-060).
+
+        Caps the number of workflow dispatches in a sliding window.
+        Prevents runaway execution storms regardless of upstream failures.
+        """
+        import time
+
+        if self._dispatch_rate_limit <= 0:
+            return None
+
+        now = time.monotonic()
+        cutoff = now - self._dispatch_rate_window
+
+        # Prune old timestamps
+        self._dispatch_timestamps = [t for t in self._dispatch_timestamps if t > cutoff]
+
+        if len(self._dispatch_timestamps) >= self._dispatch_rate_limit:
+            return GuardResult(
+                False,
+                f"Global dispatch rate limit ({self._dispatch_rate_limit} per "
+                f"{self._dispatch_rate_window:.0f}s) exceeded",
+                guard_name="dispatch_rate_limit",
+                retryable=True,
+                retry_after_seconds=self._dispatch_rate_window / 2,
+            )
+        return None
 
 
 def _extract_pr_number(payload: dict[str, Any]) -> int | None:

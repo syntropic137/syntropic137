@@ -2,7 +2,7 @@
 
 ## How to use
 
-- Next available number: **ADR-056**
+- Next available number: **ADR-063**
 - Template: Status, Date, Context, Decision, Consequences (Nygard format)
 - ADR-025 was never created (numbering gap)
 - ADR-027 has two files: `ADR-027-sdk-wrapper-architecture.md` (superseded) and `ADR-027-unified-workflow-executor.md` (accepted)
@@ -67,6 +67,7 @@
 | [ADR-034](ADR-034-test-infrastructure-architecture.md) | Test Infrastructure Architecture | Accepted |
 | [ADR-035](ADR-035-qa-workflow-standard.md) | QA Workflow Standard | Accepted |
 | [ADR-038](ADR-038-test-organization-standard.md) | Test Organization Standard | Accepted |
+| [ADR-062](ADR-062-architectural-fitness-function-standard.md) | Architectural Fitness Function Standard | Accepted |
 
 ### GitHub Integration
 
@@ -76,6 +77,7 @@
 | [ADR-041](ADR-041-offline-dev-and-webhook-recording.md) | Offline Development Mode and Webhook Recording | Accepted |
 | [ADR-043](ADR-043-git-hook-event-pipeline.md) | Git Hook Event Pipeline | Accepted |
 | [ADR-050](ADR-050-hybrid-webhook-polling-event-pipeline.md) | Hybrid Webhook + Polling Event Pipeline | Accepted |
+| [ADR-060](ADR-060-restart-safe-trigger-deduplication.md) | Restart-Safe Trigger Deduplication | Accepted |
 
 ### UI & Communication
 

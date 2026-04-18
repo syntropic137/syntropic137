@@ -3,12 +3,15 @@
 This implementation stores all projection data in memory,
 making it fast for unit tests while maintaining the same
 interface as the production PostgreSQL store.
+
+See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from syn_adapters.in_memory import InMemoryAdapterError, assert_test_only
 from syn_adapters.projection_stores.memory_store_helpers import (
     apply_filters,
     apply_pagination,
@@ -17,23 +20,9 @@ from syn_adapters.projection_stores.memory_store_helpers import (
 from syn_adapters.projection_stores.memory_store_helpers import (
     clear_projection as _clear_projection,
 )
-from syn_shared.settings import get_settings
 
-
-class InMemoryProjectionStoreError(Exception):
-    """Error raised when in-memory store is used outside test environment."""
-
-
-def _assert_test_environment() -> None:
-    """Assert that we're in a test environment."""
-    settings = get_settings()
-    if not settings.is_test:
-        raise InMemoryProjectionStoreError(
-            "InMemoryProjectionStore can ONLY be used in test environments. "
-            f"Current environment: {settings.app_environment}. "
-            "For local development, use PostgresProjectionStore. "
-            "Set APP_ENVIRONMENT=test to use in-memory storage for unit tests."
-        )
+# Re-export for backwards compatibility
+InMemoryProjectionStoreError = InMemoryAdapterError
 
 
 @dataclass
@@ -59,7 +48,7 @@ class InMemoryProjectionStore:
 
     def __post_init__(self) -> None:
         """Validate that we're in a test environment."""
-        _assert_test_environment()
+        assert_test_only()
 
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""

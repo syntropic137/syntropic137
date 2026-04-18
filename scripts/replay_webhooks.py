@@ -2,7 +2,7 @@
 
 Usage:
     uv run python scripts/replay_webhooks.py fixtures/webhooks/check_run_failure.jsonl
-    uv run python scripts/replay_webhooks.py --speed 10 --target http://localhost:8137 <file>
+    uv run python scripts/replay_webhooks.py --speed 10 --target http://localhost:9137 <file>
     uv run python scripts/replay_webhooks.py --no-signature <file>
 
 Reads JSONL files produced by WebhookRecorderMiddleware and POSTs each event
@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 
 import httpx
+
+from syn_shared.settings.dev_tooling import get_dev_api_url
 
 
 async def replay(
@@ -119,8 +121,8 @@ def main() -> None:
     parser.add_argument("file", type=Path, help="JSONL recording file to replay")
     parser.add_argument(
         "--target",
-        default="http://localhost:8137",
-        help="Target dashboard URL (default: http://localhost:8137)",
+        default=get_dev_api_url(),
+        help="Target dashboard URL (default: $DEV__API_URL or http://localhost:9137)",
     )
     parser.add_argument(
         "--speed",

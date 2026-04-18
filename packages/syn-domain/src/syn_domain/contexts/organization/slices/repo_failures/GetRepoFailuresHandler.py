@@ -4,7 +4,8 @@ Lazy handler: queries the WorkflowExecutionList projection for failed
 executions filtered by repo-execution correlation.
 """
 
-from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from event_sourcing import ProjectionReadStore
+
 from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain.queries.get_repo_failures import (
     GetRepoFailuresQuery,
@@ -17,7 +18,7 @@ from syn_domain.contexts.organization.domain.read_models.repo_failure import (
 class GetRepoFailuresHandler:
     """Query handler: get a repo's recent failures."""
 
-    def __init__(self, store: ProjectionStoreProtocol) -> None:
+    def __init__(self, store: ProjectionReadStore) -> None:
         """Initialize with the shared ProjectionStore."""
         self._store = store
 

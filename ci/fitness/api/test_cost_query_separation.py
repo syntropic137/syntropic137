@@ -5,6 +5,8 @@ is empty for cost data. This test ensures API routes never accidentally
 query the projection store for cost reads.
 
 See #532 for the architectural rationale.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

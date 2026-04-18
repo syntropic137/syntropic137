@@ -16,7 +16,8 @@ from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
 from syn_domain.contexts.github.domain.read_models.trigger_rule import TriggerRule
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
+
     from syn_domain.contexts.github.domain.events.TriggerDeletedEvent import (
         TriggerDeletedEvent,
     )
@@ -81,7 +82,7 @@ def _rule_from_dict(data: dict[str, Any]) -> TriggerRule:
 class TriggerRuleProjection:
     """Projects trigger events into TriggerRule read models."""
 
-    def __init__(self, store: ProjectionStoreProtocol) -> None:
+    def __init__(self, store: ProjectionStore) -> None:
         """Initialize the projection."""
         self._store = store
 

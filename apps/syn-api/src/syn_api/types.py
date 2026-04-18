@@ -12,7 +12,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -357,6 +357,8 @@ class WorkflowSummary(BaseModel):
     created_at: datetime | None = None
     runs_count: int = 0
     is_archived: bool = False
+    requires_repos: bool = True
+    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
 class InputDeclarationResponse(BaseModel):
@@ -403,6 +405,8 @@ class WorkflowDetail(BaseModel):
     """Template-level repository URL (single-repo workflows)."""
     repos: list[str] = Field(default_factory=list)
     """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
+    requires_repos: bool = True
+    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
 class ExecutionSummary(BaseModel):
@@ -419,10 +423,14 @@ class ExecutionSummary(BaseModel):
     completed_phases: int = 0
     total_phases: int = 0
     total_tokens: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     tool_call_count: int = 0
     error_message: str | None = None
-    repos: list[str] = Field(default_factory=list)
+    repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
 
@@ -437,11 +445,13 @@ class ExecutionDetail(BaseModel):
     completed_at: datetime | str | None = None
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
-    repos: list[str] = Field(default_factory=list)
+    repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
 
@@ -456,6 +466,10 @@ class SessionSummary(BaseModel):
     phase_id: str | None = None
     status: str = ""
     agent_type: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     started_at: datetime | None = None
@@ -625,6 +639,37 @@ class WorkflowValidation(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class GitEventData(BaseModel):
+    """Structured git event data from observability hooks.
+
+    Field names match agentic_events.payloads dataclasses (single source of truth).
+    This model is the Pydantic equivalent for API serialization.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: str | None = None
+    sha: str | None = None
+    branch: str | None = None
+    repo: str | None = None
+    message: str | None = None
+    prev_branch: str | None = None
+    is_clone: bool | None = None
+    remote: str | None = None
+    author: str | None = None
+    files_changed: int | None = None
+    insertions: int | None = None
+    deletions: int | None = None
+    commits_count: int | None = None
+    commit_range: str | None = None
+    remote_url: str | None = None
+    details: str | None = None
+    from_branch: str | None = None
+    to_branch: str | None = None
+    estimated_tokens_added: int | None = None
+    estimated_tokens_removed: int | None = None
+
+
 class ToolOperation(BaseModel):
     """A single timeline event within a session.
 
@@ -644,7 +689,14 @@ class ToolOperation(BaseModel):
     tool_use_id: str | None = None
     input_preview: str | None = None
     output_preview: str | None = None
-    # Git-specific fields (populated for git_commit, git_push, git_branch_changed, git_operation)
+    # Structured git data (v2 events - preferred).
+    # AliasChoices: JSON clients send "git", from_attributes reads "git_data"
+    # from the projection dataclass (which uses git_data to avoid shadowing).
+    git: GitEventData | None = Field(
+        None,
+        validation_alias=AliasChoices("git", "git_data"),
+    )
+    # Flat git fields (deprecated - use git sub-object instead)
     git_sha: str | None = None
     git_message: str | None = None
     git_branch: str | None = None
@@ -685,7 +737,7 @@ class ExecutionDetailFull(BaseModel):
     started_at: datetime | str | None = None
     completed_at: datetime | str | None = None
     error_message: str | None = None
-    repos: list[str] = Field(default_factory=list)
+    repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
 
@@ -765,6 +817,8 @@ class DashboardMetrics(BaseModel):
     total_sessions: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     total_artifacts: int = 0

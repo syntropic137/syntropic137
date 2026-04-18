@@ -24,10 +24,12 @@ syn workflow create <name> [options]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--type`, `-t` | `text` | `custom` | Workflow type (research, planning, implementation, review, deployment, custom) |
-| `--repo`, `-r` | `text` | `https://github.com/example/repo` | Repository URL |
+| `--repo`, `-r` | `text` | --- | Repository URL |
 | `--ref` | `text` | `main` | Repository ref/branch |
 | `--description`, `-d` | `text` | --- | Workflow description |
 | `--repos`, `-R` | `text` | --- | Default GitHub URLs for workspace hydration (repeatable). ADR-058. |
+| `--no-repos` | `boolean` | `false` | Mark workflow as not requiring repository access (ADR-058 #666) |
+| `--from`, `-f` | `text` | --- | Upload a YAML workflow definition. Every semantic field comes from the file - do not combine with --repo/--ref/--type/--description/--repos/--no-repos. |
 
 ---
 

@@ -10,7 +10,6 @@ This is critical because:
 """
 
 from datetime import UTC, datetime
-from decimal import Decimal
 
 import pytest
 
@@ -261,12 +260,11 @@ class TestSessionListProjection:
             }
         )
 
-        # Record operations
+        # Record operations (cost is Lane 2 — not accumulated here, see #695)
         await projection.on_operation_recorded(
             {
                 "session_id": "session-ops",
                 "tokens_used": 100,
-                "cost_usd": "0.001",
             }
         )
 
@@ -274,14 +272,13 @@ class TestSessionListProjection:
             {
                 "session_id": "session-ops",
                 "tokens_used": 200,
-                "cost_usd": "0.002",
             }
         )
 
         result = await mock_store.get("session_summaries", "session-ops")
         assert result is not None
         assert result["total_tokens"] == 300
-        assert float(result["total_cost_usd"]) == pytest.approx(0.003, rel=1e-6)
+        assert "total_cost_usd" not in result
 
     @pytest.mark.asyncio
     async def test_query_sessions_by_workflow(
@@ -338,7 +335,6 @@ class TestSessionSummaryToDict:
             agent_type="claude",
             status="running",
             total_tokens=100,
-            total_cost_usd=Decimal("0.01"),
             started_at=now,
             completed_at=None,
         )
@@ -364,7 +360,6 @@ class TestSessionSummaryToDict:
             agent_type="openai",
             status="completed",
             total_tokens=500,
-            total_cost_usd=Decimal("0.05"),
             started_at=iso_string,  # type: ignore[arg-type] - intentionally testing string
             completed_at=iso_string,  # type: ignore[arg-type]
         )
@@ -386,7 +381,6 @@ class TestSessionSummaryToDict:
             agent_type="claude",
             status="pending",
             total_tokens=0,
-            total_cost_usd=Decimal("0"),
             started_at=None,
             completed_at=None,
         )
@@ -495,7 +489,6 @@ class TestSessionSummarySubagentFields:
             agent_type="claude-3-5-sonnet",
             status="completed",
             total_tokens=10000,
-            total_cost_usd=Decimal("0.05"),
             started_at=None,
             completed_at=None,
             subagent_count=2,
@@ -572,7 +565,6 @@ class TestSessionSummarySubagentFields:
             agent_type="test",
             status="completed",
             total_tokens=100,
-            total_cost_usd=Decimal("0.001"),
             started_at=None,
             completed_at=None,
             subagent_count=1,

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
     TodoAction,
     TodoItem,
@@ -17,6 +18,9 @@ from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
+)
+from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+    ExecuteWorkflowCommand,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     StreamResult,
@@ -89,8 +93,13 @@ class TestAgentExecutionHandler:
         assert result.command.exit_code == 0
 
     @pytest.mark.anyio
-    async def test_interrupt_sets_exit_code_1(self) -> None:
-        """Interrupted execution sets exit_code to 1."""
+    async def test_interrupt_does_not_synthesise_exit_code_1(self) -> None:
+        """Interrupted execution must NOT synthesise exit_code=1.
+
+        The processor (_handle_run_agent) is responsible for routing interrupt_requested
+        to CancelExecutionCommand. _detect_exit_code must only return the actual process
+        exit code so the processor can make the cancellation vs failure decision cleanly.
+        """
         handler = AgentExecutionHandler(controller=None)
         workspace = MagicMock()
         workspace.last_stream_exit_code = 0
@@ -125,7 +134,9 @@ class TestAgentExecutionHandler:
                 timeout_seconds=300,
             )
 
-        assert result.command.exit_code == 1
+        assert result.command.exit_code == 0, (
+            "exit_code must reflect workspace state (0), not synthesise 1 for interrupt_requested"
+        )
         assert result.stream_result.interrupt_requested is True
 
     @pytest.mark.anyio
@@ -351,7 +362,12 @@ class TestHandlerRegistry:
 class TestDetectExitCode:
     """Tests for _detect_exit_code helper."""
 
-    def test_interrupt_returns_1(self) -> None:
+    def test_interrupt_does_not_return_1(self) -> None:
+        """interrupt_requested must NOT synthesise exit code 1.
+
+        The processor (_handle_cancel_signal) owns the cancellation routing.
+        _detect_exit_code must only return the actual process exit code.
+        """
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
             _detect_exit_code,
         )
@@ -366,7 +382,8 @@ class TestDetectExitCode:
             agent_task_result=None,
         )
         workspace = MagicMock()
-        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) == 1
+        workspace.last_stream_exit_code = None
+        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) == 0
 
     def test_nonzero_stream_exit_code(self) -> None:
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
@@ -755,96 +772,125 @@ def _make_workflow_stub(
     return wf
 
 
+def _make_cmd(
+    inputs: dict[str, str] | None = None,
+    repos: list[RepositoryRef] | None = None,
+) -> ExecuteWorkflowCommand:
+    """Create a minimal ExecuteWorkflowCommand for _resolve_repos tests."""
+    return ExecuteWorkflowCommand(
+        aggregate_id="wf-test",
+        inputs=inputs or {},
+        repos=repos or [],
+    )
+
+
 @pytest.mark.unit
 class TestResolveRepos:
     """Tests for ExecuteWorkflowHandler._resolve_repos."""
 
-    def test_comma_separated_repos_parsed(self) -> None:
-        """Comma-separated repos string is split into a list."""
+    def test_typed_repos_take_precedence_over_template_fields(self) -> None:
+        """Typed RepositoryRef on command takes precedence over template fields (ADR-063)."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
+        cmd = _make_cmd(repos=[RepositoryRef.from_slug("org/typed-repo")])
         result = ExecuteWorkflowHandler._resolve_repos(
-            {"repos": "https://github.com/org/repo-a,https://github.com/org/repo-b"},
-            _make_workflow_stub(),
+            cmd,
+            {},
+            _make_workflow_stub(repos=["https://github.com/org/template-repo"]),
         )
+        assert result == ["https://github.com/org/typed-repo"]
+
+    def test_typed_multi_repo_resolved(self) -> None:
+        """A list of typed RepositoryRefs is resolved into HTTPS URLs in order."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        cmd = _make_cmd(
+            repos=[
+                RepositoryRef.from_slug("org/repo-a"),
+                RepositoryRef.from_slug("org/repo-b"),
+            ]
+        )
+        result = ExecuteWorkflowHandler._resolve_repos(cmd, {}, _make_workflow_stub())
         assert result == [
             "https://github.com/org/repo-a",
             "https://github.com/org/repo-b",
         ]
 
-    def test_repos_with_whitespace_stripped(self) -> None:
-        """Whitespace around repo URLs is stripped."""
+    def test_falls_back_to_template_repos_when_command_repos_empty(self) -> None:
+        """Falls back to workflow.repos when command.repos is empty."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
-            {"repos": " https://github.com/org/repo-a , https://github.com/org/repo-b "},
-            _make_workflow_stub(),
-        )
-        assert result == [
-            "https://github.com/org/repo-a",
-            "https://github.com/org/repo-b",
-        ]
-
-    def test_falls_back_to_template_repos_when_inputs_empty(self) -> None:
-        """Falls back to workflow.repos when repos input is absent."""
-        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
-            ExecuteWorkflowHandler,
-        )
-
-        result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {},
             _make_workflow_stub(repos=["https://github.com/org/repo-a"]),
         )
         assert result == ["https://github.com/org/repo-a"]
 
-    def test_falls_back_to_repository_url_when_repos_and_template_repos_empty(self) -> None:
-        """Falls back to repository_url when both inputs.repos and workflow.repos are absent."""
+    def test_falls_back_to_repository_url_when_template_repos_empty(self) -> None:
+        """Falls back to template repository_url when both command.repos and workflow.repos are empty."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
         result = ExecuteWorkflowHandler._resolve_repos(
+            _make_cmd(),
             {},
             _make_workflow_stub(repository_url="https://github.com/org/repo-a"),
         )
         assert result == ["https://github.com/org/repo-a"]
 
-    def test_empty_inputs_and_no_repos_returns_empty(self) -> None:
-        """Empty inputs, no template repos, no repository_url → empty list."""
+    def test_empty_command_and_no_template_repos_returns_empty(self) -> None:
+        """No command repos, no template repos, no repository_url -> empty list."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
-        result = ExecuteWorkflowHandler._resolve_repos({}, _make_workflow_stub())
+        result = ExecuteWorkflowHandler._resolve_repos(_make_cmd(), {}, _make_workflow_stub())
         assert result == []
 
-    def test_repos_takes_precedence_over_template_repos_and_repo_url(self) -> None:
-        """inputs.repos takes precedence over workflow.repos and repository_url."""
+    def test_inputs_repos_without_typed_repos_raises(self) -> None:
+        """ADR-063 guard: inputs['repos'] without command.repos is a missed boundary translation."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
-        result = ExecuteWorkflowHandler._resolve_repos(
-            {"repos": "https://github.com/org/repo-a"},
-            _make_workflow_stub(
-                repos=["https://github.com/org/template-repo"],
-                repository_url="https://github.com/org/fallback-repo",
-            ),
-        )
-        assert result == ["https://github.com/org/repo-a"]
+        with pytest.raises(ValueError, match=r"inputs\[repos\].*command\.repos is empty"):
+            ExecuteWorkflowHandler._resolve_repos(
+                _make_cmd(),
+                {"repos": "https://github.com/org/repo-a"},
+                _make_workflow_stub(),
+            )
 
-    def test_slug_normalised_to_full_url(self) -> None:
-        """'owner/repo' slugs from trigger presets are expanded to full HTTPS URLs."""
+    def test_inputs_repository_without_typed_repos_raises(self) -> None:
+        """ADR-063 guard: inputs['repository'] without command.repos is a missed boundary translation."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
 
+        with pytest.raises(ValueError, match=r"inputs\[repository\].*command\.repos is empty"):
+            ExecuteWorkflowHandler._resolve_repos(
+                _make_cmd(),
+                {"repository": "syntropic137/syntropic137", "pr_number": "42"},
+                _make_workflow_stub(),
+            )
+
+    def test_typed_repos_bypass_inputs_guard(self) -> None:
+        """When command.repos is set, reserved input keys are ignored (typed wins)."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            ExecuteWorkflowHandler,
+        )
+
+        cmd = _make_cmd(repos=[RepositoryRef.from_slug("org/typed-repo")])
         result = ExecuteWorkflowHandler._resolve_repos(
-            {"repos": "syntropic137/syntropic137"},
+            cmd,
+            {"repos": "ignored", "repository": "also/ignored"},
             _make_workflow_stub(),
         )
-        assert result == ["https://github.com/syntropic137/syntropic137"]
+        assert result == ["https://github.com/org/typed-repo"]

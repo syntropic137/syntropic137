@@ -9,11 +9,10 @@ Uses AutoDispatchProjection (ADR-014) for reliable position tracking.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
@@ -38,13 +37,13 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 4  # Bumped: resilient on_workflow_failed for orphaned failure events (#598)
+    VERSION = 6  # Bumped: cost moved to Lane 2 — API enriches from execution_cost (#695)
 
-    def __init__(self, store: ProjectionStoreProtocol):
+    def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
 
         Args:
-            store: A ProjectionStoreProtocol implementation
+            store: A ProjectionStore implementation
         """
         self._store = store
 
@@ -76,15 +75,20 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         detail: dict[str, Any],
         input_tokens: int,
         output_tokens: int,
+        cache_creation_tokens: int,
+        cache_read_tokens: int,
         duration: float,
-        cost: Decimal,
     ) -> None:
         """Add phase metrics to execution totals."""
         detail["total_input_tokens"] = detail.get("total_input_tokens", 0) + input_tokens
         detail["total_output_tokens"] = detail.get("total_output_tokens", 0) + output_tokens
+        detail["total_cache_creation_tokens"] = (
+            detail.get("total_cache_creation_tokens", 0) + cache_creation_tokens
+        )
+        detail["total_cache_read_tokens"] = (
+            detail.get("total_cache_read_tokens", 0) + cache_read_tokens
+        )
         detail["total_duration_seconds"] = detail.get("total_duration_seconds", 0.0) + duration
-        existing_cost = Decimal(str(detail.get("total_cost_usd", "0")))
-        detail["total_cost_usd"] = str(existing_cost + cost)
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted event.
@@ -112,7 +116,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "phases": [],  # Populated as phases start/complete
             "total_input_tokens": 0,
             "total_output_tokens": 0,
-            "total_cost_usd": "0",
+            "total_cache_creation_tokens": 0,
+            "total_cache_read_tokens": 0,
             "total_duration_seconds": 0.0,
             "artifact_ids": [],
             "error_message": None,
@@ -160,7 +165,6 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         phase["cache_read_tokens"] = event_data.get("cache_read_tokens", 0)
         phase["total_tokens"] = event_data.get("total_tokens", 0)
         phase["duration_seconds"] = event_data.get("duration_seconds", 0.0)
-        phase["cost_usd"] = str(event_data.get("cost_usd", "0"))
         phase["completed_at"] = event_data.get("completed_at")
 
     @staticmethod
@@ -200,9 +204,17 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # Aggregate totals
         input_tokens = event_data.get("input_tokens", 0)
         output_tokens = event_data.get("output_tokens", 0)
+        cache_creation_tokens = event_data.get("cache_creation_tokens", 0)
+        cache_read_tokens = event_data.get("cache_read_tokens", 0)
         duration = event_data.get("duration_seconds", 0.0)
-        cost = Decimal(str(event_data.get("cost_usd", "0")))
-        self._aggregate_totals(existing, input_tokens, output_tokens, duration, cost)
+        self._aggregate_totals(
+            existing,
+            input_tokens,
+            output_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
+            duration,
+        )
 
         self._track_artifact(existing, event_data.get("artifact_id"))
 
@@ -226,16 +238,17 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         existing["completed_at"] = event_data.get("completed_at")
 
         # Update with final totals from event if provided
-        if "total_input_tokens" in event_data:
-            existing["total_input_tokens"] = event_data.get("total_input_tokens", 0)
-        if "total_output_tokens" in event_data:
-            existing["total_output_tokens"] = event_data.get("total_output_tokens", 0)
-        if "total_cost_usd" in event_data:
-            existing["total_cost_usd"] = str(event_data.get("total_cost_usd", "0"))
-        if "total_duration_seconds" in event_data:
-            existing["total_duration_seconds"] = event_data.get("total_duration_seconds", 0.0)
-        if "artifact_ids" in event_data:
-            existing["artifact_ids"] = event_data.get("artifact_ids", [])
+        _OPTIONAL_FIELDS = (
+            "total_input_tokens",
+            "total_output_tokens",
+            "total_cache_creation_tokens",
+            "total_cache_read_tokens",
+            "total_duration_seconds",
+            "artifact_ids",
+        )
+        for field in _OPTIONAL_FIELDS:
+            if field in event_data:
+                existing[field] = event_data[field]
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
@@ -261,7 +274,6 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 "phases": [],
                 "total_input_tokens": event_data.get("total_input_tokens", 0),
                 "total_output_tokens": event_data.get("total_output_tokens", 0),
-                "total_cost_usd": event_data.get("total_cost_usd", "0"),
                 "total_duration_seconds": 0.0,
                 "artifact_ids": [],
                 "error_message": event_data.get("error_message"),

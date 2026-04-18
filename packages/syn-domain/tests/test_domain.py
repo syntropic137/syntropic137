@@ -31,12 +31,6 @@ class TestDomainPackage:
 
         assert agent_sessions is not None
 
-    def test_import_agents_context(self):
-        """Test that agents context can be imported."""
-        from syn_domain.contexts import agents
-
-        assert agents is not None
-
     def test_import_artifacts_context(self):
         """Test that artifacts context can be imported."""
         from syn_domain.contexts import artifacts

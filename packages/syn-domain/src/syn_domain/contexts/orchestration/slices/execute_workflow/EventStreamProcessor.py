@@ -30,7 +30,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser i
 from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
 
     from syn_adapters.control import ExecutionController
     from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
@@ -220,6 +220,12 @@ class EventStreamProcessor:
         self._result_duration_ms: int | None = None
         self._result_num_turns: int | None = None
         self._error_reason: str | None = None
+
+        # #695: Dedup usage by message.id. Claude CLI emits one assistant event per
+        # content block (text, tool_use, etc.) for a single API response, each carrying
+        # the same message.id and identical usage. Without this, mid-flight totals
+        # overcount by the number of content blocks per turn.
+        self._seen_message_ids: set[str] = set()
 
         # ISS-196: Use collector if provided, else create one from raw writer
         if collector is not None:
@@ -472,39 +478,54 @@ class EventStreamProcessor:
         return task_result
 
     async def _handle_assistant_event(self, cli_event: dict[str, Any]) -> None:
-        """Handle assistant event — extract per-turn tokens and tool_use."""
+        """Handle assistant event — extract per-turn tokens and tool_use.
+
+        Claude CLI emits one assistant JSONL line per content block of a single
+        API response. All lines for the same response share ``message.id`` and
+        carry identical ``usage``. We dedup usage recording by message.id so
+        multi-block responses don't inflate running totals; tool_use blocks are
+        always processed because each block appears on exactly one line (#695).
+        """
         message = cli_event.get("message", {})
-        content = message.get("content", [])
+        if not isinstance(message, dict):
+            return
 
-        # Extract per-turn token usage
-        usage = message.get("usage", {})
-        if usage:
-            input_tokens = usage.get("input_tokens", 0)
-            output_tokens = usage.get("output_tokens", 0)
+        await self._record_turn_usage_once(message)
 
-            cache_creation = usage.get("cache_creation_input_tokens", 0)
-            cache_read = usage.get("cache_read_input_tokens", 0)
-
-            if input_tokens > 0 or output_tokens > 0 or cache_creation > 0 or cache_read > 0:
-                self._tokens.record(input_tokens, output_tokens, cache_creation, cache_read)
-                await self._collector.record_token_usage(
-                    input_tokens,
-                    output_tokens,
-                    cache_creation,
-                    cache_read,
-                )
-                logger.info(
-                    "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
-                    input_tokens,
-                    output_tokens,
-                    cache_read,
-                    cache_creation,
-                )
-
-        # Process tool_use items
-        for item in content:
+        for item in message.get("content", []):
             if isinstance(item, dict) and item.get("type") == "tool_use":
                 await self._handle_tool_use(item)
+
+    async def _record_turn_usage_once(self, message: Mapping[str, Any]) -> None:
+        """Record per-turn token usage, deduped by message.id (#695)."""
+        msg_id = message.get("id")
+        if msg_id and msg_id in self._seen_message_ids:
+            return
+
+        usage = message.get("usage") or {}
+        if not usage:
+            return
+
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        cache_creation = usage.get("cache_creation_input_tokens", 0)
+        cache_read = usage.get("cache_read_input_tokens", 0)
+
+        if input_tokens or output_tokens or cache_creation or cache_read:
+            self._tokens.record(input_tokens, output_tokens, cache_creation, cache_read)
+            await self._collector.record_token_usage(
+                input_tokens, output_tokens, cache_creation, cache_read
+            )
+            logger.info(
+                "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
+                input_tokens,
+                output_tokens,
+                cache_read,
+                cache_creation,
+            )
+
+        if msg_id:
+            self._seen_message_ids.add(msg_id)
 
     async def _handle_tool_use(self, item: dict[str, Any]) -> None:
         """Handle a tool_use content block from an assistant message."""

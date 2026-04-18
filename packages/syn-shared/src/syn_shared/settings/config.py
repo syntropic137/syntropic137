@@ -3,6 +3,8 @@
 All environment variables are validated on startup.
 Required variables will cause an immediate, clear error if missing.
 Each variable has a description explaining its purpose and where to get it.
+
+See ADR-004: Environment Configuration with Pydantic Settings.
 """
 
 from __future__ import annotations

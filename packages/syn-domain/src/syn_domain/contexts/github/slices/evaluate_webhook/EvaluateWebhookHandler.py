@@ -35,8 +35,8 @@ from syn_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
 
 if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import (
+        IndexedTrigger,
         TriggerQueryStore,
-        _IndexedTrigger,
     )
     from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
         TriggerRuleAggregate,
@@ -60,15 +60,21 @@ class EvaluateWebhookHandler:
         repository: Repository[TriggerRuleAggregate],
         debouncer: TriggerDebouncer | None = None,
         on_fire: OnFireCallback | None = None,
+        dispatch_rate_limit: int = 10,
+        dispatch_rate_window_seconds: float = 60.0,
     ) -> None:
         self._store = store
         self._repository = repository
         self._debouncer = debouncer
         self._on_fire = on_fire
-        self._guards = SafetyGuards()
+        self._guards = SafetyGuards(
+            dispatch_rate_limit=dispatch_rate_limit,
+            dispatch_rate_window_seconds=dispatch_rate_window_seconds,
+        )
         # Per-(trigger, pr) lock: ensures the concurrency guard check and
         # record_fire are atomic — prevents two concurrent webhook handlers
         # from both passing the guard before either records.
+        # CORRECTNESS: requires distributed lock for multi-instance (E1)
         self._fire_locks: dict[tuple[str, int | None], asyncio.Lock] = {}
 
     async def evaluate(
@@ -88,11 +94,16 @@ class EvaluateWebhookHandler:
             result = await self._evaluate_rule(rule, event, repository, installation_id, payload)
             if result is not None:
                 results.append(result)
+
+        # Prune _fire_locks to prevent unbounded growth
+        if len(self._fire_locks) > 1000:
+            self._fire_locks = {k: v for k, v in self._fire_locks.items() if v.locked()}
+
         return results
 
     async def _evaluate_rule(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         event: str,
         repository: str,
         installation_id: str,
@@ -129,7 +140,7 @@ class EvaluateWebhookHandler:
 
     async def _guarded_evaluate(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         event: str,
         repository: str,
         installation_id: str,
@@ -163,7 +174,7 @@ class EvaluateWebhookHandler:
 
     async def _handle_guard_block(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         guard_result: GuardResult,
         event: str,
         repository: str,
@@ -193,14 +204,15 @@ class EvaluateWebhookHandler:
 
     async def _fire_trigger(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         event: str,
         repository: str,
         payload: dict[str, Any],
     ) -> TriggerMatchResult:
         """Execute a trigger firing: record command + return result."""
         execution_id = f"exec-{uuid4().hex[:12]}"
-        delivery_id = payload.get("_delivery_id", "")
+        # ADR-060: use dedup_key as fallback for polled events (empty delivery_id)
+        delivery_id = payload.get("_delivery_id", "") or payload.get("_dedup_key", "")
         pr_number = _extract_pr_number(payload)
         workflow_inputs = extract_inputs(payload, rule.input_mapping)
 
@@ -222,6 +234,10 @@ class EvaluateWebhookHandler:
 
         # Mark execution as running for concurrency guard (Guard 6)
         await self._store.record_fire(rule.trigger_id, pr_number, execution_id)
+        # Record delivery for Guard 4 idempotency (ADR-060) - immediate, not via projection
+        await self._store.record_delivery(delivery_id, rule.trigger_id)
+        # Record dispatch for rate limiting (Guard 7, ADR-060)
+        self._guards.record_dispatch()
 
         result = TriggerMatchResult(trigger_id=rule.trigger_id, execution_id=execution_id)
         logger.info(
@@ -234,7 +250,7 @@ class EvaluateWebhookHandler:
 
     async def _record_block(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         guard_name: str,
         reason: str,
         event: str,
@@ -248,7 +264,9 @@ class EvaluateWebhookHandler:
                 trigger_id=rule.trigger_id,
                 guard_name=guard_name,
                 reason=reason,
-                webhook_delivery_id=payload.get("_delivery_id", ""),
+                # ADR-060: use dedup_key as fallback for polled events
+                webhook_delivery_id=payload.get("_delivery_id", "")
+                or payload.get("_dedup_key", ""),
                 event_type=event,
                 repository=repository,
                 pr_number=_extract_pr_number(payload),
@@ -265,7 +283,7 @@ class EvaluateWebhookHandler:
 
     async def _schedule_deferred(
         self,
-        rule: _IndexedTrigger,
+        rule: IndexedTrigger,
         event: str,
         repository: str,
         installation_id: str,

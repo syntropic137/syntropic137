@@ -20,7 +20,12 @@ if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
-    from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+    from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.github.services import WebhookHealthTracker
+    from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
+        _BudgetChecker,
+        _ExecutionService,
+    )
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
@@ -51,9 +56,7 @@ from syn_adapters.storage.repositories import (
 )
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
-from syn_domain.contexts.orchestration.slices.execute_workflow import (
-    WorkflowExecutionProcessor,
-)
+from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -113,14 +116,19 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     artifact_query = ArtifactQueryService(manager.artifact_list)
 
     from syn_adapters.projection_stores import get_projection_store
+    from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
     )
+    from syn_shared.settings.workspace import WorkspaceSettings
+
+    ws_config = WorkspaceServiceConfig(image=WorkspaceSettings().docker_image)
 
     return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
         session_repository=get_session_repository(),
         workspace_service=WorkspaceService.create(
+            config=ws_config,
             environment=_build_workspace_telemetry_env(),
         ),
         artifact_repository=get_artifact_repository(),
@@ -229,9 +237,7 @@ async def _build_workspace_prompt(
     2d. $ARGUMENTS → task string from inputs["task"]
     3. Context appendix: previous phase outputs appended as fallback section
     """
-    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
-        SYN_WORKSPACE_PROMPT,
-    )
+    from syn_domain.contexts.orchestration import SYN_WORKSPACE_PROMPT
 
     phase_prompt = _substitute_builtins(phase.prompt_template, execution_id, workflow_id, repo_url)
     phase_prompt = _substitute_inputs(phase_prompt, phase, inputs, phase_outputs)
@@ -315,9 +321,7 @@ def get_trigger_repo():
 
 def get_trigger_store():
     """Return the trigger query store."""
-    from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_query_store,
-    )
+    from syn_domain.contexts.github import get_trigger_query_store
 
     return get_trigger_query_store()
 
@@ -332,21 +336,22 @@ _webhook_health_tracker_singleton: object | None = None
 
 def get_event_pipeline() -> EventPipeline:
     """Return the singleton EventPipeline with Redis dedup (in-memory fallback)."""
-    from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+    from syn_domain.contexts.github import EvaluateWebhookHandler, EventPipeline
 
     global _event_pipeline_singleton
     if _event_pipeline_singleton is not None:
         assert isinstance(_event_pipeline_singleton, EventPipeline)
         return _event_pipeline_singleton
+    from syn_shared.settings import get_settings
 
-    from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
-        EvaluateWebhookHandler,
-    )
+    settings = get_settings()
 
     dedup = _create_dedup_adapter()
     evaluator = EvaluateWebhookHandler(
         store=get_trigger_store(),
         repository=get_trigger_repo(),
+        dispatch_rate_limit=settings.polling.dispatch_rate_limit,
+        dispatch_rate_window_seconds=settings.polling.dispatch_rate_window_seconds,
     )
     pipeline = EventPipeline(
         dedup=dedup,
@@ -357,7 +362,10 @@ def get_event_pipeline() -> EventPipeline:
 
 
 def _create_dedup_adapter() -> DedupPort:
-    """Create the appropriate dedup adapter based on environment."""
+    """Create the appropriate dedup adapter based on environment.
+
+    Priority (ADR-060): Postgres (durable) > Redis (cache) > In-memory (tests).
+    """
     from syn_shared.settings import get_settings
 
     settings = get_settings()
@@ -366,6 +374,24 @@ def _create_dedup_adapter() -> DedupPort:
         from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
 
         return InMemoryDedupAdapter()
+
+    # ADR-060: Prefer Postgres for durable dedup that survives restarts
+    if settings.syn_observability_db_url:
+        try:
+            from syn_api._wiring_db import get_shared_db_pool
+
+            pool = get_shared_db_pool()
+            if pool is not None:
+                from syn_adapters.dedup.postgres_dedup import PostgresDedupAdapter
+
+                ttl_days = max(1, -(-settings.polling.dedup_ttl_seconds // 86400))
+                logger.info("EventPipeline using Postgres dedup (ADR-060)")
+                return PostgresDedupAdapter(pool, ttl_days=ttl_days)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
+        except Exception:
+            logger.warning(
+                "Postgres dedup unavailable — falling back to Redis",
+                exc_info=True,
+            )
 
     try:
         import redis.asyncio as aioredis
@@ -378,19 +404,19 @@ def _create_dedup_adapter() -> DedupPort:
             redis_client,
             ttl_seconds=settings.polling.dedup_ttl_seconds,
         )
-    except Exception:
-        logger.warning(
-            "Redis unavailable for dedup — using in-memory fallback",
-            exc_info=True,
-        )
-        from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
-
-        return InMemoryDedupAdapter()
+    except Exception as exc:
+        # ADR-060: Never fall back to in-memory dedup in production --
+        # dedup state is lost on restart, causing duplicate workflow executions.
+        raise RuntimeError(
+            "No durable dedup backend available (Postgres and Redis both failed). "
+            "Configure SYN_OBSERVABILITY_DB_URL or REDIS_URL for production. "
+            "See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)."
+        ) from exc
 
 
 def get_webhook_health_tracker() -> WebhookHealthTracker:
     """Return the singleton WebhookHealthTracker."""
-    from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+    from syn_domain.contexts.github.services import WebhookHealthTracker
 
     global _webhook_health_tracker_singleton
     if _webhook_health_tracker_singleton is not None:
@@ -414,17 +440,54 @@ _pending_sha_store_singleton: object | None = None
 
 
 def get_pending_sha_store() -> PendingSHAStore:
-    """Return the singleton PendingSHAStore for check-run polling."""
-    from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
+    """Return the singleton PendingSHAStore for check-run polling.
 
+    ADR-060: production requires a durable backend. Never silently
+    falls back to in-memory -- raises RuntimeError instead.
+    """
     global _pending_sha_store_singleton
     if _pending_sha_store_singleton is not None:
-        assert isinstance(_pending_sha_store_singleton, InMemoryPendingSHAStore)
-        return _pending_sha_store_singleton
+        return _pending_sha_store_singleton  # type: ignore[return-value]
 
-    store = InMemoryPendingSHAStore()
-    _pending_sha_store_singleton = store
-    return store
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+
+    # Test/offline: use in-memory (guarded by InMemoryAdapter base class)
+    if settings.uses_in_memory_stores:
+        from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
+
+        mem_store: PendingSHAStore = InMemoryPendingSHAStore()
+        _pending_sha_store_singleton = mem_store
+        return mem_store
+
+    # Production: Postgres required (ADR-060)
+    if settings.syn_observability_db_url:
+        try:
+            from syn_api._wiring_db import get_shared_db_pool
+
+            pool = get_shared_db_pool()
+            if pool is not None:
+                from syn_adapters.github.postgres_pending_sha_store import (
+                    PostgresPendingSHAStore,
+                )
+
+                store: PendingSHAStore = PostgresPendingSHAStore(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
+                _pending_sha_store_singleton = store
+                logger.info("PendingSHAStore using Postgres (restart-durable)")
+                return store
+        except Exception:
+            logger.warning(
+                "Postgres PendingSHAStore unavailable",
+                exc_info=True,
+            )
+
+    # ADR-060: NEVER silent fallback to in-memory in production
+    msg = (
+        "No durable PendingSHAStore backend available. "
+        "Configure SYN_OBSERVABILITY_DB_URL for production use."
+    )
+    raise RuntimeError(msg)
 
 
 async def sync_published_events_to_projections() -> None:
@@ -517,11 +580,13 @@ class BackgroundWorkflowDispatcher:
     - run_workflow() → handler.handle() bridge
     - Fire-and-forget via asyncio.Task (never blocks projection loop)
     - Tracks tasks for graceful shutdown
+    - Semaphore-bounded concurrency (Phase A2)
     """
 
-    def __init__(self, handler: ExecuteWorkflowHandler) -> None:
+    def __init__(self, handler: ExecuteWorkflowHandler, max_concurrent: int = 5) -> None:
         self._handler = handler
         self._tasks: set[asyncio.Task[None]] = set()
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
     async def run_workflow(
         self,
@@ -529,13 +594,25 @@ class BackgroundWorkflowDispatcher:
         inputs: dict[str, str],
         execution_id: str = "",
         task: str | None = None,
+        repos: list[RepositoryRef] | None = None,
     ) -> None:
         asyncio_task = asyncio.create_task(
-            self._run(workflow_id, inputs, execution_id, task=task),
+            self._run_with_semaphore(workflow_id, inputs, execution_id, task=task, repos=repos),
             name=f"workflow-exec-{execution_id or workflow_id}",
         )
         self._tasks.add(asyncio_task)
         asyncio_task.add_done_callback(self._tasks.discard)
+
+    async def _run_with_semaphore(
+        self,
+        workflow_id: str,
+        inputs: dict[str, str],
+        execution_id: str,
+        task: str | None = None,
+        repos: list[RepositoryRef] | None = None,
+    ) -> None:
+        async with self._semaphore:
+            await self._run(workflow_id, inputs, execution_id, task=task, repos=repos)
 
     async def _run(
         self,
@@ -543,8 +620,10 @@ class BackgroundWorkflowDispatcher:
         inputs: dict[str, str],
         execution_id: str,
         task: str | None = None,
+        repos: list[RepositoryRef] | None = None,
     ) -> None:
-        from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+        from syn_domain.contexts.orchestration import (
+            DuplicateExecutionError,
             ExecuteWorkflowCommand,
         )
 
@@ -552,13 +631,19 @@ class BackgroundWorkflowDispatcher:
             cmd = ExecuteWorkflowCommand(
                 aggregate_id=workflow_id,
                 inputs=inputs or {},
+                repos=repos or [],
                 execution_id=execution_id or None,
                 task=task,
             )
             await self._handler.handle(cmd)
+        except DuplicateExecutionError:
+            logger.info(
+                "Duplicate dispatch for execution %s, already running",
+                execution_id,
+            )
         except Exception:
             logger.exception(
-                "Background workflow failed",
+                "Background workflow execution raised exception",
                 extra={"workflow_id": workflow_id, "execution_id": execution_id},
             )
 
@@ -571,16 +656,17 @@ class BackgroundWorkflowDispatcher:
 
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
-    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
-        ExecuteWorkflowHandler,
-    )
+    from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
 
     processor = await get_execution_processor()
     handler = ExecuteWorkflowHandler(
         processor=processor,
         workflow_repository=get_workflow_repository(),
     )
-    return BackgroundWorkflowDispatcher(handler)
+    from syn_shared.settings import get_settings
+
+    max_concurrent = get_settings().polling.max_concurrent_dispatches
+    return BackgroundWorkflowDispatcher(handler, max_concurrent=max_concurrent)
 
 
 class _NullSignalQueueAdapter:
@@ -610,9 +696,7 @@ def get_session_cost_query():
     Raises:
         RuntimeError: If the TimescaleDB pool is not yet initialized.
     """
-    from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
-        SessionCostQueryService,
-    )
+    from syn_domain.contexts.agent_sessions import SessionCostQueryService
 
     pool = get_event_store_instance().pool
     if pool is None:
@@ -631,9 +715,7 @@ def get_execution_cost_query():
     Raises:
         RuntimeError: If the TimescaleDB pool is not yet initialized.
     """
-    from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
-        ExecutionCostQueryService,
-    )
+    from syn_domain.contexts.orchestration import ExecutionCostQueryService
 
     pool = get_event_store_instance().pool
     if pool is None:
@@ -655,9 +737,20 @@ def get_realtime() -> RealTimeProjection:
     return get_realtime_projection()
 
 
+def _get_budget_checker() -> _BudgetChecker | None:
+    """Return the SpendTracker as a budget checker, or None if unavailable."""
+    try:
+        from syn_tokens.singletons import get_spend_tracker
+
+        return get_spend_tracker()
+    except Exception:
+        logger.warning("SpendTracker unavailable, dispatch budget checks disabled")
+        return None
+
+
 def get_subscription_coordinator(
     realtime_projection: RealTimeProjection | None = None,
-    execution_service: object | None = None,
+    execution_service: _ExecutionService | None = None,
 ) -> CoordinatorSubscriptionService:
     """Create the CoordinatorSubscriptionService.
 
@@ -665,11 +758,14 @@ def get_subscription_coordinator(
     """
     from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.subscriptions import create_coordinator_service
+    from syn_shared.settings import get_settings
 
     # Pass TimescaleDB pool to cost projections (#505, #507)
     timescale_pool = None
     with contextlib.suppress(Exception):
         timescale_pool = get_event_store_instance().pool
+
+    settings = get_settings()
 
     return create_coordinator_service(
         event_store=get_event_store_client(),
@@ -677,6 +773,8 @@ def get_subscription_coordinator(
         realtime_projection=realtime_projection,
         execution_service=execution_service,
         pool=timescale_pool,
+        budget_checker=_get_budget_checker(),
+        max_dispatches_per_hour=settings.polling.max_dispatches_per_hour,
     )
 
 

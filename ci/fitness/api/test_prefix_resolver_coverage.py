@@ -18,6 +18,8 @@ Required pattern for every GET /{entity_id} endpoint::
             mgr.store, "projection_namespace", entity_id, "EntityName"
         )
         ...
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

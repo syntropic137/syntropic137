@@ -1,7 +1,7 @@
 {
   "name": "syn-dashboard-ui",
   "private": true,
-  "version": "0.24.3",
+  "version": "0.25.0",
   "type": "module",
   "scripts": {
     "predev": "[ -d node_modules ] || npm install",
@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "generate:types": "tsx scripts/generate-types.ts"
   },
   "dependencies": {
     "@nivo/calendar": "^0.99.0",
@@ -45,6 +46,8 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.46.4",
     "vite": "7.3.2",
+    "openapi-typescript": "7.8.0",
+    "tsx": "4.19.4",
     "vitest": "4.1.1"
   }
 }

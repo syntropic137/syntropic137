@@ -72,9 +72,7 @@ async def _resolve_repo_names(repo_values: set[str]) -> dict[str, str]:
 
 async def _lookup_repo_ids(repo_ids: set[str]) -> dict[str, str]:
     """Look up repo IDs via the repo projection. Returns ID→display_name."""
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
-        get_repo_projection,
-    )
+    from syn_domain.contexts.organization import get_repo_projection
 
     result: dict[str, str] = {}
     try:
@@ -222,10 +220,7 @@ async def get_trigger_history(
     limit: int = 50,
 ) -> Result[list[TriggerHistoryEntry], TriggerError]:
     """Get execution history for a trigger rule."""
-    from syn_domain.contexts.github.domain.queries.get_trigger_history import GetTriggerHistoryQuery
-    from syn_domain.contexts.github.slices.trigger_history.GetTriggerHistoryHandler import (
-        get_trigger_history_handler,
-    )
+    from syn_domain.contexts.github import GetTriggerHistoryQuery, get_trigger_history_handler
 
     try:
         query = GetTriggerHistoryQuery(trigger_id=trigger_id, limit=limit)

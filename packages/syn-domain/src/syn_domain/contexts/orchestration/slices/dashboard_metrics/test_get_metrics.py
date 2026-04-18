@@ -1,7 +1,10 @@
-"""Tests for get_metrics query slice."""
+"""Tests for get_metrics query slice.
+
+Cost is Lane 2 telemetry (#695): the dashboard_metrics projection no longer
+tracks cost. The API enriches responses from the execution_cost projection.
+"""
 
 import os
-from decimal import Decimal
 
 import pytest
 
@@ -101,12 +104,9 @@ class TestDashboardMetricsProjection:
         metrics = await projection.get_metrics()
         assert metrics.total_sessions == 1
 
-        await projection.on_session_completed(
-            {"session_id": "s-1", "total_tokens": 1000, "total_cost_usd": "0.05"}
-        )
+        await projection.on_session_completed({"session_id": "s-1", "total_tokens": 1000})
         metrics = await projection.get_metrics()
         assert metrics.total_tokens == 1000
-        assert metrics.total_cost_usd == Decimal("0.05")
 
     @pytest.mark.asyncio
     async def test_artifact_created_increments_count(self, projection: DashboardMetricsProjection):
@@ -118,21 +118,16 @@ class TestDashboardMetricsProjection:
         assert metrics.total_artifacts == 2
 
     @pytest.mark.asyncio
-    async def test_cost_accumulation(self, projection: DashboardMetricsProjection):
-        """Test that costs accumulate correctly across sessions."""
+    async def test_token_accumulation(self, projection: DashboardMetricsProjection):
+        """Test that tokens accumulate correctly across sessions (cost is Lane 2)."""
         await projection.on_session_started({"session_id": "s-1"})
-        await projection.on_session_completed(
-            {"session_id": "s-1", "total_tokens": 500, "total_cost_usd": "0.025"}
-        )
+        await projection.on_session_completed({"session_id": "s-1", "total_tokens": 500})
 
         await projection.on_session_started({"session_id": "s-2"})
-        await projection.on_session_completed(
-            {"session_id": "s-2", "total_tokens": 1500, "total_cost_usd": "0.075"}
-        )
+        await projection.on_session_completed({"session_id": "s-2", "total_tokens": 1500})
 
         metrics = await projection.get_metrics()
         assert metrics.total_tokens == 2000
-        assert metrics.total_cost_usd == Decimal("0.1")
 
     @pytest.mark.asyncio
     async def test_input_output_token_tracking(self, projection: DashboardMetricsProjection):

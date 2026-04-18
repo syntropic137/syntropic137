@@ -5,7 +5,7 @@
 # Adds Cloudflare Tunnel and removes direct port exposure on gateway.
 # Prerequisites:
 #   1. Set CLOUDFLARE_TUNNEL_TOKEN in infra/.env (or resolve via 1Password)
-#   2. Set SYN_DOMAIN in infra/.env
+#   2. Set SYN_PUBLIC_HOSTNAME in infra/.env
 #   3. Configure tunnel routes in Cloudflare Zero Trust dashboard
 
 services:

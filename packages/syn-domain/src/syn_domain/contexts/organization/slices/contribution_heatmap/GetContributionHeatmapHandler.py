@@ -20,8 +20,8 @@ from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatm
 
 if TYPE_CHECKING:
     import asyncpg
+    from event_sourcing import ProjectionReadStore
 
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
         GetContributionHeatmapQuery,
     )
@@ -71,7 +71,7 @@ class GetContributionHeatmapHandler:
     def __init__(
         self,
         pool: asyncpg.Pool,
-        store: ProjectionStoreProtocol,
+        store: ProjectionReadStore,
         repo_projection: RepoProjection,
     ) -> None:
         self._timescale = TimescaleHeatmapQuery(pool)

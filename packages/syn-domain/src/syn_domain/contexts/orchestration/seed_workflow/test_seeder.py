@@ -14,7 +14,6 @@ from syn_adapters.storage import (
 )
 from syn_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
 from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
-    _build_create_command,
     _handle_seed_error,
 )
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
@@ -208,44 +207,9 @@ phases:
 
 
 # =========================================================================
-# Extracted helper tests
+# Extracted helper tests have moved to
+# ``_shared/test_yaml_to_command.py`` alongside the shared module.
 # =========================================================================
-
-
-@pytest.mark.unit
-class TestBuildCreateCommand:
-    """Tests for _build_create_command helper."""
-
-    def test_builds_command_from_definition(self) -> None:
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
-        )
-
-        definition = WorkflowDefinition(
-            id="wf-1",
-            name="Test",
-            type="research",
-            classification="simple",
-            repository={"url": "https://github.com/test/repo", "ref": "main"},
-            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
-        )
-        cmd = _build_create_command(definition)
-        assert cmd.aggregate_id == "wf-1"
-        assert cmd.name == "Test"
-        assert cmd.repository_url == "https://github.com/test/repo"
-
-    def test_uses_placeholder_url_without_repository(self) -> None:
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
-        )
-
-        definition = WorkflowDefinition(
-            id="wf-2",
-            name="No Repo",
-            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
-        )
-        cmd = _build_create_command(definition)
-        assert "placeholder" in cmd.repository_url
 
 
 @pytest.mark.unit

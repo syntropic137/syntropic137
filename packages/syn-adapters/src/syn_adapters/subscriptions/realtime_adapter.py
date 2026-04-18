@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
+    DispatchContext,
     EventEnvelope,
     ProjectionCheckpoint,
     ProjectionCheckpointStore,
@@ -19,6 +20,8 @@ from event_sourcing import (
 )
 
 if TYPE_CHECKING:
+    from event_sourcing.core.checkpoint import DispatchContext
+
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_domain.contexts.github.slices.trigger_history.projection import (
         TriggerHistoryProjection,
@@ -64,6 +67,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump(mode="json")
@@ -123,6 +127,7 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type
         if not event_type:
@@ -239,6 +244,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         event_data = envelope.event.model_dump()
         event_type = envelope.metadata.event_type or "Unknown"
@@ -272,12 +278,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         if event_type in ("WorkflowCompleted", "WorkflowFailed"):
             await self._handle_execution_terminal(event_data, event_type)
             return
-        from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import (
-            TriggerBlockedEvent,
-        )
-        from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
-            TriggerFiredEvent,
-        )
+        from syn_domain.contexts.github import TriggerBlockedEvent, TriggerFiredEvent
 
         if event_type == "github.TriggerBlocked":
             blocked = TriggerBlockedEvent.model_validate(event_data)
@@ -305,9 +306,7 @@ class TriggerHistoryAdapter(_NamespacedProjectionAdapter):
         if not execution_id:
             return
         try:
-            from syn_domain.contexts.github._shared.trigger_query_store import (
-                get_trigger_query_store,
-            )
+            from syn_domain.contexts.github import get_trigger_query_store
 
             store = get_trigger_query_store()
             await store.complete_execution(execution_id)

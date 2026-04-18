@@ -22,7 +22,7 @@ These are the manual, one-time steps required before the automated release pipel
 
 Create `@syntropic137` at https://www.npmjs.com/org/create (if not already done).
 
-#### 2. @syntropic137/cli (main repo — `apps/syn-cli-node`)
+#### 2. @syntropic137/cli (main repo - `apps/syn-cli-node`)
 
 1. Login to npm with org scope:
    ```bash
@@ -41,7 +41,7 @@ Create `@syntropic137` at https://www.npmjs.com/org/create (if not already done)
 4. Create the `npm-publish-cli` GitHub environment: repo Settings > Environments > New > `npm-publish-cli`
 5. After Trusted Publishing is configured, the `CLI_PUBLISH_NPM_TOKEN` secret is no longer needed and can be deleted.
 
-#### 3. @syntropic137/setup (npx repo — `syntropic137-npx`)
+#### 3. @syntropic137/setup (npx repo - `syntropic137-npx`)
 
 1. Login (same org scope as above):
    ```bash
@@ -61,10 +61,10 @@ Create `@syntropic137` at https://www.npmjs.com/org/create (if not already done)
 ### NPM Trusted Publishing Requirements
 
 - npm >= 11.5.1 and Node >= 22.14.0 (for OIDC token exchange)
-- Do NOT set `NODE_AUTH_TOKEN` — it overrides OIDC
-- Do NOT set `registry-url` in `setup-node` — it creates `.npmrc` that interferes with OIDC
+- Do NOT set `NODE_AUTH_TOKEN` - it overrides OIDC
+- Do NOT set `registry-url` in `setup-node` - it creates `.npmrc` that interferes with OIDC
 - The `--provenance` flag is still recommended even though docs say it is automatic
-- npm returns E404 (not 401/403) for auth failures on scoped packages — this is misleading but means "not authenticated"
+- npm returns E404 (not 401/403) for auth failures on scoped packages - this is misleading but means "not authenticated"
 
 ### GitHub Environments
 
@@ -91,13 +91,13 @@ Two environments are needed across the two repos:
    gh api repos/syntropic137/syntropic137/git/refs --method POST \
      -f ref=refs/heads/release -f sha=$(git rev-parse main)
    ```
-2. Branch ruleset: PR required, squash-only, Release Gate + CI Success checks, admin bypass.
+2. Branch ruleset: PR required, merge commits only (no squash, no rebase), Release Gate + CI Success checks, admin bypass.
 3. Vercel: set production branch to `release` in project settings.
 
 ### Docker / Container Setup
 
-- **GHCR authentication** uses the built-in `GITHUB_TOKEN` — no additional setup needed.
-- **Cosign keyless signing** uses Sigstore OIDC — no additional setup needed.
+- **GHCR authentication** uses the built-in `GITHUB_TOKEN` - no additional setup needed.
+- **Cosign keyless signing** uses Sigstore OIDC - no additional setup needed.
 - **Multi-arch builds** (amd64 + arm64) use QEMU emulation via `docker/setup-qemu-action`.
 
 ## Production Release
@@ -120,7 +120,7 @@ git push origin main
 
 ### 3. Open Release PR
 
-Open a PR from `main` to `release`. **The PR body becomes the GitHub Release notes** — write meaningful release notes here. The release-gate check enforces a minimum of 20 characters. Use this format as a guide:
+Open a PR from `main` to `release`. **The PR body becomes the GitHub Release notes** - write meaningful release notes here. The release-gate check enforces a minimum of 20 characters. Use this format as a guide:
 
 ```markdown
 ## What's Changed
@@ -139,19 +139,19 @@ The `release-create.yml` workflow reads the merged PR body verbatim and sets it 
 
 The following checks run automatically on the PR:
 
-- **Version consistency** — all 11 files match, version > current release
-- **Release notes** — PR body has content (minimum 20 characters)
-- **Docker dry-run** — all 7 container images build successfully (single-arch, no push)
-- **Full CI** — tests, lint, typecheck, security scans (same as any PR)
+- **Version consistency** - all 11 files match, version > current release
+- **Release notes** - PR body has content (minimum 20 characters)
+- **Docker dry-run** - all 6 container images build successfully (single-arch, no push)
+- **Full CI** - tests, lint, typecheck, security scans (same as any PR)
 
 ### 5. Merge
 
-Squash merge the PR. This triggers `release-create.yml` which:
+Merge the PR as a merge commit (not squash, not rebase). This triggers `release-create.yml` which:
 
 1. Reads version from `pyproject.toml`
 2. Creates git tag `v0.20.0`
 3. Creates GitHub Release with the PR body as release notes
-4. Calls `release-containers.yaml` → builds 8 multi-arch Docker images, signs with cosign, pushes to GHCR, attaches release assets (digest-pinned compose, SHA256SUMS)
+4. Calls `release-containers.yaml` → builds 6 multi-arch Docker images, signs with cosign, pushes to GHCR, attaches release assets (digest-pinned compose, SHA256SUMS)
 5. Calls `release-cli.yaml` → builds and publishes `@syntropic137/cli` to npm with Sigstore provenance
 6. Dispatches template sync to `syntropic137-npx`
 7. Vercel deploys docs from `release` branch
@@ -201,7 +201,7 @@ just bump-version 0.19.1
 
 ## Version Files Reference
 
-The `scripts/bump_version.py` script updates exactly these 11 files:
+The `scripts/workflows/bump_version.py` script updates exactly these 11 files:
 
 **Python (pyproject.toml):**
 1. `pyproject.toml` (root)
@@ -219,19 +219,23 @@ The `scripts/bump_version.py` script updates exactly these 11 files:
 11. `apps/syn-docs/package.json`
 
 **Not included** (independent versioning):
-- `lib/agentic-primitives/` — separate project
-- `lib/event-sourcing-platform/` — separate project
-- `packages/openclaw-plugin/` — independent plugin
+- `lib/agentic-primitives/` - separate project
+- `lib/event-sourcing-platform/` - separate project
+- `packages/openclaw-plugin/` - independent plugin
 
 ## Workflow Architecture
 
 ```
 PR: main → release
   ├── ci.yml (full CI suite)
-  └── release-gate.yml
-        ├── version-check
-        ├── changelog-check
-        ├── docker-dry-run (6 images)
+  └── release-gate.yml  (thin orchestrator - 4 reusable checks + 3 inline security scans)
+        ├── checks/version-check.yml       - all 11 files consistent, version > release
+        ├── checks/changelog-check.yml     - PR body >= 20 chars
+        ├── checks/codegen-sync.yml        - CLI types, CLI docs, API docs all current
+        ├── checks/docker-dry-run.yml      - all container images build (single-arch, cached)
+        ├── osv-scan (inline)
+        ├── pip-audit (inline)
+        ├── dependency-review (inline)
         └── release-gate-success (aggregator)
 
 Merge to release
@@ -244,23 +248,36 @@ Merge to release
         │     └── create GitHub Release (PR body = release notes)
         │
         ├── pre-publish-validation job  (needs: create-release)
-        │     ├── verify CLI types match OpenAPI spec
-        │     ├── verify CLI docs are current
-        │     └── verify API docs are current
+        │     └── checks/codegen-sync.yml  (workflow_call - reused from gate)
         │
         ├── release-containers.yaml  (workflow_call, needs: pre-publish-validation)
-        │     ├── build-scan-push (6 images, multi-arch)
+        │     ├── build-scan-push (multi-arch)
         │     └── release-assets (compose, SHA256SUMS, cosign sig, npx dispatch)
         │
         └── release-cli.yaml  (workflow_call, needs: pre-publish-validation)
               └── publish (npm OIDC, provenance)
 ```
 
+### Workflow Files
+
+| File | Purpose |
+|------|---------|
+| `.github/workflows/release-gate.yml` | Thin orchestrator - calls checks + inline security scans |
+| `.github/workflows/release-create.yml` | Release pipeline - create tag/release, publish containers + CLI |
+| `.github/workflows/checks/version-check.yml` | Version consistency: all 11 files match, bumped vs release |
+| `.github/workflows/checks/changelog-check.yml` | PR body length validation (takes `pr_body` input) |
+| `.github/workflows/checks/codegen-sync.yml` | Runs `just codegen`, checks for drift (CLI types, API docs, CLI docs) |
+| `.github/workflows/checks/docker-dry-run.yml` | All container images build successfully (single-arch, GHA cache) |
+| `.github/workflows/release-containers.yaml` | Multi-arch build, cosign sign, push to GHCR, release assets |
+| `.github/workflows/release-cli.yaml` | Build + publish `@syntropic137/cli` to npm (OIDC, provenance) |
+| `scripts/workflows/bump_version.py` | Version bump script; `--check` (consistency) and `--check-release` (semver vs release branch) |
+| `scripts/workflows/check_drift.py` | Drift detection; called by `codegen-sync.yml` to check git diff + untracked files for generated paths |
+
 ## Branch Protection (release)
 
 - Require PR (no direct push)
 - Required status checks: `Release Gate` + `CI Success`
-- Squash merge only
+- Merge commits only (no squash, no rebase — squashing rewrites history and forces rebasing main on every release)
 - No force pushes, no deletions
 - Admin bypass for emergencies
 
@@ -270,11 +287,11 @@ These rules exist to prevent out-of-order publishing. Do not work around them.
 
 ### The only valid release entry point is `release-create.yml`
 
-`release-containers.yaml` and `release-cli.yaml` are **internal callees** — they must only be triggered by `release-create.yml` via `workflow_call`. Direct triggers are poka-yoke protected:
+`release-containers.yaml` and `release-cli.yaml` are **internal callees** - they must only be triggered by `release-create.yml` via `workflow_call`. Direct triggers are poka-yoke protected:
 
-- **`release.published` is intentionally absent** from both publish workflows. A manually created GitHub Release (via UI, `gh release create`, or an AI agent) does not trigger publishing — it bypasses the approval gate.
-- **`workflow_dispatch` is branch-guarded** — both workflows reject dispatch from any branch other than `release`.
-- **`workflow_dispatch` dry_run defaults to `true`** on both workflows — dispatch with default inputs never pushes anything.
+- **`release.published` is intentionally absent** from both publish workflows. A manually created GitHub Release (via UI, `gh release create`, or an AI agent) does not trigger publishing - it bypasses the approval gate.
+- **`workflow_dispatch` is branch-guarded** - both workflows reject dispatch from any branch other than `release`.
+- **`workflow_dispatch` dry_run defaults to `true`** on both workflows - dispatch with default inputs never pushes anything.
 
 ### The approval gate
 
@@ -308,7 +325,7 @@ Creating a release via the GitHub UI, `gh release create`, or any automated tool
 
 ## Known Gotchas
 
-- **npm E404 on scoped packages:** npm returns E404 on PUT for scoped packages when auth fails. This is misleading — it means "not authenticated", not "package not found".
+- **npm E404 on scoped packages:** npm returns E404 on PUT for scoped packages when auth fails. This is misleading - it means "not authenticated", not "package not found".
 - **npm Trusted Publishing version requirement:** OIDC-based registry auth requires npm >= 11.5.1. Older npm versions only use OIDC for Sigstore provenance signing, NOT for registry authentication.
 - **Missing README on npmjs.com:** The `files` array in `package.json` must explicitly include `README.md` or it will not appear on the npm package page.
 - **GITHUB_TOKEN loop prevention:** Releases and events created by `GITHUB_TOKEN` do NOT trigger other workflows (GitHub's anti-loop mechanism). That is why `release-create.yml` uses reusable workflow calls (`workflow_call`) instead of relying on `release.published` events.

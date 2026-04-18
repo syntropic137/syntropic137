@@ -128,9 +128,9 @@ For secure, auto-rotating tokens with clear audit trails. See [GitHub App Setup 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `DEV__SMEE_URL` | No | None | Smee.io webhook proxy URL for local development. Auto-created by `just onboard-dev`. |
-| `SYN_DOMAIN` | No | None | Domain for Cloudflare tunnel. Set via `just onboard-dev --tunnel`. Lives in `infra/.env`. |
+| `SYN_PUBLIC_HOSTNAME` | No | None | Domain for Cloudflare tunnel. Set via `just onboard-dev --tunnel`. Lives in `infra/.env`. |
 
-> **Note:** These are mutually exclusive. If `SYN_DOMAIN` is set, the dev stack uses the Cloudflare tunnel for webhook delivery and ignores `DEV__SMEE_URL`. If neither is set, GitHub webhooks won't reach your local stack — `just onboard-dev` configures one automatically.
+> **Note:** These are mutually exclusive. If `SYN_PUBLIC_HOSTNAME` is set, the dev stack uses the Cloudflare tunnel for webhook delivery and ignores `DEV__SMEE_URL`. If neither is set, GitHub webhooks won't reach your local stack — `just onboard-dev` configures one automatically.
 
 ### 1Password Integration
 

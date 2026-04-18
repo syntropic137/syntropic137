@@ -5,6 +5,8 @@ Enforces that packages respect the dependency hierarchy:
 
 No package may import from a higher layer at runtime.
 TYPE_CHECKING imports are exempt.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

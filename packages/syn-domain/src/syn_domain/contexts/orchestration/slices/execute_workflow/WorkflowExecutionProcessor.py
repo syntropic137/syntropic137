@@ -11,10 +11,12 @@ from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoActio
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
+    ExecutionStatus,
     PhaseDefinition,
     PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    CancelExecutionCommand,
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
@@ -30,6 +32,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecor
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
+    AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
@@ -44,6 +47,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilde
     PhaseResultBuilder,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    AgentHandlerProtocol,
     ArtifactRepository,
     CommandBuilder,
     ExecutionRepository,
@@ -54,9 +58,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
-    TokenAccumulator,
 )
 
 if TYPE_CHECKING:
@@ -74,6 +75,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+        TokenAccumulator,
     )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +100,7 @@ class WorkflowExecutionProcessor:
         prompt_builder: PromptBuilder,
         command_builder: CommandBuilder,
         todo_projection: TodoProjection | None = None,
+        agent_handler: AgentHandlerProtocol | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -110,6 +115,7 @@ class WorkflowExecutionProcessor:
         self._command_builder = command_builder
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
+        self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
@@ -117,7 +123,9 @@ class WorkflowExecutionProcessor:
         self._active_cmds: dict[str, list[str]] = {}
         self._session_managers: dict[str, SessionLifecycleManager] = {}
         self._phase_tokens: dict[str, TokenAccumulator] = {}
-        self._phase_auth_tokens: dict[str, tuple[int, int]] = {}  # authoritative (input, output)
+        self._phase_auth_tokens: dict[
+            str, tuple[int, int, int, int]
+        ] = {}  # (input, output, cache_creation, cache_read)
         self._phase_artifact_ids: dict[str, list[str]] = {}
         self._phase_started_at: dict[str, datetime] = {}
 
@@ -133,6 +141,9 @@ class WorkflowExecutionProcessor:
     ) -> WorkflowExecutionResult:
         """Execute a workflow using the Processor To-Do List pattern."""
         started_at = datetime.now(UTC)
+        # Ensure resolved repos are persisted in inputs for the domain event
+        if repos and "repos" not in inputs:
+            inputs["repos"] = ",".join(repos)
         self._inputs = inputs
         aggregate = WorkflowExecutionAggregate()
 
@@ -156,8 +167,8 @@ class WorkflowExecutionProcessor:
             expected_completion_at=expected_completion_at,
             phase_definitions=phase_definitions,
         )
-        aggregate._handle_command(start_cmd)
-        await self._save_and_sync(aggregate)
+        aggregate.start_execution(start_cmd)
+        await self._save_new_and_sync(aggregate)
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
@@ -165,19 +176,24 @@ class WorkflowExecutionProcessor:
         phase_outputs: dict[str, str] = {}
 
         try:
-            while True:
-                todos = await self._todo_projection.get_pending(execution_id)
-                if not todos:
-                    break
-                await self._dispatch(
-                    todo=todos[0],
-                    aggregate=aggregate,
-                    phase_map=phase_map,
-                    phase_results=phase_results,
-                    all_artifact_ids=all_artifact_ids,
-                    completed_phase_ids=completed_phase_ids,
-                    phase_outputs=phase_outputs,
-                    repos=repos,
+            await self._drain_todo_list(
+                execution_id=execution_id,
+                aggregate=aggregate,
+                phase_map=phase_map,
+                phase_results=phase_results,
+                all_artifact_ids=all_artifact_ids,
+                completed_phase_ids=completed_phase_ids,
+                phase_outputs=phase_outputs,
+                repos=repos,
+            )
+            if aggregate.status == ExecutionStatus.CANCELLED:
+                return await self._cancel_execution(
+                    execution_id,
+                    workflow_id,
+                    phase_results,
+                    all_artifact_ids,
+                    started_at,
+                    cancel_reason=aggregate.cancel_reason,
                 )
             return await self._complete_execution(
                 aggregate,
@@ -199,6 +215,33 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids,
                 completed_phase_ids,
                 started_at,
+            )
+
+    async def _drain_todo_list(
+        self,
+        execution_id: str,
+        aggregate: WorkflowExecutionAggregate,
+        phase_map: dict[str, ExecutablePhase],
+        phase_results: list[PhaseResult],
+        all_artifact_ids: list[str],
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+        repos: list[str] | None,
+    ) -> None:
+        """Process to-do items until the list is empty (all phases done or cancelled)."""
+        while True:
+            todos = await self._todo_projection.get_pending(execution_id)
+            if not todos:
+                break
+            await self._dispatch(
+                todo=todos[0],
+                aggregate=aggregate,
+                phase_map=phase_map,
+                phase_results=phase_results,
+                all_artifact_ids=all_artifact_ids,
+                completed_phase_ids=completed_phase_ids,
+                phase_outputs=phase_outputs,
+                repos=repos,
             )
 
     async def _dispatch(
@@ -243,6 +286,45 @@ class WorkflowExecutionProcessor:
                 completed_phase_ids,
             )
 
+    async def _cancel_execution(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        phase_results: list[PhaseResult],
+        all_artifact_ids: list[str],
+        started_at: datetime,
+        cancel_reason: str | None = None,
+    ) -> WorkflowExecutionResult:
+        """Close open sessions as cancelled and return cancelled result.
+
+        Called when the to-do list empties due to ExecutionCancelledEvent.
+        The aggregate is already in CANCELLED status - no new command needed.
+        """
+        reason = cancel_reason or "Cancelled by user"
+        for _pid, mgr in list(self._session_managers.items()):
+            await mgr.complete_cancelled(reason=reason)
+        self._session_managers.clear()
+        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
+            try:
+                await workspace_cm.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Error cleaning up workspace during cancel")
+        self._active_workspace_cms.clear()
+        self._active_workspaces.clear()
+        self._active_envs.clear()
+        self._active_cmds.clear()
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="cancelled",
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            phase_results=phase_results,
+            artifact_ids=all_artifact_ids,
+            metrics=ExecutionMetrics.from_results(phase_results),
+            error_message=reason,
+        )
+
     async def _complete_execution(
         self,
         aggregate: WorkflowExecutionAggregate,
@@ -261,11 +343,12 @@ class WorkflowExecutionProcessor:
             total_phases=len(phases),
             total_input_tokens=metrics.total_input_tokens,
             total_output_tokens=metrics.total_output_tokens,
-            total_cost_usd=metrics.total_cost_usd,
+            total_cache_creation_tokens=metrics.total_cache_creation_tokens,
+            total_cache_read_tokens=metrics.total_cache_read_tokens,
             duration_seconds=metrics.total_duration_seconds,
             artifact_ids=all_artifact_ids,
         )
-        aggregate._handle_command(complete_cmd)
+        aggregate.complete_execution(complete_cmd)
         await self._save_and_sync(aggregate)
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
@@ -294,6 +377,15 @@ class WorkflowExecutionProcessor:
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_failure(error_message=str(error))
         self._session_managers.clear()
+        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
+            try:
+                await workspace_cm.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Error cleaning up workspace during failure")
+        self._active_workspace_cms.clear()
+        self._active_workspaces.clear()
+        self._active_envs.clear()
+        self._active_cmds.clear()
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
             error=str(error),
@@ -303,7 +395,7 @@ class WorkflowExecutionProcessor:
             total_phases=len(phases),
         )
         try:
-            aggregate._handle_command(fail_cmd)
+            aggregate.fail_execution(fail_cmd)
             await self._save_and_sync(aggregate)
         except Exception as save_err:
             logger.error("Failed to save failure event: %s", save_err)
@@ -339,7 +431,7 @@ class WorkflowExecutionProcessor:
             phase_order=phase.order,
             session_id=session_id,
         )
-        aggregate._handle_command(start_cmd)
+        aggregate.start_phase(start_cmd)
 
         session_mgr = SessionLifecycleManager(
             repository=self._session_repo,
@@ -380,8 +472,14 @@ class WorkflowExecutionProcessor:
         self._active_workspace_cms[todo.phase_id] = result.workspace_cm
         self._active_envs[todo.phase_id] = result.agent_env
         self._active_cmds[todo.phase_id] = result.claude_cmd
-        aggregate._handle_command(result.command)
+        aggregate.provision_workspace_completed(result.command)
         await self._save_and_sync(aggregate)
+
+    def _get_agent_handler(self) -> AgentHandlerProtocol:
+        """Return the injected handler, or create a fresh real one (default behaviour)."""
+        if self._agent_handler is not None:
+            return self._agent_handler
+        return AgentExecutionHandler(controller=self._controller)
 
     async def _handle_run_agent(
         self,
@@ -394,34 +492,36 @@ class WorkflowExecutionProcessor:
         workspace = self._active_workspaces[todo.phase_id]
         agent_env = self._active_envs[todo.phase_id]
         claude_cmd = self._active_cmds[todo.phase_id]
+        session_id = todo.session_id or ""
+        workflow_id = aggregate.workflow_id or ""
+        timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
 
         collector = ObservabilityCollector(
             writer=self._observability_writer,
-            session_id=todo.session_id or "",
+            session_id=session_id,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             workspace_id=getattr(workspace, "id", None),
             agent_model=phase.agent_config.model,
         )
-        agent_handler = AgentExecutionHandler(controller=self._controller)
-        result = await agent_handler.handle(
+        result = await self._get_agent_handler().handle(
             todo=todo,
             workspace=workspace,
             agent_env=agent_env,
             claude_cmd=claude_cmd,
-            session_id=todo.session_id or "",
+            session_id=session_id,
             agent_model=phase.agent_config.model,
-            timeout_seconds=phase.timeout_seconds or phase.agent_config.timeout_seconds,
+            timeout_seconds=timeout,
             collector=collector,
         )
 
         recorder = ConversationRecorder(self._conversation_storage)
         await recorder.store(
-            session_id=todo.session_id or "",
+            session_id=session_id,
             lines=result.stream_result.conversation_lines,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
-            workflow_id=aggregate.workflow_id or "",
+            workflow_id=workflow_id,
             model=phase.agent_config.model,
             input_tokens=result.tokens.input_tokens,
             output_tokens=result.tokens.output_tokens,
@@ -433,7 +533,13 @@ class WorkflowExecutionProcessor:
         self._phase_auth_tokens[todo.phase_id] = (
             result.command.input_tokens,
             result.command.output_tokens,
+            result.command.cache_creation_tokens,
+            result.command.cache_read_tokens,
         )
+
+        if result.stream_result.interrupt_requested:
+            await self._handle_cancel_signal(todo, result, aggregate)
+            return
 
         if result.command.exit_code != 0:
             reason = result.stream_result.error_reason
@@ -446,7 +552,23 @@ class WorkflowExecutionProcessor:
             logger.error(msg)
             raise RuntimeError(msg)
 
-        aggregate._handle_command(result.command)
+        aggregate.agent_execution_completed(result.command)
+        await self._save_and_sync(aggregate)
+
+    async def _handle_cancel_signal(
+        self,
+        todo: TodoItem,
+        result: AgentExecutionResult,
+        aggregate: WorkflowExecutionAggregate,
+    ) -> None:
+        """Dispatch CancelExecutionCommand when the agent stream was interrupted by a cancel signal."""
+        assert todo.phase_id is not None, "phase_id must be set for a running agent todo"
+        cancel_cmd = CancelExecutionCommand(
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            reason=result.stream_result.interrupt_reason or "Cancelled by user",
+        )
+        aggregate.cancel_execution(cancel_cmd)
         await self._save_and_sync(aggregate)
 
     async def _handle_collect_artifacts(
@@ -478,7 +600,7 @@ class WorkflowExecutionProcessor:
         self._phase_artifact_ids[todo.phase_id] = result.artifact_ids
         if result.first_content:
             phase_outputs[todo.phase_id] = result.first_content
-        aggregate._handle_command(result.command)
+        aggregate.artifacts_collected(result.command)
         await self._save_and_sync(aggregate)
 
     async def _handle_complete_phase(
@@ -491,15 +613,21 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Dispatch COMPLETE_PHASE."""
         assert todo.phase_id is not None
-        tokens = self._phase_tokens.pop(todo.phase_id, TokenAccumulator())
+        self._phase_tokens.pop(todo.phase_id, None)
         auth_tokens = self._phase_auth_tokens.pop(todo.phase_id, None)
         artifact_ids = self._phase_artifact_ids.pop(todo.phase_id, [])
         started_at = self._phase_started_at.pop(todo.phase_id, datetime.now(UTC))
 
-        # Prefer authoritative CLI result totals over per-turn accumulation
-        final_input = auth_tokens[0] if auth_tokens else tokens.input_tokens
-        final_output = auth_tokens[1] if auth_tokens else tokens.output_tokens
-        final_total = final_input + final_output
+        # Authoritative token counts come from the CLI result event; fall back
+        # to zeros when the result is missing (partial/interrupted phases) —
+        # Lane 2 observability holds the definitive cost either way.
+        final_input, final_output, final_cache_creation, final_cache_read = auth_tokens or (
+            0,
+            0,
+            0,
+            0,
+        )
+        final_total = final_input + final_output + final_cache_creation + final_cache_read
 
         warnings: list[str] = []
         if final_input == 0 and final_output == 0:
@@ -512,7 +640,11 @@ class WorkflowExecutionProcessor:
             started_at=started_at,
             session_id=todo.session_id or "",
             artifact_ids=artifact_ids,
-            tokens=tokens,
+            input_tokens=final_input,
+            output_tokens=final_output,
+            cache_creation_tokens=final_cache_creation,
+            cache_read_tokens=final_cache_read,
+            total_tokens=final_total,
             warnings=warnings,
         )
         phase_results.append(result)
@@ -527,20 +659,31 @@ class WorkflowExecutionProcessor:
             artifact_id=artifact_ids[0] if artifact_ids else None,
             input_tokens=final_input,
             output_tokens=final_output,
+            cache_creation_tokens=final_cache_creation,
+            cache_read_tokens=final_cache_read,
             total_tokens=final_total,
-            cost_usd=tokens.estimate_cost(),
             duration_seconds=duration,
         )
-        aggregate._handle_command(complete_cmd)
+        aggregate.complete_phase(complete_cmd)
         await self._save_and_sync(aggregate)
 
-        await self._finalize_phase(todo.phase_id, final_input, final_output, final_total, duration)
+        await self._finalize_phase(
+            todo.phase_id,
+            final_input,
+            final_output,
+            final_cache_creation,
+            final_cache_read,
+            final_total,
+            duration,
+        )
 
     async def _finalize_phase(
         self,
         phase_id: str,
         input_tokens: int,
         output_tokens: int,
+        cache_creation_tokens: int,
+        cache_read_tokens: int,
         total_tokens: int,
         duration: float,
     ) -> None:
@@ -550,6 +693,8 @@ class WorkflowExecutionProcessor:
             await session_mgr.complete_success(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
                 total_tokens=total_tokens,
                 duration_seconds=duration,
                 source="processor",
@@ -561,6 +706,23 @@ class WorkflowExecutionProcessor:
         workspace_cm = self._active_workspace_cms.pop(phase_id, None)
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
+
+    async def _save_new_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:
+        """Save a NEW aggregate (fails if stream exists) and sync events.
+
+        Uses save_new() with ExpectedVersion.NoStream to prevent duplicate
+        execution streams. Raises StreamAlreadyExistsError on conflict.
+        """
+        uncommitted = list(aggregate._uncommitted_events)
+        await self._execution_repo.save_new(aggregate)
+        for envelope in uncommitted:
+            event = envelope.event
+            event_type = getattr(event, "event_type", type(event).__name__)
+            event_data = self._serialize_event(event)
+            handler_name = self._event_type_to_handler(event_type)
+            handler = getattr(self._todo_projection, handler_name, None)
+            if handler:
+                await handler(event_data)
 
     async def _save_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:
         """Save aggregate and sync uncommitted events to local projection."""

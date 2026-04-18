@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
@@ -61,9 +61,9 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 5  # Bumped: ISS-400 add execution_type, max_tokens, artifact types to phase detail
+    VERSION = 6  # Bumped: added requires_repos field (ADR-058 #666)
 
-    def __init__(self, store: ProjectionStoreProtocol):
+    def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
         self._store = store
 
@@ -132,6 +132,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             runs_count=0,
             repository_url=event_data.get("repository_url"),
             repos=tuple(event_data.get("repos", [])),
+            requires_repos=event_data.get("requires_repos", True),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 

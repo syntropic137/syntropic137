@@ -174,6 +174,7 @@ class TestExecutionSummary:
             status="completed",
             total_cost_usd=Decimal("1.50"),
             total_tokens=10000,
+            repos=["https://github.com/org/repo"],
         )
         assert ex.total_cost_usd == Decimal("1.50")
         assert ex.total_tokens == 10000
@@ -186,6 +187,7 @@ class TestExecutionDetail:
             workflow_id="wf-1",
             workflow_name="Test",
             status="pending",
+            repos=[],
         )
         assert detail.total_input_tokens == 0
         assert detail.artifact_ids == []

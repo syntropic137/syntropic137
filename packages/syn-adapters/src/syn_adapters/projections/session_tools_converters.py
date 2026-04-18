@@ -67,9 +67,22 @@ def row_to_subagent_operation(
     )
 
 
+def _git_sub(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the structured ``git`` sub-object if present (v2 events)."""
+    git = data.get("git")
+    return git if isinstance(git, dict) else None
+
+
 def _resolve_git_branch(data: dict[str, Any], event_type: str) -> str | None:
-    """Extract the git branch from event data, falling back to command parsing."""
-    branch = data.get("branch") or data.get("to_branch") or None
+    """Extract the git branch from event data."""
+    # v2 structured path
+    git = _git_sub(data)
+    if git is not None:
+        return git.get("branch") or git.get("to_branch") or None
+
+    # Legacy flat fallback
+    ctx = _ctx(data)
+    branch = data.get("branch") or ctx.get("branch") or data.get("to_branch") or None
     if branch or event_type != "git_operation":
         return branch
     cmd = data.get("command", "")
@@ -77,14 +90,58 @@ def _resolve_git_branch(data: dict[str, Any], event_type: str) -> str | None:
     return _m.group(1) if _m else None
 
 
+def _ctx(data: dict[str, Any]) -> dict[str, Any]:
+    """Return the context sub-dict if present (legacy flat events)."""
+    ctx = data.get("context")
+    return ctx if isinstance(ctx, dict) else {}
+
+
 def _resolve_git_sha(data: dict[str, Any]) -> str | None:
-    """Extract git SHA from event data, trying multiple field names."""
-    return data.get("sha") or data.get("commit_hash") or data.get("merge_sha") or None
+    """Extract git SHA from event data."""
+    # v2 structured path
+    git = _git_sub(data)
+    if git is not None:
+        return git.get("sha") or None
+
+    # Legacy flat fallback
+    ctx = _ctx(data)
+    return (
+        data.get("sha")
+        or ctx.get("sha")
+        or data.get("commit_hash")
+        or data.get("merge_sha")
+        or None
+    )
 
 
 def _resolve_git_message(data: dict[str, Any]) -> str | None:
-    """Extract git commit message from event data, trying multiple field names."""
-    return data.get("message") or data.get("message_preview") or data.get("commit_message") or None
+    """Extract git commit message from event data."""
+    # v2 structured path
+    git = _git_sub(data)
+    if git is not None:
+        return git.get("message") or None
+
+    # Legacy flat fallback - engine renames "message" to "commit_message"
+    # during ingestion to avoid RESERVED_OBSERVATION_KEYS collision.
+    ctx = _ctx(data)
+    return (
+        data.get("commit_message")
+        or ctx.get("message")
+        or data.get("message")
+        or data.get("message_preview")
+        or None
+    )
+
+
+def _resolve_git_repo(data: dict[str, Any]) -> str | None:
+    """Extract git repo from event data."""
+    # v2 structured path
+    git = _git_sub(data)
+    if git is not None:
+        return git.get("repo") or None
+
+    # Legacy flat fallback
+    return data.get("repo") or _ctx(data).get("repo") or None
 
 
 def row_to_git_operation(
@@ -93,9 +150,11 @@ def row_to_git_operation(
     """Convert a git event row into a ToolOperation."""
     from syn_adapters.projections.session_tools import ToolOperation
 
-    git_subcmd = data.get("operation", "")
+    # Extract git subcommand (operation name)
+    git = _git_sub(data)
+    git_subcmd = git.get("operation", "") if git is not None else data.get("operation", "")
     if event_type == GIT_REWRITE and not git_subcmd:
-        git_subcmd = data.get("operation", "rebase")
+        git_subcmd = "rebase"
 
     return ToolOperation(
         observation_id=f"git-{event_type}-{row['time'].isoformat()}",
@@ -110,5 +169,6 @@ def row_to_git_operation(
         git_sha=_resolve_git_sha(data),
         git_message=_resolve_git_message(data),
         git_branch=_resolve_git_branch(data, event_type),
-        git_repo=data.get("repo") or None,
+        git_repo=_resolve_git_repo(data),
+        git_data=git,
     )

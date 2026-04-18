@@ -7,7 +7,9 @@ Structural checks that catch projection misconfiguration at CI time:
 - Trigger namespace constants match between writer and reader
 - Every subscribed event type has a dispatch handler
 
-These tests use no infrastructure — they import classes and inspect structure.
+These tests use no infrastructure -- they import classes and inspect structure.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

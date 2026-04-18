@@ -230,11 +230,9 @@ async def create_artifact(
 
     await ensure_connected()
     try:
-        from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType
-        from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        from syn_domain.contexts.artifacts import (
             ArtifactAggregate,
-        )
-        from syn_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
+            ArtifactType,
             CreateArtifactCommand,
         )
 
@@ -259,7 +257,7 @@ async def create_artifact(
 
         repo = get_artifact_repo()
         aggregate = ArtifactAggregate()
-        aggregate._handle_command(command)
+        aggregate.create_artifact(command)
         await repo.save(aggregate)
         await sync_published_events_to_projections()
 
@@ -314,12 +312,7 @@ async def update_artifact(
     """Update mutable metadata of an artifact."""
     await ensure_connected()
     try:
-        from syn_domain.contexts.artifacts.domain.commands.UpdateArtifactCommand import (
-            UpdateArtifactCommand,
-        )
-        from syn_domain.contexts.artifacts.slices.manage_artifact.ManageArtifactHandler import (
-            ManageArtifactHandler,
-        )
+        from syn_domain.contexts.artifacts import ManageArtifactHandler, UpdateArtifactCommand
 
         command = UpdateArtifactCommand(
             aggregate_id=artifact_id,
@@ -350,12 +343,7 @@ async def delete_artifact(
     """Soft-delete an artifact."""
     await ensure_connected()
     try:
-        from syn_domain.contexts.artifacts.domain.commands.DeleteArtifactCommand import (
-            DeleteArtifactCommand,
-        )
-        from syn_domain.contexts.artifacts.slices.manage_artifact.ManageArtifactHandler import (
-            ManageArtifactHandler,
-        )
+        from syn_domain.contexts.artifacts import DeleteArtifactCommand, ManageArtifactHandler
 
         command = DeleteArtifactCommand(
             aggregate_id=artifact_id,
@@ -530,6 +518,17 @@ async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResp
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
     a = result.value
+
+    # The metadata projection lists the artifact but object storage hasn't received
+    # the bytes yet — a race between ArtifactCreatedEvent and the MinIO upload (#700).
+    # Signal retry-later instead of a misleading 200-with-null body.
+    if a.content is None and a.size_bytes and a.size_bytes > 0:
+        raise HTTPException(
+            status_code=202,
+            detail=f"Artifact {artifact_id} content not yet available; retry shortly",
+            headers={"Retry-After": "2"},
+        )
+
     return ArtifactContentResponse(
         artifact_id=artifact_id,
         content=a.content,

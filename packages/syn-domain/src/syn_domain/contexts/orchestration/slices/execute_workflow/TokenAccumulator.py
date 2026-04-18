@@ -1,28 +1,17 @@
 """Token accumulation state machine for workflow execution.
 
-Extracted from WorkflowExecutionEngine to isolate token tracking
-and cost estimation concerns.
+Extracted from WorkflowExecutionEngine to isolate token tracking concerns.
+Cost is Lane 2 telemetry and is computed from authoritative Claude CLI
+totals downstream (see session_cost / execution_cost projections).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-import syn_shared.pricing as _pricing
-
-if TYPE_CHECKING:
-    from decimal import Decimal
-
 
 class TokenAccumulator:
-    """Accumulates token usage across streaming events and estimates cost.
+    """Accumulates token usage across streaming events."""
 
-    Uses ``syn_shared.pricing`` for model-aware cost estimation including
-    cache token pricing.
-    """
-
-    def __init__(self, model: str = _pricing.DEFAULT_MODEL_ID) -> None:
-        self._model = model
+    def __init__(self) -> None:
         self._input_tokens: int = 0
         self._output_tokens: int = 0
         self._cache_creation_tokens: int = 0
@@ -40,16 +29,6 @@ class TokenAccumulator:
         self._output_tokens += output_tokens
         self._cache_creation_tokens += cache_creation_tokens
         self._cache_read_tokens += cache_read_tokens
-
-    def estimate_cost(self) -> Decimal:
-        """Estimate cost based on accumulated token usage."""
-        pricing = _pricing.get_model_pricing(self._model)
-        return pricing.calculate_cost(
-            self._input_tokens,
-            self._output_tokens,
-            self._cache_creation_tokens,
-            self._cache_read_tokens,
-        )
 
     @property
     def input_tokens(self) -> int:
@@ -69,4 +48,9 @@ class TokenAccumulator:
 
     @property
     def total_tokens(self) -> int:
-        return self._input_tokens + self._output_tokens
+        return (
+            self._input_tokens
+            + self._output_tokens
+            + self._cache_creation_tokens
+            + self._cache_read_tokens
+        )

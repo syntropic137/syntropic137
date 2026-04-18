@@ -63,7 +63,7 @@ class CreateWorkflowTemplateHandler:
         aggregate = WorkflowTemplateAggregate()
 
         # Dispatch command to aggregate (uses @command_handler decorator)
-        aggregate._handle_command(command)
+        aggregate.create_workflow(command)
 
         # Persist via repository
         await self._repository.save(aggregate)

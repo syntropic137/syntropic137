@@ -12,10 +12,7 @@ logger = logging.getLogger(__name__)
 
 async def _apply_installation_created(payload: dict[str, Any]) -> None:
     """Create and persist an AppInstalledEvent from webhook payload."""
-    from syn_domain.contexts.github.domain.events import AppInstalledEvent
-    from syn_domain.contexts.github.slices.get_installation.projection import (
-        get_installation_projection,
-    )
+    from syn_domain.contexts.github import AppInstalledEvent, get_installation_projection
 
     event = AppInstalledEvent.from_webhook(payload)
     projection = get_installation_projection()
@@ -27,9 +24,7 @@ async def _apply_installation_repositories_changed(
     action: str,  # noqa: ARG001 — reserved for future per-action logic
 ) -> None:
     """Update the projection when repos are added or removed from an installation."""
-    from syn_domain.contexts.github.slices.get_installation.projection import (
-        get_installation_projection,
-    )
+    from syn_domain.contexts.github import get_installation_projection
 
     installation_id = str(payload.get("installation", {}).get("id", ""))
     if not installation_id:
@@ -63,10 +58,7 @@ async def _handle_installation_event(event_type: str, action: str, payload: dict
 
 def _classify_trigger_results(results: list[Any]) -> tuple[list[str], list[str]]:
     """Separate trigger evaluation results into (fired, deferred) ID lists."""
-    from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
-        TriggerDeferredResult,
-        TriggerMatchResult,
-    )
+    from syn_domain.contexts.github import TriggerDeferredResult, TriggerMatchResult
 
     fired: list[str] = []
     deferred: list[str] = []
@@ -89,9 +81,7 @@ async def _evaluate_triggers(
     repository = payload.get("repository", {}).get("full_name", "")
 
     try:
-        from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
-            EvaluateWebhookHandler,
-        )
+        from syn_domain.contexts.github import EvaluateWebhookHandler
 
         handler = EvaluateWebhookHandler(
             store=get_trigger_store(),

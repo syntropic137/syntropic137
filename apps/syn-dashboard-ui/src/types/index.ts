@@ -1,3 +1,16 @@
+import type { components } from '../generated/api-types'
+
+// =============================================================================
+// GENERATED TYPES (from OpenAPI spec - single source of truth)
+// Regenerate with: pnpm generate:types
+// =============================================================================
+
+/** Structured git event data from observability hooks. */
+export type GitEventData = components['schemas']['GitEventData']
+
+/** A single timeline event within a session. */
+export type OperationInfo = components['schemas']['OperationInfo']
+
 // =============================================================================
 // WORKFLOW TEMPLATE TYPES
 // Note: Templates don't have status. Status belongs to Executions.
@@ -86,37 +99,7 @@ export interface SessionSummary {
   duration_api_ms?: number | null
 }
 
-export interface OperationInfo {
-  operation_id: string
-  operation_type: string
-  timestamp: string
-  duration_seconds: number | null
-  success: boolean
-
-  // Token metrics (for MESSAGE_* types)
-  input_tokens: number | null
-  output_tokens: number | null
-  total_tokens: number | null
-
-  // Tool details (for TOOL_* types)
-  tool_name: string | null
-  tool_use_id: string | null
-  tool_input: Record<string, unknown> | null
-  tool_output: string | null
-
-  // Message details (for MESSAGE_* types)
-  message_role: string | null
-  message_content: string | null
-
-  // Thinking details (for THINKING type)
-  thinking_content: string | null
-
-  // Git details (for git_commit, git_push, git_branch_changed, git_operation)
-  git_sha: string | null
-  git_message: string | null
-  git_branch: string | null
-  git_repo: string | null
-}
+// OperationInfo is now generated from the OpenAPI spec -- see top of file.
 
 export interface SessionResponse {
   id: string
@@ -308,8 +291,8 @@ export interface ExecutionDetailResponse {
   phases: PhaseExecutionDetail[]
   total_input_tokens: number
   total_output_tokens: number
-  cache_creation_tokens: number
-  cache_read_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
   total_tokens: number
   total_cost_usd: number
   artifact_ids: string[]

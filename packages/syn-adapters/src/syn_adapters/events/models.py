@@ -28,9 +28,12 @@ from syn_shared.events import (
     AGENT_STOPPED,
     CONTEXT_COMPACTED,
     GIT_BRANCH_CHANGED,
+    GIT_CHECKOUT,
     GIT_COMMIT,
+    GIT_MERGE,
     GIT_OPERATION,
     GIT_PUSH,
+    GIT_REWRITE,
     OTLP_LOG,
     PERMISSION_REQUESTED,
     SECURITY_DECISION,
@@ -76,6 +79,9 @@ _EVENT_TYPE_MAPPING: dict[str, str] = {
     GIT_PUSH: GIT_PUSH,
     GIT_BRANCH_CHANGED: GIT_BRANCH_CHANGED,
     GIT_OPERATION: GIT_OPERATION,
+    GIT_MERGE: GIT_MERGE,
+    GIT_REWRITE: GIT_REWRITE,
+    GIT_CHECKOUT: GIT_CHECKOUT,
     # Claude Code hook events (observability plugin)
     TOOL_EXECUTION_FAILED: TOOL_EXECUTION_FAILED,
     TEAMMATE_IDLE: TEAMMATE_IDLE,
@@ -143,8 +149,10 @@ def _extract_tool_data(content: list[Any], event_data: dict[str, Any]) -> None:
 
 def _resolve_event_type(data: dict[str, Any], raw_type: str) -> str:
     """Resolve raw event type to normalized type, checking nested content first."""
-    message = data.get("message", {})
-    content = message.get("content", [])
+    message = data.get("message")
+    # Claude CLI wraps tool_use/tool_result in message.content arrays.
+    # Git hooks may put a plain string in "message" (commit message) - skip those.
+    content = message.get("content", []) if isinstance(message, dict) else []
     inner_type = _detect_inner_type(content) if isinstance(content, list) else None
     type_to_map = inner_type if inner_type else raw_type
     return _EVENT_TYPE_MAPPING.get(type_to_map, raw_type)

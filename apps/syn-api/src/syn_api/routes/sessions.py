@@ -26,6 +26,7 @@ from syn_api._wiring import (
 )
 from syn_api.types import (
     Err,
+    GitEventData,
     Ok,
     Result,
     SessionDetail,
@@ -60,6 +61,10 @@ class SessionSummaryResponse(BaseModel):
     phase_id: str | None
     status: str
     agent_provider: str | None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     started_at: str | None = None
@@ -91,6 +96,9 @@ class OperationInfo(BaseModel):
     message_role: str | None = None
     message_content: str | None = None
     thinking_content: str | None = None
+    # Structured git data (v2 events - preferred)
+    git: GitEventData | None = None
+    # Flat git fields (deprecated - use git sub-object instead)
     git_sha: str | None = None
     git_message: str | None = None
     git_branch: str | None = None
@@ -146,6 +154,26 @@ async def _fetch_one_workflow_name(
 _WF_NAME_CONCURRENCY = 20
 
 
+async def _load_session_costs(session_ids: list[str]) -> dict[str, Decimal]:
+    """Load per-session total_cost_usd from the Lane 2 session_cost projection (#695)."""
+    if not session_ids:
+        return {}
+    costs: dict[str, Decimal] = {}
+    try:
+        query_svc = get_session_cost_query()
+    except Exception:
+        logger.debug("Session cost query service unavailable", exc_info=True)
+        return costs
+    for sid in session_ids:
+        try:
+            cost = await query_svc.get(sid)
+            if cost is not None:
+                costs[sid] = cost.total_cost_usd
+        except Exception:
+            logger.debug("Failed to load cost for session %s", sid, exc_info=True)
+    return costs
+
+
 async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
     """Build a {workflow_id: workflow_name} lookup for the given IDs via concurrent store lookups."""
     if not workflow_ids:
@@ -196,8 +224,13 @@ async def list_sessions(
                 phase_id=s.phase_id,
                 status=s.status,
                 agent_type=s.agent_type,
+                input_tokens=s.input_tokens,
+                output_tokens=s.output_tokens,
+                cache_creation_tokens=s.cache_creation_tokens,
+                cache_read_tokens=s.cache_read_tokens,
                 total_tokens=s.total_tokens,
-                total_cost_usd=s.total_cost_usd,
+                # Lane 2: cost is enriched from session_cost projection at the endpoint (#695)
+                total_cost_usd=Decimal("0"),
                 started_at=s.started_at,
                 completed_at=s.completed_at,
             )
@@ -223,19 +256,13 @@ async def start_session(
     Returns:
         Ok(session_id) on success, Err(SessionError) on failure.
     """
-    from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler import (
-        StartSessionHandler,
-    )
+    from syn_domain.contexts.agent_sessions import StartSessionCommand, StartSessionHandler
 
     await ensure_connected()
     repository = get_session_repo()
     handler = StartSessionHandler(repository=repository)
 
     try:
-        from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
-            StartSessionCommand,
-        )
-
         command = StartSessionCommand(
             workflow_id=workflow_id,
             phase_id=phase_id or "",
@@ -260,19 +287,13 @@ async def complete_session(
     Returns:
         Ok(None) on success, Err(SessionError) on failure.
     """
-    from syn_domain.contexts.agent_sessions.slices.complete_session.CompleteSessionHandler import (
-        CompleteSessionHandler,
-    )
+    from syn_domain.contexts.agent_sessions import CompleteSessionCommand, CompleteSessionHandler
 
     await ensure_connected()
     repository = get_session_repo()
     handler = CompleteSessionHandler(repository=repository)
 
     try:
-        from syn_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
-            CompleteSessionCommand,
-        )
-
         command = CompleteSessionCommand(aggregate_id=session_id)
         await handler.handle(command)
         return Ok(None)
@@ -359,7 +380,8 @@ async def get_session(
         return Err(SessionError.NOT_FOUND, message=f"Session {session_id} not found")
 
     operations = await _load_tool_operations(manager, session_id)
-    cd = await _load_cost_data(session_id, session.total_tokens, session.total_cost_usd)
+    # Lane 2: session cost from TimescaleDB; fallback to 0 if unavailable (#695)
+    cd = await _load_cost_data(session_id, session.total_tokens, Decimal("0"))
 
     # Resolve workflow name with a targeted store lookup (avoids loading all workflows)
     wf_name: str | None = None
@@ -423,6 +445,8 @@ async def list_sessions_endpoint(
     summaries = result.value
     wf_ids = {s.workflow_id for s in summaries if s.workflow_id}
     wf_names = await _build_workflow_name_map(wf_ids)
+    # Lane 2: enrich each session's total_cost_usd from the session_cost projection (#695)
+    cost_by_session = await _load_session_costs([s.id for s in summaries])
     responses = [
         SessionSummaryResponse(
             id=s.id,
@@ -432,8 +456,12 @@ async def list_sessions_endpoint(
             phase_id=s.phase_id,
             status=s.status,
             agent_provider=s.agent_type,
+            input_tokens=s.input_tokens,
+            output_tokens=s.output_tokens,
+            cache_creation_tokens=s.cache_creation_tokens,
+            cache_read_tokens=s.cache_read_tokens,
             total_tokens=s.total_tokens,
-            total_cost_usd=s.total_cost_usd,
+            total_cost_usd=cost_by_session.get(s.id, Decimal("0")),
             started_at=str(s.started_at) if s.started_at else None,
             completed_at=str(s.completed_at) if s.completed_at else None,
         )
@@ -470,6 +498,7 @@ def _to_operation_info(op: ToolOperation) -> OperationInfo:
         tool_use_id=op.tool_use_id,
         tool_input=_parse_tool_input(op.input_preview),
         tool_output=op.output_preview,
+        git=op.git,
         git_sha=op.git_sha,
         git_message=op.git_message,
         git_branch=op.git_branch,

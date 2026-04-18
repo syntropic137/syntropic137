@@ -17,10 +17,9 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import asyncpg
+    from event_sourcing import ProjectionStore
 
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
-
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
+from syn_domain.contexts.agent_sessions import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_shared.pricing import get_model_pricing
 
@@ -125,11 +124,11 @@ class ExecutionCostProjection:
 
     PROJECTION_NAME = "execution_cost"
 
-    def __init__(self, store: ProjectionStoreProtocol, pool: asyncpg.Pool | None = None):
+    def __init__(self, store: ProjectionStore, pool: asyncpg.Pool | None = None):
         """Initialize with a projection store and optional TimescaleDB pool.
 
         Args:
-            store: A ProjectionStoreProtocol implementation
+            store: A ProjectionStore implementation
             pool: asyncpg Pool for querying TimescaleDB directly (ADR-029).
                   When available, query methods bypass the (empty) projection
                   store and read from the actual observability data source.

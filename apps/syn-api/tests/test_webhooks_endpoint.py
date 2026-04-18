@@ -32,21 +32,21 @@ def test_handle_ping_invalid_json_returns_empty_zen() -> None:
 def test_raise_for_webhook_error_signature_gives_401() -> None:
     err = Err(GitHubError.INVALID_SIGNATURE, message="bad sig")
     with pytest.raises(HTTPException) as exc_info:
-        _raise_for_webhook_error(err, "1.2.3.4")
+        _raise_for_webhook_error(err)
     assert exc_info.value.status_code == 401
 
 
 def test_raise_for_webhook_error_payload_gives_400() -> None:
     err = Err(GitHubError.INVALID_PAYLOAD, message="bad json")
     with pytest.raises(HTTPException) as exc_info:
-        _raise_for_webhook_error(err, "1.2.3.4")
+        _raise_for_webhook_error(err)
     assert exc_info.value.status_code == 400
 
 
 def test_raise_for_webhook_error_other_gives_500() -> None:
     err = Err(GitHubError.PROCESSING_FAILED, message="boom")
     with pytest.raises(HTTPException) as exc_info:
-        _raise_for_webhook_error(err, "1.2.3.4")
+        _raise_for_webhook_error(err)
     assert exc_info.value.status_code == 500
 
 

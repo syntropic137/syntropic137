@@ -2,6 +2,13 @@
 #
 # Command runner for Syntropic137
 # See https://github.com/casey/just
+#
+# Adding or updating recipes? Follow ADR-061 (Justfile Script Extraction):
+# - One-liners stay here. Multi-step logic goes to infra/scripts/ or scripts/.
+# - Python over bash for anything non-trivial (testable, type-checked, linted).
+# - Recipes are the public API; scripts are implementation details.
+
+set dotenv-load := true
 
 # Docker Compose shorthand variables
 compose := "docker compose -f docker/docker-compose.yaml"
@@ -26,13 +33,12 @@ help:
 
 # --- Onboarding ---
 
-# Run interactive onboarding wizard (selfhost: secrets, tunnel, GitHub App)
-onboard *args:
-    @uv run python infra/scripts/setup.py {{args}}
+# Self-host onboarding: use the NPX CLI — zero-clone, zero-dep, interactive wizard
+# npx @syntropic137/setup init
+# See https://github.com/syntropic137/syntropic137-npx for full documentation.
 
 # Dev onboarding: submodules → .env → deps → webhook URL → GitHub App → stack
 # GitHub App setup runs by default (use --skip-github to skip).
-# Cloudflare tunnel is opt-in (use --tunnel to include).
 # 1Password setup is opt-in (use --1password to include).
 onboard-dev *flags:
     #!/usr/bin/env bash
@@ -90,28 +96,15 @@ onboard-dev *flags:
     # Source .env so subsequent checks can see existing values
     if [ -f .env ]; then set -a && source .env && set +a; fi
 
-    # 7. Webhook delivery — tunnel or Smee (mutually exclusive)
-    if echo "{{flags}}" | grep -q -- "--tunnel"; then
-        echo ""
-        echo "🌐 Setting up Cloudflare tunnel for webhook delivery..."
-        uv run python infra/scripts/setup.py --stage configure_cloudflare
-        # Re-source to pick up SYN_DOMAIN
-        if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
-        # Clear Smee if previously set — tunnel replaces it
-        if grep -q '^DEV__SMEE_URL=' .env 2>/dev/null; then
-            sed -i.bak 's|^DEV__SMEE_URL=.*|DEV__SMEE_URL=|' .env && rm -f .env.bak
-            unset DEV__SMEE_URL 2>/dev/null || true
-        fi
-        _DOMAIN="${SYN_DOMAIN:-<domain>}"
-        _DOMAIN="${_DOMAIN#https://}"
-        _DOMAIN="${_DOMAIN#http://}"
-        _DOMAIN="${_DOMAIN%/}"
-        echo "   ✅ Webhooks will be delivered via tunnel (${_DOMAIN})"
-        echo "   Set your GitHub App webhook URL to: https://${_DOMAIN}/webhooks/github"
+    # 7. Webhook delivery — Smee proxy (for dev) or Cloudflare tunnel
+    # For Cloudflare tunnel setup run: npx @syntropic137/setup tunnel
+    # Skip smee when a Cloudflare tunnel is configured
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] || [ -n "${SYN_PUBLIC_HOSTNAME:-}" ]; then
+        echo "✅ Cloudflare tunnel detected - skipping smee.io setup"
     elif [ -z "${DEV__SMEE_URL:-}" ]; then
         echo ""
         echo "🔗 Setting up webhook proxy (smee.io)..."
-        SMEE_URL=$(uv run python -c "from infra.scripts.shared import create_smee_channel; print(create_smee_channel())" 2>/dev/null) || true
+        SMEE_URL=$(uv run python -c "from infra.scripts.infra_config import create_smee_channel; print(create_smee_channel())" 2>/dev/null) || true
         if [ -n "${SMEE_URL:-}" ]; then
             echo "   ✅ Channel: $SMEE_URL"
             if grep -q '^DEV__SMEE_URL=' .env 2>/dev/null; then
@@ -130,14 +123,16 @@ onboard-dev *flags:
     fi
 
     # 7. 1Password setup (opt-in with --1password)
+    # Shows prerequisites for 1Password vault integration.
+    # Prerequisites: brew install --cask 1password-cli && op signin
     if echo "{{flags}}" | grep -q -- "--1password"; then
         echo ""
-        echo "🔐 Setting up 1Password secret management..."
-        uv run python infra/scripts/setup.py --stage configure_1password
+        echo "🔐 1Password: showing vault setup prerequisites..."
+        echo "   See infra/docs/selfhost-deployment.md for vault setup instructions."
     fi
 
     # 7b. Resolve 1Password secrets into env (so step 8 sees them)
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
 
     # 8. GitHub App setup (runs by default — skip with --skip-github)
     #    Required for agent workflows to push code.
@@ -149,10 +144,12 @@ onboard-dev *flags:
         echo "✅ GitHub App already configured"
     else
         echo ""
-        echo "🔑 Setting up GitHub App (required for agent workflows to push code)..."
-        echo "   Use --skip-github to skip this step."
+        echo "🔑 GitHub App setup required for agent workflows to push code."
+        echo "   Run the NPX setup CLI to create a GitHub App:"
         echo ""
-        uv run python infra/scripts/setup.py --stage configure_github_app
+        echo "   npx @syntropic137/setup init --skip-docker"
+        echo ""
+        echo "   Or use --skip-github to skip this step and configure manually later."
     fi
 
     # 9. Wait for workspace build if it was started
@@ -171,7 +168,7 @@ onboard-dev *flags:
     echo ""
     if echo "{{flags}}" | grep -q -- "--1password"; then
         # Re-source to pick up any values written during setup + resolve 1Password
-        source scripts/resolve_env.sh
+        eval "$(uv run python scripts/resolve_infra_env.py)"
         # Derive vault name
         case "${APP_ENVIRONMENT:-development}" in
             development) _VAULT="syn137-dev" ;;
@@ -188,7 +185,7 @@ onboard-dev *flags:
         # Audit each secret: show status (in .env, missing, needs vault)
         _HAS_VALUES=""
         _MISSING=""
-        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
+        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
             _VAL="${!_VAR:-}"
             if [ -n "$_VAL" ]; then
                 # Show redacted for secrets, full for non-secrets
@@ -268,7 +265,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# Try edit first; if item doesn't exist, create it"
                 echo -n "op item edit \"$_ITEM\" --vault \"$_VAULT\""
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         echo " \\"
@@ -278,7 +275,7 @@ onboard-dev *flags:
                 echo " 2>/dev/null \\"
                 echo "|| op item create --category=login --title=\"$_ITEM\" --vault=\"$_VAULT\" \\"
                 _FIRST=true
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         if [ "$_FIRST" = true ]; then _FIRST=false; else echo " \\"; fi
@@ -341,14 +338,6 @@ onboard-dev *flags:
     echo "🚀 Starting dev stack..."
     just dev
 
-# Check prerequisites only (no changes)
-setup-check:
-    @uv run python infra/scripts/setup.py --stage check_prerequisites
-
-# Re-run a specific setup stage
-setup-stage stage:
-    @uv run python infra/scripts/setup.py --stage {{stage}}
-
 # --- Development ---
 # Uses DRY Docker Compose: base + override files (ADR-034)
 
@@ -371,7 +360,7 @@ dev: _workspace-check
     echo ""
 
     # Resolve .env + 1Password so Docker Compose inherits secrets
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
 
     echo "1️⃣ Syncing Python dependencies..."
     uv sync
@@ -386,10 +375,7 @@ dev: _workspace-check
     echo "2️⃣ Building and starting Docker services..."
     ${_COMPOSE} up -d --build
     echo ""
-    echo "3️⃣ Initialising MinIO buckets..."
-    uv run python infra/scripts/init_minio_buckets.py
-    echo ""
-    echo "4️⃣ Waiting for services to be healthy..."
+    echo "3️⃣ Waiting for services to be healthy..."
     sleep 5
     echo ""
     echo "5️⃣ Seeding workflows..."
@@ -436,7 +422,7 @@ dev-fresh: _workspace-check
     echo ""
 
     # Resolve .env + 1Password so Docker Compose inherits secrets
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
 
     echo "1️⃣ Stopping any existing processes..."
     lsof -ti:5173 | xargs kill -9 2>/dev/null || true
@@ -458,10 +444,7 @@ dev-fresh: _workspace-check
     echo "4️⃣ Building and starting Docker services..."
     ${_COMPOSE} up -d --build
     echo ""
-    echo "5️⃣ Initialising MinIO buckets..."
-    uv run python infra/scripts/init_minio_buckets.py
-    echo ""
-    echo "6️⃣ Waiting for services to be healthy..."
+    echo "5️⃣ Waiting for services to be healthy..."
     sleep 8
     echo ""
     echo "7️⃣ Running database migrations..."
@@ -697,59 +680,69 @@ e2e-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    API_URL="http://localhost:9137"
+    API_URL="http://127.0.0.1:9137"
+    CLI="node apps/syn-cli-node/dist/syn.js"
+    export SYN_API_URL="${API_URL}"
+    export SYN_NO_PREFIX=1
 
     # 1. Check if the dev stack is already running; start it if not
     if ! curl -sf "${API_URL}/health" > /dev/null 2>&1; then
-        echo "🔧 Dev stack not running — starting it..."
+        echo "Dev stack not running - starting it..."
         just dev
         echo ""
     fi
 
     # 2. Wait briefly for services to stabilise
-    echo "⏳ Waiting for services..."
+    echo "Waiting for services..."
     for i in $(seq 1 30); do
         if curl -sf "${API_URL}/health" > /dev/null 2>&1; then
             break
         fi
         if [ "$i" -eq 30 ]; then
-            echo "❌ Health endpoint did not respond within 30 seconds"
+            echo "Health endpoint did not respond within 30 seconds"
             exit 1
         fi
         sleep 1
     done
 
-    # 3. Health endpoint
-    echo "🏥 Checking health endpoint..."
+    # 3. Build the Node CLI if not already built
+    if [ ! -f "apps/syn-cli-node/dist/syn.js" ]; then
+        echo "Building Node CLI..."
+        just cli-node-build
+        echo ""
+    fi
+
+    # 4. Health endpoint
+    echo "Checking health endpoint..."
     curl -sf "${API_URL}/health" | python3 -m json.tool
     echo ""
 
-    # 4. Core CLI smoke tests
-    echo "🔍 Running CLI smoke tests..."
+    # 5. Core CLI smoke tests
+    echo "Running CLI smoke tests..."
     echo ""
 
-    echo "  → syn workflow list"
-    just cli workflow list
+    echo "  -> syn workflow list"
+    ${CLI} workflow list
     echo ""
 
-    echo "  → syn session list"
-    just cli session list
+    echo "  -> syn sessions list"
+    ${CLI} sessions list
     echo ""
 
-    echo "  → syn events recent --limit 5"
-    just cli events recent --limit 5
+    echo "  -> syn events recent --limit 5"
+    ${CLI} events recent --limit 5
     echo ""
 
-    echo "  → syn org list"
-    just cli org list
+    echo "  -> syn org list"
+    ${CLI} org list
     echo ""
 
-    echo "  → syn status"
-    just cli status
+    echo "  -> syn health"
+    ${CLI} health
     echo ""
 
-    # 5. Success
-    echo "✅ E2E smoke test passed — full stack is operational"
+    # 6. Success
+    echo "E2E smoke test passed - full stack is operational"
 
 # Check for test debt (xfail, skip, TODO in tests)
 test-debt:
@@ -779,6 +772,41 @@ test-stack-restart: test-stack-down test-stack
 # View test stack logs
 test-stack-logs:
     {{compose_test}} logs -f
+
+# --- On-Demand Environments (ADR-060) ---
+# Branch-based ephemeral environments for parallel testing.
+# All logic lives in infra/scripts/env_manager.py; these are thin wrappers.
+# Registry: infra/environments.json  |  Ports: slots 2-5 (x10000 offset)
+
+_env := "uv run python infra/scripts/env_manager.py"
+
+# Create and start an on-demand environment for a branch ("current" = current branch)
+env-up branch:
+    {{_env}} up "$(if [ '{{branch}}' = 'current' ]; then git rev-parse --abbrev-ref HEAD; else echo '{{branch}}'; fi)"
+
+# Destroy an on-demand environment (stops containers, removes volumes, frees slot)
+env-down name:
+    {{_env}} down "{{name}}"
+
+# List all on-demand environments with their ports (--json for agent consumption)
+env-list *args:
+    {{_env}} list {{args}}
+
+# Show URLs and port details for one environment (--json for agent consumption)
+env-status name *args:
+    {{_env}} status "{{name}}" {{args}}
+
+# Pause an on-demand environment (slot still held)
+env-stop name:
+    {{_env}} stop "{{name}}"
+
+# Resume a paused environment
+env-start name:
+    {{_env}} start "{{name}}"
+
+# Stream logs from an on-demand environment
+env-logs name:
+    {{_env}} logs "{{name}}"
 
 # --- Quality Assurance ---
 
@@ -825,7 +853,7 @@ setup-hooks:
     @echo "✓ Git hooks configured (.githooks/pre-push active)"
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
-qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate docs-sync
+qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate docs-sync check-compose-overlays
     @echo ""
     @echo "✅ All QA checks passed!"
 
@@ -846,19 +874,39 @@ format:
 format-check:
     uv run ruff format --check .
 
-# Ratchet: no untyped dicts in API types (dict[str, Any] or dict[str, object] in Pydantic models)
+# Ratchet: count dict[str, Any] and dict[str, object] per package - never let them grow
+# Config lives in fitness-exceptions.toml [untyped-dicts.*] (default threshold: 0)
 check-untyped-dicts:
     #!/usr/bin/env python3
     import re, sys
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib  # type: ignore[no-redef]
     from pathlib import Path
-    threshold = int(Path(".ratchets/untyped-dicts").read_text().strip() or 0)
-    text = Path("apps/syn-api/src/syn_api/types.py").read_text()
-    count = len(re.findall(r"dict\[str, (?:Any|object)\]", text))
-    if count > threshold:
-        print(f"❌ Untyped dict ratchet exceeded: {count} occurrences (threshold: {threshold})")
-        print("   Fix dict[str, Any] and dict[str, object] in apps/syn-api/src/syn_api/types.py")
+    config = tomllib.loads(Path("fitness-exceptions.toml").read_text())
+    entries = config.get("untyped-dicts", {})
+    if not entries:
+        print("  No [untyped-dicts.*] entries in fitness-exceptions.toml")
+        sys.exit(0)
+    failed = False
+    for name, entry in entries.items():
+        pkg_path = entry["path"]
+        threshold = entry.get("value", 0)
+        issue = entry.get("issue", "")
+        count = 0
+        for py_file in Path(pkg_path).rglob("*.py"):
+            count += len(re.findall(r"dict\[str, (?:Any|object)\]", py_file.read_text()))
+        if count > threshold:
+            print(f"  FAIL {name}: {count} occurrences (threshold: {threshold}) [{issue}]")
+            failed = True
+        elif threshold > 0:
+            print(f"  WARN {name}: {count}/{threshold} - tech debt, ratchet to 0 [{issue}]")
+        else:
+            print(f"  ok {name}: clean")
+    if failed:
+        print("\nRatchet exceeded! Reduce untyped dicts or lower value in fitness-exceptions.toml.")
         sys.exit(1)
-    print(f"✓ Untyped dict check: {count}/{threshold}")
 
 # Run type checker (strict mode)
 typecheck:
@@ -1029,9 +1077,6 @@ selfhost-up: _selfhost-preflight _workspace-check
     echo "🚀 Starting Syn137 self-host stack..."
     {{compose_selfhost}} up -d --build
     echo ""
-    echo "🪣 Initialising MinIO buckets..."
-    uv run python infra/scripts/init_minio_buckets.py
-    echo ""
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
     echo ""
@@ -1047,9 +1092,6 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     source infra/scripts/selfhost-env.sh
     echo "🚀 Starting Syn137 self-host stack with Cloudflare Tunnel..."
     {{compose_selfhost_cf}} up -d --build
-    echo ""
-    echo "🪣 Initialising MinIO buckets..."
-    uv run python infra/scripts/init_minio_buckets.py
     echo ""
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
@@ -1091,19 +1133,8 @@ selfhost-status:
         {{compose_selfhost}} ps
     fi
     echo ""
-    echo "🔗 Access Points:"
-    if [ -n "${SYN_DOMAIN:-}" ]; then
-        _domain=$(echo "${SYN_DOMAIN}" | sed -E 's|^https?://||' | sed 's|/$||')
-        echo "   UI:       https://$_domain"
-        echo "   API:      https://$_domain/api/v1"
-        echo "   API Docs: https://$_domain/api/v1/docs"
-    else
-        _port="${SYN_GATEWAY_PORT:-8137}"
-        echo "   UI:       http://localhost:$_port"
-        echo "   API:      http://localhost:$_port/api/v1"
-        echo "   API Docs: http://localhost:$_port/api/v1/docs"
-        echo "   (Set SYN_DOMAIN in .env for external access)"
-    fi
+    echo "Access Points:"
+    uv run python infra/scripts/print_access_urls.py
 
 # View self-host logs (all services or specific service, auto-detects tunnel)
 selfhost-logs *service:
@@ -1258,44 +1289,19 @@ secrets-delete-token:
         && echo "✅ Deleted: $_SVC" \
         || echo "⚠️  Not found: $_SVC"
 
-# Generate new secrets for deployment
-secrets-generate:
-    @echo "🔐 Generating deployment secrets..."
-    @uv run python infra/scripts/secrets_setup.py generate
-
-# Rotate all secrets (regenerates - requires restart)
-secrets-rotate:
-    @echo "🔄 Rotating secrets..."
-    @uv run python infra/scripts/secrets_setup.py rotate
-    @echo ""
-    @echo "⚠️  Restart services to apply new secrets:"
-    @echo "   just selfhost-restart api"
-
-# Verify secrets are configured
-secrets-check:
-    @uv run python infra/scripts/secrets_setup.py check
-
-# Encrypt secrets with passphrase (creates .enc files safe to commit)
-secrets-seal:
-    @uv run python infra/scripts/secrets_setup.py seal
-
-# Decrypt secrets from .enc files (restores plain-text for Docker)
-secrets-unseal:
-    @uv run python infra/scripts/secrets_setup.py unseal
-
 # Push secrets to 1Password vault (selfhost only — uses syn-ctl)
 secrets-push:
     @echo "Push secrets to 1Password via syn-ctl:"
     @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-push"
     @echo ""
-    @echo "For dev environments, use: just onboard --stage configure_1password"
+    @echo "For dev environments, use: just onboard-dev --1password"
 
 # Pull secrets from 1Password vault (selfhost only — uses syn-ctl)
 secrets-pull:
     @echo "Pull secrets from 1Password via syn-ctl:"
     @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-pull"
     @echo ""
-    @echo "For dev environments, use: just onboard --stage configure_1password"
+    @echo "For dev environments, use: just onboard-dev --1password"
 
 # --- Health ---
 
@@ -1371,8 +1377,8 @@ docs-sync:
         echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
-    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
-        echo "✅ API docs and CLI types are up-to-date"; \
+    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
+        echo "✅ API docs, CLI types, and dashboard types are up-to-date"; \
     else \
         echo "❌ API artifacts need to be committed:"; \
         echo "   Run 'just codegen' and commit the changes."; \
@@ -1389,6 +1395,8 @@ codegen: docs-cli-gen
     cd apps/syn-docs && pnpm run generate:openapi
     @echo "📄 Generating CLI TypeScript types..."
     cd apps/syn-cli-node && pnpm run generate:types
+    @echo "📄 Generating Dashboard TypeScript types..."
+    cd apps/syn-dashboard-ui && pnpm run generate:types
     @echo "✅ All generated artifacts up to date"
 
 # Build docs site (codegen + Next.js build, for deployment)
@@ -1400,19 +1408,16 @@ docs-site-build: codegen
 # Seed workflows from YAML files
 seed-workflows: _ensure-env
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
     uv run python scripts/seed_workflows.py
 
 # Seed trigger presets (self-healing, review-fix)
 seed-triggers: _ensure-env
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
     uv run python scripts/seed_triggers.py
 
 # Seed organization, system, and repos
 seed-organization: _ensure-env
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
     uv run python scripts/seed_organization.py
 
 # Seed all data (workflows + triggers + organization)
@@ -1434,9 +1439,13 @@ gen-env:
 gen-compose:
     uv run python scripts/generate_published_compose.py
 
-# Check published compose is up to date (CI mode — fails if stale)
+# Check published compose is up to date (CI mode -- fails if stale)
 check-compose:
     uv run python scripts/generate_published_compose.py --check
+
+# Validate all Docker Compose overlay combinations parse correctly
+check-compose-overlays:
+    bash scripts/check_compose_overlays.sh
 
 # Generate llms.txt from API docs
 generate-llms-txt:
@@ -1445,6 +1454,17 @@ generate-llms-txt:
 # Validate event store by querying PostgreSQL for stored events
 validate-events:
     uv run python scripts/validate_event_store.py
+
+# Bump exclude-newer to 7 days ago and re-lock (supply chain safety window)
+bump-exclude-newer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    new_date=$(date -u -v-7d "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "7 days ago" "+%Y-%m-%dT%H:%M:%SZ")
+    echo "📦 Bumping exclude-newer to: $new_date"
+    tmpfile=$(mktemp)
+    sed "s|^exclude-newer = \".*\"|exclude-newer = \"$new_date\"|" pyproject.toml > "$tmpfile" && mv "$tmpfile" pyproject.toml
+    uv lock
+    echo "✅ Lockfile updated. Review changes with: git diff uv.lock"
 
 # Lock dependencies
 lock:
@@ -1490,8 +1510,11 @@ new-package name:
 
 # Reconfigure GitHub App (change repos, permissions, or recreate)
 github-reconfigure:
-    @echo "Reconfiguring GitHub App..."
-    @uv run python infra/scripts/setup.py --stage configure_github_app
+    @echo "To reconfigure or recreate a GitHub App, use the NPX setup CLI:"
+    @echo ""
+    @echo "  npx @syntropic137/setup init --skip-docker"
+    @echo ""
+    @echo "See https://github.com/syntropic137/syntropic137-npx for documentation."
 
 # --- Security & Audit ---
 
@@ -1501,8 +1524,11 @@ audit: security-audit deps-audit-py deps-audit-npm
     @echo "✅ All security audits complete"
 
 # Run infrastructure security audit (env vars, secrets, network)
+# Note: health_check.py requires a running stack; non-blocking so `audit` works offline
 security-audit:
-    @uv run python infra/scripts/setup.py --stage security_audit
+    @uv run python infra/scripts/health_check.py --json || echo "⚠️  Health check skipped (stack not running)"
+    @echo ""
+    @echo "For a full security posture review see: docs/security-practices.md"
 
 # Audit Python dependencies against PyPI advisory database
 deps-audit-py:
@@ -1572,7 +1598,7 @@ proxy-start:
 
 # Build the dev compose command, auto-including cloudflare overlay when tunnel token is set.
 # Usage in bash: _COMPOSE=$(_dev_compose_cmd)
-# Must be called AFTER `source scripts/resolve_env.sh`.
+# Must be called AFTER infra env vars are loaded.
 _dev-compose-cmd:
     @if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then \
         echo "{{compose_dev_cf}}"; \
@@ -1598,7 +1624,7 @@ _ensure-env:
 # Check .env for common misconfigurations and warn loudly
 _env-check: _ensure-env
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
     WARNINGS=0
     ERRORS=0
 
@@ -1609,6 +1635,23 @@ _env-check: _ensure-env
     if [ ! -f .env ]; then
         echo "   ❌ ERROR: .env file not found!"
         echo "            Run: cp .env.example .env"
+        echo ""
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # --- Worktree footgun: stale SYN_INSTALL_DIR ---
+    # SYN_INSTALL_DIR pins the host path that workspace containers bind-mount.
+    # When .env is copied between worktrees, this absolute path follows along
+    # and silently points to the wrong directory, so syn-api writes setup
+    # files to one path and workspace containers mount a different one.
+    # Compose now defaults to ${PWD}, so the right fix is usually to clear it.
+    if [ -n "${SYN_INSTALL_DIR:-}" ] && [ "${SYN_INSTALL_DIR}" != "$(pwd)" ]; then
+        echo "   ❌ ERROR: SYN_INSTALL_DIR points to a different directory!"
+        echo "            SYN_INSTALL_DIR = ${SYN_INSTALL_DIR}"
+        echo "            \$PWD            = $(pwd)"
+        echo "            Workspace containers will bind-mount the wrong host path."
+        echo "            Fix: clear SYN_INSTALL_DIR in .env (recommended for worktrees)"
+        echo "                 or set it to: $(pwd)"
         echo ""
         ERRORS=$((ERRORS + 1))
     fi
@@ -1632,9 +1675,9 @@ _env-check: _ensure-env
 
     # --- Webhook forwarding ---
     if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
-        _D="${SYN_DOMAIN:-}"; _D="${_D#https://}"; _D="${_D#http://}"; _D="${_D%/}"
-        if [ -n "$_D" ]; then
-            echo "   ✅ Webhook delivery: Cloudflare tunnel (${_D})"
+        _H="${SYN_PUBLIC_HOSTNAME:-}"; _H="${_H#https://}"; _H="${_H#http://}"; _H="${_H%/}"
+        if [ -n "$_H" ]; then
+            echo "   Webhook delivery: Cloudflare tunnel (${_H})"
         else
             echo "   ✅ Webhook delivery: Cloudflare tunnel"
         fi
@@ -1682,21 +1725,21 @@ _env-check: _ensure-env
 # Start webhook delivery — Cloudflare tunnel (if configured) or Smee proxy
 _webhook-start:
     #!/usr/bin/env bash
-    source scripts/resolve_env.sh
+    eval "$(uv run python scripts/resolve_infra_env.py)"
 
     # Option 1: Cloudflare tunnel — token or domain configured
-    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] || [ -n "${SYN_DOMAIN:-}" ]; then
-        _DOMAIN="${SYN_DOMAIN#https://}"
-        _DOMAIN="${_DOMAIN#http://}"
-        _DOMAIN="${_DOMAIN%/}"
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] || [ -n "${SYN_PUBLIC_HOSTNAME:-}" ]; then
+        _HOSTNAME="${SYN_PUBLIC_HOSTNAME#https://}"
+        _HOSTNAME="${_HOSTNAME#http://}"
+        _HOSTNAME="${_HOSTNAME%/}"
         # Verify tunnel container is running
         if docker ps --format '{{"{{"}}.Names{{"}}"}}' 2>/dev/null | grep -q 'cloudflared'; then
-            echo "5️⃣  Webhooks via Cloudflare tunnel ✅ (${_DOMAIN})"
+            echo "5  Webhooks via Cloudflare tunnel (${_HOSTNAME})"
         else
             echo "5️⃣  ⚠️  Cloudflare tunnel not running — starting it..."
             $(just _dev-compose-cmd) up -d cloudflared
         fi
-        echo "   🔗 Webhook URL: https://${_DOMAIN}/webhooks/github"
+        echo "   Webhook URL: https://${_HOSTNAME}/webhooks/github"
         echo "   💡 Tunnel service URL must be: http://api:8000 (dev) or http://gateway:8081 (selfhost)"
         exit 0
     fi
@@ -1771,11 +1814,11 @@ _workspace-check:
 
 # Bump version across all 11 package files
 bump-version version:
-    python3 scripts/bump_version.py {{version}}
+    python3 scripts/workflows/bump_version.py {{version}}
 
 # Validate all 11 package files have the same version
 check-version:
-    python3 scripts/bump_version.py --check
+    python3 scripts/workflows/bump_version.py --check
 
 registry := "ghcr.io/syntropic137"
 

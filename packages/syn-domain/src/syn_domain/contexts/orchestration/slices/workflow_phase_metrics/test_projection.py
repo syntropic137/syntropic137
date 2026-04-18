@@ -4,7 +4,6 @@ Covers: stub creation, metric accumulation, missed-PhaseStarted handling,
 multi-phase isolation, status transitions, and empty/invalid event guards.
 """
 
-from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -55,7 +54,8 @@ class TestPhaseStarted:
         assert phases["p-1"]["phase_name"] == "Build"
         assert phases["p-1"]["status"] == "running"
         assert phases["p-1"]["input_tokens"] == 0
-        assert phases["p-1"]["cost_usd"] == "0"
+        # Cost is Lane 2 (#695) — projection no longer stores cost_usd
+        assert "cost_usd" not in phases["p-1"]
 
     async def test_does_not_overwrite_existing_stub(
         self, projection: WorkflowPhaseMetricsProjection
@@ -90,9 +90,7 @@ class TestPhaseStarted:
 class TestPhaseCompleted:
     """PhaseCompleted accumulates metrics and sets final status."""
 
-    async def test_accumulates_tokens_and_cost(
-        self, projection: WorkflowPhaseMetricsProjection
-    ) -> None:
+    async def test_accumulates_tokens(self, projection: WorkflowPhaseMetricsProjection) -> None:
         await projection.on_phase_started(
             {"workflow_id": "wf-1", "phase_id": "p-1", "phase_name": "Test"}
         )
@@ -103,7 +101,6 @@ class TestPhaseCompleted:
                 "input_tokens": 100,
                 "output_tokens": 50,
                 "total_tokens": 150,
-                "cost_usd": "0.003",
                 "duration_seconds": 5.0,
                 "success": True,
             }
@@ -113,7 +110,7 @@ class TestPhaseCompleted:
         assert p["input_tokens"] == 100
         assert p["output_tokens"] == 50
         assert p["total_tokens"] == 150
-        assert Decimal(p["cost_usd"]) == Decimal("0.003")
+        # Cost is Lane 2 (#695) — not stored here
         assert p["duration_seconds"] == 5.0
         assert p["status"] == "completed"
 
@@ -132,14 +129,12 @@ class TestPhaseCompleted:
                     "input_tokens": 10,
                     "output_tokens": 5,
                     "total_tokens": 15,
-                    "cost_usd": "0.001",
                     "duration_seconds": 1.0,
                     "success": True,
                 }
             )
         phases = await projection.get_phase_metrics("wf-1")
         assert phases["p-1"]["input_tokens"] == 20
-        assert Decimal(phases["p-1"]["cost_usd"]) == Decimal("0.002")
 
     async def test_sets_failed_status_on_failure(
         self, projection: WorkflowPhaseMetricsProjection

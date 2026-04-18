@@ -10,7 +10,6 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from syn_api.routes.webhooks.processing import verify_and_process_webhook
 from syn_api.routes.webhooks.push_events import _record_push_commits
-from syn_api.routes.webhooks.signature import _check_sig_rate_limit, _record_sig_failure
 from syn_api.types import Err, WebhookResult
 
 logger = logging.getLogger(__name__)
@@ -27,11 +26,10 @@ def _handle_ping(body: bytes) -> dict[str, Any]:
     return {"status": "pong", "zen": payload.get("zen", "")}
 
 
-def _raise_for_webhook_error(result: Err[Any], client_ip: str) -> NoReturn:
+def _raise_for_webhook_error(result: Err[Any]) -> NoReturn:
     """Classify a webhook error and raise the appropriate HTTPException."""
     error_name = result.error.value if hasattr(result.error, "value") else str(result.error)
     if "signature" in error_name.lower():
-        _record_sig_failure(client_ip)
         raise HTTPException(status_code=401, detail=result.message)
     if "payload" in error_name.lower():
         raise HTTPException(status_code=400, detail=result.message)
@@ -59,16 +57,11 @@ async def github_webhook_endpoint(
     x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
 ) -> dict[str, Any]:
     """Handle GitHub webhooks."""
-    client_ip = request.headers.get(
-        "X-Real-IP", request.client.host if request.client else "unknown"
-    )
     body = await request.body()
 
     # Handle ping separately
     if x_github_event == "ping":
         return _handle_ping(body)
-
-    _check_sig_rate_limit(client_ip)
 
     result = await verify_and_process_webhook(
         body=body,
@@ -78,7 +71,7 @@ async def github_webhook_endpoint(
     )
 
     if isinstance(result, Err):
-        _raise_for_webhook_error(result, client_ip)
+        _raise_for_webhook_error(result)
 
     response = _build_webhook_response(result.value)
 
@@ -88,6 +81,6 @@ async def github_webhook_endpoint(
             payload = json.loads(body)
             await _record_push_commits(payload, delivery_id=x_github_delivery)
         except Exception:
-            logger.exception("Failed to record push commit events — webhook response unaffected")
+            logger.exception("Failed to record push commit events, webhook response unaffected")
 
     return response

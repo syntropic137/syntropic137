@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     import asyncpg
 
-from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
+from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_shared.events import (
     SESSION_SUMMARY,

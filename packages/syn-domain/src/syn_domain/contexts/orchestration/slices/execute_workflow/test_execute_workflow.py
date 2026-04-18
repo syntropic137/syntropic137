@@ -7,7 +7,6 @@ Processor tests are in test_workflow_execution_processor.py.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 
 import pytest
 
@@ -45,7 +44,6 @@ class TestExecutionValueObjects:
             input_tokens=100,
             output_tokens=200,
             total_tokens=300,
-            cost_usd=Decimal("0.01"),
         )
 
         assert result.phase_id == "phase-1"
@@ -64,7 +62,6 @@ class TestExecutionValueObjects:
                 input_tokens=100,
                 output_tokens=200,
                 total_tokens=300,
-                cost_usd=Decimal("0.01"),
             ),
             PhaseResult(
                 phase_id="phase-2",
@@ -74,7 +71,6 @@ class TestExecutionValueObjects:
                 input_tokens=150,
                 output_tokens=250,
                 total_tokens=400,
-                cost_usd=Decimal("0.015"),
             ),
         ]
 
@@ -86,7 +82,7 @@ class TestExecutionValueObjects:
         assert metrics.total_input_tokens == 250
         assert metrics.total_output_tokens == 450
         assert metrics.total_tokens == 700
-        assert metrics.total_cost_usd == Decimal("0.025")
+        # Cost is Lane 2 (#695) — see execution_cost projection
 
     def test_execution_metrics_with_failed_phase(self) -> None:
         """Test metrics include failed phase counts."""

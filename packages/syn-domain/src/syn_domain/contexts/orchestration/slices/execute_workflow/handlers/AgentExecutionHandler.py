@@ -44,9 +44,12 @@ def _detect_exit_code(
     phase_id: str,
     tokens: TokenAccumulator,
 ) -> int:
-    """Determine agent exit code from stream result and workspace state."""
-    if stream_result.interrupt_requested:
-        return 1
+    """Determine agent exit code from stream result and workspace state.
+
+    Note: If interrupt_requested=True, the caller is responsible for routing
+    to the cancellation path. This function returns only the actual process
+    exit code.
+    """
     stream_exit_code = workspace.last_stream_exit_code
     if stream_exit_code is not None and stream_exit_code != 0:
         logger.error(
@@ -151,6 +154,8 @@ class AgentExecutionHandler:
         # Prefer result event totals (authoritative) over accumulated per-turn counts
         final_input = stream_result.result_input_tokens or tokens.input_tokens
         final_output = stream_result.result_output_tokens or tokens.output_tokens
+        final_cache_creation = stream_result.result_cache_creation or tokens.cache_creation_tokens
+        final_cache_read = stream_result.result_cache_read or tokens.cache_read_tokens
 
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -159,6 +164,8 @@ class AgentExecutionHandler:
             exit_code=exit_code,
             input_tokens=final_input,
             output_tokens=final_output,
+            cache_creation_tokens=final_cache_creation,
+            cache_read_tokens=final_cache_read,
         )
 
         return AgentExecutionResult(

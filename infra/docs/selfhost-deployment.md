@@ -124,7 +124,7 @@ Required settings:
 
 ```bash
 # Domain
-SYN_DOMAIN=syn137.yourdomain.com
+SYN_PUBLIC_HOSTNAME=syn137.yourdomain.com
 
 # GitHub App
 SYN_GITHUB_APP_ID=123456
@@ -304,7 +304,7 @@ The setup wizard detects what's already configured and skips accordingly:
 │     via manifest flow or manual entry.                  │
 │  5. configure_env — writes collected values to .env     │
 │     (1Password users: .env only needs non-secret        │
-│     config like SYN_DOMAIN, APP_ENVIRONMENT)             │
+│     config like SYN_PUBLIC_HOSTNAME, APP_ENVIRONMENT)             │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -323,7 +323,7 @@ just onboard
   → configures 1Password (vault derived from APP_ENVIRONMENT)
   → detects GitHub secrets in vault → skips
   → detects tunnel token in vault → skips (or creates tunnel)
-  → writes minimal .env (SYN_DOMAIN, APP_ENVIRONMENT, etc.)
+  → writes minimal .env (SYN_PUBLIC_HOSTNAME, APP_ENVIRONMENT, etc.)
 
 just selfhost-up
   → APP_ENVIRONMENT=development → vault syn137-dev

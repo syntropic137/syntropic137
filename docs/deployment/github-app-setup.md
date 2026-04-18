@@ -22,14 +22,11 @@ The easiest way to create a GitHub App is the **manifest flow** — one click an
 permissions, events, and credentials are configured automatically.
 
 ```bash
-# During full setup (includes GitHub App creation):
-just onboard
+# Full setup (includes GitHub App creation):
+npx @syntropic137/setup init
 
-# Or run only the GitHub App stage:
-python infra/scripts/setup.py --stage configure_github_app
-
-# Or run the manifest flow standalone:
-python infra/scripts/github_manifest.py
+# Or skip Docker provisioning if the stack is already running:
+npx @syntropic137/setup init --skip-docker
 ```
 
 When you choose **"new"**, the setup wizard will:
@@ -50,9 +47,10 @@ manual field entry required.
 > **Note on the Workflows permission**: The manifest flow does **not** request
 > `workflows: write` by default because it allows modifying GitHub Actions
 > workflow files (`.github/workflows/*.yml`). If your agent needs to create or
-> edit workflow files, add `"workflows": "write"` to the manifest permissions
-> in `infra/scripts/github_manifest.py` and ensure branch protection rules
-> require PR reviews for workflow changes.
+> edit workflow files, the permission must be added to the manifest in the NPX
+> setup repo (`src/manifest.ts`) — file a request at
+> https://github.com/syntropic137/syntropic137-npx/issues — and ensure branch
+> protection rules require PR reviews for workflow changes.
 
 ---
 

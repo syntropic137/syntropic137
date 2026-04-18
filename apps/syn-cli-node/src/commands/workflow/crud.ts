@@ -7,11 +7,13 @@ import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
 import { api, unwrap } from "../../client/typed.js";
 import type { components } from "../../generated/api-types.js";
+import { postYaml } from "../../client/yaml-upload.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
 import { detectFormat, resolvePackage } from "../../packages/resolver.js";
+import fs from "node:fs";
 import path from "node:path";
 
 type WorkflowResponse = components["schemas"]["WorkflowResponse"];
@@ -26,10 +28,12 @@ export const createCommand: CommandDef = {
   args: [{ name: "name", description: "Name of the workflow", required: true }],
   options: {
     type: { type: "string", short: "t", description: "Workflow type (research, planning, implementation, review, deployment, custom)", default: "custom" },
-    repo: { type: "string", short: "r", description: "Repository URL", default: "https://github.com/example/repo" },
+    repo: { type: "string", short: "r", description: "Repository URL" },
     ref: { type: "string", description: "Repository ref/branch", default: "main" },
     description: { type: "string", short: "d", description: "Workflow description" },
     repos: { type: "string", short: "R", description: "Default GitHub URLs for workspace hydration (repeatable). ADR-058.", multiple: true },
+    "no-repos": { type: "boolean", description: "Mark workflow as not requiring repository access (ADR-058 #666)", default: false },
+    from: { type: "string", short: "f", description: "Upload a YAML workflow definition. Every semantic field comes from the file - do not combine with --repo/--ref/--type/--description/--repos/--no-repos." },
   },
   handler: async (parsed: ParsedArgs) => {
     const name = parsed.positionals[0];
@@ -38,12 +42,26 @@ export const createCommand: CommandDef = {
       throw new CLIError("Missing argument", 1);
     }
 
+    const fromPath = parsed.values["from"] as string | undefined;
+
+    if (fromPath) {
+      await createFromYaml(name, fromPath, process.argv.slice(2));
+      return;
+    }
+
     const workflowType = (parsed.values["type"] as string | undefined) ?? "custom";
-    const repoUrl = (parsed.values["repo"] as string | undefined) ?? "https://github.com/example/repo";
+    const repoUrl = parsed.values["repo"] as string | undefined;
     const repoRef = (parsed.values["ref"] as string | undefined) ?? "main";
     const description = parsed.values["description"] as string | undefined;
     const reposValues = parsed.values["repos"];
     const templateRepos: string[] = Array.isArray(reposValues) ? reposValues as string[] : reposValues ? [reposValues as string] : [];
+    const noRepos = parsed.values["no-repos"] === true;
+
+    if (noRepos && repoUrl !== undefined) {
+      print(style("Warning:", YELLOW) + " --repo is ignored when --no-repos is set");
+    }
+
+    const resolvedRepoUrl = noRepos ? "" : (repoUrl ?? "");
 
     const data = unwrap(
       await api.POST("/workflows", {
@@ -51,21 +69,105 @@ export const createCommand: CommandDef = {
           name,
           workflow_type: workflowType,
           classification: "standard",
-          repository_url: repoUrl,
+          repository_url: resolvedRepoUrl,
           repository_ref: repoRef,
           description: description ?? null,
           ...(templateRepos.length > 0 ? { repos: templateRepos } : {}),
+          requires_repos: !noRepos,
         },
       }),
       "Failed to create workflow",
     );
 
-    const workflowId = data.id;
-    printSuccess(`Created workflow: ${style(name, CYAN)}`);
-    print(`  ID: ${style(workflowId, DIM)}`);
-    print(`  Type: ${style(workflowType, DIM)}`);
+    printSuccess(`Created workflow: ${style(data.name, CYAN)}`);
+    print(`  ID: ${style(data.id, DIM)}`);
+    print(`  Type: ${style(data.workflow_type, DIM)}`);
+    print(`  Classification: ${style(data.classification, DIM)}`);
+    print(`  Repos required: ${style(data.requires_repos ? "yes" : "no", DIM)}`);
+    printDim(`  Tip: Use --from ./workflow.yaml to upload a fully-defined workflow`);
   },
 };
+
+// ---------------------------------------------------------------------------
+// create --from: dumb YAML upload (server owns all parsing)
+// ---------------------------------------------------------------------------
+
+// Flags that must not be combined with --from. When --from is used, every
+// semantic field lives in the YAML; duplicate flag sources are ambiguous.
+// Short forms (-r, -d, -R, -t) are included so both styles are caught.
+const FROM_CONFLICTING_FLAGS: readonly { long: string; short?: string }[] = [
+  { long: "repo", short: "r" },
+  { long: "ref" },
+  { long: "description", short: "d" },
+  { long: "type", short: "t" },
+  { long: "repos", short: "R" },
+  { long: "no-repos" },
+];
+
+function userSuppliedFlag(argv: readonly string[], long: string, short?: string): boolean {
+  const longFlag = `--${long}`;
+  const shortFlag = short ? `-${short}` : null;
+  return argv.some((a) =>
+    a === longFlag ||
+    a.startsWith(`${longFlag}=`) ||
+    (shortFlag !== null && (a === shortFlag || a.startsWith(`${shortFlag}=`))),
+  );
+}
+
+function collectConflictingFlags(argv: readonly string[]): string[] {
+  const endOfFlags = argv.indexOf("--");
+  const scan = endOfFlags === -1 ? argv : argv.slice(0, endOfFlags);
+  const conflicts: string[] = [];
+  for (const { long, short } of FROM_CONFLICTING_FLAGS) {
+    if (userSuppliedFlag(scan, long, short)) {
+      conflicts.push(`--${long}`);
+    }
+  }
+  return conflicts;
+}
+
+async function createFromYaml(
+  name: string,
+  fromPath: string,
+  argv: readonly string[],
+): Promise<void> {
+  const conflicts = collectConflictingFlags(argv);
+  if (conflicts.length > 0) {
+    printError(
+      `--from cannot be combined with ${conflicts.join(", ")} - those values live in the YAML. Edit the file instead.`,
+    );
+    throw new CLIError("Conflicting flags", 1);
+  }
+
+  const resolved = path.resolve(fromPath);
+  if (!fs.existsSync(resolved)) {
+    printError(`Path not found: ${fromPath}`);
+    throw new CLIError("Path not found", 1);
+  }
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile()) {
+    printError(
+      `--from expects a .yaml file, not a directory. ` +
+        `For marketplace packages, use 'syn workflow install' instead.`,
+    );
+    throw new CLIError("Invalid --from path", 1);
+  }
+
+  const ext = path.extname(resolved).toLowerCase();
+  if (ext !== ".yaml" && ext !== ".yml") {
+    printError(`Workflow file must be .yaml or .yml: ${fromPath}`);
+    throw new CLIError("Invalid file extension", 1);
+  }
+
+  const fileBytes = fs.readFileSync(resolved);
+  const response = await postYaml(fileBytes, { name });
+
+  printSuccess(`Created workflow: ${style(response.name, CYAN)}`);
+  print(`  ID: ${style(response.id, DIM)}`);
+  print(`  Type: ${style(response.workflow_type, DIM)}`);
+  print(`  Classification: ${style(response.classification, DIM)}`);
+  print(`  Repos required: ${style(response.requires_repos ? "yes" : "no", DIM)}`);
+}
 
 // ---------------------------------------------------------------------------
 // list

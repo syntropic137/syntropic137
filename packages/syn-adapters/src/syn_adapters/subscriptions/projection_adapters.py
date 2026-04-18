@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
+    DispatchContext,
     EventEnvelope,
     ProjectionCheckpoint,
     ProjectionCheckpointStore,
@@ -33,6 +34,8 @@ from syn_shared.events import (
 )
 
 if TYPE_CHECKING:
+    from event_sourcing.core.checkpoint import DispatchContext
+
     from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
         SessionCostProjection,
     )
@@ -83,6 +86,7 @@ class _ObservationProjectionAdapter(CheckpointedProjection):
         self,
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
+        context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
         event_type = envelope.metadata.event_type or "Unknown"
         event_data = envelope.event.model_dump()

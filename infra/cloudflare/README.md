@@ -50,7 +50,7 @@ cp .env.example .env
 
 # Edit .env and add your tunnel token
 # CLOUDFLARE_TUNNEL_TOKEN=eyJ...your-token...
-# SYN_DOMAIN=syn137.yourdomain.com
+# SYN_PUBLIC_HOSTNAME=syn137.yourdomain.com
 ```
 
 ### Step 4: Generate Secrets
