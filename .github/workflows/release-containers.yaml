@@ -12,7 +12,7 @@
 #   1. Build container images (multi-arch for servers, amd64-only for UI)
 #   2. Push to GHCR with version tags
 #   3. Sign with cosign (keyless OIDC), SBOM via BuildKit
-#   4. Attach release assets (compose file, syn-ctl, .env.example, SHA256SUMS)
+#   4. Attach release assets (compose file, .env.example, SHA256SUMS)
 #
 # Security scanning happens in CI (OSV Scanner + pip-audit on every push).
 # Release workflow trusts CI — builds, signs, and publishes only.
