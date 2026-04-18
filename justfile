@@ -1289,20 +1289,6 @@ secrets-delete-token:
         && echo "✅ Deleted: $_SVC" \
         || echo "⚠️  Not found: $_SVC"
 
-# Push secrets to 1Password vault (selfhost only — uses syn-ctl)
-secrets-push:
-    @echo "Push secrets to 1Password via syn-ctl:"
-    @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-push"
-    @echo ""
-    @echo "For dev environments, use: just onboard-dev --1password"
-
-# Pull secrets from 1Password vault (selfhost only — uses syn-ctl)
-secrets-pull:
-    @echo "Pull secrets from 1Password via syn-ctl:"
-    @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-pull"
-    @echo ""
-    @echo "For dev environments, use: just onboard-dev --1password"
-
 # --- Health ---
 
 # Run health checks on all services
@@ -1892,7 +1878,6 @@ release-assets version:
         docker/docker-compose.syntropic137.yaml \
         docker/selfhost.env.example \
         docker/selfhost-entrypoint.sh \
-        syn-ctl \
         --repo syntropic137/syntropic137 --clobber
     echo "✅ Assets uploaded"
 
