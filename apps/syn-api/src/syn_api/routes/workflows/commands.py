@@ -590,8 +590,6 @@ async def create_workflow_from_yaml(
     from syn_domain.contexts.orchestration import (
         CreateWorkflowTemplateHandler,
         WorkflowDefinition,
-    )
-    from syn_domain.contexts.orchestration._shared.yaml_to_command import (
         build_command_from_definition,
     )
 

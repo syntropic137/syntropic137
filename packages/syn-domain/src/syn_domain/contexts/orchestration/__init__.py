@@ -16,6 +16,9 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     validate_workflow_yaml,
 )
+from syn_domain.contexts.orchestration._shared.yaml_to_command import (
+    build_command_from_definition,
+)
 from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     PhaseDefinition,
     PhaseExecutionType,
@@ -141,5 +144,6 @@ __all__ = [
     "WorkflowTemplateAggregate",
     "WorkflowType",
     "WorkspaceAggregate",
+    "build_command_from_definition",
     "validate_workflow_yaml",
 ]
