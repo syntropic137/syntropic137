@@ -61,7 +61,9 @@ class TestBuildCommandFromDefinition:
         cmd = build_command_from_definition(definition)
         assert cmd.repository_url == ""
         assert cmd.repository_ref == "main"
-        assert cmd.requires_repos is False
+        # Default is opt-out: workflows without explicit requires_repos still
+        # require -R at runtime. Research/no-repo workflows must opt out.
+        assert cmd.requires_repos is True
 
     def test_unknown_type_falls_back_to_custom(self) -> None:
         definition = _minimal_definition(type="not-a-real-type")
@@ -102,7 +104,7 @@ class TestBuildCommandFromDefinition:
 
 @pytest.mark.unit
 class TestInferRequiresRepos:
-    """ADR-058 #666: explicit value wins; otherwise infer from repository."""
+    """ADR-058 #666 (v0.25.2): explicit value wins; otherwise default True (opt-out)."""
 
     def test_explicit_true_overrides_no_repo(self) -> None:
         definition = _minimal_definition(requires_repos=True)
@@ -115,11 +117,12 @@ class TestInferRequiresRepos:
         )
         assert infer_requires_repos(definition) is False
 
-    def test_infer_false_when_no_repository(self) -> None:
+    def test_default_true_when_no_repository_and_no_explicit_value(self) -> None:
+        """v0.25.2: default is opt-out - workflows require -R unless they say otherwise."""
         definition = _minimal_definition()
-        assert infer_requires_repos(definition) is False
+        assert infer_requires_repos(definition) is True
 
-    def test_infer_true_when_repository_present(self) -> None:
+    def test_default_true_when_repository_present(self) -> None:
         definition = _minimal_definition(
             repository={"url": "https://github.com/test/repo", "ref": "main"},
         )

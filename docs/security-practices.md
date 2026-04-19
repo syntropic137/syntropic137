@@ -165,7 +165,21 @@ All containers in the selfhost compose file use:
 
 ### Docker socket proxy
 
-The API container does not mount `/var/run/docker.sock` directly. Instead, it connects through a **Docker socket proxy** (tecnativa/docker-socket-proxy) that allowlists only the operations needed for workspace management (container create/start/stop/exec). This limits blast radius if the API container is compromised.
+The API container does not mount `/var/run/docker.sock` directly. Instead, it connects through a **Docker socket proxy** (tecnativa/docker-socket-proxy) that allowlists only the operations needed for workspace management. This limits blast radius if the API container is compromised.
+
+**Allowed operations** (env flags set in `docker/docker-compose.yaml`):
+
+| Flag | Purpose |
+|---|---|
+| `CONTAINERS=1` | `/containers/*` path prefix (inspect, list, rm) |
+| `ALLOW_START=1` | `POST /containers/{id}/start` |
+| `ALLOW_STOP=1` | `POST /containers/{id}/stop` |
+| `EXEC=1` | `/exec/*` paths (docker exec) |
+| `POST=1` | enables non-GET verbs (POST, DELETE, PUT) |
+| `NETWORKS=1` | `/networks/*` - agentic_isolation (ADR-021) creates per-execution agent networks |
+| `INFO=1` | `/info` - agentic_isolation probes engine capabilities at boot |
+
+Everything else (images, volumes, secrets, swarm, system, plugins) is blocked by default. The proxy runs with `cap_drop: [ALL]`, `security_opt: no-new-privileges`, and a `tmpfs` for `/tmp`. The real socket is read-only-mounted into the proxy alone; no other container sees it.
 
 ---
 

@@ -20,11 +20,11 @@ graph LR
         e3[workflow_failed]
         e4[phase_completed]
         e5[phase_started]
-        e6[trigger_fired]
+        e6[workflow_interrupted]
         e7[workflow_template_created]
-        e8[workflow_interrupted]
+        e8[trigger_fired]
         e9[execution_cancelled]
-        e10[session_started]
+        e10[agent_observation]
     end
 
     subgraph projections["Projections"]
@@ -45,11 +45,8 @@ graph LR
         p15[TriggerHistoryProjection]
     end
 
-    e10 --> p11
-    e10 --> p2
-    e5 --> p2
-    e6 --> p6
-    e6 --> p15
+    e10 --> p10
+    e10 --> p3
     e2 --> p8
     e2 --> p7
     e2 --> p4
@@ -58,13 +55,16 @@ graph LR
     e3 --> p7
     e3 --> p4
     e3 --> p2
+    e5 --> p2
+    e6 --> p4
     e7 --> p2
-    e8 --> p4
-    e9 --> p4
     e1 --> p6
     e1 --> p4
     e1 --> p2
     e4 --> p4
+    e8 --> p6
+    e8 --> p15
+    e9 --> p4
 ```
 
 ---
@@ -86,11 +86,11 @@ graph LR
 | workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
 | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
-| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
-| workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
 | workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
+| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
-| session_started | SessionListProjection, DashboardMetricsProjection | 2 |
+| agent_observation | SessionCostProjection, ExecutionCostProjection | 2 |
 
 ---
 

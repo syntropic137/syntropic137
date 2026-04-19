@@ -15,16 +15,16 @@ This table shows the most important event flows in Syn137 (events that feed the 
 | ? | workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | ? | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
 | ? | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
-| ? | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
-| ? | workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
 | ? | workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| ? | workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
+| ? | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | ? | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| ? | agent_observation | SessionCostProjection, ExecutionCostProjection | 2 |
+| ? | session_summary | SessionCostProjection, ExecutionCostProjection | 2 |
+| ? | session_completed | SessionListProjection, DashboardMetricsProjection | 2 |
 | ? | session_started | SessionListProjection, DashboardMetricsProjection | 2 |
 | ? | artifact_created | ArtifactListProjection, DashboardMetricsProjection | 2 |
-| ? | session_summary | SessionCostProjection, ExecutionCostProjection | 2 |
 | ? | session_cost_finalized | SessionCostProjection, ExecutionCostProjection | 2 |
-| ? | agent_observation | SessionCostProjection, ExecutionCostProjection | 2 |
-| ? | session_completed | SessionListProjection, DashboardMetricsProjection | 2 |
 
 ---
 

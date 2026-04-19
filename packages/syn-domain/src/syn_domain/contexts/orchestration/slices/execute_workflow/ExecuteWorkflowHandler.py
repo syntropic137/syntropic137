@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from event_sourcing import StreamAlreadyExistsError
 
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -107,21 +108,26 @@ _RESERVED_REPO_INPUT_KEYS: frozenset[str] = frozenset({"repos", "repository"})
 def _resolve_repos_from_template(
     merged_inputs: dict[str, str],
     workflow: WorkflowTemplateAggregate,
-) -> list[str]:
+) -> list[RepositoryRef]:
     """Resolve repos from workflow template fields (NOT from inputs dict).
 
     Two template-level sources are checked, in order:
     1. ``workflow.repos`` - list with optional ``{{var}}`` substitution
     2. ``workflow.repository_url`` - single-repo template fallback
+
+    Returns typed ``RepositoryRef`` per ADR-063: template strings are
+    parsed at this last string boundary so downstream consumers can rely
+    on a single canonical representation.
     """
     if workflow.repos:
         return [
-            _normalise_repo_url(_substitute_repo_vars(r, merged_inputs)) for r in workflow.repos
+            RepositoryRef.parse(_normalise_repo_url(_substitute_repo_vars(r, merged_inputs)))
+            for r in workflow.repos
         ]
 
     repo_url = _resolve_repo_url(workflow, merged_inputs)
     if repo_url:
-        return [repo_url]
+        return [RepositoryRef.parse(repo_url)]
     return []
 
 
@@ -212,16 +218,18 @@ class ExecuteWorkflowHandler:
         command: ExecuteWorkflowCommand,
         merged_inputs: dict[str, str],
         workflow: WorkflowTemplateAggregate,
-    ) -> list[str]:
+    ) -> list[RepositoryRef]:
         """Resolve repos: typed ``command.repos`` first, else workflow template fields.
 
         Per ADR-063, repository identity must be passed across context boundaries
         as typed ``RepositoryRef`` on the command. This handler does NOT inspect
         ``inputs`` for repo keys - that path was removed when boundaries were typed.
         Producers (API route, ``BackgroundWorkflowDispatcher``) own the translation.
+        Returns typed refs end-to-end; the processor and downstream handlers
+        consume the canonical form via ``r.https_url`` at their respective seams.
         """
         if command.repos:
-            return [r.https_url for r in command.repos]
+            return list(command.repos)
 
         # Guard: if a producer left repo identity in inputs without populating
         # command.repos, that's a missed boundary translation - fail loud (ADR-063).

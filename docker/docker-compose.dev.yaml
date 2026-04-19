@@ -72,7 +72,7 @@ services:
       SYN_WORKSPACE_CONTAINER_DIR: /workspaces
       # Host path that Docker daemon can mount (must match volume mount below).
       # ${PWD} (compose's invocation dir) is the correct default for worktrees;
-      # SYN_INSTALL_DIR overrides only for syn-ctl which sets it explicitly.
+      # SYN_INSTALL_DIR can be set explicitly to override the install directory.
       SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-${PWD}}/workspaces
       # Agent network: matches the compose-prefixed name for this stack (syn-dev_agent-net).
       # Each compose stack gets its own prefix, preventing cross-stack container leakage.
