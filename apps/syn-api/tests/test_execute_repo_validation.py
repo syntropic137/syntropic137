@@ -257,8 +257,24 @@ class TestRequiresReposPreflightGating:
         from syn_api.routes.executions.commands import _get_preflight_repos
 
         wf = self._make_workflow(repo_url="", requires_repos=False)
-        repos = _get_preflight_repos({}, wf, None)
+        repos = _get_preflight_repos([], {}, wf, None)
         assert repos == []
+
+    def test_get_preflight_repos_uses_typed_repos(self) -> None:
+        """Typed RepositoryRef list flows directly into preflight URLs (no CSV detour)."""
+        from syn_api.routes.executions.commands import _get_preflight_repos
+        from syn_domain.contexts._shared.repository_ref import RepositoryRef
+
+        wf = self._make_workflow(repo_url="", requires_repos=True)
+        typed = [
+            RepositoryRef.from_slug("owner/a"),
+            RepositoryRef.from_url("https://github.com/owner/b"),
+        ]
+        repos = _get_preflight_repos(typed, {}, wf, None)
+        assert repos == [
+            "https://github.com/owner/a",
+            "https://github.com/owner/b",
+        ]
 
     @pytest.mark.asyncio
     async def test_validate_all_repos_noop_on_empty_list(self) -> None:
@@ -373,7 +389,11 @@ class TestReservedRepoInputKeyRejection:
 
     @pytest.mark.asyncio
     async def test_typed_repos_field_is_accepted(self) -> None:
-        """The typed `repos: list[str]` field is the canonical channel — no rejection."""
+        """The typed `repos: list[str]` field is the canonical channel — no rejection.
+
+        ADR-063: typed repos do NOT leak back into ``effective_inputs`` as a CSV
+        string. Repository identity travels as ``RepositoryRef`` end-to-end.
+        """
         from syn_api.routes.executions.commands import (
             ExecuteWorkflowRequest,
             _validate_execution_request,
@@ -406,4 +426,5 @@ class TestReservedRepoInputKeyRejection:
         assert len(typed_repos) == 2
         assert typed_repos[0].https_url == "https://github.com/owner/a"
         assert typed_repos[1].https_url == "https://github.com/owner/b"
-        assert effective_inputs["repos"] == "https://github.com/owner/a,owner/b"
+        assert "repos" not in effective_inputs
+        assert "repository" not in effective_inputs

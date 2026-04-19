@@ -168,10 +168,11 @@ class TestProcessorReposPersistence:
 
     @pytest.mark.anyio
     async def test_resolved_repos_written_to_inputs(self) -> None:
-        """Resolved repos list is persisted as CSV in inputs['repos']."""
+        """Typed RepositoryRefs are normalised to HTTPS URLs in inputs['repos']."""
         processor = _make_processor()
         processor._execution_repo.save = AsyncMock()
 
+        from syn_domain.contexts._shared.repository_ref import RepositoryRef
         from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
             ExecutablePhase,
         )
@@ -190,7 +191,7 @@ class TestProcessorReposPersistence:
             ],
             inputs=inputs,
             execution_id="exec-repos",
-            repos=["https://github.com/org/my-repo"],
+            repos=[RepositoryRef.from_slug("org/my-repo")],
         )
 
         assert inputs["repos"] == "https://github.com/org/my-repo"
@@ -201,6 +202,7 @@ class TestProcessorReposPersistence:
         processor = _make_processor()
         processor._execution_repo.save = AsyncMock()
 
+        from syn_domain.contexts._shared.repository_ref import RepositoryRef
         from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
             ExecutablePhase,
         )
@@ -219,7 +221,7 @@ class TestProcessorReposPersistence:
             ],
             inputs=inputs,
             execution_id="exec-no-overwrite",
-            repos=["https://github.com/org/resolved"],
+            repos=[RepositoryRef.from_url("https://github.com/org/resolved")],
         )
 
         assert inputs["repos"] == "https://github.com/org/explicit"

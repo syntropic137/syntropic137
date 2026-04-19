@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
     PhaseDefinition,
@@ -224,7 +225,7 @@ class TestReposVariableSubstitution:
     """ExecuteWorkflowHandler._resolve_repos must apply {{variable}} substitution."""
 
     def test_variable_in_repos_resolves_with_input(self):
-        """{{owner}}/app + merged_inputs["owner"] = acme -> full GitHub URL."""
+        """{{owner}}/app + merged_inputs["owner"] = acme -> typed RepositoryRef."""
         wf = _make_workflow_with_repos(["{{owner}}/app"])
         result = ExecuteWorkflowHandler._resolve_repos(
             _empty_cmd(),
@@ -232,7 +233,7 @@ class TestReposVariableSubstitution:
             wf,  # type: ignore[arg-type]
         )
 
-        assert result == ["https://github.com/acme/app"]
+        assert result == [RepositoryRef.from_slug("acme/app")]
 
     def test_variable_in_full_url_resolves(self):
         """Full URL template resolves correctly."""
@@ -243,7 +244,7 @@ class TestReposVariableSubstitution:
             wf,  # type: ignore[arg-type]
         )
 
-        assert result == ["https://github.com/myorg/myapp"]
+        assert result == [RepositoryRef.from_slug("myorg/myapp")]
 
     def test_unresolved_placeholder_raises_value_error(self):
         """Missing input for {{variable}} must raise ValueError, not silently fall back."""
@@ -268,7 +269,7 @@ class TestReposVariableSubstitution:
             )
 
     def test_static_url_passes_through_unchanged(self):
-        """Static repos without {{}} are returned as-is (no normalisation change)."""
+        """Static repos without {{}} are parsed into typed RepositoryRef."""
         wf = _make_workflow_with_repos(["https://github.com/acme/app"])
         result = ExecuteWorkflowHandler._resolve_repos(
             _empty_cmd(),
@@ -276,7 +277,7 @@ class TestReposVariableSubstitution:
             wf,  # type: ignore[arg-type]
         )
 
-        assert result == ["https://github.com/acme/app"]
+        assert result == [RepositoryRef.from_slug("acme/app")]
 
     def test_multiple_repos_all_resolved(self):
         """All repos in the list get substitution applied."""
@@ -288,8 +289,8 @@ class TestReposVariableSubstitution:
         )
 
         assert result == [
-            "https://github.com/acme/app1",
-            "https://github.com/acme/app2",
+            RepositoryRef.from_slug("acme/app1"),
+            RepositoryRef.from_slug("acme/app2"),
         ]
 
     def test_inputs_repos_without_typed_command_repos_raises(self):
@@ -316,4 +317,4 @@ class TestReposVariableSubstitution:
             wf,  # type: ignore[arg-type]
         )
 
-        assert result == ["https://github.com/acme/fallback"]
+        assert result == [RepositoryRef.from_slug("acme/fallback")]

@@ -120,14 +120,18 @@ def _apply_repo_substitution(repos: list[str], merged: dict[str, str]) -> list[s
 
 
 def _get_preflight_repos(
+    typed_repos: list[RepositoryRef],
     effective_inputs: dict[str, str],
     workflow: WorkflowTemplateAggregate,
     task: str | None,
 ) -> list[str]:
-    """Resolve the list of repos to preflight-validate for GitHub App access."""
-    repos_csv = effective_inputs.get("repos", "")
-    if repos_csv:
-        return [u.strip() for u in repos_csv.split(",") if u.strip()]
+    """Resolve the list of repos to preflight-validate for GitHub App access.
+
+    ADR-063: typed ``repos`` from the request take precedence; we read
+    ``r.https_url`` directly rather than re-parsing a CSV string.
+    """
+    if typed_repos:
+        return [r.https_url for r in typed_repos]
 
     # Check workflow.repos with variable substitution (mirrors ExecuteWorkflowHandler._resolve_repos).
     # Without this, unresolved {{variable}} patterns in repos silently fall through to
@@ -453,20 +457,27 @@ async def _validate_execution_request(
                 detail=f"Invalid repository entry '{repo}': {exc}",
             ) from exc
 
-    # Preflight needs the resolved URLs under effective_inputs["repos"]; this is an
-    # internal plumbing channel, not a user-facing input key.
+    # ADR-063: repository identity travels as typed RepositoryRef through preflight
+    # and the processor. Do not smuggle it through inputs - reserved-key rejection
+    # above guarantees user inputs cannot collide with this channel.
     effective_inputs: dict[str, str] = dict(request.inputs)
-    if request.repos:
-        effective_inputs["repos"] = ",".join(request.repos)
 
     # Validate required input declarations (always runs)
     merged = _merge_inputs(workflow, effective_inputs, request.task)
     _check_missing_declarations(workflow, merged)
 
-    # Repo validation only when the workflow requires repos (ADR-058 #666)
+    # Repo validation only when the workflow requires repos (ADR-058 #666).
+    # ADR-063: this block fully covers what ExecuteWorkflowHandler._resolve_repos
+    # could raise downstream - RepositoryRef.parse runs above for typed repos,
+    # _check_repo_url_placeholders catches unresolved {{var}} in workflow.repos,
+    # and the reserved-key rejection guards against inputs[repos] / inputs[repository].
+    # Anything else surfacing in BackgroundTask is a real infra failure, not a
+    # validation gap.
     if workflow.requires_repos:
         _check_repo_url_placeholders(workflow, merged)
-        preflight_repos = _get_preflight_repos(effective_inputs, workflow, request.task)
+        preflight_repos = _get_preflight_repos(
+            typed_repos, effective_inputs, workflow, request.task
+        )
         await _validate_all_repos_access(preflight_repos)
 
     return workflow, effective_inputs, typed_repos
