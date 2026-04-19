@@ -168,6 +168,17 @@ def _build_claude_command(
     return cmd
 
 
+def _owner_repo_from_url(url: str | None) -> str:
+    """Extract owner/repo from a GitHub HTTPS URL. Empty string if not a github URL."""
+    if not url:
+        return ""
+    stripped = url.rstrip("/").removesuffix(".git")
+    parts = stripped.split("/")
+    if len(parts) >= 5 and parts[2] == "github.com":
+        return f"{parts[3]}/{parts[4]}"
+    return ""
+
+
 def _substitute_builtins(
     template: str,
     execution_id: str,
@@ -178,6 +189,19 @@ def _substitute_builtins(
     result = template.replace("{{execution_id}}", execution_id)
     result = result.replace("{{workflow_id}}", workflow_id)
     result = result.replace("{{repo_url}}", repo_url or "")
+    # {{repository}} is a deprecated single-repo convenience -- derived from the
+    # primary repo's URL as owner/repo. Tracked for removal in #715.
+    # Multi-repo workflows should use {{repos}} (CSV of HTTPS URLs) or discover
+    # repos from /workspace/repos/ at runtime instead.
+    if "{{repository}}" in result:
+        logger.warning(
+            "Workflow %s uses deprecated {{repository}} template variable. "
+            "It will be removed in a future release. Migrate to /workspace/repos/ "
+            "discovery (single-repo) or {{repos}} (multi-repo). "
+            "Track: https://github.com/syntropic137/syntropic137/issues/715",
+            workflow_id,
+        )
+        result = result.replace("{{repository}}", _owner_repo_from_url(repo_url))
     return result
 
 

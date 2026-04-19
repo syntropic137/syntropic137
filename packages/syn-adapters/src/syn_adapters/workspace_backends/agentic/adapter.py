@@ -42,6 +42,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class WorkspaceProvisionError(RuntimeError):
+    """Raised when Docker-backed workspace provisioning fails.
+
+    Wraps the underlying error with execution/workspace context so the
+    `_fail_execution` path in the workflow processor can surface an
+    actionable message through to the CLI (instead of "Unknown error").
+    """
+
+
 class AgenticIsolationAdapter:
     """Implements IsolationBackendPort using agentic_isolation.
 
@@ -139,8 +148,19 @@ class AgenticIsolationAdapter:
             security=self._security,
         )
 
-        # Create workspace via provider
-        workspace_obj = await self._provider.create(ws_config)
+        # Create workspace via provider — wrap so docker/network failures surface
+        # with execution context all the way to the CLI (was "Unknown error").
+        try:
+            workspace_obj = await self._provider.create(ws_config)
+        except Exception as exc:
+            logger.exception(
+                "Workspace provisioning failed (execution=%s, workspace=%s)",
+                config.execution_id,
+                config.workspace_id,
+            )
+            raise WorkspaceProvisionError(
+                f"Workspace provisioning failed for execution {config.execution_id}: {exc}"
+            ) from exc
 
         # Store for later operations
         self._workspaces[workspace_obj.id] = workspace_obj  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary

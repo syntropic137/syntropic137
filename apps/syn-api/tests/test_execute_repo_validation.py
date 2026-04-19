@@ -257,8 +257,24 @@ class TestRequiresReposPreflightGating:
         from syn_api.routes.executions.commands import _get_preflight_repos
 
         wf = self._make_workflow(repo_url="", requires_repos=False)
-        repos = _get_preflight_repos({}, wf, None)
+        repos = _get_preflight_repos([], {}, wf, None)
         assert repos == []
+
+    def test_get_preflight_repos_uses_typed_repos(self) -> None:
+        """Typed RepositoryRef list flows directly into preflight URLs (no CSV detour)."""
+        from syn_api.routes.executions.commands import _get_preflight_repos
+        from syn_domain.contexts._shared.repository_ref import RepositoryRef
+
+        wf = self._make_workflow(repo_url="", requires_repos=True)
+        typed = [
+            RepositoryRef.from_slug("owner/a"),
+            RepositoryRef.from_url("https://github.com/owner/b"),
+        ]
+        repos = _get_preflight_repos(typed, {}, wf, None)
+        assert repos == [
+            "https://github.com/owner/a",
+            "https://github.com/owner/b",
+        ]
 
     @pytest.mark.asyncio
     async def test_validate_all_repos_noop_on_empty_list(self) -> None:
@@ -292,3 +308,123 @@ class TestRequiresReposPreflightGating:
             _check_missing_declarations(wf, merged)
         assert exc_info.value.status_code == 422
         assert "task" in str(exc_info.value.detail)
+
+
+# -- Reserved repo input-key rejection (ADR-063 boundary) ---------------------
+
+
+class TestReservedRepoInputKeyRejection:
+    """'repository' and 'repos' as input keys are rejected at the HTTP boundary.
+
+    Regression: CLI used to send --input repository=X as a generic input, API
+    returned 200 + BackgroundTask, handler's _resolve_repos raised ValueError
+    inside the task. The silent-success-then-404 is fixed by synchronous 422.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rejects_singular_repository_input_key(self) -> None:
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            ExecuteWorkflowRequest,
+            _validate_execution_request,
+        )
+
+        wf = MagicMock()
+        wf.requires_repos = True
+        wf.input_declarations = []
+
+        with (
+            patch(
+                "syn_api.routes.executions.commands.get_workflow_repo",
+                return_value=MagicMock(get_by_id=AsyncMock(return_value=wf)),
+            ),
+            patch(
+                "syn_api.routes.executions.commands.ensure_connected",
+                new=AsyncMock(),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await _validate_execution_request(
+                "wf-1",
+                ExecuteWorkflowRequest(inputs={"repository": "owner/repo"}, repos=[]),
+            )
+
+        assert exc_info.value.status_code == 422
+        detail = str(exc_info.value.detail)
+        assert "'repository'" in detail
+        assert "-R" in detail
+
+    @pytest.mark.asyncio
+    async def test_rejects_plural_repos_input_key(self) -> None:
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            ExecuteWorkflowRequest,
+            _validate_execution_request,
+        )
+
+        wf = MagicMock()
+        wf.requires_repos = True
+        wf.input_declarations = []
+
+        with (
+            patch(
+                "syn_api.routes.executions.commands.get_workflow_repo",
+                return_value=MagicMock(get_by_id=AsyncMock(return_value=wf)),
+            ),
+            patch(
+                "syn_api.routes.executions.commands.ensure_connected",
+                new=AsyncMock(),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await _validate_execution_request(
+                "wf-1",
+                ExecuteWorkflowRequest(inputs={"repos": "owner/a,owner/b"}, repos=[]),
+            )
+
+        assert exc_info.value.status_code == 422
+        assert "'repos'" in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_typed_repos_field_is_accepted(self) -> None:
+        """The typed `repos: list[str]` field is the canonical channel — no rejection.
+
+        ADR-063: typed repos do NOT leak back into ``effective_inputs`` as a CSV
+        string. Repository identity travels as ``RepositoryRef`` end-to-end.
+        """
+        from syn_api.routes.executions.commands import (
+            ExecuteWorkflowRequest,
+            _validate_execution_request,
+        )
+
+        wf = MagicMock()
+        wf.requires_repos = False
+        wf.input_declarations = []
+        wf.repos = []
+        wf._repository_url = ""
+
+        with (
+            patch(
+                "syn_api.routes.executions.commands.get_workflow_repo",
+                return_value=MagicMock(get_by_id=AsyncMock(return_value=wf)),
+            ),
+            patch(
+                "syn_api.routes.executions.commands.ensure_connected",
+                new=AsyncMock(),
+            ),
+        ):
+            _, effective_inputs, typed_repos = await _validate_execution_request(
+                "wf-1",
+                ExecuteWorkflowRequest(
+                    inputs={},
+                    repos=["https://github.com/owner/a", "owner/b"],
+                ),
+            )
+
+        assert len(typed_repos) == 2
+        assert typed_repos[0].https_url == "https://github.com/owner/a"
+        assert typed_repos[1].https_url == "https://github.com/owner/b"
+        assert "repos" not in effective_inputs
+        assert "repository" not in effective_inputs

@@ -760,3 +760,64 @@ ADR compliance is verified by integration tests:
 - [E2B Sandboxes](https://e2b.dev/docs)
 - [Docker Security Best Practices](https://docs.docker.com/engine/security/)
 - [Container Escape CVEs](https://sysdig.com/blog/container-escape-cve/)
+
+---
+
+## 2026-04-18 Addendum - Socket-proxy allow-list expansion (v0.25.2)
+
+Phase-2 workspace provisioning requires `agentic_isolation` to talk to the
+Docker engine for operations the original allow-list blocked:
+
+- Create per-execution Docker networks (`POST /networks/create`)
+- Inspect networks (`GET /networks/{id}`)
+- Probe engine capabilities at boot (`GET /info`)
+
+Original allow-list (`CONTAINERS`, `ALLOW_START`, `ALLOW_STOP`, `EXEC`, `POST`)
+returned 403 on every `/networks/*` and `/info` request. The agentic adapter
+swallowed the resulting exception and surfaced "Unknown error" through the
+CLI - one of the three P0 v0.25.2 release blockers.
+
+### Decision
+
+Extend `tecnativa/docker-socket-proxy` env allow-list with `NETWORKS=1` and
+`INFO=1`. Documented in `docs/security-practices.md` and applied to both
+`docker/docker-compose.yaml` and `docker/docker-compose.syntropic137.yaml`.
+
+### Trade-offs
+
+**Blast radius widens.** A compromised API container can now:
+- list, create, inspect, and delete arbitrary Docker networks on the host engine
+- read engine metadata (Docker version, kernel, cgroup driver, registry config,
+  storage driver, security options)
+
+**What still mitigates this:**
+- `cap_drop: [ALL]` and `security_opt: no-new-privileges` on every container
+- The Docker socket itself is mounted **read-only** into the proxy alone; no
+  other container has direct socket access
+- The proxy still blocks images, volumes, secrets, swarm, plugins, and the
+  `/system/*` path-prefix
+- Per-execution networks are namespaced; the API has no way to attach arbitrary
+  containers to host networks
+
+### Alternatives considered
+
+1. **Path-level allow-list (e.g. "POST /networks/create only").** Not supported
+   by `tecnativa/docker-socket-proxy` without a fork. Upstream issue requesting
+   finer granularity has been open since 2022 with no movement.
+2. **Sidecar pattern (per-execution network-creator container with its own
+   socket mount).** Higher operational complexity: extra container per
+   execution, RPC contract to maintain, lifecycle coupling to workspace
+   provisioning. Deferred - see "Future narrowing path" below.
+3. **Move network management into agentic_isolation host-side.** Would require
+   running `agentic_isolation` outside the API container; conflicts with the
+   single-binary deployment model.
+
+### Future narrowing path
+
+Move network creation out of the API process into a privileged sidecar that
+takes typed RPC requests (e.g. `CreateAgentNetwork(execution_id) -> NetworkRef`),
+then revoke `NETWORKS=1` from the API's proxy. The sidecar would have a
+purpose-built socket allow-list scoped to network operations only, and the API
+would lose the ability to enumerate, inspect, or delete arbitrary networks.
+
+Tracked as #714 (Phase-2 follow-on to v0.25.2).

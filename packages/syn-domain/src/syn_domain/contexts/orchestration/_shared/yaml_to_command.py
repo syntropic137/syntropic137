@@ -26,10 +26,15 @@ if TYPE_CHECKING:
 
 
 def infer_requires_repos(definition: WorkflowDefinition) -> bool:
-    """ADR-058: explicit ``requires_repos`` wins; otherwise infer from repo presence."""
+    """ADR-058: explicit ``requires_repos`` wins; otherwise default to True (opt-out).
+
+    The platform's primary use case is running workflows against repos, so the
+    default favors that path. Research/no-repo workflows must opt out with
+    ``requires_repos: false``.
+    """
     if definition.requires_repos is not None:
         return definition.requires_repos
-    return definition.repository is not None
+    return True
 
 
 def build_command_from_definition(
