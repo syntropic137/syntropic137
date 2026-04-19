@@ -62,8 +62,13 @@ async def _resolve_installation_id(installation_id: str, repository: str) -> str
     P0-3: the CLI registers triggers with syn `repo-*` IDs. Those are
     unknown to the GitHub API, so we first resolve them to `owner/name`
     via the repo projection, then ask the App which installation owns
-    that repo. Returns `""` if resolution fails at any step — the poller
-    re-resolves on first fire.
+    that repo.
+
+    Returns `""` if resolution fails at any step. The trigger is then
+    persisted with empty installation_id and is silently skipped at
+    polling time (see ``event_ingestion._get_repos_to_poll``) until the
+    operator re-registers it. Lazy re-resolution at polling time is
+    tracked separately as #713 for v0.26+.
     """
     if installation_id or not repository:
         return installation_id
@@ -72,7 +77,8 @@ async def _resolve_installation_id(installation_id: str, repository: str) -> str
     if full_name is None:
         logger.warning(
             "Could not resolve repository identifier '%s' to owner/name; "
-            "trigger will be persisted with installation_id='' and re-resolve later",
+            "trigger will be persisted with installation_id='' and skipped at "
+            "polling - re-register after the App is installed on the repo",
             repository,
         )
         return ""
@@ -86,7 +92,9 @@ async def _resolve_installation_id(installation_id: str, repository: str) -> str
         return str(resolved)
     except Exception:
         logger.warning(
-            "Could not auto-resolve installation_id for %s",
+            "Could not auto-resolve installation_id for %s; "
+            "trigger will be persisted with installation_id='' and skipped at "
+            "polling - re-register after the App is installed on the repo",
             full_name,
             exc_info=True,
         )

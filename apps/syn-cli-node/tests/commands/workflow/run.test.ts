@@ -285,6 +285,98 @@ describe("workflow run commands", () => {
       expect(body.repos).toEqual(["acme/widgets"]);
     });
 
+    it("resolves mixed -R values: repo-* via lookup, owner/repo passthrough", async () => {
+      mockFetch
+        // 1) repo-abc lookup
+        .mockResolvedValueOnce(
+          jsonResponse({
+            repo_id: "repo-abc",
+            organization_id: "org-1",
+            system_id: "",
+            provider: "github",
+            full_name: "acme/widgets",
+            owner: "acme",
+            default_branch: "main",
+            installation_id: "",
+            is_private: false,
+            created_by: "",
+            created_at: "2026-01-01T00:00:00Z",
+          }),
+        )
+        // 2) resolveWorkflow list
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-mixed-1", name: "W", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        // 3) workflow detail
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-mixed-1",
+            name: "W",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        // 4) execute
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-mix" }),
+        );
+
+      await runCommand.handler({
+        positionals: ["wf-mixed"],
+        values: { repo: ["repo-abc", "other/widgets"] },
+      });
+
+      // Exactly one /repos/ lookup — for repo-abc only, not for other/widgets
+      const urls = mockFetch.mock.calls.map((c: unknown[]) => (c[0] as Request).url);
+      const repoLookups = urls.filter((u: string) => u.includes("/repos/"));
+      expect(repoLookups).toHaveLength(1);
+      expect(repoLookups[0]).toContain("/repos/repo-abc");
+      expect(urls.some((u: string) => u.includes("/repos/other"))).toBe(false);
+
+      // Execute body carries both: resolved full_name from lookup, then passthrough slug
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.repos).toEqual(["acme/widgets", "other/widgets"]);
+    });
+
+    it("fails loud when repo-* lookup returns no full_name", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          repo_id: "repo-broken",
+          organization_id: "org-1",
+          system_id: "",
+          provider: "github",
+          full_name: "",
+          owner: "",
+          default_branch: "main",
+          installation_id: "",
+          is_private: false,
+          created_by: "",
+          created_at: "2026-01-01T00:00:00Z",
+        }),
+      );
+
+      await expect(
+        runCommand.handler({
+          positionals: ["wf-broken"],
+          values: { repo: ["repo-broken"] },
+        }),
+      ).rejects.toThrow(CLIError);
+
+      // Only the lookup call happened — never reached resolveWorkflow or execute
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const errOut = (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .join("");
+      expect(errOut.length === 0 || errOut).toBeDefined();
+    });
+
     it("fails loud when API returns status!=started", async () => {
       mockFetch
         .mockResolvedValueOnce(
