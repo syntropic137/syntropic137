@@ -5302,8 +5302,14 @@ export interface operations {
             query?: {
                 /** @description Filter by workflow ID */
                 workflow_id?: string | null;
-                /** @description Filter by status */
+                /** @description Filter by single status (legacy) */
                 status?: string | null;
+                /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
+                statuses?: string | null;
+                /** @description Inclusive ISO 8601 lower bound on started_at */
+                started_after?: string | null;
+                /** @description Inclusive ISO 8601 upper bound on started_at */
+                started_before?: string | null;
                 /** @description Max items to return */
                 limit?: number;
             };

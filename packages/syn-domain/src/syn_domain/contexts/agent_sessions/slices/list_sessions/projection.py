@@ -43,6 +43,67 @@ def _calculate_duration(
         return None
 
 
+def _coerce_iso_datetime(value: object) -> datetime | None:
+    """Parse an ISO 8601 string or accept an existing datetime; return None on failure.
+
+    Handles the trailing ``Z`` suffix (RFC 3339) which ``fromisoformat`` rejects
+    on Python <3.11.
+    """
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _within_window(
+    record: Any,
+    after: datetime | None,
+    before: datetime | None,
+) -> bool:
+    """True if ``record['started_at']`` is within [after, before]."""
+    started = _coerce_iso_datetime(record.get("started_at"))
+    if started is None:
+        return False
+    if after is not None and started < after:
+        return False
+    return not (before is not None and started > before)
+
+
+def _build_query_filters(
+    workflow_id: str | None,
+    status_filter: str | None,
+    statuses: list[str] | None,
+) -> dict[str, str]:
+    """Build the equality filter map for store.query()."""
+    filters: dict[str, str] = {}
+    if workflow_id:
+        filters["workflow_id"] = workflow_id
+    if status_filter and not statuses:
+        filters["status"] = status_filter
+    return filters
+
+
+def _apply_post_filters(
+    data: list[Any],
+    statuses: list[str] | None,
+    started_after: datetime | None,
+    started_before: datetime | None,
+    offset: int,
+    limit: int,
+) -> list[Any]:
+    """Apply the in-memory filters that the store cannot express, then paginate."""
+    if statuses:
+        allowed = set(statuses)
+        data = [d for d in data if d.get("status") in allowed]
+    if started_after is not None or started_before is not None:
+        data = [d for d in data if _within_window(d, started_after, started_before)]
+    return data[offset : offset + limit] if limit else data[offset:]
+
+
 def _accumulate_tokens(existing: dict[str, Any], event_data: dict) -> None:
     """Accumulate token counts from an operation event."""
     op_tokens = event_data.get("total_tokens", 0) or event_data.get("tokens_used", 0)
@@ -273,24 +334,43 @@ class SessionListProjection(AutoDispatchProjection):
         self,
         workflow_id: str | None = None,
         status_filter: str | None = None,
+        statuses: list[str] | None = None,
+        started_after: datetime | None = None,
+        started_before: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
         order_by: str = "-started_at",
     ) -> list[SessionSummary]:
-        """Query sessions with optional filtering."""
-        filters = {}
-        if workflow_id:
-            filters["workflow_id"] = workflow_id
-        if status_filter:
-            filters["status"] = status_filter
+        """Query sessions with optional filtering.
+
+        ``statuses`` (multi-select) takes precedence over ``status_filter``
+        (single value, kept for backwards compatibility).
+
+        Time-range filters (``started_after`` / ``started_before``) are applied
+        post-fetch in Python because the underlying store filter only supports
+        equality. We fetch without a row cap when bounds are present so the
+        bounded slice is honoured even on installs with many sessions.
+        """
+        filters = _build_query_filters(workflow_id, status_filter, statuses)
+        post_filtering = bool(
+            statuses or started_after is not None or started_before is not None
+        )
+        store_limit = None if post_filtering else limit
+        store_offset = 0 if post_filtering else offset
 
         data = await self._store.query(
             self.PROJECTION_NAME,
             filters=filters if filters else None,
             order_by=order_by,
-            limit=limit,
-            offset=offset,
+            limit=store_limit,
+            offset=store_offset,
         )
+
+        if post_filtering:
+            data = _apply_post_filters(
+                data, statuses, started_after, started_before, offset, limit
+            )
+
         return [SessionSummary.from_dict(d) for d in data]
 
     async def reconcile_orphaned(

@@ -260,6 +260,9 @@ async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
 async def list_sessions(
     workflow_id: str | None = None,
     status: str | None = None,
+    statuses: list[str] | None = None,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> Result[list[SessionSummary], SessionError]:
@@ -267,7 +270,11 @@ async def list_sessions(
 
     Args:
         workflow_id: Filter by workflow ID.
-        status: Filter by session status.
+        status: Filter by single session status (legacy).
+        statuses: Filter by multiple statuses (OR'd together). Takes
+            precedence over ``status``.
+        started_after: Inclusive lower bound on ``started_at``.
+        started_before: Inclusive upper bound on ``started_at``.
         limit: Maximum results to return.
         offset: Pagination offset.
 
@@ -280,6 +287,9 @@ async def list_sessions(
     domain_sessions = await projection.query(
         workflow_id=workflow_id,
         status_filter=status,
+        statuses=statuses,
+        started_after=started_after,
+        started_before=started_before,
         limit=limit,
         offset=offset,
     )
@@ -494,16 +504,61 @@ async def get_session(
 # =============================================================================
 
 
+def _build_session_summary_response(
+    s: SessionSummary,
+    workflow_name: str | None,
+    info: _SummaryEnrichment,
+) -> SessionSummaryResponse:
+    """Compose a SessionSummaryResponse from a domain summary + enrichment."""
+    return SessionSummaryResponse(
+        id=s.id,
+        workflow_id=s.workflow_id,
+        workflow_name=workflow_name,
+        execution_id=s.execution_id,
+        phase_id=s.phase_id,
+        status=s.status,
+        agent_provider=s.agent_type,
+        agent_model=info.agent_model,
+        agent_model_display=format_model_compact(info.agent_model),
+        input_tokens=s.input_tokens,
+        output_tokens=s.output_tokens,
+        cache_creation_tokens=s.cache_creation_tokens,
+        cache_read_tokens=s.cache_read_tokens,
+        total_tokens=s.total_tokens,
+        total_tokens_display=format_tokens(s.total_tokens),
+        total_cost_usd=info.total_cost_usd,
+        total_cost_display=format_cost(info.total_cost_usd),
+        duration_seconds=info.duration_seconds,
+        duration_display=format_duration_seconds(info.duration_seconds),
+        started_at=str(s.started_at) if s.started_at else None,
+        completed_at=str(s.completed_at) if s.completed_at else None,
+    )
+
+
 @router.get("", response_model=SessionListResponse)
 async def list_sessions_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
-    status: str | None = Query(None, description="Filter by status"),
+    status: str | None = Query(None, description="Filter by single status (legacy)"),
+    statuses: str | None = Query(
+        None,
+        description="Comma-separated list of statuses (OR'd; takes precedence over `status`)",
+    ),
+    started_after: datetime | None = Query(
+        None, description="Inclusive ISO 8601 lower bound on started_at"
+    ),
+    started_before: datetime | None = Query(
+        None, description="Inclusive ISO 8601 upper bound on started_at"
+    ),
     limit: int = Query(50, ge=1, le=200, description="Max items to return"),
 ) -> SessionListResponse:
     """List agent sessions with optional filtering."""
+    status_list = [s.strip() for s in statuses.split(",") if s.strip()] if statuses else None
     result = await list_sessions(
         workflow_id=workflow_id,
         status=status,
+        statuses=status_list,
+        started_after=started_after,
+        started_before=started_before,
         limit=limit,
     )
 
@@ -515,38 +570,15 @@ async def list_sessions_endpoint(
     wf_names = await _build_workflow_name_map(wf_ids)
     # Lane 2: enrich each session's cost/model/duration from the session_cost projection (#695)
     enrichment = await _load_session_costs([s.id for s in summaries])
-    responses: list[SessionSummaryResponse] = []
-    for s in summaries:
-        info = enrichment.get(s.id, _SummaryEnrichment())
-        responses.append(
-            SessionSummaryResponse(
-                id=s.id,
-                workflow_id=s.workflow_id,
-                workflow_name=wf_names.get(s.workflow_id, None) if s.workflow_id else None,
-                execution_id=s.execution_id,
-                phase_id=s.phase_id,
-                status=s.status,
-                agent_provider=s.agent_type,
-                agent_model=info.agent_model,
-                agent_model_display=format_model_compact(info.agent_model),
-                input_tokens=s.input_tokens,
-                output_tokens=s.output_tokens,
-                cache_creation_tokens=s.cache_creation_tokens,
-                cache_read_tokens=s.cache_read_tokens,
-                total_tokens=s.total_tokens,
-                total_tokens_display=format_tokens(s.total_tokens),
-                total_cost_usd=info.total_cost_usd,
-                total_cost_display=format_cost(info.total_cost_usd),
-                duration_seconds=info.duration_seconds,
-                duration_display=format_duration_seconds(info.duration_seconds),
-                started_at=str(s.started_at) if s.started_at else None,
-                completed_at=str(s.completed_at) if s.completed_at else None,
-            )
+    responses = [
+        _build_session_summary_response(
+            s,
+            wf_names.get(s.workflow_id) if s.workflow_id else None,
+            enrichment.get(s.id, _SummaryEnrichment()),
         )
-    return SessionListResponse(
-        sessions=responses,
-        total=len(responses),
-    )
+        for s in summaries
+    ]
+    return SessionListResponse(sessions=responses, total=len(responses))
 
 
 def _parse_tool_input(input_preview: str | None) -> dict[str, Any] | None:

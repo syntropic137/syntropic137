@@ -1132,10 +1132,66 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by status",
+              "description": "Filter by single status (legacy)",
               "title": "Status"
             },
-            "description": "Filter by status"
+            "description": "Filter by single status (legacy)"
+          },
+          {
+            "name": "statuses",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated list of statuses (OR'd; takes precedence over `status`)",
+              "title": "Statuses"
+            },
+            "description": "Comma-separated list of statuses (OR'd; takes precedence over `status`)"
+          },
+          {
+            "name": "started_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive ISO 8601 lower bound on started_at",
+              "title": "Started After"
+            },
+            "description": "Inclusive ISO 8601 lower bound on started_at"
+          },
+          {
+            "name": "started_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive ISO 8601 upper bound on started_at",
+              "title": "Started Before"
+            },
+            "description": "Inclusive ISO 8601 upper bound on started_at"
           },
           {
             "name": "limit",
