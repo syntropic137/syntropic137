@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from syn_adapters.conversations import ConversationStoragePort
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
@@ -136,14 +137,17 @@ class WorkflowExecutionProcessor:
         phases: list[ExecutablePhase],
         inputs: dict[str, Any],
         execution_id: str,
-        repos: list[str] | None = None,
+        repos: list[RepositoryRef] | None = None,
         expected_completion_at: datetime | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow using the Processor To-Do List pattern."""
         started_at = datetime.now(UTC)
-        # Ensure resolved repos are persisted in inputs for the domain event
+        # PromptBuilder reads ``inputs["repos"]`` for ``{{repos}}`` template substitution.
+        # ADR-063: write the canonical HTTPS form of typed RepositoryRef so the prompt
+        # never sees un-normalized slugs. TODO(#712): replace this with typed access
+        # once PromptBuilder consumes ``RepositoryRef`` directly.
         if repos and "repos" not in inputs:
-            inputs["repos"] = ",".join(repos)
+            inputs["repos"] = ",".join(r.https_url for r in repos)
         self._inputs = inputs
         aggregate = WorkflowExecutionAggregate()
 
@@ -226,7 +230,7 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
-        repos: list[str] | None,
+        repos: list[RepositoryRef] | None,
     ) -> None:
         """Process to-do items until the list is empty (all phases done or cancelled)."""
         while True:
@@ -253,7 +257,7 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
-        repos: list[str] | None,
+        repos: list[RepositoryRef] | None,
     ) -> None:
         """Dispatch a single to-do item to its handler."""
         assert todo.phase_id is not None
@@ -416,7 +420,7 @@ class WorkflowExecutionProcessor:
         todo: TodoItem,
         phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
-        repos: list[str] | None,
+        repos: list[RepositoryRef] | None,
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
     ) -> None:
@@ -456,12 +460,16 @@ class WorkflowExecutionProcessor:
             prompt_builder=self._prompt_builder,
             command_builder=self._command_builder,
         )
+        # ADR-063: convert typed RepositoryRef → HTTPS URL at the workspace seam.
+        # WorkspaceProvisionHandler consumes URLs (git clone, secret hydration);
+        # the typed value object stops here.
+        repo_urls = [r.https_url for r in (repos or [])]
         result = await provision_handler.handle(
             todo=todo,
             phase=phase,
             workflow_id=aggregate.workflow_id or "",
             session_id=session_id,
-            repos=repos,
+            repos=repo_urls,
             artifacts=artifacts,
             completed_phase_ids=completed_phase_ids,
             phase_outputs=phase_outputs,

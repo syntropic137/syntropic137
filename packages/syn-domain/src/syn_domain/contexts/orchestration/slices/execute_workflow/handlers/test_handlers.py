@@ -800,10 +800,10 @@ class TestResolveRepos:
             {},
             _make_workflow_stub(repos=["https://github.com/org/template-repo"]),
         )
-        assert result == ["https://github.com/org/typed-repo"]
+        assert result == [RepositoryRef.from_slug("org/typed-repo")]
 
     def test_typed_multi_repo_resolved(self) -> None:
-        """A list of typed RepositoryRefs is resolved into HTTPS URLs in order."""
+        """A list of typed RepositoryRefs flows through unchanged in order."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             ExecuteWorkflowHandler,
         )
@@ -816,8 +816,8 @@ class TestResolveRepos:
         )
         result = ExecuteWorkflowHandler._resolve_repos(cmd, {}, _make_workflow_stub())
         assert result == [
-            "https://github.com/org/repo-a",
-            "https://github.com/org/repo-b",
+            RepositoryRef.from_slug("org/repo-a"),
+            RepositoryRef.from_slug("org/repo-b"),
         ]
 
     def test_falls_back_to_template_repos_when_command_repos_empty(self) -> None:
@@ -831,7 +831,7 @@ class TestResolveRepos:
             {},
             _make_workflow_stub(repos=["https://github.com/org/repo-a"]),
         )
-        assert result == ["https://github.com/org/repo-a"]
+        assert result == [RepositoryRef.from_slug("org/repo-a")]
 
     def test_falls_back_to_repository_url_when_template_repos_empty(self) -> None:
         """Falls back to template repository_url when both command.repos and workflow.repos are empty."""
@@ -844,7 +844,7 @@ class TestResolveRepos:
             {},
             _make_workflow_stub(repository_url="https://github.com/org/repo-a"),
         )
-        assert result == ["https://github.com/org/repo-a"]
+        assert result == [RepositoryRef.from_slug("org/repo-a")]
 
     def test_empty_command_and_no_template_repos_returns_empty(self) -> None:
         """No command repos, no template repos, no repository_url -> empty list."""
@@ -893,4 +893,4 @@ class TestResolveRepos:
             {"repos": "ignored", "repository": "also/ignored"},
             _make_workflow_stub(),
         )
-        assert result == ["https://github.com/org/typed-repo"]
+        assert result == [RepositoryRef.from_slug("org/typed-repo")]

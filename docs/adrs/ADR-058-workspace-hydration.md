@@ -257,7 +257,9 @@ Add `requires_repos: bool` to workflow templates as an execution-time gate.
 
 **Default is `true`** for backward compatibility -- all existing events in the event store were created assuming repos are required.
 
-**YAML inference:** When `requires_repos` is not explicitly set in the YAML, it is inferred from the `repository` field. If `repository: null` and no explicit `requires_repos`, the flag defaults to `false`. An explicit `requires_repos: true/false` in the YAML always takes precedence.
+**YAML inference:** When `requires_repos` is not explicitly set in the YAML, the flag defaults to `true` (opt-out). An explicit `requires_repos: true/false` in the YAML always takes precedence. Research-style workflows that operate on no repos must opt out with `requires_repos: false`.
+
+> **v0.25.2 update (2026-04-18):** The original inference rule was "infer from `repository` presence" -- workflows without a `repository:` block defaulted to `false`. With v0.25.2's ADR-063 typed-repos channel, the legacy `repository:` block is being phased out (workflows now declare `requires_repos: true` and accept repos via runtime `-R`), so inferring from its presence no longer matches the platform's primary use case. The new default is opt-out: omit `requires_repos`, get `true`. Migrated marketplace workflows (`code-review`, `sdlc-trunk` v0.2.0+) rely on this.
 
 **Placeholder removal:** `SeedWorkflowService` no longer injects a `placeholder/not-configured` URL. Workflows without repos get `repository_url: ""`.
 

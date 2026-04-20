@@ -18,7 +18,11 @@ type TriggerHistoryEntry = components["schemas"]["TriggerHistoryEntryResponse"];
 
 function reqId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
-  if (!id) { printError("Missing trigger-id"); throw new CLIError("Missing argument", 1); }
+  if (!id) {
+    printError("trigger-id is required");
+    printDim("Hint: run `syn triggers list` to find a trigger ID.");
+    throw new CLIError("Missing argument", 1);
+  }
   return id;
 }
 

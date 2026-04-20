@@ -16,6 +16,32 @@ import type { components } from "../../generated/api-types.js";
 
 type InputDeclaration = components["schemas"]["InputDeclarationModel"];
 
+/**
+ * Resolve each -R value into a form the API accepts (owner/repo or full URL).
+ * `repo-*` values are looked up via the repos API and substituted with
+ * `full_name`, so users can paste `syn repo list` IDs directly.
+ */
+export async function resolveRepoRefs(refs: string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const ref of refs) {
+    if (/^repo-[a-z0-9]+$/i.test(ref)) {
+      const repo = unwrap(
+        await api.GET("/repos/{repo_id}", {
+          params: { path: { repo_id: ref } },
+        }),
+        `Failed to resolve ${ref}`,
+      );
+      if (!repo.full_name) {
+        throw new CLIError(`Repo ${ref} has no full_name; deregister and re-register`, 1);
+      }
+      out.push(repo.full_name);
+    } else {
+      out.push(ref);
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // run
 // ---------------------------------------------------------------------------
@@ -53,7 +79,7 @@ export const runCommand: CommandDef = {
   options: {
     input: { type: "string", short: "i", description: "Input variables as key=value", multiple: true },
     task: { type: "string", short: "t", description: "Primary task description ($ARGUMENTS)" },
-    repo: { type: "string", short: "R", description: "GitHub URL to pre-clone (repeatable). Overrides workflow template repos.", multiple: true },
+    repo: { type: "string", short: "R", description: "Repository to pre-clone (repeatable). Accepts owner/repo, full GitHub URL, or syn repo-* ID.", multiple: true },
     "dry-run": { type: "boolean", short: "n", description: "Validate without executing", default: false },
     quiet: { type: "boolean", short: "q", description: "Minimal output", default: false },
   },
@@ -69,9 +95,24 @@ export const runCommand: CommandDef = {
     const parsedInputs = parseInputs(inputs);
     const task = parsed.values["task"] as string | undefined;
     const repoValues = parsed.values["repo"];
-    const repos: string[] = Array.isArray(repoValues) ? repoValues as string[] : repoValues ? [repoValues as string] : [];
+    const rawRepos: string[] = Array.isArray(repoValues) ? repoValues as string[] : repoValues ? [repoValues as string] : [];
     const dryRun = parsed.values["dry-run"] === true;
     const quiet = parsed.values["quiet"] === true;
+
+    // ADR-063: repositories are a typed channel, not smuggled via `--input`.
+    // Fail loud at the CLI so users see the migration path immediately instead of
+    // the API's 422 (which is also wired up for belt-and-suspenders).
+    const leakedKeys = ["repos", "repository"].filter((k) => Object.hasOwn(parsedInputs, k));
+    if (leakedKeys.length > 0) {
+      const quoted = leakedKeys.map((k) => `'${k}'`).join(", ");
+      printError(`${quoted} is not a valid --input key.`);
+      printDim("Use -R <owner/repo> (repeatable) to specify repositories at execution time.");
+      throw new CLIError("Invalid input key", 1);
+    }
+
+    // Accept both `owner/repo` (and full GitHub URLs) and syn internal `repo-*` IDs.
+    // Resolve `repo-*` via the repos API so users can paste `syn repo list` output directly.
+    const repos = await resolveRepoRefs(rawRepos);
 
     const wf = await resolveWorkflow(partialId);
 
@@ -123,11 +164,12 @@ export const runCommand: CommandDef = {
       "Failed to execute workflow",
     );
 
-    if (result.status === "started") {
+    if (result.status === "started" && result.execution_id?.startsWith("exec-")) {
       printSuccess("\nWorkflow execution started");
       print(`  Execution ID: ${result.execution_id}`);
     } else {
-      print(`\n${style(`Status: ${result.status}`, YELLOW)}`);
+      printError(`\nUnexpected server response: status=${result.status} execution_id=${result.execution_id ?? "<none>"}`);
+      throw new CLIError("Workflow execution did not start", 1);
     }
   },
 };

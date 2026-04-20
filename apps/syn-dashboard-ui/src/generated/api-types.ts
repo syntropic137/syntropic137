@@ -2012,7 +2012,7 @@ export interface components {
             task?: string | null;
             /**
              * Repos
-             * @description GitHub URLs to pre-clone for workspace hydration (ADR-058). Overrides the workflow template's repository_url. Equivalent to passing inputs={'repos': 'url1,url2'} but type-safe.
+             * @description GitHub URLs or 'owner/repo' slugs to pre-clone for workspace hydration (ADR-058, ADR-063). Typed channel for repository identity: one execution can touch 0, 1, or N repos. Passing 'repository' or 'repos' in the `inputs` dict is rejected with 422.
              */
             repos?: string[];
             /**
