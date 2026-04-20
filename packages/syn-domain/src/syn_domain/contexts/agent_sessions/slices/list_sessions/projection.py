@@ -352,9 +352,7 @@ class SessionListProjection(AutoDispatchProjection):
         bounded slice is honoured even on installs with many sessions.
         """
         filters = _build_query_filters(workflow_id, status_filter, statuses)
-        post_filtering = bool(
-            statuses or started_after is not None or started_before is not None
-        )
+        post_filtering = bool(statuses or started_after is not None or started_before is not None)
         store_limit = None if post_filtering else limit
         store_offset = 0 if post_filtering else offset
 
@@ -367,9 +365,7 @@ class SessionListProjection(AutoDispatchProjection):
         )
 
         if post_filtering:
-            data = _apply_post_filters(
-                data, statuses, started_after, started_before, offset, limit
-            )
+            data = _apply_post_filters(data, statuses, started_after, started_before, offset, limit)
 
         return [SessionSummary.from_dict(d) for d in data]
 
