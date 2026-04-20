@@ -8,9 +8,11 @@
  */
 
 import type { ReactNode } from 'react'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { SessionSummary } from '../../types'
 import { PageLoader, SelectionCheckbox } from '../../components'
 import type { SelectionClickModifiers } from '../../hooks/useRowSelection'
+import type { SortKey, SortState } from '../../hooks/useSortUrlState'
 import { SessionRow } from './SessionRow'
 
 interface SelectionProps {
@@ -20,23 +22,35 @@ interface SelectionProps {
   onClearSelection: () => void
 }
 
+interface SortProps {
+  state: SortState
+  onToggle: (key: SortKey) => void
+}
+
 interface SessionTableProps {
   rows: SessionSummary[]
   loading: boolean
   emptyState: ReactNode
   selection?: SelectionProps
+  sort?: SortProps
 }
 
-const COLUMNS = [
-  { label: 'Status', align: 'left' as const },
-  { label: 'Workflow', align: 'left' as const },
-  { label: 'Phase', align: 'left' as const },
-  { label: 'Model', align: 'left' as const },
-  { label: 'Tokens', align: 'right' as const },
-  { label: 'Cost', align: 'right' as const },
-  { label: 'Duration', align: 'right' as const },
-  { label: 'Started', align: 'left' as const },
-  { label: '', align: 'right' as const },
+interface ColumnDef {
+  label: string
+  align: 'left' | 'right'
+  sortKey?: SortKey
+}
+
+const COLUMNS: ColumnDef[] = [
+  { label: 'Status', align: 'left', sortKey: 'status' },
+  { label: 'Workflow', align: 'left', sortKey: 'workflow' },
+  { label: 'Phase', align: 'left', sortKey: 'phase' },
+  { label: 'Model', align: 'left', sortKey: 'model' },
+  { label: 'Tokens', align: 'right', sortKey: 'tokens' },
+  { label: 'Cost', align: 'right', sortKey: 'cost' },
+  { label: 'Duration', align: 'right', sortKey: 'duration' },
+  { label: 'Started', align: 'left', sortKey: 'started' },
+  { label: '', align: 'right' },
 ]
 
 interface HeaderState {
@@ -78,13 +92,36 @@ function makeHeaderToggle(
   }
 }
 
-function ColumnHeader({ label, align }: { label: string; align: 'left' | 'right' }) {
+function SortIndicator({ active, dir }: { active: boolean; dir: SortState['dir'] }) {
+  if (!active) return null
+  const Icon = dir === 'asc' ? ArrowUp : ArrowDown
+  return <Icon className="h-3 w-3 text-[var(--color-accent)]" aria-hidden />
+}
+
+interface ColumnHeaderProps {
+  column: ColumnDef
+  sort?: SortProps
+}
+
+function ColumnHeader({ column, sort }: ColumnHeaderProps) {
+  const alignClass = column.align === 'right' ? 'text-right' : 'text-left'
+  const sortable = column.sortKey && sort
+  if (!sortable) {
+    return <th scope="col" className={`px-3 py-2 ${alignClass}`}>{column.label}</th>
+  }
+  const key = column.sortKey as SortKey
+  const isActive = sort.state.key === key
+  const ariaSort = isActive ? (sort.state.dir === 'asc' ? 'ascending' : 'descending') : 'none'
   return (
-    <th
-      scope="col"
-      className={`px-3 py-2 ${align === 'right' ? 'text-right' : 'text-left'}`}
-    >
-      {label}
+    <th scope="col" aria-sort={ariaSort} className={`px-3 py-2 ${alignClass}`}>
+      <button
+        type="button"
+        onClick={() => sort.onToggle(key)}
+        className={`inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-[var(--color-text-primary)] ${column.align === 'right' ? 'flex-row-reverse' : ''} ${isActive ? 'text-[var(--color-text-primary)]' : ''}`}
+      >
+        {column.label}
+        <SortIndicator active={isActive} dir={sort.state.dir} />
+      </button>
     </th>
   )
 }
@@ -92,9 +129,10 @@ function ColumnHeader({ label, align }: { label: string; align: 'left' | 'right'
 interface SessionTableHeadProps {
   selection?: SelectionProps
   headerState: HeaderState
+  sort?: SortProps
 }
 
-function SessionTableHead({ selection, headerState }: SessionTableHeadProps) {
+function SessionTableHead({ selection, headerState, sort }: SessionTableHeadProps) {
   return (
     <thead className="bg-[var(--color-surface-elevated)] text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
       <tr>
@@ -105,7 +143,7 @@ function SessionTableHead({ selection, headerState }: SessionTableHeadProps) {
           />
         )}
         {COLUMNS.map((col) => (
-          <ColumnHeader key={col.label || 'actions'} label={col.label} align={col.align} />
+          <ColumnHeader key={col.label || 'actions'} column={col} sort={sort} />
         ))}
       </tr>
     </thead>
@@ -134,7 +172,13 @@ function SessionTableBody({ rows, selection }: SessionTableBodyProps) {
   )
 }
 
-export function SessionTable({ rows, loading, emptyState, selection }: SessionTableProps) {
+export function SessionTable({
+  rows,
+  loading,
+  emptyState,
+  selection,
+  sort,
+}: SessionTableProps) {
   if (loading) return <PageLoader />
   if (rows.length === 0) return <>{emptyState}</>
 
@@ -143,7 +187,7 @@ export function SessionTable({ rows, loading, emptyState, selection }: SessionTa
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
       <table className="min-w-full text-sm">
-        <SessionTableHead selection={selection} headerState={headerState} />
+        <SessionTableHead selection={selection} headerState={headerState} sort={sort} />
         <SessionTableBody rows={rows} selection={selection} />
       </table>
     </div>

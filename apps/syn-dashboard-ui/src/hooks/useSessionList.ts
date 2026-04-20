@@ -17,8 +17,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { listSessions } from '../api/sessions'
 import type { SSEEventFrame, SessionSummary, TimeWindow } from '../types'
+import { sortSessions } from '../utils/sessionSort'
 import { useActivityStream } from './useActivityStream'
 import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
+import { useSortUrlState, type SortKey, type SortState } from './useSortUrlState'
 import { useStatusCounts } from './useStatusCounts'
 import { useThrottledRefetch } from './useThrottledRefetch'
 
@@ -39,6 +41,8 @@ export interface UseSessionListResult {
   setTimeWindow: (next: TimeWindow) => void
   clearAllFilters: () => void
   statusCounts: Record<string, number>
+  sort: SortState
+  toggleSort: (key: SortKey) => void
   /** SSE liveness for the page's connection indicator. */
   connected: boolean
   /** Wall-clock ms of the most recent activity frame, or null. */
@@ -64,6 +68,7 @@ export function useSessionList(): UseSessionListResult {
     clearStatuses,
     clearAll: clearAllFilters,
   } = useFilterUrlState()
+  const { sort, toggleSort } = useSortUrlState()
 
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -113,10 +118,10 @@ export function useSessionList(): UseSessionListResult {
     return () => clearInterval(id)
   }, [connected, fetchNow])
 
-  const filteredSessions = useMemo(
-    () => (searchQuery ? sessions.filter((s) => matchesQuery(s, searchQuery)) : sessions),
-    [sessions, searchQuery],
-  )
+  const filteredSessions = useMemo(() => {
+    const matched = searchQuery ? sessions.filter((s) => matchesQuery(s, searchQuery)) : sessions
+    return sortSessions(matched, sort.key, sort.dir)
+  }, [sessions, searchQuery, sort.key, sort.dir])
 
   const statusCounts = useStatusCounts(sessions)
 
@@ -133,6 +138,8 @@ export function useSessionList(): UseSessionListResult {
     setTimeWindow,
     clearAllFilters,
     statusCounts,
+    sort,
+    toggleSort,
     connected,
     lastEventAt,
   }

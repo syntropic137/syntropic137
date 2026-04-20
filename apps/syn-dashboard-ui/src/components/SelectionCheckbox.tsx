@@ -46,10 +46,7 @@ export function SelectionCheckbox({
         /* state is parent-owned — handled in onClick to capture modifiers */
       }}
       aria-label={ariaLabel}
-      className={clsx(
-        'h-4 w-4 cursor-pointer rounded border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-accent)] accent-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-background)]',
-        className,
-      )}
+      className={clsx('selection-checkbox', className)}
     />
   )
 }

@@ -36,6 +36,8 @@ export function SessionList() {
     setTimeWindow,
     clearAllFilters,
     statusCounts,
+    sort,
+    toggleSort,
     connected,
     lastEventAt,
   } = useSessionList()
@@ -114,6 +116,7 @@ export function SessionList() {
           loading={loading}
           selection={selectionProps}
           emptyState={emptyState}
+          sort={{ state: sort, onToggle: toggleSort }}
         />
       )}
 
