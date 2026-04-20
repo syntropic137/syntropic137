@@ -3507,6 +3507,12 @@ export interface components {
         /**
          * SessionResponse
          * @description Detailed session response.
+         *
+         *     Display fields (``*_display``) are produced server-side so all clients
+         *     share identical human-readable output. Raw fields remain for programmatic
+         *     consumers.
+         *
+         *     See: docs/adrs/ADR-064-observability-monitor-ui.md
          */
         SessionResponse: {
             /** Id */
@@ -3525,6 +3531,8 @@ export interface components {
             agent_provider: string | null;
             /** Agent Model */
             agent_model: string | null;
+            /** Agent Model Display */
+            agent_model_display?: string | null;
             /** Status */
             status: string;
             /** Workspace Path */
@@ -3535,30 +3543,60 @@ export interface components {
              */
             input_tokens: number;
             /**
+             * Input Tokens Display
+             * @default 0
+             */
+            input_tokens_display: string;
+            /**
              * Output Tokens
              * @default 0
              */
             output_tokens: number;
+            /**
+             * Output Tokens Display
+             * @default 0
+             */
+            output_tokens_display: string;
             /**
              * Cache Creation Tokens
              * @default 0
              */
             cache_creation_tokens: number;
             /**
+             * Cache Creation Tokens Display
+             * @default 0
+             */
+            cache_creation_tokens_display: string;
+            /**
              * Cache Read Tokens
              * @default 0
              */
             cache_read_tokens: number;
+            /**
+             * Cache Read Tokens Display
+             * @default 0
+             */
+            cache_read_tokens_display: string;
             /**
              * Total Tokens
              * @default 0
              */
             total_tokens: number;
             /**
+             * Total Tokens Display
+             * @default 0
+             */
+            total_tokens_display: string;
+            /**
              * Total Cost Usd
              * @default 0
              */
             total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
@@ -3571,6 +3609,11 @@ export interface components {
             completed_at?: string | null;
             /** Duration Seconds */
             duration_seconds?: number | null;
+            /**
+             * Duration Display
+             * @default —
+             */
+            duration_display: string;
             /** Error Message */
             error_message?: string | null;
             /** Metadata */
@@ -3581,6 +3624,16 @@ export interface components {
         /**
          * SessionSummaryResponse
          * @description Summary of an agent session.
+         *
+         *     Display fields (``*_display``) are produced server-side so all clients
+         *     (dashboard, CLI, future UIs) share identical human-readable output. Raw
+         *     fields remain for programmatic consumers; both are always present.
+         *
+         *     Timestamps stay ISO 8601 UTC. Locale and relative-time formatting is the
+         *     client's job (it knows the viewer's time zone and when the response is
+         *     actually rendered).
+         *
+         *     See: docs/adrs/ADR-064-observability-monitor-ui.md
          */
         SessionSummaryResponse: {
             /** Id */
@@ -3597,6 +3650,10 @@ export interface components {
             status: string;
             /** Agent Provider */
             agent_provider: string | null;
+            /** Agent Model */
+            agent_model?: string | null;
+            /** Agent Model Display */
+            agent_model_display?: string | null;
             /**
              * Input Tokens
              * @default 0
@@ -3623,10 +3680,27 @@ export interface components {
              */
             total_tokens: number;
             /**
+             * Total Tokens Display
+             * @default 0
+             */
+            total_tokens_display: string;
+            /**
              * Total Cost Usd
              * @default 0
              */
             total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Duration Display
+             * @default —
+             */
+            duration_display: string;
             /** Started At */
             started_at?: string | null;
             /** Completed At */

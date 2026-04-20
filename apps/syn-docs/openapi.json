@@ -8768,6 +8768,17 @@
             ],
             "title": "Agent Model"
           },
+          "agent_model_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Model Display"
+          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -8788,31 +8799,61 @@
             "title": "Input Tokens",
             "default": 0
           },
+          "input_tokens_display": {
+            "type": "string",
+            "title": "Input Tokens Display",
+            "default": "0"
+          },
           "output_tokens": {
             "type": "integer",
             "title": "Output Tokens",
             "default": 0
+          },
+          "output_tokens_display": {
+            "type": "string",
+            "title": "Output Tokens Display",
+            "default": "0"
           },
           "cache_creation_tokens": {
             "type": "integer",
             "title": "Cache Creation Tokens",
             "default": 0
           },
+          "cache_creation_tokens_display": {
+            "type": "string",
+            "title": "Cache Creation Tokens Display",
+            "default": "0"
+          },
           "cache_read_tokens": {
             "type": "integer",
             "title": "Cache Read Tokens",
             "default": 0
+          },
+          "cache_read_tokens_display": {
+            "type": "string",
+            "title": "Cache Read Tokens Display",
+            "default": "0"
           },
           "total_tokens": {
             "type": "integer",
             "title": "Total Tokens",
             "default": 0
           },
+          "total_tokens_display": {
+            "type": "string",
+            "title": "Total Tokens Display",
+            "default": "0"
+          },
           "total_cost_usd": {
             "type": "string",
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Total Cost Usd",
             "default": "0"
+          },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display",
+            "default": "$0.00"
           },
           "cost_by_model": {
             "additionalProperties": {
@@ -8862,6 +8903,11 @@
             ],
             "title": "Duration Seconds"
           },
+          "duration_display": {
+            "type": "string",
+            "title": "Duration Display",
+            "default": "\u2014"
+          },
           "error_message": {
             "anyOf": [
               {
@@ -8890,7 +8936,7 @@
           "status"
         ],
         "title": "SessionResponse",
-        "description": "Detailed session response."
+        "description": "Detailed session response.\n\nDisplay fields (``*_display``) are produced server-side so all clients\nshare identical human-readable output. Raw fields remain for programmatic\nconsumers.\n\nSee: docs/adrs/ADR-064-observability-monitor-ui.md"
       },
       "SessionSummaryResponse": {
         "properties": {
@@ -8957,6 +9003,28 @@
             ],
             "title": "Agent Provider"
           },
+          "agent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Model"
+          },
+          "agent_model_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Model Display"
+          },
           "input_tokens": {
             "type": "integer",
             "title": "Input Tokens",
@@ -8982,11 +9050,37 @@
             "title": "Total Tokens",
             "default": 0
           },
+          "total_tokens_display": {
+            "type": "string",
+            "title": "Total Tokens Display",
+            "default": "0"
+          },
           "total_cost_usd": {
             "type": "string",
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Total Cost Usd",
             "default": "0"
+          },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display",
+            "default": "$0.00"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "duration_display": {
+            "type": "string",
+            "title": "Duration Display",
+            "default": "\u2014"
           },
           "started_at": {
             "anyOf": [
@@ -9020,7 +9114,7 @@
           "agent_provider"
         ],
         "title": "SessionSummaryResponse",
-        "description": "Summary of an agent session."
+        "description": "Summary of an agent session.\n\nDisplay fields (``*_display``) are produced server-side so all clients\n(dashboard, CLI, future UIs) share identical human-readable output. Raw\nfields remain for programmatic consumers; both are always present.\n\nTimestamps stay ISO 8601 UTC. Locale and relative-time formatting is the\nclient's job (it knows the viewer's time zone and when the response is\nactually rendered).\n\nSee: docs/adrs/ADR-064-observability-monitor-ui.md"
       },
       "SessionTokenMetrics": {
         "properties": {
