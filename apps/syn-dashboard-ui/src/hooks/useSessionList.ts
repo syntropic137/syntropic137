@@ -1,7 +1,32 @@
-import { useEffect, useMemo, useState } from 'react'
+/**
+ * Session list data + live updates.
+ *
+ * Owns all data concerns for the SessionList page:
+ *   - URL-backed filter state (status chips + time window)
+ *   - initial fetch (and refetch when filters change)
+ *   - live patches via the shared activity stream (SessionStarted/Completed)
+ *   - polling fallback gated on the stream being disconnected
+ *
+ * Pages should call this hook and feed the result to presentational
+ * components — no fetching, formatting, or SSE handling lives in the page.
+ *
+ * See: docs/adrs/ADR-064-observability-monitor-ui.md
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { listSessions } from '../api/sessions'
-import type { SessionSummary } from '../types'
+import type { SSEEventFrame, SessionSummary, TimeWindow } from '../types'
+import { sortSessions } from '../utils/sessionSort'
+import { useActivityStream } from './useActivityStream'
+import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
+import { useSortUrlState, type SortKey, type SortState } from './useSortUrlState'
+import { useStatusCounts } from './useStatusCounts'
+import { useThrottledRefetch } from './useThrottledRefetch'
+
+const REFETCH_THROTTLE_MS = 500
+const POLL_INTERVAL_MS = 5000
+const SESSION_LIVE_EVENTS = new Set(['SessionStarted', 'SessionCompleted'])
 
 export interface UseSessionListResult {
   sessions: SessionSummary[]
@@ -9,54 +34,96 @@ export interface UseSessionListResult {
   loading: boolean
   searchQuery: string
   setSearchQuery: (query: string) => void
-  statusFilter: string
-  setStatusFilter: (status: string) => void
+  selectedStatuses: Set<string>
+  toggleStatus: (status: string) => void
+  clearStatuses: () => void
+  timeWindow: TimeWindow
+  setTimeWindow: (next: TimeWindow) => void
+  clearAllFilters: () => void
+  statusCounts: Record<string, number>
+  sort: SortState
+  toggleSort: (key: SortKey) => void
+  /** SSE liveness for the page's connection indicator. */
+  connected: boolean
+  /** Wall-clock ms of the most recent activity frame, or null. */
+  lastEventAt: number | null
+}
+
+function matchesQuery(session: SessionSummary, query: string): boolean {
+  const q = query.toLowerCase()
+  return (
+    session.id.toLowerCase().includes(q) ||
+    (session.workflow_id?.toLowerCase().includes(q) ?? false)
+  )
 }
 
 export function useSessionList(): UseSessionListResult {
   const [searchParams] = useSearchParams()
   const workflowIdFilter = searchParams.get('workflow_id') ?? ''
+  const {
+    selectedStatuses,
+    timeWindow,
+    toggleStatus,
+    setTimeWindow,
+    clearStatuses,
+    clearAll: clearAllFilters,
+  } = useFilterUrlState()
+  const { sort, toggleSort } = useSortUrlState()
 
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
 
-  useEffect(() => {
-    let cancelled = false
+  const statusesKey = useMemo(
+    () => Array.from(selectedStatuses).sort().join(','),
+    [selectedStatuses],
+  )
+
+  const fetchNow = useCallback(() => {
+    const statuses = statusesKey ? statusesKey.split(',') : undefined
     listSessions({
       workflow_id: workflowIdFilter || undefined,
-      status: statusFilter || undefined,
+      statuses,
+      started_after: timeWindowToStartedAfter(timeWindow),
       limit: 100,
     })
-      .then((data) => {
-        if (!cancelled) {
-          setSessions(data.sessions)
-          setLoading(false)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          console.error(err)
-          setLoading(false)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [workflowIdFilter, statusFilter])
+      .then((data) => setSessions(data.sessions))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [workflowIdFilter, statusesKey, timeWindow])
 
-  const filteredSessions = useMemo(
-    () =>
-      searchQuery
-        ? sessions.filter(
-            (s) =>
-              s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              s.workflow_id?.toLowerCase().includes(searchQuery.toLowerCase()),
-          )
-        : sessions,
-    [sessions, searchQuery],
+  const scheduleRefetch = useThrottledRefetch(fetchNow, REFETCH_THROTTLE_MS)
+
+  useEffect(() => {
+    fetchNow()
+  }, [fetchNow])
+
+  const handleFrame = useCallback(
+    (frame: SSEEventFrame) => {
+      if (frame.type === 'event' && SESSION_LIVE_EVENTS.has(frame.event_type)) {
+        scheduleRefetch()
+      }
+    },
+    [scheduleRefetch],
   )
+
+  const { connected, lastEventAt } = useActivityStream({
+    onEvent: handleFrame,
+    filter: (eventType) => SESSION_LIVE_EVENTS.has(eventType),
+  })
+
+  useEffect(() => {
+    if (connected) return
+    const id = setInterval(fetchNow, POLL_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, [connected, fetchNow])
+
+  const filteredSessions = useMemo(() => {
+    const matched = searchQuery ? sessions.filter((s) => matchesQuery(s, searchQuery)) : sessions
+    return sortSessions(matched, sort.key, sort.dir)
+  }, [sessions, searchQuery, sort.key, sort.dir])
+
+  const statusCounts = useStatusCounts(sessions)
 
   return {
     sessions,
@@ -64,7 +131,16 @@ export function useSessionList(): UseSessionListResult {
     loading,
     searchQuery,
     setSearchQuery,
-    statusFilter,
-    setStatusFilter,
+    selectedStatuses,
+    toggleStatus,
+    clearStatuses,
+    timeWindow,
+    setTimeWindow,
+    clearAllFilters,
+    statusCounts,
+    sort,
+    toggleSort,
+    connected,
+    lastEventAt,
   }
 }

@@ -214,6 +214,68 @@ class TestRealTimeProjectionEventHandlers:
 
         assert queue.qsize() == 0
 
+    @pytest.mark.asyncio
+    async def test_on_session_started_broadcasts_per_execution_and_global(
+        self, projection: RealTimeProjection
+    ) -> None:
+        """SessionStarted reaches both the per-execution channel and global activity feed.
+
+        See: docs/adrs/ADR-064-observability-monitor-ui.md
+        """
+        exec_queue = await projection.connect("exec-1")
+        activity_queue = await projection.connect("_activity_")
+
+        payload: dict[str, object] = {
+            "execution_id": "exec-1",
+            "session_id": "session-1",
+            "agent_provider": "claude",
+        }
+        await projection.on_session_started(payload)  # type: ignore[arg-type]
+
+        exec_frame = await exec_queue.get()
+        activity_frame = await activity_queue.get()
+        assert isinstance(exec_frame, SSEEventFrame)
+        assert isinstance(activity_frame, SSEEventFrame)
+        assert exec_frame.event_type == "SessionStarted"
+        assert activity_frame.event_type == "SessionStarted"
+        assert activity_frame.execution_id is None
+        assert exec_frame.execution_id == "exec-1"
+
+    @pytest.mark.asyncio
+    async def test_on_session_completed_broadcasts_per_execution_and_global(
+        self, projection: RealTimeProjection
+    ) -> None:
+        """SessionCompleted reaches both per-execution and global activity feed."""
+        exec_queue = await projection.connect("exec-1")
+        activity_queue = await projection.connect("_activity_")
+
+        payload: dict[str, object] = {
+            "execution_id": "exec-1",
+            "session_id": "session-1",
+            "total_cost_usd": "0.04",
+        }
+        await projection.on_session_completed(payload)  # type: ignore[arg-type]
+
+        exec_frame = await exec_queue.get()
+        activity_frame = await activity_queue.get()
+        assert isinstance(exec_frame, SSEEventFrame)
+        assert isinstance(activity_frame, SSEEventFrame)
+        assert exec_frame.event_type == "SessionCompleted"
+        assert activity_frame.event_type == "SessionCompleted"
+
+    @pytest.mark.asyncio
+    async def test_on_session_started_without_execution_id_still_broadcasts_global(
+        self, projection: RealTimeProjection
+    ) -> None:
+        """Even if execution_id is missing, the global feed receives the session event."""
+        activity_queue = await projection.connect("_activity_")
+
+        await projection.on_session_started({"session_id": "session-1"})  # type: ignore[arg-type]
+
+        frame = await activity_queue.get()
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.event_type == "SessionStarted"
+
 
 @pytest.mark.unit
 class TestSingleton:

@@ -1,3 +1,12 @@
+/**
+ * App shell.
+ *
+ * Sidebar is fixed at md: and up; below md: it becomes an off-canvas drawer
+ * behind a hamburger button. Esc closes the drawer; nav clicks close it too.
+ *
+ * See: docs/adrs/ADR-064-observability-monitor-ui.md
+ */
+
 import { clsx } from 'clsx'
 import {
   Activity,
@@ -8,11 +17,12 @@ import {
   GitBranch,
   Lightbulb,
   LayoutDashboard,
+  Menu,
   MessageCircle,
   X,
   Zap,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 const navigation = [
@@ -29,7 +39,7 @@ const TEASER_DISMISSED_KEY = 'syn137-teaser-dismissed'
 
 function TeaserBanner() {
   const [dismissed, setDismissed] = useState(() =>
-    localStorage.getItem(TEASER_DISMISSED_KEY) === 'true'
+    localStorage.getItem(TEASER_DISMISSED_KEY) === 'true',
   )
 
   if (dismissed) return null
@@ -64,86 +74,167 @@ function TeaserBanner() {
   )
 }
 
+interface SidebarProps {
+  onNavigate: () => void
+}
+
+function Sidebar({ onNavigate }: SidebarProps) {
+  return (
+    <>
+      <div className="flex h-14 items-center gap-3 border-b border-[var(--color-border)] px-4">
+        <img src="/logo_syntropic137.png" alt="Syntropic137" className="h-7 w-7" />
+        <div className="flex flex-col">
+          <span
+            className="text-sm font-bold tracking-wide leading-tight text-[var(--color-accent)]"
+            style={{ fontFamily: 'var(--font-brand)' }}
+          >
+            Syntropic137
+          </span>
+          <span className="text-[10px] text-[var(--color-text-muted)]">Dashboard</span>
+        </div>
+      </div>
+
+      <nav className="flex-1 space-y-1 p-3">
+        {navigation.map((item) => (
+          <NavLink
+            key={item.name}
+            to={item.href}
+            end={item.href === '/'}
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              clsx(
+                'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                isActive
+                  ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                  : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)]',
+              )
+            }
+          >
+            <item.icon className="h-4 w-4" />
+            {item.name}
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className="px-3 pb-3">
+        <TeaserBanner />
+      </div>
+
+      <div className="border-t border-[var(--color-border)] p-3">
+        <a
+          href="https://syntropic137.canny.io/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)] transition-colors"
+        >
+          <Lightbulb className="h-4 w-4" />
+          <span className="text-xs font-medium">Request a Feature</span>
+        </a>
+        <a
+          href="https://github.com/syntropic137/syntropic137/discussions"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)] transition-colors"
+        >
+          <MessageCircle className="h-4 w-4" />
+          <span className="text-xs font-medium">Discussions</span>
+        </a>
+        <div className="flex items-center gap-3 rounded-md px-3 py-2">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-elevated)]">
+            <Box className="h-3.5 w-3.5 text-[var(--color-text-secondary)]" />
+          </div>
+          <div className="flex-1 min-w-0 text-right">
+            <p className="truncate text-xs font-medium text-[var(--color-text-primary)]">
+              Syntropic137
+            </p>
+            <p className="truncate text-xs text-[var(--color-text-muted)]">v{__APP_VERSION__}</p>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 export function Layout() {
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const hamburgerRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!drawerOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setDrawerOpen(false)
+        hamburgerRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [drawerOpen])
+
+  const closeDrawer = () => setDrawerOpen(false)
+
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-10 flex w-56 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
-        {/* Logo */}
-        <div className="flex h-14 items-center gap-3 border-b border-[var(--color-border)] px-4">
-          <img src="/logo_syntropic137.png" alt="Syntropic137" className="h-7 w-7" />
-          <div className="flex flex-col">
-            <span className="text-sm font-bold tracking-wide leading-tight text-[var(--color-accent)]" style={{ fontFamily: 'var(--font-brand)' }}>
-              Syntropic137
-            </span>
-            <span className="text-[10px] text-[var(--color-text-muted)]">Dashboard</span>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 space-y-1 p-3">
-          {navigation.map((item) => (
-            <NavLink
-              key={item.name}
-              to={item.href}
-              end={item.href === '/'}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)]'
-                )
-              }
-            >
-              <item.icon className="h-4 w-4" />
-              {item.name}
-            </NavLink>
-          ))}
-        </nav>
-
-        {/* Teaser banner — above the border, at bottom of nav links */}
-        <div className="px-3 pb-3">
-          <TeaserBanner />
-        </div>
-
-        {/* Bottom section */}
-        <div className="border-t border-[var(--color-border)] p-3">
-          <a
-            href="https://syntropic137.canny.io/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)] transition-colors"
+      {/* Mobile top bar with hamburger — only below md: */}
+      <div className="fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 md:hidden">
+        <button
+          ref={hamburgerRef}
+          type="button"
+          aria-label="Open navigation"
+          aria-expanded={drawerOpen}
+          aria-controls="primary-nav"
+          onClick={() => setDrawerOpen(true)}
+          className="flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)]"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <div className="flex items-center gap-2">
+          <img src="/logo_syntropic137.png" alt="" className="h-6 w-6" />
+          <span
+            className="text-sm font-bold tracking-wide text-[var(--color-accent)]"
+            style={{ fontFamily: 'var(--font-brand)' }}
           >
-            <Lightbulb className="h-4 w-4" />
-            <span className="text-xs font-medium">Request a Feature</span>
-          </a>
-          <a
-            href="https://github.com/syntropic137/syntropic137/discussions"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)] transition-colors"
-          >
-            <MessageCircle className="h-4 w-4" />
-            <span className="text-xs font-medium">Discussions</span>
-          </a>
-          <div className="flex items-center gap-3 rounded-md px-3 py-2">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-elevated)]">
-              <Box className="h-3.5 w-3.5 text-[var(--color-text-secondary)]" />
-            </div>
-            <div className="flex-1 min-w-0 text-right">
-              <p className="truncate text-xs font-medium text-[var(--color-text-primary)]">
-                Syntropic137
-              </p>
-              <p className="truncate text-xs text-[var(--color-text-muted)]">v{__APP_VERSION__}</p>
-            </div>
-          </div>
+            Syntropic137
+          </span>
         </div>
+      </div>
+
+      {/* Backdrop — only when drawer open */}
+      {drawerOpen && (
+        <div
+          aria-hidden="true"
+          onClick={closeDrawer}
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+        />
+      )}
+
+      {/* Sidebar / drawer */}
+      <aside
+        id="primary-nav"
+        aria-label="Primary navigation"
+        className={clsx(
+          'fixed inset-y-0 left-0 z-40 flex w-56 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-transform duration-200 ease-out',
+          // Mobile: slide in/out
+          drawerOpen ? 'translate-x-0' : '-translate-x-full',
+          // Desktop: always visible
+          'md:translate-x-0 md:z-10',
+        )}
+      >
+        {/* Drawer close button — mobile only */}
+        <button
+          type="button"
+          aria-label="Close navigation"
+          onClick={closeDrawer}
+          className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)] md:hidden"
+        >
+          <X className="h-5 w-5" />
+        </button>
+        <Sidebar onNavigate={closeDrawer} />
       </aside>
 
       {/* Main content */}
-      <main className="ml-56 flex-1">
-        <div className="p-6">
+      <main className="flex-1 pt-12 md:ml-56 md:pt-0">
+        <div className="p-4 md:p-6">
           <Outlet />
         </div>
       </main>

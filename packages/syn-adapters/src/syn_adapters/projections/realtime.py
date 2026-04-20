@@ -256,12 +256,28 @@ class RealTimeProjection:
         await self._forward_event(event, "WorkflowFailed", terminal=True)
 
     async def on_session_started(self, event: dict[str, JsonValue]) -> None:
-        """Handle SessionStarted event."""
+        """Handle SessionStarted event.
+
+        Broadcasts on the per-execution channel (existing behaviour) and on
+        the global activity channel so the dashboard's session list can react
+        live without polling.
+
+        See: docs/adrs/ADR-064-observability-monitor-ui.md
+        """
         await self._forward_event(event, "SessionStarted")
+        await self.broadcast_global("SessionStarted", event)
 
     async def on_session_completed(self, event: dict[str, JsonValue]) -> None:
-        """Handle SessionCompleted event."""
+        """Handle SessionCompleted event.
+
+        Broadcasts on the per-execution channel (existing behaviour) and on
+        the global activity channel so the dashboard's session list can react
+        live without polling.
+
+        See: docs/adrs/ADR-064-observability-monitor-ui.md
+        """
         await self._forward_event(event, "SessionCompleted")
+        await self.broadcast_global("SessionCompleted", event)
 
     async def on_operation_recorded(self, event: dict[str, JsonValue]) -> None:
         """Handle OperationRecorded event (tool calls, messages, etc.)."""
