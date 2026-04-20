@@ -15,9 +15,11 @@
 
 import { Activity, Search } from 'lucide-react'
 import { Card, ConnectionIndicator, EmptyState } from '../../components'
+import { useIsMobile } from '../../hooks/useMediaQuery'
 import { useRowSelection } from '../../hooks/useRowSelection'
 import { useSessionList } from '../../hooks/useSessionList'
 import { SelectionActionBar } from './SelectionActionBar'
+import { SessionCardList } from './SessionCardList'
 import { SessionFilterBar } from './SessionFilterBar'
 import { SessionTable } from './SessionTable'
 import { useSelectionShortcuts } from './useSelectionShortcuts'
@@ -39,12 +41,33 @@ export function SessionList() {
   } = useSessionList()
 
   const selection = useRowSelection(filteredSessions)
+  const isMobile = useIsMobile()
 
   useSelectionShortcuts({
     selectAll: selection.selectAll,
     clear: selection.clear,
     hasSelection: selection.selectedCount > 0,
   })
+
+  const selectionProps = {
+    selectedIds: selection.selectedIds,
+    onToggleRow: selection.handleClick,
+    onSelectAll: selection.selectAll,
+    onClearSelection: selection.clear,
+  }
+  const emptyState = (
+    <Card>
+      <EmptyState
+        icon={Activity}
+        title={searchQuery ? 'No matching sessions' : 'No sessions yet'}
+        description={
+          searchQuery
+            ? 'Try adjusting your search query'
+            : 'Sessions will appear here when workflows are executed'
+        }
+      />
+    </Card>
+  )
 
   return (
     <div className="space-y-6 pb-24">
@@ -78,29 +101,21 @@ export function SessionList() {
         clearAll={clearAllFilters}
       />
 
-      <SessionTable
-        rows={filteredSessions}
-        loading={loading}
-        selection={{
-          selectedIds: selection.selectedIds,
-          onToggleRow: selection.handleClick,
-          onSelectAll: selection.selectAll,
-          onClearSelection: selection.clear,
-        }}
-        emptyState={
-          <Card>
-            <EmptyState
-              icon={Activity}
-              title={searchQuery ? 'No matching sessions' : 'No sessions yet'}
-              description={
-                searchQuery
-                  ? 'Try adjusting your search query'
-                  : 'Sessions will appear here when workflows are executed'
-              }
-            />
-          </Card>
-        }
-      />
+      {isMobile ? (
+        <SessionCardList
+          rows={filteredSessions}
+          loading={loading}
+          selection={selectionProps}
+          emptyState={emptyState}
+        />
+      ) : (
+        <SessionTable
+          rows={filteredSessions}
+          loading={loading}
+          selection={selectionProps}
+          emptyState={emptyState}
+        />
+      )}
 
       <SelectionActionBar
         selectedSessions={selection.selectedItems}
