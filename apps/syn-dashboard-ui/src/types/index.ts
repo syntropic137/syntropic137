@@ -87,8 +87,14 @@ export interface SessionSummary {
   phase_id: string | null
   status: string
   agent_provider: string | null
+  agent_model: string | null
+  agent_model_display: string | null
   total_tokens: number
+  total_tokens_display: string
   total_cost_usd: number
+  total_cost_display: string
+  duration_seconds: number | null
+  duration_display: string
   started_at: string | null
   completed_at: string | null
   // Subagent metrics (from agentic_isolation v0.3.0)
@@ -347,6 +353,26 @@ export const SSE_EVENTS = {
 } as const
 
 export type SSEEventType = typeof SSE_EVENTS[keyof typeof SSE_EVENTS]
+
+/**
+ * Typed envelope matching the backend's SSEEventFrame.
+ *
+ * Every frame delivered over an SSE connection is parsed into this shape.
+ * The `type` field distinguishes frame kinds:
+ *   - `connected`: initial handshake when a client subscribes
+ *   - `event`: a domain event forwarded from the event store
+ *   - `terminal`: stream is ending (execution complete/failed)
+ *
+ * See: docs/adrs/ADR-064-observability-monitor-ui.md
+ */
+export interface SSEEventFrame {
+  type: 'connected' | 'event' | 'terminal'
+  event_type: string
+  execution_id: string | null
+  /** Event payload from domain model_dump(). Keys vary per event type. */
+  data: Record<string, unknown>
+  timestamp: string
+}
 
 export interface EventMessage {
   event_type: string
