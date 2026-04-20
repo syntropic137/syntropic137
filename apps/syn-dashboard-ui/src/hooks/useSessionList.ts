@@ -2,6 +2,7 @@
  * Session list data + live updates.
  *
  * Owns all data concerns for the SessionList page:
+ *   - URL-backed filter state (status chips + time window)
  *   - initial fetch (and refetch when filters change)
  *   - live patches via the shared activity stream (SessionStarted/Completed)
  *   - polling fallback gated on the stream being disconnected
@@ -15,8 +16,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { listSessions } from '../api/sessions'
-import type { SSEEventFrame, SessionSummary } from '../types'
+import type { SSEEventFrame, SessionSummary, TimeWindow } from '../types'
 import { useActivityStream } from './useActivityStream'
+import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
+import { useStatusCounts } from './useStatusCounts'
 import { useThrottledRefetch } from './useThrottledRefetch'
 
 const REFETCH_THROTTLE_MS = 500
@@ -29,8 +32,13 @@ export interface UseSessionListResult {
   loading: boolean
   searchQuery: string
   setSearchQuery: (query: string) => void
-  statusFilter: string
-  setStatusFilter: (status: string) => void
+  selectedStatuses: Set<string>
+  toggleStatus: (status: string) => void
+  clearStatuses: () => void
+  timeWindow: TimeWindow
+  setTimeWindow: (next: TimeWindow) => void
+  clearAllFilters: () => void
+  statusCounts: Record<string, number>
   /** SSE liveness for the page's connection indicator. */
   connected: boolean
   /** Wall-clock ms of the most recent activity frame, or null. */
@@ -48,22 +56,36 @@ function matchesQuery(session: SessionSummary, query: string): boolean {
 export function useSessionList(): UseSessionListResult {
   const [searchParams] = useSearchParams()
   const workflowIdFilter = searchParams.get('workflow_id') ?? ''
+  const {
+    selectedStatuses,
+    timeWindow,
+    toggleStatus,
+    setTimeWindow,
+    clearStatuses,
+    clearAll: clearAllFilters,
+  } = useFilterUrlState()
 
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
+
+  const statusesKey = useMemo(
+    () => Array.from(selectedStatuses).sort().join(','),
+    [selectedStatuses],
+  )
 
   const fetchNow = useCallback(() => {
+    const statuses = statusesKey ? statusesKey.split(',') : undefined
     listSessions({
       workflow_id: workflowIdFilter || undefined,
-      status: statusFilter || undefined,
+      statuses,
+      started_after: timeWindowToStartedAfter(timeWindow),
       limit: 100,
     })
       .then((data) => setSessions(data.sessions))
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [workflowIdFilter, statusFilter])
+  }, [workflowIdFilter, statusesKey, timeWindow])
 
   const scheduleRefetch = useThrottledRefetch(fetchNow, REFETCH_THROTTLE_MS)
 
@@ -96,14 +118,21 @@ export function useSessionList(): UseSessionListResult {
     [sessions, searchQuery],
   )
 
+  const statusCounts = useStatusCounts(sessions)
+
   return {
     sessions,
     filteredSessions,
     loading,
     searchQuery,
     setSearchQuery,
-    statusFilter,
-    setStatusFilter,
+    selectedStatuses,
+    toggleStatus,
+    clearStatuses,
+    timeWindow,
+    setTimeWindow,
+    clearAllFilters,
+    statusCounts,
     connected,
     lastEventAt,
   }
