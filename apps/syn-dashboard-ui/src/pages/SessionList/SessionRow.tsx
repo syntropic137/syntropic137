@@ -88,9 +88,9 @@ export function SessionRow({ session }: SessionRowProps) {
           onClick={handleCopy}
           aria-label="Copy session id"
           title={copied ? 'Copied!' : 'Copy session id'}
-          className="invisible rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)] group-hover:visible"
+          className="inline-flex h-9 w-9 items-center justify-center rounded text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)] md:invisible md:h-auto md:w-auto md:p-1 md:group-hover:visible"
         >
-          <Copy className="h-3.5 w-3.5" />
+          <Copy className="h-4 w-4 md:h-3.5 md:w-3.5" />
         </button>
       </td>
     </tr>
