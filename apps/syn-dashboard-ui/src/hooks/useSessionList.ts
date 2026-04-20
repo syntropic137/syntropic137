@@ -12,11 +12,12 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { listSessions } from '../api/sessions'
 import type { SSEEventFrame, SessionSummary } from '../types'
 import { useActivityStream } from './useActivityStream'
+import { useThrottledRefetch } from './useThrottledRefetch'
 
 const REFETCH_THROTTLE_MS = 500
 const POLL_INTERVAL_MS = 5000
@@ -36,6 +37,14 @@ export interface UseSessionListResult {
   lastEventAt: number | null
 }
 
+function matchesQuery(session: SessionSummary, query: string): boolean {
+  const q = query.toLowerCase()
+  return (
+    session.id.toLowerCase().includes(q) ||
+    (session.workflow_id?.toLowerCase().includes(q) ?? false)
+  )
+}
+
 export function useSessionList(): UseSessionListResult {
   const [searchParams] = useSearchParams()
   const workflowIdFilter = searchParams.get('workflow_id') ?? ''
@@ -45,56 +54,28 @@ export function useSessionList(): UseSessionListResult {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
 
-  const lastFetchRef = useRef<number>(0)
-  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const fetchNow = useCallback(() => {
-    lastFetchRef.current = Date.now()
     listSessions({
       workflow_id: workflowIdFilter || undefined,
       status: statusFilter || undefined,
       limit: 100,
     })
-      .then((data) => {
-        setSessions(data.sessions)
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error(err)
-        setLoading(false)
-      })
+      .then((data) => setSessions(data.sessions))
+      .catch(console.error)
+      .finally(() => setLoading(false))
   }, [workflowIdFilter, statusFilter])
 
-  const scheduleRefetch = useCallback(() => {
-    const elapsed = Date.now() - lastFetchRef.current
-    if (elapsed >= REFETCH_THROTTLE_MS) {
-      fetchNow()
-      return
-    }
-    if (pendingTimerRef.current !== null) return
-    pendingTimerRef.current = setTimeout(() => {
-      pendingTimerRef.current = null
-      fetchNow()
-    }, REFETCH_THROTTLE_MS - elapsed)
-  }, [fetchNow])
+  const scheduleRefetch = useThrottledRefetch(fetchNow, REFETCH_THROTTLE_MS)
 
-  // Initial load + refetch when filters change.
   useEffect(() => {
     fetchNow()
-    return () => {
-      if (pendingTimerRef.current !== null) {
-        clearTimeout(pendingTimerRef.current)
-        pendingTimerRef.current = null
-      }
-    }
   }, [fetchNow])
 
-  // Live updates via shared activity stream.
   const handleFrame = useCallback(
     (frame: SSEEventFrame) => {
-      if (frame.type !== 'event') return
-      if (!SESSION_LIVE_EVENTS.has(frame.event_type)) return
-      scheduleRefetch()
+      if (frame.type === 'event' && SESSION_LIVE_EVENTS.has(frame.event_type)) {
+        scheduleRefetch()
+      }
     },
     [scheduleRefetch],
   )
@@ -104,7 +85,6 @@ export function useSessionList(): UseSessionListResult {
     filter: (eventType) => SESSION_LIVE_EVENTS.has(eventType),
   })
 
-  // Polling fallback: only when SSE is disconnected.
   useEffect(() => {
     if (connected) return
     const id = setInterval(fetchNow, POLL_INTERVAL_MS)
@@ -112,14 +92,7 @@ export function useSessionList(): UseSessionListResult {
   }, [connected, fetchNow])
 
   const filteredSessions = useMemo(
-    () =>
-      searchQuery
-        ? sessions.filter(
-            (s) =>
-              s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              s.workflow_id?.toLowerCase().includes(searchQuery.toLowerCase()),
-          )
-        : sessions,
+    () => (searchQuery ? sessions.filter((s) => matchesQuery(s, searchQuery)) : sessions),
     [sessions, searchQuery],
   )
 

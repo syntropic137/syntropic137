@@ -201,6 +201,26 @@ class _SummaryEnrichment:
     duration_seconds: float | None = None
 
 
+def _enrichment_from_cost(cost: object) -> _SummaryEnrichment:
+    """Build enrichment from a session_cost projection record."""
+    duration_ms = getattr(cost, "duration_ms", None)
+    return _SummaryEnrichment(
+        total_cost_usd=getattr(cost, "total_cost_usd", Decimal("0")),
+        agent_model=getattr(cost, "agent_model", None),
+        duration_seconds=(duration_ms / 1000.0) if duration_ms else None,
+    )
+
+
+async def _fetch_one_session_cost(query_svc: object, sid: str) -> _SummaryEnrichment | None:
+    """Fetch one session's enrichment; returns None on miss or transient failure."""
+    try:
+        cost = await query_svc.get(sid)  # type: ignore[attr-defined]
+    except Exception:
+        logger.debug("Failed to load cost for session %s", sid, exc_info=True)
+        return None
+    return _enrichment_from_cost(cost) if cost is not None else None
+
+
 async def _load_session_costs(session_ids: list[str]) -> dict[str, _SummaryEnrichment]:
     """Load per-session enrichment from the Lane 2 session_cost projection (#695).
 
@@ -209,23 +229,16 @@ async def _load_session_costs(session_ids: list[str]) -> dict[str, _SummaryEnric
     """
     if not session_ids:
         return {}
-    enriched: dict[str, _SummaryEnrichment] = {}
     try:
         query_svc = get_session_cost_query()
     except Exception:
         logger.debug("Session cost query service unavailable", exc_info=True)
-        return enriched
+        return {}
+    enriched: dict[str, _SummaryEnrichment] = {}
     for sid in session_ids:
-        try:
-            cost = await query_svc.get(sid)
-            if cost is not None:
-                enriched[sid] = _SummaryEnrichment(
-                    total_cost_usd=cost.total_cost_usd,
-                    agent_model=cost.agent_model,
-                    duration_seconds=(cost.duration_ms / 1000.0) if cost.duration_ms else None,
-                )
-        except Exception:
-            logger.debug("Failed to load cost for session %s", sid, exc_info=True)
+        info = await _fetch_one_session_cost(query_svc, sid)
+        if info is not None:
+            enriched[sid] = info
     return enriched
 
 
