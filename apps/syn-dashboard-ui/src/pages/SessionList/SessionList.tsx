@@ -2,17 +2,25 @@
  * Sessions page — composition only.
  *
  * Owns the page layout (heading, filter bar, connection indicator, content
- * slot). Data fetching, SSE handling, and polling fallback live in the hook;
- * formatting lives in components and utils.
+ * slot, sticky action bar). Data fetching, SSE handling, and polling fallback
+ * live in the hook; selection state lives in useRowSelection; formatting lives
+ * in components and utils.
+ *
+ * Keyboard shortcuts:
+ *   - Cmd/Ctrl+A selects all visible sessions
+ *   - Esc clears selection
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
 import { Activity, Search } from 'lucide-react'
 import { Card, ConnectionIndicator, EmptyState } from '../../components'
+import { useRowSelection } from '../../hooks/useRowSelection'
 import { useSessionList } from '../../hooks/useSessionList'
+import { SelectionActionBar } from './SelectionActionBar'
 import { SessionFilterBar } from './SessionFilterBar'
 import { SessionTable } from './SessionTable'
+import { useSelectionShortcuts } from './useSelectionShortcuts'
 
 export function SessionList() {
   const {
@@ -30,8 +38,16 @@ export function SessionList() {
     lastEventAt,
   } = useSessionList()
 
+  const selection = useRowSelection(filteredSessions)
+
+  useSelectionShortcuts({
+    selectAll: selection.selectAll,
+    clear: selection.clear,
+    hasSelection: selection.selectedCount > 0,
+  })
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Sessions</h1>
@@ -65,6 +81,12 @@ export function SessionList() {
       <SessionTable
         rows={filteredSessions}
         loading={loading}
+        selection={{
+          selectedIds: selection.selectedIds,
+          onToggleRow: selection.handleClick,
+          onSelectAll: selection.selectAll,
+          onClearSelection: selection.clear,
+        }}
         emptyState={
           <Card>
             <EmptyState
@@ -78,6 +100,11 @@ export function SessionList() {
             />
           </Card>
         }
+      />
+
+      <SelectionActionBar
+        selectedSessions={selection.selectedItems}
+        onClear={selection.clear}
       />
     </div>
   )

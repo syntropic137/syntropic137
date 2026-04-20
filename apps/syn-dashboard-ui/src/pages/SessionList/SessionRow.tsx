@@ -12,15 +12,23 @@
 import { useNavigate } from 'react-router-dom'
 import { Copy } from 'lucide-react'
 import { useState } from 'react'
-import { StatusBadge } from '../../components'
+import { clsx } from 'clsx'
+import { SelectionCheckbox, StatusBadge } from '../../components'
 import type { SessionSummary } from '../../types'
+import type { SelectionClickModifiers } from '../../hooks/useRowSelection'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
 
 interface SessionRowProps {
   session: SessionSummary
+  isSelected?: boolean
+  onToggleSelection?: (modifiers: SelectionClickModifiers) => void
 }
 
-export function SessionRow({ session }: SessionRowProps) {
+export function SessionRow({
+  session,
+  isSelected = false,
+  onToggleSelection,
+}: SessionRowProps) {
   const navigate = useNavigate()
   const [copied, setCopied] = useState(false)
 
@@ -53,8 +61,22 @@ export function SessionRow({ session }: SessionRowProps) {
       tabIndex={0}
       role="button"
       title={session.id}
-      className="group cursor-pointer border-b border-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-elevated)] focus:bg-[var(--color-surface-elevated)] focus:outline-none"
+      className={clsx(
+        'group cursor-pointer border-b border-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-elevated)] focus:bg-[var(--color-surface-elevated)] focus:outline-none',
+        isSelected && 'bg-[var(--color-accent)]/10',
+      )}
     >
+      {onToggleSelection && (
+        <td className="w-10 px-3 py-2">
+          <SelectionCheckbox
+            checked={isSelected}
+            ariaLabel={isSelected ? `Deselect session ${session.id}` : `Select session ${session.id}`}
+            onChange={(e) =>
+              onToggleSelection({ shift: e.shiftKey, meta: e.metaKey || e.ctrlKey })
+            }
+          />
+        </td>
+      )}
       <td className="px-3 py-2">
         <StatusBadge status={session.status} size="sm" />
       </td>
