@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
@@ -60,7 +62,7 @@ def _coerce_iso_datetime(value: object) -> datetime | None:
 
 
 def _within_window(
-    record: Any,
+    record: Mapping[str, object],
     after: datetime | None,
     before: datetime | None,
 ) -> bool:
