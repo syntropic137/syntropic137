@@ -19,7 +19,22 @@ This ADR establishes a single design and shared component for both pages, define
 - It does not change the SSE protocol or transport (settled in ADR-049).
 - It does not introduce a charting / timeline visualisation. That is a follow-up.
 - It does not redesign the Session or Execution detail pages. Only the list views.
-- It does not address mobile / responsive layout. The dashboard is a desktop ops tool.
+
+### Responsive design
+
+The monitor is reachable from phones as well as desktops — agents produce work at all hours and the common "is that long run finally done?" check happens on whatever screen is nearest. The dashboard uses Tailwind's default breakpoints:
+
+| Breakpoint | Min width | Role |
+|---|---|---|
+| (base) | 0 | Single column, drawer nav, card list |
+| `sm` | 640 | Filter row inline |
+| `md` | 768 | Sidebar pinned, table view, hover affordances |
+| `lg` | 1024 | Full-density table |
+
+Two specific conventions follow from the table-vs-phone tension:
+
+- **Table becomes a card list below `md:`.** Eight columns are illegible at 375px and horizontal scroll is hostile. Above `md:` the table is the canonical layout; below, each row renders as a card with a 2×2 metric grid. Both views share the same data contract and selection state.
+- **Hover-only affordances must have a touch equivalent.** The Copy-ID button on each row is `invisible group-hover:visible` at `md:+` but always visible at `<md:` so touch users can reach it. Tap targets on mobile are ≥44×44.
 
 ## Decision
 
