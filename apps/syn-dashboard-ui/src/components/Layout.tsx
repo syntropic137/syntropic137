@@ -233,7 +233,7 @@ export function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 pt-12 md:ml-56 md:pt-0">
+      <main className="min-w-0 flex-1 pt-12 md:ml-56 md:pt-0">
         <div className="p-4 md:p-6">
           <Outlet />
         </div>

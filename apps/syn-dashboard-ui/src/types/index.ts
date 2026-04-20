@@ -85,6 +85,7 @@ export interface SessionSummary {
   workflow_name: string | null
   execution_id: string | null
   phase_id: string | null
+  phase_display: string | null
   status: string
   agent_provider: string | null
   agent_model: string | null
@@ -113,6 +114,7 @@ export interface SessionResponse {
   workflow_name: string | null
   execution_id: string | null
   phase_id: string | null
+  phase_display: string | null
   milestone_id: string | null
   agent_provider: string | null
   agent_model: string | null

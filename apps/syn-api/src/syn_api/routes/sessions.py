@@ -41,6 +41,7 @@ from syn_shared.display import (
     format_cost,
     format_duration_seconds,
     format_model_compact,
+    format_phase,
     format_tokens,
 )
 
@@ -76,6 +77,7 @@ class SessionSummaryResponse(BaseModel):
     workflow_name: str | None = None
     execution_id: str | None = None
     phase_id: str | None
+    phase_display: str | None = None
     status: str
     agent_provider: str | None
     agent_model: str | None = None
@@ -143,6 +145,7 @@ class SessionResponse(BaseModel):
     workflow_name: str | None = None
     execution_id: str | None = None
     phase_id: str | None
+    phase_display: str | None = None
     milestone_id: str | None
     agent_provider: str | None
     agent_model: str | None
@@ -516,6 +519,7 @@ def _build_session_summary_response(
         workflow_name=workflow_name,
         execution_id=s.execution_id,
         phase_id=s.phase_id,
+        phase_display=format_phase(s.phase_id),
         status=s.status,
         agent_provider=s.agent_type,
         agent_model=info.agent_model,
@@ -636,6 +640,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         workflow_name=detail.workflow_name,
         execution_id=detail.execution_id,
         phase_id=detail.phase_id,
+        phase_display=format_phase(detail.phase_id),
         milestone_id=None,
         agent_provider=detail.agent_type,
         agent_model=detail.agent_model,

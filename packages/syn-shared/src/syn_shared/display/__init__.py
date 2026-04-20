@@ -17,6 +17,7 @@ from syn_shared.display.formatters import (
     format_cost,
     format_duration_seconds,
     format_model_compact,
+    format_phase,
     format_tokens,
 )
 
@@ -24,5 +25,6 @@ __all__ = [
     "format_cost",
     "format_duration_seconds",
     "format_model_compact",
+    "format_phase",
     "format_tokens",
 ]

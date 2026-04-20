@@ -10,6 +10,7 @@ from syn_shared.display import (
     format_cost,
     format_duration_seconds,
     format_model_compact,
+    format_phase,
     format_tokens,
 )
 
@@ -100,3 +101,28 @@ class TestFormatModelCompact:
     )
     def test_renders_expected_string(self, value: str | None, expected: str | None) -> None:
         assert format_model_compact(value) == expected
+
+
+class TestFormatPhase:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (None, None),
+            ("", ""),
+            ("detect", "Detect"),
+            ("research_phase", "Research Phase"),
+            ("fix-bug", "Fix Bug"),
+            ("multi_word_phase_name", "Multi Word Phase Name"),
+            ("ALREADY_TITLED", "Already Titled"),
+            (
+                "39574120-df6e-4043-a2aa-58be12c9ae51",
+                "Phase 39574120",
+            ),
+            (
+                "00000000-0000-0000-0000-000000000000",
+                "Phase 00000000",
+            ),
+        ],
+    )
+    def test_renders_expected_string(self, value: str | None, expected: str | None) -> None:
+        assert format_phase(value) == expected

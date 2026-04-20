@@ -83,8 +83,11 @@ export function SessionRow({
       <td className="px-3 py-2 text-sm text-[var(--color-text-primary)]">
         {session.workflow_name ?? session.workflow_id ?? 'Unknown workflow'}
       </td>
-      <td className="px-3 py-2 text-xs text-[var(--color-text-secondary)]">
-        {session.phase_id ?? '\u2014'}
+      <td
+        className="px-3 py-2 text-xs text-[var(--color-text-secondary)]"
+        title={session.phase_id ?? undefined}
+      >
+        {session.phase_display ?? session.phase_id ?? '\u2014'}
       </td>
       <td className="px-3 py-2 text-xs text-[var(--color-text-secondary)]">
         {session.agent_model_display ?? '\u2014'}

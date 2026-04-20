@@ -80,7 +80,9 @@ export function SessionCard({
             title={formatTimestampLocale(session.started_at)}
           >
             {formatRelativeTime(session.started_at)}
-            {session.phase_id && <> &middot; {session.phase_id}</>}
+            {(session.phase_display ?? session.phase_id) && (
+              <> &middot; {session.phase_display ?? session.phase_id}</>
+            )}
           </div>
         </div>
       </div>

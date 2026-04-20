@@ -185,8 +185,8 @@ export function SessionTable({
   const headerState = deriveHeaderState(rows.length, selection)
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <table className="min-w-full text-sm">
+    <div className="overflow-x-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <table className="w-full min-w-[720px] text-sm">
         <SessionTableHead selection={selection} headerState={headerState} sort={sort} />
         <SessionTableBody rows={rows} selection={selection} />
       </table>

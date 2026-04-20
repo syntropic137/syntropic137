@@ -8791,6 +8791,17 @@
             ],
             "title": "Phase Id"
           },
+          "phase_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Display"
+          },
           "milestone_id": {
             "anyOf": [
               {
@@ -9043,6 +9054,17 @@
               }
             ],
             "title": "Phase Id"
+          },
+          "phase_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Display"
           },
           "status": {
             "type": "string",

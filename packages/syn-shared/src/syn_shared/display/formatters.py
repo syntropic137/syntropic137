@@ -8,6 +8,7 @@ See: docs/adrs/ADR-064-observability-monitor-ui.md
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 
 EM_DASH = "\u2014"
@@ -69,6 +70,36 @@ def format_duration_seconds(seconds: float | int | None) -> str:
         return f"{minutes}m {secs}s" if secs else f"{minutes}m"
     hours, mins = divmod(minutes, 60)
     return f"{hours}h {mins}m" if mins else f"{hours}h"
+
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def format_phase(phase_id: str | None) -> str | None:
+    """Render a phase id as a human-readable label.
+
+    Slug ids title-case: ``"research_phase" -> "Research Phase"``,
+    ``"fix-bug" -> "Fix Bug"``, ``"detect" -> "Detect"``.
+
+    UUID ids (workflow phase runtime identifiers) render as the first hex
+    segment with a ``Phase`` prefix: ``"39574120-df6e-..." -> "Phase 39574120"``,
+    since title-casing a UUID produces garbage and no slug is available at this
+    layer. Callers with workflow context should prefer the real phase name.
+
+    Returns ``None`` when input is ``None`` so callers can pass-through.
+    """
+    if phase_id is None:
+        return None
+    raw = phase_id.strip()
+    if not raw:
+        return raw
+    if _UUID_RE.match(raw):
+        return f"Phase {raw.split('-', 1)[0]}"
+    words = raw.replace("_", " ").replace("-", " ").split()
+    return " ".join(word.capitalize() for word in words) if words else raw
 
 
 def format_model_compact(model: str | None) -> str | None:

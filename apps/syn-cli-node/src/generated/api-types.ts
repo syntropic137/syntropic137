@@ -3525,6 +3525,8 @@ export interface components {
             execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
+            /** Phase Display */
+            phase_display?: string | null;
             /** Milestone Id */
             milestone_id: string | null;
             /** Agent Provider */
@@ -3646,6 +3648,8 @@ export interface components {
             execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
+            /** Phase Display */
+            phase_display?: string | null;
             /** Status */
             status: string;
             /** Agent Provider */
