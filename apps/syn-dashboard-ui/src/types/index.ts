@@ -433,6 +433,9 @@ export type WorkflowStatus = 'pending' | 'in_progress' | 'completed' | 'failed' 
 export type SessionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type PhaseStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 
+/** Relative time window used by the Sessions filter bar. */
+export type TimeWindow = '15m' | '1h' | '24h' | '7d' | 'all'
+
 // =============================================================================
 // COST TRACKING TYPES
 // =============================================================================
