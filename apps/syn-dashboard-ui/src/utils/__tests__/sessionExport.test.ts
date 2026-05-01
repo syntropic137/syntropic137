@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '../../types'
-import { formatSessionIds, formatSessionsForClaude } from '../sessionExport'
+import { formatSessionIds, formatSessionsForAgent } from '../sessionExport'
 
 const sample = (overrides: Partial<SessionSummary> = {}): SessionSummary =>
   ({
@@ -38,24 +38,24 @@ describe('formatSessionIds', () => {
   })
 })
 
-describe('formatSessionsForClaude', () => {
+describe('formatSessionsForAgent', () => {
   it('returns empty string for no sessions', () => {
-    expect(formatSessionsForClaude([])).toBe('')
+    expect(formatSessionsForAgent([])).toBe('')
   })
 
   it('includes heading with count', () => {
-    const out = formatSessionsForClaude([sample(), sample({ id: 'sess_b' })])
+    const out = formatSessionsForAgent([sample(), sample({ id: 'sess_b' })])
     expect(out.startsWith('## Selected sessions (2)')).toBe(true)
   })
 
   it('emits a markdown table with all key columns', () => {
-    const out = formatSessionsForClaude([sample()])
+    const out = formatSessionsForAgent([sample()])
     expect(out).toContain('| Session ID | Workflow | Phase | Status | Tokens | Cost | Duration | Started |')
     expect(out).toContain('| sess_abc123 | Deploy Pipeline | build | completed | 1.2k | $0.045 | 12s | 2026-04-19T10:00:00Z |')
   })
 
   it('emits a fenced code block of syn session show snippets', () => {
-    const out = formatSessionsForClaude([sample({ id: 'sess_a' }), sample({ id: 'sess_b' })])
+    const out = formatSessionsForAgent([sample({ id: 'sess_a' }), sample({ id: 'sess_b' })])
     expect(out).toContain('```bash')
     expect(out).toContain('syn session show sess_a')
     expect(out).toContain('syn session show sess_b')
@@ -63,7 +63,7 @@ describe('formatSessionsForClaude', () => {
   })
 
   it('renders a dash for missing optional fields', () => {
-    const out = formatSessionsForClaude([
+    const out = formatSessionsForAgent([
       sample({ workflow_name: null, workflow_id: null, phase_id: null, started_at: null }),
     ])
     expect(out).toContain('| sess_abc123 | - | - | completed |')
@@ -71,12 +71,12 @@ describe('formatSessionsForClaude', () => {
   })
 
   it('escapes pipes in cell values', () => {
-    const out = formatSessionsForClaude([sample({ workflow_name: 'a|b' })])
+    const out = formatSessionsForAgent([sample({ workflow_name: 'a|b' })])
     expect(out).toContain('a\\|b')
   })
 
   it('falls back to total_tokens when display string is missing', () => {
-    const out = formatSessionsForClaude([sample({ total_tokens_display: undefined as unknown as string, total_tokens: 99 })])
+    const out = formatSessionsForAgent([sample({ total_tokens_display: undefined as unknown as string, total_tokens: 99 })])
     expect(out).toContain('| 99 |')
   })
 })

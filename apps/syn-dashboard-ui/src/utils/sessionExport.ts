@@ -2,9 +2,9 @@
  * Session export formatters for the multi-select action bar.
  *
  * `formatSessionIds` produces a space-separated list ready for shell pipes.
- * `formatSessionsForClaude` produces a markdown block (header + table + CLI
- * snippets) that renders cleanly when pasted into a Claude conversation,
- * giving the agent both context and next-step affordance.
+ * `formatSessionsForAgent` produces a markdown block (header + table + CLI
+ * snippets) that pastes cleanly into any agent conversation, giving it both
+ * the tabular context and a next-step affordance.
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
@@ -46,11 +46,12 @@ function rowFor(s: SessionSummary): string {
  *
  * Returns an empty string when no sessions are selected.
  */
-export function formatSessionsForClaude(sessions: SessionSummary[]): string {
+export function formatSessionsForAgent(sessions: SessionSummary[]): string {
   if (sessions.length === 0) return ''
 
   const heading = `## Selected sessions (${sessions.length})`
-  const tableHeader = '| Session ID | Workflow | Phase | Status | Tokens | Cost | Duration | Started |'
+  const tableHeader =
+    '| Session ID | Workflow | Phase | Status | Tokens | Cost | Duration | Started |'
   const tableSep = '| --- | --- | --- | --- | --- | --- | --- | --- |'
   const tableRows = sessions.map(rowFor)
   const cli = ['```bash', ...sessions.map((s) => `syn session show ${s.id}`), '```']

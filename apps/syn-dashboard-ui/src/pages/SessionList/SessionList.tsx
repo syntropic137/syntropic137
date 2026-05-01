@@ -14,11 +14,17 @@
  */
 
 import { Activity, Search } from 'lucide-react'
-import { Card, ConnectionIndicator, EmptyState, ResourceFilterBar } from '../../components'
+import {
+  Card,
+  ConnectionIndicator,
+  EmptyState,
+  ResourceFilterBar,
+  SelectionActionBar,
+} from '../../components'
 import { useIsMobile } from '../../hooks/useMediaQuery'
 import { useRowSelection } from '../../hooks/useRowSelection'
 import { useSessionList } from '../../hooks/useSessionList'
-import { SelectionActionBar } from './SelectionActionBar'
+import { formatSessionIds, formatSessionsForAgent } from '../../utils/sessionExport'
 import { SessionCardList } from './SessionCardList'
 import { SessionTable } from './SessionTable'
 import { useSelectionShortcuts } from './useSelectionShortcuts'
@@ -95,7 +101,7 @@ export function SessionList() {
   const emptyState = <SessionEmptyState searchQuery={searchQuery} />
 
   return (
-    <div className="space-y-6 pb-24">
+    <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Sessions</h1>
@@ -107,6 +113,14 @@ export function SessionList() {
       </div>
 
       <SessionSearchBar value={searchQuery} onChange={setSearchQuery} />
+
+      <SelectionActionBar
+        count={selection.selectedCount}
+        onCopyIds={() => formatSessionIds(selection.selectedItems.map((s) => s.id))}
+        onCopyForAgent={() => formatSessionsForAgent(selection.selectedItems)}
+        onClear={selection.clear}
+        resourceLabel="session"
+      />
 
       <ResourceFilterBar
         selectedStatuses={selectedStatuses}
@@ -133,11 +147,6 @@ export function SessionList() {
           sort={{ state: sort, onToggle: toggleSort }}
         />
       )}
-
-      <SelectionActionBar
-        selectedSessions={selection.selectedItems}
-        onClear={selection.clear}
-      />
     </div>
   )
 }

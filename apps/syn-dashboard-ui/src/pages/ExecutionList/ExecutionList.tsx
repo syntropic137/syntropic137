@@ -10,9 +10,17 @@
  */
 
 import { Activity, Search } from 'lucide-react'
-import { Card, ConnectionIndicator, EmptyState, ResourceFilterBar } from '../../components'
+import {
+  Card,
+  ConnectionIndicator,
+  EmptyState,
+  ResourceFilterBar,
+  SelectionActionBar,
+} from '../../components'
 import { useExecutionList } from '../../hooks/useExecutionList'
 import { useIsMobile } from '../../hooks/useMediaQuery'
+import { useRowSelection } from '../../hooks/useRowSelection'
+import { formatExecutionIds, formatExecutionsForAgent } from '../../utils/executionExport'
 import { ExecutionCardList } from './ExecutionCardList'
 import { ExecutionTable } from './ExecutionTable'
 
@@ -70,8 +78,17 @@ export function ExecutionList() {
     lastEventAt,
   } = useExecutionList()
 
+  const selectionItems = filteredExecutions.map((e) => ({ ...e, id: e.workflow_execution_id }))
+  const selection = useRowSelection(selectionItems)
   const isMobile = useIsMobile()
   const emptyState = <ExecutionEmptyState searchQuery={searchQuery} />
+
+  const selectionProps = {
+    selectedIds: selection.selectedIds,
+    onToggleRow: selection.handleClick,
+    onSelectAll: selection.selectAll,
+    onClearSelection: selection.clear,
+  }
 
   return (
     <div className="space-y-6">
@@ -87,6 +104,16 @@ export function ExecutionList() {
 
       <ExecutionSearchBar value={searchQuery} onChange={setSearchQuery} />
 
+      <SelectionActionBar
+        count={selection.selectedCount}
+        onCopyIds={() =>
+          formatExecutionIds(selection.selectedItems.map((e) => e.workflow_execution_id))
+        }
+        onCopyForAgent={() => formatExecutionsForAgent(selection.selectedItems)}
+        onClear={selection.clear}
+        resourceLabel="execution"
+      />
+
       <ResourceFilterBar
         selectedStatuses={selectedStatuses}
         toggleStatus={toggleStatus}
@@ -97,12 +124,18 @@ export function ExecutionList() {
       />
 
       {isMobile ? (
-        <ExecutionCardList rows={filteredExecutions} loading={loading} emptyState={emptyState} />
+        <ExecutionCardList
+          rows={filteredExecutions}
+          loading={loading}
+          emptyState={emptyState}
+          selection={selectionProps}
+        />
       ) : (
         <ExecutionTable
           rows={filteredExecutions}
           loading={loading}
           emptyState={emptyState}
+          selection={selectionProps}
           sort={{ state: sort, onToggle: toggleSort }}
         />
       )}
