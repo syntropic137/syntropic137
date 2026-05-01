@@ -12,24 +12,27 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 
 export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState<boolean>(() => {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (typeof window === 'undefined') return () => {}
+      const mq = window.matchMedia(query)
+      mq.addEventListener('change', onChange)
+      return () => mq.removeEventListener('change', onChange)
+    },
+    [query],
+  )
+
+  const getSnapshot = useCallback(() => {
     if (typeof window === 'undefined') return false
     return window.matchMedia(query).matches
-  })
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const mq = window.matchMedia(query)
-    const handler = (e: MediaQueryListEvent) => setMatches(e.matches)
-    setMatches(mq.matches)
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
   }, [query])
 
-  return matches
+  const getServerSnapshot = (): boolean => false
+
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
 export const BREAKPOINTS = {

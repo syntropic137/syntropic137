@@ -11,7 +11,7 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 export interface SelectionClickModifiers {
   shift?: boolean
@@ -64,39 +64,42 @@ export function useRowSelection<T extends { id: string }>(
   items: T[],
 ): UseRowSelectionResult<T> {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
-  const anchorRef = useRef<string | null>(null)
+  const [anchor, setAnchor] = useState<string | null>(null)
+  const [prevItems, setPrevItems] = useState(items)
 
-  useEffect(() => {
+  if (items !== prevItems) {
+    setPrevItems(items)
     const presentIds = new Set(items.map((i) => i.id))
-    setSelectedIds((prev) => pruneToPresent(prev, presentIds) ?? prev)
-    if (anchorRef.current && !presentIds.has(anchorRef.current)) {
-      anchorRef.current = null
+    const pruned = pruneToPresent(selectedIds, presentIds)
+    if (pruned) setSelectedIds(pruned)
+    if (anchor && !presentIds.has(anchor)) {
+      setAnchor(null)
     }
-  }, [items])
+  }
 
   const isSelected = useCallback((id: string) => selectedIds.has(id), [selectedIds])
 
   const toggle = useCallback((id: string) => {
     setSelectedIds((prev) => withToggled(prev, id))
-    anchorRef.current = id
+    setAnchor(id)
   }, [])
 
   const handleClick = useCallback(
     (id: string, modifiers: SelectionClickModifiers = {}) => {
       if (modifiers.shift) {
-        const ids = rangeBetween(items, anchorRef.current ?? id, id)
+        const ids = rangeBetween(items, anchor ?? id, id)
         setSelectedIds((prev) => withAdded(prev, ids))
         return
       }
       if (modifiers.meta) {
         setSelectedIds((prev) => withToggled(prev, id))
-        anchorRef.current = id
+        setAnchor(id)
         return
       }
       setSelectedIds(new Set([id]))
-      anchorRef.current = id
+      setAnchor(id)
     },
-    [items],
+    [items, anchor],
   )
 
   const selectAll = useCallback(() => {
@@ -105,7 +108,7 @@ export function useRowSelection<T extends { id: string }>(
 
   const clear = useCallback(() => {
     setSelectedIds(new Set())
-    anchorRef.current = null
+    setAnchor(null)
   }, [])
 
   const selectedItems = useMemo(

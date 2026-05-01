@@ -47,6 +47,12 @@ from syn_shared.display import (
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+        SessionCost,
+    )
+    from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
+        SessionCostQueryService,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -204,20 +210,22 @@ class _SummaryEnrichment:
     duration_seconds: float | None = None
 
 
-def _enrichment_from_cost(cost: object) -> _SummaryEnrichment:
+def _enrichment_from_cost(cost: SessionCost) -> _SummaryEnrichment:
     """Build enrichment from a session_cost projection record."""
-    duration_ms = getattr(cost, "duration_ms", None)
+    duration_ms = cost.duration_ms
     return _SummaryEnrichment(
-        total_cost_usd=getattr(cost, "total_cost_usd", Decimal("0")),
-        agent_model=getattr(cost, "agent_model", None),
+        total_cost_usd=cost.total_cost_usd,
+        agent_model=cost.agent_model,
         duration_seconds=(duration_ms / 1000.0) if duration_ms else None,
     )
 
 
-async def _fetch_one_session_cost(query_svc: object, sid: str) -> _SummaryEnrichment | None:
+async def _fetch_one_session_cost(
+    query_svc: SessionCostQueryService, sid: str
+) -> _SummaryEnrichment | None:
     """Fetch one session's enrichment; returns None on miss or transient failure."""
     try:
-        cost = await query_svc.get(sid)  # type: ignore[attr-defined]
+        cost = await query_svc.get(sid)
     except Exception:
         logger.debug("Failed to load cost for session %s", sid, exc_info=True)
         return None

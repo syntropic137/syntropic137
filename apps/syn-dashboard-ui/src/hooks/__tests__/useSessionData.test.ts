@@ -40,7 +40,7 @@ describe('useSessionData', () => {
 
     expect(result.current.session).toEqual(session)
     expect(result.current.error).toBeNull()
-    expect(mockGetSession).toHaveBeenCalledWith('sess-1')
+    expect(mockGetSession).toHaveBeenCalledWith('sess-1', expect.any(AbortSignal))
   })
 
   it('handles fetch error', async () => {
