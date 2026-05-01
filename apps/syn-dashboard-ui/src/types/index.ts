@@ -244,7 +244,7 @@ export interface WorkflowExecutionSummary {
   total_cost_usd: number
 }
 
-/** Item in the global execution list (includes workflow_name) */
+/** Item in the global execution list (includes workflow_name + display fields) */
 export interface ExecutionListItem {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
@@ -256,10 +256,15 @@ export interface ExecutionListItem {
   completed_phases: number
   total_phases: number
   total_tokens: number
+  total_tokens_display: string
   total_cost_usd: number
+  total_cost_display: string
+  duration_seconds: number | null
+  duration_display: string
   tool_call_count: number
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
+  repos_display: string | null
 }
 
 export interface ExecutionListResponse {

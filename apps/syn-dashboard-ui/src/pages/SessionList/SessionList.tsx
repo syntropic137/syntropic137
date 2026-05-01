@@ -14,13 +14,12 @@
  */
 
 import { Activity, Search } from 'lucide-react'
-import { Card, ConnectionIndicator, EmptyState } from '../../components'
+import { Card, ConnectionIndicator, EmptyState, ResourceFilterBar } from '../../components'
 import { useIsMobile } from '../../hooks/useMediaQuery'
 import { useRowSelection } from '../../hooks/useRowSelection'
 import { useSessionList } from '../../hooks/useSessionList'
 import { SelectionActionBar } from './SelectionActionBar'
 import { SessionCardList } from './SessionCardList'
-import { SessionFilterBar } from './SessionFilterBar'
 import { SessionTable } from './SessionTable'
 import { useSelectionShortcuts } from './useSelectionShortcuts'
 
@@ -109,7 +108,7 @@ export function SessionList() {
 
       <SessionSearchBar value={searchQuery} onChange={setSearchQuery} />
 
-      <SessionFilterBar
+      <ResourceFilterBar
         selectedStatuses={selectedStatuses}
         toggleStatus={toggleStatus}
         statusCounts={statusCounts}

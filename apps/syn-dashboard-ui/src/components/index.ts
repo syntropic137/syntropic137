@@ -19,6 +19,7 @@ export {
   type ResourceCardListProps,
   type ResourceTableProps,
 } from './ResourceTable'
+export { ResourceFilterBar, type ResourceFilterBarProps } from './ResourceFilterBar'
 export { SelectionCheckbox } from './SelectionCheckbox'
 export { SessionCostCard } from './SessionCostCard'
 export { StatusBadge } from './StatusBadge'

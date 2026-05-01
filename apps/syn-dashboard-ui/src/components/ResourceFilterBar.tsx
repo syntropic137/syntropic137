@@ -1,5 +1,5 @@
 /**
- * Filter bar for the SessionList page.
+ * Status + time-window filter bar shared by Sessions and Executions.
  *
  * Composes status FilterChips + TimeWindowPicker + a Clear-all link. Pure
  * presentational — receives state and handlers from the page-level hook.
@@ -7,10 +7,11 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { FilterChip, TimeWindowPicker } from '../../components'
-import type { TimeWindow } from '../../types'
+import { FilterChip } from './FilterChip'
+import { TimeWindowPicker } from './TimeWindowPicker'
+import type { TimeWindow } from '../types'
 
-interface SessionFilterBarProps {
+export interface ResourceFilterBarProps {
   selectedStatuses: Set<string>
   toggleStatus: (status: string) => void
   statusCounts: Record<string, number>
@@ -27,14 +28,14 @@ const STATUSES: { value: string; label: string }[] = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
-export function SessionFilterBar({
+export function ResourceFilterBar({
   selectedStatuses,
   toggleStatus,
   statusCounts,
   timeWindow,
   setTimeWindow,
   clearAll,
-}: SessionFilterBarProps) {
+}: ResourceFilterBarProps) {
   const hasFilters = selectedStatuses.size > 0 || timeWindow !== '24h'
 
   return (
