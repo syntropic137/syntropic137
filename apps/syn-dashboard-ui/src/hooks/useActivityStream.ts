@@ -37,9 +37,21 @@ function notifyStateListeners(): void {
   for (const listener of stateListeners) listener()
 }
 
+// Returns true iff this subscriber should receive the frame.
+// A throwing filter predicate is treated as "no" — a buggy filter must not
+// abort dispatch for other subscribers (see Copilot review on PR #719).
+function shouldDispatchTo(sub: Subscriber, eventType: string): boolean {
+  if (!sub.filter) return true
+  try {
+    return sub.filter(eventType)
+  } catch {
+    return false
+  }
+}
+
 function dispatchFrame(frame: SSEEventFrame): void {
   for (const sub of subscribers) {
-    if (sub.filter && !sub.filter(frame.event_type)) continue
+    if (!shouldDispatchTo(sub, frame.event_type)) continue
     try {
       sub.handler(frame)
     } catch {
