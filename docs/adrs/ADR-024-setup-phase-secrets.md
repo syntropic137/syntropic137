@@ -444,3 +444,51 @@ mkdir -p /workspace/repos
 | Repo cloning | Not in setup phase | Appended by `build_setup_script()` |
 | Auth failure mode | Silent / runtime git error | Fail fast before any cloning |
 | Multi-org support | Not supported | Supported via per-installation tokens |
+
+---
+
+## 2026-05-01 Update: Docker socket proxy `IMAGES=1` (Issue #720)
+
+### Context
+
+Every first-time selfhost user (`npx syntropic137 init` then any workflow run) hit `403 Forbidden` because `syn137-docker-socket-proxy` did not allow `POST /images/create`. The Docker daemon attempted to pull the missing workspace image when `docker run` was invoked, the proxy rejected the call, and the workspace failed to provision. The only workaround was SSH'ing to the host and running `docker pull` manually — unacceptable for OSS launch.
+
+### Decision
+
+`IMAGES=1` is added to the `tecnativa/docker-socket-proxy` environment in `docker/docker-compose.yaml`. This permits the platform process (syn-api) to invoke any endpoint under `/images/*` on the Docker daemon, including the `POST /images/create` that `docker run` triggers implicitly when an image is missing locally.
+
+### What this changes about the trust posture
+
+`tecnativa/docker-socket-proxy`'s ACL is grouped at the resource-prefix level, not per-endpoint. Enabling `IMAGES=1` opens **all** `/images/*` endpoints to the platform process:
+
+| Endpoint | Used by platform? | Risk if exploited |
+|---|---|---|
+| `POST /images/create` | YES (auto-pull on `docker run`) | the desired capability |
+| `GET /images/json` | NO | low (image inventory disclosure) |
+| `POST /build` | NO | HIGH (arbitrary Dockerfile execution by a compromised platform process) |
+| `POST /images/{name}/push` | NO | HIGH (image exfiltration to attacker registry) |
+| `POST /images/{name}/tag` | NO | medium (image confusion / supply-chain misdirection) |
+| `POST /commit` | NO | medium (snapshot a container as an image) |
+| `POST /images/load` | NO | HIGH (load arbitrary image from tarball) |
+| `DELETE /images/{name}` | NO | medium (DoS via deletion of in-use images) |
+
+The platform code only invokes `POST /images/create` (transitively, via `docker run`). The unused endpoints are reachable only if syn-api itself is compromised (e.g., a FastAPI dependency vuln yielding RCE). For single-tenant selfhost deployments where the operator owns the host and trusts the syn137 release, this trade-off is acceptable: the operational benefit (the system self-heals when new workspace images appear, no `npx init` re-run needed for workspace upgrades) clearly outweighs the marginal RCE blast-radius increase.
+
+For multi-tenant or untrusted-prompt deployments, this trade-off should be revisited:
+
+- A finer-grained proxy (URL-pattern + image-allowlist filter, e.g., a small Caddy or custom Go proxy) could grant only `POST /images/create` for images on a deployment-time allowlist, denying all other `/images/*` endpoints.
+- Alternatively, a dedicated "pull manager" sidecar with the same allowlist semantics, exposed to syn-api over a tiny REST API, would compose with the existing token-injector sidecar pattern.
+
+Neither is in scope for this change. They become required if/when the platform supports multi-tenant.
+
+### Where the responsibility lives
+
+The proxy ACL change is a deployment-config change (`docker/docker-compose.yaml`). It does not introduce any new platform code path. The existing `WorkspaceDockerProvider.create()` in `agentic-primitives` already issues `docker run`; that call's implicit pull was being rejected at the proxy layer. Once the proxy permits the call, the existing code path works without modification.
+
+The Syn137 HTTP API surface (`syn-api`) is unchanged. There is no new endpoint and no new external-facing capability — this change only unblocks an internal call from the platform process to the Docker daemon.
+
+### Versioning consideration
+
+This change does NOT pin the workspace image to a specific digest. The default `WORKSPACE_IMAGE_PROVIDER=claude-cli` and `DEFAULT_TAG="latest"` continue to apply, so deployments float with whatever `:latest` is at GHCR. Operators who want reproducibility can pin via the existing `SYN_WORKSPACE_DOCKER_IMAGE` env var to a specific tag or digest.
+
+This intentionally defers the "workspace image versioning + compatibility strategy" question to a follow-up issue. The right policy (recommended pin tag, compatibility matrix, what does it mean for platform vN to support workspace image vM) needs an ADR of its own.
