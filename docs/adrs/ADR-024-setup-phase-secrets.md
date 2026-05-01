@@ -484,7 +484,7 @@ elif settings.anthropic_api_key:
     env[ENV_ANTHROPIC_API_KEY] = settings.anthropic_api_key.get_secret_value()
 ```
 
-`ANTHROPIC_BASE_URL` still routes SDK traffic through the Envoy sidecar for observability purposes — the sidecar sees the token on outgoing requests and can log it but does not need to substitute it.
+`ANTHROPIC_BASE_URL` still routes SDK traffic through the Envoy sidecar so request volume and timing remain observable. The sidecar's current Envoy access-log format (`docker/sidecar-proxy/envoy.yaml`) does not include the `Authorization` or `x-api-key` headers, so the credential is not written to any log; the sidecar simply proxies without inspecting or substituting auth headers. Any future change to that access-log format must continue to exclude credential headers.
 
 ### Yes, this means a compromised agent can exfiltrate the credential
 

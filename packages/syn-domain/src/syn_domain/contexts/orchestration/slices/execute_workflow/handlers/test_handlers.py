@@ -437,10 +437,10 @@ class TestBuildAgentEnv:
     injects nothing if neither is configured. See ADR-024 2026-05-01 update.
     """
 
-    async def test_returns_session_id_and_proxy_when_no_credentials(
+    async def test_raises_when_no_credentials_configured(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """With no credentials in settings, env contains session id + proxy url only."""
+        """No Anthropic credential anywhere -> fail fast with a clear operator message."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
             _build_agent_env,
         )
@@ -452,11 +452,8 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1")
-        assert env["CLAUDE_SESSION_ID"] == "sess-1"
-        assert env["ANTHROPIC_BASE_URL"] == "http://envoy:10000"
-        assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
-        assert "ANTHROPIC_API_KEY" not in env
+        with pytest.raises(RuntimeError, match="No Anthropic credential configured"):
+            await _build_agent_env(workspace, "sess-1")
 
     async def test_injects_oauth_token_when_configured(
         self, monkeypatch: pytest.MonkeyPatch
