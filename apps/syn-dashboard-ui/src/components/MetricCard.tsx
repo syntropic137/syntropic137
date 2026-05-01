@@ -85,7 +85,7 @@ function CardBody({
   return (
     <div
       className={clsx(
-        'rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4',
+        'flex h-full flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4',
         interactive &&
           'cursor-pointer transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-elevated)]',
       )}
@@ -150,7 +150,7 @@ export function MetricCard({
       <Link
         to={href}
         aria-label={`View ${title} details`}
-        className="rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2"
+        className="block h-full rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2"
       >
         {body}
       </Link>
@@ -163,7 +163,7 @@ export function MetricCard({
         type="button"
         onClick={() => scrollToElement(scrollToId)}
         aria-label={`Jump to ${title} section`}
-        className="block w-full rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2"
+        className="block h-full w-full rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2"
       >
         {body}
       </button>

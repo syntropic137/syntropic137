@@ -112,15 +112,20 @@ export function SessionList() {
         <ConnectionIndicator connected={connected} lastEventAt={lastEventAt} />
       </div>
 
-      <SessionSearchBar value={searchQuery} onChange={setSearchQuery} />
-
-      <SelectionActionBar
-        count={selection.selectedCount}
-        onCopyIds={() => formatSessionIds(selection.selectedItems.map((s) => s.id))}
-        onCopyForAgent={() => formatSessionsForAgent(selection.selectedItems)}
-        onClear={selection.clear}
-        resourceLabel="session"
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <SessionSearchBar value={searchQuery} onChange={setSearchQuery} />
+        {selection.selectedCount > 0 && (
+          <div className="flex-1">
+            <SelectionActionBar
+              count={selection.selectedCount}
+              onCopyIds={() => formatSessionIds(selection.selectedItems.map((s) => s.id))}
+              onCopyForAgent={() => formatSessionsForAgent(selection.selectedItems)}
+              onClear={selection.clear}
+              resourceLabel="session"
+            />
+          </div>
+        )}
+      </div>
 
       <ResourceFilterBar
         selectedStatuses={selectedStatuses}

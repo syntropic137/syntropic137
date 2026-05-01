@@ -108,17 +108,22 @@ export function ExecutionList() {
         <ConnectionIndicator connected={connected} lastEventAt={lastEventAt} />
       </div>
 
-      <ExecutionSearchBar value={searchQuery} onChange={setSearchQuery} />
-
-      <SelectionActionBar
-        count={selection.selectedCount}
-        onCopyIds={() =>
-          formatExecutionIds(selection.selectedItems.map((e) => e.workflow_execution_id))
-        }
-        onCopyForAgent={() => formatExecutionsForAgent(selection.selectedItems)}
-        onClear={selection.clear}
-        resourceLabel="execution"
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <ExecutionSearchBar value={searchQuery} onChange={setSearchQuery} />
+        {selection.selectedCount > 0 && (
+          <div className="flex-1">
+            <SelectionActionBar
+              count={selection.selectedCount}
+              onCopyIds={() =>
+                formatExecutionIds(selection.selectedItems.map((e) => e.workflow_execution_id))
+              }
+              onCopyForAgent={() => formatExecutionsForAgent(selection.selectedItems)}
+              onClear={selection.clear}
+              resourceLabel="execution"
+            />
+          </div>
+        )}
+      </div>
 
       <ResourceFilterBar
         selectedStatuses={selectedStatuses}

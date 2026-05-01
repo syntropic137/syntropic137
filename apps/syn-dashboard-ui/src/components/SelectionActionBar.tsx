@@ -55,15 +55,15 @@ export function SelectionActionBar({
     <div
       role="region"
       aria-label="Selection actions"
-      className="flex flex-col gap-3 rounded-lg border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/5 p-3 sm:flex-row sm:items-center sm:justify-between"
+      className="flex h-10 items-center gap-3 rounded-lg border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/5 px-3"
     >
       <div
         aria-live="polite"
-        className="text-sm font-medium text-[var(--color-text-primary)]"
+        className="whitespace-nowrap text-sm font-medium text-[var(--color-text-primary)]"
       >
         {label}
       </div>
-      <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+      <div className="ml-auto flex items-center gap-2">
         <ActionButton
           icon={lastCopied === 'ids' ? Check : Copy}
           label={lastCopied === 'ids' ? 'Copied!' : 'Copy IDs'}
@@ -106,12 +106,12 @@ function ActionButton({
       type="button"
       onClick={onClick}
       className={clsx(
-        'inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-background)]',
+        'inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-background)]',
         variantClass,
         highlight && 'border-[var(--color-accent)] text-[var(--color-accent)]',
       )}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="h-3.5 w-3.5" />
       <span>{label}</span>
     </button>
   )
