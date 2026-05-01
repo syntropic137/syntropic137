@@ -447,6 +447,109 @@ mkdir -p /workspace/repos
 
 ---
 
+## 2026-05-01 Update: Claude Credential Injection (Agent Phase)
+
+### The proxy-managed pattern no longer works for Claude credentials
+
+The 2026-01-29 update identified that Claude CLI authentication could not follow the setup-phase pattern used for GitHub and pointed at ADR-022 (shared Envoy proxy with sidecar token substitution) as the path forward. Specifically, ADR-022 proposed setting `CLAUDE_CODE_OAUTH_TOKEN="proxy-managed"` in the agent env, and having the token-injector sidecar swap the real credential value on outgoing HTTPS requests before they reached `api.anthropic.com`.
+
+**This substitution path does not work with Claude Code CLI v2.1.76+.** The CLI performs a client-side credential format check before making any API call:
+
+| Credential source | Expected format | `"proxy-managed"` result |
+|---|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | `sk-ant-oat01-…` | ❌ fails format check |
+| `ANTHROPIC_API_KEY` | `sk-ant-…` | ❌ fails format check |
+| On-disk credentials file | valid JSON at `~/.claude/credentials.json` | ❌ file absent |
+
+If all three checks fail, the CLI exits immediately with `Not logged in · Please run /login` — no HTTP request is issued, the sidecar never sees anything to substitute.
+
+### Decision: direct injection into agent env
+
+**This is forced, not chosen.** Claude Code CLI v2.1.76+ will not authenticate against any value that does not pass its local format check. Every alternative has been verified to fail:
+
+- **`"proxy-managed"` placeholder** (the original ADR-022 design) → fails the format regex → CLI exits before any HTTP call → sidecar never invoked.
+- **Empty env var** → CLI exits with `Not logged in`.
+- **`--bare` flag** to bypass auth check → does not exist in v2.1.76+ (`error: unknown option '--bare'`, verified empirically in cycle 001).
+- **`--skip-auth-check` or equivalent** → does not exist.
+- **On-disk credentials file pre-populated by setup phase** → the `~/.claude/credentials.json` format is not publicly documented and is opaque to write reliably.
+
+The CLI is what consumers run; we cannot change it. There is no way to keep the credential out of the agent's environment AND have Claude Code authenticate. Pick one. We pick "Claude Code authenticates" because the alternative is "the platform does nothing."
+
+The real credential is injected directly into the agent phase environment in `_build_agent_env` (`WorkspaceProvisionHandler.py`). OAuth token is preferred; API key is the fallback:
+
+```python
+if settings.claude_code_oauth_token:
+    env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = settings.claude_code_oauth_token.get_secret_value()
+elif settings.anthropic_api_key:
+    env[ENV_ANTHROPIC_API_KEY] = settings.anthropic_api_key.get_secret_value()
+```
+
+`ANTHROPIC_BASE_URL` still routes SDK traffic through the Envoy sidecar so request volume and timing remain observable. The sidecar's current Envoy access-log format (`docker/sidecar-proxy/envoy.yaml`) does not include the `Authorization` or `x-api-key` headers, so the credential is not written to any log; the sidecar simply proxies without inspecting or substituting auth headers. Any future change to that access-log format must continue to exclude credential headers.
+
+### Yes, this means a compromised agent can exfiltrate the credential
+
+A prompt-injected workspace agent that escapes its tool sandbox could read `CLAUDE_CODE_OAUTH_TOKEN` from `/proc/self/environ` and exfiltrate it. We acknowledge this. The mitigation is not "hide the token" (impossible, see above) but:
+
+1. **Operator awareness:** anyone running a Claude Code agent on their own credential is implicitly trusting that agent with it. This applies equally to running Claude Code on your laptop, in a Syn137 workspace, or via any other harness. Users running Syn137 selfhost are running their own agents on their own credential.
+2. **Workflow code review:** prompt-injection-resistant workflow design (limited tool grants, explicit allowlists, no fetch-then-execute patterns) reduces the practical exfiltration risk.
+3. **Credential rotation discipline:** OAuth tokens can be revoked at the Anthropic console; rotate any credential after a workflow run that handled untrusted input.
+
+For multi-tenant or untrusted-workflow scenarios, this trade-off becomes unacceptable. At that point Syn137 needs a fundamentally different agent runtime (e.g., per-tenant short-lived API keys minted by a privileged minter, with the minter behind the sidecar). That is out of scope for the single-tenant selfhost design.
+
+### Security posture change
+
+This deviates from the original "agent phase never sees raw secrets" invariant. The revised posture:
+
+| Property | Previous goal | Current reality |
+|---|---|---|
+| Agent env holds real credential | ❌ no | ✅ yes (via env var) |
+| Subagents inherit credential | ❌ no | ✅ yes (env is inherited) |
+| Credential visible in `/proc/self/environ` | ❌ no | ✅ yes (agent process) |
+| Credential visible to sidecar | ✅ yes (substitution) | ✅ yes (on outgoing requests) |
+| Credential cleared after phase | ✅ yes | ❌ no (env stays for phase duration) |
+
+Acceptable risk framing (from 2026-01-29 update, still applies):
+- ✅ Single-tenant deployments with trusted agent code
+- ✅ Self-hosted instances with controlled workloads
+- ❌ Multi-tenant production (agent code cannot be fully trusted)
+- ❌ Untrusted marketplace workflows without additional sandboxing
+
+### What would restore the original invariant
+
+If a future Claude Code CLI version supports any of the following, the original ADR-022 pattern can be reinstated:
+
+1. A `--skip-auth-check` or `--bare` flag that defers auth to the server response (does not exist as of v2.1.76).
+2. A credential-helper interface for HTTP APIs analogous to `git credential-helper`.
+3. On-disk credential pre-population during setup phase (the `~/.claude/credentials.json` file format is not publicly documented; this may be viable if the format is discovered or stabilizes).
+
+### Per-credential injection matrix
+
+Different secret types have very different risk profiles. The platform handles each according to its lifetime, scope, and ToS posture:
+
+| Credential | Lifetime | Scope | Current strategy | Risk class | Follow-up |
+|---|---|---|---|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | months/years | account-wide, full spend | direct env injection | **HIGH** — accepted; ToS gray area precludes header proxying | none — direct injection is the long-term posture |
+| `ANTHROPIC_API_KEY` | indefinite | account-wide, full spend | direct env injection (fallback when OAuth absent) | **HIGH** — accepted short-term | TODO #724 — spike sidecar substitution with valid-format placeholder |
+| `GH_TOKEN` (GitHub App installation token) | 1 hour | per-installation, repo-scoped | direct env injection (planned) | **LOW** — already short-lived and scoped | TODO #723 — implement direct injection; #725 — sidecar mint-on-demand for >60min tasks |
+| `GH_TOKEN` (user PAT, dev fallback) | user-set | user-defined | direct env injection (operator-controlled) | **MEDIUM** — operator owns it | none — user controls scope |
+
+### Long-running task ceiling
+
+GitHub App installation tokens are hard-capped at **1 hour** by GitHub. As Claude Code agent runs grow longer (model capability + multi-phase orchestration), workflow executions exceeding 60 minutes will hit mid-execution 401s on any `gh` or `git push` call. The direct-injection path (#723) does not solve this; the sidecar mint-on-demand pattern (#725) does, by transparently refreshing the token on every outgoing GitHub call.
+
+Migration plan: ship #723 first to unblock the common case (sub-60min workflows). Land #725 before it becomes a blocker — track wall-clock distribution of workflow executions to know when that's imminent.
+
+### TODOs in implementation
+
+Code paths that violate ADR-024's original "agent never sees raw secrets" invariant carry inline TODO comments referencing the relevant follow-up issue:
+
+- `_build_agent_env` in `WorkspaceProvisionHandler.py` — TODO #724 (Claude API key sidecar spike)
+- (future) `_build_agent_env` once `GH_TOKEN` injection lands — TODO #725 (GH App sidecar mint-on-demand)
+
+These TODOs are an explicit reminder that direct injection is a deliberate compromise documented in this ADR, not an oversight.
+
+---
+
 ## 2026-05-01 Update: Docker socket proxy `IMAGES=1` (Issue #720)
 
 ### Context
