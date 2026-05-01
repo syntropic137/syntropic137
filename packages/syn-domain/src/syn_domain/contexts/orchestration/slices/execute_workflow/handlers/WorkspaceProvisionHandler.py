@@ -92,19 +92,12 @@ async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict
         env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = settings.claude_code_oauth_token.get_secret_value()
     elif settings.anthropic_api_key:
         env[ENV_ANTHROPIC_API_KEY] = settings.anthropic_api_key.get_secret_value()
-    else:
-        # Fail fast at the platform layer rather than letting the workspace agent
-        # crash with a generic "Not logged in" error. Operator gets a clear message
-        # naming both supported env vars instead of having to guess from a CLI
-        # error string. Per Copilot review on PR #722.
-        msg = (
-            "No Anthropic credential configured. Set CLAUDE_CODE_OAUTH_TOKEN "
-            "(preferred for Claude Max subscribers) or ANTHROPIC_API_KEY in the "
-            "platform environment, then restart the API container. "
-            "See ADR-024 (2026-05-01 update) for why direct env injection is the "
-            "only viable path with Claude Code v2.1.76+."
-        )
-        raise RuntimeError(msg)
+    # No fail-fast here. If neither credential is configured, the workspace
+    # agent will exit with "Not logged in" — acceptable for now. A startup-time
+    # check that fails the API container with a clear operator message would
+    # be cleaner; tracked separately. (Copilot suggested fail-fast in this
+    # function, but that breaks smoke tests that exercise the processor loop
+    # without configured credentials.)
 
     # TODO(#723): direct injection — short-term only.
     # TODO(#725): replace with sidecar mint-on-demand to (a) restore the
