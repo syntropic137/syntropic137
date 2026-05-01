@@ -110,7 +110,9 @@ export function SessionDetail() {
 
       <SubagentsSection subagents={session.subagents} />
 
-      <OperationTimeline ref={timelineRef} operations={session.operations} />
+      <section id="operations-timeline">
+        <OperationTimeline ref={timelineRef} operations={session.operations} />
+      </section>
     </div>
   )
 }

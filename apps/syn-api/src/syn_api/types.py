@@ -466,6 +466,7 @@ class SessionSummary(BaseModel):
     phase_id: str | None = None
     status: str = ""
     agent_type: str = ""
+    repos: list[str] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -767,6 +768,7 @@ class SessionDetail(BaseModel):
     agent_type: str = ""
     status: str = ""
     workspace_path: str | None = None
+    repos: list[str] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0

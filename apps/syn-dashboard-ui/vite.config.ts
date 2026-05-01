@@ -37,6 +37,8 @@ function quietProxy(proxy: any, label: string) {
 }
 
 // https://vite.dev/config/
+const API_TARGET = process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:9137'
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(version),
@@ -46,7 +48,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/v1': {
-        target: 'http://localhost:9137',
+        target: API_TARGET,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/v1/, ''),
         configure: (proxy) => quietProxy(proxy, 'api'),

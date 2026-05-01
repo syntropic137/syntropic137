@@ -236,8 +236,14 @@ class RealTimeProjection:
             await self.broadcast(execution_id, event_type, event, terminal=terminal)
 
     async def on_workflow_execution_started(self, event: dict[str, JsonValue]) -> None:
-        """Handle WorkflowExecutionStarted event."""
+        """Handle WorkflowExecutionStarted event.
+
+        Broadcasts on the per-execution channel (existing behaviour) and on
+        the global activity channel so the dashboard's execution list can
+        react live without polling.
+        """
         await self._forward_event(event, "WorkflowExecutionStarted")
+        await self.broadcast_global("WorkflowExecutionStarted", event)
 
     async def on_phase_started(self, event: dict[str, JsonValue]) -> None:
         """Handle PhaseStarted event."""
@@ -248,20 +254,45 @@ class RealTimeProjection:
         await self._forward_event(event, "PhaseCompleted")
 
     async def on_workflow_completed(self, event: dict[str, JsonValue]) -> None:
-        """Handle WorkflowCompleted event — sends terminal sentinel."""
+        """Handle WorkflowCompleted event — sends terminal sentinel.
+
+        Also broadcasts on the global activity channel so the execution list
+        can update on completion without manual refresh.
+        """
         await self._forward_event(event, "WorkflowCompleted", terminal=True)
+        await self.broadcast_global("WorkflowCompleted", event)
 
     async def on_workflow_failed(self, event: dict[str, JsonValue]) -> None:
-        """Handle WorkflowFailed event — sends terminal sentinel."""
+        """Handle WorkflowFailed event — sends terminal sentinel.
+
+        Also broadcasts on the global activity channel.
+        """
         await self._forward_event(event, "WorkflowFailed", terminal=True)
+        await self.broadcast_global("WorkflowFailed", event)
 
     async def on_session_started(self, event: dict[str, JsonValue]) -> None:
-        """Handle SessionStarted event."""
+        """Handle SessionStarted event.
+
+        Broadcasts on the per-execution channel (existing behaviour) and on
+        the global activity channel so the dashboard's session list can react
+        live without polling.
+
+        See: docs/adrs/ADR-064-observability-monitor-ui.md
+        """
         await self._forward_event(event, "SessionStarted")
+        await self.broadcast_global("SessionStarted", event)
 
     async def on_session_completed(self, event: dict[str, JsonValue]) -> None:
-        """Handle SessionCompleted event."""
+        """Handle SessionCompleted event.
+
+        Broadcasts on the per-execution channel (existing behaviour) and on
+        the global activity channel so the dashboard's session list can react
+        live without polling.
+
+        See: docs/adrs/ADR-064-observability-monitor-ui.md
+        """
         await self._forward_event(event, "SessionCompleted")
+        await self.broadcast_global("SessionCompleted", event)
 
     async def on_operation_recorded(self, event: dict[str, JsonValue]) -> None:
         """Handle OperationRecorded event (tool calls, messages, etc.)."""

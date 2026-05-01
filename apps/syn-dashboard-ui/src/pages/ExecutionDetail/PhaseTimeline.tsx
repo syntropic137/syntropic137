@@ -67,15 +67,20 @@ function PhaseTokenSegment({ label, total, rows, accentColor }: {
   )
 }
 
-function PhaseCard({ phase, now }: { phase: Phase; now: number }) {
+function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
   const Icon = phaseStatusIcons[phase.status] ?? Clock
-  const totalPhaseTokens = phase.input_tokens + phase.output_tokens + (phase.cache_creation_tokens ?? 0) + (phase.cache_read_tokens ?? 0)
-  const duration = phase.status === 'running' && phase.started_at
-    ? ((now - new Date(phase.started_at).getTime()) / 1000).toFixed(1)
-    : phase.duration_seconds.toFixed(1)
+  const totalPhaseTokens =
+    phase.input_tokens +
+    phase.output_tokens +
+    (phase.cache_creation_tokens ?? 0) +
+    (phase.cache_read_tokens ?? 0)
+  const duration =
+    phase.status === 'running' && phase.started_at
+      ? ((now - new Date(phase.started_at).getTime()) / 1000).toFixed(1)
+      : phase.duration_seconds.toFixed(1)
 
   return (
-    <div className={clsx('flex min-w-[200px] flex-1 flex-col rounded-lg border p-4 transition-all', phaseStatusColors[phase.status] ?? phaseStatusColors.pending)}>
+    <>
       <div className="flex items-center gap-2">
         <Icon className={clsx('h-4 w-4', statusIconColors[phase.status] ?? 'text-slate-400')} />
         <span className="text-sm font-medium text-[var(--color-text-primary)]">{phase.name}</span>
@@ -91,27 +96,62 @@ function PhaseCard({ phase, now }: { phase: Phase; now: number }) {
         <span>{duration}s</span>
       </div>
       <div className="mt-2 space-y-1.5 text-xs text-[var(--color-text-muted)]">
-        <PhaseTokenSegment label="In" total={phase.input_tokens + (phase.cache_read_tokens ?? 0)} accentColor="bg-indigo-500/10 text-indigo-400" rows={[
-          { label: 'Fresh', value: phase.input_tokens },
-          { label: 'Cache read', value: phase.cache_read_tokens ?? 0, color: 'text-emerald-400' },
-        ]} />
-        <PhaseTokenSegment label="Out" total={phase.output_tokens + (phase.cache_creation_tokens ?? 0)} accentColor="bg-violet-500/10 text-violet-400" rows={[
-          { label: 'Output', value: phase.output_tokens },
-          { label: 'Cache write', value: phase.cache_creation_tokens ?? 0, color: 'text-amber-400' },
-        ]} />
+        <PhaseTokenSegment
+          label="In"
+          total={phase.input_tokens + (phase.cache_read_tokens ?? 0)}
+          accentColor="bg-indigo-500/10 text-indigo-400"
+          rows={[
+            { label: 'Fresh', value: phase.input_tokens },
+            { label: 'Cache read', value: phase.cache_read_tokens ?? 0, color: 'text-emerald-400' },
+          ]}
+        />
+        <PhaseTokenSegment
+          label="Out"
+          total={phase.output_tokens + (phase.cache_creation_tokens ?? 0)}
+          accentColor="bg-violet-500/10 text-violet-400"
+          rows={[
+            { label: 'Output', value: phase.output_tokens },
+            {
+              label: 'Cache write',
+              value: phase.cache_creation_tokens ?? 0,
+              color: 'text-amber-400',
+            },
+          ]}
+        />
       </div>
-      <div className="mt-auto pt-2">
-        {phase.session_id && (
-          <Link to={`/sessions/${phase.session_id}`} className="text-xs text-[var(--color-accent)] hover:underline">
-            View Session →
-          </Link>
+      {phase.agent_session_id && (
+        <div className="mt-auto pt-2 text-xs text-[var(--color-text-muted)]">
+          <span title="Claude CLI session ID for OTel correlation">
+            OTel: {phase.agent_session_id.slice(0, 8)}...
+          </span>
+        </div>
+      )}
+    </>
+  )
+}
+
+function PhaseCard({ phase, now }: { phase: Phase; now: number }) {
+  const baseClasses = clsx(
+    'flex min-w-[200px] flex-1 flex-col rounded-lg border p-4 transition-all',
+    phaseStatusColors[phase.status] ?? phaseStatusColors.pending,
+  )
+  if (phase.session_id) {
+    return (
+      <Link
+        to={`/sessions/${phase.session_id}`}
+        className={clsx(
+          baseClasses,
+          'cursor-pointer hover:border-[var(--color-accent)] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]',
         )}
-        {phase.agent_session_id && (
-          <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-            <span title="Claude CLI session ID for OTel correlation">OTel: {phase.agent_session_id.slice(0, 8)}...</span>
-          </div>
-        )}
-      </div>
+        aria-label={`Open session for phase ${phase.name}`}
+      >
+        <PhaseCardBody phase={phase} now={now} />
+      </Link>
+    )
+  }
+  return (
+    <div className={baseClasses}>
+      <PhaseCardBody phase={phase} now={now} />
     </div>
   )
 }

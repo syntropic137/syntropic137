@@ -43,6 +43,7 @@ class SessionLifecycleManager:
         phase_id: str,
         agent_provider: str,
         agent_model: str,
+        repos: list[str] | None = None,
     ) -> None:
         self._repo = repository
         self._session_id = session_id
@@ -52,6 +53,7 @@ class SessionLifecycleManager:
         self._phase_id = phase_id
         self._agent_provider = agent_provider
         self._agent_model = agent_model
+        self._repos = list(repos) if repos else []
 
     @property
     def session(self) -> AgentSessionAggregate | None:
@@ -70,6 +72,7 @@ class SessionLifecycleManager:
             phase_id=self._phase_id,
             agent_provider=self._agent_provider,
             agent_model=self._agent_model,
+            repos=list(self._repos),
         )
         self._session.start_session(cmd)
         await self._repo.save(self._session)

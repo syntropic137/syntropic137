@@ -37,9 +37,23 @@ from syn_api.types import (
 from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
     WorkflowListProjection,
 )
+from syn_shared.display import (
+    format_cost,
+    format_duration_seconds,
+    format_model_compact,
+    format_phase,
+    format_repos,
+    format_tokens,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+        SessionCost,
+    )
+    from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
+        SessionCostQueryService,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -52,21 +66,41 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 class SessionSummaryResponse(BaseModel):
-    """Summary of an agent session."""
+    """Summary of an agent session.
+
+    Display fields (``*_display``) are produced server-side so all clients
+    (dashboard, CLI, future UIs) share identical human-readable output. Raw
+    fields remain for programmatic consumers; both are always present.
+
+    Timestamps stay ISO 8601 UTC. Locale and relative-time formatting is the
+    client's job (it knows the viewer's time zone and when the response is
+    actually rendered).
+
+    See: docs/adrs/ADR-064-observability-monitor-ui.md
+    """
 
     id: str
     workflow_id: str | None
     workflow_name: str | None = None
     execution_id: str | None = None
     phase_id: str | None
+    phase_display: str | None = None
     status: str
     agent_provider: str | None
+    agent_model: str | None = None
+    agent_model_display: str | None = None
+    repos: list[str] = Field(default_factory=list)
+    repos_display: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     total_tokens: int = 0
+    total_tokens_display: str = "0"
     total_cost_usd: Decimal = Decimal("0")
+    total_cost_display: str = "$0.00"
+    duration_seconds: float | None = None
+    duration_display: str = "\u2014"
     started_at: str | None = None
     completed_at: str | None = None
 
@@ -106,29 +140,47 @@ class OperationInfo(BaseModel):
 
 
 class SessionResponse(BaseModel):
-    """Detailed session response."""
+    """Detailed session response.
+
+    Display fields (``*_display``) are produced server-side so all clients
+    share identical human-readable output. Raw fields remain for programmatic
+    consumers.
+
+    See: docs/adrs/ADR-064-observability-monitor-ui.md
+    """
 
     id: str
     workflow_id: str | None
     workflow_name: str | None = None
     execution_id: str | None = None
     phase_id: str | None
+    phase_display: str | None = None
     milestone_id: str | None
     agent_provider: str | None
     agent_model: str | None
+    agent_model_display: str | None = None
+    repos: list[str] = Field(default_factory=list)
+    repos_display: str | None = None
     status: str
     workspace_path: str | None = None
     input_tokens: int = 0
+    input_tokens_display: str = "0"
     output_tokens: int = 0
+    output_tokens_display: str = "0"
     cache_creation_tokens: int = 0
+    cache_creation_tokens_display: str = "0"
     cache_read_tokens: int = 0
+    cache_read_tokens_display: str = "0"
     total_tokens: int = 0
+    total_tokens_display: str = "0"
     total_cost_usd: Decimal = Decimal("0")
+    total_cost_display: str = "$0.00"
     cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
     operations: list[OperationInfo] = Field(default_factory=list)
     started_at: str | None = None
     completed_at: str | None = None
     duration_seconds: float | None = None
+    duration_display: str = "\u2014"
     error_message: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -154,24 +206,71 @@ async def _fetch_one_workflow_name(
 _WF_NAME_CONCURRENCY = 20
 
 
-async def _load_session_costs(session_ids: list[str]) -> dict[str, Decimal]:
-    """Load per-session total_cost_usd from the Lane 2 session_cost projection (#695)."""
+@dataclass
+class _SummaryEnrichment:
+    """Per-session enrichment loaded from Lane 2 (cost projection).
+
+    Lane 2 updates token + cost totals continuously as the agent runs, so
+    these values are live for in-flight sessions. The domain projection
+    (Lane 1) only sees final tokens on `SessionCompleted`.
+    """
+
+    total_cost_usd: Decimal = Decimal("0")
+    agent_model: str | None = None
+    duration_seconds: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    total_tokens: int | None = None
+
+
+def _enrichment_from_cost(cost: SessionCost) -> _SummaryEnrichment:
+    """Build enrichment from a session_cost projection record."""
+    duration_ms = cost.duration_ms
+    return _SummaryEnrichment(
+        total_cost_usd=cost.total_cost_usd,
+        agent_model=cost.agent_model,
+        duration_seconds=(duration_ms / 1000.0) if duration_ms else None,
+        input_tokens=cost.input_tokens,
+        output_tokens=cost.output_tokens,
+        cache_creation_tokens=cost.cache_creation_tokens,
+        cache_read_tokens=cost.cache_read_tokens,
+        total_tokens=cost.total_tokens,
+    )
+
+
+async def _fetch_one_session_cost(
+    query_svc: SessionCostQueryService, sid: str
+) -> _SummaryEnrichment | None:
+    """Fetch one session's enrichment; returns None on miss or transient failure."""
+    try:
+        cost = await query_svc.get(sid)
+    except Exception:
+        logger.debug("Failed to load cost for session %s", sid, exc_info=True)
+        return None
+    return _enrichment_from_cost(cost) if cost is not None else None
+
+
+async def _load_session_costs(session_ids: list[str]) -> dict[str, _SummaryEnrichment]:
+    """Load per-session enrichment from the Lane 2 session_cost projection (#695).
+
+    Returns cost, agent model, and duration so the list endpoint can populate
+    display fields without a second round-trip.
+    """
     if not session_ids:
         return {}
-    costs: dict[str, Decimal] = {}
     try:
         query_svc = get_session_cost_query()
     except Exception:
         logger.debug("Session cost query service unavailable", exc_info=True)
-        return costs
+        return {}
+    enriched: dict[str, _SummaryEnrichment] = {}
     for sid in session_ids:
-        try:
-            cost = await query_svc.get(sid)
-            if cost is not None:
-                costs[sid] = cost.total_cost_usd
-        except Exception:
-            logger.debug("Failed to load cost for session %s", sid, exc_info=True)
-    return costs
+        info = await _fetch_one_session_cost(query_svc, sid)
+        if info is not None:
+            enriched[sid] = info
+    return enriched
 
 
 async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
@@ -192,6 +291,9 @@ async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
 async def list_sessions(
     workflow_id: str | None = None,
     status: str | None = None,
+    statuses: list[str] | None = None,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> Result[list[SessionSummary], SessionError]:
@@ -199,7 +301,11 @@ async def list_sessions(
 
     Args:
         workflow_id: Filter by workflow ID.
-        status: Filter by session status.
+        status: Filter by single session status (legacy).
+        statuses: Filter by multiple statuses (OR'd together). Takes
+            precedence over ``status``.
+        started_after: Inclusive lower bound on ``started_at``.
+        started_before: Inclusive upper bound on ``started_at``.
         limit: Maximum results to return.
         offset: Pagination offset.
 
@@ -212,6 +318,9 @@ async def list_sessions(
     domain_sessions = await projection.query(
         workflow_id=workflow_id,
         status_filter=status,
+        statuses=statuses,
+        started_after=started_after,
+        started_before=started_before,
         limit=limit,
         offset=offset,
     )
@@ -224,6 +333,7 @@ async def list_sessions(
                 phase_id=s.phase_id,
                 status=s.status,
                 agent_type=s.agent_type,
+                repos=list(s.repos),
                 input_tokens=s.input_tokens,
                 output_tokens=s.output_tokens,
                 cache_creation_tokens=s.cache_creation_tokens,
@@ -404,6 +514,7 @@ async def get_session(
             phase_id=session.phase_id,
             agent_type=session.agent_type,
             status=session.status,
+            repos=list(session.repos),
             input_tokens=cd.input_tokens,
             output_tokens=cd.output_tokens,
             cache_creation_tokens=cd.cache_creation_tokens,
@@ -426,16 +537,79 @@ async def get_session(
 # =============================================================================
 
 
+def _build_session_summary_response(
+    s: SessionSummary,
+    workflow_name: str | None,
+    info: _SummaryEnrichment,
+) -> SessionSummaryResponse:
+    """Compose a SessionSummaryResponse from a domain summary + enrichment.
+
+    Token + cost totals prefer Lane 2 (live) over the domain projection,
+    which only finalizes on `SessionCompleted`.
+    """
+    input_tokens = info.input_tokens if info.input_tokens is not None else s.input_tokens
+    output_tokens = info.output_tokens if info.output_tokens is not None else s.output_tokens
+    cache_creation_tokens = (
+        info.cache_creation_tokens
+        if info.cache_creation_tokens is not None
+        else s.cache_creation_tokens
+    )
+    cache_read_tokens = (
+        info.cache_read_tokens if info.cache_read_tokens is not None else s.cache_read_tokens
+    )
+    total_tokens = info.total_tokens if info.total_tokens is not None else s.total_tokens
+    return SessionSummaryResponse(
+        id=s.id,
+        workflow_id=s.workflow_id,
+        workflow_name=workflow_name,
+        execution_id=s.execution_id,
+        phase_id=s.phase_id,
+        phase_display=format_phase(s.phase_id),
+        status=s.status,
+        agent_provider=s.agent_type,
+        agent_model=info.agent_model,
+        agent_model_display=format_model_compact(info.agent_model),
+        repos=list(s.repos),
+        repos_display=format_repos(s.repos),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
+        total_tokens=total_tokens,
+        total_tokens_display=format_tokens(total_tokens),
+        total_cost_usd=info.total_cost_usd,
+        total_cost_display=format_cost(info.total_cost_usd),
+        duration_seconds=info.duration_seconds,
+        duration_display=format_duration_seconds(info.duration_seconds),
+        started_at=str(s.started_at) if s.started_at else None,
+        completed_at=str(s.completed_at) if s.completed_at else None,
+    )
+
+
 @router.get("", response_model=SessionListResponse)
 async def list_sessions_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
-    status: str | None = Query(None, description="Filter by status"),
+    status: str | None = Query(None, description="Filter by single status (legacy)"),
+    statuses: str | None = Query(
+        None,
+        description="Comma-separated list of statuses (OR'd; takes precedence over `status`)",
+    ),
+    started_after: datetime | None = Query(
+        None, description="Inclusive ISO 8601 lower bound on started_at"
+    ),
+    started_before: datetime | None = Query(
+        None, description="Inclusive ISO 8601 upper bound on started_at"
+    ),
     limit: int = Query(50, ge=1, le=200, description="Max items to return"),
 ) -> SessionListResponse:
     """List agent sessions with optional filtering."""
+    status_list = [s.strip() for s in statuses.split(",") if s.strip()] if statuses else None
     result = await list_sessions(
         workflow_id=workflow_id,
         status=status,
+        statuses=status_list,
+        started_after=started_after,
+        started_before=started_before,
         limit=limit,
     )
 
@@ -445,32 +619,17 @@ async def list_sessions_endpoint(
     summaries = result.value
     wf_ids = {s.workflow_id for s in summaries if s.workflow_id}
     wf_names = await _build_workflow_name_map(wf_ids)
-    # Lane 2: enrich each session's total_cost_usd from the session_cost projection (#695)
-    cost_by_session = await _load_session_costs([s.id for s in summaries])
+    # Lane 2: enrich each session's cost/model/duration from the session_cost projection (#695)
+    enrichment = await _load_session_costs([s.id for s in summaries])
     responses = [
-        SessionSummaryResponse(
-            id=s.id,
-            workflow_id=s.workflow_id,
-            workflow_name=wf_names.get(s.workflow_id, None) if s.workflow_id else None,
-            execution_id=s.execution_id,
-            phase_id=s.phase_id,
-            status=s.status,
-            agent_provider=s.agent_type,
-            input_tokens=s.input_tokens,
-            output_tokens=s.output_tokens,
-            cache_creation_tokens=s.cache_creation_tokens,
-            cache_read_tokens=s.cache_read_tokens,
-            total_tokens=s.total_tokens,
-            total_cost_usd=cost_by_session.get(s.id, Decimal("0")),
-            started_at=str(s.started_at) if s.started_at else None,
-            completed_at=str(s.completed_at) if s.completed_at else None,
+        _build_session_summary_response(
+            s,
+            wf_names.get(s.workflow_id) if s.workflow_id else None,
+            enrichment.get(s.id, _SummaryEnrichment()),
         )
         for s in summaries
     ]
-    return SessionListResponse(
-        sessions=responses,
-        total=len(responses),
-    )
+    return SessionListResponse(sessions=responses, total=len(responses))
 
 
 def _parse_tool_input(input_preview: str | None) -> dict[str, Any] | None:
@@ -521,28 +680,40 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
     detail = result.value
     operations = [_to_operation_info(op) for op in (detail.operations or [])]
 
+    total_cost = Decimal(str(detail.total_cost_usd))
     return SessionResponse(
         id=detail.id,
         workflow_id=detail.workflow_id,
         workflow_name=detail.workflow_name,
         execution_id=detail.execution_id,
         phase_id=detail.phase_id,
+        phase_display=format_phase(detail.phase_id),
         milestone_id=None,
         agent_provider=detail.agent_type,
         agent_model=detail.agent_model,
+        agent_model_display=format_model_compact(detail.agent_model),
+        repos=list(detail.repos),
+        repos_display=format_repos(detail.repos),
         status=detail.status,
         workspace_path=detail.workspace_path,
         input_tokens=detail.input_tokens,
+        input_tokens_display=format_tokens(detail.input_tokens),
         output_tokens=detail.output_tokens,
+        output_tokens_display=format_tokens(detail.output_tokens),
         cache_creation_tokens=detail.cache_creation_tokens,
+        cache_creation_tokens_display=format_tokens(detail.cache_creation_tokens),
         cache_read_tokens=detail.cache_read_tokens,
+        cache_read_tokens_display=format_tokens(detail.cache_read_tokens),
         total_tokens=detail.total_tokens,
-        total_cost_usd=Decimal(str(detail.total_cost_usd)),
+        total_tokens_display=format_tokens(detail.total_tokens),
+        total_cost_usd=total_cost,
+        total_cost_display=format_cost(total_cost),
         cost_by_model=detail.cost_by_model,
         operations=operations,
         started_at=str(detail.started_at) if detail.started_at else None,
         completed_at=str(detail.completed_at) if detail.completed_at else None,
         duration_seconds=detail.duration_seconds,
+        duration_display=format_duration_seconds(detail.duration_seconds),
         error_message=detail.error_message,
         metadata={},
     )

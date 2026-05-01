@@ -5,7 +5,9 @@ import {
   formatDuration,
   formatDurationFromRange,
   formatDurationSeconds,
+  formatRelativeTime,
   formatTime,
+  formatTimestampLocale,
   formatTokens,
 } from '../formatters'
 
@@ -130,5 +132,53 @@ describe('formatDurationFromRange', () => {
 
   it('returns dash when startedAt is null', () => {
     expect(formatDurationFromRange(null, null)).toBe('—')
+  })
+})
+
+describe('formatRelativeTime', () => {
+  const now = new Date('2026-04-19T12:00:00Z').getTime()
+
+  it('returns "just now" for very recent timestamps', () => {
+    expect(formatRelativeTime('2026-04-19T11:59:58Z', now)).toBe('just now')
+  })
+
+  it('formats seconds in the past', () => {
+    expect(formatRelativeTime('2026-04-19T11:59:30Z', now)).toBe('30s ago')
+  })
+
+  it('formats minutes in the past', () => {
+    expect(formatRelativeTime('2026-04-19T11:56:00Z', now)).toBe('4m ago')
+  })
+
+  it('formats hours in the past', () => {
+    expect(formatRelativeTime('2026-04-19T09:00:00Z', now)).toBe('3h ago')
+  })
+
+  it('formats days in the past', () => {
+    expect(formatRelativeTime('2026-04-17T12:00:00Z', now)).toBe('2d ago')
+  })
+
+  it('formats future timestamps with "in"', () => {
+    expect(formatRelativeTime('2026-04-19T12:02:00Z', now)).toBe('in 2m')
+  })
+
+  it('returns dash for null/invalid input', () => {
+    expect(formatRelativeTime(null)).toBe('—')
+    expect(formatRelativeTime(undefined)).toBe('—')
+    expect(formatRelativeTime('not-a-date')).toBe('—')
+  })
+})
+
+describe('formatTimestampLocale', () => {
+  it('produces a non-empty locale string for a valid ISO timestamp', () => {
+    const result = formatTimestampLocale('2026-04-19T12:00:00Z')
+    expect(result.length).toBeGreaterThan(0)
+    expect(result).not.toBe('—')
+  })
+
+  it('returns dash for null/undefined/invalid', () => {
+    expect(formatTimestampLocale(null)).toBe('—')
+    expect(formatTimestampLocale(undefined)).toBe('—')
+    expect(formatTimestampLocale('not-a-date')).toBe('—')
   })
 })
