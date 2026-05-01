@@ -203,11 +203,21 @@ _WF_NAME_CONCURRENCY = 20
 
 @dataclass
 class _SummaryEnrichment:
-    """Per-session enrichment loaded from Lane 2 (cost projection)."""
+    """Per-session enrichment loaded from Lane 2 (cost projection).
+
+    Lane 2 updates token + cost totals continuously as the agent runs, so
+    these values are live for in-flight sessions. The domain projection
+    (Lane 1) only sees final tokens on `SessionCompleted`.
+    """
 
     total_cost_usd: Decimal = Decimal("0")
     agent_model: str | None = None
     duration_seconds: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 def _enrichment_from_cost(cost: SessionCost) -> _SummaryEnrichment:
@@ -217,6 +227,11 @@ def _enrichment_from_cost(cost: SessionCost) -> _SummaryEnrichment:
         total_cost_usd=cost.total_cost_usd,
         agent_model=cost.agent_model,
         duration_seconds=(duration_ms / 1000.0) if duration_ms else None,
+        input_tokens=cost.input_tokens,
+        output_tokens=cost.output_tokens,
+        cache_creation_tokens=cost.cache_creation_tokens,
+        cache_read_tokens=cost.cache_read_tokens,
+        total_tokens=cost.total_tokens,
     )
 
 
@@ -520,7 +535,22 @@ def _build_session_summary_response(
     workflow_name: str | None,
     info: _SummaryEnrichment,
 ) -> SessionSummaryResponse:
-    """Compose a SessionSummaryResponse from a domain summary + enrichment."""
+    """Compose a SessionSummaryResponse from a domain summary + enrichment.
+
+    Token + cost totals prefer Lane 2 (live) over the domain projection,
+    which only finalizes on `SessionCompleted`.
+    """
+    input_tokens = info.input_tokens if info.input_tokens is not None else s.input_tokens
+    output_tokens = info.output_tokens if info.output_tokens is not None else s.output_tokens
+    cache_creation_tokens = (
+        info.cache_creation_tokens
+        if info.cache_creation_tokens is not None
+        else s.cache_creation_tokens
+    )
+    cache_read_tokens = (
+        info.cache_read_tokens if info.cache_read_tokens is not None else s.cache_read_tokens
+    )
+    total_tokens = info.total_tokens if info.total_tokens is not None else s.total_tokens
     return SessionSummaryResponse(
         id=s.id,
         workflow_id=s.workflow_id,
@@ -532,12 +562,12 @@ def _build_session_summary_response(
         agent_provider=s.agent_type,
         agent_model=info.agent_model,
         agent_model_display=format_model_compact(info.agent_model),
-        input_tokens=s.input_tokens,
-        output_tokens=s.output_tokens,
-        cache_creation_tokens=s.cache_creation_tokens,
-        cache_read_tokens=s.cache_read_tokens,
-        total_tokens=s.total_tokens,
-        total_tokens_display=format_tokens(s.total_tokens),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
+        total_tokens=total_tokens,
+        total_tokens_display=format_tokens(total_tokens),
         total_cost_usd=info.total_cost_usd,
         total_cost_display=format_cost(info.total_cost_usd),
         duration_seconds=info.duration_seconds,
