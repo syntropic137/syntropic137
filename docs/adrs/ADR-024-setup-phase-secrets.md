@@ -465,6 +465,16 @@ If all three checks fail, the CLI exits immediately with `Not logged in · Pleas
 
 ### Decision: direct injection into agent env
 
+**This is forced, not chosen.** Claude Code CLI v2.1.76+ will not authenticate against any value that does not pass its local format check. Every alternative has been verified to fail:
+
+- **`"proxy-managed"` placeholder** (the original ADR-022 design) → fails the format regex → CLI exits before any HTTP call → sidecar never invoked.
+- **Empty env var** → CLI exits with `Not logged in`.
+- **`--bare` flag** to bypass auth check → does not exist in v2.1.76+ (`error: unknown option '--bare'`, verified empirically in cycle 001).
+- **`--skip-auth-check` or equivalent** → does not exist.
+- **On-disk credentials file pre-populated by setup phase** → the `~/.claude/credentials.json` format is not publicly documented and is opaque to write reliably.
+
+The CLI is what consumers run; we cannot change it. There is no way to keep the credential out of the agent's environment AND have Claude Code authenticate. Pick one. We pick "Claude Code authenticates" because the alternative is "the platform does nothing."
+
 The real credential is injected directly into the agent phase environment in `_build_agent_env` (`WorkspaceProvisionHandler.py`). OAuth token is preferred; API key is the fallback:
 
 ```python
@@ -475,6 +485,16 @@ elif settings.anthropic_api_key:
 ```
 
 `ANTHROPIC_BASE_URL` still routes SDK traffic through the Envoy sidecar for observability purposes — the sidecar sees the token on outgoing requests and can log it but does not need to substitute it.
+
+### Yes, this means a compromised agent can exfiltrate the credential
+
+A prompt-injected workspace agent that escapes its tool sandbox could read `CLAUDE_CODE_OAUTH_TOKEN` from `/proc/self/environ` and exfiltrate it. We acknowledge this. The mitigation is not "hide the token" (impossible, see above) but:
+
+1. **Operator awareness:** anyone running a Claude Code agent on their own credential is implicitly trusting that agent with it. This applies equally to running Claude Code on your laptop, in a Syn137 workspace, or via any other harness. Users running Syn137 selfhost are running their own agents on their own credential.
+2. **Workflow code review:** prompt-injection-resistant workflow design (limited tool grants, explicit allowlists, no fetch-then-execute patterns) reduces the practical exfiltration risk.
+3. **Credential rotation discipline:** OAuth tokens can be revoked at the Anthropic console; rotate any credential after a workflow run that handled untrusted input.
+
+For multi-tenant or untrusted-workflow scenarios, this trade-off becomes unacceptable. At that point Syn137 needs a fundamentally different agent runtime (e.g., per-tenant short-lived API keys minted by a privileged minter, with the minter behind the sidecar). That is out of scope for the single-tenant selfhost design.
 
 ### Security posture change
 
