@@ -60,3 +60,56 @@ export function formatDurationFromRange(
   const end = completedAt ? new Date(completedAt).getTime() : (now ?? Date.now())
   return formatDurationSeconds((end - start) / 1000)
 }
+
+/**
+ * Format an ISO timestamp as a relative time ("4m ago", "in 2m", "just now").
+ * Returns '\u2014' if iso is null/empty. Pass `now` for deterministic tests.
+ *
+ * Client-side rendering keeps the string current to wall-clock time without the
+ * server needing to know when the response will be displayed.
+ */
+export function formatRelativeTime(iso: string | null | undefined, now?: number): string {
+  if (!iso) return '\u2014'
+  const ts = new Date(iso).getTime()
+  if (Number.isNaN(ts)) return '\u2014'
+  const diffMs = (now ?? Date.now()) - ts
+  const past = diffMs >= 0
+  const absSeconds = Math.abs(diffMs) / 1000
+  if (absSeconds < 5) return 'just now'
+
+  const units: Array<[number, string]> = [
+    [60, 's'],
+    [60, 'm'],
+    [24, 'h'],
+    [7, 'd'],
+    [Number.POSITIVE_INFINITY, 'w'],
+  ]
+  let value = absSeconds
+  let unit = 's'
+  for (const [step, label] of units) {
+    if (value < step) {
+      unit = label
+      break
+    }
+    value /= step
+    unit = label
+  }
+  const rounded = Math.max(1, Math.round(value))
+  return past ? `${rounded}${unit} ago` : `in ${rounded}${unit}`
+}
+
+/**
+ * Format an ISO timestamp into the user's locale + time zone.
+ *
+ * Server returns ISO 8601 UTC; the browser is the only place that knows where
+ * the viewer actually is, so locale/time-zone formatting belongs here.
+ */
+export function formatTimestampLocale(iso: string | null | undefined): string {
+  if (!iso) return '\u2014'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '\u2014'
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(d)
+}

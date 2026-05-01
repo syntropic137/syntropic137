@@ -8,6 +8,10 @@ vi.mock('../../api/sessions', () => ({
   listSessions: vi.fn(),
 }))
 
+vi.mock('../useActivityStream', () => ({
+  useActivityStream: vi.fn(() => ({ connected: true, lastEventAt: null })),
+}))
+
 import { listSessions } from '../../api/sessions'
 
 const mockListSessions = vi.mocked(listSessions)

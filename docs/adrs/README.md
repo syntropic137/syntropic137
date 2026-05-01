@@ -2,7 +2,7 @@
 
 ## How to use
 
-- Next available number: **ADR-063**
+- Next available number: **ADR-065**
 - Template: Status, Date, Context, Decision, Consequences (Nygard format)
 - ADR-025 was never created (numbering gap)
 - ADR-027 has two files: `ADR-027-sdk-wrapper-architecture.md` (superseded) and `ADR-027-unified-workflow-executor.md` (accepted)
@@ -86,6 +86,7 @@
 | [ADR-016](ADR-016-ui-feedback-module.md) | UI Feedback Module | Proposed |
 | [ADR-044](ADR-044-cli-first-agent-native-interface.md) | CLI-First, Agent-Native Interface Design | Accepted |
 | [ADR-053](ADR-053-plugin-schema-generation-strategy.md) | Plugin Schema Generation Strategy | Accepted |
+| [ADR-064](ADR-064-observability-monitor-ui.md) | Observability Monitor UI for Sessions and Executions | Proposed |
 
 ### Agent Architecture
 

@@ -208,6 +208,9 @@ class SessionSummary:
     execution_id: str | None = None
     """ID of the workflow execution/run this session belongs to."""
 
+    repos: tuple[str, ...] = ()
+    """Repository slugs (owner/repo) this session has access to."""
+
     operations: tuple[OperationRecord, ...] = ()
     """Operations recorded during this session."""
 
@@ -257,6 +260,7 @@ class SessionSummary:
             duration_seconds=data.get("duration_seconds"),
             phase_id=data.get("phase_id"),
             execution_id=data.get("execution_id"),
+            repos=tuple(data.get("repos", ())),
             operations=operations,
             # Subagent metrics
             subagent_count=data.get("subagent_count", 0),
@@ -303,6 +307,7 @@ class SessionSummary:
             "duration_seconds": self.duration_seconds,
             "phase_id": self.phase_id,
             "execution_id": self.execution_id,
+            "repos": list(self.repos),
             "operations": [op.to_dict() for op in self.operations],
             # Subagent metrics
             "subagent_count": self.subagent_count,

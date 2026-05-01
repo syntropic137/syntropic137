@@ -16,20 +16,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { API_BASE } from '../api/client'
+import type { SSEEventFrame } from '../types'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Typed envelope matching SSEEventFrame on the backend. */
-export interface SSEEventFrame {
-  type: 'connected' | 'event' | 'terminal'
-  event_type: string
-  execution_id: string | null
-  /** Event payload from domain model_dump(). Keys vary per event type. */
-  data: Record<string, unknown>
-  timestamp: string
-}
+export type { SSEEventFrame }
 
 /** Options for the hook */
 export interface UseExecutionStreamOptions {

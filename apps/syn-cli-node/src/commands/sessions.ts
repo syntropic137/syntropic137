@@ -1,6 +1,11 @@
 /**
- * Session management commands — list, show.
- * Port of apps/syn-cli/src/syn_cli/commands/sessions.py
+ * Session management commands - list, show.
+ *
+ * Reads server-produced *_display fields for human-readable values
+ * (tokens, cost, duration, model). Locale-dependent timestamps are
+ * formatted client-side from the API's ISO 8601 UTC strings.
+ *
+ * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
@@ -9,7 +14,7 @@ import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
-import { formatCost, formatDuration, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
+import { formatStatus, formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
 
 type SessionSummary = components["schemas"]["SessionSummaryResponse"];
@@ -44,19 +49,19 @@ const listCommand: CommandDef = {
     const table = new Table({ title: "Sessions" });
     table.addColumn("Session ID", { style: CYAN });
     table.addColumn("Status");
-    table.addColumn("Provider");
+    table.addColumn("Model");
     table.addColumn("Started");
     table.addColumn("Tokens", { align: "right" });
     table.addColumn("Cost", { align: "right" });
 
     for (const s of items) {
       table.addRow(
-        s.id.slice(0, 8) + "…",
+        s.id.slice(0, 8) + "\u2026",
         formatStatus(s.status),
-        s.agent_provider ?? "\u2014",
+        s.agent_model_display ?? s.agent_provider ?? "\u2014",
         formatTimestamp(s.started_at),
-        formatTokens(s.total_tokens),
-        formatCost(s.total_cost_usd),
+        s.total_tokens_display,
+        s.total_cost_display,
       );
     }
     table.print();
@@ -79,14 +84,14 @@ const showCommand: CommandDef = {
     print(`  Workflow:    ${d.workflow_name ?? d.workflow_id ?? "\u2014"}`);
     print(`  Status:      ${formatStatus(d.status)}`);
     print(`  Provider:    ${d.agent_provider ?? "\u2014"}`);
-    print(`  Model:       ${d.agent_model ?? "\u2014"}`);
+    print(`  Model:       ${d.agent_model_display ?? d.agent_model ?? "\u2014"}`);
     print(`  Started:     ${formatTimestamp(d.started_at)}`);
     if (d.completed_at) print(`  Completed:   ${formatTimestamp(d.completed_at)}`);
-    if (d.duration_seconds != null) print(`  Duration:    ${formatDuration(d.duration_seconds * 1000)}`);
-    print(`  Tokens:      ${formatTokens(d.total_tokens)} (in: ${formatTokens(d.input_tokens)}, out: ${formatTokens(d.output_tokens)})`);
-    if (d.cache_creation_tokens) print(`  Cache Write: ${formatTokens(d.cache_creation_tokens)}`);
-    if (d.cache_read_tokens) print(`  Cache Read:  ${formatTokens(d.cache_read_tokens)}`);
-    print(`  Cost:        ${formatCost(d.total_cost_usd)}`);
+    if (d.duration_seconds != null) print(`  Duration:    ${d.duration_display}`);
+    print(`  Tokens:      ${d.total_tokens_display} (in: ${d.input_tokens_display}, out: ${d.output_tokens_display})`);
+    if (d.cache_creation_tokens) print(`  Cache Write: ${d.cache_creation_tokens_display}`);
+    if (d.cache_read_tokens) print(`  Cache Read:  ${d.cache_read_tokens_display}`);
+    print(`  Cost:        ${d.total_cost_display}`);
     if (d.error_message) print(`  Error:       ${d.error_message}`);
 
     const operations = d.operations ?? [];

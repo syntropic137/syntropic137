@@ -58,6 +58,15 @@ class ExecutionDetailResponse(BaseModel):
 
 
 class ExecutionSummaryResponse(BaseModel):
+    """Summary of a workflow execution.
+
+    Display fields (``*_display``) are produced server-side so all clients
+    (dashboard, CLI, future UIs) share identical human-readable output. Raw
+    fields remain for programmatic consumers; both are always present.
+
+    See: docs/adrs/ADR-064-observability-monitor-ui.md
+    """
+
     workflow_execution_id: str
     workflow_id: str
     workflow_name: str
@@ -67,14 +76,19 @@ class ExecutionSummaryResponse(BaseModel):
     completed_phases: int = 0
     total_phases: int = 0
     total_tokens: int
+    total_tokens_display: str = "0"
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
     total_cache_read_tokens: int
     total_cost_usd: Decimal = Decimal("0")
+    total_cost_display: str = "$0.00"
+    duration_seconds: float | None = None
+    duration_display: str = "—"
     tool_call_count: int = 0
     error_message: str | None = None
     repos: list[str] = Field(default_factory=list)
+    repos_display: str | None = None
 
 
 class ExecutionListResponse(BaseModel):
