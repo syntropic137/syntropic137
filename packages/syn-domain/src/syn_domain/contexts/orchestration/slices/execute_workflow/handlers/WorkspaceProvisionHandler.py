@@ -81,6 +81,12 @@ def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, 
     # validates credential format locally before sending any HTTP request, so
     # the sidecar-substitution pattern ("proxy-managed" placeholder) no longer
     # works — the CLI rejects it before the proxy gets a chance. ADR-024 updated.
+    #
+    # TODO(#724): For the API key path specifically, spike whether a syntactically
+    # valid placeholder (e.g. "sk-ant-DEADBEEF...") passes the local format check
+    # so the Envoy sidecar can substitute the real value on egress. If it works,
+    # restore ADR-022/024's "agent never sees raw secrets" invariant for API keys.
+    # OAuth is out of scope (ToS gray area for header proxying).
     if settings.claude_code_oauth_token:
         env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = settings.claude_code_oauth_token.get_secret_value()
     elif settings.anthropic_api_key:

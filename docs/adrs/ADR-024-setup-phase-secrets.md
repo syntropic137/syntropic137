@@ -501,3 +501,29 @@ If a future Claude Code CLI version supports any of the following, the original 
 1. A `--skip-auth-check` or `--bare` flag that defers auth to the server response (does not exist as of v2.1.76).
 2. A credential-helper interface for HTTP APIs analogous to `git credential-helper`.
 3. On-disk credential pre-population during setup phase (the `~/.claude/credentials.json` file format is not publicly documented; this may be viable if the format is discovered or stabilizes).
+
+### Per-credential injection matrix
+
+Different secret types have very different risk profiles. The platform handles each according to its lifetime, scope, and ToS posture:
+
+| Credential | Lifetime | Scope | Current strategy | Risk class | Follow-up |
+|---|---|---|---|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | months/years | account-wide, full spend | direct env injection | **HIGH** — accepted; ToS gray area precludes header proxying | none — direct injection is the long-term posture |
+| `ANTHROPIC_API_KEY` | indefinite | account-wide, full spend | direct env injection (fallback when OAuth absent) | **HIGH** — accepted short-term | TODO #724 — spike sidecar substitution with valid-format placeholder |
+| `GH_TOKEN` (GitHub App installation token) | 1 hour | per-installation, repo-scoped | direct env injection (planned) | **LOW** — already short-lived and scoped | TODO #723 — implement direct injection; #725 — sidecar mint-on-demand for >60min tasks |
+| `GH_TOKEN` (user PAT, dev fallback) | user-set | user-defined | direct env injection (operator-controlled) | **MEDIUM** — operator owns it | none — user controls scope |
+
+### Long-running task ceiling
+
+GitHub App installation tokens are hard-capped at **1 hour** by GitHub. As Claude Code agent runs grow longer (model capability + multi-phase orchestration), workflow executions exceeding 60 minutes will hit mid-execution 401s on any `gh` or `git push` call. The direct-injection path (#723) does not solve this; the sidecar mint-on-demand pattern (#725) does, by transparently refreshing the token on every outgoing GitHub call.
+
+Migration plan: ship #723 first to unblock the common case (sub-60min workflows). Land #725 before it becomes a blocker — track wall-clock distribution of workflow executions to know when that's imminent.
+
+### TODOs in implementation
+
+Code paths that violate ADR-024's original "agent never sees raw secrets" invariant carry inline TODO comments referencing the relevant follow-up issue:
+
+- `_build_agent_env` in `WorkspaceProvisionHandler.py` — TODO #724 (Claude API key sidecar spike)
+- (future) `_build_agent_env` once `GH_TOKEN` injection lands — TODO #725 (GH App sidecar mint-on-demand)
+
+These TODOs are an explicit reminder that direct injection is a deliberate compromise documented in this ADR, not an oversight.
