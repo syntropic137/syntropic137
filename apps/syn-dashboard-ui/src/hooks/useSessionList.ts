@@ -20,6 +20,7 @@ import type { SSEEventFrame, SessionSummary, TimeWindow } from '../types'
 import { sortSessions } from '../utils/sessionSort'
 import { useActivityStream } from './useActivityStream'
 import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
+import { useRefetchWhileRunning } from './useRefetchWhileRunning'
 import { useSortUrlState, type SortKey, type SortState } from './useSortUrlState'
 import { useStatusCounts } from './useStatusCounts'
 import { useThrottledRefetch } from './useThrottledRefetch'
@@ -27,6 +28,11 @@ import { useThrottledRefetch } from './useThrottledRefetch'
 const REFETCH_THROTTLE_MS = 500
 const POLL_INTERVAL_MS = 5000
 const SESSION_LIVE_EVENTS = new Set(['SessionStarted', 'SessionCompleted'])
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
+
+function isTerminalSession(s: SessionSummary): boolean {
+  return TERMINAL_STATUSES.has(s.status)
+}
 
 export interface UseSessionListResult {
   sessions: SessionSummary[]
@@ -117,6 +123,10 @@ export function useSessionList(): UseSessionListResult {
     const id = setInterval(fetchNow, POLL_INTERVAL_MS)
     return () => clearInterval(id)
   }, [connected, fetchNow])
+
+  // SSE only fires on Started/Completed, but Lane 2 (tokens/cost/duration)
+  // updates continuously. Poll while any row is non-terminal.
+  useRefetchWhileRunning({ items: sessions, isTerminal: isTerminalSession, refetch: fetchNow })
 
   const filteredSessions = useMemo(() => {
     const matched = searchQuery ? sessions.filter((s) => matchesQuery(s, searchQuery)) : sessions

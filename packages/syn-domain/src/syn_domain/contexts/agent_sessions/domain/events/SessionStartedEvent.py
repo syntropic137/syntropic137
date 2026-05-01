@@ -6,6 +6,7 @@ from datetime import datetime  # noqa: TC003
 from typing import Any
 
 from event_sourcing import DomainEvent, event
+from pydantic import Field
 
 
 @event("SessionStarted", "v1")
@@ -27,6 +28,10 @@ class SessionStartedEvent(DomainEvent):
     # Agent info
     agent_provider: str
     agent_model: str | None = None
+
+    # Repository context (owner/repo slugs from the workflow execution).
+    # Optional with empty default for backward compatibility with pre-repos events.
+    repos: list[str] = Field(default_factory=list)
 
     # Timing
     started_at: datetime

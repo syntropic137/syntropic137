@@ -45,7 +45,7 @@ const COLUMNS: ColumnDef[] = [
   { label: 'Status', align: 'left', sortKey: 'status' },
   { label: 'Workflow', align: 'left', sortKey: 'workflow' },
   { label: 'Phase', align: 'left', sortKey: 'phase' },
-  { label: 'Model', align: 'left', sortKey: 'model' },
+  { label: 'Repos', align: 'left', sortKey: 'repos' },
   { label: 'Tokens', align: 'right', sortKey: 'tokens' },
   { label: 'Cost', align: 'right', sortKey: 'cost' },
   { label: 'Duration', align: 'right', sortKey: 'duration' },

@@ -11,6 +11,7 @@ from syn_shared.display import (
     format_duration_seconds,
     format_model_compact,
     format_phase,
+    format_repos,
     format_tokens,
 )
 
@@ -126,3 +127,23 @@ class TestFormatPhase:
     )
     def test_renders_expected_string(self, value: str | None, expected: str | None) -> None:
         assert format_phase(value) == expected
+
+
+class TestFormatRepos:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (None, None),
+            ([], None),
+            ((), None),
+            (["acme/foo"], "foo"),
+            (["acme/foo", "acme/bar"], "foo +1"),
+            (["acme/foo", "acme/bar", "acme/baz"], "foo +2"),
+            (["  acme/foo  ", "", "acme/bar"], "foo +1"),
+            (["singletoken"], "singletoken"),
+        ],
+    )
+    def test_renders_expected_string(
+        self, value: list[str] | tuple[str, ...] | None, expected: str | None
+    ) -> None:
+        assert format_repos(value) == expected

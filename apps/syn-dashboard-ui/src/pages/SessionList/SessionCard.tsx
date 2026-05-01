@@ -87,7 +87,7 @@ export function SessionCard({
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <MetricCell label="Model" value={session.agent_model_display ?? '\u2014'} />
+        <MetricCell label="Repos" value={session.repos_display ?? '\u2014'} />
         <MetricCell label="Tokens" value={session.total_tokens_display} />
         <MetricCell label="Cost" value={session.total_cost_display} />
         <MetricCell label="Duration" value={session.duration_display} />

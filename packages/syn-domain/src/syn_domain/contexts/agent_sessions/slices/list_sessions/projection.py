@@ -242,6 +242,7 @@ class SessionListProjection(AutoDispatchProjection):
             duration_seconds=None,
             phase_id=event_data.get("phase_id"),
             execution_id=event_data.get("execution_id"),
+            repos=tuple(event_data.get("repos", ())),
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
 

@@ -42,6 +42,7 @@ from syn_shared.display import (
     format_duration_seconds,
     format_model_compact,
     format_phase,
+    format_repos,
     format_tokens,
 )
 
@@ -88,6 +89,8 @@ class SessionSummaryResponse(BaseModel):
     agent_provider: str | None
     agent_model: str | None = None
     agent_model_display: str | None = None
+    repos: list[str] = Field(default_factory=list)
+    repos_display: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -156,6 +159,8 @@ class SessionResponse(BaseModel):
     agent_provider: str | None
     agent_model: str | None
     agent_model_display: str | None = None
+    repos: list[str] = Field(default_factory=list)
+    repos_display: str | None = None
     status: str
     workspace_path: str | None = None
     input_tokens: int = 0
@@ -328,6 +333,7 @@ async def list_sessions(
                 phase_id=s.phase_id,
                 status=s.status,
                 agent_type=s.agent_type,
+                repos=list(s.repos),
                 input_tokens=s.input_tokens,
                 output_tokens=s.output_tokens,
                 cache_creation_tokens=s.cache_creation_tokens,
@@ -508,6 +514,7 @@ async def get_session(
             phase_id=session.phase_id,
             agent_type=session.agent_type,
             status=session.status,
+            repos=list(session.repos),
             input_tokens=cd.input_tokens,
             output_tokens=cd.output_tokens,
             cache_creation_tokens=cd.cache_creation_tokens,
@@ -562,6 +569,8 @@ def _build_session_summary_response(
         agent_provider=s.agent_type,
         agent_model=info.agent_model,
         agent_model_display=format_model_compact(info.agent_model),
+        repos=list(s.repos),
+        repos_display=format_repos(s.repos),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cache_creation_tokens=cache_creation_tokens,
@@ -683,6 +692,8 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         agent_provider=detail.agent_type,
         agent_model=detail.agent_model,
         agent_model_display=format_model_compact(detail.agent_model),
+        repos=list(detail.repos),
+        repos_display=format_repos(detail.repos),
         status=detail.status,
         workspace_path=detail.workspace_path,
         input_tokens=detail.input_tokens,

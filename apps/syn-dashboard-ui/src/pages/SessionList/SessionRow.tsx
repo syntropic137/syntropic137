@@ -24,6 +24,26 @@ interface SessionRowProps {
   onToggleSelection?: (modifiers: SelectionClickModifiers) => void
 }
 
+const EM_DASH = '—'
+
+interface DerivedCells {
+  workflowLabel: string
+  phaseLabel: string
+  phaseTitle: string | undefined
+  reposLabel: string
+  reposTitle: string | undefined
+}
+
+function deriveCells(session: SessionSummary): DerivedCells {
+  return {
+    workflowLabel: session.workflow_name ?? session.workflow_id ?? 'Unknown workflow',
+    phaseLabel: session.phase_display ?? session.phase_id ?? EM_DASH,
+    phaseTitle: session.phase_id ?? undefined,
+    reposLabel: session.repos_display ?? EM_DASH,
+    reposTitle: session.repos.join('\n') || undefined,
+  }
+}
+
 export function SessionRow({
   session,
   isSelected = false,
@@ -31,6 +51,7 @@ export function SessionRow({
 }: SessionRowProps) {
   const navigate = useNavigate()
   const [copied, setCopied] = useState(false)
+  const cells = deriveCells(session)
 
   const handleClick = () => {
     navigate(`/sessions/${session.id}`)
@@ -81,16 +102,19 @@ export function SessionRow({
         <StatusBadge status={session.status} size="sm" />
       </td>
       <td className="px-3 py-2 text-sm text-[var(--color-text-primary)]">
-        {session.workflow_name ?? session.workflow_id ?? 'Unknown workflow'}
+        {cells.workflowLabel}
       </td>
       <td
         className="px-3 py-2 text-xs text-[var(--color-text-secondary)]"
-        title={session.phase_id ?? undefined}
+        title={cells.phaseTitle}
       >
-        {session.phase_display ?? session.phase_id ?? '\u2014'}
+        {cells.phaseLabel}
       </td>
-      <td className="px-3 py-2 text-xs text-[var(--color-text-secondary)]">
-        {session.agent_model_display ?? '\u2014'}
+      <td
+        className="px-3 py-2 text-xs text-[var(--color-text-secondary)]"
+        title={cells.reposTitle}
+      >
+        {cells.reposLabel}
       </td>
       <td className="px-3 py-2 text-right font-mono text-xs text-[var(--color-text-secondary)]">
         {session.total_tokens_display}

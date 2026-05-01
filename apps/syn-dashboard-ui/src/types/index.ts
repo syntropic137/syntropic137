@@ -90,6 +90,8 @@ export interface SessionSummary {
   agent_provider: string | null
   agent_model: string | null
   agent_model_display: string | null
+  repos: string[]
+  repos_display: string | null
   total_tokens: number
   total_tokens_display: string
   total_cost_usd: number

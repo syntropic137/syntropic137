@@ -131,3 +131,21 @@ def format_model_compact(model: str | None) -> str | None:
         return raw
     version = ".".join(version_parts)
     return f"{family.title()} {version}"
+
+
+def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
+    """Render a list of ``owner/repo`` slugs as a compact label.
+
+    One repo: just the repo name (``"acme/foo" -> "foo"``).
+    Multiple: first repo + ``+N`` (``["acme/foo", "acme/bar"] -> "foo +1"``).
+    Empty or ``None`` returns ``None``.
+    """
+    if not repos:
+        return None
+    items = [r.strip() for r in repos if r and r.strip()]
+    if not items:
+        return None
+    first = items[0].split("/", 1)[-1] or items[0]
+    if len(items) == 1:
+        return first
+    return f"{first} +{len(items) - 1}"

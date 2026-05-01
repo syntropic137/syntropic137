@@ -145,6 +145,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             milestone_id=command.milestone_id,
             agent_provider=command.agent_provider,
             agent_model=command.agent_model,
+            repos=list(command.repos),
             started_at=datetime.now(UTC),
             metadata=command.metadata or {},
         )

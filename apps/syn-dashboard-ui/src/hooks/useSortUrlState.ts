@@ -15,7 +15,7 @@ export type SortKey =
   | 'status'
   | 'workflow'
   | 'phase'
-  | 'model'
+  | 'repos'
   | 'tokens'
   | 'cost'
   | 'duration'
@@ -32,7 +32,7 @@ const VALID_KEYS: SortKey[] = [
   'status',
   'workflow',
   'phase',
-  'model',
+  'repos',
   'tokens',
   'cost',
   'duration',

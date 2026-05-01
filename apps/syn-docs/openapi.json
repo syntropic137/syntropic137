@@ -8846,6 +8846,24 @@
             ],
             "title": "Agent Model Display"
           },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos"
+          },
+          "repos_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repos Display"
+          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -9102,6 +9120,24 @@
               }
             ],
             "title": "Agent Model Display"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos"
+          },
+          "repos_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repos Display"
           },
           "input_tokens": {
             "type": "integer",

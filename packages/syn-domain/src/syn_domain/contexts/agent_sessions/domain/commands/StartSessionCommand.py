@@ -32,5 +32,8 @@ class StartSessionCommand(BaseModel):
     agent_provider: str = Field(..., description="Agent provider (claude, openai, mock)")
     agent_model: str | None = Field(default=None, description="Specific model used")
 
+    # Repository context (owner/repo slugs from the workflow execution)
+    repos: list[str] = Field(default_factory=list, description="Repos this session has access to")
+
     # Optional metadata
     metadata: dict[str, Any] | None = None

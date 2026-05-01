@@ -3535,6 +3535,10 @@ export interface components {
             agent_model: string | null;
             /** Agent Model Display */
             agent_model_display?: string | null;
+            /** Repos */
+            repos?: string[];
+            /** Repos Display */
+            repos_display?: string | null;
             /** Status */
             status: string;
             /** Workspace Path */
@@ -3658,6 +3662,10 @@ export interface components {
             agent_model?: string | null;
             /** Agent Model Display */
             agent_model_display?: string | null;
+            /** Repos */
+            repos?: string[];
+            /** Repos Display */
+            repos_display?: string | null;
             /**
              * Input Tokens
              * @default 0
