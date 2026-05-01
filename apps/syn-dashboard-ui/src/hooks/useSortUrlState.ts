@@ -31,6 +31,10 @@ export interface SortConfig<K extends string> {
 export interface UseSortUrlStateResult<K extends string> {
   sort: SortState<K>
   toggleSort: (key: K) => void
+  /** True iff the current sort differs from the configured default. */
+  isDefault: boolean
+  /** Restore the default key + direction (clears the URL params). */
+  resetSort: () => void
 }
 
 // Legacy alias retained for SessionList during migration.
@@ -106,5 +110,19 @@ export function useSortUrlState<K extends string>(
     [sort, setSearchParams, config.defaultKey, defaultDir],
   )
 
-  return { sort, toggleSort }
+  const resetSort = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const out = new URLSearchParams(prev)
+        out.delete('sort')
+        out.delete('dir')
+        return out
+      },
+      { replace: true },
+    )
+  }, [setSearchParams])
+
+  const isDefault = sort.key === config.defaultKey && sort.dir === defaultDir
+
+  return { sort, toggleSort, isDefault, resetSort }
 }

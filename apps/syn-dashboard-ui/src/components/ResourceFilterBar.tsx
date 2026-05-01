@@ -17,7 +17,10 @@ export interface ResourceFilterBarProps {
   statusCounts: Record<string, number>
   timeWindow: TimeWindow
   setTimeWindow: (next: TimeWindow) => void
-  clearAll: () => void
+  /** Restore default filters + sort; surfaces the Reset button when truthy. */
+  reset: () => void
+  /** When false (defaults are active), the Reset button is hidden. */
+  isDefault: boolean
 }
 
 const STATUSES: { value: string; label: string }[] = [
@@ -34,10 +37,9 @@ export function ResourceFilterBar({
   statusCounts,
   timeWindow,
   setTimeWindow,
-  clearAll,
+  reset,
+  isDefault,
 }: ResourceFilterBarProps) {
-  const hasFilters = selectedStatuses.size > 0 || timeWindow !== '24h'
-
   return (
     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <div className="flex flex-wrap items-center gap-2">
@@ -52,16 +54,16 @@ export function ResourceFilterBar({
         ))}
       </div>
       <div className="flex items-center gap-3">
-        <TimeWindowPicker value={timeWindow} onChange={setTimeWindow} />
-        {hasFilters && (
+        {!isDefault && (
           <button
             type="button"
-            onClick={clearAll}
+            onClick={reset}
             className="text-xs text-[var(--color-text-secondary)] underline-offset-2 hover:text-[var(--color-text-primary)] hover:underline"
           >
-            Clear
+            Reset
           </button>
         )}
+        <TimeWindowPicker value={timeWindow} onChange={setTimeWindow} />
       </div>
     </div>
   )

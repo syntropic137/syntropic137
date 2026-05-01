@@ -54,6 +54,14 @@ function isTerminalSession(s: SessionSummary): boolean {
   return TERMINAL_STATUSES.has(s.status)
 }
 
+function isDefaultViewState(
+  isDefaultSort: boolean,
+  selectedStatuses: Set<string>,
+  timeWindow: TimeWindow,
+): boolean {
+  return isDefaultSort && selectedStatuses.size === 0 && timeWindow === '24h'
+}
+
 export interface UseSessionListResult {
   sessions: SessionSummary[]
   filteredSessions: SessionSummary[]
@@ -65,7 +73,10 @@ export interface UseSessionListResult {
   clearStatuses: () => void
   timeWindow: TimeWindow
   setTimeWindow: (next: TimeWindow) => void
-  clearAllFilters: () => void
+  /** Restore default filters AND default sort (started/desc). */
+  resetView: () => void
+  /** True when filters and sort are at their defaults. */
+  isDefaultView: boolean
   statusCounts: Record<string, number>
   sort: SortState<SortKey>
   toggleSort: (key: SortKey) => void
@@ -94,7 +105,13 @@ export function useSessionList(): UseSessionListResult {
     clearStatuses,
     clearAll: clearAllFilters,
   } = useFilterUrlState()
-  const { sort, toggleSort } = useSortUrlState(SESSION_SORT_CONFIG)
+  const { sort, toggleSort, isDefault: isDefaultSort, resetSort } =
+    useSortUrlState(SESSION_SORT_CONFIG)
+  const isDefaultView = isDefaultViewState(isDefaultSort, selectedStatuses, timeWindow)
+  const resetView = useCallback(() => {
+    clearAllFilters()
+    resetSort()
+  }, [clearAllFilters, resetSort])
 
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -166,7 +183,8 @@ export function useSessionList(): UseSessionListResult {
     clearStatuses,
     timeWindow,
     setTimeWindow,
-    clearAllFilters,
+    resetView,
+    isDefaultView,
     statusCounts,
     sort,
     toggleSort,

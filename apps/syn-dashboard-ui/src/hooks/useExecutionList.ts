@@ -93,7 +93,10 @@ export interface UseExecutionListResult {
   clearStatuses: () => void
   timeWindow: TimeWindow
   setTimeWindow: (next: TimeWindow) => void
-  clearAllFilters: () => void
+  /** Restore default filters AND default sort. */
+  resetView: () => void
+  /** True when filters and sort are at their defaults. */
+  isDefaultView: boolean
   statusCounts: Record<string, number>
   sort: SortState<ExecutionSortKey>
   toggleSort: (key: ExecutionSortKey) => void
@@ -110,7 +113,13 @@ export function useExecutionList(): UseExecutionListResult {
     clearStatuses,
     clearAll: clearAllFilters,
   } = useFilterUrlState()
-  const { sort, toggleSort } = useSortUrlState(EXECUTION_SORT_CONFIG)
+  const { sort, toggleSort, isDefault: isDefaultSort, resetSort } =
+    useSortUrlState(EXECUTION_SORT_CONFIG)
+  const isDefaultView = isDefaultSort && selectedStatuses.size === 0 && timeWindow === '24h'
+  const resetView = useCallback(() => {
+    clearAllFilters()
+    resetSort()
+  }, [clearAllFilters, resetSort])
 
   const [executions, setExecutions] = useState<ExecutionListItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -186,7 +195,8 @@ export function useExecutionList(): UseExecutionListResult {
     clearStatuses,
     timeWindow,
     setTimeWindow,
-    clearAllFilters,
+    resetView,
+    isDefaultView,
     statusCounts,
     sort,
     toggleSort,

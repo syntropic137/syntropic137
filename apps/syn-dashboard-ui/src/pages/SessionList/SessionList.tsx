@@ -75,7 +75,8 @@ export function SessionList() {
     toggleStatus,
     timeWindow,
     setTimeWindow,
-    clearAllFilters,
+    resetView,
+    isDefaultView,
     statusCounts,
     sort,
     toggleSort,
@@ -133,7 +134,8 @@ export function SessionList() {
         statusCounts={statusCounts}
         timeWindow={timeWindow}
         setTimeWindow={setTimeWindow}
-        clearAll={clearAllFilters}
+        reset={resetView}
+        isDefault={isDefaultView}
       />
 
       {isMobile ? (

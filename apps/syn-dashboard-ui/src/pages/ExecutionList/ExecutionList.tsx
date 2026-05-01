@@ -71,7 +71,8 @@ export function ExecutionList() {
     toggleStatus,
     timeWindow,
     setTimeWindow,
-    clearAllFilters,
+    resetView,
+    isDefaultView,
     statusCounts,
     sort,
     toggleSort,
@@ -131,7 +132,8 @@ export function ExecutionList() {
         statusCounts={statusCounts}
         timeWindow={timeWindow}
         setTimeWindow={setTimeWindow}
-        clearAll={clearAllFilters}
+        reset={resetView}
+        isDefault={isDefaultView}
       />
 
       {isMobile ? (
