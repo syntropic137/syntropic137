@@ -48,12 +48,14 @@ export function Dashboard() {
           icon={GitBranch}
           color="accent"
           subtitle={`${metrics?.completed_workflows ?? 0} completed`}
+          href="/workflows"
         />
         <MetricCard
           title="Total Sessions"
           value={metrics?.total_sessions ?? 0}
           icon={Activity}
           color="success"
+          href="/sessions"
         />
         <MetricCard
           title="Total Tokens"

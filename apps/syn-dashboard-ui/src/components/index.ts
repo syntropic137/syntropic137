@@ -12,6 +12,7 @@ export { ExecutionCostSummary } from './ExecutionCostSummary'
 export { Layout } from './Layout'
 export { Loader, PageLoader } from './Loader'
 export { MetricCard } from './MetricCard'
+export { ModelBreakdown, type ModelBreakdownProps } from './ModelBreakdown'
 export {
   ResourceCardList,
   ResourceTable,

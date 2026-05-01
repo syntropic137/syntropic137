@@ -2,7 +2,16 @@ import { clsx } from 'clsx'
 import { CheckCircle2, DollarSign, FileText, Play, XCircle } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 
-import { Breadcrumbs, Card, EmptyState, MetricCard, PageLoader, StatusBadge } from '../../components'
+import {
+  Breadcrumbs,
+  Card,
+  EmptyState,
+  MetricCard,
+  ModelBreakdown,
+  PageLoader,
+  StatusBadge,
+} from '../../components'
+import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
 import { useExecutionData } from '../../hooks'
@@ -10,7 +19,47 @@ import type { ExecutionDetailResponse } from '../../types'
 import { formatDurationFromRange } from '../../utils/formatters'
 import { ArtifactSection } from './ArtifactSection'
 import { PhaseTimeline } from './PhaseTimeline'
-import { TokenBreakdownChart } from './TokenBreakdownChart'
+
+type Phase = ExecutionDetailResponse['phases'][number]
+
+function ReposPanel({ repos }: { repos: string[] }) {
+  if (repos.length === 0) return null
+  return (
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <h3 className="mb-2 text-sm font-medium text-[var(--color-text-muted)]">Repositories</h3>
+      <ul className="space-y-1">
+        {repos.map((url) => {
+          const name = url.split('/').pop()?.replace(/\.git$/, '') ?? url
+          return (
+            <li key={url} className="text-sm">
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[var(--color-accent)] hover:underline"
+                title={url}
+              >
+                {name}
+              </a>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+function aggregateCostByModel(phases: Phase[]): Record<string, string> {
+  const totals = new Map<string, number>()
+  for (const phase of phases) {
+    for (const [model, costStr] of Object.entries(phase.cost_by_model ?? {})) {
+      const cost = Number.parseFloat(costStr)
+      if (!Number.isFinite(cost)) continue
+      totals.set(model, (totals.get(model) ?? 0) + cost)
+    }
+  }
+  return Object.fromEntries(Array.from(totals.entries()).map(([m, v]) => [m, v.toString()]))
+}
 
 function ConnectionIndicator({ isConnected }: { isConnected: boolean }) {
   return (
@@ -80,17 +129,43 @@ function ExecutionHeader({ execution, executionId, isConnected, now, refreshExec
   )
 }
 
-function ExecutionMetricsGrid({ execution }: { execution: ExecutionDetailResponse }) {
-  const completedPhases = execution.phases.filter(p => p.status === 'completed').length
+function ExecutionMetricsGrid({
+  execution,
+  hasCostByModel,
+}: {
+  execution: ExecutionDetailResponse
+  hasCostByModel: boolean
+}) {
+  const completedPhases = execution.phases.filter((p) => p.status === 'completed').length
   const cacheCreation = execution.total_cache_creation_tokens
   const cacheRead = execution.total_cache_read_tokens
-  const totalTokens = execution.total_input_tokens + execution.total_output_tokens + cacheCreation + cacheRead
+  const totalTokens =
+    execution.total_input_tokens + execution.total_output_tokens + cacheCreation + cacheRead
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <MetricCard title="Phases" value={`${completedPhases}/${execution.phases.length}`} icon={CheckCircle2} color="success" subtitle={`${completedPhases} completed, ${execution.artifact_ids.length} artifact${execution.artifact_ids.length !== 1 ? 's' : ''}`} />
-      <MetricCard title="Total Tokens" value={totalTokens.toLocaleString()} icon={FileText} subtitle={`In: ${(execution.total_input_tokens + cacheCreation + cacheRead).toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`} />
-      <MetricCard title="Total Cost" value={`$${Number(execution.total_cost_usd).toFixed(4)}`} icon={DollarSign} color="warning" />
+      <MetricCard
+        title="Phases"
+        value={`${completedPhases}/${execution.phases.length}`}
+        icon={CheckCircle2}
+        color="success"
+        subtitle={`${completedPhases} completed, ${execution.artifact_ids.length} artifact${execution.artifact_ids.length !== 1 ? 's' : ''}`}
+        scrollToId="phase-timeline"
+      />
+      <MetricCard
+        title="Total Tokens"
+        value={totalTokens.toLocaleString()}
+        icon={FileText}
+        subtitle={`In: ${(execution.total_input_tokens + cacheCreation + cacheRead).toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`}
+        scrollToId="token-breakdown"
+      />
+      <MetricCard
+        title="Total Cost"
+        value={`$${Number(execution.total_cost_usd).toFixed(4)}`}
+        icon={DollarSign}
+        color="warning"
+        scrollToId={hasCostByModel ? 'cost-by-model' : undefined}
+      />
     </div>
   )
 }
@@ -120,38 +195,34 @@ export function ExecutionDetail() {
     { label: execution.workflow_name || execution.workflow_id, href: `/workflows/${execution.workflow_id}` },
     { label: `Execution ${execution.workflow_execution_id.slice(0, 8)}` },
   ]
+  const aggregatedCostByModel = aggregateCostByModel(execution.phases)
 
   return (
     <div className="space-y-6">
       <Breadcrumbs items={breadcrumbs} />
       <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} now={now} refreshExecution={refreshExecution} />
       {execution.error_message && <ExecutionErrorCard message={execution.error_message} />}
-      {execution.repos && execution.repos.length > 0 && (
-        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <h3 className="mb-2 text-sm font-medium text-[var(--color-text-muted)]">Repositories</h3>
-          <ul className="space-y-1">
-            {execution.repos.map((url) => {
-              const name = url.split('/').pop()?.replace(/\.git$/, '') ?? url
-              return (
-                <li key={url} className="text-sm">
-                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] hover:underline" title={url}>
-                    {name}
-                  </a>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      )}
-      <ExecutionMetricsGrid execution={execution} />
-      <TokenBreakdownChart
-        inputTokens={execution.total_input_tokens}
-        outputTokens={execution.total_output_tokens}
-        cacheCreationTokens={execution.total_cache_creation_tokens}
-        cacheReadTokens={execution.total_cache_read_tokens}
-        phases={execution.phases}
+      <ReposPanel repos={execution.repos ?? []} />
+      <ExecutionMetricsGrid
+        execution={execution}
+        hasCostByModel={Object.keys(aggregatedCostByModel).length > 0}
       />
-      <PhaseTimeline phases={execution.phases} now={now} />
+      <section id="token-breakdown">
+        <TokenBreakdown
+          inputTokens={execution.total_input_tokens}
+          outputTokens={execution.total_output_tokens}
+          cacheCreationTokens={execution.total_cache_creation_tokens}
+          cacheReadTokens={execution.total_cache_read_tokens}
+        />
+      </section>
+      {Object.keys(aggregatedCostByModel).length > 0 && (
+        <section id="cost-by-model">
+          <ModelBreakdown costByModel={aggregatedCostByModel} />
+        </section>
+      )}
+      <section id="phase-timeline">
+        <PhaseTimeline phases={execution.phases} now={now} />
+      </section>
       {execution.artifact_ids.length > 0 && (
         <ArtifactSection phases={execution.phases} artifactDetails={artifactDetails} />
       )}
