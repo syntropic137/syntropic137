@@ -10,6 +10,7 @@
  */
 
 import { Activity, Search } from 'lucide-react'
+import { useMemo } from 'react'
 import {
   Card,
   ConnectionIndicator,
@@ -78,7 +79,12 @@ export function ExecutionList() {
     lastEventAt,
   } = useExecutionList()
 
-  const selectionItems = filteredExecutions.map((e) => ({ ...e, id: e.workflow_execution_id }))
+  // Stable identity for useRowSelection: a new array reference each render would
+  // trip the items-changed branch and cascade into a render loop.
+  const selectionItems = useMemo(
+    () => filteredExecutions.map((e) => ({ ...e, id: e.workflow_execution_id })),
+    [filteredExecutions],
+  )
   const selection = useRowSelection(selectionItems)
   const isMobile = useIsMobile()
   const emptyState = <ExecutionEmptyState searchQuery={searchQuery} />
