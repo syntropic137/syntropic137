@@ -6451,6 +6451,11 @@
             "type": "integer",
             "title": "Total Tokens"
           },
+          "total_tokens_display": {
+            "type": "string",
+            "title": "Total Tokens Display",
+            "default": "0"
+          },
           "total_input_tokens": {
             "type": "integer",
             "title": "Total Input Tokens"
@@ -6472,6 +6477,27 @@
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Total Cost Usd",
             "default": "0"
+          },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display",
+            "default": "$0.00"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "duration_display": {
+            "type": "string",
+            "title": "Duration Display",
+            "default": "\u2014"
           },
           "tool_call_count": {
             "type": "integer",
@@ -6495,6 +6521,17 @@
             },
             "type": "array",
             "title": "Repos"
+          },
+          "repos_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repos Display"
           }
         },
         "type": "object",
@@ -6509,7 +6546,8 @@
           "total_cache_creation_tokens",
           "total_cache_read_tokens"
         ],
-        "title": "ExecutionSummaryResponse"
+        "title": "ExecutionSummaryResponse",
+        "description": "Summary of a workflow execution.\n\nDisplay fields (``*_display``) are produced server-side so all clients\n(dashboard, CLI, future UIs) share identical human-readable output. Raw\nfields remain for programmatic consumers; both are always present.\n\nSee: docs/adrs/ADR-064-observability-monitor-ui.md"
       },
       "ExportManifestResponse": {
         "properties": {

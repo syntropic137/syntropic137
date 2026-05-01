@@ -22,6 +22,12 @@ from syn_api.types import (
     Result,
     ToolOperation,
 )
+from syn_shared.display import (
+    format_cost,
+    format_duration_seconds,
+    format_repos,
+    format_tokens,
+)
 
 from .models import (
     ExecutionDetailResponse,
@@ -46,6 +52,60 @@ router = APIRouter(tags=["executions"])
 
 def _to_str(val: object | None) -> str | None:
     return str(val) if val is not None else None
+
+
+def _coerce_dt(value: object | None) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        with contextlib.suppress(ValueError):
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return None
+
+
+def _duration_seconds(started: object | None, completed: object | None) -> float | None:
+    """Compute duration from start/end timestamps when both are present."""
+    s = _coerce_dt(started)
+    c = _coerce_dt(completed)
+    if s is None or c is None:
+        return None
+    return (c - s).total_seconds()
+
+
+def _build_execution_summary_response(
+    e: ExecutionSummary,
+) -> ExecutionSummaryResponse:
+    """Compose an ExecutionSummaryResponse from a domain summary.
+
+    Display fields are derived from raw values via syn_shared.display so all
+    clients (dashboard, CLI) share identical strings.
+    """
+    duration_seconds = _duration_seconds(e.started_at, e.completed_at)
+    cost = Decimal(str(e.total_cost_usd))
+    return ExecutionSummaryResponse(
+        workflow_execution_id=e.workflow_execution_id,
+        workflow_id=e.workflow_id,
+        workflow_name=e.workflow_name,
+        status=e.status,
+        started_at=_to_str(e.started_at),
+        completed_at=_to_str(e.completed_at),
+        completed_phases=e.completed_phases,
+        total_phases=e.total_phases,
+        total_tokens=e.total_tokens,
+        total_tokens_display=format_tokens(e.total_tokens),
+        total_input_tokens=e.total_input_tokens,
+        total_output_tokens=e.total_output_tokens,
+        total_cache_creation_tokens=e.total_cache_creation_tokens,
+        total_cache_read_tokens=e.total_cache_read_tokens,
+        total_cost_usd=cost,
+        total_cost_display=format_cost(cost),
+        duration_seconds=duration_seconds,
+        duration_display=format_duration_seconds(duration_seconds),
+        tool_call_count=e.tool_call_count,
+        error_message=e.error_message,
+        repos=list(e.repos),
+        repos_display=format_repos(e.repos),
+    )
 
 
 def _parse_iso(value: str) -> datetime | None:
@@ -432,28 +492,7 @@ async def list_executions_endpoint(
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
     return ExecutionListResponse(
-        executions=[
-            ExecutionSummaryResponse(
-                workflow_execution_id=e.workflow_execution_id,
-                workflow_id=e.workflow_id,
-                workflow_name=e.workflow_name,
-                status=e.status,
-                started_at=_to_str(e.started_at),
-                completed_at=_to_str(e.completed_at),
-                completed_phases=e.completed_phases,
-                total_phases=e.total_phases,
-                total_tokens=e.total_tokens,
-                total_input_tokens=e.total_input_tokens,
-                total_output_tokens=e.total_output_tokens,
-                total_cache_creation_tokens=e.total_cache_creation_tokens,
-                total_cache_read_tokens=e.total_cache_read_tokens,
-                total_cost_usd=Decimal(str(e.total_cost_usd)),
-                tool_call_count=e.tool_call_count,
-                error_message=e.error_message,
-                repos=list(e.repos),
-            )
-            for e in result.value
-        ],
+        executions=[_build_execution_summary_response(e) for e in result.value],
         total=len(result.value),
         page=page,
         page_size=page_size,

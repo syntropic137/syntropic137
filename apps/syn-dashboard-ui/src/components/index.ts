@@ -12,6 +12,13 @@ export { ExecutionCostSummary } from './ExecutionCostSummary'
 export { Layout } from './Layout'
 export { Loader, PageLoader } from './Loader'
 export { MetricCard } from './MetricCard'
+export {
+  ResourceCardList,
+  ResourceTable,
+  type ColumnDef,
+  type ResourceCardListProps,
+  type ResourceTableProps,
+} from './ResourceTable'
 export { SelectionCheckbox } from './SelectionCheckbox'
 export { SessionCostCard } from './SessionCostCard'
 export { StatusBadge } from './StatusBadge'

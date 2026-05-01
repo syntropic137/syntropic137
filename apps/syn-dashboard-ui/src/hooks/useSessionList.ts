@@ -21,7 +21,27 @@ import { sortSessions } from '../utils/sessionSort'
 import { useActivityStream } from './useActivityStream'
 import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
 import { useRefetchWhileRunning } from './useRefetchWhileRunning'
-import { useSortUrlState, type SortKey, type SortState } from './useSortUrlState'
+import {
+  useSortUrlState,
+  type SortConfig,
+  type SortKey,
+  type SortState,
+} from './useSortUrlState'
+
+const SESSION_SORT_CONFIG: SortConfig<SortKey> = {
+  validKeys: [
+    'status',
+    'workflow',
+    'phase',
+    'repos',
+    'tokens',
+    'cost',
+    'duration',
+    'started',
+  ],
+  defaultKey: 'started',
+  defaultDir: 'desc',
+}
 import { useStatusCounts } from './useStatusCounts'
 import { useThrottledRefetch } from './useThrottledRefetch'
 
@@ -47,7 +67,7 @@ export interface UseSessionListResult {
   setTimeWindow: (next: TimeWindow) => void
   clearAllFilters: () => void
   statusCounts: Record<string, number>
-  sort: SortState
+  sort: SortState<SortKey>
   toggleSort: (key: SortKey) => void
   /** SSE liveness for the page's connection indicator. */
   connected: boolean
@@ -74,7 +94,7 @@ export function useSessionList(): UseSessionListResult {
     clearStatuses,
     clearAll: clearAllFilters,
   } = useFilterUrlState()
-  const { sort, toggleSort } = useSortUrlState()
+  const { sort, toggleSort } = useSortUrlState(SESSION_SORT_CONFIG)
 
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)

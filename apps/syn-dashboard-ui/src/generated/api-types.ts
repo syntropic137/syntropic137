@@ -2296,7 +2296,16 @@ export interface components {
             /** Error */
             error?: string | null;
         };
-        /** ExecutionSummaryResponse */
+        /**
+         * ExecutionSummaryResponse
+         * @description Summary of a workflow execution.
+         *
+         *     Display fields (``*_display``) are produced server-side so all clients
+         *     (dashboard, CLI, future UIs) share identical human-readable output. Raw
+         *     fields remain for programmatic consumers; both are always present.
+         *
+         *     See: docs/adrs/ADR-064-observability-monitor-ui.md
+         */
         ExecutionSummaryResponse: {
             /** Workflow Execution Id */
             workflow_execution_id: string;
@@ -2322,6 +2331,11 @@ export interface components {
             total_phases: number;
             /** Total Tokens */
             total_tokens: number;
+            /**
+             * Total Tokens Display
+             * @default 0
+             */
+            total_tokens_display: string;
             /** Total Input Tokens */
             total_input_tokens: number;
             /** Total Output Tokens */
@@ -2336,6 +2350,18 @@ export interface components {
              */
             total_cost_usd: string;
             /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Duration Display
+             * @default —
+             */
+            duration_display: string;
+            /**
              * Tool Call Count
              * @default 0
              */
@@ -2344,6 +2370,8 @@ export interface components {
             error_message?: string | null;
             /** Repos */
             repos?: string[];
+            /** Repos Display */
+            repos_display?: string | null;
         };
         /**
          * ExportManifestResponse

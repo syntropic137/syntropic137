@@ -1,16 +1,39 @@
 /**
- * URL-backed sort state for the Sessions table.
+ * URL-backed sort state for resource tables.
  *
- * Schema: `?sort=cost&dir=desc`. The default (`started/desc`) is never written
- * to the URL so a clean URL stays clean.
+ * Schema: `?sort=<key>&dir=<asc|desc>`. The configured default is never
+ * written to the URL so a clean URL stays clean.
  *
  * Click a header to sort: same key flips direction, different key restarts at
- * `desc` (most useful for cost / duration / started).
+ * the configured default direction (typically `desc` for numeric/time
+ * columns).
+ *
+ * Generic over the page's sort-key union (e.g. SessionSortKey,
+ * ExecutionSortKey) so each page gets compile-time-checked keys.
  */
 
 import { useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
+export type SortDir = 'asc' | 'desc'
+
+export interface SortState<K extends string = string> {
+  key: K
+  dir: SortDir
+}
+
+export interface SortConfig<K extends string> {
+  validKeys: readonly K[]
+  defaultKey: K
+  defaultDir?: SortDir
+}
+
+export interface UseSortUrlStateResult<K extends string> {
+  sort: SortState<K>
+  toggleSort: (key: K) => void
+}
+
+// Legacy alias retained for SessionList during migration.
 export type SortKey =
   | 'status'
   | 'workflow'
@@ -21,38 +44,24 @@ export type SortKey =
   | 'duration'
   | 'started'
 
-export type SortDir = 'asc' | 'desc'
-
-export interface SortState {
-  key: SortKey
-  dir: SortDir
-}
-
-const VALID_KEYS: SortKey[] = [
-  'status',
-  'workflow',
-  'phase',
-  'repos',
-  'tokens',
-  'cost',
-  'duration',
-  'started',
-]
-
-const DEFAULT_KEY: SortKey = 'started'
-const DEFAULT_DIR: SortDir = 'desc'
-
-function parseKey(raw: string | null): SortKey {
-  return VALID_KEYS.includes(raw as SortKey) ? (raw as SortKey) : DEFAULT_KEY
+function parseKey<K extends string>(raw: string | null, config: SortConfig<K>): K {
+  return (config.validKeys as readonly string[]).includes(raw ?? '')
+    ? (raw as K)
+    : config.defaultKey
 }
 
 function parseDir(raw: string | null): SortDir {
   return raw === 'asc' ? 'asc' : 'desc'
 }
 
-function withSort(prev: URLSearchParams, next: SortState): URLSearchParams {
+function withSort<K extends string>(
+  prev: URLSearchParams,
+  next: SortState<K>,
+  config: SortConfig<K>,
+): URLSearchParams {
   const out = new URLSearchParams(prev)
-  if (next.key === DEFAULT_KEY && next.dir === DEFAULT_DIR) {
+  const defaultDir = config.defaultDir ?? 'desc'
+  if (next.key === config.defaultKey && next.dir === defaultDir) {
     out.delete('sort')
     out.delete('dir')
   } else {
@@ -62,31 +71,39 @@ function withSort(prev: URLSearchParams, next: SortState): URLSearchParams {
   return out
 }
 
-function nextStateOnHeaderClick(prev: SortState, key: SortKey): SortState {
-  if (prev.key !== key) return { key, dir: 'desc' }
+function nextStateOnHeaderClick<K extends string>(
+  prev: SortState<K>,
+  key: K,
+  defaultDir: SortDir,
+): SortState<K> {
+  if (prev.key !== key) return { key, dir: defaultDir }
   return { key, dir: prev.dir === 'desc' ? 'asc' : 'desc' }
 }
 
-export interface UseSortUrlStateResult {
-  sort: SortState
-  toggleSort: (key: SortKey) => void
-}
-
-export function useSortUrlState(): UseSortUrlStateResult {
+export function useSortUrlState<K extends string>(
+  config: SortConfig<K>,
+): UseSortUrlStateResult<K> {
   const [searchParams, setSearchParams] = useSearchParams()
+  const defaultDir = config.defaultDir ?? 'desc'
 
-  const sort = useMemo<SortState>(
-    () => ({ key: parseKey(searchParams.get('sort')), dir: parseDir(searchParams.get('dir')) }),
-    [searchParams],
+  const sort = useMemo<SortState<K>>(
+    () => ({
+      key: parseKey(searchParams.get('sort'), config),
+      dir: parseDir(searchParams.get('dir')),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searchParams, config.defaultKey],
   )
 
   const toggleSort = useCallback(
-    (key: SortKey) => {
-      setSearchParams((prev) => withSort(prev, nextStateOnHeaderClick(sort, key)), {
-        replace: true,
-      })
+    (key: K) => {
+      setSearchParams(
+        (prev) => withSort(prev, nextStateOnHeaderClick(sort, key, defaultDir), config),
+        { replace: true },
+      )
     },
-    [sort, setSearchParams],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sort, setSearchParams, config.defaultKey, defaultDir],
   )
 
   return { sort, toggleSort }
