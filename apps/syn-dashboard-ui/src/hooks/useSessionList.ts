@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useResetView } from './useResetView'
 import { listSessions } from '../api/sessions'
 import type { SSEEventFrame, SessionSummary, TimeWindow } from '../types'
 import { sortSessions } from '../utils/sessionSort'
@@ -103,15 +104,10 @@ export function useSessionList(): UseSessionListResult {
     toggleStatus,
     setTimeWindow,
     clearStatuses,
-    clearAll: clearAllFilters,
   } = useFilterUrlState()
-  const { sort, toggleSort, isDefault: isDefaultSort, resetSort } =
-    useSortUrlState(SESSION_SORT_CONFIG)
+  const { sort, toggleSort, isDefault: isDefaultSort } = useSortUrlState(SESSION_SORT_CONFIG)
   const isDefaultView = isDefaultViewState(isDefaultSort, selectedStatuses, timeWindow)
-  const resetView = useCallback(() => {
-    clearAllFilters()
-    resetSort()
-  }, [clearAllFilters, resetSort])
+  const resetView = useResetView()
 
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)

@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listAllExecutions } from '../api/executions'
+import { useResetView } from './useResetView'
 import type { ExecutionListItem, SSEEventFrame, TimeWindow } from '../types'
 import { sortExecutions } from '../utils/executionSort'
 import { useActivityStream } from './useActivityStream'
@@ -111,15 +112,10 @@ export function useExecutionList(): UseExecutionListResult {
     toggleStatus,
     setTimeWindow,
     clearStatuses,
-    clearAll: clearAllFilters,
   } = useFilterUrlState()
-  const { sort, toggleSort, isDefault: isDefaultSort, resetSort } =
-    useSortUrlState(EXECUTION_SORT_CONFIG)
+  const { sort, toggleSort, isDefault: isDefaultSort } = useSortUrlState(EXECUTION_SORT_CONFIG)
   const isDefaultView = isDefaultSort && selectedStatuses.size === 0 && timeWindow === '24h'
-  const resetView = useCallback(() => {
-    clearAllFilters()
-    resetSort()
-  }, [clearAllFilters, resetSort])
+  const resetView = useResetView()
 
   const [executions, setExecutions] = useState<ExecutionListItem[]>([])
   const [loading, setLoading] = useState(true)
