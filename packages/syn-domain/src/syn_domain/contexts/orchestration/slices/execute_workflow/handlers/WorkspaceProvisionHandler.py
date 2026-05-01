@@ -23,6 +23,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     ProvisionWorkspaceCompletedCommand,
 )
 from syn_shared.env_constants import (
+    ENV_ANTHROPIC_API_KEY,
     ENV_ANTHROPIC_BASE_URL,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
     ENV_CLAUDE_SESSION_ID,
@@ -51,11 +52,14 @@ CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 
 
 def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
-    """Build agent environment with proxy-based auth (ISS-43).
+    """Build agent environment for workspace execution.
 
-    Validates proxy is available (credentials live on the proxy container,
-    not in agent env vars). Routes Anthropic SDK via ANTHROPIC_BASE_URL
-    (not HTTP_PROXY — Node.js CONNECT tunneling breaks Envoy forward proxy).
+    Injects Claude credentials directly into agent env. ANTHROPIC_BASE_URL
+    routes SDK traffic through the Envoy sidecar for observability, but auth
+    is carried by the credential env var rather than sidecar substitution.
+
+    See ADR-024 (2026-05-01 update) for why the original "proxy-managed"
+    placeholder approach was abandoned and this direct injection was adopted.
     """
     proxy_url = workspace.proxy_url
     if not proxy_url:
@@ -64,11 +68,25 @@ def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, 
             "Ensure envoy-proxy service is running and sidecar is enabled."
         )
         raise RuntimeError(msg)
-    return {
+
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+    env: dict[str, str] = {
         ENV_CLAUDE_SESSION_ID: session_id,
         ENV_ANTHROPIC_BASE_URL: proxy_url,
-        ENV_CLAUDE_CODE_OAUTH_TOKEN: "proxy-managed",
     }
+
+    # Prefer OAuth token; fall back to API key. Claude Code CLI v2.1.76+
+    # validates credential format locally before sending any HTTP request, so
+    # the sidecar-substitution pattern ("proxy-managed" placeholder) no longer
+    # works — the CLI rejects it before the proxy gets a chance. ADR-024 updated.
+    if settings.claude_code_oauth_token:
+        env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = settings.claude_code_oauth_token.get_secret_value()
+    elif settings.anthropic_api_key:
+        env[ENV_ANTHROPIC_API_KEY] = settings.anthropic_api_key.get_secret_value()
+
+    return env
 
 
 class ProvisionResult:

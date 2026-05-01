@@ -444,3 +444,60 @@ mkdir -p /workspace/repos
 | Repo cloning | Not in setup phase | Appended by `build_setup_script()` |
 | Auth failure mode | Silent / runtime git error | Fail fast before any cloning |
 | Multi-org support | Not supported | Supported via per-installation tokens |
+
+---
+
+## 2026-05-01 Update: Claude Credential Injection (Agent Phase)
+
+### The proxy-managed pattern no longer works for Claude credentials
+
+The 2026-01-29 update identified that Claude CLI authentication could not follow the setup-phase pattern used for GitHub and pointed at ADR-022 (shared Envoy proxy with sidecar token substitution) as the path forward. Specifically, ADR-022 proposed setting `CLAUDE_CODE_OAUTH_TOKEN="proxy-managed"` in the agent env, and having the token-injector sidecar swap the real credential value on outgoing HTTPS requests before they reached `api.anthropic.com`.
+
+**This substitution path does not work with Claude Code CLI v2.1.76+.** The CLI performs a client-side credential format check before making any API call:
+
+| Credential source | Expected format | `"proxy-managed"` result |
+|---|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | `sk-ant-oat01-…` | ❌ fails format check |
+| `ANTHROPIC_API_KEY` | `sk-ant-…` | ❌ fails format check |
+| On-disk credentials file | valid JSON at `~/.claude/credentials.json` | ❌ file absent |
+
+If all three checks fail, the CLI exits immediately with `Not logged in · Please run /login` — no HTTP request is issued, the sidecar never sees anything to substitute.
+
+### Decision: direct injection into agent env
+
+The real credential is injected directly into the agent phase environment in `_build_agent_env` (`WorkspaceProvisionHandler.py`). OAuth token is preferred; API key is the fallback:
+
+```python
+if settings.claude_code_oauth_token:
+    env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = settings.claude_code_oauth_token.get_secret_value()
+elif settings.anthropic_api_key:
+    env[ENV_ANTHROPIC_API_KEY] = settings.anthropic_api_key.get_secret_value()
+```
+
+`ANTHROPIC_BASE_URL` still routes SDK traffic through the Envoy sidecar for observability purposes — the sidecar sees the token on outgoing requests and can log it but does not need to substitute it.
+
+### Security posture change
+
+This deviates from the original "agent phase never sees raw secrets" invariant. The revised posture:
+
+| Property | Previous goal | Current reality |
+|---|---|---|
+| Agent env holds real credential | ❌ no | ✅ yes (via env var) |
+| Subagents inherit credential | ❌ no | ✅ yes (env is inherited) |
+| Credential visible in `/proc/self/environ` | ❌ no | ✅ yes (agent process) |
+| Credential visible to sidecar | ✅ yes (substitution) | ✅ yes (on outgoing requests) |
+| Credential cleared after phase | ✅ yes | ❌ no (env stays for phase duration) |
+
+Acceptable risk framing (from 2026-01-29 update, still applies):
+- ✅ Single-tenant deployments with trusted agent code
+- ✅ Self-hosted instances with controlled workloads
+- ❌ Multi-tenant production (agent code cannot be fully trusted)
+- ❌ Untrusted marketplace workflows without additional sandboxing
+
+### What would restore the original invariant
+
+If a future Claude Code CLI version supports any of the following, the original ADR-022 pattern can be reinstated:
+
+1. A `--skip-auth-check` or `--bare` flag that defers auth to the server response (does not exist as of v2.1.76).
+2. A credential-helper interface for HTTP APIs analogous to `git credential-helper`.
+3. On-disk credential pre-population during setup phase (the `~/.claude/credentials.json` file format is not publicly documented; this may be viable if the format is discovered or stabilizes).
