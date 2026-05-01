@@ -426,21 +426,120 @@ class TestDetectExitCode:
 
 @pytest.mark.unit
 class TestBuildAgentEnv:
-    """Tests for _build_agent_env helper."""
+    """Tests for _build_agent_env helper.
 
-    def test_returns_env_with_proxy_url(self) -> None:
+    Updated 2026-05-01 (ADR-024 amendment): the helper no longer injects a
+    "proxy-managed" placeholder into CLAUDE_CODE_OAUTH_TOKEN. Claude Code CLI
+    v2.1.76+ rejects the placeholder at its local format check before any HTTP
+    call, so the sidecar substitution pattern is no longer viable. Instead the
+    helper reads settings.claude_code_oauth_token (preferred) or
+    settings.anthropic_api_key (fallback) and injects the real value, OR
+    injects nothing if neither is configured. See ADR-024 2026-05-01 update.
+    """
+
+    async def test_returns_session_id_and_proxy_when_no_credentials(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With no credentials in settings, env contains session id + proxy url only."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
             _build_agent_env,
+        )
+        from syn_shared.settings import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(settings, "claude_code_oauth_token", None, raising=False)
+        monkeypatch.setattr(settings, "anthropic_api_key", None, raising=False)
+
+        workspace = MagicMock()
+        workspace.proxy_url = "http://envoy:10000"
+        env = await _build_agent_env(workspace, "sess-1")
+        assert env["CLAUDE_SESSION_ID"] == "sess-1"
+        assert env["ANTHROPIC_BASE_URL"] == "http://envoy:10000"
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+        assert "ANTHROPIC_API_KEY" not in env
+
+    async def test_injects_oauth_token_when_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OAuth token in settings -> injected into agent env."""
+        from pydantic import SecretStr
+
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            _build_agent_env,
+        )
+        from syn_shared.settings import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(
+            settings,
+            "claude_code_oauth_token",
+            SecretStr("sk-ant-oat01-real-token"),
+            raising=False,
+        )
+        monkeypatch.setattr(settings, "anthropic_api_key", None, raising=False)
+
+        workspace = MagicMock()
+        workspace.proxy_url = "http://envoy:10000"
+        env = await _build_agent_env(workspace, "sess-1")
+        assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-real-token"
+        assert "ANTHROPIC_API_KEY" not in env
+
+    async def test_falls_back_to_api_key_when_oauth_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No OAuth, but API key set -> API key injected as fallback."""
+        from pydantic import SecretStr
+
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            _build_agent_env,
+        )
+        from syn_shared.settings import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(settings, "claude_code_oauth_token", None, raising=False)
+        monkeypatch.setattr(
+            settings,
+            "anthropic_api_key",
+            SecretStr("sk-ant-api03-real-key"),
+            raising=False,
         )
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = _build_agent_env(workspace, "sess-1")
-        assert env["CLAUDE_SESSION_ID"] == "sess-1"
-        assert env["ANTHROPIC_BASE_URL"] == "http://envoy:10000"
-        assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "proxy-managed"
+        env = await _build_agent_env(workspace, "sess-1")
+        assert env["ANTHROPIC_API_KEY"] == "sk-ant-api03-real-key"
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
 
-    def test_raises_without_proxy(self) -> None:
+    async def test_oauth_preferred_over_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Both set -> OAuth wins; API key not injected."""
+        from pydantic import SecretStr
+
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            _build_agent_env,
+        )
+        from syn_shared.settings import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(
+            settings,
+            "claude_code_oauth_token",
+            SecretStr("sk-ant-oat01-pref"),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            settings,
+            "anthropic_api_key",
+            SecretStr("sk-ant-api-fallback"),
+            raising=False,
+        )
+
+        workspace = MagicMock()
+        workspace.proxy_url = "http://envoy:10000"
+        env = await _build_agent_env(workspace, "sess-1")
+        assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-pref"
+        assert "ANTHROPIC_API_KEY" not in env
+
+    async def test_raises_without_proxy(self) -> None:
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
             _build_agent_env,
         )
@@ -448,7 +547,7 @@ class TestBuildAgentEnv:
         workspace = MagicMock()
         workspace.proxy_url = None  # sidecar not running
         with pytest.raises(RuntimeError, match="proxy not available"):
-            _build_agent_env(workspace, "sess-1")
+            await _build_agent_env(workspace, "sess-1")
 
 
 # =========================================================================
