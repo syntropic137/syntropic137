@@ -459,20 +459,20 @@ Every first-time selfhost user (`npx syntropic137 init` then any workflow run) h
 
 ### What this changes about the trust posture
 
-`tecnativa/docker-socket-proxy`'s ACL is grouped at the resource-prefix level, not per-endpoint. Enabling `IMAGES=1` opens **all** `/images/*` endpoints to the platform process:
+`tecnativa/docker-socket-proxy`'s ACL is grouped at the resource-prefix level, not per-endpoint. Enabling `IMAGES=1` opens **all `/images/*` endpoints** to the platform process:
 
 | Endpoint | Used by platform? | Risk if exploited |
 |---|---|---|
 | `POST /images/create` | YES (auto-pull on `docker run`) | the desired capability |
 | `GET /images/json` | NO | low (image inventory disclosure) |
-| `POST /build` | NO | HIGH (arbitrary Dockerfile execution by a compromised platform process) |
 | `POST /images/{name}/push` | NO | HIGH (image exfiltration to attacker registry) |
 | `POST /images/{name}/tag` | NO | medium (image confusion / supply-chain misdirection) |
-| `POST /commit` | NO | medium (snapshot a container as an image) |
 | `POST /images/load` | NO | HIGH (load arbitrary image from tarball) |
 | `DELETE /images/{name}` | NO | medium (DoS via deletion of in-use images) |
 
-The platform code only invokes `POST /images/create` (transitively, via `docker run`). The unused endpoints are reachable only if syn-api itself is compromised (e.g., a FastAPI dependency vuln yielding RCE). For single-tenant selfhost deployments where the operator owns the host and trusts the syn137 release, this trade-off is acceptable: the operational benefit (the system self-heals when new workspace images appear, no `npx init` re-run needed for workspace upgrades) clearly outweighs the marginal RCE blast-radius increase.
+`POST /build` and `POST /commit` are **not** under the `/images/*` prefix and therefore are **not** made reachable by `IMAGES=1`. They remain blocked unless their own proxy flags (`BUILD=1`, `COMMIT=1`) are enabled separately, which this change does not do.
+
+The platform code only invokes `POST /images/create` (transitively, via `docker run`). The unused `/images/*` endpoints are reachable only if syn-api itself is compromised (e.g., a FastAPI dependency vuln yielding RCE). For single-tenant selfhost deployments where the operator owns the host and trusts the syn137 release, this trade-off is acceptable: the operational benefit (the system self-heals when new workspace images appear, no `npx init` re-run needed for workspace upgrades) clearly outweighs the marginal RCE blast-radius increase.
 
 For multi-tenant or untrusted-prompt deployments, this trade-off should be revisited:
 
