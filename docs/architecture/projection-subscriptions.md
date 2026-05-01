@@ -19,12 +19,12 @@ graph LR
         e2[workflow_failed]
         e3[workflow_completed]
         e4[phase_completed]
-        e5[execution_cancelled]
-        e6[workflow_template_created]
-        e7[trigger_fired]
-        e8[workflow_interrupted]
+        e5[workflow_template_created]
+        e6[execution_cancelled]
+        e7[workflow_interrupted]
+        e8[trigger_fired]
         e9[phase_started]
-        e10[session_completed]
+        e10[session_summary]
     end
 
     subgraph projections["Projections"]
@@ -45,17 +45,18 @@ graph LR
         p15[TriggerHistoryProjection]
     end
 
-    e10 --> p11
-    e10 --> p2
+    e10 --> p10
+    e10 --> p3
+    e5 --> p2
+    e6 --> p4
     e2 --> p8
     e2 --> p7
     e2 --> p4
     e2 --> p2
-    e5 --> p4
-    e6 --> p2
-    e7 --> p6
-    e7 --> p15
-    e8 --> p4
+    e7 --> p4
+    e4 --> p4
+    e8 --> p6
+    e8 --> p15
     e1 --> p6
     e1 --> p4
     e1 --> p2
@@ -64,7 +65,6 @@ graph LR
     e3 --> p4
     e3 --> p2
     e9 --> p2
-    e4 --> p4
 ```
 
 ---
@@ -85,12 +85,12 @@ graph LR
 | workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | workflow_completed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
-| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
 | workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
-| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
+| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
 | workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
-| session_completed | SessionListProjection, DashboardMetricsProjection | 2 |
+| session_summary | SessionCostProjection, ExecutionCostProjection | 2 |
 
 ---
 
