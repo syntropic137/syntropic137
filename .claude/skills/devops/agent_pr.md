@@ -31,9 +31,12 @@ Get a feature/fix branch from local working state to a green, reviewable PR agai
 5. Stage explicit files by name. Never `git add -A` (pre-commit hook blocks it).
 6. If untracked sibling dirs in the repo root (e.g. `markdown-explorer/`) cause spurious `just fitness-check` violations, move them outside the repo, push, then restore them after.
 7. Push. Never `--no-verify` (pre-push hooks fail for real reasons).
-8. Open the PR against `main` with the standard body.
+8. Identify the GitHub issue this PR addresses. Most PRs should close one - if there isn't an issue yet, file one first (`gh issue create`) so the work is tracked. The PR body must include `Closes #N` on its own line; bare `#N` does NOT auto-close (per SKILL.md "Common gotchas"). If the change genuinely doesn't map to an issue (e.g. a typo fix), say so explicitly in the body.
+9. Open the PR against `main` with the standard body.
    ```
    gh pr create --base main --title "<short title>" --body "$(cat <<'EOF'
+   Closes #<N>
+
    ## Summary
    - <1-3 bullets, "why" not "what">
 
@@ -42,8 +45,9 @@ Get a feature/fix branch from local working state to a green, reviewable PR agai
    EOF
    )"
    ```
-9. Wait for CI green AND at least one review pass (Copilot at minimum, ideally a human glance) before flagging the PR as ready to merge. If CI was green and the PR had to merge early without a review pass, fetch comments retroactively (`gh api repos/<o>/<r>/pulls/<N>/comments`, `gh pr view <N> --json reviews,comments`) and address them via `agent_hotfix.md` or a small follow-up PR. See `feedback_review_pass_before_merge`: maintenance cost dominates implementation cost, so review-pass discipline is a velocity multiplier, not a tax.
-10. Operator merges manually; never `--auto` on `gh pr merge`.
+10. Wait for CI green AND at least one review pass (Copilot at minimum, ideally a human glance) before flagging the PR as ready to merge. If CI was green and the PR had to merge early without a review pass, fetch comments retroactively (`gh api repos/<o>/<r>/pulls/<N>/comments`, `gh pr view <N> --json reviews,comments`) and address them via `agent_hotfix.md` or a small follow-up PR. See `feedback_review_pass_before_merge`: maintenance cost dominates implementation cost, so review-pass discipline is a velocity multiplier, not a tax.
+11. Operator merges manually; never `--auto` on `gh pr merge`.
+12. After merge, verify the linked issue auto-closed (`gh issue view <N>`). If it didn't, the PR body was malformed; close the issue manually and note the cause for the next PR.
 
 ## References
 
