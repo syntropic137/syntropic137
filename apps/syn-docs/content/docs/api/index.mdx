@@ -14,8 +14,17 @@ http://localhost:8137/api
 
 ## Authentication
 
-The API currently supports internal access. Authentication is planned for a
-future release.
+The API itself does not implement authentication. In a self-hosted deployment,
+the nginx gateway in front of the API enforces HTTP basic auth, and the same
+credential gates both the API and the dashboard UI.
+
+The unauthenticated port is bound to loopback on the host machine only, so the
+API is not reachable from your local network or the internet without going
+through the gateway. Remote access is intended via Cloudflare Tunnel, which
+routes to the authenticated port and requires the credential.
+
+See [Self-hosting → Authentication](/docs/guide/self-hosting#authentication)
+for credential setup, the port model, and tunnel configuration.
 
 ## Endpoints
 
