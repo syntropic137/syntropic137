@@ -146,10 +146,19 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Step 4: Build, test, publish CLI to npm
+  #
+  # Gated on `release-containers` success: the published CLI's compose template
+  # references container images at this version tag. If a container build
+  # failed, those tags don't exist on GHCR, and operators upgrading via
+  # `npx @syntropic137/setup update` would pull a CLI that points at missing
+  # images. Wait for containers to be reachable before publishing the CLI.
+  #
+  # See post-mortem on the v0.25.3 release: sidecar-proxy failed but CLI
+  # published anyway, leaving npm v0.25.3 in a broken state.
   # ---------------------------------------------------------------------------
   release-cli:
     name: CLI
-    needs: [create-release, pre-publish-validation]
+    needs: [create-release, pre-publish-validation, release-containers]
     if: needs.create-release.outputs.created == 'true'
     uses: ./.github/workflows/release-cli.yaml
     with:
