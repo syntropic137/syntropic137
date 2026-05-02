@@ -1,5 +1,12 @@
 /**
- * Shared formatting utilities for cost tracking components.
+ * Shared formatting utilities.
+ *
+ * Most numeric and currency formatting is now produced server-side as
+ * `*_display` fields on API responses (see ADR-064); the locale-dependent
+ * helpers below are the only formatting still owned by the client because the
+ * server cannot know the viewer's locale or rendering time.
+ *
+ * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
 /**
@@ -56,6 +63,8 @@ export {
   formatTime,
   formatDate,
   formatTimestamp,
+  formatTimestampLocale,
+  formatRelativeTime,
   formatDurationSeconds,
   formatDurationFromRange,
 } from './dateFormatters'

@@ -232,4 +232,44 @@ If two URLs produce the same repo name (e.g. `org-a/myapp` and `org-b/myapp`), o
 
 **Workaround (manual):** Rename one repo before passing the URL list, or fork one under a different name.
 
-**Future fix:** Namespace clash detection in `build_setup_script()` — suffix the second occurrence with the owner slug (e.g. `myapp` → `myapp-org-b`). Tracked as a follow-up issue.
+**Future fix:** Namespace clash detection in `build_setup_script()` -- suffix the second occurrence with the owner slug (e.g. `myapp` -> `myapp-org-b`). Tracked as a follow-up issue.
+
+---
+
+## Addendum: `requires_repos` Execution Gate (#666)
+
+**Date:** 2026-04-11
+
+### Problem
+
+The preflight validation added alongside workspace hydration (Section 3) assumed all workflows need repositories. Workflows that don't require repos (research, analysis, artifact-only tasks) failed because:
+
+1. `SeedWorkflowService` injected a placeholder URL (`https://github.com/placeholder/not-configured`) for workflows with `repository: null`
+2. The preflight check tried to verify GitHub App access on this placeholder and returned a confusing error
+3. Workflows with `{{repository}}` template variables failed with "Missing required inputs" when no repo was provided
+
+### Decision
+
+Add `requires_repos: bool` to workflow templates as an execution-time gate.
+
+- **`requires_repos: true`** (default): Full preflight validation runs -- resolve repos, check GitHub App installation, fail if missing. This is the existing behavior.
+- **`requires_repos: false`**: Skip repo validation entirely. The agent gets a bare workspace with no cloned repos. It can still run commands, do research, and save artifacts.
+
+**Default is `true`** for backward compatibility -- all existing events in the event store were created assuming repos are required.
+
+**YAML inference:** When `requires_repos` is not explicitly set in the YAML, the flag defaults to `true` (opt-out). An explicit `requires_repos: true/false` in the YAML always takes precedence. Research-style workflows that operate on no repos must opt out with `requires_repos: false`.
+
+> **v0.25.2 update (2026-04-18):** The original inference rule was "infer from `repository` presence" -- workflows without a `repository:` block defaulted to `false`. With v0.25.2's ADR-063 typed-repos channel, the legacy `repository:` block is being phased out (workflows now declare `requires_repos: true` and accept repos via runtime `-R`), so inferring from its presence no longer matches the platform's primary use case. The new default is opt-out: omit `requires_repos`, get `true`. Migrated marketplace workflows (`code-review`, `sdlc-trunk` v0.2.0+) rely on this.
+
+**Placeholder removal:** `SeedWorkflowService` no longer injects a `placeholder/not-configured` URL. Workflows without repos get `repository_url: ""`.
+
+### Design Philosophy
+
+Templates are higher-order prompts -- generic, reusable recipes that define the *shape* of work (phases, prompt structure), not the *target*. Repos and tasks are injected at execution time:
+
+- **CLI:** `syn workflow run <id> --repo <url>`
+- **Dashboard:** Repo picker (future, #667)
+- **Triggers:** Webhook payload provides the repo
+- **API:** `repos: [...]` in the execute request body
+
+`requires_repos` gates the preflight validation pipeline, not the repo resolution itself. When `true`, the system validates GitHub App access before spinning up a container, ensuring fast failure. When `false`, the pipeline is skipped entirely.

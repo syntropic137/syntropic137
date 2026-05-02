@@ -1,11 +1,11 @@
 """In-memory storage utilities for TESTING ONLY.
 
-Contains InMemoryEventStore, InMemoryEventPublisher, test-environment
-guards, and singleton factory functions. All repositories now go through
-the SDK's EventStoreRepository backed by MemoryEventStoreClient — see
-repositories.py.
+Contains InMemoryEventStore, InMemoryEventPublisher and singleton factory
+functions. All repositories now go through the SDK's EventStoreRepository
+backed by MemoryEventStoreClient -- see repositories.py.
 
 WARNING: These utilities are for unit/integration tests only.
+See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
 from __future__ import annotations
@@ -13,32 +13,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from syn_shared.settings import get_settings
+from syn_adapters.in_memory import InMemoryAdapter, InMemoryAdapterError, assert_test_only
 
 if TYPE_CHECKING:
     from event_sourcing import EventEnvelope
 
-
-class InMemoryStorageError(Exception):
-    """Raised when in-memory storage is used outside of test environment."""
-
-    pass
-
-
-def _assert_test_environment() -> None:
-    """Assert that we're in a test or offline environment.
-
-    Raises:
-        InMemoryStorageError: If not in test/offline environment.
-    """
-    settings = get_settings()
-    if not settings.uses_in_memory_stores:
-        raise InMemoryStorageError(
-            "In-memory storage can ONLY be used in test or offline environments. "
-            f"Current environment: {settings.app_environment}. "
-            "For local development, use PostgreSQL via 'just dev'. "
-            "Set APP_ENVIRONMENT=test or APP_ENVIRONMENT=offline to use in-memory storage."
-        )
+# Re-export for backwards compatibility with existing imports
+InMemoryStorageError = InMemoryAdapterError
 
 
 @dataclass
@@ -66,7 +47,7 @@ class InMemoryEventStore:
 
     def __post_init__(self) -> None:
         """Validate environment on initialization."""
-        _assert_test_environment()
+        assert_test_only()
 
     def append(
         self,
@@ -102,18 +83,18 @@ class InMemoryEventStore:
         self._sequence = 0
 
 
-class InMemoryEventPublisher:
+class InMemoryEventPublisher(InMemoryAdapter):
     """In-memory event publisher for testing ONLY.
 
     Implements the EventPublisher protocol. Collects events so that
     sync_published_events_to_projections() can dispatch them to projections.
 
     Raises:
-        InMemoryStorageError: If instantiated outside test environment.
+        InMemoryAdapterError: If instantiated outside test environment.
     """
 
     def __init__(self) -> None:
-        _assert_test_environment()
+        super().__init__()
         self._published_events: list[EventEnvelope[Any]] = []
 
     async def publish(self, events: list[EventEnvelope[Any]]) -> None:
@@ -166,7 +147,6 @@ __all__ = [
     "InMemoryEventStore",
     "InMemoryStorageError",
     "StoredEvent",
-    "_assert_test_environment",
     "get_event_publisher",
     "get_event_store",
     "reset_storage",

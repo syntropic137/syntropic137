@@ -41,36 +41,50 @@ Use Docker Compose's multi-file feature to maintain a single source of truth:
 
 ```
 docker/
-├── docker-compose.yaml        # Base: all service definitions
-├── docker-compose.dev.yaml    # Dev overrides: ports, volumes
-└── docker-compose.test.yaml   # Test overrides: offset ports, no volumes
+├── docker-compose.yaml           # Base: all service definitions, shared infra
+├── docker-compose.dev.yaml       # Dev overrides: ports, volumes, restart
+├── docker-compose.test.yaml      # Test overrides: offset ports, no volumes
+├── docker-compose.selfhost.yaml  # Production: secrets, resource limits, gateway
+└── docker-compose.ondemand.yaml  # On-demand: parameterized ports, ephemeral
 ```
 
 The base file contains:
 - Service images and build contexts
-- Environment variables
+- Environment variables (defaults)
 - Health checks
 - Service dependencies
+- Shared infrastructure services (docker-socket-proxy, envoy-proxy, token-injector)
+- Internal networks for service isolation (`docker-proxy`, `agent-net`)
 
-Override files add:
+Override files add only environment-specific config:
 - Port mappings (different per environment)
-- Volume mounts (dev only)
+- Volume mounts (dev/selfhost only - on-demand is ephemeral)
 - Container names (prefixed per environment)
+- Restart policies
+- Resource limits and security hardening (selfhost only)
+- Secrets (selfhost only - dev/ondemand use env vars)
 
 ### 2. Port Offset Strategy
 
 Test stack uses ports offset by +10000 from dev:
 
-| Service | Dev Port | Test Port | Internal Port |
-|---------|----------|-----------|---------------|
-| TimescaleDB | 5432 | 15432 | 5432 |
-| EventStore | 50051 | 55051 | 50051 |
-| Collector | 8080 | 18080 | 8080 |
-| MinIO API | 9000 | 19000 | 9000 |
-| MinIO Console | 9001 | 19001 | 9001 |
-| Redis | 6379 | 16379 | 6379 |
+| Service | Dev Port | Test Port | On-Demand (Slot 2) | On-Demand (Slot 3) | Internal Port |
+|---------|----------|-----------|-------------------|-------------------|---------------|
+| Gateway | 8137 | - | 28137 | 38137 | 80 |
+| API | 9137 | - | 29137 | 39137 | 8000 |
+| TimescaleDB | 5432 | 15432 | 25432 | 35432 | 5432 |
+| EventStore | 50051 | 55051 | 60051 | 61051 | 50051 |
+| Collector | 8080 | 18080 | 28080 | 38080 | 8080 |
+| MinIO API | 9000 | 19000 | 29000 | 39000 | 9000 |
+| MinIO Console | 9001 | 19001 | 29001 | 39001 | 9001 |
+| Redis | 6379 | 16379 | 26379 | 36379 | 6379 |
+| Envoy | 8081 | - | 28081 | 38081 | 8081 |
 
-This allows both stacks to run simultaneously without conflicts.
+Dev/test use fixed port offsets. On-demand environments use dynamic slot-based allocation
+(slots 2-5, offset = slot * 10000). Event store uses a separate range starting at 60051
+to avoid exceeding port 65535. See ADR-060 for full on-demand environment details.
+
+This allows all stacks to run simultaneously without conflicts.
 
 ### 3. Container Naming Convention
 
@@ -275,3 +289,4 @@ See: `PROJECT-PLAN_20251220_TEST-INFRASTRUCTURE.md`
 - [Testcontainers Python](https://testcontainers-python.readthedocs.io/)
 - [es-p Test Infrastructure Pattern](../lib/event-sourcing-platform/event-store/eventstore-backend-postgres/tests/common/mod.rs)
 - [ADR-033: Recording-Based Integration Testing](./ADR-033-recording-based-integration-testing.md)
+- [ADR-060: On-Demand Environment Creation](./ADR-060-on-demand-environment-creation.md)

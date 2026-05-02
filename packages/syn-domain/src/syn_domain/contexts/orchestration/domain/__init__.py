@@ -14,9 +14,19 @@ Per ADR-020:
 """
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-# Note: Imports may fail during transition period while old contexts still exist
-# Use lazy imports or try/except when importing aggregates
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate as WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate as WorkflowTemplateAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
+        WorkspaceAggregate as WorkspaceAggregate,
+    )
+
 __all__ = [
     "HandlerResult",
     "WorkflowExecutionAggregate",

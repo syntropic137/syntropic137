@@ -92,8 +92,13 @@ class TokenCount:
 
     @property
     def total(self) -> int:
-        """Total tokens (input + output)."""
-        return self.input_tokens + self.output_tokens
+        """Total tokens (input + output + cache_creation + cache_read)."""
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_tokens
+            + self.cache_read_tokens
+        )
 
     @classmethod
     def zero(cls) -> "TokenCount":

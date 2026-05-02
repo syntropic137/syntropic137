@@ -1,12 +1,11 @@
 import { SSE_CONNECT_TIMEOUT_MS, getApiUrl, getAuthHeaders } from "../config.js";
+import { API_PREFIX } from "./constants.js";
 /**
  * Valid SSE endpoint paths must start with /sse/.
  * This catches wrong prefixes (e.g. /watch/activity) at compile time
  * while still allowing parameterised paths like /sse/executions/${id}.
  */
 export type SSEPath = `/sse/${string}`;
-
-const API_PREFIX = (process.env["SYN_NO_PREFIX"] === "1" || process.env["SYN_NO_PREFIX"] === "true") ? "" : "/api/v1";
 
 export interface SSEEvent {
   type: string;

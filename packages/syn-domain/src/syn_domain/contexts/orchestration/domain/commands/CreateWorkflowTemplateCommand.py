@@ -36,7 +36,7 @@ class CreateWorkflowTemplateCommand(BaseModel):
     classification: WorkflowClassification
 
     # Repository context
-    repository_url: str = Field(..., min_length=1)
+    repository_url: str = Field(default="")
     repository_ref: str = Field(default="main")
 
     # Phase definitions
@@ -52,3 +52,7 @@ class CreateWorkflowTemplateCommand(BaseModel):
     # Multi-repo support (ADR-058)
     repos: list[str] = Field(default_factory=list)
     """Full GitHub URLs for this workflow template. Empty = single-repo (use repository_url)."""
+
+    # Execution gate (ADR-058 #666)
+    requires_repos: bool = True
+    """Whether this workflow requires repository access at execution time."""

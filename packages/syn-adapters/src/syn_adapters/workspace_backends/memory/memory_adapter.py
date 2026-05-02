@@ -2,85 +2,32 @@
 
 ⚠️  TEST ENVIRONMENT ONLY ⚠️
 
-All adapters in this module will raise TestEnvironmentRequiredError
-if used outside of APP_ENVIRONMENT=test or APP_ENVIRONMENT=testing.
-
-This module also provides shared utilities used by the other memory adapters:
-- TestEnvironmentRequiredError: Exception for non-test environments
-- _assert_test_environment(): Guard function to enforce test-only usage
+See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 
 Usage in tests:
     adapter = MemoryIsolationAdapter()
     handle = await adapter.create(config)
     result = await adapter.execute(handle, ["echo", "hello"])
     await adapter.destroy(handle)
-
-See ADR-004 (Mock Objects: Test Environment Only) and ADR-023 (Workspace-First Execution).
 """
 
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+
+from syn_adapters.in_memory import InMemoryAdapter, InMemoryAdapterError
+
+# Re-export for backwards compatibility with existing tests/imports
+TestEnvironmentRequiredError = InMemoryAdapterError
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationConfig,
         IsolationHandle,
-    )
-
-
-# =============================================================================
-# EXCEPTIONS
-# =============================================================================
-
-
-class TestEnvironmentRequiredError(Exception):
-    """Raised when in-memory adapters are used outside test environment.
-
-    Per ADR-004 and ADR-023, mock/memory objects can only be used
-    when APP_ENVIRONMENT is 'test' or 'testing'.
-    """
-
-    pass
-
-
-# =============================================================================
-# ENVIRONMENT VALIDATION
-# =============================================================================
-
-
-def _assert_test_environment() -> None:
-    """Assert we're in test environment - memory adapters are TEST-ONLY.
-
-    Per ADR-004 (Mock Objects: Test Environment Only):
-    - All mock objects MUST validate they are running in test environment
-    - This prevents accidental mock usage in production
-    - Forces real implementations for E2E testing
-    - Fails fast with clear error messages
-
-    Raises:
-        TestEnvironmentRequiredError: If APP_ENVIRONMENT is not 'test' or 'testing'
-    """
-    app_env = os.getenv("APP_ENVIRONMENT", "development").lower()
-
-    if app_env in ("test", "testing"):
-        return  # OK
-
-    raise TestEnvironmentRequiredError(
-        f"Memory adapters cannot be used in '{app_env}' environment. "
-        f"Memory adapters are for TESTS ONLY.\n\n"
-        f"For development/production, use WorkspaceService:\n"
-        f"  from syn_adapters.workspace_backends.service import WorkspaceService\n"
-        f"  service = WorkspaceService.create()\n\n"
-        f"To run tests, set APP_ENVIRONMENT=test:\n"
-        f"  APP_ENVIRONMENT=test pytest ...\n\n"
-        f"See ADR-004: Environment Configuration\n"
-        f"See ADR-023: Workspace-First Execution Model"
     )
 
 
@@ -107,24 +54,19 @@ class MemoryIsolationState:
 # =============================================================================
 
 
-class MemoryIsolationAdapter:
+class MemoryIsolationAdapter(InMemoryAdapter):
     """In-memory implementation of IsolationBackendPort.
 
     ⚠️  TEST ENVIRONMENT ONLY ⚠️
 
     Simulates isolation without Docker/VM overhead.
     Commands are recorded but not actually executed.
-
-    Usage:
-        adapter = MemoryIsolationAdapter()
-        handle = await adapter.create(config)
-        result = await adapter.execute(handle, ["echo", "hello"])
-        await adapter.destroy(handle)
+    Inherits environment guard from InMemoryAdapter.
     """
 
     def __init__(self) -> None:
         """Initialize adapter - validates test environment."""
-        _assert_test_environment()
+        super().__init__()
         self._instances: dict[str, MemoryIsolationState] = {}
 
     async def create(self, config: IsolationConfig) -> IsolationHandle:

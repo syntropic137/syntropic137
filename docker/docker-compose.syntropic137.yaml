@@ -175,16 +175,17 @@ services:
     image: ghcr.io/syntropic137/syn-collector:${SYN_VERSION:-latest}
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
-    container_name: syn137-docker-socket-proxy
     environment:
-      CONTAINERS: 1
-      ALLOW_START: 1
-      ALLOW_STOP: 1
-      EXEC: 1
-      POST: 1
+      CONTAINERS: "1"
+      ALLOW_START: "1"
+      ALLOW_STOP: "1"
+      EXEC: "1"
+      POST: "1"
+      NETWORKS: "1"
+      INFO: "1"
+      IMAGES: "1"
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock:ro
-    restart: always
     security_opt:
     - no-new-privileges:true
     cap_drop:
@@ -195,6 +196,10 @@ services:
     - SETGID
     tmpfs:
     - /tmp
+    networks:
+    - docker-proxy
+    container_name: syn137-docker-socket-proxy
+    restart: always
     deploy:
       resources:
         limits:
@@ -205,8 +210,6 @@ services:
       options:
         max-size: 5m
         max-file: "3"
-    networks:
-    - syn-proxy
   api:
     environment:
       SYN_API_PORT: "8000"
@@ -215,6 +218,7 @@ services:
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
       REDIS_URL: redis://redis:6379/0
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
       LOG_FORMAT: ${LOG_FORMAT:-json}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SYN_GITHUB_APP_ID: ${SYN_GITHUB_APP_ID:-}
@@ -229,8 +233,7 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       SYN_WORKSPACE_CONTAINER_DIR: /workspaces
-      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-.}/workspaces
-      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-${PWD}}/workspaces
       SYN_AGENT_NETWORK: syntropic137_selfhost_agent-net
       SYN_PROXY_URL: http://envoy-proxy:8081
       SYN_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
@@ -256,6 +259,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    networks:
+    - syn-internal
+    - docker-proxy
     container_name: syn137-api
     volumes:
     - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
@@ -292,9 +298,6 @@ services:
       options:
         max-size: 10m
         max-file: "3"
-    networks:
-    - syn-internal
-    - syn-proxy
     image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}
   gateway:
     container_name: syn137-gateway
@@ -506,8 +509,6 @@ networks:
   syn-internal:
     name: syn137_internal
     driver: bridge
-  syn-proxy:
-    name: syn137_proxy
-    driver: bridge
-    internal: true
   agent-net: null
+  docker-proxy:
+    internal: true

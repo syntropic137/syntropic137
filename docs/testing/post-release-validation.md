@@ -149,6 +149,23 @@ syn repo list
 > rm -f ~/.syntropic137/workflows/installed.json
 > ```
 
+### Step 5: Pre-flight GitHub App installation check
+
+Before §6/§7 (which need a real repo to run workflows and fire triggers against),
+confirm the GitHub App is installed on your test repo. Skipping this means
+register → assign → run fails multiple minutes in with a cryptic message.
+
+```bash
+# Replace owner/repo with your test repo
+TEST_REPO="owner/repo"
+APP_NAME=$(grep SYN_GITHUB_APP_NAME ~/.syntropic137/.env | cut -d= -f2)
+echo "Checking GitHub App '$APP_NAME' installation on $TEST_REPO..."
+gh api "/repos/$TEST_REPO/installation" --jq '.id' 2>&1 | head -1
+```
+
+- [ ] Response is a numeric installation ID (not an error)
+- [ ] If 404: install the App on the repo via `https://github.com/apps/$APP_NAME` before proceeding
+
 ---
 
 ## 1. Install CLI from npm
@@ -335,13 +352,13 @@ syn repo sessions <repo-id>
 syn workflow list
 syn workflow show <workflow-id>
 syn workflow search
-syn workflow installed
+syn workflow packages
 ```
 
 - [ ] Existing workflows appear
 - [ ] No deserialization or schema errors
 - [ ] Marketplace search returns results (if marketplace registered)
-- [ ] Installed packages listed
+- [ ] Local package history listed (`syn workflow packages` shows marketplace pulls on this machine)
 
 ### Marketplace
 
@@ -615,7 +632,7 @@ syn workflow show <workflow-id>
 
 - [ ] All installed workflows appear in list
 - [ ] Workflow detail shows correct phases, type, classification
-- [ ] `syn workflow installed` shows the packages with version and source
+- [ ] `syn workflow packages` shows the local marketplace-pull history with version and source
 
 ### Run a workflow (costs tokens)
 
@@ -625,6 +642,15 @@ syn workflow run <workflow-id>
 
 - [ ] Execution starts
 - [ ] Workspace provisioned (container created)
+
+> **Repositories (v0.25.2+):** Pass repos as a typed channel with `-R`, not through `--input`.
+> `-R` is repeatable and accepts three forms: `owner/repo`, a full GitHub URL,
+> or a `repo-*` ID from `syn repo list`. Example: `syn workflow run <id> -R owner/a -R repo-abc123`.
+>
+> `--input repository=owner/repo` and `--input repos=owner/a,owner/b` are rejected
+> at the CLI (and at the API as a belt-and-suspenders 422). The error message points
+> you at `-R`. Older workflows that declared `repository` in `input_declarations` must
+> drop it and rely on execution-time `-R` values.
 
 ### Monitor execution
 
@@ -770,11 +796,12 @@ syn triggers enable review-fix --repo owner/repo --workflow <workflow-id>
 
 # Register a custom trigger with safety limits
 # Note: action is part of the event name (e.g., issue_comment.created), not a separate flag
+# Note: --workflow requires the FULL UUID (not a short prefix). Copy from `syn workflow list`.
 syn triggers register \
   --event issue_comment.created \
   --repo <repo-id> \
-  --workflow <workflow-id> \
-  --max-fires 5 \
+  --workflow <workflow-uuid> \
+  --max-attempts 5 \
   --cooldown 300
 ```
 
@@ -782,6 +809,7 @@ syn triggers register \
 - [ ] Custom trigger registered with safety limits
 - [ ] `syn triggers list` shows both triggers
 - [ ] `syn triggers show <trigger-id>` shows conditions and safety guards
+- [ ] Registered trigger has a non-empty `installation_id` (v0.25.2 resolves `repo-*` IDs via the repo projection; empty ID means the App isn't installed on the repo from Step 5)
 
 ### Trigger pause/resume
 
@@ -1007,7 +1035,7 @@ claude plugin update syntropic137@syntropic137
 | `/syn-observe <session-id> events` | Returns event timeline for a session from Section 6 |
 
 - [ ] All commands above return results without errors
-- [ ] No commands reference deprecated field names (`window_cost_usd`, `syn workflow installed`)
+- [ ] No commands reference deprecated field names (`window_cost_usd`) or removed subcommands (`syn workflow installed` — renamed to `syn workflow packages`)
 
 ### Skill validation
 

@@ -6,6 +6,7 @@
 import { CommandGroup, type CommandDef } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
 import { getApiUrl, getAuthHeaders, CLI_VERSION } from "../config.js";
+import { DEFAULT_SELFHOST_API_URL, ENV_SYN_API_URL } from "../constants.js";
 import { print } from "../output/console.js";
 import { style, BOLD, GREEN, RED, DIM } from "../output/ansi.js";
 
@@ -28,7 +29,7 @@ const showCommand: CommandDef = {
     print(`  Auth:     ${hasAuth ? style(authType, GREEN) : style("none", DIM)}`);
     print("");
     print(style("Environment Variables", BOLD));
-    print(`  SYN_API_URL:      ${process.env["SYN_API_URL"] ?? style("(default: http://localhost:8137)", DIM)}`);
+    print(`  ${ENV_SYN_API_URL}:      ${process.env[ENV_SYN_API_URL] ?? style(`(default: ${DEFAULT_SELFHOST_API_URL})`, DIM)}`);
     print(`  SYN_API_TOKEN:    ${process.env["SYN_API_TOKEN"] ? style("set", GREEN) : style("not set", DIM)}`);
     print(`  SYN_API_USER:     ${process.env["SYN_API_USER"] ?? style("not set", DIM)}`);
     print(`  SYN_API_PASSWORD: ${process.env["SYN_API_PASSWORD"] ? style("set", GREEN) : style("not set", DIM)}`);
@@ -43,7 +44,7 @@ const validateCommand: CommandDef = {
     const apiUrl = getApiUrl();
 
     if (!apiUrl.startsWith("http://") && !apiUrl.startsWith("https://")) {
-      issues.push("SYN_API_URL must start with http:// or https://");
+      issues.push(`${ENV_SYN_API_URL} must start with http:// or https://`);
     }
 
     const headers = getAuthHeaders();
@@ -75,8 +76,8 @@ const envCommand: CommandDef = {
     print("# Syntropic137 CLI configuration");
     print("# Copy and adjust these variables in your shell profile");
     print("");
-    print("# API server URL (default: http://localhost:8137)");
-    print("export SYN_API_URL=http://localhost:8137");
+    print(`# API server URL (default: ${DEFAULT_SELFHOST_API_URL})`);
+    print(`export ${ENV_SYN_API_URL}=${DEFAULT_SELFHOST_API_URL}`);
     print("");
     print("# Authentication (choose one):");
     print("# Option 1: Bearer token");

@@ -1,4 +1,7 @@
-"""Unit tests for webhook signature verification and rate limiting."""
+"""Unit tests for webhook signature verification.
+
+IP-based rate limiting is handled at the edge (NGINX/Cloudflare), not in the app.
+"""
 
 from __future__ import annotations
 
@@ -7,23 +10,12 @@ import hmac
 from unittest.mock import patch
 
 import pytest
-from fastapi import HTTPException
 
 from syn_api.routes.webhooks.signature import (
-    _check_sig_rate_limit,
-    _record_sig_failure,
-    _sig_failures,
     _verify_signature,
     verify_webhook_signature,
 )
 from syn_api.types import Err, Ok
-
-
-@pytest.fixture(autouse=True)
-def _clear_rate_limits() -> None:
-    """Reset rate-limit state between tests."""
-    _sig_failures.clear()
-
 
 # --- _verify_signature ---
 
@@ -81,30 +73,3 @@ def test_verify_webhook_signature_returns_err_on_missing_sig() -> None:
 
     assert isinstance(result, Err)
     assert "Missing" in (result.message or "")
-
-
-# --- Rate limiting ---
-
-
-def test_check_rate_limit_allows_under_threshold() -> None:
-    for _ in range(4):
-        _record_sig_failure("1.2.3.4")
-    # Should not raise — 4 < 5
-    _check_sig_rate_limit("1.2.3.4")
-
-
-def test_check_rate_limit_blocks_at_threshold() -> None:
-    for _ in range(5):
-        _record_sig_failure("1.2.3.4")
-
-    with pytest.raises(HTTPException) as exc_info:
-        _check_sig_rate_limit("1.2.3.4")
-    assert exc_info.value.status_code == 429
-
-
-def test_check_rate_limit_different_ips_independent() -> None:
-    for _ in range(5):
-        _record_sig_failure("1.2.3.4")
-
-    # Different IP should not be affected
-    _check_sig_rate_limit("5.6.7.8")

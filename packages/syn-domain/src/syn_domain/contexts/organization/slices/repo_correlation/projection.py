@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
@@ -34,11 +34,11 @@ class RepoCorrelationProjection(AutoDispatchProjection):
     PROJECTION_NAME = REPO_CORRELATION
     VERSION = 1
 
-    def __init__(self, store: ProjectionStoreProtocol) -> None:
+    def __init__(self, store: ProjectionStore) -> None:
         """Initialize with a projection store.
 
         Args:
-            store: A ProjectionStoreProtocol implementation.
+            store: A ProjectionStore implementation.
         """
         self._store = store
 

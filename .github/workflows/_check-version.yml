@@ -1,0 +1,38 @@
+# =============================================================================
+# Check: Version Consistency
+# =============================================================================
+# Validates that all 11 version files match and the version is greater than
+# what's currently on the release branch.
+#
+# Called by: release-gate.yml
+#
+# NOTE on the `_check-` prefix and flat layout:
+# GitHub Actions does NOT support reusable workflows in subdirectories of
+# .github/workflows/ — they MUST live at the top level. Moving them into a
+# `checks/` subdir produces a cryptic "invalid workflow reference" failure
+# with 0 jobs and the path-as-name in the UI. The `_check-` prefix is our
+# convention for grouping reusable-only (workflow_call) workflows visually.
+# =============================================================================
+
+name: Check - Version Consistency
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    name: Version Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0  # Need release branch history for comparison
+
+      - name: Validate all 11 version files match
+        run: python3 scripts/workflows/bump_version.py --check
+
+      - name: Validate version is bumped vs release branch
+        run: python3 scripts/workflows/bump_version.py --check-release

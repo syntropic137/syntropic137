@@ -1,10 +1,11 @@
 # Base Docker Compose - Shared service definitions
-# Usage: docker compose -f docker-compose.yaml -f docker-compose.{dev,test}.yaml up
+# Usage: docker compose -f docker-compose.yaml -f docker-compose.{dev,test,selfhost,ondemand}.yaml up
 #
 # This file contains service images, builds, env vars, health checks, dependencies.
 # NO ports, NO volumes, NO container_name (those go in override files).
 #
 # See: ADR-034 - Test Infrastructure Architecture
+# See: ADR-060 - On-Demand Environment Creation
 
 name: syntropic137_${APP_ENVIRONMENT:-development}
 
@@ -83,6 +84,41 @@ services:
       start_period: 10s
 
   # =============================================================================
+  # DOCKER SOCKET PROXY (ISS-164)
+  # =============================================================================
+  # Restricts API to only the Docker API endpoints it needs for workspace mgmt.
+  # The real socket is mounted ONLY here - API talks to this proxy via TCP.
+  # Override files add: container_name, restart policy, resource limits.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      CONTAINERS: 1     # Allow /containers/* path prefix (inspect, list, rm)
+      ALLOW_START: 1    # docker start -> POST /containers/{id}/start
+      ALLOW_STOP: 1     # docker stop  -> POST /containers/{id}/stop
+      EXEC: 1           # docker exec  -> /exec/* paths
+      POST: 1           # Enable all non-GET verbs (POST, DELETE, PUT)
+      NETWORKS: 1       # ADR-021: agentic_isolation provisioning creates/inspects agent-net
+      INFO: 1           # agentic_isolation probes engine capabilities via /info
+      IMAGES: 1         # #720 / ADR-024 (2026-05-01): allow `docker run` to auto-pull missing
+                        # workspace images. Without this every selfhost user hits 403 Forbidden
+                        # on first workflow run because POST /images/create is blocked.
+                        # Trade-off documented in ADR-024 amendment.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    tmpfs:
+      - /tmp
+    networks:
+      - docker-proxy
+
+  # =============================================================================
   # API - Query and Control Service
   # =============================================================================
   api:
@@ -97,8 +133,10 @@ services:
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
       REDIS_URL: redis://redis:6379/0
-      # Note: secrets (GitHub App, Anthropic, storage) are injected via the
-      # dev overlay (docker-compose.dev.yaml) using env_file: ../.env
+      # Docker socket proxy (ISS-164) - all stacks use the same proxy
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      # Note: secrets (GitHub App, Anthropic, storage) are injected via
+      # overlay files (dev, selfhost, ondemand) using env_file or environment
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -108,6 +146,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
     healthcheck:
       test:
         [
@@ -118,6 +158,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    networks:
+      - default
+      - docker-proxy
 
   # =============================================================================
   # MINIO - S3-compatible Object Storage
@@ -189,9 +232,13 @@ services:
       - default
 
 networks:
+  docker-proxy:
+    # Isolated bridge for docker-socket-proxy <-> API communication only.
+    # No other services should be on this network.
+    internal: true
   agent-net:
     # Not internal: agents need egress for git operations (clone/push to github.com).
-    # API key security is enforced via ANTHROPIC_BASE_URL routing to the proxy —
+    # API key security is enforced via ANTHROPIC_BASE_URL routing to the proxy -
     # agents only hold a "proxy-managed" placeholder, so direct api.anthropic.com
     # calls fail. Full network isolation (internal: true) deferred to Phase 2
     # when git traffic is also routed through the proxy via CONNECT tunneling.

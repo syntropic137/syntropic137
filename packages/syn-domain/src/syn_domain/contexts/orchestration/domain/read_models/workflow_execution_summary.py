@@ -1,8 +1,11 @@
-"""Read model for workflow execution (run) list views."""
+"""Read model for workflow execution (run) list views.
+
+Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
+at the API boundary from the execution_cost projection.
+"""
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
 
 
 @dataclass(frozen=True)
@@ -40,8 +43,17 @@ class WorkflowExecutionSummary:
     total_tokens: int
     """Total tokens used across all phases."""
 
-    total_cost_usd: Decimal | str
-    """Total cost in USD."""
+    total_input_tokens: int = 0
+    """Total input tokens across all phases."""
+
+    total_output_tokens: int = 0
+    """Total output tokens across all phases."""
+
+    total_cache_creation_tokens: int = 0
+    """Total cache creation tokens across all phases."""
+
+    total_cache_read_tokens: int = 0
+    """Total cache read tokens across all phases."""
 
     tool_call_count: int = 0
     """Total number of tool calls across all phases."""
@@ -61,10 +73,6 @@ class WorkflowExecutionSummary:
 
         Supports both new naming (workflow_execution_id) and legacy (execution_id).
         """
-        cost = data.get("total_cost_usd", "0")
-        if isinstance(cost, str):
-            cost = Decimal(cost)
-
         # Support both new and legacy naming for backward compatibility
         execution_id = data.get("workflow_execution_id") or data.get("execution_id", "")
 
@@ -78,7 +86,10 @@ class WorkflowExecutionSummary:
             completed_phases=data.get("completed_phases", 0),
             total_phases=data.get("total_phases", 0),
             total_tokens=data.get("total_tokens", 0),
-            total_cost_usd=cost,
+            total_input_tokens=data.get("total_input_tokens", 0),
+            total_output_tokens=data.get("total_output_tokens", 0),
+            total_cache_creation_tokens=data.get("total_cache_creation_tokens", 0),
+            total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
             tool_call_count=data.get("tool_call_count", 0),
             expected_completion_at=data.get("expected_completion_at"),
             error_message=data.get("error_message"),
@@ -106,7 +117,10 @@ class WorkflowExecutionSummary:
             "completed_phases": self.completed_phases,
             "total_phases": self.total_phases,
             "total_tokens": self.total_tokens,
-            "total_cost_usd": str(self.total_cost_usd),
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_cache_creation_tokens": self.total_cache_creation_tokens,
+            "total_cache_read_tokens": self.total_cache_read_tokens,
             "tool_call_count": self.tool_call_count,
             "expected_completion_at": self._to_iso_string(self.expected_completion_at),
             "error_message": self.error_message,

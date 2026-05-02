@@ -7,12 +7,15 @@
 # Checks:
 #   1. Version consistency — all 11 package files match and are bumped
 #   2. Release notes — PR body must contain meaningful release notes
-#   3. Docs drift — generated CLI + API docs match source
-#   4. CLI ↔ API sync — generated CLI types match OpenAPI spec (single source of truth)
-#   5. Docker dry-run — all container images build successfully (single-arch)
-#   6. Security scans — OSV, pip-audit, dependency review (no known vulnerabilities)
+#   3. Codegen sync — CLI types, CLI docs, API docs all match source
+#   4. Docker dry-run — all container images build successfully (single-arch, cached)
+#   5. Security scans — OSV, pip-audit, dependency review
 #
 # Full CI (tests, lint, typecheck) also runs on these PRs via ci.yml.
+#
+# Each check lives in .github/workflows/ with the `_check-` prefix as a
+# reusable workflow. (GitHub Actions does not support subdirectories for
+# reusable workflows — they must be at the top level.)
 # =============================================================================
 
 name: Release Gate
@@ -27,308 +30,29 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Version Consistency
+  # Reusable checks
+  #
+  # NOTE: GitHub Actions does NOT support reusable workflows in subdirectories
+  # of .github/workflows/ — they must live at the top level. The `_check-*`
+  # prefix visually groups them and signals they only fire via workflow_call
+  # (they appear as greyed-out entries in the Actions sidebar).
   # ---------------------------------------------------------------------------
   version-check:
-    name: Version Consistency
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0  # Need release branch HEAD for comparison
+    uses: ./.github/workflows/_check-version.yml
 
-      - name: Validate version files match
-        run: python3 scripts/bump_version.py --check
-
-      - name: Validate version is bumped
-        run: |
-          PR_VERSION=$(python3 scripts/bump_version.py --current)
-          RELEASE_VERSION=$(git show origin/release:pyproject.toml | grep '^version = ' | head -1 | sed 's/version = "\(.*\)"/\1/')
-
-          echo "PR version:      $PR_VERSION"
-          echo "Release version: $RELEASE_VERSION"
-
-          if [ "$PR_VERSION" = "$RELEASE_VERSION" ]; then
-            echo "::error::Version $PR_VERSION has not been bumped from the current release."
-            echo "Run: just bump-version <new-version>"
-            exit 1
-          fi
-
-          # Compare versions using semantic version precedence rules.
-          # Pre-releases sort lower than their stable counterpart (e.g.,
-          # 0.19.1-beta.1 < 0.19.1) per the semver spec.
-          python3 -c "
-          import re
-          import sys
-
-          SEMVER_RE = re.compile(
-              r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
-              r'(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
-          )
-
-          def parse_version(v):
-              match = SEMVER_RE.fullmatch(v)
-              if not match:
-                  raise ValueError(f'Invalid semantic version: {v}')
-              major, minor, patch, prerelease = match.groups()
-              prerelease_parts = prerelease.split('.') if prerelease else None
-              return (int(major), int(minor), int(patch), prerelease_parts)
-
-          def compare_prerelease(pr1, pr2):
-              if pr1 is None and pr2 is None:
-                  return 0
-              if pr1 is None:
-                  return 1   # stable > prerelease
-              if pr2 is None:
-                  return -1  # prerelease < stable
-              for a, b in zip(pr1, pr2):
-                  a_num, b_num = a.isdigit(), b.isdigit()
-                  if a_num and b_num:
-                      if int(a) != int(b):
-                          return -1 if int(a) < int(b) else 1
-                  elif a_num != b_num:
-                      return -1 if a_num else 1
-                  else:
-                      if a != b:
-                          return -1 if a < b else 1
-              if len(pr1) == len(pr2):
-                  return 0
-              return -1 if len(pr1) < len(pr2) else 1
-
-          def compare_versions(v1, v2):
-              maj1, min1, pat1, pre1 = parse_version(v1)
-              maj2, min2, pat2, pre2 = parse_version(v2)
-              core1, core2 = (maj1, min1, pat1), (maj2, min2, pat2)
-              if core1 != core2:
-                  return -1 if core1 < core2 else 1
-              return compare_prerelease(pre1, pre2)
-
-          try:
-              cmp = compare_versions('$PR_VERSION', '$RELEASE_VERSION')
-          except ValueError as exc:
-              print(f'::error::{exc}')
-              sys.exit(1)
-
-          if cmp <= 0:
-              print(f'::error::PR version $PR_VERSION is not greater than release version $RELEASE_VERSION')
-              sys.exit(1)
-          print(f'OK: $PR_VERSION > $RELEASE_VERSION')
-          "
-
-  # ---------------------------------------------------------------------------
-  # Release Notes
-  # ---------------------------------------------------------------------------
   changelog-check:
-    name: Release Notes Present
-    runs-on: ubuntu-latest
-    steps:
-      - name: Validate PR body has release notes
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          if [ -z "$PR_BODY" ]; then
-            echo "::error::PR body is empty. Add release notes describing what changed."
-            exit 1
-          fi
+    uses: ./.github/workflows/_check-changelog.yml
+    with:
+      pr_body: ${{ github.event.pull_request.body }}
 
-          BODY_LENGTH=${#PR_BODY}
-          if [ "$BODY_LENGTH" -lt 20 ]; then
-            echo "::error::PR body is too short ($BODY_LENGTH chars). Add meaningful release notes."
-            exit 1
-          fi
+  codegen-sync:
+    uses: ./.github/workflows/_check-codegen-sync.yml
 
-          echo "OK: Release notes present ($BODY_LENGTH chars)"
-
-  # ---------------------------------------------------------------------------
-  # Docs Drift — generated CLI + API docs must match source
-  # ---------------------------------------------------------------------------
-  docs-drift:
-    name: Docs Drift
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          submodules: true
-
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
-        with:
-          version: 10
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-
-      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
-
-      - name: Install dependencies
-        run: |
-          pnpm --filter @syntropic137/cli install --frozen-lockfile
-          pnpm --filter syn-docs install --frozen-lockfile
-
-      - name: Generate CLI docs
-        run: pnpm --filter @syntropic137/cli generate:docs
-
-      - name: Check CLI docs drift
-        run: |
-          CHANGED=$(git diff --name-only apps/syn-docs/content/docs/cli/)
-          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)
-          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::CLI docs are out of sync. Run 'just codegen' and commit."
-            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
-            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
-            exit 1
-          fi
-          echo "CLI docs are up to date."
-
-      - name: Generate API docs
-        run: |
-          uv run python scripts/extract_openapi.py
-          cd apps/syn-docs && pnpm run generate:openapi
-
-      - name: Check API docs drift
-        run: |
-          CHANGED=$(git diff --name-only apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/)
-          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)
-          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::API docs are out of sync. Run 'just codegen' and commit."
-            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
-            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
-            exit 1
-          fi
-          echo "API docs are up to date."
-
-  # ---------------------------------------------------------------------------
-  # CLI ↔ API Sync — generated CLI types must match OpenAPI spec
-  # ---------------------------------------------------------------------------
-  cli-api-sync:
-    name: CLI ↔ API Sync
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          submodules: true
-
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
-        with:
-          version: 10
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-
-      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
-
-      - name: Install CLI dependencies
-        run: pnpm --filter @syntropic137/cli install --frozen-lockfile
-
-      - name: Regenerate OpenAPI spec
-        run: uv run python scripts/extract_openapi.py
-
-      - name: Check CLI types vs OpenAPI spec
-        run: pnpm --filter @syntropic137/cli run check:api-drift
-
-      - name: Regenerate CLI types and check for drift
-        run: |
-          pnpm --filter @syntropic137/cli generate:types
-          CHANGED=$(git diff --name-only apps/syn-cli-node/src/generated/)
-          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-cli-node/src/generated/)
-          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::CLI generated types are out of sync with OpenAPI spec."
-            echo "Run 'just codegen' and commit."
-            [[ -n "$CHANGED" ]] && echo "Changed files:" && echo "$CHANGED"
-            [[ -n "$UNTRACKED" ]] && echo "Untracked files:" && echo "$UNTRACKED"
-            exit 1
-          fi
-          echo "CLI types are in sync with OpenAPI spec."
-
-  # ---------------------------------------------------------------------------
-  # Docker Change Detection — skip Docker builds when only non-Docker files changed
-  # ---------------------------------------------------------------------------
-  check-docker-changes:
-    name: Check Docker Changes
-    runs-on: ubuntu-latest
-    outputs:
-      docker_changed: ${{ steps.filter.outputs.docker }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
-        id: filter
-        with:
-          filters: |
-            docker:
-              - 'infra/docker/**'
-              - 'docker/**'
-              - '**/Dockerfile*'
-              - 'apps/syn-api/**'
-              - 'apps/syn-dashboard-ui/**'
-              - 'packages/syn-collector/**'
-              - 'packages/syn-domain/**'
-              - 'packages/syn-adapters/**'
-              - 'packages/syn-shared/**'
-              - 'lib/**'
-              - 'pyproject.toml'
-              - 'uv.lock'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-
-  # ---------------------------------------------------------------------------
-  # Docker Dry-Run — verify all images build (single-arch, no push)
-  # ---------------------------------------------------------------------------
   docker-dry-run:
-    name: "Docker Build: ${{ matrix.image }}"
-    needs: check-docker-changes
-    if: needs.check-docker-changes.outputs.docker_changed == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: syn-api
-            dockerfile: infra/docker/images/syn-api/Dockerfile
-            context: "."
-            build-args: "INCLUDE_DOCKER_CLI=1"
-          - image: syn-gateway
-            dockerfile: infra/docker/images/gateway/Dockerfile
-            context: "."
-          - image: syn-collector
-            dockerfile: packages/syn-collector/Dockerfile
-            context: "."
-          - image: syn-dashboard-ui
-            dockerfile: apps/syn-dashboard-ui/Dockerfile
-            context: "."
-          - image: sidecar-proxy
-            dockerfile: docker/sidecar-proxy/Dockerfile
-            context: docker/sidecar-proxy
-          - image: token-injector
-            dockerfile: docker/token-injector/Dockerfile
-            context: docker/token-injector
-          # agentic-workspace uses build-provider.py staging — validated
-          # separately in e2e-container.yml, skip in gate to save CI time.
-
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          submodules: true
-
-      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
-
-      - name: Build (no push)
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          push: false
-          load: true
-          tags: test/${{ matrix.image }}:gate
-          build-args: ${{ matrix.build-args }}
-          cache-from: type=gha
+    uses: ./.github/workflows/_check-docker-dry-run.yml
 
   # ---------------------------------------------------------------------------
-  # Security Scans — no known vulnerabilities in dependencies
+  # Security Scans — inline (not duplicated elsewhere, no extraction needed)
   # ---------------------------------------------------------------------------
   osv-scan:
     name: OSV Vulnerability Scan
@@ -360,9 +84,13 @@ jobs:
             | uv tool run pip-audit --disable-pip --no-deps \
               --ignore-vuln GHSA-5239-wwwm-4pmq \
               --ignore-vuln GHSA-p423-j2cm-9vmq \
+              --ignore-vuln GHSA-6w46-j5rx-g56g \
+              --ignore-vuln GHSA-mj87-hwqh-73pj \
               -r /dev/stdin
           # TODO(#345): remove --ignore-vuln once pygments releases a fix
           # TODO(#634): remove --ignore-vuln once cryptography 46.0.7 is available on PyPI
+          # TODO(#678): remove --ignore-vuln GHSA-6w46-j5rx-g56g once pytest 9.0.3 is available on PyPI
+          # TODO(#696): remove --ignore-vuln GHSA-mj87-hwqh-73pj once python-multipart 0.0.26 is available on PyPI
 
   dependency-review:
     name: Dependency Review
@@ -379,47 +107,43 @@ jobs:
   release-gate-success:
     name: Release Gate
     if: always()
-    needs: [version-check, changelog-check, docs-drift, cli-api-sync, check-docker-changes, docker-dry-run, osv-scan, pip-audit, dependency-review]
+    needs:
+      - version-check
+      - changelog-check
+      - codegen-sync
+      - docker-dry-run
+      - osv-scan
+      - pip-audit
+      - dependency-review
     runs-on: ubuntu-latest
     steps:
       - name: Check all gates passed
         run: |
-          echo "version-check: ${{ needs.version-check.result }}"
-          echo "changelog-check: ${{ needs.changelog-check.result }}"
-          echo "docs-drift: ${{ needs.docs-drift.result }}"
-          echo "cli-api-sync: ${{ needs.cli-api-sync.result }}"
-          echo "check-docker-changes: ${{ needs.check-docker-changes.result }}"
-          echo "docker-dry-run: ${{ needs.docker-dry-run.result }}"
-          echo "osv-scan: ${{ needs.osv-scan.result }}"
-          echo "pip-audit: ${{ needs.pip-audit.result }}"
-          echo "dependency-review: ${{ needs.dependency-review.result }}"
+          echo "version-check:    ${{ needs.version-check.result }}"
+          echo "changelog-check:  ${{ needs.changelog-check.result }}"
+          echo "codegen-sync:     ${{ needs.codegen-sync.result }}"
+          echo "docker-dry-run:   ${{ needs.docker-dry-run.result }}"
+          echo "osv-scan:         ${{ needs.osv-scan.result }}"
+          echo "pip-audit:        ${{ needs.pip-audit.result }}"
+          echo "dependency-review:${{ needs.dependency-review.result }}"
 
-          # Core gates must all succeed
-          if [[ "${{ needs.version-check.result }}" != "success" ]] || \
-             [[ "${{ needs.changelog-check.result }}" != "success" ]] || \
-             [[ "${{ needs.docs-drift.result }}" != "success" ]] || \
-             [[ "${{ needs.cli-api-sync.result }}" != "success" ]] || \
-             [[ "${{ needs.check-docker-changes.result }}" != "success" ]]; then
-            echo "::error::One or more release gate checks failed."
-            exit 1
-          fi
+          FAILED=0
+          check() {
+            local job="$1" result="$2"
+            if [[ "$result" != "success" ]]; then
+              echo "::error::${job} did not pass (result: ${result})"
+              FAILED=1
+            fi
+          }
+          check "version-check"    "${{ needs.version-check.result }}"
+          check "changelog-check"  "${{ needs.changelog-check.result }}"
+          check "codegen-sync"     "${{ needs.codegen-sync.result }}"
+          check "docker-dry-run"   "${{ needs.docker-dry-run.result }}"
+          check "osv-scan"         "${{ needs.osv-scan.result }}"
+          check "pip-audit"        "${{ needs.pip-audit.result }}"
+          check "dependency-review" "${{ needs.dependency-review.result }}"
 
-          # Docker dry-run must succeed when it ran, or be skipped (no docker changes)
-          DOCKER_RESULT="${{ needs.docker-dry-run.result }}"
-          if [[ "$DOCKER_RESULT" != "success" && "$DOCKER_RESULT" != "skipped" ]]; then
-            echo "::error::Docker dry-run failed."
-            exit 1
-          fi
-
-          if [[ "$DOCKER_RESULT" == "skipped" ]]; then
-            echo "Docker dry-run skipped (no Docker-related changes detected)."
-          fi
-
-          # Security scans must all succeed
-          if [[ "${{ needs.osv-scan.result }}" != "success" ]] || \
-             [[ "${{ needs.pip-audit.result }}" != "success" ]] || \
-             [[ "${{ needs.dependency-review.result }}" != "success" ]]; then
-            echo "::error::Security scan(s) failed — release blocked until vulnerabilities are resolved."
+          if [[ "$FAILED" == "1" ]]; then
             exit 1
           fi
 

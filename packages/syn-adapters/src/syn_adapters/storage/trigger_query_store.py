@@ -22,13 +22,7 @@ if TYPE_CHECKING:
         TriggerCondition,
     )
 
-from syn_domain.contexts.github._shared.trigger_query_store import (
-    TriggerQueryStore,
-    _IndexedTrigger,
-)
-from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import (
-    TriggerConfig,
-)
+from syn_domain.contexts.github import IndexedTrigger, TriggerConfig, TriggerQueryStore
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +77,9 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         # Mirrors InMemoryTriggerQueryStore._running_executions.
         self._running_executions: dict[str, tuple[str, int | None]] = {}
 
-    def _to_indexed_trigger(self, data: dict[str, Any]) -> _IndexedTrigger:
-        """Reconstruct an _IndexedTrigger from projection store data."""
-        trigger = _IndexedTrigger(
+    def _to_indexed_trigger(self, data: dict[str, Any]) -> IndexedTrigger:
+        """Reconstruct an IndexedTrigger from projection store data."""
+        trigger = IndexedTrigger(
             trigger_id=data.get("trigger_id", ""),
             name=data.get("name", ""),
             event=data.get("event", ""),
@@ -109,13 +103,13 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
 
     # --- Read methods ---
 
-    async def get(self, trigger_id: str) -> _IndexedTrigger | None:
+    async def get(self, trigger_id: str) -> IndexedTrigger | None:
         data = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if data is None:
             return None
         return self._to_indexed_trigger(data)
 
-    async def list_by_event_and_repo(self, event: str, repository: str) -> list[_IndexedTrigger]:
+    async def list_by_event_and_repo(self, event: str, repository: str) -> list[IndexedTrigger]:
         results = await self._store.query(
             NS_TRIGGER_INDEX,
             filters={"event": event, "repository": repository, "status": "active"},
@@ -126,7 +120,7 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         self,
         repository: str | None = None,
         status: str | None = None,
-    ) -> list[_IndexedTrigger]:
+    ) -> list[IndexedTrigger]:
         filters = _build_optional_filters(repository=repository, status=status)
         results = await self._store.query(
             NS_TRIGGER_INDEX,
@@ -196,7 +190,24 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         pass  # Writes come from TriggerQueryProjection
 
     async def record_delivery(self, delivery_id: str, trigger_id: str) -> None:
-        pass  # Writes come from TriggerQueryProjection
+        """Record delivery for Guard 4 idempotency (ADR-060).
+
+        Called in the live fire path for immediate dedup. The projection
+        (TriggerQueryProjection) also writes the same key from the
+        TriggerFiredEvent; payload shape is aligned so the second write
+        is a true idempotent overwrite.
+        """
+        if not delivery_id:
+            return
+        await self._store.save(
+            NS_DELIVERIES,
+            delivery_id,
+            {
+                "delivery_id": delivery_id,
+                "trigger_id": trigger_id,
+                "processed_at": datetime.now(UTC).isoformat(),
+            },
+        )
 
     async def record_fire(
         self,

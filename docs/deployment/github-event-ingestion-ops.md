@@ -67,10 +67,10 @@ With many repositories, consider:
 
 | Logger | Level | What |
 |--------|-------|------|
-| `syn_api.services.github_event_poller` | INFO | Poller start/stop, mode transitions |
-| `syn_api.services.github_event_poller` | DEBUG | Per-cycle repo count and current mode |
-| `syn_api.services.github_event_poller` | WARNING | Rate limit backoff, polling errors |
-| `syn_api.services.github_event_poller` | EXCEPTION | Individual event ingestion failures |
+| `syn_domain.contexts.github.services.event_ingestion` | INFO | Poller start/stop, mode transitions |
+| `syn_domain.contexts.github.services.event_ingestion` | DEBUG | Per-cycle repo count and current mode |
+| `syn_domain.contexts.github.services.event_ingestion` | WARNING | Rate limit backoff, polling errors |
+| `syn_domain.contexts.github.services.event_ingestion` | EXCEPTION | Individual event ingestion failures |
 | `syn_domain...event_pipeline.pipeline` | DEBUG | Deduplicated events (key + source) |
 | `syn_domain...event_pipeline.pipeline` | WARNING | Dedup backend failures (fail-open) |
 | `syn_domain...event_pipeline.poller_state` | INFO | Mode transitions (ACTIVE ↔ SAFETY_NET) |

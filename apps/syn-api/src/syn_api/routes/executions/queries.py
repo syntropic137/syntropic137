@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, NamedTuple
@@ -21,6 +22,12 @@ from syn_api.types import (
     PhaseExecution,
     Result,
     ToolOperation,
+)
+from syn_shared.display import (
+    format_cost,
+    format_duration_seconds,
+    format_repos,
+    format_tokens,
 )
 
 from .models import (
@@ -46,6 +53,108 @@ router = APIRouter(tags=["executions"])
 
 def _to_str(val: object | None) -> str | None:
     return str(val) if val is not None else None
+
+
+def _coerce_dt(value: object | None) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        with contextlib.suppress(ValueError):
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return None
+
+
+def _duration_seconds(started: object | None, completed: object | None) -> float | None:
+    """Compute duration from start/end timestamps when both are present."""
+    s = _coerce_dt(started)
+    c = _coerce_dt(completed)
+    if s is None or c is None:
+        return None
+    return (c - s).total_seconds()
+
+
+@dataclass
+class _MergedExecutionTotals:
+    """Token + cost totals after preferring Lane 2 enrichment over domain values."""
+
+    cost: Decimal
+    input_tokens: int
+    output_tokens: int
+    cache_creation_tokens: int
+    cache_read_tokens: int
+    total_tokens: int
+
+
+def _merge_totals(
+    e: ExecutionSummary, enrichment: _ExecutionEnrichment | None
+) -> _MergedExecutionTotals:
+    """Prefer Lane 2 totals when present; fall back to the domain summary."""
+    if enrichment is None:
+        return _MergedExecutionTotals(
+            cost=Decimal(str(e.total_cost_usd)),
+            input_tokens=e.total_input_tokens,
+            output_tokens=e.total_output_tokens,
+            cache_creation_tokens=e.total_cache_creation_tokens,
+            cache_read_tokens=e.total_cache_read_tokens,
+            total_tokens=e.total_tokens,
+        )
+    return _MergedExecutionTotals(
+        cost=enrichment.total_cost_usd,
+        input_tokens=enrichment.input_tokens
+        if enrichment.input_tokens is not None
+        else e.total_input_tokens,
+        output_tokens=enrichment.output_tokens
+        if enrichment.output_tokens is not None
+        else e.total_output_tokens,
+        cache_creation_tokens=enrichment.cache_creation_tokens
+        if enrichment.cache_creation_tokens is not None
+        else e.total_cache_creation_tokens,
+        cache_read_tokens=enrichment.cache_read_tokens
+        if enrichment.cache_read_tokens is not None
+        else e.total_cache_read_tokens,
+        total_tokens=enrichment.total_tokens
+        if enrichment.total_tokens is not None
+        else e.total_tokens,
+    )
+
+
+def _build_execution_summary_response(
+    e: ExecutionSummary,
+    enrichment: _ExecutionEnrichment | None = None,
+) -> ExecutionSummaryResponse:
+    """Compose an ExecutionSummaryResponse from a domain summary + enrichment.
+
+    Token + cost totals prefer Lane 2 (live) over the domain projection,
+    which only finalizes on phase completion. Display fields are derived
+    from raw values via syn_shared.display so all clients (dashboard,
+    CLI) share identical strings.
+    """
+    duration_seconds = _duration_seconds(e.started_at, e.completed_at)
+    totals = _merge_totals(e, enrichment)
+    return ExecutionSummaryResponse(
+        workflow_execution_id=e.workflow_execution_id,
+        workflow_id=e.workflow_id,
+        workflow_name=e.workflow_name,
+        status=e.status,
+        started_at=_to_str(e.started_at),
+        completed_at=_to_str(e.completed_at),
+        completed_phases=e.completed_phases,
+        total_phases=e.total_phases,
+        total_tokens=totals.total_tokens,
+        total_tokens_display=format_tokens(totals.total_tokens),
+        total_input_tokens=totals.input_tokens,
+        total_output_tokens=totals.output_tokens,
+        total_cache_creation_tokens=totals.cache_creation_tokens,
+        total_cache_read_tokens=totals.cache_read_tokens,
+        total_cost_usd=totals.cost,
+        total_cost_display=format_cost(totals.cost),
+        duration_seconds=duration_seconds,
+        duration_display=format_duration_seconds(duration_seconds),
+        tool_call_count=e.tool_call_count,
+        error_message=e.error_message,
+        repos=list(e.repos),
+        repos_display=format_repos(e.repos),
+    )
 
 
 def _parse_iso(value: str) -> datetime | None:
@@ -74,18 +183,7 @@ async def _load_phase_operations(
     """Load tool operations for a session, returning [] on failure."""
     try:
         tool_data = await manager.session_tools.get(session_id)
-        return [
-            ToolOperation(
-                observation_id=op.observation_id,
-                operation_type=op.operation_type,
-                timestamp=op.timestamp,
-                duration_ms=op.duration_ms,
-                success=op.success,
-                tool_name=op.tool_name,
-                tool_use_id=op.tool_use_id,
-            )
-            for op in (tool_data or [])
-        ]
+        return [ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])]
     except Exception:
         logger.exception("Failed to load tool ops for session %s", session_id)
         return []
@@ -141,7 +239,7 @@ async def _map_phase_detail(
         output_tokens=phase.output_tokens,
         cache_creation_tokens=sc.cache_creation,
         cache_read_tokens=sc.cache_read,
-        cost_usd=Decimal(str(phase.cost_usd)),
+        cost_usd=Decimal("0"),  # Lane 2: enriched via _enrich_costs from execution_cost (#695)
         duration_seconds=phase.duration_seconds,
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
@@ -186,6 +284,56 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
         operations=operations,
     )
+
+
+@dataclass
+class _ExecutionEnrichment:
+    """Per-execution enrichment loaded from Lane 2 (execution_cost projection).
+
+    Lane 2 updates token + cost totals continuously while phases run, so
+    these values are live for in-flight executions. The domain projection
+    (Lane 1) only sees final tokens on phase completion.
+    """
+
+    total_cost_usd: Decimal = Decimal("0")
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    total_tokens: int | None = None
+
+
+async def _load_execution_enrichment(
+    manager: ProjectionManager, execution_ids: list[str]
+) -> dict[str, _ExecutionEnrichment]:
+    """Load per-execution enrichment from the Lane 2 execution_cost projection (#695)."""
+    out: dict[str, _ExecutionEnrichment] = {}
+    for eid in execution_ids:
+        try:
+            ec = await manager.execution_cost.get_execution_cost(eid)
+        except Exception:
+            logger.debug("Failed to load execution cost for %s", eid, exc_info=True)
+            continue
+        if ec is None:
+            continue
+        total = ec.input_tokens + ec.output_tokens + ec.cache_creation_tokens + ec.cache_read_tokens
+        out[eid] = _ExecutionEnrichment(
+            total_cost_usd=ec.total_cost_usd,
+            input_tokens=ec.input_tokens,
+            output_tokens=ec.output_tokens,
+            cache_creation_tokens=ec.cache_creation_tokens,
+            cache_read_tokens=ec.cache_read_tokens,
+            total_tokens=total,
+        )
+    return out
+
+
+async def _load_execution_costs(
+    manager: ProjectionManager, execution_ids: list[str]
+) -> dict[str, Decimal]:
+    """Backwards-compat: cost-only view kept for legacy callers."""
+    enriched = await _load_execution_enrichment(manager, execution_ids)
+    return {eid: e.total_cost_usd for eid, e in enriched.items()}
 
 
 async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
@@ -237,6 +385,10 @@ async def list_(
         if domain_summaries
         else {}
     )
+    # Enrich each execution's total_cost_usd from the Lane 2 execution_cost projection (#695)
+    cost_by_execution = await _load_execution_costs(
+        manager, [s.workflow_execution_id for s in domain_summaries]
+    )
     return Ok(
         [
             ExecutionSummary(
@@ -249,9 +401,14 @@ async def list_(
                 completed_phases=s.completed_phases,
                 total_phases=s.total_phases,
                 total_tokens=s.total_tokens,
-                total_cost_usd=s.total_cost_usd,
+                total_input_tokens=s.total_input_tokens,
+                total_output_tokens=s.total_output_tokens,
+                total_cache_creation_tokens=s.total_cache_creation_tokens,
+                total_cache_read_tokens=s.total_cache_read_tokens,
+                total_cost_usd=cost_by_execution.get(s.workflow_execution_id, Decimal("0")),
                 tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
                 error_message=s.error_message,
+                repos=list(s.repos),
             )
             for s in domain_summaries
         ]
@@ -267,10 +424,12 @@ async def get(
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
 
-    # Enrich with TimescaleDB cost data when available (#505)
+    # Enrich with TimescaleDB cost data when available (#505, #695: cost is Lane 2)
     total_input = detail.total_input_tokens
     total_output = detail.total_output_tokens
-    total_cost = detail.total_cost_usd
+    total_cache_creation = detail.total_cache_creation_tokens
+    total_cache_read = detail.total_cache_read_tokens
+    total_cost: Decimal | str = Decimal("0")
     total_duration = detail.total_duration_seconds
 
     with contextlib.suppress(Exception):
@@ -278,6 +437,8 @@ async def get(
         if exec_cost is not None and exec_cost.total_tokens > 0:
             total_input = exec_cost.input_tokens
             total_output = exec_cost.output_tokens
+            total_cache_creation = exec_cost.cache_creation_tokens or total_cache_creation
+            total_cache_read = exec_cost.cache_read_tokens or total_cache_read
             total_cost = exec_cost.total_cost_usd
             if exec_cost.duration_ms > 0:
                 total_duration = exec_cost.duration_ms / 1000.0
@@ -292,10 +453,13 @@ async def get(
             completed_at=detail.completed_at,
             total_input_tokens=total_input,
             total_output_tokens=total_output,
+            total_cache_creation_tokens=total_cache_creation,
+            total_cache_read_tokens=total_cache_read,
             total_cost_usd=total_cost,
             total_duration_seconds=total_duration,
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
+            repos=list(detail.repos),
         )
     )
 
@@ -341,7 +505,7 @@ async def get_detail(
         manager,
         phases,
         fallback_tokens=detail.total_input_tokens + detail.total_output_tokens,
-        fallback_cost=detail.total_cost_usd,
+        fallback_cost=Decimal("0"),
     )
 
     return Ok(
@@ -366,9 +530,15 @@ async def list_active(
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     """List currently running or paused executions."""
     await ensure_connected()
-    all_execs = await get_projection_mgr().workflow_execution_list.get_all(
+    manager = get_projection_mgr()
+    all_execs = await manager.workflow_execution_list.get_all(
         limit=limit,
         status_filter=None,
+    )
+    active = [s for s in all_execs if s.status in ("running", "paused", "pending")]
+    # Enrich cost from Lane 2 execution_cost projection (#695)
+    cost_by_execution = await _load_execution_costs(
+        manager, [s.workflow_execution_id for s in active]
     )
     return Ok(
         [
@@ -382,11 +552,11 @@ async def list_active(
                 completed_phases=s.completed_phases,
                 total_phases=s.total_phases,
                 total_tokens=s.total_tokens,
-                total_cost_usd=s.total_cost_usd,
+                total_cost_usd=cost_by_execution.get(s.workflow_execution_id, Decimal("0")),
                 error_message=s.error_message,
+                repos=list(s.repos),
             )
-            for s in all_execs
-            if s.status in ("running", "paused", "pending")
+            for s in active
         ]
     )
 
@@ -405,23 +575,13 @@ async def list_executions_endpoint(
     result = await list_(status=status, limit=page_size, offset=offset)
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
+    manager = get_projection_mgr()
+    enrichment = await _load_execution_enrichment(
+        manager, [e.workflow_execution_id for e in result.value]
+    )
     return ExecutionListResponse(
         executions=[
-            ExecutionSummaryResponse(
-                workflow_execution_id=e.workflow_execution_id,
-                workflow_id=e.workflow_id,
-                workflow_name=e.workflow_name,
-                status=e.status,
-                started_at=_to_str(e.started_at),
-                completed_at=_to_str(e.completed_at),
-                completed_phases=e.completed_phases,
-                total_phases=e.total_phases,
-                total_tokens=e.total_tokens,
-                total_cost_usd=Decimal(str(e.total_cost_usd)),
-                tool_call_count=e.tool_call_count,
-                error_message=e.error_message,
-                repos=list(e.repos),
-            )
+            _build_execution_summary_response(e, enrichment.get(e.workflow_execution_id))
             for e in result.value
         ],
         total=len(result.value),
@@ -460,8 +620,8 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         phases=phases,
         total_input_tokens=total_input,
         total_output_tokens=total_output,
-        cache_creation_tokens=total_cache_creation,
-        cache_read_tokens=total_cache_read,
+        total_cache_creation_tokens=total_cache_creation,
+        total_cache_read_tokens=total_cache_read,
         total_tokens=max(
             detail.total_tokens,
             total_input + total_output + total_cache_creation + total_cache_read,

@@ -110,9 +110,9 @@ class InMemoryObservabilityStore:
     """
 
     def __init__(self) -> None:
-        from syn_adapters.storage.in_memory import _assert_test_environment
+        from syn_adapters.in_memory import assert_test_only
 
-        _assert_test_environment()
+        assert_test_only()
         self.events: list[dict[str, Any]] = []
 
     async def write_event(self, event: CollectedEvent) -> None:

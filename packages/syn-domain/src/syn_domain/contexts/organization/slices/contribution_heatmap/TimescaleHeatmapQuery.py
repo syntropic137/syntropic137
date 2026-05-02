@@ -9,9 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import asyncpg
 
-from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import (
-    CostCalculator,
-)
+from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     HeatmapDayBucket,
 )

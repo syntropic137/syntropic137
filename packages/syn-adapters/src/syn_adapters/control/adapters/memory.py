@@ -1,51 +1,22 @@
-"""In-memory adapters for development and testing.
+"""In-memory adapters for testing only.
 
-NOTE: These adapters are for TESTING ONLY. They include environment checks
-that will raise an error if used outside of test environment.
-See ADR-004 for environment configuration strategy.
+See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 from collections import defaultdict
 from typing import TYPE_CHECKING
+
+from syn_adapters.in_memory import InMemoryAdapter
 
 if TYPE_CHECKING:
     from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.state_machine import ExecutionState
 
 
-def _assert_test_environment() -> None:
-    """Assert that we're running in a test environment.
-
-    In-memory adapters should only be used in tests. For development/production,
-    use persistent adapters (e.g., ProjectionControlStateAdapter).
-
-    Raises:
-        RuntimeError: If APP_ENVIRONMENT is not set or not 'test'/'development'.
-    """
-    app_env = os.getenv("APP_ENVIRONMENT", "").lower()
-
-    # Fail explicitly if APP_ENVIRONMENT is not set
-    if app_env == "":
-        raise RuntimeError(
-            "APP_ENVIRONMENT is not set. InMemory adapters can only be used when "
-            "APP_ENVIRONMENT is explicitly set to 'test' or 'development'. "
-            "Set APP_ENVIRONMENT=test for testing, or use a persistent adapter for production."
-        )
-
-    # Only allow 'test' or 'development' environments
-    if app_env not in ("test", "development"):
-        raise RuntimeError(
-            f"InMemory adapters can only be used in test/development environment. "
-            f"Current APP_ENVIRONMENT: '{app_env}'. "
-            f"Use ProjectionControlStateAdapter for production."
-        )
-
-
-class InMemoryControlStateAdapter:
+class InMemoryControlStateAdapter(InMemoryAdapter):
     """In-memory state storage for testing.
 
     WARNING: This adapter is for TESTING ONLY. State is not persisted.
@@ -55,7 +26,7 @@ class InMemoryControlStateAdapter:
     """
 
     def __init__(self) -> None:
-        _assert_test_environment()
+        super().__init__()
         self._states: dict[str, ExecutionState] = {}
         self._lock = asyncio.Lock()
 
@@ -73,7 +44,7 @@ class InMemoryControlStateAdapter:
         self._states.clear()
 
 
-class InMemorySignalQueueAdapter:
+class InMemorySignalQueueAdapter(InMemoryAdapter):
     """In-memory signal queue for testing.
 
     WARNING: This adapter is for TESTING ONLY. Signals are not persisted.
@@ -83,7 +54,7 @@ class InMemorySignalQueueAdapter:
     """
 
     def __init__(self) -> None:
-        _assert_test_environment()
+        super().__init__()
         self._queues: dict[str, list[ControlSignal]] = defaultdict(list)
         self._lock = asyncio.Lock()
 

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from event_sourcing import AutoDispatchProjection
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
     TodoAction,
@@ -58,7 +58,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
     PROJECTION_NAME = "execution_todo"
     VERSION = 1
 
-    def __init__(self, store: ProjectionStoreProtocol) -> None:
+    def __init__(self, store: ProjectionStore) -> None:
         """Initialize with a projection store."""
         self._store = store
 

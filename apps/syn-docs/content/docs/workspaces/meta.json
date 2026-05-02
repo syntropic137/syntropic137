@@ -1,4 +1,4 @@
 {
   "title": "Workspaces",
-  "pages": ["index", "features", "security", "configuration"]
+  "pages": ["index", "features", "hydration", "security", "configuration"]
 }

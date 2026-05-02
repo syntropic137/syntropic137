@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import (
@@ -39,9 +39,7 @@ router = APIRouter(prefix="/workflows", tags=["workflows"])
 
 
 def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
-    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
-        WorkflowType,
-    )
+    from syn_domain.contexts.orchestration import WorkflowType
 
     type_map: dict[str, WorkflowType] = {
         "research": WorkflowType.RESEARCH,
@@ -55,9 +53,7 @@ def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
 
 
 def _resolve_classification(classification: str) -> WorkflowClassification:
-    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
-        WorkflowClassification,
-    )
+    from syn_domain.contexts.orchestration import WorkflowClassification
 
     classification_map: dict[str, WorkflowClassification] = {
         "simple": WorkflowClassification.SIMPLE,
@@ -69,10 +65,7 @@ def _resolve_classification(classification: str) -> WorkflowClassification:
 
 
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
-    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
-        PhaseDefinition,
-        PhaseExecutionType,
-    )
+    from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
 
     if phases:
         return [
@@ -106,9 +99,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
 def _build_input_declarations(
     inputs: list[dict[str, Any]] | None,
 ) -> list[InputDeclaration]:
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-        InputDeclaration,
-    )
+    from syn_domain.contexts.orchestration import InputDeclaration
 
     if not inputs:
         return []
@@ -127,7 +118,7 @@ async def create_workflow(
     name: str,
     workflow_type: str = "custom",
     classification: str = "standard",
-    repository_url: str = "https://github.com/example/repo",
+    repository_url: str = "",
     repository_ref: str = "main",
     description: str | None = None,
     project_name: str | None = None,
@@ -135,6 +126,7 @@ async def create_workflow(
     input_declarations: list[dict[str, Any]] | None = None,
     workflow_id: str | None = None,
     repos: list[str] | None = None,
+    requires_repos: bool = True,
 ) -> Result[str, WorkflowError]:
     """Create a new workflow template.
 
@@ -153,10 +145,8 @@ async def create_workflow(
     Returns:
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+    from syn_domain.contexts.orchestration import (
         CreateWorkflowTemplateCommand,
-    )
-    from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
         CreateWorkflowTemplateHandler,
     )
 
@@ -172,6 +162,7 @@ async def create_workflow(
         project_name=project_name,
         input_declarations=_build_input_declarations(input_declarations),
         repos=repos or [],
+        requires_repos=requires_repos,
     )
 
     await ensure_connected()
@@ -201,10 +192,7 @@ async def validate_yaml(
     Returns:
         Ok(WorkflowValidation) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration._shared.workflow_definition import (
-        WorkflowDefinition,
-        validate_workflow_yaml,
-    )
+    from syn_domain.contexts.orchestration import WorkflowDefinition, validate_workflow_yaml
 
     is_valid, error_msg = validate_workflow_yaml(yaml_content)
 
@@ -248,10 +236,8 @@ async def delete_workflow(
     Returns:
         Ok(None) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
+    from syn_domain.contexts.orchestration import (
         ArchiveWorkflowTemplateCommand,
-    )
-    from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
         ArchiveWorkflowTemplateHandler,
     )
 
@@ -299,7 +285,7 @@ class CreateWorkflowRequest(BaseModel):
     name: str
     workflow_type: str = "custom"
     classification: str = "standard"
-    repository_url: str = "https://github.com/example/repo"
+    repository_url: str = ""
     repository_ref: str = "main"
     description: str | None = None
     project_name: str | None = None
@@ -310,6 +296,13 @@ class CreateWorkflowRequest(BaseModel):
         description=(
             "Default GitHub URLs for this workflow template (ADR-058). "
             "Can be overridden at execution time via the repos field on the execute request."
+        ),
+    )
+    requires_repos: bool = Field(
+        default=True,
+        description=(
+            "Whether this workflow requires repository access at execution time (ADR-058 #666). "
+            "Set to false for research or analysis workflows that don't need repos."
         ),
     )
 
@@ -341,6 +334,9 @@ class CreateWorkflowResponse(BaseModel):
     id: str
     name: str
     workflow_type: str
+    classification: str
+    repository_url: str
+    requires_repos: bool
     status: str
 
 
@@ -378,6 +374,7 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
         input_declarations=body.input_declarations,
         workflow_id=body.id,
         repos=list(body.repos),
+        requires_repos=body.requires_repos,
     )
 
     if isinstance(result, Err):
@@ -387,6 +384,9 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
         id=result.value,
         name=body.name,
         workflow_type=body.workflow_type,
+        classification=body.classification,
+        repository_url=body.repository_url,
+        requires_repos=body.requires_repos,
         status="created",
     )
 
@@ -481,10 +481,8 @@ async def update_phase_prompt(
     Returns:
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
+    from syn_domain.contexts.orchestration import (
         UpdatePhasePromptCommand,
-    )
-    from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
         UpdateWorkflowPhaseHandler,
     )
 
@@ -540,4 +538,156 @@ async def update_phase_prompt_endpoint(
         workflow_id=workflow_id,
         phase_id=phase_id,
         status="updated",
+    )
+
+
+# =============================================================================
+# YAML Upload (thin wrapper — server owns parsing)
+# =============================================================================
+
+
+_ACCEPTED_YAML_CONTENT_TYPES = frozenset(
+    {
+        "application/yaml",
+        "application/x-yaml",
+        "text/yaml",
+        "text/x-yaml",
+    }
+)
+_MAX_YAML_BYTES = 1 * 1024 * 1024  # 1 MiB — workflow definitions are small
+
+
+class _YamlCreateOutcome(BaseModel):
+    """Internal service-layer result: enough to build the HTTP response."""
+
+    model_config = ConfigDict(frozen=True)
+    workflow_id: str
+    name: str
+    workflow_type: str
+    classification: str
+    repository_url: str
+    requires_repos: bool
+
+
+async def create_workflow_from_yaml(
+    yaml_content: str,
+    *,
+    workflow_id_override: str | None = None,
+    name_override: str | None = None,
+) -> Result[_YamlCreateOutcome, WorkflowError]:
+    """Create a workflow template from raw YAML content.
+
+    Server owns all YAML semantics (name, classification, repository,
+    requires_repos inference per ADR-058). Query-string overrides win for
+    ``name`` and ``workflow_id`` when supplied.
+
+    Raises ``ValueError`` on malformed YAML or unresolved ``prompt_file:``
+    references (no base_dir is available server-side).
+    """
+    import yaml
+    from event_sourcing.core.errors import StreamAlreadyExistsError
+
+    from syn_domain.contexts.orchestration import (
+        CreateWorkflowTemplateHandler,
+        WorkflowDefinition,
+        build_command_from_definition,
+    )
+
+    try:
+        definition = WorkflowDefinition.from_yaml(yaml_content)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Malformed YAML: {e}") from e
+    command = build_command_from_definition(
+        definition,
+        workflow_id_override=workflow_id_override,
+        name_override=name_override,
+    )
+
+    await ensure_connected()
+    handler = CreateWorkflowTemplateHandler(
+        repository=get_workflow_repo(),
+        event_publisher=get_publisher(),
+    )
+
+    # Domain-invariant failures (invalid fields, empty phases) raise ValueError;
+    # duplicate workflow ids surface as StreamAlreadyExistsError from the event
+    # store. Both are user-input problems. Anything else is a bug or
+    # infrastructure failure and should propagate as a 500.
+    try:
+        workflow_id = await handler.handle(command)
+    except (ValueError, StreamAlreadyExistsError) as e:
+        return Err(WorkflowError.INVALID_INPUT, message=str(e))
+    await sync_published_events_to_projections()
+    return Ok(
+        _YamlCreateOutcome(
+            workflow_id=workflow_id,
+            name=command.name,
+            workflow_type=command.workflow_type.value,
+            classification=command.classification.value,
+            repository_url=command.repository_url,
+            requires_repos=command.requires_repos,
+        )
+    )
+
+
+@router.post("/from-yaml", response_model=CreateWorkflowResponse, status_code=201)
+async def create_workflow_from_yaml_endpoint(
+    request: Request,
+    name: str | None = None,
+    workflow_id: str | None = None,
+) -> CreateWorkflowResponse:
+    """Create a workflow template by uploading raw YAML.
+
+    The CLI (`syn workflow create --from <file>`) POSTs the file bytes
+    here. Every semantic field (name, classification, repository,
+    phases, inputs, requires_repos) comes from the YAML itself.
+
+    Query-string ``name`` and ``workflow_id`` are optional overrides
+    intended for scripted bulk installation (e.g. renaming a template
+    on install). They are *not* a second source of truth for fields
+    that live in the YAML.
+    """
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type not in _ACCEPTED_YAML_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                f"Expected YAML content-type (one of "
+                f"{sorted(_ACCEPTED_YAML_CONTENT_TYPES)!r}), got {content_type!r}"
+            ),
+        )
+
+    raw = await request.body()
+    if len(raw) > _MAX_YAML_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"YAML body exceeds {_MAX_YAML_BYTES} bytes",
+        )
+
+    try:
+        yaml_content = raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"YAML body is not valid UTF-8: {e}") from e
+
+    try:
+        result = await create_workflow_from_yaml(
+            yaml_content,
+            workflow_id_override=workflow_id,
+            name_override=name,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid workflow YAML: {e}") from e
+
+    if isinstance(result, Err):
+        raise HTTPException(status_code=400, detail=result.message)
+
+    outcome = result.value
+    return CreateWorkflowResponse(
+        id=outcome.workflow_id,
+        name=outcome.name,
+        workflow_type=outcome.workflow_type,
+        classification=outcome.classification,
+        repository_url=outcome.repository_url,
+        requires_repos=outcome.requires_repos,
+        status="created",
     )

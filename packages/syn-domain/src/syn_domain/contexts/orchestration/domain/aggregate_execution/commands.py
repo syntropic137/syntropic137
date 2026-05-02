@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from datetime import datetime
-    from decimal import Decimal
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         PhaseDefinition,
@@ -39,7 +38,11 @@ class StartExecutionCommand:
 
 
 class CompleteExecutionCommand:
-    """Command to mark a workflow execution as completed."""
+    """Command to mark a workflow execution as completed.
+
+    Tokens are domain truth (Lane 1). Cost is Lane 2 telemetry and is not
+    carried on this command — see execution_cost projection.
+    """
 
     def __init__(
         self,
@@ -48,7 +51,8 @@ class CompleteExecutionCommand:
         total_phases: int,
         total_input_tokens: int,
         total_output_tokens: int,
-        total_cost_usd: Decimal,
+        total_cache_creation_tokens: int,
+        total_cache_read_tokens: int,
         duration_seconds: float,
         artifact_ids: list[str],
     ) -> None:
@@ -57,7 +61,8 @@ class CompleteExecutionCommand:
         self.total_phases = total_phases
         self.total_input_tokens = total_input_tokens
         self.total_output_tokens = total_output_tokens
-        self.total_cost_usd = total_cost_usd
+        self.total_cache_creation_tokens = total_cache_creation_tokens
+        self.total_cache_read_tokens = total_cache_read_tokens
         self.duration_seconds = duration_seconds
         self.artifact_ids = artifact_ids
 
@@ -103,7 +108,11 @@ class StartPhaseCommand:
 
 
 class CompletePhaseCommand:
-    """Command to mark a phase as completed with metrics."""
+    """Command to mark a phase as completed with metrics.
+
+    Tokens are domain truth (Lane 1). Cost is Lane 2 telemetry and is not
+    carried on this command — see session_cost / execution_cost projections.
+    """
 
     def __init__(
         self,
@@ -114,8 +123,9 @@ class CompletePhaseCommand:
         artifact_id: str | None,
         input_tokens: int,
         output_tokens: int,
+        cache_creation_tokens: int,
+        cache_read_tokens: int,
         total_tokens: int,
-        cost_usd: Decimal,
         duration_seconds: float,
     ) -> None:
         self.aggregate_id = execution_id
@@ -125,8 +135,9 @@ class CompletePhaseCommand:
         self.artifact_id = artifact_id
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.cache_creation_tokens = cache_creation_tokens
+        self.cache_read_tokens = cache_read_tokens
         self.total_tokens = total_tokens
-        self.cost_usd = cost_usd
         self.duration_seconds = duration_seconds
 
 
@@ -219,6 +230,8 @@ class AgentExecutionCompletedCommand:
         exit_code: int = 0,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+        cache_read_tokens: int = 0,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -226,6 +239,8 @@ class AgentExecutionCompletedCommand:
         self.exit_code = exit_code
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.cache_creation_tokens = cache_creation_tokens
+        self.cache_read_tokens = cache_read_tokens
 
 
 class ArtifactsCollectedCommand:

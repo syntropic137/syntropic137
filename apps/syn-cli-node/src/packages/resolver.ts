@@ -58,6 +58,16 @@ export function recordInstallation(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// ADR-058: requires_repos default inference
+// ---------------------------------------------------------------------------
+
+function inferRequiresRepos(data: Record<string, unknown>): boolean {
+  if (data["requires_repos"] === true) return true;
+  if (data["requires_repos"] === false) return false;
+  return data["repository"] != null;
+}
+
+// ---------------------------------------------------------------------------
 // Source parsing
 // ---------------------------------------------------------------------------
 
@@ -169,7 +179,14 @@ function loadWorkflowYaml(
   if (!fs.existsSync(yamlPath)) {
     throw new Error(`workflow.yaml not found in ${workflowDir}`);
   }
+  return loadWorkflowYamlFromPath(yamlPath, sourcePath);
+}
 
+function loadWorkflowYamlFromPath(
+  yamlPath: string,
+  sourcePath: string,
+): ResolvedWorkflow {
+  const workflowDir = path.dirname(yamlPath);
   const content = fs.readFileSync(yamlPath, "utf-8");
   const data = parseYaml(content) as Record<string, unknown>;
 
@@ -185,12 +202,11 @@ function loadWorkflowYaml(
     name: String(data["name"] ?? ""),
     workflow_type: String(data["type"] ?? data["workflow_type"] ?? "custom"),
     classification: String(data["classification"] ?? "standard"),
-    repository_url: repository
-      ? String(repository["url"] ?? "https://github.com/placeholder/not-configured")
-      : "https://github.com/placeholder/not-configured",
+    repository_url: repository ? String(repository["url"] ?? "") : "",
     repository_ref: repository ? String(repository["ref"] ?? "main") : "main",
     description: data["description"] ? String(data["description"]) : null,
     project_name: data["project_name"] ? String(data["project_name"]) : null,
+    requires_repos: inferRequiresRepos(data),
     phases: resolvedPhases as Record<string, unknown>[],
     input_declarations: parseInputDeclarations(data),
     source_path: sourcePath,
@@ -327,10 +343,11 @@ function resolveStandaloneYaml(
       name: String(data["name"] ?? baseName),
       workflow_type: String(data["type"] ?? data["workflow_type"] ?? "custom"),
       classification: String(data["classification"] ?? "standard"),
-      repository_url: "https://github.com/placeholder/not-configured",
+      repository_url: "",
       repository_ref: "main",
       description: data["description"] ? String(data["description"]) : null,
       project_name: data["project_name"] ? String(data["project_name"]) : null,
+      requires_repos: inferRequiresRepos(data),
       phases: Array.isArray(data["phases"])
         ? (data["phases"] as Record<string, unknown>[])
         : [],

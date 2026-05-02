@@ -86,8 +86,15 @@ class EventType(StrEnum):
     # Context management
     PRE_COMPACT = "pre_compact"
 
-    # Git operations
+    # Git operations (current names - match syn_shared.events and agentic_events.EventType)
     GIT_COMMIT = "git_commit"
+    GIT_PUSH = "git_push"
+    GIT_MERGE = "git_merge"
+    GIT_REWRITE = "git_rewrite"
+    GIT_CHECKOUT = "git_checkout"
+    GIT_BRANCH_CHANGED = "git_branch_changed"
+    GIT_OPERATION = "git_operation"
+    # Legacy names (kept for backward compat with old hook events already in DB)
     GIT_BRANCH_CREATED = "git_branch_created"
     GIT_BRANCH_SWITCHED = "git_branch_switched"
     GIT_MERGE_COMPLETED = "git_merge_completed"

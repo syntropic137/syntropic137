@@ -1,3 +1,16 @@
+import type { components } from '../generated/api-types'
+
+// =============================================================================
+// GENERATED TYPES (from OpenAPI spec - single source of truth)
+// Regenerate with: pnpm generate:types
+// =============================================================================
+
+/** Structured git event data from observability hooks. */
+export type GitEventData = components['schemas']['GitEventData']
+
+/** A single timeline event within a session. */
+export type OperationInfo = components['schemas']['OperationInfo']
+
 // =============================================================================
 // WORKFLOW TEMPLATE TYPES
 // Note: Templates don't have status. Status belongs to Executions.
@@ -72,10 +85,19 @@ export interface SessionSummary {
   workflow_name: string | null
   execution_id: string | null
   phase_id: string | null
+  phase_display: string | null
   status: string
   agent_provider: string | null
+  agent_model: string | null
+  agent_model_display: string | null
+  repos: string[]
+  repos_display: string | null
   total_tokens: number
+  total_tokens_display: string
   total_cost_usd: number
+  total_cost_display: string
+  duration_seconds: number | null
+  duration_display: string
   started_at: string | null
   completed_at: string | null
   // Subagent metrics (from agentic_isolation v0.3.0)
@@ -86,37 +108,7 @@ export interface SessionSummary {
   duration_api_ms?: number | null
 }
 
-export interface OperationInfo {
-  operation_id: string
-  operation_type: string
-  timestamp: string
-  duration_seconds: number | null
-  success: boolean
-
-  // Token metrics (for MESSAGE_* types)
-  input_tokens: number | null
-  output_tokens: number | null
-  total_tokens: number | null
-
-  // Tool details (for TOOL_* types)
-  tool_name: string | null
-  tool_use_id: string | null
-  tool_input: Record<string, unknown> | null
-  tool_output: string | null
-
-  // Message details (for MESSAGE_* types)
-  message_role: string | null
-  message_content: string | null
-
-  // Thinking details (for THINKING type)
-  thinking_content: string | null
-
-  // Git details (for git_commit, git_push, git_branch_changed, git_operation)
-  git_sha: string | null
-  git_message: string | null
-  git_branch: string | null
-  git_repo: string | null
-}
+// OperationInfo is now generated from the OpenAPI spec -- see top of file.
 
 export interface SessionResponse {
   id: string
@@ -124,6 +116,7 @@ export interface SessionResponse {
   workflow_name: string | null
   execution_id: string | null
   phase_id: string | null
+  phase_display: string | null
   milestone_id: string | null
   agent_provider: string | null
   agent_model: string | null
@@ -251,7 +244,7 @@ export interface WorkflowExecutionSummary {
   total_cost_usd: number
 }
 
-/** Item in the global execution list (includes workflow_name) */
+/** Item in the global execution list (includes workflow_name + display fields) */
 export interface ExecutionListItem {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
@@ -263,10 +256,15 @@ export interface ExecutionListItem {
   completed_phases: number
   total_phases: number
   total_tokens: number
+  total_tokens_display: string
   total_cost_usd: number
+  total_cost_display: string
+  duration_seconds: number | null
+  duration_display: string
   tool_call_count: number
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
+  repos_display: string | null
 }
 
 export interface ExecutionListResponse {
@@ -308,8 +306,8 @@ export interface ExecutionDetailResponse {
   phases: PhaseExecutionDetail[]
   total_input_tokens: number
   total_output_tokens: number
-  cache_creation_tokens: number
-  cache_read_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
   total_tokens: number
   total_cost_usd: number
   artifact_ids: string[]
@@ -364,6 +362,26 @@ export const SSE_EVENTS = {
 } as const
 
 export type SSEEventType = typeof SSE_EVENTS[keyof typeof SSE_EVENTS]
+
+/**
+ * Typed envelope matching the backend's SSEEventFrame.
+ *
+ * Every frame delivered over an SSE connection is parsed into this shape.
+ * The `type` field distinguishes frame kinds:
+ *   - `connected`: initial handshake when a client subscribes
+ *   - `event`: a domain event forwarded from the event store
+ *   - `terminal`: stream is ending (execution complete/failed)
+ *
+ * See: docs/adrs/ADR-064-observability-monitor-ui.md
+ */
+export interface SSEEventFrame {
+  type: 'connected' | 'event' | 'terminal'
+  event_type: string
+  execution_id: string | null
+  /** Event payload from domain model_dump(). Keys vary per event type. */
+  data: Record<string, unknown>
+  timestamp: string
+}
 
 export interface EventMessage {
   event_type: string
@@ -423,6 +441,9 @@ export interface WorkspaceInfo {
 export type WorkflowStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
 export type SessionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type PhaseStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+
+/** Relative time window used by the Sessions filter bar. */
+export type TimeWindow = '15m' | '1h' | '24h' | '7d' | 'all'
 
 // =============================================================================
 // COST TRACKING TYPES

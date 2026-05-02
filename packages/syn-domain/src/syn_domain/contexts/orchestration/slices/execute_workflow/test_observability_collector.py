@@ -143,6 +143,36 @@ class TestObservabilityCollectorWithWriter:
         assert call.kwargs["data"]["commit_sha"] == "abc123"
 
     @pytest.mark.anyio
+    async def test_record_embedded_event_renames_message(self) -> None:
+        """record_embedded_event renames 'message' to 'commit_message'.
+
+        'message' is a RESERVED_OBSERVATION_KEYS entry that would be silently
+        stripped by record_observation. Git hooks emit commit messages as the
+        plain string field 'message', so we rename to 'commit_message' to
+        preserve it through the pipeline.
+        """
+        writer = AsyncMock()
+        collector = _make_collector(writer=writer)
+
+        enriched = {
+            "context": {
+                "operation": "commit",
+                "message": "feat: add MIT license",
+                "sha": "abc123",
+                "branch": "main",
+            },
+            "metadata": {"repo": "my-repo"},
+        }
+        await collector.record_embedded_event("git_commit", enriched)
+
+        call = writer.record_observation.call_args
+        data = call.kwargs["data"]
+        assert "message" not in data, "message should be renamed to avoid reserved-key stripping"
+        assert data["commit_message"] == "feat: add MIT license"
+        assert data["sha"] == "abc123"
+        assert data["repo"] == "my-repo"
+
+    @pytest.mark.anyio
     async def test_record_session_summary(self) -> None:
         """record_session_summary emits SESSION_SUMMARY with authoritative CLI totals (ISS-217)."""
         writer = AsyncMock()

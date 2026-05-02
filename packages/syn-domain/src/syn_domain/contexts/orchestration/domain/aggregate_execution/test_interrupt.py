@@ -122,8 +122,6 @@ class TestInterruptExecution:
 
     def test_interrupt_is_terminal_cannot_start_again(self) -> None:
         """INTERRUPTED status is terminal — further commands should fail."""
-        from decimal import Decimal
-
         from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
         )
@@ -144,7 +142,8 @@ class TestInterruptExecution:
                     total_phases=2,
                     total_input_tokens=0,
                     total_output_tokens=0,
-                    total_cost_usd=Decimal("0"),
+                    total_cache_creation_tokens=0,
+                    total_cache_read_tokens=0,
                     duration_seconds=0.0,
                     artifact_ids=[],
                 )

@@ -6,7 +6,9 @@ environment so the env check sees values stored in 1Password, not just .env
 plain text.
 
 Unlike op_resolver.py, this script does NOT skip keys already present in
-os.environ — its job is to report what is actually in the vault.
+os.environ - its job is to report what is actually in the vault.
+
+See ADR-004: Environment Configuration with Pydantic Settings.
 """
 
 from __future__ import annotations
@@ -18,11 +20,29 @@ import subprocess
 import sys
 from pathlib import Path
 
+from syn_shared.settings.constants import (
+    ENV_ANTHROPIC_API_KEY,
+    ENV_CLAUDE_CODE_OAUTH_TOKEN,
+    ENV_SYN_PUBLIC_HOSTNAME,
+)
+
+# infra_config lives in infra/scripts/ - add to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "infra" / "scripts"))
+
+from infra_config import (
+    ENV_CLOUDFLARE_TUNNEL_TOKEN,
+    ENV_GITHUB_APP_ID,
+    ENV_GITHUB_APP_NAME,
+    ENV_GITHUB_PRIVATE_KEY,
+    ENV_GITHUB_WEBHOOK_SECRET,
+    ENV_SYN_API_PASSWORD,
+    parse_env_file,
+)
+
 _OP_ITEM_TITLE = "syntropic137-config"
 _OP_SAT_PREFIX = "OP_SERVICE_ACCOUNT_TOKEN_"
 
-# Canonical env→vault mapping (mirrored from op_resolver.py — this script is
-# standalone and cannot import from syn_shared).
+# Canonical env-to-vault mapping (mirrored from op_resolver.py).
 _ENV_TO_VAULT: dict[str, str] = {
     "selfhost": "syntropic137",
     "development": "syn137-dev",
@@ -31,40 +51,24 @@ _ENV_TO_VAULT: dict[str, str] = {
     "production": "syn137-prod",
 }
 
+# 1Password vault field labels that we resolve. Built from imported constants
+# so there's exactly one place each name is defined.
 _KEYS = {
-    "SYN_GITHUB_APP_ID",
-    "SYN_GITHUB_APP_NAME",
-    "SYN_GITHUB_PRIVATE_KEY",
-    "SYN_GITHUB_WEBHOOK_SECRET",
-    "CLOUDFLARE_TUNNEL_TOKEN",
-    "SYN_DOMAIN",
-    "ANTHROPIC_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "SYN_API_PASSWORD",
+    ENV_GITHUB_APP_ID,
+    ENV_GITHUB_APP_NAME,
+    ENV_GITHUB_PRIVATE_KEY,
+    ENV_GITHUB_WEBHOOK_SECRET,
+    ENV_CLOUDFLARE_TUNNEL_TOKEN,
+    ENV_SYN_PUBLIC_HOSTNAME,
+    ENV_ANTHROPIC_API_KEY,
+    ENV_CLAUDE_CODE_OAUTH_TOKEN,
+    ENV_SYN_API_PASSWORD,
 }
-
-
-def _parse_env_file(path: Path) -> dict[str, str]:
-    result: dict[str, str] = {}
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return result
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, raw_value = line.partition("=")
-        key = key.strip()
-        value = raw_value.strip().strip("'\"")
-        if key:
-            result[key] = value
-    return result
 
 
 def main() -> None:
     env_file = Path(".env")
-    candidates = _parse_env_file(env_file)
+    candidates = parse_env_file(env_file)
     candidates.update(os.environ)
 
     app_env = candidates.get("APP_ENVIRONMENT", "").strip().lower()

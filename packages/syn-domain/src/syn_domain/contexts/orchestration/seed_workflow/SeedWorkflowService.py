@@ -24,11 +24,8 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-    WorkflowType,
-)
-from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
-    CreateWorkflowTemplateCommand,
+from syn_domain.contexts.orchestration._shared.yaml_to_command import (
+    build_command_from_definition,
 )
 from syn_shared.logging import get_logger
 
@@ -67,27 +64,6 @@ class SeedReport:
 
 
 _DUPLICATE_MARKERS = ("already exists", "precondition failed", "concurrency conflict", "duplicate")
-
-
-def _build_create_command(definition: WorkflowDefinition) -> CreateWorkflowTemplateCommand:
-    """Build a CreateWorkflowTemplateCommand from a workflow definition."""
-    default_url = "https://github.com/placeholder/not-configured"
-    try:
-        workflow_type = WorkflowType(definition.type)
-    except ValueError:
-        workflow_type = WorkflowType.CUSTOM
-    return CreateWorkflowTemplateCommand(
-        aggregate_id=definition.id,
-        name=definition.name,
-        workflow_type=workflow_type,
-        classification=definition.classification,
-        repository_url=(definition.repository.url if definition.repository else default_url),
-        repository_ref=(definition.repository.ref if definition.repository else "main"),
-        phases=definition.get_domain_phases(),
-        project_name=definition.project_name,
-        description=definition.description,
-        input_declarations=definition.get_domain_input_declarations(),
-    )
 
 
 def _handle_seed_error(
@@ -227,7 +203,7 @@ class WorkflowSeeder:
             )
             return SeedResult(workflow_id=workflow_id, name=definition.name, success=True)
 
-        command = _build_create_command(definition)
+        command = build_command_from_definition(definition)
         try:
             created_id = await self._handler.handle(command)
             self._existing_ids.add(workflow_id)

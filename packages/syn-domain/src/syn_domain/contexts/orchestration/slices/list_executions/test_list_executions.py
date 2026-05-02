@@ -66,18 +66,17 @@ class TestWorkflowExecutionListProjection:
                 "completed_phases": 0,
                 "total_phases": 3,
                 "total_tokens": 0,
-                "total_cost_usd": "0",
             }
         )
 
         projection = WorkflowExecutionListProjection(mock_store)
 
+        # Cost is Lane 2 (#695) — projection ignores cost_usd on event
         await projection.on_phase_completed(
             {
                 "execution_id": "exec-1",
                 "phase_id": "research",
                 "total_tokens": 1500,
-                "cost_usd": Decimal("0.10"),
             }
         )
 
@@ -86,7 +85,8 @@ class TestWorkflowExecutionListProjection:
 
         assert saved_data["completed_phases"] == 1
         assert saved_data["total_tokens"] == 1500
-        assert saved_data["total_cost_usd"] == "0.10"
+        # Cost is Lane 2 (#695) — projection no longer stores total_cost_usd
+        assert "total_cost_usd" not in saved_data
 
     @pytest.mark.asyncio
     async def test_handles_workflow_completed(self, mock_store: AsyncMock) -> None:

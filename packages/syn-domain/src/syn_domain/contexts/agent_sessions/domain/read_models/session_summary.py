@@ -1,8 +1,11 @@
-"""Read model for session list views."""
+"""Read model for session list views.
+
+Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
+at the API boundary from the session_cost projection (#695).
+"""
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 
 
@@ -177,9 +180,6 @@ class SessionSummary:
     total_tokens: int
     """Total tokens used in this session."""
 
-    total_cost_usd: Decimal
-    """Total cost in USD for this session."""
-
     started_at: datetime | None
     """When the session started."""
 
@@ -193,6 +193,12 @@ class SessionSummary:
     output_tokens: int = 0
     """Output tokens used in this session."""
 
+    cache_creation_tokens: int = 0
+    """Cache creation tokens used in this session."""
+
+    cache_read_tokens: int = 0
+    """Cache read tokens used in this session."""
+
     duration_seconds: float | None = None
     """Duration of the session in seconds."""
 
@@ -201,6 +207,9 @@ class SessionSummary:
 
     execution_id: str | None = None
     """ID of the workflow execution/run this session belongs to."""
+
+    repos: tuple[str, ...] = ()
+    """Repository slugs (owner/repo) this session has access to."""
 
     operations: tuple[OperationRecord, ...] = ()
     """Operations recorded during this session."""
@@ -242,14 +251,16 @@ class SessionSummary:
             agent_type=data.get("agent_type", ""),
             status=data.get("status", "pending"),
             total_tokens=data.get("total_tokens", 0),
-            total_cost_usd=Decimal(str(data.get("total_cost_usd", 0))),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             input_tokens=data.get("input_tokens", 0),
             output_tokens=data.get("output_tokens", 0),
+            cache_creation_tokens=data.get("cache_creation_tokens", 0),
+            cache_read_tokens=data.get("cache_read_tokens", 0),
             duration_seconds=data.get("duration_seconds"),
             phase_id=data.get("phase_id"),
             execution_id=data.get("execution_id"),
+            repos=tuple(data.get("repos", ())),
             operations=operations,
             # Subagent metrics
             subagent_count=data.get("subagent_count", 0),
@@ -287,14 +298,16 @@ class SessionSummary:
             "agent_type": self.agent_type,
             "status": self.status,
             "total_tokens": self.total_tokens,
-            "total_cost_usd": str(self.total_cost_usd),
             "started_at": started_at_str,
             "completed_at": completed_at_str,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
             "duration_seconds": self.duration_seconds,
             "phase_id": self.phase_id,
             "execution_id": self.execution_id,
+            "repos": list(self.repos),
             "operations": [op.to_dict() for op in self.operations],
             # Subagent metrics
             "subagent_count": self.subagent_count,

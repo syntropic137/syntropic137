@@ -10,7 +10,6 @@ This is critical because:
 """
 
 from datetime import UTC, datetime
-from decimal import Decimal
 
 import pytest
 
@@ -41,12 +40,14 @@ class MockProjectionStore:
         projection_name: str,
         filters: dict | None = None,
         order_by: str | None = None,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[dict]:
         items = list(self._data.get(projection_name, {}).values())
         if filters:
             items = [item for item in items if all(item.get(k) == v for k, v in filters.items())]
+        if limit is None:
+            return items[offset:]
         return items[offset : offset + limit]
 
 
@@ -261,12 +262,11 @@ class TestSessionListProjection:
             }
         )
 
-        # Record operations
+        # Record operations (cost is Lane 2 — not accumulated here, see #695)
         await projection.on_operation_recorded(
             {
                 "session_id": "session-ops",
                 "tokens_used": 100,
-                "cost_usd": "0.001",
             }
         )
 
@@ -274,14 +274,120 @@ class TestSessionListProjection:
             {
                 "session_id": "session-ops",
                 "tokens_used": 200,
-                "cost_usd": "0.002",
             }
         )
 
         result = await mock_store.get("session_summaries", "session-ops")
         assert result is not None
         assert result["total_tokens"] == 300
-        assert float(result["total_cost_usd"]) == pytest.approx(0.003, rel=1e-6)
+        assert "total_cost_usd" not in result
+
+    @pytest.mark.asyncio
+    async def test_query_filters_by_started_after(
+        self,
+        projection: SessionListProjection,
+        mock_store: MockProjectionStore,
+    ) -> None:
+        """started_after returns only sessions whose started_at >= bound."""
+        await projection.on_session_started(
+            {
+                "session_id": "old",
+                "workflow_id": "wf",
+                "agent_provider": "claude",
+                "started_at": "2026-04-18T08:00:00+00:00",
+            }
+        )
+        await projection.on_session_started(
+            {
+                "session_id": "new",
+                "workflow_id": "wf",
+                "agent_provider": "claude",
+                "started_at": "2026-04-18T12:00:00+00:00",
+            }
+        )
+
+        bound = datetime(2026, 4, 18, 10, 0, 0, tzinfo=UTC)
+        results = await projection.query(started_after=bound)
+        assert {s.id for s in results} == {"new"}
+
+    @pytest.mark.asyncio
+    async def test_query_filters_by_started_before(
+        self,
+        projection: SessionListProjection,
+        mock_store: MockProjectionStore,
+    ) -> None:
+        """started_before returns only sessions whose started_at <= bound."""
+        await projection.on_session_started(
+            {
+                "session_id": "old",
+                "workflow_id": "wf",
+                "agent_provider": "claude",
+                "started_at": "2026-04-18T08:00:00+00:00",
+            }
+        )
+        await projection.on_session_started(
+            {
+                "session_id": "new",
+                "workflow_id": "wf",
+                "agent_provider": "claude",
+                "started_at": "2026-04-18T12:00:00+00:00",
+            }
+        )
+
+        bound = datetime(2026, 4, 18, 10, 0, 0, tzinfo=UTC)
+        results = await projection.query(started_before=bound)
+        assert {s.id for s in results} == {"old"}
+
+    @pytest.mark.asyncio
+    async def test_query_filters_by_time_window_intersection(
+        self,
+        projection: SessionListProjection,
+        mock_store: MockProjectionStore,
+    ) -> None:
+        """started_after + started_before together yield the intersection."""
+        for sid, started in [
+            ("a", "2026-04-18T08:00:00+00:00"),
+            ("b", "2026-04-18T11:00:00+00:00"),
+            ("c", "2026-04-18T13:00:00+00:00"),
+        ]:
+            await projection.on_session_started(
+                {
+                    "session_id": sid,
+                    "workflow_id": "wf",
+                    "agent_provider": "claude",
+                    "started_at": started,
+                }
+            )
+
+        results = await projection.query(
+            started_after=datetime(2026, 4, 18, 10, 0, 0, tzinfo=UTC),
+            started_before=datetime(2026, 4, 18, 12, 0, 0, tzinfo=UTC),
+        )
+        assert {s.id for s in results} == {"b"}
+
+    @pytest.mark.asyncio
+    async def test_query_multi_status_or(
+        self,
+        projection: SessionListProjection,
+        mock_store: MockProjectionStore,
+    ) -> None:
+        """statuses=[a,b] returns sessions in either state (OR'd)."""
+        for sid, status in [("a", "running"), ("b", "completed"), ("c", "failed")]:
+            await projection.on_session_started(
+                {
+                    "session_id": sid,
+                    "workflow_id": "wf",
+                    "agent_provider": "claude",
+                    "started_at": "2026-04-18T08:00:00+00:00",
+                }
+            )
+            data = await mock_store.get("session_summaries", sid)
+            assert data is not None
+            data["status"] = status
+            await mock_store.save("session_summaries", sid, data)
+
+        results = await projection.query(statuses=["running", "failed"])
+        assert {s.id for s in results} == {"a", "c"}
 
     @pytest.mark.asyncio
     async def test_query_sessions_by_workflow(
@@ -338,7 +444,6 @@ class TestSessionSummaryToDict:
             agent_type="claude",
             status="running",
             total_tokens=100,
-            total_cost_usd=Decimal("0.01"),
             started_at=now,
             completed_at=None,
         )
@@ -364,7 +469,6 @@ class TestSessionSummaryToDict:
             agent_type="openai",
             status="completed",
             total_tokens=500,
-            total_cost_usd=Decimal("0.05"),
             started_at=iso_string,  # type: ignore[arg-type] - intentionally testing string
             completed_at=iso_string,  # type: ignore[arg-type]
         )
@@ -386,7 +490,6 @@ class TestSessionSummaryToDict:
             agent_type="claude",
             status="pending",
             total_tokens=0,
-            total_cost_usd=Decimal("0"),
             started_at=None,
             completed_at=None,
         )
@@ -495,7 +598,6 @@ class TestSessionSummarySubagentFields:
             agent_type="claude-3-5-sonnet",
             status="completed",
             total_tokens=10000,
-            total_cost_usd=Decimal("0.05"),
             started_at=None,
             completed_at=None,
             subagent_count=2,
@@ -572,7 +674,6 @@ class TestSessionSummarySubagentFields:
             agent_type="test",
             status="completed",
             total_tokens=100,
-            total_cost_usd=Decimal("0.001"),
             started_at=None,
             completed_at=None,
             subagent_count=1,

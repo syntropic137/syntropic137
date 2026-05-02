@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
-from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
@@ -82,7 +81,6 @@ class PhaseResult:
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
-    cost_usd: Decimal = field(default_factory=lambda: Decimal("0"))
     error_message: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -100,7 +98,6 @@ class ExecutionMetrics:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_tokens: int = 0
-    total_cost_usd: Decimal = field(default_factory=lambda: Decimal("0"))
     total_duration_seconds: float = 0.0
 
     @classmethod
@@ -112,7 +109,6 @@ class ExecutionMetrics:
         total_input = sum(r.input_tokens for r in results)
         total_output = sum(r.output_tokens for r in results)
         total_tokens = sum(r.total_tokens for r in results)
-        total_cost = sum((r.cost_usd for r in results), Decimal("0"))
 
         # Calculate total duration
         duration = 0.0
@@ -128,7 +124,6 @@ class ExecutionMetrics:
             total_input_tokens=total_input,
             total_output_tokens=total_output,
             total_tokens=total_tokens,
-            total_cost_usd=total_cost,
             total_duration_seconds=duration,
         )
 

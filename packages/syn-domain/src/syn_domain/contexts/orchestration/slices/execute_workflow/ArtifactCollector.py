@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
-from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType
+from syn_domain.contexts.artifacts import ArtifactType
 
 if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
@@ -268,10 +268,8 @@ class ArtifactCollector:
         title: str,
     ) -> None:
         """Create and save an artifact with two-tier storage (ADR-012)."""
-        from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        from syn_domain.contexts.artifacts import (
             ArtifactAggregate,
-        )
-        from syn_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
             CreateArtifactCommand,
         )
 
@@ -322,5 +320,5 @@ class ArtifactCollector:
             title=title,
             storage_uri=storage_uri,
         )
-        aggregate._handle_command(command)
+        aggregate.create_artifact(command)
         await self._repository.save(aggregate)

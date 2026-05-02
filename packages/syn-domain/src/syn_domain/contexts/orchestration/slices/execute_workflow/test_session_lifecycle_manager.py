@@ -66,6 +66,8 @@ class TestCompleteSuccess:
         await mgr.complete_success(
             input_tokens=100,
             output_tokens=50,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
             total_tokens=150,
             duration_seconds=1.5,
             source="test",
@@ -91,6 +93,8 @@ class TestCompleteSuccess:
         await mgr.complete_success(
             input_tokens=6939,
             output_tokens=517,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
             total_tokens=7456,
             duration_seconds=303.0,
             source="processor",
@@ -112,6 +116,8 @@ class TestCompleteSuccess:
         await mgr.complete_success(
             input_tokens=0,
             output_tokens=0,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
             total_tokens=0,
             duration_seconds=0.0,
             source="test",
@@ -136,6 +142,8 @@ class TestCompleteSuccess:
         await mgr.complete_success(
             input_tokens=100,
             output_tokens=50,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
             total_tokens=150,
             duration_seconds=1.0,
             source="test",

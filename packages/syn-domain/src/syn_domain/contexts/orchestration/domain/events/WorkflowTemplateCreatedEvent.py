@@ -53,3 +53,7 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
     # Multi-repo support (ADR-058)
     repos: list[str] = Field(default_factory=list)
     """Full GitHub URLs declared for this workflow template (ADR-058). Empty = single-repo (use repository_url)."""
+
+    # Execution gate (ADR-058 #666)
+    requires_repos: bool = True
+    """Whether this workflow requires repository access. Default True for backward compat with existing events."""

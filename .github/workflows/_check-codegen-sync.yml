@@ -1,0 +1,66 @@
+# =============================================================================
+# Check: Codegen Sync
+# =============================================================================
+# Runs `just codegen` and verifies no generated artifacts have drifted.
+#
+# Generated paths checked:
+#   - apps/syn-cli-node/src/generated/  (CLI TypeScript types from OpenAPI)
+#   - apps/syn-docs/content/docs/cli/   (CLI command reference docs)
+#   - apps/syn-docs/content/docs/api/   (API reference docs)
+#   - apps/syn-docs/openapi.json        (OpenAPI spec)
+#
+# To fix a failure locally: just codegen && git add -A && git commit
+#
+# Called by: release-gate.yml, release-create.yml (pre-publish validation)
+#
+# NOTE: reusable workflows must live at the top of .github/workflows/ — no
+# subdirectories allowed (GitHub rejects with "invalid workflow reference").
+# See _check-version.yml for the full story.
+# =============================================================================
+
+name: Check - Codegen Sync
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  codegen-sync:
+    name: Codegen Sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: true
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+
+      - name: Install dependencies
+        run: |
+          pnpm --filter @syntropic137/cli install --frozen-lockfile
+          pnpm --filter syn-docs install --frozen-lockfile
+          pnpm --filter syn-dashboard-ui install --frozen-lockfile
+
+      - name: Regenerate all artifacts
+        run: just codegen
+
+      - name: Check for drift
+        run: |
+          python3 scripts/workflows/check_drift.py \
+            apps/syn-cli-node/src/generated/ \
+            apps/syn-docs/content/docs/cli/ \
+            apps/syn-docs/content/docs/api/ \
+            apps/syn-docs/openapi.json

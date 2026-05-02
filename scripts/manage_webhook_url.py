@@ -18,6 +18,8 @@ import os
 import sys
 from pathlib import Path
 
+from syn_shared.settings.constants import ENV_SYN_PUBLIC_HOSTNAME
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -44,9 +46,9 @@ def _get_smee_url() -> str | None:
 
 
 def _get_prod_url() -> str | None:
-    domain = os.environ.get("SYN_DOMAIN")
-    if domain:
-        return f"https://api.{domain}/webhooks/github"
+    hostname = os.environ.get(ENV_SYN_PUBLIC_HOSTNAME)
+    if hostname:
+        return f"https://api.{hostname}/webhooks/github"
     return None
 
 
@@ -89,7 +91,7 @@ async def _switch(mode: str, dry_run: bool) -> int:
     else:
         target_url = _get_prod_url()
         if not target_url:
-            print("SYN_DOMAIN not set — skipping webhook restore")
+            print(f"{ENV_SYN_PUBLIC_HOSTNAME} not set - skipping webhook restore")
             return 0
         label = "prod (Cloudflare)"
 

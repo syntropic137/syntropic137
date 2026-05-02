@@ -31,8 +31,15 @@ HOOK_EVENT_MAP: dict[str, EventType] = {
     "notification_sent": EventType.NOTIFICATION_SENT,
     # Context management
     "pre_compact": EventType.PRE_COMPACT,
-    # Git operations
+    # Git operations (current emitter names from agentic_events.EventType)
     "git_commit": EventType.GIT_COMMIT,
+    "git_push": EventType.GIT_PUSH,
+    "git_merge": EventType.GIT_MERGE,
+    "git_rewrite": EventType.GIT_REWRITE,
+    "git_checkout": EventType.GIT_CHECKOUT,
+    "git_branch_changed": EventType.GIT_BRANCH_CHANGED,
+    "git_operation": EventType.GIT_OPERATION,
+    # Legacy git event names (kept for backward compat)
     "git_branch_created": EventType.GIT_BRANCH_CREATED,
     "git_branch_switched": EventType.GIT_BRANCH_SWITCHED,
     "git_merge_completed": EventType.GIT_MERGE_COMPLETED,

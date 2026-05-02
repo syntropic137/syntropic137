@@ -120,79 +120,17 @@ jobs:
           echo "Created release: ${{ steps.version.outputs.version }}"
 
   # ---------------------------------------------------------------------------
-  # Step 2: Pre-publish validation — verify API/CLI/docs pipeline is in sync
+  # Step 2: Pre-publish validation — codegen sync (reuses _check-codegen-sync.yml)
+  #
+  # NOTE: reusable workflows must live at the top of .github/workflows/ — no
+  # subdirectories. The `_check-*` prefix visually groups them. See
+  # _check-codegen-sync.yml for the constraint.
   # ---------------------------------------------------------------------------
   pre-publish-validation:
     name: Pre-Publish Validation
     needs: [create-release]
     if: needs.create-release.outputs.created == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          submodules: true
-
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
-        with:
-          version: 10
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-
-      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
-
-      - name: Install dependencies
-        run: |
-          pnpm --filter @syntropic137/cli install --frozen-lockfile
-          pnpm --filter syn-docs install --frozen-lockfile
-
-      - name: Regenerate OpenAPI spec
-        run: uv run python scripts/extract_openapi.py
-
-      - name: Verify CLI types match OpenAPI spec
-        run: pnpm --filter @syntropic137/cli run check:api-drift
-
-      - name: Verify generated CLI types are current
-        run: |
-          pnpm --filter @syntropic137/cli generate:types
-          CHANGED=$(git diff --name-only apps/syn-cli-node/src/generated/)
-          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-cli-node/src/generated/)
-          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::CLI types are stale — aborting release."
-            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
-            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
-            exit 1
-          fi
-          echo "CLI types are in sync."
-
-      - name: Verify CLI docs are current
-        run: |
-          pnpm --filter @syntropic137/cli generate:docs
-          CHANGED=$(git diff --name-only apps/syn-docs/content/docs/cli/)
-          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)
-          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::CLI docs are stale — aborting release."
-            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
-            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
-            exit 1
-          fi
-          echo "CLI docs are in sync."
-
-      - name: Verify API docs are current
-        run: |
-          cd apps/syn-docs && pnpm run generate:openapi
-          cd ../..
-          CHANGED=$(git diff --name-only apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/)
-          UNTRACKED=$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)
-          if [[ -n "$CHANGED" || -n "$UNTRACKED" ]]; then
-            echo "::error::API docs are stale — aborting release."
-            [[ -n "$CHANGED" ]] && echo "Modified:" && echo "$CHANGED"
-            [[ -n "$UNTRACKED" ]] && echo "Untracked:" && echo "$UNTRACKED"
-            exit 1
-          fi
-          echo "API docs are in sync."
+    uses: ./.github/workflows/_check-codegen-sync.yml
 
   # ---------------------------------------------------------------------------
   # Step 3: Build, sign, push Docker images + attach release assets

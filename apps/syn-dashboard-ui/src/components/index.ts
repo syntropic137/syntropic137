@@ -1,13 +1,28 @@
 export { Breadcrumbs } from './Breadcrumbs'
 export { ChartTooltip } from './ChartTooltip'
 export { Card, CardContent, CardHeader } from './Card'
+export { CliDisclaimerBanner } from './CliDisclaimerBanner'
+export { ConnectionIndicator } from './ConnectionIndicator'
 export { EmptyState } from './EmptyState'
+export { FilterChip } from './FilterChip'
+export { TimeWindowPicker } from './TimeWindowPicker'
 export { EventFeed } from './EventFeed'
 export { ExecutionControl } from './ExecutionControl'
 export { ExecutionCostSummary } from './ExecutionCostSummary'
 export { Layout } from './Layout'
 export { Loader, PageLoader } from './Loader'
 export { MetricCard } from './MetricCard'
+export { ModelBreakdown, type ModelBreakdownProps } from './ModelBreakdown'
+export {
+  ResourceCardList,
+  ResourceTable,
+  type ColumnDef,
+  type ResourceCardListProps,
+  type ResourceTableProps,
+} from './ResourceTable'
+export { ResourceFilterBar, type ResourceFilterBarProps } from './ResourceFilterBar'
+export { SelectionActionBar, type SelectionActionBarProps } from './SelectionActionBar'
+export { SelectionCheckbox } from './SelectionCheckbox'
 export { SessionCostCard } from './SessionCostCard'
 export { StatusBadge } from './StatusBadge'
 export { SubagentCard, SubagentList } from './SubagentCard'

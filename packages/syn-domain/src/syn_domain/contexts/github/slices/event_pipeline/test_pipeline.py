@@ -67,6 +67,7 @@ def _make_event(
     repository: str = "owner/repo",
     installation_id: str = "12345",
     delivery_id: str = "delivery-abc",
+    source_primed: bool = True,
 ) -> NormalizedEvent:
     return NormalizedEvent(
         event_type=event_type,
@@ -78,6 +79,7 @@ def _make_event(
         payload={"repository": {"full_name": repository}},
         received_at=datetime.now(UTC),
         delivery_id=delivery_id,
+        source_primed=source_primed,
     )
 
 
@@ -177,6 +179,82 @@ class TestPipelineWithTriggers:
 
         result = await pipeline.ingest(_make_event(event_type="push"))
         assert "tr-001" in result.triggers_fired
+
+
+class TestPipelineColdStartFence:
+    """ADR-060 Layer 5: source_primed=False skips trigger evaluation."""
+
+    @pytest.mark.asyncio
+    async def test_unprimed_event_skips_trigger_evaluation(self) -> None:
+        """An unprimed event must not fire any matching trigger."""
+        store = InMemoryTriggerQueryStore()
+        await store.index_trigger(
+            trigger_id="tr-cold",
+            name="cold-start-trigger",
+            event="push",
+            repository="owner/repo",
+            workflow_id="wf-001",
+            conditions=[],
+            input_mapping={},
+            config=_make_config(),
+            installation_id="12345",
+            created_by="test",
+            status="active",
+        )
+        pipeline = _make_pipeline(store=store)
+
+        result = await pipeline.ingest(
+            _make_event(event_type="push", source_primed=False),
+        )
+
+        assert result.status == "processed"
+        assert result.triggers_fired == []
+        assert result.deferred == []
+        assert result.blocked == []
+
+    @pytest.mark.asyncio
+    async def test_unprimed_event_does_not_notify_observers(self) -> None:
+        """Cold-start replays must not register SHAs via observer callbacks."""
+        observed: list[NormalizedEvent] = []
+
+        async def observer(event: NormalizedEvent) -> None:
+            observed.append(event)
+
+        pipeline = _make_pipeline()
+        pipeline.add_observer(observer)
+
+        await pipeline.ingest(_make_event(source_primed=False))
+
+        assert observed == []
+
+    @pytest.mark.asyncio
+    async def test_primed_event_still_fires_after_unprimed(self) -> None:
+        """The fence is per-event; a later primed event must still fire."""
+        store = InMemoryTriggerQueryStore()
+        await store.index_trigger(
+            trigger_id="tr-primed",
+            name="primed-trigger",
+            event="push",
+            repository="owner/repo",
+            workflow_id="wf-001",
+            conditions=[],
+            input_mapping={},
+            config=_make_config(),
+            installation_id="12345",
+            created_by="test",
+            status="active",
+        )
+        pipeline = _make_pipeline(store=store)
+
+        cold = await pipeline.ingest(
+            _make_event(dedup_key="cold-1", source_primed=False),
+        )
+        warm = await pipeline.ingest(
+            _make_event(dedup_key="warm-1", source_primed=True),
+        )
+
+        assert cold.triggers_fired == []
+        assert "tr-primed" in warm.triggers_fired
 
 
 def _make_config() -> Any:  # noqa: ANN401

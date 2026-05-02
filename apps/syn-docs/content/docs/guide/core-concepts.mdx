@@ -38,6 +38,9 @@ A **workflow** is a YAML definition of work to be done. It consists of one or mo
 ```yaml
 id: research-v1
 name: Research Workflow
+repos:
+  - https://github.com/acme/api-service
+  - https://github.com/acme/web-app
 phases:
   - id: discovery
     prompt_file: phases/discovery.md
@@ -48,6 +51,8 @@ phases:
 ```
 
 Phases execute sequentially. Each phase can reference the output of previous phases using `{{phase-id}}` substitution. The `$ARGUMENTS` variable passes user input into the prompt.
+
+The `repos` list tells Syntropic137 which repositories to pre-clone into the workspace before the agent starts. See [Workspace Hydration](/docs/workspaces/hydration).
 
 Workflows can be packaged and distributed. See [Workflow Packages](/docs/guide/workflows).
 

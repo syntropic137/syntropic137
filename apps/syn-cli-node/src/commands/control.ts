@@ -7,7 +7,7 @@ import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/com
 import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
-import { print, printError } from "../output/console.js";
+import { print, printError, printDim } from "../output/console.js";
 import { style, GREEN, YELLOW } from "../output/ansi.js";
 import { formatStatus } from "../output/format.js";
 
@@ -16,7 +16,11 @@ type StateResponse = components["schemas"]["StateResponse"];
 
 function reqId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
-  if (!id) { printError("Missing execution-id"); throw new CLIError("Missing argument", 1); }
+  if (!id) {
+    printError("execution-id is required");
+    printDim("Hint: run `syn execution list` to find an execution ID.");
+    throw new CLIError("Missing argument", 1);
+  }
   return id;
 }
 

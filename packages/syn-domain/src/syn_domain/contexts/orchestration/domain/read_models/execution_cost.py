@@ -5,11 +5,31 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
-    _coerce_datetime,
-    _coerce_decimal,
-    _coerce_decimal_dict,
-)
+
+def _coerce_decimal(value: str | Decimal | int | float | None, default: str = "0") -> Decimal:
+    """Coerce a value to Decimal, returning *default* when None."""
+    if value is None:
+        return Decimal(default)
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def _coerce_datetime(value: str | datetime | None) -> datetime | None:
+    """Coerce a value to datetime, returning None when not parseable."""
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return value
+
+
+def _coerce_decimal_dict(raw: dict[str, str | Decimal] | None) -> dict[str, Decimal]:
+    """Coerce a dict of string/Decimal values to Decimal values."""
+    if not raw:
+        return {}
+    return {k: _coerce_decimal(v) for k, v in raw.items()}
 
 
 @dataclass

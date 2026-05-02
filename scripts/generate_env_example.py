@@ -3,6 +3,7 @@
 
 This script introspects the Settings class and generates a well-documented
 .env.example file with all environment variables, their defaults, and descriptions.
+See ADR-004: Environment Configuration with Pydantic Settings.
 
 Usage:
     python scripts/generate_env_example.py
@@ -546,7 +547,7 @@ def generate_infra_env_example() -> str:
             "cloudflare_account_id",
             "cloudflare_api_token",
             "cloudflare_zone_id",
-            "syn_domain",
+            "syn_public_hostname",
             "cloudflare_tunnel_name",
             "cloudflare_tunnel_token",
         ],

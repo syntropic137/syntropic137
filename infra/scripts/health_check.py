@@ -30,7 +30,7 @@ import time
 import urllib.request
 from dataclasses import asdict, dataclass
 
-from shared import (
+from infra_config import (
     PORT_API,
     PORT_COLLECTOR,
     PORT_EVENT_STORE,

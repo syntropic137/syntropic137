@@ -36,8 +36,10 @@ from typing import Any
 
 import httpx
 
+from syn_shared.settings.dev_tooling import get_dev_api_url
+
 # Configuration
-DASHBOARD_URL = os.getenv("SYN_API_URL", "http://localhost:8137")
+DASHBOARD_URL = get_dev_api_url()
 SANDBOX_REPO = "syntropic137/sandbox_syn-engineer-beta"
 # Use research workflow which is already registered
 # github-pr-workflow requires event-based registration (future)

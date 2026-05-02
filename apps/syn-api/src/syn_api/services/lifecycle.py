@@ -37,10 +37,25 @@ if TYPE_CHECKING:
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api._wiring import BackgroundWorkflowDispatcher
-    from syn_api.services.check_run_poller import CheckRunPoller
-    from syn_api.services.github_event_poller import GitHubEventPoller
+    from syn_domain.contexts.github.services import (
+        CheckRunIngestionService,
+        GitHubEventIngestionScheduler,
+    )
 
 logger = logging.getLogger(__name__)
+
+
+def _handle_recovery_task_exception(task: asyncio.Task[None]) -> None:
+    """Log exceptions from the lifecycle recovery background task."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "Lifecycle recovery task crashed: %s",
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
 
 
 class DegradedReason(StrEnum):
@@ -64,8 +79,8 @@ class LifecycleState:
 
     subscription_service: CoordinatorSubscriptionService | None = None
     workflow_dispatcher: BackgroundWorkflowDispatcher | None = None
-    event_poller: GitHubEventPoller | None = None
-    check_run_poller: CheckRunPoller | None = None
+    event_poller: GitHubEventIngestionScheduler | None = None
+    check_run_poller: CheckRunIngestionService | None = None
     conversation_storage: MinioConversationStorage | None = None
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
     _recovery_task: asyncio.Task[None] | None = None
@@ -126,10 +141,12 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # Spawn a background recovery loop for any recoverable degradations.
     recoverable = [r for r in state.degraded_reasons if _is_recoverable(r)]
     if recoverable:
-        state._recovery_task = asyncio.create_task(
+        task = asyncio.create_task(
             _recovery_loop(state),
             name="lifecycle-recovery",
         )
+        task.add_done_callback(_handle_recovery_task_exception)
+        state._recovery_task = task
 
 
 async def startup(
@@ -174,6 +191,15 @@ async def startup(
     if isinstance(result, Err):
         return result
 
+    # ADR-060: Initialize shared DB pool for durable dedup and cursor store.
+    # Best-effort — if it fails, services fall back to Redis/in-memory.
+    try:
+        from syn_api._wiring_db import init_shared_db_pool
+
+        await init_shared_db_pool()
+    except Exception:
+        logger.warning("Shared DB pool init failed — dedup will use Redis fallback", exc_info=True)
+
     await _init_degradable_services(_state)
 
     mode = "degraded" if _state.degraded_reasons else "full"
@@ -200,6 +226,12 @@ async def shutdown() -> Result[None, LifecycleError]:
             if entry.shutdown_fn is not None:
                 with contextlib.suppress(Exception):
                     await entry.shutdown_fn(_state)
+
+        # ADR-060: Close shared DB pool
+        with contextlib.suppress(Exception):
+            from syn_api._wiring_db import close_shared_db_pool
+
+            await close_shared_db_pool()
 
         await disconnect()
         return Ok(None)
@@ -362,7 +394,10 @@ async def _shutdown_subscriptions(state: LifecycleState) -> None:
 
 
 async def _init_event_poller(state: LifecycleState) -> None:
-    """Start the GitHub Events API poller."""
+    """Start the GitHub Events API poller.
+
+    See ADR-060: Restart-safe trigger deduplication (cold-start fence, cursor persistence).
+    """
     from syn_shared.settings import get_settings
 
     settings = get_settings()
@@ -382,12 +417,46 @@ async def _init_event_poller(state: LifecycleState) -> None:
         get_trigger_store,
         get_webhook_health_tracker,
     )
-    from syn_api.services.github_event_poller import GitHubEventPoller
+    from syn_domain.contexts.github.services import (
+        GitHubEventIngestionScheduler,
+        GitHubRepoIngestionService,
+    )
+
+    # ADR-060: Wire persistent cursor store for restart-safe polling.
+    # HistoricalPoller base class uses this for cold-start fence + ETag persistence.
+    cursor_store = None
+    try:
+        from syn_api._wiring_db import get_shared_db_pool
+
+        pool = get_shared_db_pool()
+        if pool is not None:
+            from syn_adapters.github.poller_cursor_store import PostgresPollerCursorStore
+
+            cursor_store = PostgresPollerCursorStore(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
+            logger.info("Poller cursor store initialized (ADR-060)")
+    except Exception:
+        logger.warning("Cursor store unavailable - poller will re-fetch on restart", exc_info=True)
+
+    if cursor_store is None:
+        if not settings.uses_in_memory_stores:
+            logger.error(
+                "Durable poller cursor store unavailable in production - "
+                "disabling event poller to prevent cold-start restart storms (ADR-060)"
+            )
+            return
+        from syn_adapters.github.poller_cursor_store import InMemoryPollerCursorStore
+
+        cursor_store = InMemoryPollerCursorStore()
+        logger.warning("Using in-memory cursor store - cold-start fence resets on restart")
 
     events_client = GitHubEventsAPIClient(get_github_client())
-    poller = GitHubEventPoller(
-        events_client=events_client,
+    repo_service = GitHubRepoIngestionService(
+        events_api=events_client,
         pipeline=get_event_pipeline(),
+        cursor_store=cursor_store,
+    )
+    poller = GitHubEventIngestionScheduler(
+        repo_service=repo_service,
         health_tracker=get_webhook_health_tracker(),
         trigger_store=get_trigger_store(),
         settings=settings.polling,
@@ -430,10 +499,10 @@ async def _init_check_run_poller(state: LifecycleState) -> None:
         get_trigger_store,
         get_webhook_health_tracker,
     )
-    from syn_api.services.check_run_poller import CheckRunPoller
+    from syn_domain.contexts.github.services import CheckRunIngestionService
 
-    poller = CheckRunPoller(
-        checks_client=GitHubChecksAPIClient(get_github_client()),
+    poller = CheckRunIngestionService(
+        checks_api=GitHubChecksAPIClient(get_github_client()),
         pipeline=get_event_pipeline(),
         sha_store=get_pending_sha_store(),
         health_tracker=get_webhook_health_tracker(),

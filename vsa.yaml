@@ -32,6 +32,22 @@ validation:
   # Commands live at domain/commands/ with handlers in slices/ (DDD convention per ADR-020)
   domain_level_commands: true
 
+# Layer separation enforcement (VSA206)
+# Domain and slice code must not import from adapter/API packages at runtime
+layer_separation:
+  forbidden_domain_imports:
+    - "syn_adapters"
+    - "syn_api"
+    - "syn_collector"
+  forbidden_adapter_imports:
+    - "syn_api"
+
+# Cross-context public API enforcement (ADR-062)
+# Scan adapter and API layers for deep cross-context imports
+cross_context_scan_paths:
+  - "packages/syn-adapters/src"
+  - "apps/syn-api/src"
+
 # Pattern definitions (Python conventions)
 patterns:
   command: "*Command"

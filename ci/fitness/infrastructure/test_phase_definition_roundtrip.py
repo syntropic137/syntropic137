@@ -5,6 +5,8 @@ Regression test for the silent field-dropping bug (ISS-405) where
 constructor, silently discarding prompt_template, model, max_tokens,
 timeout_seconds, allowed_tools, argument_hint, execution_type,
 input_artifact_types, and output_artifact_types.
+
+Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
 
 from __future__ import annotations

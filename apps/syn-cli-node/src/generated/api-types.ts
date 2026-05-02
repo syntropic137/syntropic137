@@ -152,6 +152,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/from-yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Workflow From Yaml Endpoint
+         * @description Create a workflow template by uploading raw YAML.
+         *
+         *     The CLI (`syn workflow create --from <file>`) POSTs the file bytes
+         *     here. Every semantic field (name, classification, repository,
+         *     phases, inputs, requires_repos) comes from the YAML itself.
+         *
+         *     Query-string ``name`` and ``workflow_id`` are optional overrides
+         *     intended for scripted bulk installation (e.g. renaming a template
+         *     on install). They are *not* a second source of truth for fields
+         *     that live in the YAML.
+         */
+        post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/executions": {
         parameters: {
             query?: never;
@@ -1870,7 +1899,7 @@ export interface components {
             classification: string;
             /**
              * Repository Url
-             * @default https://github.com/example/repo
+             * @default
              */
             repository_url: string;
             /**
@@ -1895,6 +1924,12 @@ export interface components {
              * @description Default GitHub URLs for this workflow template (ADR-058). Can be overridden at execution time via the repos field on the execute request.
              */
             repos?: string[];
+            /**
+             * Requires Repos
+             * @description Whether this workflow requires repository access at execution time (ADR-058 #666). Set to false for research or analysis workflows that don't need repos.
+             * @default true
+             */
+            requires_repos: boolean;
         };
         /** CreateWorkflowResponse */
         CreateWorkflowResponse: {
@@ -1904,6 +1939,12 @@ export interface components {
             name: string;
             /** Workflow Type */
             workflow_type: string;
+            /** Classification */
+            classification: string;
+            /** Repository Url */
+            repository_url: string;
+            /** Requires Repos */
+            requires_repos: boolean;
             /** Status */
             status: string;
         };
@@ -1971,7 +2012,7 @@ export interface components {
             task?: string | null;
             /**
              * Repos
-             * @description GitHub URLs to pre-clone for workspace hydration (ADR-058). Overrides the workflow template's repository_url. Equivalent to passing inputs={'repos': 'url1,url2'} but type-safe.
+             * @description GitHub URLs or 'owner/repo' slugs to pre-clone for workspace hydration (ADR-058, ADR-063). Typed channel for repository identity: one execution can touch 0, 1, or N repos. Passing 'repository' or 'repos' in the `inputs` dict is rejected with 422.
              */
             repos?: string[];
             /**
@@ -2117,30 +2158,15 @@ export interface components {
             completed_at?: string | null;
             /** Phases */
             phases?: components["schemas"]["PhaseExecutionInfo"][];
-            /**
-             * Total Input Tokens
-             * @default 0
-             */
+            /** Total Input Tokens */
             total_input_tokens: number;
-            /**
-             * Total Output Tokens
-             * @default 0
-             */
+            /** Total Output Tokens */
             total_output_tokens: number;
-            /**
-             * Cache Creation Tokens
-             * @default 0
-             */
-            cache_creation_tokens: number;
-            /**
-             * Cache Read Tokens
-             * @default 0
-             */
-            cache_read_tokens: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
+            /** Total Tokens */
             total_tokens: number;
             /**
              * Total Cost Usd
@@ -2270,7 +2296,16 @@ export interface components {
             /** Error */
             error?: string | null;
         };
-        /** ExecutionSummaryResponse */
+        /**
+         * ExecutionSummaryResponse
+         * @description Summary of a workflow execution.
+         *
+         *     Display fields (``*_display``) are produced server-side so all clients
+         *     (dashboard, CLI, future UIs) share identical human-readable output. Raw
+         *     fields remain for programmatic consumers; both are always present.
+         *
+         *     See: docs/adrs/ADR-064-observability-monitor-ui.md
+         */
         ExecutionSummaryResponse: {
             /** Workflow Execution Id */
             workflow_execution_id: string;
@@ -2294,16 +2329,38 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            /** Total Tokens */
+            total_tokens: number;
             /**
-             * Total Tokens
+             * Total Tokens Display
              * @default 0
              */
-            total_tokens: number;
+            total_tokens_display: string;
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Total Output Tokens */
+            total_output_tokens: number;
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
             /**
              * Total Cost Usd
              * @default 0
              */
             total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Duration Display
+             * @default —
+             */
+            duration_display: string;
             /**
              * Tool Call Count
              * @default 0
@@ -2313,6 +2370,8 @@ export interface components {
             error_message?: string | null;
             /** Repos */
             repos?: string[];
+            /** Repos Display */
+            repos_display?: string | null;
         };
         /**
          * ExportManifestResponse
@@ -2368,6 +2427,55 @@ export interface components {
              * @default
              */
             last_seen: string;
+        };
+        /**
+         * GitEventData
+         * @description Structured git event data from observability hooks.
+         *
+         *     Field names match agentic_events.payloads dataclasses (single source of truth).
+         *     This model is the Pydantic equivalent for API serialization.
+         */
+        GitEventData: {
+            /** Operation */
+            operation?: string | null;
+            /** Sha */
+            sha?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /** Repo */
+            repo?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Prev Branch */
+            prev_branch?: string | null;
+            /** Is Clone */
+            is_clone?: boolean | null;
+            /** Remote */
+            remote?: string | null;
+            /** Author */
+            author?: string | null;
+            /** Files Changed */
+            files_changed?: number | null;
+            /** Insertions */
+            insertions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /** Commits Count */
+            commits_count?: number | null;
+            /** Commit Range */
+            commit_range?: string | null;
+            /** Remote Url */
+            remote_url?: string | null;
+            /** Details */
+            details?: string | null;
+            /** From Branch */
+            from_branch?: string | null;
+            /** To Branch */
+            to_branch?: string | null;
+            /** Estimated Tokens Added */
+            estimated_tokens_added?: number | null;
+            /** Estimated Tokens Removed */
+            estimated_tokens_removed?: number | null;
         };
         /**
          * GitHubRepoListResponse
@@ -2570,20 +2678,15 @@ export interface components {
              * @default 0
              */
             total_sessions: number;
-            /**
-             * Total Input Tokens
-             * @default 0
-             */
+            /** Total Input Tokens */
             total_input_tokens: number;
-            /**
-             * Total Output Tokens
-             * @default 0
-             */
+            /** Total Output Tokens */
             total_output_tokens: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
+            /** Total Tokens */
             total_tokens: number;
             /**
              * Total Cost Usd
@@ -2643,6 +2746,7 @@ export interface components {
             message_content?: string | null;
             /** Thinking Content */
             thinking_content?: string | null;
+            git?: components["schemas"]["GitEventData"] | null;
             /** Git Sha */
             git_sha?: string | null;
             /** Git Message */
@@ -2757,30 +2861,15 @@ export interface components {
             session_id?: string | null;
             /** Artifact Id */
             artifact_id?: string | null;
-            /**
-             * Input Tokens
-             * @default 0
-             */
+            /** Input Tokens */
             input_tokens: number;
-            /**
-             * Output Tokens
-             * @default 0
-             */
+            /** Output Tokens */
             output_tokens: number;
-            /**
-             * Cache Creation Tokens
-             * @default 0
-             */
+            /** Cache Creation Tokens */
             cache_creation_tokens: number;
-            /**
-             * Cache Read Tokens
-             * @default 0
-             */
+            /** Cache Read Tokens */
             cache_read_tokens: number;
-            /**
-             * Total Tokens
-             * @default 0
-             */
+            /** Total Tokens */
             total_tokens: number;
             /**
              * Duration Seconds
@@ -3446,6 +3535,12 @@ export interface components {
         /**
          * SessionResponse
          * @description Detailed session response.
+         *
+         *     Display fields (``*_display``) are produced server-side so all clients
+         *     share identical human-readable output. Raw fields remain for programmatic
+         *     consumers.
+         *
+         *     See: docs/adrs/ADR-064-observability-monitor-ui.md
          */
         SessionResponse: {
             /** Id */
@@ -3458,16 +3553,147 @@ export interface components {
             execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
+            /** Phase Display */
+            phase_display?: string | null;
             /** Milestone Id */
             milestone_id: string | null;
             /** Agent Provider */
             agent_provider: string | null;
             /** Agent Model */
             agent_model: string | null;
+            /** Agent Model Display */
+            agent_model_display?: string | null;
+            /** Repos */
+            repos?: string[];
+            /** Repos Display */
+            repos_display?: string | null;
             /** Status */
             status: string;
             /** Workspace Path */
             workspace_path?: string | null;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Input Tokens Display
+             * @default 0
+             */
+            input_tokens_display: string;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Output Tokens Display
+             * @default 0
+             */
+            output_tokens_display: string;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Creation Tokens Display
+             * @default 0
+             */
+            cache_creation_tokens_display: string;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Read Tokens Display
+             * @default 0
+             */
+            cache_read_tokens_display: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Tokens Display
+             * @default 0
+             */
+            total_tokens_display: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /** Operations */
+            operations?: components["schemas"]["OperationInfo"][];
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Duration Display
+             * @default —
+             */
+            duration_display: string;
+            /** Error Message */
+            error_message?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * SessionSummaryResponse
+         * @description Summary of an agent session.
+         *
+         *     Display fields (``*_display``) are produced server-side so all clients
+         *     (dashboard, CLI, future UIs) share identical human-readable output. Raw
+         *     fields remain for programmatic consumers; both are always present.
+         *
+         *     Timestamps stay ISO 8601 UTC. Locale and relative-time formatting is the
+         *     client's job (it knows the viewer's time zone and when the response is
+         *     actually rendered).
+         *
+         *     See: docs/adrs/ADR-064-observability-monitor-ui.md
+         */
+        SessionSummaryResponse: {
+            /** Id */
+            id: string;
+            /** Workflow Id */
+            workflow_id: string | null;
+            /** Workflow Name */
+            workflow_name?: string | null;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id: string | null;
+            /** Phase Display */
+            phase_display?: string | null;
+            /** Status */
+            status: string;
+            /** Agent Provider */
+            agent_provider: string | null;
+            /** Agent Model */
+            agent_model?: string | null;
+            /** Agent Model Display */
+            agent_model_display?: string | null;
+            /** Repos */
+            repos?: string[];
+            /** Repos Display */
+            repos_display?: string | null;
             /**
              * Input Tokens
              * @default 0
@@ -3494,58 +3720,27 @@ export interface components {
              */
             total_tokens: number;
             /**
+             * Total Tokens Display
+             * @default 0
+             */
+            total_tokens_display: string;
+            /**
              * Total Cost Usd
              * @default 0
              */
             total_cost_usd: string;
-            /** Cost By Model */
-            cost_by_model?: {
-                [key: string]: string;
-            };
-            /** Operations */
-            operations?: components["schemas"]["OperationInfo"][];
-            /** Started At */
-            started_at?: string | null;
-            /** Completed At */
-            completed_at?: string | null;
+            /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
             /** Duration Seconds */
             duration_seconds?: number | null;
-            /** Error Message */
-            error_message?: string | null;
-            /** Metadata */
-            metadata?: {
-                [key: string]: unknown;
-            };
-        };
-        /**
-         * SessionSummaryResponse
-         * @description Summary of an agent session.
-         */
-        SessionSummaryResponse: {
-            /** Id */
-            id: string;
-            /** Workflow Id */
-            workflow_id: string | null;
-            /** Workflow Name */
-            workflow_name?: string | null;
-            /** Execution Id */
-            execution_id?: string | null;
-            /** Phase Id */
-            phase_id: string | null;
-            /** Status */
-            status: string;
-            /** Agent Provider */
-            agent_provider: string | null;
             /**
-             * Total Tokens
-             * @default 0
+             * Duration Display
+             * @default —
              */
-            total_tokens: number;
-            /**
-             * Total Cost Usd
-             * @default 0
-             */
-            total_cost_usd: string;
+            duration_display: string;
             /** Started At */
             started_at?: string | null;
             /** Completed At */
@@ -4349,6 +4544,11 @@ export interface components {
             repository_url?: string | null;
             /** Repos */
             repos?: string[];
+            /**
+             * Requires Repos
+             * @default true
+             */
+            requires_repos: boolean;
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -4372,6 +4572,11 @@ export interface components {
              * @default false
              */
             is_archived: boolean;
+            /**
+             * Requires Repos
+             * @default true
+             */
+            requires_repos: boolean;
         };
         /**
          * CostSummaryResponse
@@ -4768,6 +4973,38 @@ export interface operations {
             };
         };
     };
+    create_workflow_from_yaml_endpoint_workflows_from_yaml_post: {
+        parameters: {
+            query?: {
+                name?: string | null;
+                workflow_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_executions_endpoint_executions_get: {
         parameters: {
             query?: {
@@ -5105,8 +5342,14 @@ export interface operations {
             query?: {
                 /** @description Filter by workflow ID */
                 workflow_id?: string | null;
-                /** @description Filter by status */
+                /** @description Filter by single status (legacy) */
                 status?: string | null;
+                /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
+                statuses?: string | null;
+                /** @description Inclusive ISO 8601 lower bound on started_at */
+                started_after?: string | null;
+                /** @description Inclusive ISO 8601 upper bound on started_at */
+                started_before?: string | null;
                 /** @description Max items to return */
                 limit?: number;
             };

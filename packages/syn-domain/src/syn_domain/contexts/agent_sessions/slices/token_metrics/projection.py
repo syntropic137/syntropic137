@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from event_sourcing import ProjectionStore
 
 from syn_domain.contexts.agent_sessions.domain.read_models.token_metrics import (
     SessionTokenMetrics,
@@ -32,11 +32,11 @@ class TokenMetricsProjection:
 
     PROJECTION_NAME = "token_metrics"
 
-    def __init__(self, store: ProjectionStoreProtocol):
+    def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
 
         Args:
-            store: A ProjectionStoreProtocol implementation
+            store: A ProjectionStore implementation
         """
         self._store = store
 
