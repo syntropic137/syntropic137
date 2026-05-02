@@ -261,3 +261,50 @@ class TestProjectionStoreProtocol:
         ]
         for method in required_methods:
             assert hasattr(ProjectionStoreProtocol, method)
+
+
+@pytest.mark.integration
+class TestProjectionStoreChunkedPagingContract:
+    """Contract tests for limit/offset pagination relied on by chunked paging (#730).
+
+    Verifies that sequential limit/offset page fetches produce disjoint sets
+    whose union is the complete dataset — the invariant that
+    SessionListProjection.query()'s chunked loop depends on.
+
+    Runs against InMemoryProjectionStore by default.  In CI with a live
+    Postgres instance these same assertions should be run against
+    PostgresProjectionStore to pin the contract against the real backend.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sequential_pages_are_disjoint_and_cover_all_records(
+        self, memory_store: InMemoryProjectionStore
+    ) -> None:
+        """Pages fetched with sequential (limit, offset) calls are disjoint and complete."""
+        n_records = 50
+        projection_name = "test_chunked_contract"
+        for i in range(n_records):
+            await memory_store.save(projection_name, f"key-{i:02d}", {"index": i})
+
+        page_size = 12
+        seen_indices: set[int] = set()
+        store_offset = 0
+        iterations = 0
+
+        while True:
+            page = await memory_store.query(projection_name, limit=page_size, offset=store_offset)
+            if not page:
+                break
+            for record in page:
+                idx = record["index"]
+                assert idx not in seen_indices, f"Duplicate record at store_offset={store_offset}"
+                seen_indices.add(idx)
+            if len(page) < page_size:
+                break
+            store_offset += len(page)
+            iterations += 1
+            assert iterations < 100, "Infinite loop — store pagination is broken"
+
+        assert seen_indices == set(range(n_records)), (
+            f"Pagination did not cover all records: missing {set(range(n_records)) - seen_indices}"
+        )
