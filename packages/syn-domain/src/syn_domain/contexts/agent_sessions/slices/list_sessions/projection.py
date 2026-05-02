@@ -22,6 +22,10 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_summary impor
 
 logger = logging.getLogger(__name__)
 
+_MIN_CHUNK_SIZE = 100
+_CHUNK_SIZE_MULTIPLIER = 4
+_SAFETY_CAP_ROWS = 5_000
+
 
 def _calculate_duration(
     started_at: str | datetime | None, completed_at: str | datetime | None
@@ -89,21 +93,18 @@ def _build_query_filters(
     return filters
 
 
-def _apply_post_filters(
-    data: list[Any],
+def _passes_post_filter(
+    record: Mapping[str, object],
     statuses: list[str] | None,
     started_after: datetime | None,
     started_before: datetime | None,
-    offset: int,
-    limit: int,
-) -> list[Any]:
-    """Apply the in-memory filters that the store cannot express, then paginate."""
-    if statuses:
-        allowed = set(statuses)
-        data = [d for d in data if d.get("status") in allowed]
-    if started_after is not None or started_before is not None:
-        data = [d for d in data if _within_window(d, started_after, started_before)]
-    return data[offset : offset + limit] if limit else data[offset:]
+) -> bool:
+    """Return True iff record passes all post-fetch filters."""
+    if statuses and record.get("status") not in statuses:
+        return False
+    return (started_after is None and started_before is None) or _within_window(
+        record, started_after, started_before
+    )
 
 
 def _accumulate_tokens(existing: dict[str, Any], event_data: dict) -> None:
@@ -349,28 +350,66 @@ class SessionListProjection(AutoDispatchProjection):
         ``statuses`` (multi-select) takes precedence over ``status_filter``
         (single value, kept for backwards compatibility).
 
-        Time-range filters (``started_after`` / ``started_before``) are applied
-        post-fetch in Python because the underlying store filter only supports
-        equality. We fetch without a row cap when bounds are present so the
-        bounded slice is honoured even on installs with many sessions.
+        When post-fetch filters are needed (``statuses`` or time-range), the
+        method pages through the store in chunks of
+        ``max(_MIN_CHUNK_SIZE, limit * _CHUNK_SIZE_MULTIPLIER)`` rows rather
+        than fetching the entire table unbounded.  The loop terminates on the
+        first of: empty page, ``_SAFETY_CAP_ROWS`` scanned, or enough matched
+        records accumulated.  This bounds worst-case memory while preserving
+        the offset/limit pagination contract.
         """
         filters = _build_query_filters(workflow_id, status_filter, statuses)
-        post_filtering = bool(statuses or started_after is not None or started_before is not None)
-        store_limit = None if post_filtering else limit
-        store_offset = 0 if post_filtering else offset
+        post_filtering = bool(statuses or started_after or started_before)
 
-        data = await self._store.query(
-            self.PROJECTION_NAME,
-            filters=filters if filters else None,
-            order_by=order_by,
-            limit=store_limit,
-            offset=store_offset,
-        )
+        if not post_filtering:
+            data = await self._store.query(
+                self.PROJECTION_NAME,
+                filters=filters if filters else None,
+                order_by=order_by,
+                limit=limit,
+                offset=offset,
+            )
+            return [SessionSummary.from_dict(d) for d in data]
 
-        if post_filtering:
-            data = _apply_post_filters(data, statuses, started_after, started_before, offset, limit)
+        chunk_size = max(_MIN_CHUNK_SIZE, limit * _CHUNK_SIZE_MULTIPLIER)
+        target = (offset + limit) if limit else None
+        matched: list[Any] = []
+        store_offset = 0
+        total_scanned = 0
 
-        return [SessionSummary.from_dict(d) for d in data]
+        while True:
+            page = await self._store.query(
+                self.PROJECTION_NAME,
+                filters=filters if filters else None,
+                order_by=order_by,
+                limit=chunk_size,
+                offset=store_offset,
+            )
+            if not page:
+                break
+
+            for record in page:
+                if _passes_post_filter(record, statuses, started_after, started_before):
+                    matched.append(record)
+
+            total_scanned += len(page)
+
+            if total_scanned >= _SAFETY_CAP_ROWS:
+                logger.warning(
+                    "list_sessions safety cap reached",
+                    extra={"scanned": total_scanned, "matched": len(matched), "target": target},
+                )
+                break
+
+            if target is not None and len(matched) >= target:
+                break
+
+            if len(page) < chunk_size:
+                break
+
+            store_offset += len(page)
+
+        return [SessionSummary.from_dict(d) for d in matched[offset:target]]
 
     async def reconcile_orphaned(
         self,
