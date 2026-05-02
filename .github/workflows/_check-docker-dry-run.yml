@@ -1,11 +1,27 @@
 # =============================================================================
 # Check: Docker Dry-Run
 # =============================================================================
-# Builds all container images (single-arch, no push) to verify Dockerfiles
-# are valid and all build contexts resolve correctly.
+# Builds container images without push to verify Dockerfiles are valid on
+# every target architecture they ship to. Coverage matches release-containers.yaml:
+#   - Server images (syn-api, syn-gateway, syn-collector, sidecar-proxy,
+#     token-injector): linux/amd64 + linux/arm64
+#   - syn-dashboard-ui: linux/amd64 only (static asset bundle that serves both
+#     archs identically at runtime)
+#
+# Multi-arch coverage was added per #736: v0.25.3 release pipeline failed at
+# the multi-arch publish step on a stale Debian apt source in the envoy base
+# image, but the PR-time gate had only built AMD64 and passed. Now we catch
+# this class of issue pre-merge.
+#
+# Each (image, arch) combination runs as its own matrix job on a NATIVE
+# GitHub-hosted runner (ubuntu-latest for amd64, ubuntu-24.04-arm for arm64).
+# No QEMU emulation - builds run at native speed in parallel, so wall-clock
+# time is roughly the same as the original single-arch gate. ARM64 runners
+# are GA on public repos as of early 2025; this repo is public.
 #
 # Always runs - no path-filter skip logic. Docker layer caching (GHA cache,
-# per-image scope) makes unchanged images near-instant on subsequent runs.
+# per-image-and-platform scope) makes unchanged builds near-instant on
+# subsequent runs.
 #
 # Called by: release-gate.yml
 #
@@ -24,32 +40,38 @@ permissions:
 
 jobs:
   docker-dry-run:
-    name: "Docker Build: ${{ matrix.image }}"
-    runs-on: ubuntu-latest
+    name: "Docker Build: ${{ matrix.image }} (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - image: syn-api
-            dockerfile: infra/docker/images/syn-api/Dockerfile
-            context: "."
-            build-args: "INCLUDE_DOCKER_CLI=1"
-          - image: syn-gateway
-            dockerfile: infra/docker/images/gateway/Dockerfile
-            context: "."
-          - image: syn-collector
-            dockerfile: packages/syn-collector/Dockerfile
-            context: "."
-          - image: syn-dashboard-ui
-            dockerfile: apps/syn-dashboard-ui/Dockerfile
-            context: "."
-          - image: sidecar-proxy
-            dockerfile: docker/sidecar-proxy/Dockerfile
-            context: docker/sidecar-proxy
-          - image: token-injector
-            dockerfile: docker/token-injector/Dockerfile
-            context: docker/token-injector
+          # syn-api — multi-arch (matches release-containers.yaml)
+          - { image: syn-api, dockerfile: infra/docker/images/syn-api/Dockerfile, context: ".", build-args: "INCLUDE_DOCKER_CLI=1", arch: amd64, runner: ubuntu-latest, platform: linux/amd64 }
+          - { image: syn-api, dockerfile: infra/docker/images/syn-api/Dockerfile, context: ".", build-args: "INCLUDE_DOCKER_CLI=1", arch: arm64, runner: ubuntu-24.04-arm, platform: linux/arm64 }
+
+          # syn-gateway — multi-arch
+          - { image: syn-gateway, dockerfile: infra/docker/images/gateway/Dockerfile, context: ".", arch: amd64, runner: ubuntu-latest, platform: linux/amd64 }
+          - { image: syn-gateway, dockerfile: infra/docker/images/gateway/Dockerfile, context: ".", arch: arm64, runner: ubuntu-24.04-arm, platform: linux/arm64 }
+
+          # syn-collector — multi-arch
+          - { image: syn-collector, dockerfile: packages/syn-collector/Dockerfile, context: ".", arch: amd64, runner: ubuntu-latest, platform: linux/amd64 }
+          - { image: syn-collector, dockerfile: packages/syn-collector/Dockerfile, context: ".", arch: arm64, runner: ubuntu-24.04-arm, platform: linux/arm64 }
+
+          # syn-dashboard-ui — amd64 only (matches release-containers.yaml; UI
+          # is shipped amd64-only because it's a static asset bundle that
+          # serves both archs identically at runtime)
+          - { image: syn-dashboard-ui, dockerfile: apps/syn-dashboard-ui/Dockerfile, context: ".", arch: amd64, runner: ubuntu-latest, platform: linux/amd64 }
+
+          # sidecar-proxy — multi-arch
+          - { image: sidecar-proxy, dockerfile: docker/sidecar-proxy/Dockerfile, context: docker/sidecar-proxy, arch: amd64, runner: ubuntu-latest, platform: linux/amd64 }
+          - { image: sidecar-proxy, dockerfile: docker/sidecar-proxy/Dockerfile, context: docker/sidecar-proxy, arch: arm64, runner: ubuntu-24.04-arm, platform: linux/arm64 }
+
+          # token-injector — multi-arch
+          - { image: token-injector, dockerfile: docker/token-injector/Dockerfile, context: docker/token-injector, arch: amd64, runner: ubuntu-latest, platform: linux/amd64 }
+          - { image: token-injector, dockerfile: docker/token-injector/Dockerfile, context: docker/token-injector, arch: arm64, runner: ubuntu-24.04-arm, platform: linux/arm64 }
+
           # agentic-workspace uses build-provider.py staging - validated
           # separately in e2e-container.yml, skip in gate to save CI time.
 
@@ -60,14 +82,20 @@ jobs:
 
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
-      - name: Build (no push)
+      - name: Build single-arch native (no push)
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          # Single-platform per matrix entry. The runner is already that arch
+          # (ubuntu-latest for amd64, ubuntu-24.04-arm for arm64), so the
+          # build is native — no QEMU emulation overhead.
+          platforms: ${{ matrix.platform }}
           push: false
           load: true
           tags: test/${{ matrix.image }}:gate
           build-args: ${{ matrix.build-args }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+          # Per-(image,arch) cache scope so amd64 and arm64 caches don't
+          # collide. (#736)
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }},mode=max

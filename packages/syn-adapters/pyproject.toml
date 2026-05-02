@@ -1,6 +1,6 @@
 [project]
 name = "syn-adapters"
-version = "0.25.3"
+version = "0.25.4"
 description = "External integrations for Syntropic137"
 requires-python = ">=3.12"
 
