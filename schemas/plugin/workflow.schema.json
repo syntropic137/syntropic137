@@ -1,7 +1,40 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.25.4/workflow.schema.json",
   "$defs": {
+    "ClaudePluginRef": {
+      "additionalProperties": false,
+      "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version)`` only \u2014 name overrides\ndo not affect identity, so a workflow-scope ref and a phase-scope ref\npointing at the same plugin dedup cleanly into one lock entry.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source_url": {
+          "minLength": 1,
+          "title": "Source Url",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "name_overridden": {
+          "default": false,
+          "title": "Name Overridden",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "source_url",
+        "version"
+      ],
+      "title": "ClaudePluginRef",
+      "type": "object"
+    },
     "InputYamlDefinition": {
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
       "properties": {
@@ -183,6 +216,13 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "claude_plugins": {
+          "items": {
+            "$ref": "#/$defs/ClaudePluginRef"
+          },
+          "title": "Claude Plugins",
+          "type": "array"
         }
       },
       "required": [
@@ -223,19 +263,6 @@
       ],
       "title": "WorkflowClassification",
       "type": "string"
-    },
-    "WorkflowType": {
-      "description": "Type of workflow execution.",
-      "enum": [
-        "research",
-        "planning",
-        "implementation",
-        "review",
-        "deployment",
-        "custom"
-      ],
-      "title": "WorkflowType",
-      "type": "string"
     }
   },
   "description": "Complete workflow definition as parsed from YAML.\n\nThis is the root model for workflow YAML files.",
@@ -265,8 +292,9 @@
       "title": "Description"
     },
     "type": {
-      "$ref": "#/$defs/WorkflowType",
-      "default": "custom"
+      "default": "custom",
+      "title": "Type",
+      "type": "string"
     },
     "classification": {
       "$ref": "#/$defs/WorkflowClassification",
@@ -282,6 +310,18 @@
         }
       ],
       "default": null
+    },
+    "requires_repos": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Requires Repos"
     },
     "project_name": {
       "anyOf": [
@@ -308,6 +348,13 @@
       },
       "minItems": 1,
       "title": "Phases",
+      "type": "array"
+    },
+    "claude_plugins": {
+      "items": {
+        "$ref": "#/$defs/ClaudePluginRef"
+      },
+      "title": "Claude Plugins",
       "type": "array"
     }
   },
