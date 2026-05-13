@@ -313,7 +313,7 @@ class ValidateYamlRequest(BaseModel):
     filename: str = Field(default="workflow.yaml", description="Original filename (informational)")
     file: str | None = Field(
         default=None,
-        description="Deprecated — file paths are no longer supported. Use 'content' instead.",
+        description="Deprecated; file paths are no longer supported. Use 'content' instead.",
     )
 
 
@@ -434,7 +434,7 @@ class DeleteWorkflowResponse(BaseModel):
     summary="Archive (soft-delete) a workflow template",
     responses={
         404: {"description": "Workflow template not found"},
-        409: {"description": "Conflict — workflow has active executions or is already archived"},
+        409: {"description": "Conflict; workflow has active executions or is already archived"},
     },
 )
 async def delete_workflow_endpoint(workflow_id: str) -> DeleteWorkflowResponse:
@@ -542,7 +542,7 @@ async def update_phase_prompt_endpoint(
 
 
 # =============================================================================
-# YAML Upload (thin wrapper — server owns parsing)
+# YAML Upload (thin wrapper; server owns parsing)
 # =============================================================================
 
 
@@ -554,7 +554,7 @@ _ACCEPTED_YAML_CONTENT_TYPES = frozenset(
         "text/x-yaml",
     }
 )
-_MAX_YAML_BYTES = 1 * 1024 * 1024  # 1 MiB — workflow definitions are small
+_MAX_YAML_BYTES = 1 * 1024 * 1024  # 1 MiB; workflow definitions are small
 
 
 class _YamlCreateOutcome(BaseModel):
@@ -582,11 +582,15 @@ async def create_workflow_from_yaml(
     ``name`` and ``workflow_id`` when supplied.
 
     Raises ``ValueError`` on malformed YAML or unresolved ``prompt_file:``
-    references (no base_dir is available server-side).
+    references (no base_dir is available server-side). Raises
+    ``ClaudePluginError`` (any subclass) if a referenced claude plugin
+    cannot be fetched, parsed, or validated. The endpoint wrapper maps both
+    error families to the right HTTP status.
     """
     import yaml
     from event_sourcing.core.errors import StreamAlreadyExistsError
 
+    from syn_api._wiring import get_claude_plugin_resolution_service
     from syn_domain.contexts.orchestration import (
         CreateWorkflowTemplateHandler,
         WorkflowDefinition,
@@ -597,6 +601,15 @@ async def create_workflow_from_yaml(
         definition = WorkflowDefinition.from_yaml(yaml_content)
     except yaml.YAMLError as e:
         raise ValueError(f"Malformed YAML: {e}") from e
+
+    # Implicit fetch: any claude_plugins ref the YAML declares must be
+    # present in the lock projection before we register the workflow.
+    # ClaudePluginError subclasses propagate to the endpoint wrapper, which
+    # translates them to HTTP 422 with a stable error_code. The workflow is
+    # NOT registered if any plugin fetch fails (no partial state).
+    resolution_service = await get_claude_plugin_resolution_service()
+    await resolution_service.ensure_registered(definition)
+
     command = build_command_from_definition(
         definition,
         workflow_id_override=workflow_id_override,
@@ -669,12 +682,23 @@ async def create_workflow_from_yaml_endpoint(
     except UnicodeDecodeError as e:
         raise HTTPException(status_code=400, detail=f"YAML body is not valid UTF-8: {e}") from e
 
+    from syn_api.services.claude_plugin_error_mapping import (
+        http_exception_for_claude_plugin_error,
+    )
+    from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
+        ClaudePluginError,
+    )
+
     try:
         result = await create_workflow_from_yaml(
             yaml_content,
             workflow_id_override=workflow_id,
             name_override=name,
         )
+    except ClaudePluginError as e:
+        # Stable error_code (claude_plugin_unreachable, etc.) so CLI/dashboard
+        # can render actionable messages without string sniffing.
+        raise http_exception_for_claude_plugin_error(e) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid workflow YAML: {e}") from e
 

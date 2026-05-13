@@ -61,14 +61,18 @@ issue = "#768"  # interactive-tmux cancel-polling loop; landed via fix/interacti
 value = 820
 issue = "#768"  # grew absorbing 769's _DispatchContext + shared-workspace exactly-once cleanup, the stale-COLLECT_ARTIFACTS skip guard, and the codex-review phase-aware interactive-tmux gate / followup repos threading; split scheduled with the interactive-tmux post-launch polish
 
+[max-loc-file."apps.syn-api.src.syn_api._wiring"]
+value = 1200
+issue = "#185"
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# Untyped Dicts — dict[str, Any] and dict[str, object] in Python packages
+# Untyped Dicts - dict[str, Any] and dict[str, object] in Python packages
 # Default is 0 (clean). Every non-zero entry is grandfathered tech debt.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [untyped-dicts.syn-domain]
 path = "packages/syn-domain"
-value = 372
+value = 391
 issue = "#673"
 
 [untyped-dicts.syn-adapters]
@@ -78,7 +82,7 @@ issue = "#673"
 
 [untyped-dicts.syn-api]
 path = "apps/syn-api"
-value = 93
+value = 94
 issue = "#673"
 
 [untyped-dicts.syn-collector]

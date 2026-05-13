@@ -1,3 +1,8 @@
+# See ADR-066: this seeder is a dev/CI tool that lives in the domain package
+# but is invoked from scripts; it never runs inside the request lifecycle. After
+# the #726 Phase A redesign, the resolver call here is pure validation -- it
+# refuses to seed any workflow that references an unregistered plugin (the CLI
+# must register plugins first via POST /claude-plugins/registrations).
 """Service for seeding workflows from YAML definitions.
 
 **Development / testing tool only.** This service bypasses the HTTP API
@@ -18,8 +23,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path  # noqa: TC003 - needed at runtime for file operations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
+from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
+    ClaudePluginError,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
@@ -33,6 +41,18 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
         CreateWorkflowTemplateHandler,
     )
+
+
+class _ClaudePluginResolver(Protocol):
+    """Minimal contract the seeder needs from the resolution service.
+
+    Defined locally so the domain layer never imports the API service module
+    (would invert the dependency direction). Production wires
+    ``ClaudePluginResolutionService`` here; tests pass a no-op or a stub.
+    """
+
+    async def ensure_registered(self, workflow_def: WorkflowDefinition) -> None: ...
+
 
 logger = get_logger(__name__)
 
@@ -101,16 +121,29 @@ class WorkflowSeeder:
         handler: CreateWorkflowTemplateHandler,
         *,
         skip_existing: bool = True,
+        claude_plugin_resolver: _ClaudePluginResolver | None = None,
+        fail_on_plugin_not_registered: bool = True,
     ) -> None:
         """Initialize the seeder.
 
         Args:
             handler: The CreateWorkflowTemplateHandler to use for creating workflows.
             skip_existing: If True, skip workflows that already exist.
+            claude_plugin_resolver: Optional resolver for ``claude_plugins`` refs
+                (issue #726). When provided, every YAML's plugin refs are
+                validated against the lock projection before the workflow is
+                registered. When ``None``, plugin validation is skipped entirely
+                -- safe for legacy seed paths that pre-date #726.
+            fail_on_plugin_not_registered: When True (production default), a
+                missing plugin registration aborts the seeder by re-raising.
+                When False (dev/CI), the failure is logged and the workflow is
+                recorded as failed but seeding continues.
         """
         self._handler = handler
         self._skip_existing = skip_existing
         self._existing_ids: set[str] = set()
+        self._claude_plugin_resolver = claude_plugin_resolver
+        self._fail_on_plugin_not_registered = fail_on_plugin_not_registered
 
     async def seed_from_directory(
         self,
@@ -202,6 +235,31 @@ class WorkflowSeeder:
                 phases=len(definition.phases),
             )
             return SeedResult(workflow_id=workflow_id, name=definition.name, success=True)
+
+        # Validation against the lock projection (#726 Phase A). Failures
+        # either abort seeding (prod default) or surface as a per-workflow
+        # failed result so the rest of the seed run still completes (dev/CI).
+        # The seeder no longer fetches plugins; the CLI must register them
+        # first via POST /claude-plugins/registrations.
+        if self._claude_plugin_resolver is not None:
+            try:
+                await self._claude_plugin_resolver.ensure_registered(definition)
+            except ClaudePluginError as exc:
+                if self._fail_on_plugin_not_registered:
+                    raise
+                logger.error(
+                    "Skipping workflow seed: claude plugin not registered",
+                    workflow_id=workflow_id,
+                    name=definition.name,
+                    error_code=exc.error_code,
+                    error=str(exc),
+                )
+                return SeedResult(
+                    workflow_id=workflow_id,
+                    name=definition.name,
+                    success=False,
+                    error=f"claude_plugin_not_registered: {exc}",
+                )
 
         command = build_command_from_definition(definition)
         try:
