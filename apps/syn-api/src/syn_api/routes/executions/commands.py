@@ -18,7 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import (
     ensure_connected,
-    get_execution_processor,
     get_projection_mgr,
     get_workflow_repo,
 )
@@ -365,7 +364,6 @@ async def execute(
     """
     from syn_domain.contexts.orchestration import (
         ExecuteWorkflowCommand,
-        ExecuteWorkflowHandler,
         WorkflowNotFoundError,
     )
 
@@ -374,13 +372,13 @@ async def execute(
     detail = await manager.workflow_detail.get_by_id(workflow_id)
     workflow_name = detail.name if detail else ""
 
-    from syn_api._wiring import get_workflow_repo
+    # Single composition root for ExecuteWorkflowHandler (see _wiring.py).
+    # The previous local instantiation here drifted from the dispatcher's
+    # version (issue #726): missed the phase_plugin_resolver wiring and
+    # silently broke claude-plugin materialization for synchronous executes.
+    from syn_api._wiring import get_execute_workflow_handler
 
-    processor = await get_execution_processor()
-    handler = ExecuteWorkflowHandler(
-        processor=processor,
-        workflow_repository=get_workflow_repo(),
-    )
+    handler = await get_execute_workflow_handler()
 
     try:
         cmd = ExecuteWorkflowCommand(

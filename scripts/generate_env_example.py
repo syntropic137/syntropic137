@@ -33,6 +33,7 @@ from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
 from syn_shared.settings.infra import InfraSettings  # noqa: E402
+from syn_shared.settings.storage import StorageSettings  # noqa: E402
 from syn_shared.settings.workspace import (  # noqa: E402
     ContainerLoggingSettings,
     GitIdentitySettings,
@@ -368,6 +369,18 @@ def generate_env_example() -> str:
             "GIT IDENTITY FOR WORKSPACE COMMITS",
             prefix="SYN_GIT_",
             description="Git identity for agent commits. Prefer GitHub App for authentication.",
+        )
+    )
+
+    # WHY: StorageSettings holds the new claude_plugins MinIO bucket name
+    # (issue #726). The composed Settings.storage property reads from
+    # SYN_STORAGE_* env vars, so they need to be discoverable in .env.example.
+    lines.extend(
+        generate_settings_section(
+            StorageSettings,
+            "OBJECT STORAGE (MinIO / artifacts / claude plugins)",
+            prefix="SYN_STORAGE_",
+            description="MinIO buckets and credentials. See ADR-012 (artifacts) and issue #726 (claude plugins).",
         )
     )
 
