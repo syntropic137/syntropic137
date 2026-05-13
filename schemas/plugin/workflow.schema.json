@@ -55,6 +55,39 @@
       "title": "AgentYamlDefinition",
       "type": "object"
     },
+    "ClaudePluginRef": {
+      "additionalProperties": false,
+      "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version)`` only \u2014 name overrides\ndo not affect identity, so a workflow-scope ref and a phase-scope ref\npointing at the same plugin dedup cleanly into one lock entry.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source_url": {
+          "minLength": 1,
+          "title": "Source Url",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "name_overridden": {
+          "default": false,
+          "title": "Name Overridden",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "source_url",
+        "version"
+      ],
+      "title": "ClaudePluginRef",
+      "type": "object"
+    },
     "InputYamlDefinition": {
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
       "properties": {
@@ -247,6 +280,13 @@
             }
           ],
           "default": null
+        },
+        "claude_plugins": {
+          "items": {
+            "$ref": "#/$defs/ClaudePluginRef"
+          },
+          "title": "Claude Plugins",
+          "type": "array"
         }
       },
       "required": [
@@ -372,6 +412,13 @@
       },
       "minItems": 1,
       "title": "Phases",
+      "type": "array"
+    },
+    "claude_plugins": {
+      "items": {
+        "$ref": "#/$defs/ClaudePluginRef"
+      },
+      "title": "Claude Plugins",
       "type": "array"
     }
   },

@@ -6,6 +6,10 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
+    ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
+
 
 class WorkflowType(StrEnum):
     """Type of workflow execution."""
@@ -113,3 +117,8 @@ class PhaseDefinition(BaseModel):
     """Which tmux pane the phase targets in a multi-agent interactive-tmux
     workspace. Valid values: "claude", "codex", "gemini". Defaults to
     "claude" when omitted. Ignored by the default claude -p path."""
+
+    # Workflow-author-declared plugin refs at phase scope (issue #726). PR1 carries
+    # them through the YAML to the domain; PR2's resolution service rewrites them
+    # into ResolvedClaudePlugin entries on ExecutablePhase.
+    claude_plugins: tuple[ClaudePluginRef, ...] = Field(default_factory=tuple)

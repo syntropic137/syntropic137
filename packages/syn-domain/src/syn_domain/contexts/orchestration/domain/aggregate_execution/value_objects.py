@@ -7,6 +7,10 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
 from typing import Any
 
+from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+    ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
+)
+
 
 class ExecutionStatus(StrEnum):
     """Status of workflow execution."""
@@ -187,3 +191,8 @@ class ExecutablePhase:
 
     # Timeout for this phase (can override agent config)
     timeout_seconds: int | None = None
+
+    # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
+    # this empty; PR2's resolution service populates it from the workflow- and
+    # phase-scope ClaudePluginRefs.
+    claude_plugins: tuple[ResolvedClaudePlugin, ...] = ()

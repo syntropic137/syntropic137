@@ -8,6 +8,9 @@ from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (  # noqa: TC001
+    ClaudePluginRef,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
@@ -56,3 +59,9 @@ class CreateWorkflowTemplateCommand(BaseModel):
     # Execution gate (ADR-058 #666)
     requires_repos: bool = True
     """Whether this workflow requires repository access at execution time."""
+
+    # Workflow-scope claude plugin refs (issue #726, PR2). Per-phase refs are
+    # carried inside ``PhaseDefinition.claude_plugins``; workflow-scope refs
+    # apply to every phase and live here so the aggregate carries the full
+    # declaration through to execute time.
+    claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
