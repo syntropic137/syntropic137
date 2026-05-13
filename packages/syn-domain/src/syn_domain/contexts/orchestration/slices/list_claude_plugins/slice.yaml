@@ -1,0 +1,6 @@
+name: list-claude-plugins
+type: query
+projection: ClaudePluginLockProjection
+subscribes_to:
+  - ClaudePluginRegisteredEvent
+returns: list[LockEntry]

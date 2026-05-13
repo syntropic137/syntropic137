@@ -1,0 +1,9 @@
+name: register-claude-plugin
+type: command
+aggregate: ClaudePluginRegistration
+emits:
+  - ClaudePluginRegisteredEvent
+projection: ClaudePluginLockProjection
+subscribes_to:
+  - ClaudePluginRegisteredEvent
+returns: RegisterClaudePluginResult

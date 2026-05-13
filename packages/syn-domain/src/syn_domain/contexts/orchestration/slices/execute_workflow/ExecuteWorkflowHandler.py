@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
@@ -23,6 +24,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
+        ClaudePluginRef,
+    )
+    from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+        ResolvedClaudePlugin,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
@@ -33,6 +40,14 @@ if TYPE_CHECKING:
         WorkflowExecutionProcessor,
         WorkflowExecutionResult,
     )
+
+# WHY (issue #726, PR2): the resolver is injected as a callable so the
+# domain handler does not import the application service. The wiring layer
+# binds this to ``ClaudePluginResolutionService.resolve_for_phase``.
+PhasePluginResolver = Callable[
+    ["Sequence[ClaudePluginRef]", "Sequence[ClaudePluginRef]"],
+    Awaitable["tuple[ResolvedClaudePlugin, ...]"],
+]
 
 logger = logging.getLogger(__name__)
 
@@ -169,9 +184,15 @@ class ExecuteWorkflowHandler:
         self,
         processor: WorkflowExecutionProcessor,
         workflow_repository: WorkflowRepository,
+        phase_plugin_resolver: PhasePluginResolver | None = None,
     ) -> None:
         self._processor = processor
         self._workflow_repo = workflow_repository
+        # WHY optional (issue #726, PR2): pre-PR2 callers and the in-process
+        # smoke tests construct the handler without a resolver. When None,
+        # ``_get_executable_phases`` leaves ``ExecutablePhase.claude_plugins``
+        # at its empty default and PR1 behaviour is preserved.
+        self._phase_plugin_resolver = phase_plugin_resolver
 
     async def handle(
         self,
@@ -192,7 +213,7 @@ class ExecuteWorkflowHandler:
         if workflow is None:
             raise WorkflowNotFoundError(command.aggregate_id)
 
-        phases = self._get_executable_phases(workflow)
+        phases = await self._get_executable_phases(workflow)
         merged_inputs = self._merge_inputs(command, workflow)
         repos = (
             self._resolve_repos(command, merged_inputs, workflow) if workflow.requires_repos else []
@@ -265,14 +286,28 @@ class ExecuteWorkflowHandler:
 
         return _resolve_repos_from_template(merged_inputs, workflow)
 
-    @staticmethod
-    def _get_executable_phases(
+    async def _get_executable_phases(
+        self,
         workflow: WorkflowTemplateAggregate,
     ) -> list[ExecutablePhase]:
-        """Convert workflow template phases to executable phases."""
-        executable_phases = []
+        """Convert workflow template phases to executable phases.
+
+        WHY async (issue #726, PR2): the per-phase claude-plugin resolution
+        reads the lock projection, which is async. ``ExecutablePhase`` is
+        otherwise a pure value object construction.
+        """
+        # WHY single resolver call per phase: keeps each phase's
+        # ``ExecutablePhase.claude_plugins`` populated exactly once, even
+        # though the workflow-scope refs are the same across all phases.
+        # Resolution unions global + workflow + phase scopes per phase.
+        workflow_refs = workflow.claude_plugins
+        executable_phases: list[ExecutablePhase] = []
         for phase in workflow.phases:
             agent_config = _build_agent_config_from_phase(phase)
+            resolved = await self._resolve_phase_plugins(
+                workflow_refs=workflow_refs,
+                phase_refs=list(phase.claude_plugins),
+            )
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,
@@ -285,6 +320,24 @@ class ExecuteWorkflowHandler:
                         phase.output_artifact_types[0] if phase.output_artifact_types else "text"
                     ),
                     timeout_seconds=phase.timeout_seconds,
+                    claude_plugins=resolved,
                 )
             )
         return executable_phases
+
+    async def _resolve_phase_plugins(
+        self,
+        workflow_refs: Sequence[ClaudePluginRef],
+        phase_refs: Sequence[ClaudePluginRef],
+    ) -> tuple[ResolvedClaudePlugin, ...]:
+        """Delegate to the injected resolver, falling back to empty for legacy paths."""
+        if self._phase_plugin_resolver is None:
+            return ()
+        if not workflow_refs and not phase_refs:
+            # WHY short-circuit: avoids touching the lock projection when
+            # neither scope declares plugins. The global scope still applies
+            # via the resolver, but skipping the call when both local scopes
+            # are empty matches PR1 behavior for workflows that pre-date #726.
+            empty_global = await self._phase_plugin_resolver([], [])
+            return empty_global
+        return await self._phase_plugin_resolver(workflow_refs, phase_refs)
