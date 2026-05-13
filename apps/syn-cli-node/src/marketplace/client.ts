@@ -107,12 +107,10 @@ export async function fetchMarketplaceJson(
 
     const index = MarketplaceIndexSchema.parse(data);
 
-    if (index.syntropic137.type !== "workflow-marketplace") {
-      throw new Error(
-        `Expected syntropic137.type='workflow-marketplace', got '${index.syntropic137.type}'`,
-      );
-    }
-
+    // WHY (#763): we no longer enforce a specific syntropic137.type here so
+    // that claude-plugin marketplaces (without the marker, or with a
+    // different type) can be ingested. Callers that need a specific kind
+    // should assert on `index.syntropic137?.type` themselves.
     return index;
   } finally {
     removeTempDir(tmpdir);
@@ -236,6 +234,78 @@ export async function resolvePluginByName(
   }
 
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Artifact-agnostic resolver (#726, #763)
+//
+// WHY: both `syn workflow install` and `syn claude-plugin install` accept
+// a bare name and need to resolve it through configured marketplaces. The
+// only artifact-specific bit is what callers do with the resolved
+// directory (parse workflow YAMLs vs. read .claude-plugin/plugin.json),
+// so the resolver itself stops at "here is the local path".
+// ---------------------------------------------------------------------------
+
+export interface ResolvedMarketplaceArtifact {
+  /** Local path to the artifact directory (the plugin or workflow root). */
+  readonly packagePath: string;
+  /** Registry the artifact came from. */
+  readonly registryName: string;
+  /** Full marketplace entry (so caller can read description/tags/etc.). */
+  readonly entry: MarketplacePluginEntry;
+  /** Caller MUST removeTempDir(tmpdir) when done. */
+  readonly tmpdir: string;
+  /** The ref actually used for the clone (caller-provided or entry default). */
+  readonly resolvedRef: string;
+  /** Resolved git sha at the head of the ref, when discoverable. */
+  readonly gitSha: string | null;
+}
+
+export async function resolveFromMarketplace(
+  bareName: string,
+  ref: string | null,
+  registryFilter?: string | null,
+): Promise<ResolvedMarketplaceArtifact | null> {
+  const result = await resolvePluginByName(bareName, registryFilter ?? null);
+  if (result === null) return null;
+
+  const [regName, entry, plugin] = result;
+  // WHY: ref precedence is explicit-ref > entry-pinned-ref > registry default.
+  // null/empty caller ref falls through to the marketplace's own pin.
+  const resolvedRef =
+    ref && ref.trim() !== "" && ref !== "main" ? ref : (plugin.ref ?? entry.ref);
+
+  // Path-traversal guard mirrors the workflow-side check; the marketplace
+  // file is third-party content so we do not trust it.
+  if (plugin.source.startsWith("/") || plugin.source.includes("..")) {
+    throw new Error(`Unsafe plugin source path in marketplace: ${plugin.source}`);
+  }
+
+  const url = `https://github.com/${entry.repo}.git`;
+  const tmpdir = makeTempDir("syn-mkt-art-");
+  try {
+    await gitClone(url, resolvedRef, tmpdir);
+  } catch (err) {
+    removeTempDir(tmpdir);
+    throw err;
+  }
+
+  const subdir = path.resolve(tmpdir, plugin.source.replace(/^\.\//, ""));
+  if (!subdir.startsWith(tmpdir)) {
+    removeTempDir(tmpdir);
+    throw new Error(`Plugin source path escapes repository: ${plugin.source}`);
+  }
+
+  const gitSha = await gitLsRemote(entry.repo, resolvedRef);
+
+  return {
+    packagePath: subdir,
+    registryName: regName,
+    entry: plugin,
+    tmpdir,
+    resolvedRef,
+    gitSha,
+  };
 }
 
 export { gitLsRemote as getGitHeadSha };

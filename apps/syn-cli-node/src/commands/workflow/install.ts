@@ -23,8 +23,9 @@ import {
   scaffoldSinglePackage,
   scaffoldMultiPackage,
 } from "../../packages/resolver.js";
-import { gitClone, makeTempDir, removeTempDir } from "../../packages/git.js";
-import { resolvePluginByName, getGitHeadSha } from "../../marketplace/client.js";
+import { removeTempDir } from "../../packages/git.js";
+import { resolveFromMarketplace } from "../../marketplace/client.js";
+import { runClaudePluginPreflight } from "../../packages/claude-plugin-preflight.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,41 +54,27 @@ export async function tryMarketplaceResolution(
   gitSha: string | null;
   effectiveRef: string;
 } | null> {
-  const result = await resolvePluginByName(source);
-  if (result === null) return null;
+  // WHY (#726): the marketplace resolver is now artifact-agnostic; the
+  // workflow-specific work (resolving the package into a list of workflows)
+  // happens here, after the directory is on disk.
+  const resolved = await resolveFromMarketplace(source, ref);
+  if (resolved === null) return null;
 
-  const [regName, entry, plugin] = result;
-  const effectiveRef = ref !== "main" ? ref : entry.ref;
-  const url = `https://github.com/${entry.repo}.git`;
+  print(
+    `Found ${style(resolved.entry.name, BOLD)} in marketplace ${style(resolved.registryName, CYAN)}`,
+  );
+  print(`Cloning ...@${resolved.resolvedRef} (already done)`);
 
-  // Validate plugin source path
-  if (plugin.source.startsWith("/") || plugin.source.includes("..")) {
-    throw new Error(`Unsafe plugin source path in marketplace: ${plugin.source}`);
-  }
-
-  print(`Found ${style(plugin.name, BOLD)} in marketplace ${style(regName, CYAN)}`);
-  print(`Cloning ${style(entry.repo, CYAN)}@${effectiveRef}...`);
-
-  // Clone only — don't resolve at repo root (marketplace root != plugin root)
-  const tmpdir = makeTempDir("syn-pkg-");
-  try {
-    await gitClone(url, effectiveRef, tmpdir);
-  } catch (err) {
-    removeTempDir(tmpdir);
-    throw err;
-  }
-
-  // Resolve from plugin's subdirectory
-  const subdir = path.resolve(tmpdir, plugin.source.replace(/^\.\//, ""));
-  if (!subdir.startsWith(tmpdir)) {
-    removeTempDir(tmpdir);
-    throw new Error(`Plugin source path escapes repository: ${plugin.source}`);
-  }
-
-  const { manifest, workflows } = resolvePackage(subdir);
-  const gitSha = await getGitHeadSha(entry.repo, effectiveRef);
-
-  return { packagePath: subdir, manifest, workflows, tmpdir, marketplaceSource: regName, gitSha, effectiveRef };
+  const { manifest, workflows } = resolvePackage(resolved.packagePath);
+  return {
+    packagePath: resolved.packagePath,
+    manifest,
+    workflows,
+    tmpdir: resolved.tmpdir,
+    marketplaceSource: resolved.registryName,
+    gitSha: resolved.gitSha,
+    effectiveRef: resolved.resolvedRef,
+  };
 }
 
 export async function resolveSource(
@@ -212,6 +199,11 @@ export const installCommand: CommandDef = {
         printWorkflowSummary(workflows);
         return;
       }
+
+      // WHY (#726 Phase B): if any workflow YAML declares `claude_plugins:`,
+      // resolve them BEFORE we mutate the API. This keeps install atomic
+      // from the user's perspective without requiring the API to do git work.
+      await runClaudePluginPreflight(packagePath);
 
       const installedRefs = await installWorkflowsViaApi(workflows);
 

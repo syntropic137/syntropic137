@@ -4,6 +4,7 @@
   "pages": [
     "index",
     "artifacts",
+    "claude-plugin",
     "config",
     "control",
     "conversations",
