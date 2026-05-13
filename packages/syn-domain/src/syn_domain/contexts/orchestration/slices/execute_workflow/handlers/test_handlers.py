@@ -999,3 +999,173 @@ class TestResolveRepos:
             _make_workflow_stub(),
         )
         assert result == [RepositoryRef.from_slug("org/typed-repo")]
+
+
+# =========================================================================
+# WorkspaceProvisionHandler — claude plugin materialization (issue #726, PR2)
+# =========================================================================
+
+
+@pytest.mark.unit
+class TestWorkspaceProvisionClaudePlugins:
+    """Verify the PR2 materialization branch of WorkspaceProvisionHandler."""
+
+    @pytest.mark.anyio
+    async def test_materializes_plugins_and_appends_plugin_dir_flags(self) -> None:
+        from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+            ResolvedClaudePlugin,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        workspace = AsyncMock()
+        workspace.proxy_url = "http://envoy:10000"
+        workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+        workspace.inject_files = AsyncMock()
+        workspace.workspace_id = "ws-test"
+
+        workspace_cm = AsyncMock()
+        workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
+
+        workspace_service = MagicMock()
+        workspace_service.create_workspace.return_value = workspace_cm
+
+        async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
+            return "Do the task"
+
+        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
+            return ["claude", "--print", prompt]
+
+        materializer = AsyncMock()
+        materializer.fetch_for_workspace = AsyncMock(
+            return_value=[
+                (".syn-plugins/hello/.claude-plugin/plugin.json", b'{"name":"hello"}'),
+                (".syn-plugins/hello/skills/greet/SKILL.md", b"hi"),
+            ],
+        )
+
+        handler = WorkspaceProvisionHandler(
+            workspace_service=workspace_service,
+            prompt_builder=fake_prompt_builder,
+            command_builder=fake_command_builder,
+            claude_plugin_materializer=materializer,
+        )
+
+        plugin = ResolvedClaudePlugin(
+            name="hello",
+            source_url="https://github.com/example/hello",
+            version="0.0.1",
+            resolved_sha="sha-hello",
+            tree_storage_prefix="prefix/sha-hello",
+        )
+        phase = ExecutablePhase(
+            phase_id="phase-1",
+            name="Phase 1",
+            order=1,
+            description="",
+            agent_config=AgentConfiguration(),
+            prompt_template="Do the task",
+            output_artifact_type="text",
+            claude_plugins=(plugin,),
+        )
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.PROVISION_WORKSPACE,
+            phase_id="phase-1",
+        )
+
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+            MockSecrets.create = AsyncMock(return_value=MagicMock())
+            result = await handler.handle(
+                todo=todo,
+                phase=phase,
+                workflow_id="wf-1",
+                session_id="sess-1",
+                repos=[],
+            )
+
+        # The materializer was consulted with the resolved plugin tuple.
+        materializer.fetch_for_workspace.assert_awaited_once_with((plugin,))
+
+        # Workspace received the materialized files via inject_files at least once
+        # with the .syn-plugins/<name>/* shape.
+        plugin_inject_calls = [
+            call
+            for call in workspace.inject_files.call_args_list
+            if any(p.startswith(".syn-plugins/hello/") for p, _ in call.args[0])
+        ]
+        assert plugin_inject_calls, "expected at least one inject_files call with plugin paths"
+
+        # The constructed claude command includes a --plugin-dir flag for the plugin.
+        assert "--plugin-dir" in result.claude_cmd
+        flag_index = result.claude_cmd.index("--plugin-dir")
+        assert result.claude_cmd[flag_index + 1] == "/workspace/.syn-plugins/hello"
+
+    @pytest.mark.anyio
+    async def test_skips_materialization_when_phase_has_no_plugins(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        workspace = AsyncMock()
+        workspace.proxy_url = "http://envoy:10000"
+        workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+        workspace.inject_files = AsyncMock()
+        workspace.workspace_id = "ws-test"
+
+        workspace_cm = AsyncMock()
+        workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
+        workspace_service = MagicMock()
+        workspace_service.create_workspace.return_value = workspace_cm
+
+        async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
+            return "Do the task"
+
+        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
+            return ["claude", "--print", prompt]
+
+        materializer = AsyncMock()
+        materializer.fetch_for_workspace = AsyncMock(return_value=[])
+
+        handler = WorkspaceProvisionHandler(
+            workspace_service=workspace_service,
+            prompt_builder=fake_prompt_builder,
+            command_builder=fake_command_builder,
+            claude_plugin_materializer=materializer,
+        )
+        phase = ExecutablePhase(
+            phase_id="phase-1",
+            name="Phase 1",
+            order=1,
+            description="",
+            agent_config=AgentConfiguration(),
+            prompt_template="Do the task",
+            output_artifact_type="text",
+        )
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.PROVISION_WORKSPACE,
+            phase_id="phase-1",
+        )
+
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+            MockSecrets.create = AsyncMock(return_value=MagicMock())
+            result = await handler.handle(
+                todo=todo,
+                phase=phase,
+                workflow_id="wf-1",
+                session_id="sess-1",
+                repos=[],
+            )
+
+        materializer.fetch_for_workspace.assert_not_called()
+        assert "--plugin-dir" not in result.claude_cmd

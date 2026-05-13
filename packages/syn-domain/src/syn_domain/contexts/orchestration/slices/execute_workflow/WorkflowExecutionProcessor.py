@@ -77,6 +77,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        ClaudePluginMaterializerProtocol,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
         TokenAccumulator,
     )
@@ -102,6 +105,7 @@ class WorkflowExecutionProcessor:
         command_builder: CommandBuilder,
         todo_projection: TodoProjection | None = None,
         agent_handler: AgentHandlerProtocol | None = None,
+        claude_plugin_materializer: ClaudePluginMaterializerProtocol | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -117,6 +121,10 @@ class WorkflowExecutionProcessor:
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
         self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
+        # WHY (issue #726, PR2): the materializer is the optional collaborator
+        # that turns ResolvedClaudePlugin entries on the phase into workspace
+        # files. Wired through to ``WorkspaceProvisionHandler`` per call.
+        self._claude_plugin_materializer = claude_plugin_materializer
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
@@ -460,6 +468,7 @@ class WorkflowExecutionProcessor:
             workspace_service=self._workspace_service,
             prompt_builder=self._prompt_builder,
             command_builder=self._command_builder,
+            claude_plugin_materializer=self._claude_plugin_materializer,
         )
         # ADR-063: convert typed RepositoryRef → HTTPS URL at the workspace seam.
         # WorkspaceProvisionHandler consumes URLs (git clone, secret hydration);

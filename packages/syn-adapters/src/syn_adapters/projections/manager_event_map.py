@@ -219,6 +219,16 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("session_cost", "on_session_cost_finalized"),
         ("execution_cost", "on_session_cost_finalized"),
     ],
+    # Claude plugin injection (issue #726)
+    "ClaudePluginRegistered": [
+        ("claude_plugin_lock", "on_claude_plugin_registered"),
+    ],
+    "GlobalClaudePluginAdded": [
+        ("global_claude_plugins", "on_global_claude_plugin_added"),
+    ],
+    "GlobalClaudePluginRemoved": [
+        ("global_claude_plugins", "on_global_claude_plugin_removed"),
+    ],
 }
 
 
