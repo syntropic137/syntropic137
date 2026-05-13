@@ -1,0 +1,5 @@
+{
+  "name": "goodbye-world",
+  "version": "0.0.1",
+  "description": "Second validation plugin to test multi-plugin loading"
+}
