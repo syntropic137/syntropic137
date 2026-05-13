@@ -1,0 +1,73 @@
+---
+title: syn claude-plugin
+description: "Manage Claude Code plugins registered with Syntropic137"
+---
+
+Manage Claude Code plugins registered with Syntropic137
+
+## `syn claude-plugin global`
+
+Manage the global Claude plugin set (subactions: add, remove, list)
+
+```bash
+syn claude-plugin global <action> [name_or_value] [version]
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `action` | `text` | Yes | add | remove | list |
+| `name_or_value` | `text` | No | Plugin name (add/remove) - 'add' also takes a version |
+| `version` | `text` | No | Plugin version (add only) |
+
+---
+
+## `syn claude-plugin install`
+
+Install a Claude Code plugin into the platform lock (optionally enable globally)
+
+```bash
+syn claude-plugin install <ref> [options]
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `ref` | `text` | Yes | Plugin reference, e.g. org/repo@version or &lt;url&gt;@&lt;version&gt; |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--global`, `-g` | `boolean` | `false` | Also add the plugin to the global plugin set |
+
+---
+
+## `syn claude-plugin list`
+
+List all registered Claude plugins
+
+```bash
+syn claude-plugin list
+```
+
+---
+
+## `syn claude-plugin show`
+
+Show registered Claude plugin detail
+
+```bash
+syn claude-plugin show <name> <version>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | `text` | Yes | Plugin name |
+| `version` | `text` | Yes | Plugin version |
+
+---

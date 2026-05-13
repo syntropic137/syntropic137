@@ -14,13 +14,22 @@ export const MarketplacePluginEntrySchema = z.object({
   description: z.string().default(""),
   category: z.string().default(""),
   tags: z.array(z.string()).default([]),
+  // WHY (#763): claude-plugin marketplaces use `ref` per-plugin to pin
+  // versions independently of the marketplace repo's default branch. We
+  // accept it as optional metadata; the resolver falls back to the parent
+  // entry.ref when missing.
+  ref: z.string().optional(),
 }).passthrough();
 
 export type MarketplacePluginEntry = z.infer<typeof MarketplacePluginEntrySchema>;
 
 export const MarketplaceIndexSchema = z.object({
   name: z.string().min(1),
-  syntropic137: SyntropicMarkerSchema,
+  // WHY (#763): the syntropic137 marker is optional so we can ingest plain
+  // claude-plugin marketplaces (e.g. AgentParadise/agentic-primitives) that
+  // do not advertise themselves as workflow marketplaces. Workflow code
+  // still asserts `syntropic137.type === 'workflow-marketplace'` separately.
+  syntropic137: SyntropicMarkerSchema.optional(),
   plugins: z.array(MarketplacePluginEntrySchema).default([]),
 }).passthrough();
 
