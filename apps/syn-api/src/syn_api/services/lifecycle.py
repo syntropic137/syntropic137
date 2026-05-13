@@ -65,6 +65,7 @@ class DegradedReason(StrEnum):
     """
 
     ARTIFACT_STORAGE = "artifact_storage"
+    CLAUDE_PLUGIN_STORAGE = "claude_plugin_storage"
     CONVERSATION_STORAGE = "conversation_storage"
     SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
     EVENT_POLLER = "event_poller"
@@ -326,6 +327,15 @@ async def _init_artifact_storage(state: LifecycleState) -> None:  # noqa: ARG001
     logger.info("Artifact storage bucket verified")
 
 
+async def _init_claude_plugin_storage(state: LifecycleState) -> None:  # noqa: ARG001
+    """Ensure claude plugin storage bucket exists at startup (issue #726)."""
+    from syn_adapters.storage.claude_plugin_storage.factory import get_claude_plugin_storage
+
+    storage = await get_claude_plugin_storage()
+    await storage.ensure_ready()
+    logger.info("Claude plugin storage bucket verified")
+
+
 async def _init_conversation_storage(state: LifecycleState) -> None:
     """Initialize conversation storage (MinIO + PostgreSQL pool).
 
@@ -537,6 +547,11 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
     _ServiceEntry(
         reason=DegradedReason.ARTIFACT_STORAGE,
         init_fn=_init_artifact_storage,
+        recoverable=True,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.CLAUDE_PLUGIN_STORAGE,
+        init_fn=_init_claude_plugin_storage,
         recoverable=True,
     ),
     _ServiceEntry(

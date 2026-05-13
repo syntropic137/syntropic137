@@ -99,6 +99,14 @@ class StorageSettings(BaseSettings):
         ),
     )
 
+    claude_plugin_bucket_name: str = Field(
+        default="claude-plugins",
+        description=(
+            "Storage bucket name for materialized claude plugin trees (issue #726). "
+            "Used by MinIO provider. Default: claude-plugins."
+        ),
+    )
+
     # =========================================================================
     # MINIO STORAGE SETTINGS
     # =========================================================================

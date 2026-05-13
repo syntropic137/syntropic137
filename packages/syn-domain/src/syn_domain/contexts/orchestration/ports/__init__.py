@@ -36,8 +36,19 @@ from syn_domain.contexts.orchestration.ports.ArtifactQueryServicePort import (
 from syn_domain.contexts.orchestration.ports.ArtifactRepositoryPort import (
     ArtifactRepositoryPort,
 )
+from syn_domain.contexts.orchestration.ports.ClaudePluginRegistrationRepositoryPort import (
+    ClaudePluginRegistrationRepositoryPort,
+)
+from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
+    ClaudePluginFile,
+    ClaudePluginStoragePort,
+    StoredClaudePluginTree,
+)
 from syn_domain.contexts.orchestration.ports.ConversationStoragePort import (
     ConversationStoragePort,
+)
+from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
+    GlobalClaudePluginRegistryRepositoryPort,
 )
 from syn_domain.contexts.orchestration.ports.ObservabilityServicePort import (
     ObservabilityServicePort,
@@ -59,9 +70,14 @@ __all__ = [
     "ArtifactContentStoragePort",
     "ArtifactQueryServicePort",
     "ArtifactRepositoryPort",
+    "ClaudePluginFile",
+    "ClaudePluginRegistrationRepositoryPort",
+    "ClaudePluginStoragePort",
     "ConversationStoragePort",
+    "GlobalClaudePluginRegistryRepositoryPort",
     "ObservabilityServicePort",
     "SessionRepositoryPort",
+    "StoredClaudePluginTree",
     "WorkflowExecutionRepositoryPort",
     # Repository Ports
     "WorkflowTemplateRepositoryPort",
