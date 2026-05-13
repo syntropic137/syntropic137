@@ -713,7 +713,7 @@ class BackgroundWorkflowDispatcher:
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
 
-async def get_execute_workflow_handler() -> "ExecuteWorkflowHandler":
+async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
     """Single composition root for ExecuteWorkflowHandler.
 
     Both the synchronous POST /workflows/{id}/execute route and the
