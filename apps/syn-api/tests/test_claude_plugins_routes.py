@@ -14,7 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 # Tests use the in-memory wiring path (InMemoryAdapter guards everywhere).
 os.environ.setdefault("APP_ENVIRONMENT", "test")
@@ -43,6 +43,21 @@ from syn_api.types import (
 )
 
 
+class _TestManifest(TypedDict):
+    """Minimal manifest shape used by test fixtures."""
+
+    name: str
+    version: str
+
+
+class _AsgiReceiveMessage(TypedDict):
+    """ASGI receive() message shape returned by the test helper."""
+
+    type: str
+    body: bytes
+    more_body: bool
+
+
 def _b64(content: bytes) -> str:
     return base64.b64encode(content).decode("ascii")
 
@@ -58,7 +73,7 @@ def _plugin_files(name: str) -> list[ClaudePluginFileEntry]:
     ]
 
 
-def _manifest(name: str) -> dict[str, object]:
+def _manifest(name: str) -> _TestManifest:
     return {"name": name, "version": "1.0.0"}
 
 
@@ -281,10 +296,10 @@ def _yaml_request(body: bytes) -> Request:
     headers: list[tuple[bytes, bytes]] = [(b"content-type", b"application/yaml")]
     sent = False
 
-    async def receive() -> dict[str, object]:
+    async def receive() -> _AsgiReceiveMessage:
         nonlocal sent
         if sent:
-            return {"type": "http.disconnect"}
+            return {"type": "http.disconnect", "body": b"", "more_body": False}
         sent = True
         return {"type": "http.request", "body": body, "more_body": False}
 
