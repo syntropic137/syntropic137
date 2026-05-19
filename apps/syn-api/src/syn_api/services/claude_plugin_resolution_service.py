@@ -22,14 +22,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
-    ClaudePluginNotRegistered,
-)
-
 # WHY: ClaudePluginRef is constructed at runtime in _collect_unique_refs when
 # rehydrating refs from the global registry projection; hoist the import so the
-# hot loop does not pay a per-iteration import cost.
-from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
+# hot loop does not pay a per-iteration import cost. Public-API import (ADR-063)
+# keeps the API tier off of orchestration internals.
+from syn_domain.contexts.orchestration import (
+    ClaudePluginNotRegistered,
     ClaudePluginRef,
 )
 
@@ -215,7 +213,7 @@ class ClaudePluginResolutionService:
         name: str,
         ref: ClaudePluginRef,
     ) -> ResolvedClaudePlugin:
-        from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+        from syn_domain.contexts.orchestration import (
             ResolvedClaudePlugin,
         )
 

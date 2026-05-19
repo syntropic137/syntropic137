@@ -53,19 +53,15 @@ from syn_api.types import (
     RegisterClaudePluginResponse,
     RemoveGlobalClaudePluginResponse,
 )
-from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
+from syn_domain.contexts.orchestration import (
     ClaudePluginError,
+    ClaudePluginNotFoundError,
     ClaudePluginNotRegistered,
-)
-from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
-    ClaudePluginFile,
-)
-from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
     GlobalClaudePluginEntry,
     GlobalClaudePluginNotFoundError,
 )
-from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
-    ClaudePluginNotFoundError,
+from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
+    ClaudePluginFile,
 )
 
 if TYPE_CHECKING:

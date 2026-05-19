@@ -54,6 +54,27 @@ class ClaudePluginManifestInvalid(ClaudePluginError):
         self.detail = detail
 
 
+class ClaudePluginInvalidName(ClaudePluginError):
+    """A plugin name fails workspace-path safety validation.
+
+    Raised at the materialization boundary when a registered plugin's name
+    would be unsafe to interpolate into a workspace-relative path (issue
+    #726). Path-traversal, absolute-path, control-character, and empty names
+    are rejected so the materializer cannot escape ``.syn-plugins/<name>/``.
+    """
+
+    error_code = "claude_plugin_invalid_name"
+
+    def __init__(self, name: str, reason: str) -> None:
+        super().__init__(
+            f"Claude plugin name {name!r} is invalid: {reason}. "
+            "Names must be a single path segment without separators, traversal, "
+            "control characters, or leading dots."
+        )
+        self.name = name
+        self.reason = reason
+
+
 class ClaudePluginNotRegistered(ClaudePluginError):
     """A referenced plugin is not present in the lock projection.
 

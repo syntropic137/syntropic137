@@ -4,7 +4,7 @@
   "$defs": {
     "ClaudePluginRef": {
       "additionalProperties": false,
-      "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version)`` only \u2014 name overrides\ndo not affect identity, so a workflow-scope ref and a phase-scope ref\npointing at the same plugin dedup cleanly into one lock entry.",
+      "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version, name)`` to match the lock\nprojection key (issue #726). A workflow author who installs the same\nplugin under two different display names produces two distinct lock\nentries -- the materializer needs both to write the right files.",
       "properties": {
         "name": {
           "minLength": 1,

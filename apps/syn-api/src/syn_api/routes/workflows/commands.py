@@ -583,9 +583,11 @@ async def create_workflow_from_yaml(
 
     Raises ``ValueError`` on malformed YAML or unresolved ``prompt_file:``
     references (no base_dir is available server-side). Raises
-    ``ClaudePluginError`` (any subclass) if a referenced claude plugin
-    cannot be fetched, parsed, or validated. The endpoint wrapper maps both
-    error families to the right HTTP status.
+    ``ClaudePluginError`` (any subclass) if a referenced claude plugin is
+    not yet present in the lock projection -- per the #726 Phase A design
+    the API does not fetch; the CLI must register plugins via
+    ``POST /claude-plugins/registrations`` first. The endpoint wrapper maps
+    both error families to the right HTTP status.
     """
     import yaml
     from event_sourcing.core.errors import StreamAlreadyExistsError
@@ -685,7 +687,7 @@ async def create_workflow_from_yaml_endpoint(
     from syn_api.services.claude_plugin_error_mapping import (
         http_exception_for_claude_plugin_error,
     )
-    from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
+    from syn_domain.contexts.orchestration import (
         ClaudePluginError,
     )
 

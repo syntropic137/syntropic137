@@ -111,13 +111,12 @@ class TestRejection:
 
 
 class TestIdentity:
-    def test_equal_when_source_and_version_match_regardless_of_name_override(self) -> None:
+    def test_equal_when_source_version_and_name_all_match(self) -> None:
         a = ClaudePluginRef.model_validate("syntropic137/slp@5.0.7")
         b = ClaudePluginRef.model_validate(
             {
                 "source": "github.com/syntropic137/slp",
                 "version": "5.0.7",
-                "name": "renamed",
             }
         )
         assert a == b
@@ -133,3 +132,26 @@ class TestIdentity:
         a = ClaudePluginRef.model_validate("foo/bar@1.0.0")
         b = ClaudePluginRef.model_validate("foo/bar@1.0.1")
         assert a != b
+
+    def test_not_equal_when_only_name_differs(self) -> None:
+        # WHY: lock projection keys on (source_url, version, name); two refs to
+        # the same repo+version registered under different display names are
+        # distinct lock entries, so the set must preserve both. Regression test
+        # for the prior bug where equality ignored ``name``.
+        a = ClaudePluginRef.model_validate(
+            {
+                "source": "github.com/foo/bar",
+                "version": "1.0.0",
+                "name": "alpha",
+            }
+        )
+        b = ClaudePluginRef.model_validate(
+            {
+                "source": "github.com/foo/bar",
+                "version": "1.0.0",
+                "name": "beta",
+            }
+        )
+        assert a != b
+        assert hash(a) != hash(b)
+        assert len({a, b}) == 2

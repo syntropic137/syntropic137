@@ -213,9 +213,10 @@ def _reject_latest_version(value: object) -> None:
 class ClaudePluginRef(BaseModel):
     """A workflow-declared reference to a Claude Code plugin.
 
-    Compared and hashed by ``(source_url, version)`` only - name overrides
-    do not affect identity, so a workflow-scope ref and a phase-scope ref
-    pointing at the same plugin dedup cleanly into one lock entry.
+    Compared and hashed by ``(source_url, version, name)`` to match the lock
+    projection key (issue #726). A workflow author who installs the same
+    plugin under two different display names produces two distinct lock
+    entries -- the materializer needs both to write the right files.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -235,11 +236,18 @@ class ClaudePluginRef(BaseModel):
         return coerced
 
     def __eq__(self, other: object) -> bool:
-        # Identity is the lock key, NOT the user-visible name. This lets
-        # workflow- and phase-scope refs to the same plugin dedupe cleanly.
+        # Identity is the lock projection key: (source_url, version, name).
+        # WHY include name: a marketplace repo can publish multiple plugins,
+        # and the same (source_url, version) registered under two different
+        # names must produce two distinct lock entries so the materializer
+        # writes the correct file set for each.
         if not isinstance(other, ClaudePluginRef):
             return NotImplemented
-        return self.source_url == other.source_url and self.version == other.version
+        return (
+            self.source_url == other.source_url
+            and self.version == other.version
+            and self.name == other.name
+        )
 
     def __hash__(self) -> int:
-        return hash((self.source_url, self.version))
+        return hash((self.source_url, self.version, self.name))
