@@ -218,59 +218,81 @@ class WorkflowSeeder:
         """Seed a single workflow from a definition."""
         workflow_id = definition.id
 
-        if self._skip_existing and workflow_id in self._existing_ids:
-            logger.debug("Skipping existing workflow", workflow_id=workflow_id)
-            return SeedResult(
-                workflow_id=workflow_id,
-                name=definition.name,
-                success=False,
-                error=f"Workflow {workflow_id} already exists",
-            )
+        skip_result = self._skip_if_existing(definition)
+        if skip_result is not None:
+            return skip_result
 
         if dry_run:
-            logger.info(
-                "Dry-run: would create workflow",
-                workflow_id=workflow_id,
+            return self._dry_run_result(definition)
+
+        plugin_failure = await self._validate_plugins(definition)
+        if plugin_failure is not None:
+            return plugin_failure
+
+        return await self._dispatch_create(definition, workflow_id)
+
+    def _skip_if_existing(self, definition: WorkflowDefinition) -> SeedResult | None:
+        workflow_id = definition.id
+        if not (self._skip_existing and workflow_id in self._existing_ids):
+            return None
+        logger.debug("Skipping existing workflow", workflow_id=workflow_id)
+        return SeedResult(
+            workflow_id=workflow_id,
+            name=definition.name,
+            success=False,
+            error=f"Workflow {workflow_id} already exists",
+        )
+
+    def _dry_run_result(self, definition: WorkflowDefinition) -> SeedResult:
+        logger.info(
+            "Dry-run: would create workflow",
+            workflow_id=definition.id,
+            name=definition.name,
+            phases=len(definition.phases),
+        )
+        return SeedResult(workflow_id=definition.id, name=definition.name, success=True)
+
+    async def _validate_plugins(self, definition: WorkflowDefinition) -> SeedResult | None:
+        """Validate claude plugin refs against the lock projection (#726 Phase A).
+
+        Returns ``None`` on success (caller continues), a failure ``SeedResult``
+        when dev/CI mode tolerates the miss, or re-raises in prod mode.
+        """
+        if self._claude_plugin_resolver is None:
+            return None
+        try:
+            await self._claude_plugin_resolver.ensure_registered(definition)
+        except ClaudePluginError as exc:
+            if self._fail_on_plugin_not_registered:
+                raise
+            logger.error(
+                "Skipping workflow seed: claude plugin not registered",
+                workflow_id=definition.id,
                 name=definition.name,
-                phases=len(definition.phases),
+                error_code=exc.error_code,
+                error=str(exc),
             )
-            return SeedResult(workflow_id=workflow_id, name=definition.name, success=True)
+            return SeedResult(
+                workflow_id=definition.id,
+                name=definition.name,
+                success=False,
+                error=f"claude_plugin_not_registered: {exc}",
+            )
+        return None
 
-        # Validation against the lock projection (#726 Phase A). Failures
-        # either abort seeding (prod default) or surface as a per-workflow
-        # failed result so the rest of the seed run still completes (dev/CI).
-        # The seeder no longer fetches plugins; the CLI must register them
-        # first via POST /claude-plugins/registrations.
-        if self._claude_plugin_resolver is not None:
-            try:
-                await self._claude_plugin_resolver.ensure_registered(definition)
-            except ClaudePluginError as exc:
-                if self._fail_on_plugin_not_registered:
-                    raise
-                logger.error(
-                    "Skipping workflow seed: claude plugin not registered",
-                    workflow_id=workflow_id,
-                    name=definition.name,
-                    error_code=exc.error_code,
-                    error=str(exc),
-                )
-                return SeedResult(
-                    workflow_id=workflow_id,
-                    name=definition.name,
-                    success=False,
-                    error=f"claude_plugin_not_registered: {exc}",
-                )
-
+    async def _dispatch_create(
+        self,
+        definition: WorkflowDefinition,
+        workflow_id: str,
+    ) -> SeedResult:
         command = build_command_from_definition(definition)
         try:
             created_id = await self._handler.handle(command)
-            self._existing_ids.add(workflow_id)
-            logger.info(
-                "Workflow seeded successfully", workflow_id=created_id, name=definition.name
-            )
-            return SeedResult(workflow_id=created_id, name=definition.name, success=True)
         except Exception as e:
             return _handle_seed_error(e, workflow_id, definition.name, self._existing_ids)
+        self._existing_ids.add(workflow_id)
+        logger.info("Workflow seeded successfully", workflow_id=created_id, name=definition.name)
+        return SeedResult(workflow_id=created_id, name=definition.name, success=True)
 
     def register_existing(self, workflow_ids: set[str]) -> None:
         """Register existing workflow IDs to skip during seeding.

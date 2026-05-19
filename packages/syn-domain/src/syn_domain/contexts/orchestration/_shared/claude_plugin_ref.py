@@ -20,9 +20,19 @@ reproducibility (see ADR / plan for #726).
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class _ParsedRefDict(TypedDict):
+    """Canonical dict shape produced by all ref parsers before model validation."""
+
+    name: str
+    source_url: str
+    version: str
+    name_overridden: bool
+
 
 # Anchored shorthand parser: org/repo@version. Disallows whitespace, slashes
 # and @ inside org/repo so we never match a full URL by accident.
@@ -67,59 +77,72 @@ def _normalize_source(source: str) -> str:
     return source
 
 
-def _parse_string_form(raw: str) -> dict[str, Any]:
+def _try_parse_github_shorthand(raw: str) -> _ParsedRefDict | None:
+    """Form A parser: ``org/repo@version``. Returns ``None`` if not a match.
+
+    WHY: full URLs contain ``://`` or ``git@`` and are routed to Form B; this
+    helper fails fast on those without consulting the regex.
+    """
+    if "://" in raw or raw.startswith("git@"):
+        return None
+    match = _GITHUB_SHORTHAND_RE.match(raw)
+    if match is None:
+        return None
+    org, repo, version = match.group(1), match.group(2), match.group(3)
+    return {
+        "name": repo,
+        "source_url": f"https://github.com/{org}/{repo}",
+        "version": version,
+        "name_overridden": False,
+    }
+
+
+def _missing_version_error(raw: str) -> ValueError:
+    return ValueError(
+        f"claude plugin reference {raw!r} is missing '@<version>' suffix; "
+        "expected '<url>@<tag-or-sha>'"
+    )
+
+
+def _parse_url_form(raw: str) -> _ParsedRefDict:
+    """Form B parser: ``<url>@<version>``.
+
+    WHY split on LAST @: git@host: and git+ssh://git@host both contain @ before
+    any version delimiter. We also defend against an @ that is purely part of
+    the protocol prefix (no real version) and against a "version" that is
+    actually still part of the URL (contains "/" or "://").
+    """
+    last_at = raw.rfind("@")
+    if last_at < 0 or last_at < len("git@"):
+        raise _missing_version_error(raw)
+    url_part = raw[:last_at]
+    version = raw[last_at + 1 :]
+    if not version:
+        msg = f"claude plugin reference {raw!r} has empty version after '@'"
+        raise ValueError(msg)
+    if "://" in version or "/" in version:
+        raise _missing_version_error(raw)
+    return {
+        "name": _basename_from_url(url_part),
+        "source_url": url_part,
+        "version": version,
+        "name_overridden": False,
+    }
+
+
+def _parse_string_form(raw: str) -> _ParsedRefDict:
     """Parse the two string forms (GitHub shorthand and full URL@version)."""
     raw = raw.strip()
     if not raw:
         msg = "claude plugin reference cannot be empty"
         raise ValueError(msg)
 
-    # Form A: github shorthand ``org/repo@version``.
-    # Try this first - fails fast for full URLs because they contain "://".
-    if "://" not in raw and not raw.startswith("git@"):
-        match = _GITHUB_SHORTHAND_RE.match(raw)
-        if match:
-            org, repo, version = match.group(1), match.group(2), match.group(3)
-            return {
-                "name": repo,
-                "source_url": f"https://github.com/{org}/{repo}",
-                "version": version,
-                "name_overridden": False,
-            }
+    shorthand = _try_parse_github_shorthand(raw)
+    if shorthand is not None:
+        return shorthand
 
-    # Form B: full URL with version suffix. Split on LAST @ because git@host:
-    # and git+ssh://git@host both contain @ before any version delimiter.
     if raw.startswith(_URL_PREFIXES):
-        last_at = raw.rfind("@")
-        # Reject if the @ is part of the protocol prefix itself
-        # (e.g. "git@host" with no version).
-        if last_at < 0 or last_at < len("git@"):
-            msg = (
-                f"claude plugin reference {raw!r} is missing '@<version>' suffix; "
-                "expected '<url>@<tag-or-sha>'"
-            )
-            raise ValueError(msg)
-        # Defend against the @ being inside the prefix (e.g. just "git@host:org/repo"
-        # with no trailing version).
-        url_part = raw[:last_at]
-        version = raw[last_at + 1 :]
-        if not version:
-            msg = f"claude plugin reference {raw!r} has empty version after '@'"
-            raise ValueError(msg)
-        # If the "version" still contains a "/" or "://" it almost certainly is part
-        # of the URL, meaning no version was provided.
-        if "://" in version or "/" in version:
-            msg = (
-                f"claude plugin reference {raw!r} is missing '@<version>' suffix; "
-                "expected '<url>@<tag-or-sha>'"
-            )
-            raise ValueError(msg)
-        return {
-            "name": _basename_from_url(url_part),
-            "source_url": url_part,
-            "version": version,
-            "name_overridden": False,
-        }
+        return _parse_url_form(raw)
 
     msg = (
         f"claude plugin reference {raw!r} is not a recognized form; "
@@ -128,7 +151,7 @@ def _parse_string_form(raw: str) -> dict[str, Any]:
     raise ValueError(msg)
 
 
-def _parse_dict_form(raw: dict[str, Any]) -> dict[str, Any]:
+def _parse_dict_form(raw: dict[str, Any]) -> _ParsedRefDict:
     """Parse the verbose mapping form."""
     # Accept either ``source`` or ``source_url`` for ergonomic flexibility.
     source_value = raw.get("source") or raw.get("source_url")
@@ -156,6 +179,37 @@ def _parse_dict_form(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _is_verbose_dict_form(value: dict[Any, Any]) -> bool:
+    """Distinguish the verbose YAML form from a fully-built model dump.
+
+    WHY: a model dump always has the canonical fields exactly; the verbose
+    form has ``source`` (or ``source_url`` without the other canonical fields).
+    """
+    keys = set(value.keys())
+    return "source" in keys or ("source_url" in keys and "name" not in keys)
+
+
+def _coerce_to_canonical_dict(value: object) -> object:
+    if isinstance(value, str):
+        return _parse_string_form(value)
+    if isinstance(value, dict) and _is_verbose_dict_form(value):
+        return _parse_dict_form(value)
+    return value
+
+
+def _reject_latest_version(value: object) -> None:
+    """Reject @latest regardless of how we got here -- defeats the lockfile."""
+    if not isinstance(value, dict):
+        return
+    version = value.get("version")
+    if isinstance(version, str) and version.strip().lower() == "latest":
+        msg = (
+            "claude plugin version must be a specific tag/branch/sha; "
+            "'@latest' is not allowed for reproducibility"
+        )
+        raise ValueError(msg)
+
+
 class ClaudePluginRef(BaseModel):
     """A workflow-declared reference to a Claude Code plugin.
 
@@ -176,26 +230,9 @@ class ClaudePluginRef(BaseModel):
     def _coerce_input(cls, value: object) -> object:
         # Already-validated dict shape (e.g. round-trip through model_dump) - let
         # field validators handle it after we still reject @latest below.
-        if isinstance(value, str):
-            value = _parse_string_form(value)
-        elif isinstance(value, dict):
-            keys = set(value.keys())  # type: ignore[arg-type]
-            # Distinguish the verbose YAML form from a fully-built model dump.
-            # A dump always has the canonical fields exactly; the verbose form has
-            # ``source`` (or ``source_url`` without the other canonical fields).
-            if "source" in keys or ("source_url" in keys and "name" not in keys):
-                value = _parse_dict_form(value)  # type: ignore[arg-type]
-
-        # Reject @latest regardless of how we got here - defeats the lockfile.
-        if isinstance(value, dict):
-            version = value.get("version")
-            if isinstance(version, str) and version.strip().lower() == "latest":
-                msg = (
-                    "claude plugin version must be a specific tag/branch/sha; "
-                    "'@latest' is not allowed for reproducibility"
-                )
-                raise ValueError(msg)
-        return value
+        coerced = _coerce_to_canonical_dict(value)
+        _reject_latest_version(coerced)
+        return coerced
 
     def __eq__(self, other: object) -> bool:
         # Identity is the lock key, NOT the user-visible name. This lets

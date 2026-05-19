@@ -91,31 +91,61 @@ class AddGlobalClaudePluginHandler:
         # domain rule (raises ``ValueError`` on duplicate name) handles
         # idempotency cleanly.
         for attempt in range(2):
-            aggregate = await self._repo.get_by_id(GLOBAL_CLAUDE_PLUGIN_REGISTRY_STREAM_ID)
-            if aggregate is None:
-                fresh = GlobalClaudePluginRegistryAggregate()
-                if self._apply_or_short_circuit(fresh, command, entry.name) is None:
-                    return result
-                try:
-                    await self._repo.save_new(fresh)
-                except StreamAlreadyExistsError:
-                    logger.info(
-                        "Concurrent global registry create; reloading and retrying",
-                        extra={"plugin_name": entry.name, "attempt": attempt},
-                    )
-                    continue
+            if await self._try_add_once(command, entry.name, attempt):
                 return result
-
-            if self._apply_or_short_circuit(aggregate, command, entry.name) is None:
-                return result
-            await self._repo.save(aggregate)
-            return result
 
         # WHY: two save_new races back-to-back is impossible because the second
         # iteration always sees the persisted aggregate and takes the save()
         # path. This branch only runs if the event store is misbehaving.
         msg = "Failed to add global claude plugin after retry; event store inconsistent"
         raise RuntimeError(msg)
+
+    async def _try_add_once(
+        self,
+        command: AddGlobalClaudePluginCommand,
+        plugin_name: str,
+        attempt: int,
+    ) -> bool:
+        """One pass of the add loop. Returns True when work is done (success
+        or idempotent no-op), False when the caller must retry.
+        """
+        aggregate = await self._repo.get_by_id(GLOBAL_CLAUDE_PLUGIN_REGISTRY_STREAM_ID)
+        if aggregate is None:
+            return await self._create_new_registry(command, plugin_name, attempt)
+        return await self._extend_existing_registry(aggregate, command, plugin_name)
+
+    async def _create_new_registry(
+        self,
+        command: AddGlobalClaudePluginCommand,
+        plugin_name: str,
+        attempt: int,
+    ) -> bool:
+        """First-write path: no aggregate yet. Returns True on success/no-op,
+        False if a concurrent writer beat us (caller should retry).
+        """
+        fresh = GlobalClaudePluginRegistryAggregate()
+        if self._apply_or_short_circuit(fresh, command, plugin_name) is None:
+            return True
+        try:
+            await self._repo.save_new(fresh)
+        except StreamAlreadyExistsError:
+            logger.info(
+                "Concurrent global registry create; reloading and retrying",
+                extra={"plugin_name": plugin_name, "attempt": attempt},
+            )
+            return False
+        return True
+
+    async def _extend_existing_registry(
+        self,
+        aggregate: GlobalClaudePluginRegistryAggregate,
+        command: AddGlobalClaudePluginCommand,
+        plugin_name: str,
+    ) -> bool:
+        if self._apply_or_short_circuit(aggregate, command, plugin_name) is None:
+            return True
+        await self._repo.save(aggregate)
+        return True
 
     def _apply_or_short_circuit(
         self,
