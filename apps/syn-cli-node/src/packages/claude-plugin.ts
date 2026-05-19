@@ -79,6 +79,46 @@ function rejectLatest(version: string): void {
   }
 }
 
+function tryParseGithubShorthand(trimmed: string): ParsedClaudePluginRef | null {
+  // WHY: Form A only applies to bare "org/repo@version"; full URLs contain
+  // "://" or "git@" and are handled by Form B.
+  if (trimmed.includes("://") || trimmed.startsWith("git@")) return null;
+  const match = GITHUB_SHORTHAND_RE.exec(trimmed);
+  if (!match) return null;
+  const [, org, repo, version] = match as unknown as [string, string, string, string];
+  rejectLatest(version);
+  return {
+    name: repo,
+    source_url: `https://github.com/${org}/${repo}`,
+    version,
+  };
+}
+
+function missingVersionError(raw: string): CLIError {
+  return new CLIError(
+    `claude plugin reference '${raw}' is missing '@<version>' suffix; expected '<url>@<tag-or-sha>'`,
+  );
+}
+
+function parseUrlForm(trimmed: string, raw: string): ParsedClaudePluginRef {
+  // WHY: split on the LAST @ because git@host: and git+ssh://git@host
+  // already contain an @ before the version delimiter. "git@" is 4 chars;
+  // reject if @ is part of the protocol prefix only.
+  const lastAt = trimmed.lastIndexOf("@");
+  if (lastAt < 4) throw missingVersionError(raw);
+  const urlPart = trimmed.slice(0, lastAt);
+  const version = trimmed.slice(lastAt + 1);
+  if (version === "" || version.includes("://") || version.includes("/")) {
+    throw missingVersionError(raw);
+  }
+  rejectLatest(version);
+  return {
+    name: basenameFromUrl(urlPart),
+    source_url: urlPart,
+    version,
+  };
+}
+
 export function parseClaudePluginRef(raw: string): ParsedClaudePluginRef {
   const trimmed = raw.trim();
   if (trimmed === "") {
@@ -86,43 +126,12 @@ export function parseClaudePluginRef(raw: string): ParsedClaudePluginRef {
   }
 
   // Form A: github shorthand "org/repo@version".
-  if (!trimmed.includes("://") && !trimmed.startsWith("git@")) {
-    const match = GITHUB_SHORTHAND_RE.exec(trimmed);
-    if (match) {
-      const [, org, repo, version] = match as unknown as [string, string, string, string];
-      rejectLatest(version);
-      return {
-        name: repo,
-        source_url: `https://github.com/${org}/${repo}`,
-        version,
-      };
-    }
-  }
+  const shorthand = tryParseGithubShorthand(trimmed);
+  if (shorthand !== null) return shorthand;
 
-  // Form B: full URL with @version suffix. Split on the LAST @ because
-  // git@host: and git+ssh://git@host already contain an @ before the
-  // version delimiter.
+  // Form B: full URL with @version suffix.
   if (startsWithUrlPrefix(trimmed)) {
-    const lastAt = trimmed.lastIndexOf("@");
-    // "git@" is 4 chars; reject if @ is part of the protocol prefix only.
-    if (lastAt < 4) {
-      throw new CLIError(
-        `claude plugin reference '${raw}' is missing '@<version>' suffix; expected '<url>@<tag-or-sha>'`,
-      );
-    }
-    const urlPart = trimmed.slice(0, lastAt);
-    const version = trimmed.slice(lastAt + 1);
-    if (version === "" || version.includes("://") || version.includes("/")) {
-      throw new CLIError(
-        `claude plugin reference '${raw}' is missing '@<version>' suffix; expected '<url>@<tag-or-sha>'`,
-      );
-    }
-    rejectLatest(version);
-    return {
-      name: basenameFromUrl(urlPart),
-      source_url: urlPart,
-      version,
-    };
+    return parseUrlForm(trimmed, raw);
   }
 
   // Form C: bare-host shorthand like "github.com/org/repo@v1" - normalize
@@ -175,37 +184,43 @@ export function readPluginManifest(rootDir: string): PluginManifest {
  *   (we surface this BEFORE the network call so users do not wait minutes
  *   for a payload the API would reject)
  */
-export function walkPluginTree(rootDir: string): PluginFileEntry[] {
-  const entries: PluginFileEntry[] = [];
-  let totalBytes = 0;
+interface TreeWalkState {
+  readonly rootDir: string;
+  readonly entries: PluginFileEntry[];
+  totalBytes: number;
+}
 
-  function walk(dir: string): void {
-    const dirEntries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of dirEntries) {
-      if (entry.name === ".git") continue;
-      const abs = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(abs);
-        continue;
-      }
-      if (!entry.isFile()) {
-        // Skip symlinks, sockets, devices - we only ship plain files.
-        continue;
-      }
-      const rel = path.relative(rootDir, abs).split(path.sep).join("/");
-      const content = fs.readFileSync(abs);
-      totalBytes += content.byteLength;
-      if (totalBytes > MAX_TREE_BYTES) {
-        throw new CLIError(
-          `plugin tree exceeds ${MAX_TREE_BYTES} bytes (${MAX_TREE_BYTES / 1024 / 1024} MiB); refusing to upload`,
-        );
-      }
-      entries.push({ rel_path: rel, content_b64: content.toString("base64") });
-    }
+function readFileEntry(state: TreeWalkState, abs: string): PluginFileEntry {
+  // WHY: paths POSIX-normalized so the API-side sha256 is host-agnostic.
+  const rel = path.relative(state.rootDir, abs).split(path.sep).join("/");
+  const content = fs.readFileSync(abs);
+  state.totalBytes += content.byteLength;
+  if (state.totalBytes > MAX_TREE_BYTES) {
+    throw new CLIError(
+      `plugin tree exceeds ${MAX_TREE_BYTES} bytes (${MAX_TREE_BYTES / 1024 / 1024} MiB); refusing to upload`,
+    );
   }
+  return { rel_path: rel, content_b64: content.toString("base64") };
+}
 
-  walk(rootDir);
+function walkTreeInto(state: TreeWalkState, dir: string): void {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === ".git") continue;
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkTreeInto(state, abs);
+      continue;
+    }
+    // WHY: skip symlinks, sockets, devices - we only ship plain files.
+    if (!entry.isFile()) continue;
+    state.entries.push(readFileEntry(state, abs));
+  }
+}
+
+export function walkPluginTree(rootDir: string): PluginFileEntry[] {
+  const state: TreeWalkState = { rootDir, entries: [], totalBytes: 0 };
+  walkTreeInto(state, rootDir);
   // Stable order so the API-side sha256 is reproducible across runs.
-  entries.sort((a, b) => (a.rel_path < b.rel_path ? -1 : a.rel_path > b.rel_path ? 1 : 0));
-  return entries;
+  state.entries.sort((a, b) => (a.rel_path < b.rel_path ? -1 : a.rel_path > b.rel_path ? 1 : 0));
+  return state.entries;
 }

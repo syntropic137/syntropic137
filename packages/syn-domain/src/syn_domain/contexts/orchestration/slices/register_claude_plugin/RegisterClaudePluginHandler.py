@@ -101,18 +101,8 @@ class RegisterClaudePluginHandler:
             The lock-entry data, idempotent on re-submission of the same
             ``(source_url, version, name)``.
         """
-        # Determine the canonical plugin name BEFORE computing the stream id,
-        # because the stream id includes name (see compute_claude_plugin_stream_id
-        # docstring). Caller-supplied ``name`` is authoritative when set, then
-        # the manifest's name, then a basename fallback.
-        parsed_manifest = _extract_plugin_manifest(files, source_url, version)
-        # WHY merge: the inline ``manifest`` argument lets the CLI carry through
-        # fields it parsed locally, but the file-derived parse is authoritative.
-        # Identical content for identical input; the merge guards against drift.
-        merged_manifest = {**manifest, **parsed_manifest}
-        manifest_name = _name_from_manifest(merged_manifest)
-        default_name = name if name else manifest_name
-        effective_name = default_name or _basename_from_url(source_url)
+        merged_manifest = _build_merged_manifest(files, source_url, version, manifest)
+        effective_name = _resolve_effective_name(name, merged_manifest, source_url)
 
         stream_id = ClaudePluginRegistrationAggregate.compute_stream_id(
             source_url, version, effective_name
@@ -124,14 +114,7 @@ class RegisterClaudePluginHandler:
             return _result_from_aggregate(existing)
 
         sha = _compute_tree_sha(files)
-
-        if not await self._storage.exists(sha):
-            stored = await self._storage.upload_tree(sha, files)
-            tree_prefix = stored.storage_prefix
-        else:
-            # WHY (issue #726): cache hit. Reuse the existing prefix via the
-            # storage port instead of re-uploading.
-            tree_prefix = self._storage.prefix_for(sha)
+        tree_prefix = await self._ensure_tree_uploaded(sha, files)
 
         command = RegisterClaudePluginCommand(
             aggregate_id=stream_id,
@@ -145,10 +128,44 @@ class RegisterClaudePluginHandler:
 
         aggregate = ClaudePluginRegistrationAggregate()
         aggregate.register(command)
+        race_result = await self._save_or_recover_from_race(aggregate, stream_id, source_url)
+        if race_result is not None:
+            return race_result
+
+        return RegisterClaudePluginResult(
+            name=effective_name,
+            source_url=source_url,
+            version=version,
+            resolved_sha=sha,
+            tree_storage_prefix=tree_prefix,
+        )
+
+    async def _ensure_tree_uploaded(
+        self,
+        sha: str,
+        files: list[ClaudePluginFile],
+    ) -> str:
+        # WHY (issue #726): cache hit reuses the existing prefix via the
+        # storage port instead of re-uploading.
+        if not await self._storage.exists(sha):
+            stored = await self._storage.upload_tree(sha, files)
+            return stored.storage_prefix
+        return self._storage.prefix_for(sha)
+
+    async def _save_or_recover_from_race(
+        self,
+        aggregate: ClaudePluginRegistrationAggregate,
+        stream_id: str,
+        source_url: str,
+    ) -> RegisterClaudePluginResult | None:
+        """Save the aggregate; on concurrent-write loss, return the winner.
+
+        Returns ``None`` if our save succeeded (caller continues normally);
+        returns the winner's result if a concurrent register beat us.
+        """
         try:
             await self._repo.save_new(aggregate)
         except StreamAlreadyExistsError:
-            # Concurrent register beat us. Load the winner and return.
             logger.info(
                 "Concurrent claude plugin register collision; loading existing entry",
                 extra={"stream_id": stream_id, "source_url": source_url},
@@ -162,14 +179,39 @@ class RegisterClaudePluginHandler:
                 )
                 raise RuntimeError(msg) from None
             return _result_from_aggregate(existing_after)
+        return None
 
-        return RegisterClaudePluginResult(
-            name=effective_name,
-            source_url=source_url,
-            version=version,
-            resolved_sha=sha,
-            tree_storage_prefix=tree_prefix,
-        )
+
+def _build_merged_manifest(
+    files: list[ClaudePluginFile],
+    source_url: str,
+    version: str,
+    caller_manifest: dict[str, object],
+) -> dict[str, object]:
+    """Parse the manifest from the file tree, merging with the caller's view.
+
+    WHY merge: the inline ``manifest`` argument lets the CLI carry through
+    fields it parsed locally, but the file-derived parse is authoritative.
+    Identical content for identical input; the merge guards against drift.
+    """
+    parsed_manifest = _extract_plugin_manifest(files, source_url, version)
+    return {**caller_manifest, **parsed_manifest}
+
+
+def _resolve_effective_name(
+    explicit_name: str | None,
+    merged_manifest: dict[str, object],
+    source_url: str,
+) -> str:
+    """Determine the canonical plugin name.
+
+    WHY priority order: caller-supplied ``name`` is authoritative when set,
+    then the manifest's name, then a basename fallback. The stream id includes
+    the name, so this must be resolved BEFORE the stream id is computed.
+    """
+    manifest_name = _name_from_manifest(merged_manifest)
+    default_name = explicit_name if explicit_name else manifest_name
+    return default_name or _basename_from_url(source_url)
 
 
 def _compute_tree_sha(files: list[ClaudePluginFile]) -> str:

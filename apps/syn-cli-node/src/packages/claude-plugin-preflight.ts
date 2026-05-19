@@ -40,26 +40,38 @@ export interface PreflightResult {
   readonly skipped: readonly ParsedClaudePluginRef[];
 }
 
+const SKIP_WALK_DIRS = new Set([".git", "node_modules"]);
+
+function isYamlFilename(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith(".yaml") || lower.endsWith(".yml");
+}
+
+function isWalkableDir(dir: string): boolean {
+  // WHY: collapse the existence + directory checks so the recursive walker
+  // can early-return without nested conditionals.
+  return fs.existsSync(dir) && fs.statSync(dir).isDirectory();
+}
+
+function walkYamlDir(dir: string, out: string[]): void {
+  if (!isWalkableDir(dir)) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (SKIP_WALK_DIRS.has(entry.name)) continue;
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkYamlDir(abs, out);
+      continue;
+    }
+    if (entry.isFile() && isYamlFilename(entry.name)) {
+      out.push(abs);
+    }
+  }
+}
+
 /** Recursively find every *.yaml/*.yml file under a directory. */
 function findYamlFiles(root: string): string[] {
   const out: string[] = [];
-  function walk(dir: string): void {
-    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
-      const abs = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(abs);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const lower = entry.name.toLowerCase();
-      if (lower.endsWith(".yaml") || lower.endsWith(".yml")) {
-        out.push(abs);
-      }
-    }
-  }
-  walk(root);
+  walkYamlDir(root, out);
   return out;
 }
 
@@ -83,24 +95,28 @@ function extractRefStrings(doc: unknown): string[] {
   return refs;
 }
 
+function refStringFromVerbose(item: unknown): string | null {
+  // WHY: verbose mapping form is stringified to "<source>@<version>" so it
+  // shares the parser with the shorthand form. Explicit name overrides are
+  // dropped because the manifest name is canonical.
+  if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
+  const obj = item as Record<string, unknown>;
+  const src = obj["source"] ?? obj["source_url"];
+  const ver = obj["version"];
+  if (typeof src !== "string" || typeof ver !== "string") return null;
+  return `${src}@${ver}`;
+}
+
+function refStringFromItem(item: unknown): string | null {
+  if (typeof item === "string") return item;
+  return refStringFromVerbose(item);
+}
+
 function collectRefs(value: unknown, into: string[]): void {
   if (!Array.isArray(value)) return;
   for (const item of value) {
-    if (typeof item === "string") {
-      into.push(item);
-      continue;
-    }
-    // Verbose mapping form - stringify into "<source>@<version>" so we share
-    // the parser. We only support source/source_url + version here; explicit
-    // name overrides are dropped (the manifest's name is canonical).
-    if (typeof item === "object" && item !== null && !Array.isArray(item)) {
-      const obj = item as Record<string, unknown>;
-      const src = obj["source"] ?? obj["source_url"];
-      const ver = obj["version"];
-      if (typeof src === "string" && typeof ver === "string") {
-        into.push(`${src}@${ver}`);
-      }
-    }
+    const ref = refStringFromItem(item);
+    if (ref !== null) into.push(ref);
   }
 }
 
@@ -119,26 +135,86 @@ async function isInLock(name: string, version: string): Promise<boolean> {
   return false;
 }
 
-export async function runClaudePluginPreflight(
-  packagePath: string,
-): Promise<PreflightResult | null> {
-  const yamlFiles = findYamlFiles(packagePath);
-  const seen = new Map<string, ParsedClaudePluginRef>();
+function tryParseYamlFile(file: string): unknown | null {
+  // WHY: non-workflow YAMLs may not parse cleanly with our minimal parser; we
+  // surface a null sentinel so the orchestrator can skip without a try/catch.
+  try {
+    return parseYaml(fs.readFileSync(file, "utf-8"));
+  } catch {
+    return null;
+  }
+}
 
+function collectUniqueRefsFromYamls(yamlFiles: readonly string[]): Map<string, ParsedClaudePluginRef> {
+  const seen = new Map<string, ParsedClaudePluginRef>();
   for (const file of yamlFiles) {
-    let parsed: unknown;
-    try {
-      parsed = parseYaml(fs.readFileSync(file, "utf-8"));
-    } catch {
-      // Non-workflow YAMLs may not parse cleanly with our minimal parser; skip.
-      continue;
-    }
+    const parsed = tryParseYamlFile(file);
+    if (parsed === null) continue;
     for (const refString of extractRefStrings(parsed)) {
       const ref = parseClaudePluginRef(refString);
       const key = `${ref.source_url}@${ref.version}`;
       if (!seen.has(key)) seen.set(key, ref);
     }
   }
+  return seen;
+}
+
+async function isRefAlreadyLocked(ref: ParsedClaudePluginRef): Promise<"cache" | "api" | null> {
+  // WHY (#726): consult the local CLI registry first to avoid an API
+  // round-trip for plugins we already know are locked. The API check
+  // remains as fallback because the local cache may be wiped or
+  // out-of-date between machines.
+  if (findInstalled(ref.name, ref.version)) return "cache";
+  if (await isInLock(ref.name, ref.version)) return "api";
+  return null;
+}
+
+async function registerSingleRef(ref: ParsedClaudePluginRef): Promise<void> {
+  try {
+    const result = await registerClaudePluginFromRef(ref);
+    // WHY: keep the local cache in sync so subsequent pre-flights skip
+    // the API round-trip too.
+    recordInstallation({
+      name: result.name,
+      version: result.version,
+      source_url: ref.source_url,
+      resolved_sha: result.sha256,
+      marketplace_source: null,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new CLIError(
+      `claude plugin pre-flight failed for ${ref.source_url}@${ref.version}: ${detail}\n` +
+        "  No workflows were installed.",
+    );
+  }
+}
+
+async function processRef(
+  ref: ParsedClaudePluginRef,
+  registered: ParsedClaudePluginRef[],
+  skipped: ParsedClaudePluginRef[],
+): Promise<void> {
+  const lockHit = await isRefAlreadyLocked(ref);
+  if (lockHit === "cache") {
+    printDim(`  - ${ref.name}@${ref.version} already locked (cache), skipping`);
+    skipped.push(ref);
+    return;
+  }
+  if (lockHit === "api") {
+    printDim(`  - ${ref.name}@${ref.version} already locked, skipping`);
+    skipped.push(ref);
+    return;
+  }
+  await registerSingleRef(ref);
+  registered.push(ref);
+}
+
+export async function runClaudePluginPreflight(
+  packagePath: string,
+): Promise<PreflightResult | null> {
+  const yamlFiles = findYamlFiles(packagePath);
+  const seen = collectUniqueRefsFromYamls(yamlFiles);
 
   if (seen.size === 0) return null;
 
@@ -149,40 +225,7 @@ export async function runClaudePluginPreflight(
   const skipped: ParsedClaudePluginRef[] = [];
 
   for (const ref of seen.values()) {
-    // WHY (#726): consult the local CLI registry first to avoid an API
-    // round-trip for plugins we already know are locked. The API check
-    // remains as fallback because the local cache may be wiped or
-    // out-of-date between machines.
-    if (findInstalled(ref.name, ref.version)) {
-      printDim(`  - ${ref.name}@${ref.version} already locked (cache), skipping`);
-      skipped.push(ref);
-      continue;
-    }
-    const present = await isInLock(ref.name, ref.version);
-    if (present) {
-      printDim(`  - ${ref.name}@${ref.version} already locked, skipping`);
-      skipped.push(ref);
-      continue;
-    }
-    try {
-      const result = await registerClaudePluginFromRef(ref);
-      // WHY: keep the local cache in sync so subsequent pre-flights skip
-      // the API round-trip too.
-      recordInstallation({
-        name: result.name,
-        version: result.version,
-        source_url: ref.source_url,
-        resolved_sha: result.sha256,
-        marketplace_source: null,
-      });
-      registered.push(ref);
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      throw new CLIError(
-        `claude plugin pre-flight failed for ${ref.source_url}@${ref.version}: ${detail}\n` +
-          "  No workflows were installed.",
-      );
-    }
+    await processRef(ref, registered, skipped);
   }
 
   if (registered.length > 0) {

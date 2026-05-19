@@ -34,7 +34,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
         ResolvedClaudePlugin,
@@ -50,6 +50,58 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _extend_unique_refs(
+    ordered: list[ClaudePluginRef],
+    seen: set[tuple[str, str, str]],
+    refs: Iterable[ClaudePluginRef],
+) -> None:
+    """Append refs to ``ordered`` skipping any whose dedup key is in ``seen``.
+
+    WHY a single helper: workflow, phase, and global passes all want the same
+    dedup semantics; inlining each made the orchestrator overflow on cognitive
+    complexity.
+    """
+    for ref in refs:
+        key = (ref.source_url, ref.version, ref.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(ref)
+
+
+def _log_override(
+    scope_name: str,
+    prev: tuple[str, ClaudePluginRef],
+    ref: ClaudePluginRef,
+) -> None:
+    logger.info(
+        "Claude plugin override at %s scope shadows %s scope",
+        scope_name,
+        prev[0],
+        extra={
+            "plugin_name": ref.name,
+            "displaced_version": prev[1].version,
+            "displaced_scope": prev[0],
+            "winning_version": ref.version,
+            "winning_scope": scope_name,
+        },
+    )
+
+
+def _select_innermost_per_name(
+    scope_order: list[tuple[str, list[ClaudePluginRef]]],
+) -> dict[str, tuple[str, ClaudePluginRef]]:
+    """Innermost-wins layering: phase > workflow > global, keyed by name."""
+    chosen: dict[str, tuple[str, ClaudePluginRef]] = {}
+    for scope_name, refs in scope_order:
+        for ref in refs:
+            prev = chosen.get(ref.name)
+            if prev is not None and prev[1].version != ref.version:
+                _log_override(scope_name, prev, ref)
+            chosen[ref.name] = (scope_name, ref)
+    return chosen
 
 
 class ClaudePluginResolutionService:
@@ -105,33 +157,20 @@ class ClaudePluginResolutionService:
         seen: set[tuple[str, str, str]] = set()
         ordered: list[ClaudePluginRef] = []
 
-        for ref in workflow_def.claude_plugins:
-            key = (ref.source_url, ref.version, ref.name)
-            if key not in seen:
-                seen.add(key)
-                ordered.append(ref)
-
+        _extend_unique_refs(ordered, seen, workflow_def.claude_plugins)
         for phase in workflow_def.phases:
-            for ref in phase.claude_plugins:
-                key = (ref.source_url, ref.version, ref.name)
-                if key not in seen:
-                    seen.add(key)
-                    ordered.append(ref)
+            _extend_unique_refs(ordered, seen, phase.claude_plugins)
 
         # Global refs come last; they are the outermost scope.
-        for entry in await self._global.list_all():
-            key = (entry.source_url, entry.version, entry.name)
-            if key in seen:
-                continue
-            seen.add(key)
-            ordered.append(
-                ClaudePluginRef(
-                    name=entry.name,
-                    source_url=entry.source_url,
-                    version=entry.version,
-                )
+        global_refs = [
+            ClaudePluginRef(
+                name=entry.name,
+                source_url=entry.source_url,
+                version=entry.version,
             )
-
+            for entry in await self._global.list_all()
+        ]
+        _extend_unique_refs(ordered, seen, global_refs)
         return ordered
 
     async def resolve_for_phase(
@@ -154,10 +193,6 @@ class ClaudePluginResolutionService:
         3. Return the deduplicated tuple in declaration order so the workspace
            materializer and the ``--plugin-dir`` flag list are deterministic.
         """
-        from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
-            ResolvedClaudePlugin,
-        )
-
         # Step 1: layered union with innermost-wins semantics keyed by name.
         global_entries = await self._global.list_all()
         global_refs: list[ClaudePluginRef] = [
@@ -169,44 +204,33 @@ class ClaudePluginResolutionService:
             ("workflow", list(workflow_claude_plugins)),
             ("phase", list(phase_claude_plugins)),
         ]
-
-        chosen: dict[str, tuple[str, ClaudePluginRef]] = {}
-        for scope_name, refs in scope_order:
-            for ref in refs:
-                prev = chosen.get(ref.name)
-                if prev is not None and prev[1].version != ref.version:
-                    logger.info(
-                        "Claude plugin override at %s scope shadows %s scope",
-                        scope_name,
-                        prev[0],
-                        extra={
-                            "plugin_name": ref.name,
-                            "displaced_version": prev[1].version,
-                            "displaced_scope": prev[0],
-                            "winning_version": ref.version,
-                            "winning_scope": scope_name,
-                        },
-                    )
-                chosen[ref.name] = (scope_name, ref)
+        chosen = _select_innermost_per_name(scope_order)
 
         # Step 2: lock lookup. Order is preserved by dict insertion order.
-        resolved: list[ResolvedClaudePlugin] = []
-        for name, (_scope, ref) in chosen.items():
-            entry = await self._lock.get_by_source_version_name(ref.source_url, ref.version, name)
-            if entry is None:
-                msg = (
-                    f"Claude plugin {ref.source_url}@{ref.version} (name={name}) is "
-                    "not in the lock projection. ``ensure_registered`` must run "
-                    "during workflow install or global add before execute time."
-                )
-                raise LookupError(msg)
-            resolved.append(
-                ResolvedClaudePlugin(
-                    name=name,
-                    source_url=entry.source_url,
-                    version=entry.version,
-                    resolved_sha=entry.resolved_sha,
-                    tree_storage_prefix=entry.tree_storage_prefix,
-                )
-            )
+        resolved = [await self._lookup_in_lock(name, ref) for name, (_scope, ref) in chosen.items()]
         return tuple(resolved)
+
+    async def _lookup_in_lock(
+        self,
+        name: str,
+        ref: ClaudePluginRef,
+    ) -> ResolvedClaudePlugin:
+        from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+            ResolvedClaudePlugin,
+        )
+
+        entry = await self._lock.get_by_source_version_name(ref.source_url, ref.version, name)
+        if entry is None:
+            msg = (
+                f"Claude plugin {ref.source_url}@{ref.version} (name={name}) is "
+                "not in the lock projection. ``ensure_registered`` must run "
+                "during workflow install or global add before execute time."
+            )
+            raise LookupError(msg)
+        return ResolvedClaudePlugin(
+            name=name,
+            source_url=entry.source_url,
+            version=entry.version,
+            resolved_sha=entry.resolved_sha,
+            tree_storage_prefix=entry.tree_storage_prefix,
+        )
