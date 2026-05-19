@@ -192,9 +192,7 @@ class ClaudePluginResolutionService:
         # Step 2: lock lookup. Order is preserved by dict insertion order.
         resolved: list[ResolvedClaudePlugin] = []
         for name, (_scope, ref) in chosen.items():
-            entry = await self._lock.get_by_source_version_name(
-                ref.source_url, ref.version, name
-            )
+            entry = await self._lock.get_by_source_version_name(ref.source_url, ref.version, name)
             if entry is None:
                 msg = (
                     f"Claude plugin {ref.source_url}@{ref.version} (name={name}) is "
