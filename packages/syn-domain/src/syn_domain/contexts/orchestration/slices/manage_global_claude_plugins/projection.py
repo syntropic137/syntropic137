@@ -10,9 +10,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TypedDict
 
 from event_sourcing import AutoDispatchProjection
+
+
+class _GlobalAddedEventData(TypedDict, total=False):
+    """Wire shape of GlobalClaudePluginAddedEvent's payload after JSON decode."""
+
+    name: str
+    source_url: str
+    version: str
+    resolved_sha: str
+    added_at: str
+
+
+class _GlobalRemovedEventData(TypedDict, total=False):
+    """Wire shape of GlobalClaudePluginRemovedEvent's payload."""
+
+    name: str
+    removed_at: str
+
+
+class _GlobalEntryStored(TypedDict):
+    """Row shape persisted to the projection store."""
+
+    name: str
+    source_url: str
+    version: str
+    resolved_sha: str
+    added_at: str
 
 
 @dataclass(frozen=True)
@@ -45,7 +72,7 @@ class GlobalClaudePluginsProjection(AutoDispatchProjection):
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)  # type: ignore[attr-defined]
 
-    async def on_global_claude_plugin_added(self, event_data: dict[str, Any]) -> None:
+    async def on_global_claude_plugin_added(self, event_data: _GlobalAddedEventData) -> None:
         name = event_data.get("name")
         if not isinstance(name, str) or not name:
             return
@@ -58,7 +85,7 @@ class GlobalClaudePluginsProjection(AutoDispatchProjection):
         )
         await self._store.save(self.PROJECTION_NAME, name, _entry_to_dict(entry))  # type: ignore[attr-defined]
 
-    async def on_global_claude_plugin_removed(self, event_data: dict[str, Any]) -> None:
+    async def on_global_claude_plugin_removed(self, event_data: _GlobalRemovedEventData) -> None:
         name = event_data.get("name")
         if not isinstance(name, str) or not name:
             return
@@ -75,7 +102,7 @@ class GlobalClaudePluginsProjection(AutoDispatchProjection):
         return _entry_from_dict(data)
 
 
-def _entry_to_dict(entry: GlobalClaudePluginEntry) -> dict[str, Any]:
+def _entry_to_dict(entry: GlobalClaudePluginEntry) -> _GlobalEntryStored:
     return {
         "name": entry.name,
         "source_url": entry.source_url,
@@ -85,7 +112,7 @@ def _entry_to_dict(entry: GlobalClaudePluginEntry) -> dict[str, Any]:
     }
 
 
-def _entry_from_dict(data: dict[str, Any]) -> GlobalClaudePluginEntry:
+def _entry_from_dict(data: _GlobalEntryStored) -> GlobalClaudePluginEntry:
     return GlobalClaudePluginEntry(
         name=str(data["name"]),
         source_url=str(data.get("source_url", "")),

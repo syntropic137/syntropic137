@@ -50,6 +50,11 @@ issue = "#185"
 # ═══════════════════════════════════════════════════════════════════════════════
 # Untyped Dicts - dict[str, Any] and dict[str, object] in Python packages
 # Default is 0 (clean). Every non-zero entry is grandfathered tech debt.
+#
+# RATCHET INVARIANT: values MAY ONLY DECREASE. Never bump a value up to
+# accommodate new untyped dicts. Type them with TypedDict or Pydantic
+# before merging. The threshold is a ceiling on existing tech debt, not
+# a budget for new debt.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [untyped-dicts.syn-domain]

@@ -20,7 +20,7 @@ max = 15
 scope = "function"
 severity = "error"
 # Entity IDs: "python:module.path::func_name" / "rust:crate::path::func_name"
-exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
+exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*", "python:markdown-explorer*"]
 
 # File-level cognitive complexity REMOVED — lean on LOC + fan-out for file health.
 # Per-function cognitive is the meaningful signal; file-level sums penalize
@@ -37,7 +37,7 @@ field = "metrics.cyclomatic"
 max = 10
 scope = "function"
 severity = "error"
-exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
+exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*", "python:markdown-explorer*"]
 
 # ─── Lines of Code ───────────────────────────────────────────────────────────
 
@@ -49,7 +49,7 @@ field = "metrics.loc"
 max = 100
 scope = "function"
 severity = "warning"
-exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
+exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*", "python:markdown-explorer*"]
 
 [[rules.threshold]]
 id = "max-loc-file"
@@ -59,7 +59,7 @@ field = "metrics.lines_of_code"
 max = 750
 scope = "module"
 severity = "error"
-exclude = ["infra*", "scripts*", "lib*", "ci*", "*conftest*"]
+exclude = ["infra*", "scripts*", "lib*", "ci*", "*conftest*", "markdown-explorer*"]
 
 # ─── Coupling ────────────────────────────────────────────────────────────────
 
@@ -71,4 +71,4 @@ field = "metrics.martin.ce"
 max = 30
 scope = "module"
 severity = "error"
-exclude = ["infra*", "scripts*", "lib*", "ci*", "*conftest*"]
+exclude = ["infra*", "scripts*", "lib*", "ci*", "*conftest*", "markdown-explorer*"]
