@@ -35,13 +35,25 @@ syn claude-plugin install <ref> [options]
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `ref` | `text` | Yes | Plugin reference, e.g. org/repo@version or &lt;url&gt;@&lt;version&gt; |
+| `ref` | `text` | Yes | Plugin reference: bare name (marketplace), org/repo@version, or &lt;url&gt;@&lt;version&gt; |
 
 **Options:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--global`, `-g` | `boolean` | `false` | Also add the plugin to the global plugin set |
+| `--plugin`, `-p` | `text` | --- | When the source is a marketplace repo, select a single plugin by name |
+| `--force`, `-f` | `boolean` | `false` | Re-register even if the local registry already has this (name, version) |
+
+---
+
+## `syn claude-plugin installed`
+
+List Claude plugins installed locally via 'syn claude-plugin install'
+
+```bash
+syn claude-plugin installed
+```
 
 ---
 

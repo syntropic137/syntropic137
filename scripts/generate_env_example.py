@@ -74,7 +74,13 @@ def get_default_value(field_info: FieldInfo) -> str:
     if isinstance(default, list | tuple):
         return ""  # Empty for complex defaults
 
-    return str(default)
+    value = str(default)
+    # WHY quote whitespace-bearing values: shell-sourced .env files split on
+    # whitespace unless the value is quoted (e.g. BACKUP_SCHEDULE="0 3 * * *").
+    # python-dotenv tolerates either form, but `set -a; source .env` does not.
+    if any(ch.isspace() for ch in value) and not (value.startswith(('"', "'"))):
+        return f'"{value}"'
+    return value
 
 
 def is_secret_type(field_type: type[Any]) -> bool:

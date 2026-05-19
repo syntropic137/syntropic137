@@ -13,6 +13,9 @@ from syn_api.services.claude_plugin_materializer import (
     WORKSPACE_PLUGIN_ROOT,
     ClaudePluginMaterializer,
 )
+from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
+    ClaudePluginInvalidName,
+)
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,
 )
@@ -128,3 +131,48 @@ async def test_lru_cache_evicts_when_full() -> None:
 
     # Cache holds only the two most recent entries (sha-1, sha-2).
     assert mat.cache_size() == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hostile_name",
+    [
+        "../etc/passwd",
+        "..",
+        "foo/bar",
+        "foo\\bar",
+        ".hidden",
+        "",
+        "with\x00null",
+        "with\nnewline",
+    ],
+)
+async def test_fetch_for_workspace_rejects_unsafe_plugin_names(hostile_name: str) -> None:
+    # Security: a plugin name with path-traversal, separators, leading dot,
+    # control characters, or emptiness must be rejected BEFORE any fetch.
+    storage = InMemoryClaudePluginStorage()
+    await storage.upload_tree(
+        "sha-x", [ClaudePluginFile(rel_path=".claude-plugin/plugin.json", content=b"x")]
+    )
+    fetch_count = {"n": 0}
+    real_fetch = storage.fetch_tree
+
+    async def counting_fetch(sha256: str):
+        fetch_count["n"] += 1
+        return await real_fetch(sha256)
+
+    storage.fetch_tree = counting_fetch  # type: ignore[method-assign]
+
+    plugin = ResolvedClaudePlugin(
+        name=hostile_name,
+        source_url="https://github.com/example/x",
+        version="1.0.0",
+        resolved_sha="sha-x",
+        tree_storage_prefix="memory://claude-plugins/sha256-sha-x",
+    )
+    mat = ClaudePluginMaterializer(storage=storage)
+    with pytest.raises(ClaudePluginInvalidName):
+        await mat.fetch_for_workspace((plugin,))
+    # No fetch happened, so nothing was materialized.
+    assert fetch_count["n"] == 0

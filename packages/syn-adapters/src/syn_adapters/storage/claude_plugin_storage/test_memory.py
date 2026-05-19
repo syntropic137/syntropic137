@@ -7,7 +7,7 @@ import os
 import pytest
 
 # Ensure InMemoryAdapter env-guard passes.
-os.environ.setdefault("SYN_ENVIRONMENT", "test")
+os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.storage.claude_plugin_storage.memory import (
     ClaudePluginStorageError,

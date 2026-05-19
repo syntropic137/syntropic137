@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from fastapi import HTTPException
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
+    from syn_domain.contexts.orchestration import (
         ClaudePluginError,
     )
 
@@ -20,9 +20,11 @@ if TYPE_CHECKING:
 def http_exception_for_claude_plugin_error(exc: ClaudePluginError) -> HTTPException:
     """Convert a ``ClaudePluginError`` into a 422 ``HTTPException``.
 
-    Why 422 (not 400 or 502): the ref itself is the user's input, but
-    "unreachable" is upstream. Both shapes are about the *meaning* of the
-    request being unprocessable in this context, which 422 captures cleanly.
+    Why 422 (not 400): after the #726 Phase A redesign the API does no git
+    work, so the error taxonomy is purely about request semantics --
+    manifest-missing, manifest-invalid, name-invalid, or not-registered.
+    All four mean the request itself is unprocessable in this state, which
+    422 captures cleanly. The CLI surfaces upstream fetch failures locally.
     """
     detail: dict[str, str] = {
         "error_code": exc.error_code,

@@ -18,6 +18,10 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration import (
+    ClaudePluginInvalidName,
+)
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
         ResolvedClaudePlugin,
@@ -25,6 +29,32 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
         ClaudePluginStoragePort,
     )
+
+# WHY: plugin.name is interpolated into a workspace path. We must reject
+# anything that could escape ``.syn-plugins/<name>/`` -- traversal, separators,
+# absolute paths, or control characters. Names must be a single safe segment.
+_FORBIDDEN_NAME_SUBSTRINGS = ("..", "/", "\\", "\x00")
+
+
+def _validate_plugin_name(name: str) -> None:
+    """Reject plugin names that would be unsafe in a workspace path.
+
+    Raises ``ClaudePluginInvalidName`` for empty names, names with path
+    separators, parent-directory traversal, leading dots, or control
+    characters. The check runs at the materialization boundary so a
+    registration that somehow slipped a hostile name through cannot reach
+    the workspace.
+    """
+    if not name or not name.strip():
+        raise ClaudePluginInvalidName(name, "name is empty")
+    if name.startswith("."):
+        raise ClaudePluginInvalidName(name, "name starts with '.'")
+    for needle in _FORBIDDEN_NAME_SUBSTRINGS:
+        if needle in name:
+            raise ClaudePluginInvalidName(name, f"name contains forbidden sequence {needle!r}")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in name):
+        raise ClaudePluginInvalidName(name, "name contains control characters")
+
 
 # WHY: 16 entries comfortably covers a typical workflow's plugin set across
 # phases without bounding heap usage. Each entry is the file-byte tuple list
@@ -68,6 +98,11 @@ class ClaudePluginMaterializer:
         """
         if not plugins:
             return []
+        # WHY: validate every name BEFORE any fetch -- a hostile name must not
+        # cause partial materialization. Raises ClaudePluginInvalidName and
+        # writes nothing on the first bad name.
+        for plugin in plugins:
+            _validate_plugin_name(plugin.name)
         materialized: list[tuple[str, bytes]] = []
         for plugin in plugins:
             tree = await self._fetch_tree_cached(plugin.resolved_sha)
