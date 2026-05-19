@@ -43,12 +43,12 @@ class TestStreamId:
         ) == compute_claude_plugin_stream_id("https://example/x", "1.0.0", "p")
 
     def test_different_inputs_differ(self) -> None:
-        assert compute_claude_plugin_stream_id(
-            "u", "1", "p"
-        ) != compute_claude_plugin_stream_id("u", "2", "p")
-        assert compute_claude_plugin_stream_id(
-            "u1", "1", "p"
-        ) != compute_claude_plugin_stream_id("u2", "1", "p")
+        assert compute_claude_plugin_stream_id("u", "1", "p") != compute_claude_plugin_stream_id(
+            "u", "2", "p"
+        )
+        assert compute_claude_plugin_stream_id("u1", "1", "p") != compute_claude_plugin_stream_id(
+            "u2", "1", "p"
+        )
 
     def test_marketplace_plugins_differ_by_name(self) -> None:
         # Regression for the collision bug fixed in #726: marketplace repos
