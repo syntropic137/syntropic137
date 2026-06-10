@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
+    InteractiveTmuxDriver,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
@@ -241,6 +242,82 @@ class TestAgentExecutionHandler:
             num_turns=7,
             duration_ms=48000,
         )
+
+    @staticmethod
+    def _interactive_workspace(driver: MagicMock) -> MagicMock:
+        """Workspace whose isolation adapter exposes provider_handle()."""
+        workspace = MagicMock()
+        workspace._service._isolation.provider_handle = MagicMock(return_value=driver)
+        return workspace
+
+    @pytest.mark.anyio
+    async def test_interactive_pane_capture_persisted_as_conversation(self) -> None:
+        """Interactive path stores the pane capture as a conversation line."""
+        import json
+
+        handler = AgentExecutionHandler(controller=None)
+
+        driver = MagicMock(spec=InteractiveTmuxDriver)
+        driver.await_completion.return_value = MagicMock(ready=True, reason="ready")
+        driver.capture_response.return_value = "OK"
+        workspace = self._interactive_workspace(driver)
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.RUN_AGENT,
+            phase_id="p-1",
+        )
+        result = await handler.handle(
+            todo=todo,
+            workspace=workspace,
+            agent_env={},
+            claude_cmd=[],
+            session_id="sess-1",
+            agent_model="sonnet",
+            timeout_seconds=60,
+            interactive_prompt="Reply with OK.",
+        )
+
+        driver.send_message.assert_called_once_with("claude", "Reply with OK.")
+        assert result.command.exit_code == 0
+        assert result.stream_result.error_reason is None
+        assert len(result.stream_result.conversation_lines) == 1
+        captured = json.loads(result.stream_result.conversation_lines[0])
+        assert captured["message"]["content"][0]["text"] == "OK"
+        assert captured["source"] == "interactive-tmux-capture"
+
+    @pytest.mark.anyio
+    async def test_interactive_timeout_sets_error_reason(self) -> None:
+        """await_completion timeout yields exit 124 with an explicit error_reason."""
+        handler = AgentExecutionHandler(controller=None)
+
+        driver = MagicMock(spec=InteractiveTmuxDriver)
+        driver.await_completion.return_value = MagicMock(ready=False, reason="timeout")
+        driver.capture_response.return_value = "partial pane output"
+        workspace = self._interactive_workspace(driver)
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.RUN_AGENT,
+            phase_id="p-1",
+        )
+        result = await handler.handle(
+            todo=todo,
+            workspace=workspace,
+            agent_env={},
+            claude_cmd=[],
+            session_id="sess-1",
+            agent_model="sonnet",
+            timeout_seconds=60,
+            interactive_prompt="Reply with OK.",
+        )
+
+        assert result.command.exit_code == 124
+        assert result.stream_result.error_reason is not None
+        assert "60s" in result.stream_result.error_reason
+        assert "timeout" in result.stream_result.error_reason
+        # Partial pane output is still persisted for diagnosis.
+        assert len(result.stream_result.conversation_lines) == 1
 
 
 # =========================================================================

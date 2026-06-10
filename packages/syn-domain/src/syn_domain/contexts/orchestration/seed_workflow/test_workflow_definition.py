@@ -330,3 +330,96 @@ def test_validate_empty_yaml_with_base_dir(tmp_path: Path) -> None:
     assert is_valid is False
     assert error is not None
     assert "must be a mapping" in error
+
+
+# =============================================================================
+# Per-phase agent block Tests (interactive-tmux integration, PR #765)
+# =============================================================================
+
+AGENT_BLOCK_WORKFLOW_YAML = """
+id: agent-block-wf
+name: Agent Block Workflow
+requires_repos: false
+
+phases:
+  - id: interactive
+    name: Interactive Phase
+    order: 1
+    agent:
+      provider: claude-interactive
+      model: sonnet
+    prompt_template: Reply with OK.
+
+  - id: standard
+    name: Standard Phase
+    order: 2
+    prompt_template: Summarize the result.
+"""
+
+
+def test_parse_agent_block() -> None:
+    """agent.provider / agent.model are parsed from the YAML phase."""
+    definition = WorkflowDefinition.from_yaml(AGENT_BLOCK_WORKFLOW_YAML)
+
+    interactive = definition.phases[0]
+    assert interactive.agent is not None
+    assert interactive.agent.provider == "claude-interactive"
+    assert interactive.agent.model == "sonnet"
+
+    standard = definition.phases[1]
+    assert standard.agent is None
+
+
+def test_agent_block_reaches_domain_phase() -> None:
+    """to_domain() threads agent.provider and agent.model fallback through."""
+    definition = WorkflowDefinition.from_yaml(AGENT_BLOCK_WORKFLOW_YAML)
+    domain_phases = definition.get_domain_phases()
+
+    assert domain_phases[0].provider == "claude-interactive"
+    assert domain_phases[0].model == "sonnet"  # agent.model fallback
+
+    assert domain_phases[1].provider is None
+    assert domain_phases[1].model is None
+
+
+def test_top_level_model_wins_over_agent_model() -> None:
+    """Top-level phase model takes precedence over agent.model."""
+    yaml_content = """
+id: model-precedence-wf
+name: Model Precedence Workflow
+requires_repos: false
+
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    model: opus
+    agent:
+      provider: claude-interactive
+      model: sonnet
+    prompt_template: Do the thing.
+"""
+    definition = WorkflowDefinition.from_yaml(yaml_content)
+    domain_phase = definition.get_domain_phases()[0]
+    assert domain_phase.model == "opus"
+    assert domain_phase.provider == "claude-interactive"
+
+
+def test_agent_provider_reaches_executable_phase() -> None:
+    """agent.provider flows into ExecutablePhase.agent_config.provider."""
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
+    )
+
+    definition = WorkflowDefinition.from_yaml(AGENT_BLOCK_WORKFLOW_YAML)
+
+    class _StubTemplate:
+        phases = definition.get_domain_phases()
+
+    executable = ExecuteWorkflowHandler._get_executable_phases(_StubTemplate())  # type: ignore[arg-type]
+
+    assert executable[0].agent_config.provider == "claude-interactive"
+    assert executable[0].agent_config.model == "sonnet"
+
+    # Default phase keeps the default provider (claude -p path).
+    assert executable[1].agent_config.provider == "claude"

@@ -162,27 +162,28 @@ class InputYamlDefinition(BaseModel):
         )
 
 
-class PhaseAgentSpec(BaseModel):
-    """YAML `agent:` block on a phase.
+class AgentYamlDefinition(BaseModel):
+    """Per-phase ``agent`` block as parsed from YAML.
 
-    Selects the agent provider (default `claude-cli` via the
-    `claude -p` path) and, for the interactive-tmux multi-agent
-    backend, which tmux pane the phase drives. See
+    Selects which agent provider drives the phase (e.g. ``claude`` for the
+    default ``claude -p`` Docker path, ``claude-interactive`` for the
+    interactive-tmux workspace provider), which tmux pane the phase
+    targets, and optionally the model. See
     docs/plans/multi-agent-workspaces.md.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    provider: str = "claude"
-    """One of: `claude` (default; `claude -p` path),
-    `claude-interactive` (drives the interactive-tmux pane)."""
+    provider: str | None = None
+    """One of: ``claude`` (default; ``claude -p`` path),
+    ``claude-interactive`` (drives the interactive-tmux pane)."""
 
-    agent_id: str = "claude"
+    agent_id: str | None = None
     """Which tmux pane the phase targets when provider is
-    `claude-interactive`. One of: `claude`, `codex`, `gemini`."""
+    ``claude-interactive``. One of: ``claude``, ``codex``, ``gemini``."""
 
     model: str | None = None
-    """Per-phase model override (e.g. `sonnet`, `opus`)."""
+    """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
 
 
 class PhaseYamlDefinition(BaseModel):
@@ -214,8 +215,9 @@ class PhaseYamlDefinition(BaseModel):
     argument_hint: str | None = None
     model: str | None = None
 
-    # Multi-agent interactive-tmux: optional `agent:` block.
-    agent: PhaseAgentSpec | None = None
+    # Per-phase agent provider selection (interactive-tmux integration).
+    # ``agent.model`` is a fallback for the top-level ``model`` field.
+    agent: AgentYamlDefinition | None = None
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
@@ -241,13 +243,12 @@ class PhaseYamlDefinition(BaseModel):
 
         # Multi-agent (interactive-tmux): per-phase agent block. When
         # absent, leave provider/agent_id as None so the domain default
-        # ("claude") applies. The model override on the agent block
-        # takes precedence over the top-level model field if both are
-        # set (rare; usually only one is used).
+        # ("claude") applies. Top-level model wins; agent.model is the
+        # fallback.
         provider = self.agent.provider if self.agent else None
         agent_id = self.agent.agent_id if self.agent else None
         agent_model = self.agent.model if self.agent else None
-        model = agent_model or self.model
+        model = self.model or agent_model
 
         return PhaseDefinition(
             phase_id=self.id,

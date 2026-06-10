@@ -101,11 +101,12 @@ class PhaseDefinition(BaseModel):
     """Per-phase model override (e.g., 'sonnet', 'opus')."""
 
     provider: str | None = None
-    """Per-phase agent provider override.
+    """Per-phase agent provider override (e.g., 'claude', 'claude-interactive').
 
-    Valid values: "claude" (default; runs claude -p) or "claude-interactive"
-    (drives the interactive-tmux pane via send_message/await_completion).
-    See docs/plans/multi-agent-workspaces.md.
+    None means the execution default ('claude', the claude -p Docker path).
+    'claude-interactive' routes the phase through the interactive-tmux
+    workspace provider. Sourced from the workflow YAML ``agent.provider``
+    field. See docs/plans/multi-agent-workspaces.md.
     """
 
     agent_id: str | None = None

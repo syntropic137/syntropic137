@@ -94,6 +94,58 @@ async def test_destroy_calls_provider_destroy_and_drops_handle() -> None:
     assert "itws-xyz" not in adapter._workspaces
 
 
+@pytest.mark.asyncio
+async def test_destroy_failure_retains_handle_for_retry() -> None:
+    """A failed provider destroy MUST NOT drop the workspace handle.
+
+    Losing the handle would make the leaked tmux/Docker resources
+    unrecoverable; keeping it allows cleanup_workspace (or an operator)
+    to retry the destroy.
+    """
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+        IsolationHandle,
+    )
+
+    fake_workspace = MagicMock()
+    fake_workspace.id = "itws-fail"
+    fake_workspace.metadata = {}
+    fake_workspace._handle = MagicMock()
+
+    fake_provider_cls = MagicMock()
+    fake_provider = fake_provider_cls.return_value
+    fake_provider.create = AsyncMock(return_value=fake_workspace)
+    fake_provider.destroy = AsyncMock(side_effect=RuntimeError("docker rm timed out"))
+
+    handle = IsolationHandle(
+        isolation_id="itws-fail",
+        isolation_type="interactive-tmux",
+        proxy_url=None,
+        workspace_path="/workspace",
+        host_workspace_path="",
+    )
+
+    with (
+        patch.object(adapter_mod, "_InteractiveTmuxProvider", fake_provider_cls),
+        patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
+    ):
+        adapter = InteractiveTmuxIsolationAdapter()
+        await adapter.create(
+            IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
+        )
+        with pytest.raises(RuntimeError, match="docker rm timed out"):
+            await adapter.destroy(handle)
+
+        # Handle survives the failure: a retry can still reach the workspace.
+        assert "itws-fail" in adapter._workspaces
+
+        # Retry succeeds once the provider recovers; handle is dropped.
+        fake_provider.destroy = AsyncMock()
+        await adapter.destroy(handle)
+
+    assert "itws-fail" not in adapter._workspaces
+
+
 def test_constructor_raises_when_provider_missing() -> None:
     """Constructor MUST fail loudly when the provider class is absent.
 

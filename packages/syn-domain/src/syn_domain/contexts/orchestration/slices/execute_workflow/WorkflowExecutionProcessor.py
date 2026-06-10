@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -85,6 +86,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class _DispatchContext:
+    """Execution-local dispatch state, created per run().
+
+    D3 fix (stress 2026-06-10), hardened for concurrent dispatch: tracks
+    the phase currently being dispatched so a workflow-level failure can
+    mark the inner phase record as ``failed`` instead of stranding it at
+    ``running``. Carried as a per-run object (not processor instance
+    state) because BackgroundWorkflowDispatcher shares one processor
+    across up to max_concurrent executions; instance state would let a
+    concurrent execution overwrite the value and _fail_execution would
+    emit a failed_phase_id belonging to a different execution.
+    """
+
+    current_phase_id: str | None = None
+
+
 class WorkflowExecutionProcessor:
     """Reads the to-do list and dispatches to handlers. Zero business logic."""
 
@@ -103,10 +121,16 @@ class WorkflowExecutionProcessor:
         command_builder: CommandBuilder,
         todo_projection: TodoProjection | None = None,
         agent_handler: AgentHandlerProtocol | None = None,
+        interactive_workspace_service: WorkspaceService | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
         self._workspace_service = workspace_service
+        # Optional second service for phases that declare
+        # agent.provider="claude-interactive" (interactive-tmux backend).
+        # The default workspace_service stays on the Docker claude -p path
+        # so normal claude phases keep Envoy token accounting + telemetry.
+        self._interactive_workspace_service = interactive_workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
         self._artifact_query = artifact_query
@@ -139,11 +163,6 @@ class WorkflowExecutionProcessor:
         self._shared_workspaces: dict[
             str, tuple[ManagedWorkspace, AbstractAsyncContextManager[ManagedWorkspace]]
         ] = {}
-        # D3 fix (stress 2026-06-10): track the phase currently being
-        # dispatched so a workflow-level failure can mark the inner
-        # phase record as ``failed`` instead of stranding it at
-        # ``running``. Cleared by _finalize_phase.
-        self._current_phase_id: str | None = None
 
     async def run(
         self,
@@ -193,6 +212,7 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str] = []
         completed_phase_ids: list[str] = []
         phase_outputs: dict[str, str] = {}
+        dispatch_ctx = _DispatchContext()
 
         try:
             await self._drain_todo_list(
@@ -204,6 +224,7 @@ class WorkflowExecutionProcessor:
                 completed_phase_ids=completed_phase_ids,
                 phase_outputs=phase_outputs,
                 repos=repos,
+                dispatch_ctx=dispatch_ctx,
             )
             if aggregate.status == ExecutionStatus.CANCELLED:
                 return await self._cancel_execution(
@@ -240,6 +261,7 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids,
                 completed_phase_ids,
                 started_at,
+                failed_phase_id=dispatch_ctx.current_phase_id,
             )
 
     async def _drain_todo_list(
@@ -252,6 +274,7 @@ class WorkflowExecutionProcessor:
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
         repos: list[RepositoryRef] | None,
+        dispatch_ctx: _DispatchContext,
     ) -> None:
         """Process to-do items until the list is empty (all phases done or cancelled)."""
         while True:
@@ -267,6 +290,7 @@ class WorkflowExecutionProcessor:
                 completed_phase_ids=completed_phase_ids,
                 phase_outputs=phase_outputs,
                 repos=repos,
+                dispatch_ctx=dispatch_ctx,
             )
 
     async def _dispatch(
@@ -279,14 +303,16 @@ class WorkflowExecutionProcessor:
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
         repos: list[RepositoryRef] | None,
+        dispatch_ctx: _DispatchContext,
     ) -> None:
         """Dispatch a single to-do item to its handler."""
         assert todo.phase_id is not None
         phase = phase_map[todo.phase_id]
         # D3 (stress 2026-06-10): record the phase under dispatch so
         # _fail_execution can attribute a workflow-level failure to a
-        # real phase id and unstrand the inner phase record.
-        self._current_phase_id = todo.phase_id
+        # real phase id and unstrand the inner phase record. Stored on
+        # the per-run _DispatchContext, never on the shared processor.
+        dispatch_ctx.current_phase_id = todo.phase_id
         if todo.action == TodoAction.PROVISION_WORKSPACE:
             await self._handle_provision(
                 todo,
@@ -314,6 +340,9 @@ class WorkflowExecutionProcessor:
                 phase_results,
                 completed_phase_ids,
             )
+            # The phase finished cleanly; a later workflow-level failure
+            # (between phases) must not be attributed to it.
+            dispatch_ctx.current_phase_id = None
 
     async def _cancel_execution(
         self,
@@ -404,8 +433,14 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
         started_at: datetime,
+        failed_phase_id: str | None = None,
     ) -> WorkflowExecutionResult:
-        """Close open sessions, save failure event, and return failed result."""
+        """Close open sessions, save failure event, and return failed result.
+
+        ``failed_phase_id`` comes from the run's own _DispatchContext so
+        it always belongs to THIS execution, even with concurrent runs
+        sharing the processor instance.
+        """
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_failure(error_message=str(error))
         self._session_managers.clear()
@@ -424,7 +459,7 @@ class WorkflowExecutionProcessor:
             execution_id=execution_id,
             error=str(error),
             error_type=type(error).__name__,
-            failed_phase_id=self._current_phase_id,
+            failed_phase_id=failed_phase_id,
             completed_phases=len(completed_phase_ids),
             total_phases=len(phases),
         )
@@ -528,7 +563,7 @@ class WorkflowExecutionProcessor:
     ) -> ProvisionResult:
         """Build a ProvisionResult — reusing the shared workspace when applicable."""
         provision_handler = WorkspaceProvisionHandler(
-            workspace_service=self._workspace_service,
+            workspace_service=self._workspace_service_for(phase),
             prompt_builder=self._prompt_builder,
             command_builder=self._command_builder,
         )
@@ -571,6 +606,26 @@ class WorkflowExecutionProcessor:
                 result.workspace_cm,
             )
         return result
+
+    def _workspace_service_for(self, phase: ExecutablePhase) -> WorkspaceService:
+        """Select the workspace service for a phase by its agent provider.
+
+        Default: the Docker-backed claude -p service. Phases declaring
+        agent.provider="claude-interactive" route to the interactive-tmux
+        service; if none is configured, fail loudly instead of silently
+        running the phase on the wrong provider.
+        """
+        if phase.agent_config.provider != "claude-interactive":
+            return self._workspace_service
+        if self._interactive_workspace_service is None:
+            msg = (
+                f"Phase '{phase.phase_id}' declares agent provider "
+                "'claude-interactive' but no interactive workspace service "
+                "is configured. Set SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED=true "
+                "so the interactive-tmux provider is wired in."
+            )
+            raise RuntimeError(msg)
+        return self._interactive_workspace_service
 
     def _get_agent_handler(self) -> AgentHandlerProtocol:
         """Return the injected handler, or create a fresh real one (default behaviour)."""
@@ -804,8 +859,6 @@ class WorkflowExecutionProcessor:
         self._active_envs.pop(phase_id, None)
         self._active_cmds.pop(phase_id, None)
         self._active_prompts.pop(phase_id, None)
-        if self._current_phase_id == phase_id:
-            self._current_phase_id = None
         workspace_cm = self._active_workspace_cms.pop(phase_id, None)
         # Multi-agent: if this workspace is shared across phases of an
         # execution (interactive-tmux backend), DON'T tear it down here.
