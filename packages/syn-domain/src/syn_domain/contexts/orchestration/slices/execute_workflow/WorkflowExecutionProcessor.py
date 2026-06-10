@@ -132,6 +132,11 @@ class WorkflowExecutionProcessor:
         ] = {}  # (input, output, cache_creation, cache_read)
         self._phase_artifact_ids: dict[str, list[str]] = {}
         self._phase_started_at: dict[str, datetime] = {}
+        # D3 fix (stress 2026-06-10): track the phase currently being
+        # dispatched so a workflow-level failure can mark the inner
+        # phase record as ``failed`` instead of stranding it at
+        # ``running``. Cleared by _finalize_phase.
+        self._current_phase_id: str | None = None
 
     async def run(
         self,
@@ -271,6 +276,10 @@ class WorkflowExecutionProcessor:
         """Dispatch a single to-do item to its handler."""
         assert todo.phase_id is not None
         phase = phase_map[todo.phase_id]
+        # D3 (stress 2026-06-10): record the phase under dispatch so
+        # _fail_execution can attribute a workflow-level failure to a
+        # real phase id and unstrand the inner phase record.
+        self._current_phase_id = todo.phase_id
         if todo.action == TodoAction.PROVISION_WORKSPACE:
             await self._handle_provision(
                 todo,
@@ -405,7 +414,7 @@ class WorkflowExecutionProcessor:
             execution_id=execution_id,
             error=str(error),
             error_type=type(error).__name__,
-            failed_phase_id=None,
+            failed_phase_id=self._current_phase_id,
             completed_phases=len(completed_phase_ids),
             total_phases=len(phases),
         )
@@ -727,6 +736,8 @@ class WorkflowExecutionProcessor:
         self._active_envs.pop(phase_id, None)
         self._active_cmds.pop(phase_id, None)
         self._active_prompts.pop(phase_id, None)
+        if self._current_phase_id == phase_id:
+            self._current_phase_id = None
         workspace_cm = self._active_workspace_cms.pop(phase_id, None)
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)

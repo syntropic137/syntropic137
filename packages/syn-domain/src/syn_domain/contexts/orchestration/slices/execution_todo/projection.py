@@ -8,6 +8,18 @@ Designed for two usage modes:
 2. Persistent: catches up asynchronously for external consumers
 
 See AGENTS.md "Projection Consistency in Processor Loops".
+
+Monotonicity guard (fix for D1 — stress 2026-06-10): the projection
+record stores ``phase_progress: {phase_id -> max_action_rank_ever_seen}``.
+Every advance-direction handler refuses to regress a phase below its
+recorded rank. Without this, the in-process sync (processor) and the
+persistent subscription (coordinator) — both wired to the same
+``projection_store`` — race on the shared record, and an out-of-order
+late event such as AgentExecutionCompleted overwrites a more recent
+state, causing the processor to re-dispatch COLLECT_ARTIFACTS after the
+workspace has already been finalized. The race manifested as
+``KeyError: 'reply'`` in WorkflowExecutionProcessor at line 607
+(``self._active_workspaces[todo.phase_id]``) on ~60% of stress runs.
 """
 
 from __future__ import annotations
@@ -43,6 +55,21 @@ def _item_from_dict(data: dict) -> TodoItem:
         workspace_id=data.get("workspace_id"),
         session_id=data.get("session_id"),
     )
+
+
+# Action rank for the monotonic per-phase highwater mark (D1 fix).
+# An advance-direction event handler refuses to set a phase to an
+# action whose rank is <= the phase's current rank.
+_ACTION_RANK: dict[TodoAction, int] = {
+    TodoAction.PROVISION_WORKSPACE: 1,
+    TodoAction.RUN_AGENT: 2,
+    TodoAction.COLLECT_ARTIFACTS: 3,
+    TodoAction.COMPLETE_PHASE: 4,
+}
+# Sentinel rank for phases that have already had PhaseCompleted applied
+# — strictly greater than any TodoAction rank, so subsequent advance-
+# direction handlers for the same phase become no-ops.
+_RANK_PHASE_DONE = 99
 
 
 class ExecutionTodoProjection(AutoDispatchProjection):
@@ -109,6 +136,14 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         # Sort by order, take first phase
         sorted_phases = sorted(phase_defs, key=lambda p: p.get("order", 0))
         first_phase = sorted_phases[0]
+        phase_id = first_phase["phase_id"]
+
+        # Initial state: phase is at PROVISION_WORKSPACE rank. This is a
+        # fresh execution; no prior progress to respect. Idempotency
+        # guard: if a record already exists with a later rank we still
+        # leave it alone — the executor has moved on.
+        if await self._phase_at_or_past(execution_id, phase_id, TodoAction.PROVISION_WORKSPACE):
+            return
 
         await self._store.save(
             self.PROJECTION_NAME,
@@ -120,10 +155,11 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                         TodoItem(
                             execution_id=execution_id,
                             action=TodoAction.PROVISION_WORKSPACE,
-                            phase_id=first_phase["phase_id"],
+                            phase_id=phase_id,
                         )
                     )
                 ],
+                "phase_progress": {phase_id: _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]},
             },
         )
 
@@ -132,13 +168,20 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
             return
+        phase_id = event_data.get("phase_id")
+        if not isinstance(phase_id, str):
+            return
 
-        await self._replace_todo(
+        if await self._phase_at_or_past(execution_id, phase_id, TodoAction.RUN_AGENT):
+            return
+
+        await self._advance_phase_todo(
             execution_id,
+            phase_id,
             TodoItem(
                 execution_id=execution_id,
                 action=TodoAction.RUN_AGENT,
-                phase_id=event_data.get("phase_id"),
+                phase_id=phase_id,
                 workspace_id=event_data.get("workspace_id"),
                 session_id=event_data.get("session_id"),
             ),
@@ -149,13 +192,20 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
             return
+        phase_id = event_data.get("phase_id")
+        if not isinstance(phase_id, str):
+            return
 
-        await self._replace_todo(
+        if await self._phase_at_or_past(execution_id, phase_id, TodoAction.COLLECT_ARTIFACTS):
+            return
+
+        await self._advance_phase_todo(
             execution_id,
+            phase_id,
             TodoItem(
                 execution_id=execution_id,
                 action=TodoAction.COLLECT_ARTIFACTS,
-                phase_id=event_data.get("phase_id"),
+                phase_id=phase_id,
                 session_id=event_data.get("session_id"),
             ),
         )
@@ -165,13 +215,20 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
             return
+        phase_id = event_data.get("phase_id")
+        if not isinstance(phase_id, str):
+            return
 
-        await self._replace_todo(
+        if await self._phase_at_or_past(execution_id, phase_id, TodoAction.COMPLETE_PHASE):
+            return
+
+        await self._advance_phase_todo(
             execution_id,
+            phase_id,
             TodoItem(
                 execution_id=execution_id,
                 action=TodoAction.COMPLETE_PHASE,
-                phase_id=event_data.get("phase_id"),
+                phase_id=phase_id,
                 session_id=event_data.get("session_id"),
             ),
         )
@@ -180,23 +237,33 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         """Phase completed → remove COMPLETE_PHASE to-do for this phase only.
 
         Other pending todos (e.g., PROVISION_WORKSPACE from NextPhaseReady)
-        must be preserved.
+        must be preserved. Also locks the phase at _RANK_PHASE_DONE so a
+        late-arriving AgentExecutionCompleted from a competing writer
+        does not regress the projection.
         """
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
             return
 
         phase_id = event_data.get("phase_id")
+        if not isinstance(phase_id, str):
+            return
         current = await self.get_pending(execution_id)
         remaining = [
             t
             for t in current
             if not (t.action == TodoAction.COMPLETE_PHASE and t.phase_id == phase_id)
         ]
+        progress = await self._phase_progress(execution_id)
+        progress[phase_id] = _RANK_PHASE_DONE
         await self._store.save(
             self.PROJECTION_NAME,
             execution_id,
-            {"execution_id": execution_id, "items": [_item_to_dict(t) for t in remaining]},
+            {
+                "execution_id": execution_id,
+                "items": [_item_to_dict(t) for t in remaining],
+                "phase_progress": progress,
+            },
         )
 
     async def on_next_phase_ready(self, event_data: dict) -> None:
@@ -254,9 +321,56 @@ class ExecutionTodoProjection(AutoDispatchProjection):
     # =========================================================================
 
     async def _replace_todo(self, execution_id: str, new_todo: TodoItem) -> None:
-        """Replace all pending todos for an execution with a single new one."""
+        """Replace all pending todos for an execution with a single new one.
+
+        Retained for callers that ignore the monotonic per-phase guard
+        (currently none on the happy path). Prefer ``_advance_phase_todo``.
+        """
         await self._store.save(
             self.PROJECTION_NAME,
             execution_id,
             {"execution_id": execution_id, "items": [_item_to_dict(new_todo)]},
+        )
+
+    async def _phase_progress(self, execution_id: str) -> dict[str, int]:
+        """Read the per-phase highwater map. Empty dict if no record."""
+        data = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if not data:
+            return {}
+        progress = data.get("phase_progress")
+        return dict(progress) if isinstance(progress, dict) else {}
+
+    async def _phase_at_or_past(self, execution_id: str, phase_id: str, action: TodoAction) -> bool:
+        """Has this (execution, phase) already advanced to or past ``action``?"""
+        progress = await self._phase_progress(execution_id)
+        current = progress.get(phase_id, 0)
+        return current >= _ACTION_RANK[action]
+
+    async def _advance_phase_todo(
+        self, execution_id: str, phase_id: str, new_todo: TodoItem
+    ) -> None:
+        """Replace todos AND bump the phase's monotonic rank.
+
+        Re-reads the projection record at write-time so a concurrent
+        writer that already advanced past us cannot be regressed:
+        compare-and-set semantics on the per-phase rank.
+        """
+        data = await self._store.get(self.PROJECTION_NAME, execution_id)
+        progress: dict[str, int] = {}
+        if data:
+            raw_progress = data.get("phase_progress")
+            if isinstance(raw_progress, dict):
+                progress = dict(raw_progress)
+        new_rank = _ACTION_RANK[new_todo.action]
+        if progress.get(phase_id, 0) >= new_rank:
+            return  # Lost the CAS — a more recent writer is ahead, no-op.
+        progress[phase_id] = new_rank
+        await self._store.save(
+            self.PROJECTION_NAME,
+            execution_id,
+            {
+                "execution_id": execution_id,
+                "items": [_item_to_dict(new_todo)],
+                "phase_progress": progress,
+            },
         )
