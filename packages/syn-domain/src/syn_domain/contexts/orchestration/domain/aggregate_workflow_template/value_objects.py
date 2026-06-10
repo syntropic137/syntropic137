@@ -99,3 +99,12 @@ class PhaseDefinition(BaseModel):
 
     model: str | None = None
     """Per-phase model override (e.g., 'sonnet', 'opus')."""
+
+    provider: str | None = None
+    """Per-phase agent provider override (e.g., 'claude', 'claude-interactive').
+
+    None means the execution default ('claude', the claude -p Docker path).
+    'claude-interactive' routes the phase through the interactive-tmux
+    workspace provider. Sourced from the workflow YAML ``agent.provider``
+    field.
+    """

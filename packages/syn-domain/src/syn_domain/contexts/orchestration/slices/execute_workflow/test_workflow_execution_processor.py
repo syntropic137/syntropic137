@@ -15,7 +15,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 )
 
 
-def _make_processor() -> WorkflowExecutionProcessor:
+def _make_processor(
+    interactive_workspace_service: MagicMock | None = None,
+) -> WorkflowExecutionProcessor:
     """Create a processor with mocked dependencies."""
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
@@ -34,6 +36,7 @@ def _make_processor() -> WorkflowExecutionProcessor:
         prompt_builder=AsyncMock(return_value="test prompt"),
         command_builder=MagicMock(return_value=["claude", "--model", "haiku"]),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+        interactive_workspace_service=interactive_workspace_service,
     )
 
 
@@ -50,6 +53,50 @@ class TestProcessorDispatching:
         assert convert("WorkspaceProvisionedForPhase") == "on_workspace_provisioned_for_phase"
         assert convert("ArtifactsCollectedForPhase") == "on_artifacts_collected_for_phase"
         assert convert("AgentExecutionCompleted") == "on_agent_execution_completed"
+
+
+@pytest.mark.unit
+class TestWorkspaceServiceSelection:
+    """Per-phase provider selection MUST NOT move claude phases off Docker."""
+
+    @staticmethod
+    def _phase(provider: str = "claude") -> object:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+
+        return ExecutablePhase(
+            phase_id="p1",
+            name="Phase 1",
+            order=1,
+            agent_config=AgentConfiguration(provider=provider),
+            prompt_template="do it",
+        )
+
+    def test_claude_phase_uses_default_service_even_with_interactive_wired(self) -> None:
+        """Normal claude phases stay on the Docker claude -p service."""
+        interactive = MagicMock()
+        processor = _make_processor(interactive_workspace_service=interactive)
+
+        selected = processor._workspace_service_for(self._phase("claude"))
+
+        assert selected is processor._workspace_service
+        assert selected is not interactive
+
+    def test_interactive_phase_uses_interactive_service(self) -> None:
+        interactive = MagicMock()
+        processor = _make_processor(interactive_workspace_service=interactive)
+
+        selected = processor._workspace_service_for(self._phase("claude-interactive"))
+
+        assert selected is interactive
+
+    def test_interactive_phase_without_service_fails_loudly(self) -> None:
+        processor = _make_processor(interactive_workspace_service=None)
+
+        with pytest.raises(RuntimeError, match="SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED"):
+            processor._workspace_service_for(self._phase("claude-interactive"))
 
 
 @pytest.mark.unit

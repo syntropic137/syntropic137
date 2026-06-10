@@ -120,10 +120,16 @@ class WorkflowExecutionProcessor:
         command_builder: CommandBuilder,
         todo_projection: TodoProjection | None = None,
         agent_handler: AgentHandlerProtocol | None = None,
+        interactive_workspace_service: WorkspaceService | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
         self._workspace_service = workspace_service
+        # Optional second service for phases that declare
+        # agent.provider="claude-interactive" (interactive-tmux backend).
+        # The default workspace_service stays on the Docker claude -p path
+        # so normal claude phases keep Envoy token accounting + telemetry.
+        self._interactive_workspace_service = interactive_workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
         self._artifact_query = artifact_query
@@ -506,7 +512,7 @@ class WorkflowExecutionProcessor:
             self._artifact_query,
         )
         provision_handler = WorkspaceProvisionHandler(
-            workspace_service=self._workspace_service,
+            workspace_service=self._workspace_service_for(phase),
             prompt_builder=self._prompt_builder,
             command_builder=self._command_builder,
         )
@@ -533,6 +539,26 @@ class WorkflowExecutionProcessor:
         self._active_prompts[todo.phase_id] = result.interactive_prompt
         aggregate.provision_workspace_completed(result.command)
         await self._save_and_sync(aggregate)
+
+    def _workspace_service_for(self, phase: ExecutablePhase) -> WorkspaceService:
+        """Select the workspace service for a phase by its agent provider.
+
+        Default: the Docker-backed claude -p service. Phases declaring
+        agent.provider="claude-interactive" route to the interactive-tmux
+        service; if none is configured, fail loudly instead of silently
+        running the phase on the wrong provider.
+        """
+        if phase.agent_config.provider != "claude-interactive":
+            return self._workspace_service
+        if self._interactive_workspace_service is None:
+            msg = (
+                f"Phase '{phase.phase_id}' declares agent provider "
+                "'claude-interactive' but no interactive workspace service "
+                "is configured. Set SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED=true "
+                "so the interactive-tmux provider is wired in."
+            )
+            raise RuntimeError(msg)
+        return self._interactive_workspace_service
 
     def _get_agent_handler(self) -> AgentHandlerProtocol:
         """Return the injected handler, or create a fresh real one (default behaviour)."""

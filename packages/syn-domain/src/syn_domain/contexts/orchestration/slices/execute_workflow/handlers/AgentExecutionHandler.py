@@ -447,12 +447,71 @@ async def _run_interactive_driver(
         len(pane),
     )
 
+    return _build_completed_result(
+        todo=todo,
+        session_id=session_id,
+        tokens=tokens,
+        subagents=subagents,
+        exit_code=exit_code,
+        pane=pane,
+        reason=reason,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _build_completed_result(
+    *,
+    todo: TodoItem,
+    session_id: str,
+    tokens: TokenAccumulator,
+    subagents: SubagentTracker,
+    exit_code: int,
+    pane: str,
+    reason: str,
+    timeout_seconds: int,
+) -> AgentExecutionResult:
+    """Build the AgentExecutionResult for a completed interactive phase.
+
+    Persists the pane capture as conversation content so the phase's
+    actual response survives into conversation storage. Wrapped as a
+    single synthetic JSONL line because ConversationRecorder stores
+    JSONL (the claude -p path stores raw stream-json lines).
+    """
+    import json
+
+    assert todo.phase_id is not None
+    conversation_lines: list[str] = []
+    if pane:
+        conversation_lines.append(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": pane}],
+                    },
+                    "source": "interactive-tmux-capture",
+                }
+            )
+        )
+
+    error_reason = (
+        None
+        if exit_code == 0
+        else (
+            f"interactive-tmux await_completion did not become ready "
+            f"within {timeout_seconds}s (reason={reason})"
+        )
+    )
+
     stream_result = StreamResult(
-        line_count=1,
+        line_count=len(conversation_lines),
         interrupt_requested=False,
         interrupt_reason=None,
         agent_task_result=None,
+        conversation_lines=conversation_lines,
         num_turns=1,
+        error_reason=error_reason,
     )
     command = AgentExecutionCompletedCommand(
         execution_id=todo.execution_id,

@@ -252,8 +252,11 @@ class ExecuteWorkflowHandler:
         executable_phases = []
         for phase in workflow.phases:
             phase_model = getattr(phase, "model", None)
-            agent_config = (
-                AgentConfiguration(model=phase_model) if phase_model else AgentConfiguration()
+            phase_provider = getattr(phase, "provider", None)
+            defaults = AgentConfiguration()
+            agent_config = AgentConfiguration(
+                provider=phase_provider or defaults.provider,
+                model=phase_model or defaults.model,
             )
             executable_phases.append(
                 ExecutablePhase(
