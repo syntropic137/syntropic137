@@ -84,6 +84,7 @@ def build_isolation_config(
     workflow_id: str | None,
     phase_id: str | None,
     extra_environment: dict[str, str] | None,
+    claude_plugin_dirs: tuple[str, ...] = (),
 ) -> IsolationConfig:
     """Build IsolationConfig with merged environment variables.
 
@@ -115,6 +116,7 @@ def build_isolation_config(
             cpu_limit_cores=config.cpu_limit_cores,
         ),
         environment=merged_environment,
+        claude_plugin_dirs=claude_plugin_dirs,
     )
 
 

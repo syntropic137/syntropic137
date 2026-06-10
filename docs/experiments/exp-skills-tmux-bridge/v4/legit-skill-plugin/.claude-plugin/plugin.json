@@ -1,0 +1,5 @@
+{
+  "name": "syn137-greet-plugin",
+  "version": "0.0.1",
+  "description": "exp/skills-tmux-bridge — ships a single Syn137 greeting skill that demonstrates plugin discovery + activation through the interactive-tmux dispatch path."
+}

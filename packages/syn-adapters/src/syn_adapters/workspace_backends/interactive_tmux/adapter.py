@@ -111,6 +111,8 @@ class InteractiveTmuxIsolationAdapter:
             raise InteractiveTmuxUnavailableError(msg)
 
         self._default_image = default_image
+        self._startup_timeout_s = startup_timeout_s
+        self._strict_startup = strict_startup
         self._provider = _InteractiveTmuxProvider(
             default_image=default_image,
             startup_timeout_s=startup_timeout_s,
@@ -125,6 +127,8 @@ class InteractiveTmuxIsolationAdapter:
 
     async def create(self, config: IsolationConfig) -> IsolationHandle:
         """Create an interactive-tmux workspace from a Syn137 isolation config."""
+        from pathlib import Path
+
         from agentic_isolation import WorkspaceConfig  # type: ignore[import-not-found]
 
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -142,7 +146,23 @@ class InteractiveTmuxIsolationAdapter:
             },
         )
 
-        workspace_obj = await self._provider.create(ws_config)
+        # Per-workspace plugin dirs (issue #726). The upstream provider
+        # bakes ``default_claude_plugin_dirs`` at __init__ time and applies
+        # the same list to every workspace it creates. For per-phase
+        # plugin sets we instantiate a fresh provider on each call when
+        # the caller supplied a non-empty list — keeps the cached default
+        # provider intact for the empty-list path. The provider
+        # constructor only stores kwargs, so this is cheap.
+        provider = self._provider
+        if config.claude_plugin_dirs and _InteractiveTmuxProvider is not None:
+            provider = _InteractiveTmuxProvider(
+                default_image=self._default_image,
+                startup_timeout_s=self._startup_timeout_s,
+                strict_startup=self._strict_startup,
+                default_claude_plugin_dirs=[Path(p) for p in config.claude_plugin_dirs],
+            )
+
+        workspace_obj = await provider.create(ws_config)
         self._workspaces[workspace_obj.id] = workspace_obj
 
         logger.info(

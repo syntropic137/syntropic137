@@ -205,6 +205,13 @@ class IsolationConfig:
     # Labels for tracking
     labels: Mapping[str, str] = field(default_factory=dict)
 
+    # Container-side paths to load as Claude Code plugin dirs (issue #726).
+    # Translated by the interactive-tmux adapter to one ``claude --plugin-dir
+    # <path>`` flag per entry — the only mechanism that actually loads
+    # plugins into the tmux-driven TUI. Ignored by other backends (the
+    # claude -p path emits its own --plugin-dir flags downstream).
+    claude_plugin_dirs: tuple[str, ...] = ()
+
 
 @dataclass(frozen=True)
 class SidecarConfig:

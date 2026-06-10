@@ -473,6 +473,7 @@ class WorkspaceService:
         workflow_id: str | None,
         phase_id: str | None,
         extra_environment: dict[str, str] | None,
+        claude_plugin_dirs: tuple[str, ...] = (),
     ) -> tuple[WorkspaceAggregate, IsolationConfig]:
         """Create aggregate and isolation config for a new workspace.
 
@@ -503,6 +504,7 @@ class WorkspaceService:
             workflow_id=workflow_id,
             phase_id=phase_id,
             extra_environment=extra_environment,
+            claude_plugin_dirs=claude_plugin_dirs,
         )
 
         return aggregate, isolation_config
@@ -518,6 +520,7 @@ class WorkspaceService:
         inject_tokens: bool = False,
         token_types: list[TokenType] | None = None,
         extra_environment: dict[str, str] | None = None,
+        claude_plugin_dirs: tuple[str, ...] = (),
     ) -> AsyncIterator[ManagedWorkspace]:
         """Create a managed workspace with full lifecycle.
 
@@ -546,6 +549,7 @@ class WorkspaceService:
             workflow_id,
             phase_id,
             extra_environment,
+            claude_plugin_dirs,
         )
 
         isolation_handle: IsolationHandle | None = None

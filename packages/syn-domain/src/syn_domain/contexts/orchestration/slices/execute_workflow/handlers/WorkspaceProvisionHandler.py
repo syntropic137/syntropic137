@@ -250,12 +250,20 @@ class WorkspaceProvisionHandler:
         assert todo.phase_id is not None
 
         effective_repos = repos or []
+        # Pre-compute the resolved plugin paths so the workspace backend
+        # can launch claude with the right ``--plugin-dir`` flags from
+        # turn 1 (issue #726). Empty tuple for phases that declare no
+        # plugins — workspace creation path stays byte-equal.
+        claude_plugin_dirs = tuple(
+            f"/workspace/.syn-plugins/{plugin.name}" for plugin in phase.claude_plugins
+        )
         workspace_cm = self._workspace_service.create_workspace(
             execution_id=todo.execution_id,
             workflow_id=workflow_id,
             phase_id=todo.phase_id,
             with_sidecar=True,
             inject_tokens=True,
+            claude_plugin_dirs=claude_plugin_dirs,
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
@@ -351,35 +359,6 @@ class WorkspaceProvisionHandler:
                 workspace.workspace_id,
             )
 
-        # exp/skills-tmux-bridge: option-1 bridge for the interactive-tmux path.
-        #
-        # The claude -p path activates plugins via the ``--plugin-dir`` flag
-        # list emitted in ``_build_provision_result``. The interactive-tmux
-        # driver (#765) launches claude as a bare TUI with no plugin flags
-        # (see lib/agentic-primitives/providers/workspaces/interactive-tmux/
-        # driver/interactive_tmux.py: ``_ClaudeAdapter.launch_in_window``).
-        # Plugins materialized under ``<workspace>/.syn-plugins/<name>/`` are
-        # on disk but invisible to the driver-started agent.
-        #
-        # Option 1 (this code) emits a workspace-level
-        # ``<workspace>/.claude/settings.json`` that lists the materialized
-        # plugin names under ``enabledPlugins`` (pseudo-marketplace ``syn``).
-        # This is the cheapest experimental bridge — it stays inside Syn137
-        # and requires no upstream change. If the e2e shows that claude's
-        # plugin loader does not resolve a pseudo-marketplace entry without a
-        # corresponding marketplace.json registration, the durable fix is
-        # option 2 (upstream): teach the interactive-tmux driver to accept
-        # ``plugin_dirs`` and start claude with ``--plugin-dir`` flags. See
-        # ``docs/plans/workflow-skills.md`` §3 for the trade-off.
-        bridge_settings = self._build_workspace_settings_for_plugins(phase.claude_plugins)
-        if bridge_settings is not None:
-            await workspace.inject_files([(".claude/settings.json", bridge_settings)])
-            logger.info(
-                "Wrote <workspace>/.claude/settings.json bridge for %d plugin(s) "
-                "(exp/skills-tmux-bridge — option 1)",
-                len(phase.claude_plugins),
-            )
-
     @staticmethod
     def _append_plugin_dir_flags(
         claude_cmd: list[str],
@@ -396,39 +375,6 @@ class WorkspaceProvisionHandler:
         for plugin in plugins:
             claude_cmd.append("--plugin-dir")
             claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
-
-    @staticmethod
-    def _build_workspace_settings_for_plugins(
-        plugins: tuple[ResolvedClaudePlugin, ...],
-    ) -> bytes | None:
-        """Build a workspace-level ``.claude/settings.json`` body for plugins.
-
-        Returns the JSON-encoded bytes when at least one plugin is present,
-        otherwise None so the caller can skip the inject. Pure function so
-        the resolution-time shape is unit-testable without touching docker.
-        """
-        if not plugins:
-            return None
-        import json as _json
-
-        # WHY pseudo-marketplace "syn": ``enabledPlugins`` keys are
-        # ``<plugin>@<marketplace>``; the marketplace label is opaque to
-        # claude's loader as long as it can resolve the plugin. We use
-        # ``syn`` to namespace these entries away from the baked-in
-        # ``claude-plugins-official`` LSP entries the workspace image writes.
-        enabled = {f"{plugin.name}@syn": True for plugin in plugins}
-        body = {
-            "enabledPlugins": enabled,
-            # WHY a non-spec "extraKnownPluginDirs" key: harmless if claude
-            # ignores it; documents the on-disk shape for the next agent
-            # reading this file. The discovery contract that actually
-            # carries claude -p is the CLI ``--plugin-dir`` flag, emitted
-            # in ``_build_provision_result``.
-            "extraKnownPluginDirs": [
-                f"/workspace/.syn-plugins/{plugin.name}" for plugin in plugins
-            ],
-        }
-        return _json.dumps(body, indent=2).encode("utf-8") + b"\n"
 
     async def _inject_phase_artifacts(
         self,

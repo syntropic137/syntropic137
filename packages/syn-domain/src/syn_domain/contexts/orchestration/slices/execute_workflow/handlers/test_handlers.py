@@ -1172,110 +1172,162 @@ class TestWorkspaceProvisionClaudePlugins:
 
 
 # =========================================================================
-# exp/skills-tmux-bridge: option-1 bridge contract
+# exp/skills-tmux-bridge: plugin_dirs forwarding (option-2 wiring)
 # =========================================================================
 
 
 @pytest.mark.unit
-class TestWorkspaceProvisionHandlerSkillsBridge:
-    """Contract tests for the workspace-level .claude/settings.json bridge.
+class TestWorkspaceProvisionHandlerForwardsPluginDirs:
+    """Pin the wiring contract: ``handle()`` converts ``phase.claude_plugins``
+    into ``/workspace/.syn-plugins/<name>`` paths and forwards them as
+    ``claude_plugin_dirs=`` to ``WorkspaceService.create_workspace``. The
+    interactive-tmux adapter forwards those to the upstream driver which
+    launches claude with ``--plugin-dir`` flags — the only mechanism that
+    actually loads plugins into the tmux-driven TUI.
 
-    The interactive-tmux path (#765) launches claude with no CLI flags, so
-    the ``--plugin-dir`` flag emission in ``_build_provision_result`` never
-    reaches the agent. The option-1 bridge writes a project-level
-    ``.claude/settings.json`` so the interactive driver-launched claude has
-    a discovery hook. These tests pin the shape so the next agent picks up
-    the contract from the test, not from comments.
+    Option 1 (writing <workspace>/.claude/settings.json) was experimentally
+    invalidated. See docs/experiments/exp-skills-tmux-bridge/.
     """
 
-    def test_empty_plugin_tuple_returns_none(self) -> None:
-        """No plugins means no bridge file — caller must skip the inject."""
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            WorkspaceProvisionHandler,
-        )
-
-        assert WorkspaceProvisionHandler._build_workspace_settings_for_plugins(()) is None
-
-    def test_single_plugin_emits_enabled_marker_and_dir(self) -> None:
-        """One plugin emits one enabledPlugins entry and one extraKnownPluginDirs path."""
-        import json as _json
+    @pytest.mark.anyio
+    async def test_handle_forwards_resolved_plugin_dirs(self) -> None:
+        from contextlib import asynccontextmanager
 
         from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
             ResolvedClaudePlugin,
         )
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            WorkspaceProvisionHandler,
-        )
-
-        plugin = ResolvedClaudePlugin(
-            name="hello-world",
-            source_url="https://github.com/syntropic137/hello-world",
-            version="1.0.0",
-            resolved_sha="sha256-deadbeef",
-            tree_storage_prefix="claude-plugins/sha256-deadbeef",
-        )
-        body = WorkspaceProvisionHandler._build_workspace_settings_for_plugins((plugin,))
-        assert body is not None
-        decoded = _json.loads(body)
-        assert decoded["enabledPlugins"] == {"hello-world@syn": True}
-        assert decoded["extraKnownPluginDirs"] == ["/workspace/.syn-plugins/hello-world"]
-
-    def test_multi_plugin_preserves_declaration_order(self) -> None:
-        """Two plugins emit two entries in declaration order — deterministic for tests."""
-        import json as _json
-
-        from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
-            ResolvedClaudePlugin,
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
         )
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
             WorkspaceProvisionHandler,
+        )
+
+        captured_plugin_dirs: list[tuple[str, ...]] = []
+
+        @asynccontextmanager
+        async def fake_create_workspace(**kwargs):
+            captured_plugin_dirs.append(kwargs.get("claude_plugin_dirs", ()))
+            ws = MagicMock()
+            ws.workspace_id = "ws-1"
+            ws.proxy_url = "http://proxy.local"
+            ws.isolation_handle = MagicMock(isolation_type="docker")
+            ws.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0, stderr=""))
+            ws.inject_files = AsyncMock()
+            yield ws
+
+        workspace_service = MagicMock()
+        workspace_service.create_workspace = fake_create_workspace
+
+        async def fake_prompt_builder(*_args, **_kwargs):
+            return "prompt"
+
+        handler = WorkspaceProvisionHandler(
+            workspace_service=workspace_service,
+            prompt_builder=fake_prompt_builder,
+            command_builder=lambda _phase, _prompt: ["claude"],
         )
 
         plugins = (
             ResolvedClaudePlugin(
-                name="hello-world",
-                source_url="https://github.com/x/hello",
+                name="alpha",
+                source_url="https://github.com/x/a",
                 version="1.0.0",
-                resolved_sha="sha256-a",
-                tree_storage_prefix="claude-plugins/sha256-a",
+                resolved_sha="sha-a",
+                tree_storage_prefix="claude-plugins/sha-a",
             ),
             ResolvedClaudePlugin(
-                name="goodbye-world",
-                source_url="https://github.com/x/goodbye",
+                name="beta",
+                source_url="https://github.com/x/b",
                 version="2.0.0",
-                resolved_sha="sha256-b",
-                tree_storage_prefix="claude-plugins/sha256-b",
+                resolved_sha="sha-b",
+                tree_storage_prefix="claude-plugins/sha-b",
             ),
         )
-        body = WorkspaceProvisionHandler._build_workspace_settings_for_plugins(plugins)
-        assert body is not None
-        decoded = _json.loads(body)
-        assert decoded["enabledPlugins"] == {
-            "hello-world@syn": True,
-            "goodbye-world@syn": True,
-        }
-        assert decoded["extraKnownPluginDirs"] == [
-            "/workspace/.syn-plugins/hello-world",
-            "/workspace/.syn-plugins/goodbye-world",
+        phase = ExecutablePhase(
+            phase_id="p-1",
+            name="Phase",
+            order=1,
+            prompt_template="noop",
+            claude_plugins=plugins,
+        )
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.PROVISION_WORKSPACE,
+            phase_id="p-1",
+        )
+
+        # _build_agent_env runs after create_workspace and may fail on
+        # MagicMock settings — we only care about the kwargs that already
+        # reached create_workspace, captured above.
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            await handler.handle(
+                todo=todo,
+                phase=phase,
+                workflow_id="wf-1",
+                session_id="sess-1",
+                repos=[],
+            )
+
+        assert captured_plugin_dirs == [
+            (
+                "/workspace/.syn-plugins/alpha",
+                "/workspace/.syn-plugins/beta",
+            )
         ]
 
-    def test_body_is_valid_utf8_json_with_trailing_newline(self) -> None:
-        """Bytes are utf-8 JSON with a final newline — POSIX-friendly file shape."""
-        from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
-            ResolvedClaudePlugin,
+    @pytest.mark.anyio
+    async def test_handle_passes_empty_tuple_for_no_plugins(self) -> None:
+        from contextlib import asynccontextmanager
+
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
         )
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
             WorkspaceProvisionHandler,
         )
 
-        plugin = ResolvedClaudePlugin(
-            name="x",
-            source_url="https://github.com/x/x",
-            version="1.0.0",
-            resolved_sha="sha256-x",
-            tree_storage_prefix="claude-plugins/sha256-x",
+        captured_plugin_dirs: list[tuple[str, ...]] = []
+
+        @asynccontextmanager
+        async def fake_create_workspace(**kwargs):
+            captured_plugin_dirs.append(kwargs.get("claude_plugin_dirs", ()))
+            ws = MagicMock()
+            ws.workspace_id = "ws-1"
+            ws.proxy_url = "http://proxy.local"
+            ws.isolation_handle = MagicMock(isolation_type="docker")
+            ws.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0, stderr=""))
+            ws.inject_files = AsyncMock()
+            yield ws
+
+        workspace_service = MagicMock()
+        workspace_service.create_workspace = fake_create_workspace
+
+        async def fake_prompt_builder(*_args, **_kwargs):
+            return "prompt"
+
+        handler = WorkspaceProvisionHandler(
+            workspace_service=workspace_service,
+            prompt_builder=fake_prompt_builder,
+            command_builder=lambda _phase, _prompt: ["claude"],
         )
-        body = WorkspaceProvisionHandler._build_workspace_settings_for_plugins((plugin,))
-        assert body is not None
-        assert body.endswith(b"\n")
-        body.decode("utf-8")
+        phase = ExecutablePhase(phase_id="p-1", name="Phase", order=1, prompt_template="noop")
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.PROVISION_WORKSPACE,
+            phase_id="p-1",
+        )
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            await handler.handle(
+                todo=todo,
+                phase=phase,
+                workflow_id="wf-1",
+                session_id="sess-1",
+                repos=[],
+            )
+
+        assert captured_plugin_dirs == [()]
