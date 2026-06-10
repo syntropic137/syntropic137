@@ -202,6 +202,29 @@ class TestObservabilityCollectorWithWriter:
         assert data["num_turns"] == 7
         assert data["duration_ms"] == 48000
         assert data["model"] == "claude-haiku"
+        # Default claude -p path: no pane identity in the payload.
+        assert "agent_id" not in data
+
+    @pytest.mark.anyio
+    async def test_record_session_summary_carries_agent_id(self) -> None:
+        """Interactive-tmux summaries include agent_id so consumers can group per pane."""
+        writer = AsyncMock()
+        collector = _make_collector(writer=writer)
+
+        await collector.record_session_summary(
+            total_cost_usd=0.0,
+            input_tokens=0,
+            output_tokens=0,
+            cache_creation=0,
+            cache_read=0,
+            num_turns=1,
+            duration_ms=0,
+            agent_id="codex",
+        )
+
+        writer.record_observation.assert_called_once()
+        data = writer.record_observation.call_args.kwargs["data"]
+        assert data["agent_id"] == "codex"
 
     @pytest.mark.anyio
     async def test_record_session_summary_noop_without_writer(self) -> None:

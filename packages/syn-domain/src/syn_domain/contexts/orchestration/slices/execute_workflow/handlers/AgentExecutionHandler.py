@@ -446,6 +446,7 @@ async def _run_interactive_driver(
             cache_read=0,
             num_turns=1,
             duration_ms=0,
+            agent_id=agent_id,
         )
 
     logger.info(

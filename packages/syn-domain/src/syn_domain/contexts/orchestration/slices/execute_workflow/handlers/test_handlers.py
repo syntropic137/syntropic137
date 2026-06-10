@@ -319,6 +319,44 @@ class TestAgentExecutionHandler:
         # Partial pane output is still persisted for diagnosis.
         assert len(result.stream_result.conversation_lines) == 1
 
+    @pytest.mark.anyio
+    async def test_interactive_agent_id_targets_pane_and_reaches_observability(self) -> None:
+        """agent_id selects the tmux pane and is threaded into the session summary."""
+        handler = AgentExecutionHandler(controller=None)
+
+        driver = MagicMock(spec=InteractiveTmuxDriver)
+        driver.await_completion.return_value = MagicMock(ready=True, reason="ready")
+        driver.capture_response.return_value = "OK"
+        workspace = self._interactive_workspace(driver)
+        collector = AsyncMock()
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.RUN_AGENT,
+            phase_id="p-1",
+        )
+        await handler.handle(
+            todo=todo,
+            workspace=workspace,
+            agent_env={},
+            claude_cmd=[],
+            session_id="sess-1",
+            agent_model="sonnet",
+            timeout_seconds=60,
+            interactive_prompt="Reply with OK.",
+            collector=collector,
+            agent_id="codex",
+        )
+
+        # Driver calls target the selected pane, not the default.
+        driver.send_message.assert_called_once_with("codex", "Reply with OK.")
+        driver.await_completion.assert_called_once_with("codex", timeout=60.0)
+        driver.capture_response.assert_called_once_with("codex")
+
+        # Observability summary carries the pane identity.
+        collector.record_session_summary.assert_awaited_once()
+        assert collector.record_session_summary.call_args.kwargs["agent_id"] == "codex"
+
 
 # =========================================================================
 # ArtifactCollectionHandler
