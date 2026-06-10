@@ -1,0 +1,25 @@
+{
+  "scenario": "S3b-postfix-cancel-retry",
+  "description": "Visibility-aware retry of S3b after the fix branch is deployed. Establishes that POST /executions/{id}/cancel now actually cancels the interactive-tmux phase.",
+  "execution_id": "exec-dacda097f5b3",
+  "projection_visibility_lag_ms": 200,
+  "cancel_http_response": {
+    "success": true,
+    "execution_id": "exec-dacda097f5b3",
+    "state": "running",
+    "message": "Cancel signal queued",
+    "error": null
+  },
+  "outcome_after_cancel": {
+    "workflow_status": "cancelled",
+    "phase_status": "cancelled",
+    "cancel_to_terminal_ms": 3211,
+    "error_message_field": "S3b-postfix-retry",
+    "interpretation": "Phase was actually interrupted: workflow_status moved to 'cancelled' (never seen in pre-fix runs), phase_status is also 'cancelled', and the cancel reached terminal state in 3.2 s versus the 17.9 s of the pre-fix run that ignored the cancel and ran to completion."
+  },
+  "syn_api_log_lines": [
+    "Cancel signal received during interactive phase (exec=exec-dacda097f5b3, reason=S3b-postfix-retry)",
+    "interactive-tmux phase cancelled (phase=reply, reason=S3b-postfix-retry)"
+  ],
+  "verdict": "D-block-1 (cancel no-op) — VERIFIED FIXED."
+}

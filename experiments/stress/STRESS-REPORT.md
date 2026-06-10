@@ -362,3 +362,119 @@ ls experiments/stress/evidence/           # raw logs + S4 pane dumps
 Each script registers / submits idempotently and writes:
 - `experiments/stress/results/sN-*.json` — structured findings
 - `experiments/stress/evidence/sN-transcript.txt` — raw transcript
+
+---
+
+# Post-fix verification (2026-06-10, fix branch `fix/interactive-tmux-stress-blockers`)
+
+After the initial campaign, the orchestrator dispatched the stress lane to fix the blockers. The fixes landed as commit `519c6977` on `fix/interactive-tmux-stress-blockers` (off `feat/interactive-tmux-workspaces`). Three files changed (≈+512/-84):
+
+- `packages/syn-domain/.../execute_workflow/handlers/AgentExecutionHandler.py` — cancel poll-loop (D-block-1) + typed `InteractiveTmuxTransportError` (D2)
+- `packages/syn-domain/.../execution_todo/projection.py` — monotonic per-phase rank guard (D1)
+- `packages/syn-domain/.../execute_workflow/WorkflowExecutionProcessor.py` — `_current_phase_id` tracking + populated `failed_phase_id` on FailExecutionCommand (D3)
+
+syn-api was rebuilt from this branch (`docker compose -p syn-dev … up -d --no-deps --build api`); both `InteractiveTmuxTransportError` and `phase_progress` are present in the deployed image. Provider-side blockers D-block-2 and D-block-3 are owned by a parallel agentic-primitives lane and are not in this fix pass; S4 is **not** re-run.
+
+## S1 — sequential load (post-fix)
+
+| Run | execution_id        | workflow_status | phase_status | phase_dur (s) | wall (s) | new leaks |
+|-----|---------------------|-----------------|--------------|---------------|----------|-----------|
+| 1   | exec-cce81b16266a   | completed       | completed    | 18.83         | 21.31    | 0         |
+| 2   | exec-6adebda9a23a   | completed       | completed    | 19.66         | 21.95    | 0         |
+| 3   | exec-26f68d77b5a1   | **failed**      | **failed**   | 0.00          | 8.16     | 0         |
+| 4   | exec-8510f3276557   | completed       | completed    | 44.56         | 47.37    | 0         |
+| 5   | exec-e6a47a9fed9e   | completed       | completed    | 21.07         | 23.71    | 0         |
+
+(Source: `experiments/stress/results/s1-postfix-sequential.json`, `s1-postfix-runs.ndjson`.)
+
+- `workflow_completed`: **4/5** (pre-fix: 2/5) — major improvement.
+- `KeyError: 'reply'` occurrences: **0/5** (pre-fix: 3/5). **D1 verified fixed.**
+- `phase_status` always agrees with `workflow_status` — when the workflow is `failed`, the phase is `failed` (pre-fix: phase stayed at `running`). **D3 verified fixed.**
+- Run 3 failed with a **different** error: `write_file('/workspace/.setup/setup.sh') failed: tee: /workspace/.setup/setup.sh: No such file or directory`. Setup-phase race in the workspace bootstrap — surfaced *because* the report-window now lets phases reach completion more often. Logged as **D8 (new — major)** below.
+
+## S3a — kill mid-execution (post-fix)
+
+| Metric                            | Value                                                                                       |
+|-----------------------------------|---------------------------------------------------------------------------------------------|
+| `final_status`                    | failed                                                                                      |
+| `phase_status`                    | **`failed`** (pre-fix: `running` — stranded)                                                |
+| `kill_to_terminal_ms`             | 1667                                                                                        |
+| `post_test_new_containers`        | 0                                                                                           |
+| `error_message`                   | `Command '['docker','exec','interactive-tmux-itws-460c5096-4c1be2b0','tmux','new-session','-d',…]' returned non-zero exit status 137.` |
+
+(Source: `experiments/stress/results/s3-postfix-resilience.json`.)
+
+- **D3 verified fixed** — the inner phase record now flips to `failed`.
+- **D2 only PARTIALLY fixed**. My `InteractiveTmuxTransportError` wrapper covers `CalledProcessError` raised by the driver's `send_message → await_completion → capture_response` loop. The S3a kill hit *before* the agent loop — during workspace bootstrap (`tmux new-session`) — so the raw Python repr still leaks. The agent-loop path is typed; the bootstrap path still needs to be wrapped.
+
+## S3b — control-plane Cancel (post-fix)
+
+(Source: `experiments/stress/results/s3-postfix-cancel-retry.json`.)
+
+| Metric                          | Value                                                                  |
+|---------------------------------|------------------------------------------------------------------------|
+| HTTP cancel response            | `200 success=true message="Cancel signal queued"`                       |
+| `workflow_status` (final)       | **`cancelled`** (pre-fix: never reached `cancelled` in any of 18 runs) |
+| `phase_status` (final)          | **`cancelled`** (pre-fix: `completed` or stranded `running`)            |
+| `cancel_to_terminal_ms`         | **3211** (pre-fix: 17875 — phase ran to natural completion)             |
+| `post_test_new_containers`      | 0                                                                       |
+| syn-api log lines               | `Cancel signal received during interactive phase (exec=…, reason=…)`; `interactive-tmux phase cancelled (phase=reply, reason=…)` |
+
+- **D-block-1 verified FIXED.** The new poll-then-tear-down loop in `_handle_interactive` observed the cancel, called `driver.stop()`, and returned `interrupt_requested=True` so the workflow aggregate transitioned through `cancel_execution`. The 17.9 s → 3.2 s wall-time delta is the cleanest possible proof.
+- D4 (4.5 s projection-visibility race on the cancel route) **still present** — unrelated to the payload-honoring fix. Visibility-aware retry pattern (poll `GET /executions/{id}` until 200, then cancel) sidesteps it. Polish-pass candidate.
+
+## Defect status after the fix pass
+
+| ID            | Severity (pre)   | Status now                                                                                          |
+|---------------|------------------|-----------------------------------------------------------------------------------------------------|
+| D-block-1     | BLOCKER          | **FIXED** — cancel actually cancels; status=`cancelled`; 3.2 s to terminal.                          |
+| D-block-2     | BLOCKER          | (Provider-side, owned by agentic-primitives lane; out of scope this pass — S4 not re-run.)          |
+| D-block-3     | BLOCKER          | (Provider-side, same lane.)                                                                          |
+| D1            | BLOCKER          | **FIXED** — 0/5 `'reply'` KeyError; monotonic per-phase rank guard in the projection.                |
+| D2            | MAJOR            | **PARTIALLY FIXED** — typed error covers driver agent loop; workspace bootstrap path still raw.     |
+| D3            | MAJOR            | **FIXED** — phase status now reflects workflow-level failure / cancel.                              |
+| D4            | MAJOR            | Unchanged — 4.5 s projection visibility race on the cancel route. Polish-pass candidate.            |
+| D-obs-1       | MAJOR            | Unchanged — Lane-2 telemetry still uniformly zero. Not in this fix pass.                            |
+| D5            | minor            | Unchanged — provisioning staggered ~200-300 ms per execution.                                       |
+| D6            | minor            | Unchanged — 3 pre-existing leaks remain from previous bring-up.                                     |
+| D7            | minor            | Unchanged — `phase_model` reports `haiku` though YAML specifies `sonnet`.                            |
+| **D8** (NEW)  | **major**        | Setup-phase race: `write_file('/workspace/.setup/setup.sh') failed: tee … No such file`. Intermittent (1/5 post-fix). Pre-existed; was masked by the D1 noise. |
+
+## New defect surfaced
+
+### D8 — Setup-phase workspace race: `tee /workspace/.setup/setup.sh: No such file or directory`
+
+- **Symptom**: A reply-ok-interactive run fails with `write_file('/workspace/.setup/setup.sh') failed: tee: /workspace/.setup/setup.sh: No such file or directory`. The phase never starts; `phase_status=failed`, `phase_duration_seconds=0.0`. Total wall ~8 s.
+- **Evidence**: 1 of 5 runs in the post-fix S1 (`experiments/stress/results/s1-postfix-runs.ndjson`, run 3 = `exec-26f68d77b5a1`).
+- **Why now**: The pre-fix campaign had the `KeyError: 'reply'` masking ~60 % of runs; the underlying setup-phase intermittence was rare enough to be lost in that noise. With D1 fixed, runs reach setup more often, exposing the older race.
+- **Likely cause**: a missing `mkdir -p /workspace/.setup` before the setup script is `tee`-written. ADR-024 setup-phase secret-injection path; the workspace provisioner appears to assume the directory exists.
+- **Out of scope** for this fix pass — surfaced only by the post-fix verification window. Captured here so the owning agent on `feat/interactive-tmux-workspaces` can pick it up.
+
+## Reproduction of the post-fix verification
+
+Stack rebuild from the fix branch:
+
+```sh
+git checkout fix/interactive-tmux-stress-blockers
+docker compose -p syn-dev \
+  -f docker/docker-compose.yaml \
+  -f docker/docker-compose.dev.yaml \
+  -f docker/docker-compose.dev-interactive-tmux.yaml \
+  up -d --no-deps --build api
+```
+
+Verification (re-runs the harness against the rebuilt stack):
+
+```sh
+git checkout exp/interactive-tmux-stress
+bash experiments/stress/scripts/s1_sequential.sh
+bash experiments/stress/scripts/s3_resilience.sh
+# Visibility-aware cancel retry (inline; see results/s3-postfix-cancel-retry.json):
+# submit → poll GET /executions/{id} until 200 → POST /executions/{id}/cancel → assert status=cancelled
+```
+
+Post-fix evidence files:
+
+- `experiments/stress/results/s1-postfix-sequential.json` + `s1-postfix-runs.ndjson`
+- `experiments/stress/results/s3-postfix-resilience.json`
+- `experiments/stress/results/s3-postfix-cancel-retry.json`

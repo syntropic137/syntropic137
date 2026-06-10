@@ -1,0 +1,73 @@
+{
+  "scenario": "S1-sequential",
+  "n_runs": 5,
+  "phase_completed_count": 4,
+  "workflow_completed_count": 4,
+  "workflow_failed_count": 1,
+  "any_new_leaks": false,
+  "phase_duration_min": 19.661992,
+  "phase_duration_max": 44.559102,
+  "phase_duration_avg": 26.296149500000002,
+  "runs": [
+    {
+      "run": 1,
+      "execution_id": "exec-6f570075f079",
+      "workflow_status": "completed",
+      "wall_ms": 22330,
+      "new_leak_count": 0,
+      "phase_status": "completed",
+      "phase_duration_seconds": 19.896279,
+      "phase_model": "haiku",
+      "workflow_error": null,
+      "completed_phases": 1
+    },
+    {
+      "run": 2,
+      "execution_id": "exec-6adebda9a23a",
+      "workflow_status": "completed",
+      "wall_ms": 21949,
+      "new_leak_count": 0,
+      "phase_status": "completed",
+      "phase_duration_seconds": 19.661992,
+      "phase_model": "haiku",
+      "workflow_error": null,
+      "completed_phases": 1
+    },
+    {
+      "run": 3,
+      "execution_id": "exec-26f68d77b5a1",
+      "workflow_status": "failed",
+      "wall_ms": 8155,
+      "new_leak_count": 0,
+      "phase_status": "failed",
+      "phase_duration_seconds": 0.0,
+      "phase_model": null,
+      "workflow_error": "write_file('/workspace/.setup/setup.sh') failed: tee: /workspace/.setup/setup.sh: No such file or directory\n",
+      "completed_phases": 0
+    },
+    {
+      "run": 4,
+      "execution_id": "exec-8510f3276557",
+      "workflow_status": "completed",
+      "wall_ms": 47366,
+      "new_leak_count": 0,
+      "phase_status": "completed",
+      "phase_duration_seconds": 44.559102,
+      "phase_model": "haiku",
+      "workflow_error": null,
+      "completed_phases": 1
+    },
+    {
+      "run": 5,
+      "execution_id": "exec-e6a47a9fed9e",
+      "workflow_status": "completed",
+      "wall_ms": 23706,
+      "new_leak_count": 0,
+      "phase_status": "completed",
+      "phase_duration_seconds": 21.067225,
+      "phase_model": "haiku",
+      "workflow_error": null,
+      "completed_phases": 1
+    }
+  ]
+}

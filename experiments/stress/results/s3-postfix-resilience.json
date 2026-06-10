@@ -1,0 +1,23 @@
+{
+  "scenario": "S3-resilience",
+  "s3a_kill": {
+    "execution_id": "exec-892ae3aeabc8",
+    "killed_container_id": "c1fdbae73d42",
+    "final_status": "failed",
+    "kill_to_terminal_ms": 1667,
+    "post_test_new_containers": 0,
+    "error_message": "Command '['docker', 'exec', 'interactive-tmux-itws-460c5096-4c1be2b0', 'tmux', 'new-session', '-d', '-s', 'agents', '-n', 'claude', '-x', '200', '-y', '50']' returned non-zero exit status 137.",
+    "phase_status": "failed",
+    "phase_error": null
+  },
+  "s3b_cancel": {
+    "execution_id": "exec-efc74c3e5b43",
+    "cancel_response_raw": "{\"detail\":\"Execution not found: exec-efc74c3e5b43\"}",
+    "final_status": "completed",
+    "cancel_to_terminal_ms": 21859,
+    "post_test_new_containers": 0,
+    "error_message": null,
+    "phase_status": "completed",
+    "phase_error": null
+  }
+}
