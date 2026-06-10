@@ -9,7 +9,7 @@ Reports AgentExecutionCompletedCommand to the aggregate.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -36,6 +36,42 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+class InteractiveCompletionResult(Protocol):
+    """Structural view of the driver's AwaitResult (agentic-primitives).
+
+    Only the members this handler reads; the concrete dataclass carries
+    more (timed_out, duration_ms, pane, ...).
+    """
+
+    @property
+    def ready(self) -> bool: ...
+
+    @property
+    def reason(self) -> str: ...
+
+
+@runtime_checkable
+class InteractiveTmuxDriver(Protocol):
+    """Typed surface of the interactive-tmux driver workspace.
+
+    The concrete class (`interactive_tmux.InteractiveTmuxWorkspace`)
+    lives in the agentic-primitives submodule and is intentionally not
+    imported here; `provider_handle()` returns it as `Any`. This
+    Protocol pins the documented send_message / await_completion /
+    capture_response / stop surface so the handler is type-checked
+    against it, and `_handle_interactive` validates the handle against
+    it at the provider boundary (runtime_checkable: method presence).
+    """
+
+    def send_message(self, agent: str, text: str) -> None: ...
+
+    def await_completion(self, agent: str, timeout: float = ...) -> InteractiveCompletionResult: ...
+
+    def capture_response(self, agent: str) -> str: ...
+
+    def stop(self) -> None: ...
 
 
 def _detect_exit_code(
@@ -233,14 +269,17 @@ class AgentExecutionHandler:
         """
         assert todo.phase_id is not None
 
-        from typing import Any, cast
-
         adapter = getattr(workspace, "_service", None)
         adapter = getattr(adapter, "_isolation", None)
         get_handle = getattr(adapter, "provider_handle", None)
-        driver: Any = None
+        # Boundary validation: provider_handle() returns Any (the concrete
+        # driver lives in the agentic-primitives submodule); narrow it to
+        # the typed Protocol here so everything downstream is type-checked.
+        driver: InteractiveTmuxDriver | None = None
         if callable(get_handle):
-            driver = cast("Any", get_handle(workspace.isolation_handle))
+            handle = get_handle(workspace.isolation_handle)
+            if isinstance(handle, InteractiveTmuxDriver):
+                driver = handle
 
         if driver is None:
             return _interactive_driver_unavailable(
@@ -277,8 +316,8 @@ def _interactive_driver_unavailable(
     assert todo.phase_id is not None
     error_msg = (
         "interactive-tmux dispatch invoked but the workspace's "
-        "isolation backend does not expose provider_handle "
-        "(expected InteractiveTmuxIsolationAdapter). "
+        "isolation backend does not expose provider_handle returning "
+        "an InteractiveTmuxDriver (expected InteractiveTmuxIsolationAdapter). "
         "Check SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED and "
         "WorkspaceServiceConfig.provider_kind."
     )
@@ -310,7 +349,7 @@ def _interactive_driver_unavailable(
 
 async def _run_interactive_driver(
     *,
-    driver: object,
+    driver: InteractiveTmuxDriver,
     todo: TodoItem,
     tokens: TokenAccumulator,
     subagents: SubagentTracker,
@@ -342,13 +381,10 @@ async def _run_interactive_driver(
     def _drive() -> tuple[int, str, str]:
         from subprocess import CalledProcessError
 
-        send = driver.send_message
-        await_completion = driver.await_completion
-        capture = driver.capture_response
         try:
-            send("claude", prompt)
-            result = await_completion("claude", timeout=float(timeout_seconds))
-            pane = capture("claude")
+            driver.send_message("claude", prompt)
+            result = driver.await_completion("claude", timeout=float(timeout_seconds))
+            pane = driver.capture_response("claude")
         except CalledProcessError as exc:
             # D2: convert raw subprocess errors to a typed domain error
             # so error_message is not a raw Python repr leaking the
@@ -441,7 +477,7 @@ async def _race_completion_against_cancel(
     completion_future: object,
     controller: ExecutionController | None,
     execution_id: str,
-    driver: object,
+    driver: InteractiveTmuxDriver,
 ) -> object | None:
     """Poll for a CANCEL signal while the driver runs.
 
@@ -480,10 +516,8 @@ async def _race_completion_against_cancel(
                 )
                 # Tear down the workspace to unblock the driver thread.
                 try:
-                    stop = getattr(driver, "stop", None)
-                    if callable(stop):
-                        await asyncio.to_thread(stop)
-                except Exception as exc:  # pragma: no cover — defensive
+                    await asyncio.to_thread(driver.stop)
+                except Exception as exc:  # pragma: no cover - defensive
                     logger.warning(
                         "driver.stop on cancel raised (exec=%s): %s",
                         execution_id,
@@ -497,9 +531,13 @@ async def _race_completion_against_cancel(
                         "Driver thread did not exit within 10s after cancel (exec=%s)",
                         execution_id,
                     )
-                except Exception:
-                    # Expected — the thread errored because the container is gone.
-                    pass
+                except Exception as exc:
+                    # Expected: the thread errored because the container is gone.
+                    logger.debug(
+                        "Driver thread unwound with error after cancel (exec=%s): %s",
+                        execution_id,
+                        exc,
+                    )
                 return signal
         try:
             await asyncio.wait_for(asyncio.shield(fut), timeout=poll_interval_s)
