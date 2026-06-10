@@ -151,7 +151,19 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     )
     from syn_shared.settings.workspace import WorkspaceSettings
 
-    ws_config = WorkspaceServiceConfig(image=WorkspaceSettings().docker_image)
+    ws_settings = WorkspaceSettings()
+    # Interactive-tmux opt-in (SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED). When
+    # on, the WorkspaceService routes through InteractiveTmuxIsolationAdapter
+    # with no Envoy ext_authz injection (see docs/plans/interactive-tmux-
+    # integration.md §3.4). Default off — the claude -p Docker path is the
+    # only live path. Image is provider-specific.
+    if ws_settings.interactive_tmux_enabled:
+        ws_config = WorkspaceServiceConfig(
+            image=ws_settings.interactive_tmux_image,
+            provider_kind="interactive-tmux",
+        )
+    else:
+        ws_config = WorkspaceServiceConfig(image=ws_settings.docker_image)
 
     # WHY (issue #726, PR2): the materializer turns ResolvedClaudePlugin
     # entries on each phase into workspace files; the processor passes it

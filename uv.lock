@@ -71,9 +71,9 @@ dependencies = [
 requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.1.0" },
     { name = "python-json-logger", specifier = ">=2.0.7" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.10" },
 ]
 provides-extras = ["dev"]
 

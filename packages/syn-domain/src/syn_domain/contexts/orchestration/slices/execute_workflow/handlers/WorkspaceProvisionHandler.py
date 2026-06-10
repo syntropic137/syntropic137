@@ -164,7 +164,14 @@ async def _resolve_github_app_token() -> str | None:
 class ProvisionResult:
     """Result of workspace provisioning."""
 
-    __slots__ = ("agent_env", "claude_cmd", "command", "workspace", "workspace_cm")
+    __slots__ = (
+        "agent_env",
+        "claude_cmd",
+        "command",
+        "interactive_prompt",
+        "workspace",
+        "workspace_cm",
+    )
 
     def __init__(
         self,
@@ -173,12 +180,19 @@ class ProvisionResult:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         command: ProvisionWorkspaceCompletedCommand,
+        interactive_prompt: str | None = None,
     ) -> None:
         self.workspace = workspace
         self.workspace_cm = workspace_cm  # async context manager for cleanup
         self.agent_env = agent_env
         self.claude_cmd = claude_cmd
         self.command = command
+        # When non-None, AgentExecutionHandler dispatches to the
+        # interactive-tmux path (send_message/await_completion/
+        # capture_response) instead of workspace.stream(claude_cmd).
+        # Populated by WorkspaceProvisionHandler when the phase's
+        # agent_config.provider == "claude-interactive".
+        self.interactive_prompt = interactive_prompt
 
 
 class WorkspaceProvisionHandler:
@@ -337,6 +351,68 @@ class WorkspaceProvisionHandler:
                 workspace.workspace_id,
             )
 
+        # exp/skills-tmux-bridge: option-1 bridge for the interactive-tmux path.
+        #
+        # The claude -p path activates plugins via the ``--plugin-dir`` flag
+        # list emitted in ``_build_provision_result``. The interactive-tmux
+        # driver (#765) launches claude as a bare TUI with no plugin flags
+        # (see lib/agentic-primitives/providers/workspaces/interactive-tmux/
+        # driver/interactive_tmux.py: ``_ClaudeAdapter.launch_in_window``).
+        # Plugins materialized under ``<workspace>/.syn-plugins/<name>/`` are
+        # on disk but invisible to the driver-started agent.
+        #
+        # Option 1 (this code) emits a workspace-level
+        # ``<workspace>/.claude/settings.json`` that lists the materialized
+        # plugin names under ``enabledPlugins`` (pseudo-marketplace ``syn``).
+        # This is the cheapest experimental bridge — it stays inside Syn137
+        # and requires no upstream change. If the e2e shows that claude's
+        # plugin loader does not resolve a pseudo-marketplace entry without a
+        # corresponding marketplace.json registration, the durable fix is
+        # option 2 (upstream): teach the interactive-tmux driver to accept
+        # ``plugin_dirs`` and start claude with ``--plugin-dir`` flags. See
+        # ``docs/plans/workflow-skills.md`` §3 for the trade-off.
+        bridge_settings = self._build_workspace_settings_for_plugins(phase.claude_plugins)
+        if bridge_settings is not None:
+            await workspace.inject_files([(".claude/settings.json", bridge_settings)])
+            logger.info(
+                "Wrote <workspace>/.claude/settings.json bridge for %d plugin(s) "
+                "(exp/skills-tmux-bridge — option 1)",
+                len(phase.claude_plugins),
+            )
+
+    @staticmethod
+    def _build_workspace_settings_for_plugins(
+        plugins: tuple[ResolvedClaudePlugin, ...],
+    ) -> bytes | None:
+        """Build a workspace-level ``.claude/settings.json`` body for plugins.
+
+        Returns the JSON-encoded bytes when at least one plugin is present,
+        otherwise None so the caller can skip the inject. Pure function so
+        the resolution-time shape is unit-testable without touching docker.
+        """
+        if not plugins:
+            return None
+        import json as _json
+
+        # WHY pseudo-marketplace "syn": ``enabledPlugins`` keys are
+        # ``<plugin>@<marketplace>``; the marketplace label is opaque to
+        # claude's loader as long as it can resolve the plugin. We use
+        # ``syn`` to namespace these entries away from the baked-in
+        # ``claude-plugins-official`` LSP entries the workspace image writes.
+        enabled = {f"{plugin.name}@syn": True for plugin in plugins}
+        body = {
+            "enabledPlugins": enabled,
+            # WHY a non-spec "extraKnownPluginDirs" key: harmless if claude
+            # ignores it; documents the on-disk shape for the next agent
+            # reading this file. The discovery contract that actually
+            # carries claude -p is the CLI ``--plugin-dir`` flag, emitted
+            # in ``_build_provision_result``.
+            "extraKnownPluginDirs": [
+                f"/workspace/.syn-plugins/{plugin.name}" for plugin in plugins
+            ],
+        }
+        return _json.dumps(body, indent=2).encode("utf-8") + b"\n"
+
     async def _inject_phase_artifacts(
         self,
         workspace: ManagedWorkspace,
@@ -369,17 +445,34 @@ class WorkspaceProvisionHandler:
         prompt = await self._prompt_builder(
             phase, todo.execution_id, workflow_id, repo_url_for_prompt, outputs, inputs or {}
         )
-        claude_cmd = self._command_builder(phase, prompt)
-        # WHY append after command_builder (issue #726, PR2): the entrypoint of
-        # the production base image already discovers baked-in plugins under
-        # /opt/agentic/plugins/ via AGENTIC_PLUGIN_FLAGS. Per-workflow
-        # ``--plugin-dir`` flags are additive: claude CLI accepts multiple
-        # ``--plugin-dir`` instances and merges them. Validated against the
-        # production image in cycle-004/dogfood-platform-726/validation-experiment.
-        for plugin in phase.claude_plugins:
-            claude_cmd.append("--plugin-dir")
-            claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
-        agent_env = await _build_agent_env(workspace, session_id)
+        # Interactive-tmux dispatch (#765): when the phase declares
+        # provider="claude-interactive", AgentExecutionHandler will drive
+        # the agent through send_message/await_completion against the
+        # tmux pane instead of running claude -p. Skip the CLI command
+        # builder for interactive paths.
+        explicit_interactive = phase.agent_config.provider == "claude-interactive"
+        implicit_interactive = workspace.isolation_handle.isolation_type == "interactive-tmux"
+        is_interactive = explicit_interactive or implicit_interactive
+        claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
+        interactive_prompt = prompt if is_interactive else None
+
+        # CLI-flag activation for claude_plugins (#764, #726):
+        # ``--plugin-dir`` only reaches the agent via the claude -p path.
+        # For the interactive-tmux path the driver-launched claude does
+        # not consume these flags, so plugin discovery there is carried
+        # by the workspace-level <workspace>/.claude/settings.json that
+        # ``_materialize_claude_plugins`` writes (option-1 bridge —
+        # exp/skills-tmux-bridge).
+        if not is_interactive:
+            for plugin in phase.claude_plugins:
+                claude_cmd.append("--plugin-dir")
+                claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
+
+        # Interactive-tmux runs claude as a TUI with OAuth-on-disk and no
+        # sidecar; ``_build_agent_env`` requires the Envoy proxy URL the
+        # claude -p path uses to route SDK traffic. Skip env build for
+        # interactive phases.
+        agent_env = {} if is_interactive else await _build_agent_env(workspace, session_id)
         assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
             execution_id=todo.execution_id,
@@ -393,6 +486,7 @@ class WorkspaceProvisionHandler:
             agent_env=agent_env,
             claude_cmd=claude_cmd,
             command=command,
+            interactive_prompt=interactive_prompt,
         )
 
     @staticmethod
