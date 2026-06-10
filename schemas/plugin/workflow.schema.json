@@ -3,11 +3,16 @@
   "$id": "https://syntropic137.dev/schemas/plugin/v0.25.4/workflow.schema.json",
   "$defs": {
     "AgentYamlDefinition": {
-      "description": "Per-phase ``agent`` block as parsed from YAML.\n\nSelects which agent provider drives the phase (e.g. ``claude`` for the\ndefault ``claude -p`` Docker path, ``claude-interactive`` for the\ninteractive-tmux workspace provider) and optionally the model.",
+      "additionalProperties": false,
+      "description": "Per-phase ``agent`` block as parsed from YAML.\n\nSelects which agent provider drives the phase (e.g. ``claude`` for the\ndefault ``claude -p`` Docker path, ``claude-interactive`` for the\ninteractive-tmux workspace provider), which tmux pane the phase\ntargets, and optionally the model. See\ndocs/plans/multi-agent-workspaces.md.",
       "properties": {
         "provider": {
           "anyOf": [
             {
+              "enum": [
+                "claude",
+                "claude-interactive"
+              ],
               "type": "string"
             },
             {
@@ -16,6 +21,23 @@
           ],
           "default": null,
           "title": "Provider"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "enum": [
+                "claude",
+                "codex",
+                "gemini"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
         },
         "model": {
           "anyOf": [

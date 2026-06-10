@@ -17,7 +17,7 @@ semantics) — no runtime coupling to the library.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -174,13 +174,13 @@ class AgentYamlDefinition(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    provider: str | None = None
+    provider: Literal["claude", "claude-interactive"] | None = None
     """One of: ``claude`` (default; ``claude -p`` path),
     ``claude-interactive`` (drives the interactive-tmux pane)."""
 
-    agent_id: str | None = None
+    agent_id: Literal["claude", "codex", "gemini"] | None = None
     """Which tmux pane the phase targets when provider is
-    ``claude-interactive``. One of: ``claude``, ``codex``, ``gemini``."""
+    ``claude-interactive``."""
 
     model: str | None = None
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
