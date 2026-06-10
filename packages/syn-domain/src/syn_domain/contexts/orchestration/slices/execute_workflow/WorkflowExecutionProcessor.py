@@ -362,12 +362,7 @@ class WorkflowExecutionProcessor:
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_cancelled(reason=reason)
         self._session_managers.clear()
-        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
-            try:
-                await workspace_cm.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("Error cleaning up workspace during cancel")
-        self._active_workspace_cms.clear()
+        await self._close_phase_workspace_cms(context="cancel")
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
@@ -444,12 +439,7 @@ class WorkflowExecutionProcessor:
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_failure(error_message=str(error))
         self._session_managers.clear()
-        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
-            try:
-                await workspace_cm.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("Error cleaning up workspace during failure")
-        self._active_workspace_cms.clear()
+        await self._close_phase_workspace_cms(context="failure")
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
@@ -479,6 +469,25 @@ class WorkflowExecutionProcessor:
             metrics=ExecutionMetrics.from_results(phase_results),
             error_message=str(error),
         )
+
+    async def _close_phase_workspace_cms(self, context: str) -> None:
+        """Close per-phase workspace context managers and clear per-phase state.
+
+        Shared interactive-tmux context managers are skipped here: they are
+        owned by ``_shared_workspaces`` and torn down exactly once via
+        ``_cleanup_shared_workspace`` (the callers invoke it right after).
+        Closing them in this loop too would double-exit the same context
+        manager and destroy the shared container twice.
+        """
+        shared_cms = {id(cm) for _, cm in self._shared_workspaces.values()}
+        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
+            if id(workspace_cm) in shared_cms:
+                continue
+            try:
+                await workspace_cm.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Error cleaning up workspace during %s", context)
+        self._active_workspace_cms.clear()
 
     async def _cleanup_shared_workspace(self, execution_id: str) -> None:
         """Tear down the shared workspace at execution end. Idempotent."""
