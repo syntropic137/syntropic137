@@ -391,7 +391,7 @@ class WorkspaceProvisionHandler:
             session_id=session_id,
             effective_repos=[],
             outputs=phase_outputs or {},
-            inputs=inputs,
+            inputs=dict(inputs) if inputs is not None else None,
         )
 
     @staticmethod
