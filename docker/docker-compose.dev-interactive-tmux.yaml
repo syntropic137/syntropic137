@@ -1,0 +1,29 @@
+# Interactive-tmux dev overlay.
+#
+# Layered on top of docker-compose.{yaml,dev.yaml} when a developer wants
+# the dev stack to route through the EXP-05 interactive-tmux workspace
+# provider instead of the default claude -p Docker provider:
+#
+#   docker compose \
+#     -f docker/docker-compose.yaml \
+#     -f docker/docker-compose.dev.yaml \
+#     -f docker/docker-compose.dev-interactive-tmux.yaml \
+#     up -d --build api
+#
+# What this overlay adds:
+#   * SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED=true so the wiring picks
+#     the interactive-tmux factory branch.
+#   * AGENTIC_INTERACTIVE_TMUX_DRIVER + a read-only mount of the driver
+#     tree from the host submodule checkout. The agentic-primitives
+#     Python package ships without the providers/workspaces/ tree, so
+#     the driver path-walk inside the container fails without this.
+#
+# This file is OFF unless explicitly layered in. See:
+#   docs/plans/interactive-tmux-integration.md
+services:
+  api:
+    environment:
+      SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED: "true"
+      AGENTIC_INTERACTIVE_TMUX_DRIVER: /opt/agentic-primitives/providers/workspaces/interactive-tmux/driver/interactive_tmux.py
+    volumes:
+      - ../lib/agentic-primitives/providers/workspaces/interactive-tmux:/opt/agentic-primitives/providers/workspaces/interactive-tmux:ro

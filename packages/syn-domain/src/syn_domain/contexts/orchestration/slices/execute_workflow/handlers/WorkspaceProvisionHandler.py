@@ -146,7 +146,14 @@ async def _resolve_github_app_token() -> str | None:
 class ProvisionResult:
     """Result of workspace provisioning."""
 
-    __slots__ = ("agent_env", "claude_cmd", "command", "workspace", "workspace_cm")
+    __slots__ = (
+        "agent_env",
+        "claude_cmd",
+        "command",
+        "interactive_prompt",
+        "workspace",
+        "workspace_cm",
+    )
 
     def __init__(
         self,
@@ -155,12 +162,19 @@ class ProvisionResult:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         command: ProvisionWorkspaceCompletedCommand,
+        interactive_prompt: str | None = None,
     ) -> None:
         self.workspace = workspace
         self.workspace_cm = workspace_cm  # async context manager for cleanup
         self.agent_env = agent_env
         self.claude_cmd = claude_cmd
         self.command = command
+        # When non-None, AgentExecutionHandler dispatches to the
+        # interactive-tmux path (send_message/await_completion/
+        # capture_response) instead of workspace.stream(claude_cmd).
+        # Populated by WorkspaceProvisionHandler when the phase's
+        # agent_config.provider == "claude-interactive".
+        self.interactive_prompt = interactive_prompt
 
 
 class WorkspaceProvisionHandler:
@@ -305,7 +319,16 @@ class WorkspaceProvisionHandler:
         prompt = await self._prompt_builder(
             phase, todo.execution_id, workflow_id, repo_url_for_prompt, outputs, inputs or {}
         )
-        claude_cmd = self._command_builder(phase, prompt)
+        # Interactive-tmux dispatch: when the phase declares
+        # provider="claude-interactive", AgentExecutionHandler will drive
+        # the agent through send_message/await_completion against the
+        # tmux pane instead of running claude -p. Skip the CLI command
+        # builder (it would produce a noisy claude_cmd we never run) and
+        # carry the prompt out-of-band on the ProvisionResult.
+        is_interactive = phase.agent_config.provider == "claude-interactive"
+        claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
+        interactive_prompt = prompt if is_interactive else None
+
         agent_env = await _build_agent_env(workspace, session_id)
         assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
@@ -320,6 +343,7 @@ class WorkspaceProvisionHandler:
             agent_env=agent_env,
             claude_cmd=claude_cmd,
             command=command,
+            interactive_prompt=interactive_prompt,
         )
 
     @staticmethod

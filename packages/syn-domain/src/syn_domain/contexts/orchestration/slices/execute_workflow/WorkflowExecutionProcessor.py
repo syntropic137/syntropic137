@@ -119,6 +119,9 @@ class WorkflowExecutionProcessor:
         self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
+        # Per-phase prompt set out-of-band when provider="claude-interactive"
+        # (claude_cmd is empty for that path). None for the default claude -p path.
+        self._active_prompts: dict[str, str | None] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
         self._active_envs: dict[str, dict[str, str]] = {}
         self._active_cmds: dict[str, list[str]] = {}
@@ -317,6 +320,7 @@ class WorkflowExecutionProcessor:
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
+        self._active_prompts.clear()
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -390,6 +394,7 @@ class WorkflowExecutionProcessor:
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
+        self._active_prompts.clear()
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
             error=str(error),
@@ -481,6 +486,7 @@ class WorkflowExecutionProcessor:
         self._active_workspace_cms[todo.phase_id] = result.workspace_cm
         self._active_envs[todo.phase_id] = result.agent_env
         self._active_cmds[todo.phase_id] = result.claude_cmd
+        self._active_prompts[todo.phase_id] = result.interactive_prompt
         aggregate.provision_workspace_completed(result.command)
         await self._save_and_sync(aggregate)
 
@@ -501,6 +507,7 @@ class WorkflowExecutionProcessor:
         workspace = self._active_workspaces[todo.phase_id]
         agent_env = self._active_envs[todo.phase_id]
         claude_cmd = self._active_cmds[todo.phase_id]
+        interactive_prompt = self._active_prompts.get(todo.phase_id)
         session_id = todo.session_id or ""
         workflow_id = aggregate.workflow_id or ""
         timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
@@ -522,6 +529,7 @@ class WorkflowExecutionProcessor:
             agent_model=phase.agent_config.model,
             timeout_seconds=timeout,
             collector=collector,
+            interactive_prompt=interactive_prompt,
         )
 
         recorder = ConversationRecorder(self._conversation_storage)
@@ -712,6 +720,7 @@ class WorkflowExecutionProcessor:
         self._active_workspaces.pop(phase_id, None)
         self._active_envs.pop(phase_id, None)
         self._active_cmds.pop(phase_id, None)
+        self._active_prompts.pop(phase_id, None)
         workspace_cm = self._active_workspace_cms.pop(phase_id, None)
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)

@@ -108,12 +108,37 @@ class AgentExecutionHandler:
         agent_model: str,
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
+        interactive_prompt: str | None = None,
     ) -> AgentExecutionResult:
-        """Run agent in workspace and stream output."""
+        """Run agent in workspace and stream output.
+
+        Dispatch:
+          * `interactive_prompt is None` (default) → claude -p path:
+            stream `claude_cmd` through the workspace, parse stream-json
+            into Lane-2 events.
+          * `interactive_prompt is not None` → interactive-tmux path:
+            drive the workspace's interactive-tmux driver via
+            send_message / await_completion / capture_response and
+            synthesize a single Lane-2 capture event. Token/cost
+            accounting is not available on this path in v1
+            (see docs/plans/interactive-tmux-integration.md §7).
+        """
         assert todo.phase_id is not None
 
         tokens = TokenAccumulator()
         subagents = SubagentTracker()
+
+        if interactive_prompt is not None:
+            return await self._handle_interactive(
+                todo=todo,
+                workspace=workspace,
+                tokens=tokens,
+                subagents=subagents,
+                prompt=interactive_prompt,
+                session_id=session_id,
+                timeout_seconds=timeout_seconds,
+                collector=collector,
+            )
 
         processor = EventStreamProcessor(
             tokens=tokens,
@@ -168,6 +193,126 @@ class AgentExecutionHandler:
             cache_read_tokens=final_cache_read,
         )
 
+        return AgentExecutionResult(
+            stream_result=stream_result,
+            tokens=tokens,
+            subagents=subagents,
+            command=command,
+        )
+
+    async def _handle_interactive(
+        self,
+        *,
+        todo: TodoItem,
+        workspace: ManagedWorkspace,
+        tokens: TokenAccumulator,
+        subagents: SubagentTracker,
+        prompt: str,
+        session_id: str,
+        timeout_seconds: int,
+        collector: ObservabilityCollector | None,
+    ) -> AgentExecutionResult:
+        """Drive a claude-interactive phase through send_message/await_completion.
+
+        Routes through `InteractiveTmuxIsolationAdapter.provider_handle(...)`
+        — public accessor, no `_handle` reach-ins. Falls back to the
+        standard agent path with a recorded error if the workspace is
+        not actually backed by the interactive provider.
+        """
+        assert todo.phase_id is not None
+
+        from typing import Any, cast
+
+        adapter = getattr(workspace, "_service", None)
+        adapter = getattr(adapter, "_isolation", None)
+        get_handle = getattr(adapter, "provider_handle", None)
+        driver: Any = None
+        if callable(get_handle):
+            driver = cast("Any", get_handle(workspace.isolation_handle))
+
+        if driver is None:
+            error_msg = (
+                "interactive-tmux dispatch invoked but the workspace's "
+                "isolation backend does not expose provider_handle "
+                "(expected InteractiveTmuxIsolationAdapter). "
+                "Check SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED and "
+                "WorkspaceServiceConfig.provider_kind."
+            )
+            logger.error(error_msg)
+            stream_result = StreamResult(
+                line_count=0,
+                interrupt_requested=False,
+                interrupt_reason=None,
+                agent_task_result=None,
+                error_reason=error_msg,
+            )
+            command = AgentExecutionCompletedCommand(
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                session_id=session_id,
+                exit_code=1,
+                input_tokens=0,
+                output_tokens=0,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
+            )
+            return AgentExecutionResult(
+                stream_result=stream_result,
+                tokens=tokens,
+                subagents=subagents,
+                command=command,
+            )
+
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+
+        def _drive() -> tuple[int, str, str]:
+            driver.send_message("claude", prompt)
+            result = driver.await_completion("claude", timeout=float(timeout_seconds))
+            pane = driver.capture_response("claude")
+            exit_code = 0 if result.ready else 124  # 124 = standard timeout exit code
+            reason = getattr(result, "reason", "ready" if result.ready else "timeout")
+            return exit_code, pane, reason
+
+        exit_code, pane, reason = await loop.run_in_executor(None, _drive)
+
+        if collector is not None:
+            await collector.record_session_summary(
+                total_cost_usd=0.0,
+                input_tokens=0,
+                output_tokens=0,
+                cache_creation=0,
+                cache_read=0,
+                num_turns=1,
+                duration_ms=0,
+            )
+
+        logger.info(
+            "interactive-tmux phase finished (phase=%s, exit=%d, reason=%s, pane_chars=%d)",
+            todo.phase_id,
+            exit_code,
+            reason,
+            len(pane),
+        )
+
+        stream_result = StreamResult(
+            line_count=1,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            num_turns=1,
+        )
+        command = AgentExecutionCompletedCommand(
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            session_id=session_id,
+            exit_code=exit_code,
+            input_tokens=0,
+            output_tokens=0,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
+        )
         return AgentExecutionResult(
             stream_result=stream_result,
             tokens=tokens,

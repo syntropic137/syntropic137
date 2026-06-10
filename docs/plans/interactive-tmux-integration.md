@@ -457,13 +457,120 @@ not regressed by this PR). The follow-up `topology-analyze` step failed
 on this VPS with an `aps` binary path glitch unrelated to this PR;
 logged in §10.
 
-**End-to-end workflow run:** intentionally **not executed in this PR**.
-Per §3.2/§3.3 of the plan (orchestrator review clarification), v1 ships
-only the adapter + flag + factory plumbing. There is no
-`AgentExecutionHandler` dispatch wired yet, so a workflow that asked for
-`provider: claude-interactive` would still hit the `claude -p` path
-during execution. End-to-end is gated on the follow-up handler-dispatch
-PR.
+### C2 follow-up (2026-06-10): handler dispatch + integration test + partial e2e
+
+After the C2 commit, the orchestrator asked for a working, tested
+end-to-end integration, not seam-only. The following changes landed
+on `feat/interactive-tmux-workspaces`:
+
+* **`AgentExecutionHandler` dispatch wired.** When a phase carries
+  `provider: claude-interactive`, `WorkspaceProvisionHandler` populates
+  `ProvisionResult.interactive_prompt` (claude_cmd is left empty), the
+  processor carries it into `_active_prompts[phase_id]`, and
+  `AgentExecutionHandler.handle()` routes through a new
+  `_handle_interactive()` that calls
+  `adapter.provider_handle(handle).send_message → await_completion →
+  capture_response`. The public `provider_handle()` accessor is used
+  end-to-end (no `_handle` reach-ins).
+* **`AgentHandlerProtocol` + `FakeAgentExecutionHandler`** gained the
+  new `interactive_prompt: str | None = None` kwarg so the protocol
+  stays the single source of truth.
+* **Flag-aware API wiring.** `apps/syn-api/src/syn_api/_wiring.py`
+  reads `WorkspaceSettings().interactive_tmux_enabled` and passes
+  `provider_kind="interactive-tmux"` + the interactive-tmux image into
+  `WorkspaceServiceConfig`. Default off → existing claude -p path
+  unchanged.
+* **Docker-gated integration test** added at
+  `packages/syn-adapters/tests/workspace_backends/interactive_tmux/test_integration.py`:
+  starts a real `agentic-workspace-interactive-tmux:latest` container,
+  sends `Reply with the literal string OK and nothing else.`, awaits
+  completion, captures the pane. Skip markers cover missing Docker,
+  missing provider import, missing `~/.claude` creds, missing image.
+  **Result on the bring-up host: 1 passed in 35.01s** — the full
+  send_message / await_completion / capture_response loop ran against
+  the live Claude REPL.
+
+#### End-to-end via syn-api HTTP path (partial — architectural blocker)
+
+The orchestrator asked for a real HTTP-triggered workflow run.
+`just dev` came up (after a host-port conflict on 5432 — postgres 18
+is bound to localhost:5432 on this VPS, blocking the syn-db bind; ran
+the stack via direct `docker compose -f docker-compose.yaml -f
+docker-compose.dev.yaml -f docker-compose.dev-interactive-tmux.yaml up
+-d --build api` instead so the host port could be remapped locally).
+
+Sequence we ran:
+
+1. `POST /workflows/from-yaml` with
+   `workflows/examples/reply-ok-interactive.yaml` →
+   `{"id":"reply-ok-interactive","status":"created"}`.
+2. `POST /workflows/reply-ok-interactive/execute` →
+   `execution_id = "exec-e24d72471dff"`.
+3. `GET /executions/exec-e24d72471dff` → status `failed`.
+
+**What this PROVED:**
+
+* The wiring branches: syn-api's `_wiring.py` instantiated
+  `InteractiveTmuxIsolationAdapter` (visible in the stack trace —
+  `packages/syn-adapters/.../workspace_backends/interactive_tmux/adapter.py`
+  line 145 in `create`). The default-Docker `AgenticIsolationAdapter`
+  is NOT on the path.
+* The agentic-primitives `InteractiveTmuxProvider` is reachable
+  inside the API container (we mounted the driver tree at
+  `/opt/agentic-primitives/providers/workspaces/interactive-tmux` and
+  set `AGENTIC_INTERACTIVE_TMUX_DRIVER`).
+* **Envoy ext_authz bypass is confirmed.** `docker logs syn-token-injector`
+  for the full window of the execution shows **only the startup line**
+  (`Token injector starting on port 9002`) — no activity referencing
+  `exec-e24d72471dff`, no token vending call, no `ANTHROPIC_API_KEY`
+  injection on the path. The
+  `test_interactive_factory_uses_noop_token_injection` unit gate is
+  the live contract, and the actual stack agreed: nothing was
+  injected.
+
+**What FAILED — architectural blocker:**
+
+The driver raised `start_workspace called with no enabled agents
+(host_auth empty)` because the interactive-tmux driver builds its
+container by reading `$HOME/.claude` and `$HOME/.claude.json` on the
+process that calls `InteractiveTmuxWorkspace.start_workspace(...)` —
+which is the syn-api container's own filesystem, not the operator's
+host. Even when those are mounted in, the driver then copies them
+into a `tempfile.mkdtemp(...)` directory under syn-api's `/tmp` and
+bind-mounts THAT path into the new agent container. Inside the syn-api
+container, `/tmp` is the syn-api container's filesystem; the docker
+daemon — reached via the `docker-socket-proxy` sidecar — runs on the
+host filesystem and cannot mount syn-api's `/tmp` into a sibling
+container. This is the standard docker-out-of-docker host-path
+translation gap: the bind-mount source path must exist on the docker
+daemon's host, but the driver builds throwaway dirs inside the calling
+process's filesystem.
+
+Two real fixes (both bigger than the scope of this PR):
+
+1. Teach the driver to use a configurable "host-path translation"
+   prefix (matching `SYN_WORKSPACE_HOST_DIR` /
+   `SYN_WORKSPACE_CONTAINER_DIR` for the claude-cli provider). The
+   driver writes throwaway dirs to a path that exists on both the
+   syn-api container and the docker daemon's host.
+2. Run syn-api directly on the docker host (not in a container) for
+   the interactive-tmux path. Local-development only — not viable for
+   self-host installs.
+
+**What the integration test covered instead:** the same
+`send_message / await_completion / capture_response` round-trip, run
+on the docker host directly. That exercised the EXACT public seam
+syn-api uses (`InteractiveTmuxIsolationAdapter.provider_handle(...)`)
+against the live claude REPL. It is not a full HTTP-triggered
+workflow, but it is a real end-to-end test of the integration the
+adapter implements.
+
+#### E2E checkbox stance
+
+The PR-body checklist's "End-to-end run" item is **unchecked**:
+the HTTP-triggered workflow path hit the docker-out-of-docker blocker
+above. The closest substitute that DID run end-to-end (integration
+test against the live container) is the row above it, and IS checked.
 
 ### What this means for the Envoy bypass concern
 
@@ -510,6 +617,40 @@ This is closed in v1 at the **factory boundary**:
   recipe expects. Cognitive/cyclomatic gate (the substantive part)
   completed cleanly; topology was skipped. Not a regression introduced
   by this PR; will follow up with a separate issue if it persists in CI.
+* **2026-06-10** — `pnpm install` triggered by `just codegen` (which the
+  pre-push hook runs) prompted to approve esbuild/sharp build scripts
+  on a fresh clone. Resolved with `pnpm approve-builds --all`. Should
+  be a one-time operator step on a fresh VPS; consider documenting in
+  the onboarding skill.
+* **2026-06-10** — `just dev` failed to bind syn-db on port 5432 because
+  a host-level postgres 18 (`/usr/lib/postgresql/18/bin/postgres`) is
+  bound to `localhost:5432`. Worked around by locally remapping
+  `5432:5432` → `55434:5432` while running the e2e (stashed before
+  commit; not pushed). Operator follow-up: either stop the host
+  postgres or document the override.
+* **2026-06-10** — The `agentic_isolation` Python package on
+  `agentprims-lab` (c2e7f66) eagerly imports the interactive_tmux
+  driver at `agentic_isolation.providers.interactive_tmux.__init__`
+  module load, which `agentic_isolation.providers.__init__` re-exports,
+  which `agentic_isolation.__init__` re-exports. Inside the syn-api
+  container the driver isn't on the path-walk because the
+  `providers/workspaces/` tree isn't shipped with the Python package.
+  Worked around with `AGENTIC_INTERACTIVE_TMUX_DRIVER` env + a
+  read-only bind mount of the driver tree (new file
+  `docker/docker-compose.dev-interactive-tmux.yaml`). Real fix is
+  upstream: make the driver load lazy at first
+  `InteractiveTmuxWorkspace.start_workspace(...)` call so importing
+  the provider module doesn't require the driver to be reachable.
+* **2026-06-10** — The interactive-tmux driver builds its bind-mount
+  source paths under `tempfile.mkdtemp(...)` inside the calling
+  process's filesystem. When the calling process is the syn-api
+  container (docker-out-of-docker via docker-socket-proxy), those
+  paths don't exist on the docker daemon's host filesystem, so the
+  agent container can't be started. This is the e2e blocker
+  documented in §9. Real fix: the driver needs a configurable
+  host-path translation prefix (analogous to
+  `SYN_WORKSPACE_HOST_DIR` / `SYN_WORKSPACE_CONTAINER_DIR` for the
+  claude-cli provider).
 
 ---
 
