@@ -341,14 +341,105 @@ Validating phase 2 codex end-to-end requires fixing the
 artifact-pipeline KeyError — owned by the next PR in the stack,
 not this one (per stacking convention).
 
+### Phase 3 follow-up (2026-06-10): stress fix merged, phase 2 unblocked
+
+The synstress lane shipped
+[`fix/interactive-tmux-stress-blockers`](https://github.com/syntropic137/syntropic137/tree/fix/interactive-tmux-stress-blockers)
+(commit `519c6977`) with four fixes including **D1: workflow-level
+KeyError on COLLECT_ARTIFACTS** — the projection race documented in
+this plan §9 and in PR #765's evidence. Merged into
+`feat/multi-agent-workspaces` (this branch); conflicts resolved by
+keeping multi-agent's `_shared_workspaces` alongside stress fix's
+`_current_phase_id`, and by threading multi-agent's `agent_id`
+parameter through stress fix's new `_run_interactive_driver`
+extraction.
+
+#### Re-run with simple-marker prompts → both phases dispatch
+
+Execution **`exec-bc0b0464c7d9`** (workflow `multi-agent-markers`,
+proven simple-marker prompts on both phases):
+
+```
+Created interactive-tmux workspace
+(id=itws-b5d6c877, execution=exec-bc0b0464c7d9,
+ agents=['claude', 'codex', 'gemini'])
+
+interactive-tmux phase finished
+(phase=claude_first, agent=claude, exit=0, reason=ready, pane_chars=1820)
+interactive-tmux phase finished
+(phase=codex_second, agent=codex, exit=0, reason=ready, pane_chars=1615)
+
+Destroying interactive-tmux workspace (id=itws-b5d6c877)
+```
+
+Workflow status: **`completed`** in 59.1 s
+(claude phase 52.6 s + codex phase 6.3 s + overhead).
+Phase records: both `status="completed"`, `error_message=null`.
+
+This is the first true full-pass of the multi-agent chain through
+syn-api's HTTP path. The stress fix's D1 race fix took: phase 2
+(codex) was dispatched and completed cleanly on the SAME shared
+swarm container that phase 1 (claude) ran on (single workspace id
+`itws-b5d6c877`, destroyed once via
+`_cleanup_shared_workspace` at execution end).
+
+#### File write/read criterion still unmet (Claude TUI permission gate)
+
+The orchestrator's strict criterion is "phase 1 writes a file,
+phase 2 reads it on the shared workspace". A first attempt
+(`exec-626a221601c9`, workflow `multi-agent-claude-then-codex-v2`)
+asked phase 1's claude pane to use its Write tool to create
+`/workspace/note.txt`. That phase timed out with
+`reason=timeout_never_ready` after 240 s, exit code 124.
+
+Root cause is NOT the stress fix and NOT the multi-agent wiring:
+Claude's interactive TUI gates on a per-action permission dialog
+when tools (Write / Bash / Edit) are invoked, even though the
+driver's pre-seeded `.claude.json` sets
+`hasTrustDialogAccepted=true` for the workspace project. The
+permission modal blocks `_ClaudeAdapter.is_ready()`'s 3-signal
+heuristic (no `❯` prompt visible, footer hidden), so
+`await_completion` correctly returns `timeout_never_ready`. The
+container itself is fine (1797–2066 char pane captures show
+Claude's TUI is alive and asking for permission).
+
+**Mitigation paths (deferred, NOT in this PR):**
+
+1. Patch agentic-primitives' `_ClaudeAdapter.launch_in_window` to
+   pass `--dangerously-skip-permissions` so the interactive TUI
+   inherits the same auto-approve semantics as the `claude -p`
+   path. Upstream change.
+2. Pre-create the file via the adapter's `execute()` route in the
+   provision step, then have phase 1 just confirm-and-modify it.
+   Loses the "phase 1 originated the file" narrative.
+3. Use codex for the write (codex auto-accepts shell more
+   liberally per EXP-04) and claude for the read. Inverts the
+   orchestrator-specified order; may still trip a different
+   permission flow.
+
+#### E2E checkbox stance (final)
+
+The PR-body checklist's "**End-to-end run on HTTP path: phase 2
+reads file phase 1 wrote**" item **stays unchecked**. The
+orchestrator's instruction is explicit: "check the e2e checkbox
+only on a true full pass". File hand-off is not yet proven.
+
+What IS now proven (and the corresponding sub-checkbox flips):
+- ✅ **Phase 2 dispatch unblocked** by stress fix `519c6977`.
+- ✅ **Per-execution shared workspace** verified — same container
+  hosts both phases, destroyed once at execution end.
+- ✅ **Per-phase agent dispatch** — claude pane for phase 1,
+  codex pane for phase 2, both reach `reason=ready` with full
+  pane captures.
+
 ## 10. Friction log
 
 * **2026-06-10** — Workflow YAML `from-yaml` endpoint uses event
   versioning; uploading the same workflow id twice raises
   `Concurrency conflict: expected version 0, got 1`. Worked around
   by renaming the workflow id (`multi-agent-write-then-read` →
-  `multi-agent-claude-then-codex`). Operator-facing UX gap;
-  separate issue.
+  `multi-agent-claude-then-codex` → `…-v2` → `multi-agent-markers`).
+  Operator-facing UX gap; separate issue.
 * **2026-06-10** — First multi-agent e2e attempt
   (`exec-a0220fac66ce`) timed out at 180s with
   `reason=timeout_never_ready` because the prompt asked Claude to
@@ -363,6 +454,17 @@ not this one (per stacking convention).
   `KeyError: 'reply'` on #765). Not a multi-agent issue; same
   downstream gap inherited from the parent branch. Phase 2 (codex)
   never dispatched as a result.
+  **2026-06-10 follow-up:** synstress lane fixed this on branch
+  `fix/interactive-tmux-stress-blockers` (`519c6977`, D1 fix).
+  Merged into this branch; `exec-bc0b0464c7d9` confirmed phase 2
+  now dispatches.
+* **2026-06-10** — Claude's interactive TUI gates each tool use
+  (Write / Bash / Edit) on a per-action permission dialog despite
+  the driver pre-seeding `hasTrustDialogAccepted=true` in
+  `.claude.json`. Blocked the file-write/read e2e proof. The
+  multi-agent integration is not the cause; documented in §9 with
+  three deferred mitigation paths. E2E checkbox stays unchecked
+  until one of those lands.
 
 ---
 

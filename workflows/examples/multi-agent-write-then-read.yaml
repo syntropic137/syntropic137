@@ -1,5 +1,5 @@
-id: multi-agent-claude-then-codex
-name: Multi-agent shared workspace (claude → codex)
+id: multi-agent-claude-then-codex-v2
+name: Multi-agent shared workspace (claude writes / codex reads)
 description: |
   Two-phase workflow proving shared workspace state across agents.
   Phase 1 runs on Claude and writes /workspace/note.txt.
@@ -22,19 +22,20 @@ phases:
     execution_type: sequential
     argument_hint: "(none)"
     description: |
-      Asks Claude to reply with a marker string so we know phase 1
-      ran successfully. Used as the simplest possible round-trip
-      proof on the claude pane.
+      Phase 1: claude writes /workspace/note.txt with the marker
+      string. Uses Claude's Write tool (auto-trusted for the
+      pre-seeded /workspace project per the driver's claude.json).
     input_artifacts: []
     output_artifacts: []
     max_tokens: 1024
-    timeout_seconds: 180
+    timeout_seconds: 240
     agent:
       provider: claude-interactive
       agent_id: claude
     prompt_template: |
-      Reply with the literal string PHASE_ONE_CLAUDE_OK and nothing
-      else.
+      Use your Write tool to create the file at /workspace/note.txt
+      with the contents PHASE_ONE_CLAUDE_WROTE. After the file is
+      written, reply with the literal string DONE.
 
   - id: read
     name: Read on codex
@@ -42,17 +43,16 @@ phases:
     execution_type: sequential
     argument_hint: "(none)"
     description: |
-      Asks Codex (running in the SAME tmux container as the Claude
-      pane from phase 1) to reply with a marker string. Proves the
-      shared interactive-tmux workspace is alive across phases AND
-      that phase 2 was dispatched to the codex pane.
+      Phase 2: codex reads /workspace/note.txt that claude wrote in
+      phase 1. Proves shared filesystem state across agent boundaries
+      within the same interactive-tmux swarm container.
     input_artifacts: []
     output_artifacts: []
     max_tokens: 1024
-    timeout_seconds: 180
+    timeout_seconds: 240
     agent:
       provider: claude-interactive
       agent_id: codex
     prompt_template: |
-      Reply with the literal string PHASE_TWO_CODEX_OK and nothing
-      else.
+      Open the file at /workspace/note.txt and reply with its
+      contents verbatim.
