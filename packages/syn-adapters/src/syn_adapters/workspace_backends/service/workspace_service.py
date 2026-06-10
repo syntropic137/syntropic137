@@ -90,6 +90,13 @@ class WorkspaceServiceConfig:
         timeout_seconds: Default command timeout
         allowed_hosts: Allowed egress hosts for sidecar
         default_token_ttl: Default token TTL in seconds
+        provider_kind: Which workspace provider to use within the chosen
+            backend. ``"docker"`` (default) is the existing claude-cli
+            (``claude -p``) path. ``"interactive-tmux"`` selects the
+            EXP-05 interactive-tmux provider from agentic-primitives —
+            requires ``SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED=true`` to
+            actually be picked up by the factory. See
+            ``docs/plans/interactive-tmux-integration.md``.
     """
 
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
@@ -105,6 +112,7 @@ class WorkspaceServiceConfig:
     default_token_ttl: int = 300  # 5 minutes
     capabilities: tuple[CapabilityType, ...] = (CapabilityType.NETWORK,)
     environment: dict[str, str] = field(default_factory=dict)  # Non-sensitive env vars
+    provider_kind: str = "docker"  # "docker" | "interactive-tmux"
 
 
 class WorkspaceService:
@@ -225,9 +233,17 @@ class WorkspaceService:
                     default_token_ttl=cfg.default_token_ttl,
                     capabilities=cfg.capabilities,
                     environment=merged_env,
+                    provider_kind=cfg.provider_kind,
                 )
         else:
             cfg = WorkspaceServiceConfig(environment=environment or {})
+
+        # Phase C2: route to the interactive-tmux factory when the config
+        # asks for it AND the host has opted in via the feature flag. The
+        # default (provider_kind="docker") leaves the existing claude -p
+        # path completely untouched.
+        if cfg.provider_kind == "interactive-tmux":
+            return cls._create_interactive_tmux_impl(cfg)
 
         # Choose security profile based on backend type
         # LOCAL is test-only → development(); everything else (DOCKER_HARDENED, GVISOR) → production()
@@ -259,6 +275,81 @@ class WorkspaceService:
             isolation=isolation,  # type: ignore[arg-type]
             sidecar=sidecar,
             token_injection=token_injection,
+            event_stream=event_stream,  # type: ignore[arg-type]
+            config=cfg,
+        )
+
+    @classmethod
+    def _create_interactive_tmux_impl(
+        cls,
+        cfg: WorkspaceServiceConfig,
+    ) -> WorkspaceService:
+        """Internal: WorkspaceService backed by the EXP-05 interactive-tmux provider.
+
+        Gated by ``SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED`` (default
+        ``false``). When the flag is off, this method raises with a
+        clear, actionable error instead of silently falling back to the
+        Docker path — silent fallback would hide misconfiguration.
+
+        Token injection: the interactive CLI authenticates via OAuth on
+        disk (mounted ``~/.claude/.credentials.json`` +
+        ``~/.claude.json``). We wire a NoopTokenInjectionAdapter so the
+        Envoy ext_authz ANTHROPIC_API_KEY injection is NOT layered on
+        top — see ``docs/plans/interactive-tmux-integration.md`` §3.4
+        for the rationale (credential-confusion risk).
+        """
+        from syn_adapters.workspace_backends.agentic import AgenticEventStreamAdapter
+        from syn_adapters.workspace_backends.interactive_tmux import (
+            INTERACTIVE_TMUX_AVAILABLE,
+            InteractiveTmuxIsolationAdapter,
+            NoopSidecarAdapter,
+            NoopTokenInjectionAdapter,
+        )
+        from syn_shared.settings.workspace import WorkspaceSettings
+
+        settings = WorkspaceSettings()
+        if not settings.interactive_tmux_enabled:
+            msg = (
+                "WorkspaceServiceConfig.provider_kind='interactive-tmux' "
+                "requires SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED=true. "
+                "The flag is OFF by default; see "
+                "docs/plans/interactive-tmux-integration.md for the "
+                "rollout plan."
+            )
+            raise RuntimeError(msg)
+
+        if not INTERACTIVE_TMUX_AVAILABLE:
+            msg = (
+                "InteractiveTmuxProvider is not importable from "
+                "agentic_isolation.providers.interactive_tmux. The "
+                "agentic-primitives submodule must be pinned at a "
+                "commit on the `agentprims-lab` branch (or its "
+                "successor) that ships the provider."
+            )
+            raise RuntimeError(msg)
+
+        isolation = InteractiveTmuxIsolationAdapter(
+            default_image=settings.interactive_tmux_image,
+        )
+        # Reuse the agentic event-stream adapter shape; interactive-tmux
+        # does not emit stream-json today, so the stream is effectively
+        # a single-shot capture, but the adapter remains plumbable.
+        event_stream = AgenticEventStreamAdapter()
+
+        # NO SidecarTokenInjectionAdapter on this path — OAuth-on-disk
+        # authenticates outbound calls; injecting an API key on top is
+        # the credential-confusion class explicitly called out in
+        # §3.4. NoopSidecarAdapter satisfies the lifecycle code's
+        # SidecarPort slot in production (MemorySidecarAdapter is
+        # test-only per ADR-060); NoopTokenInjectionAdapter satisfies
+        # the token-injection slot without ever vending an API key.
+        sidecar = NoopSidecarAdapter()
+        token_injection = NoopTokenInjectionAdapter()
+
+        return cls(
+            isolation=isolation,  # type: ignore[arg-type]
+            sidecar=sidecar,  # type: ignore[arg-type]
+            token_injection=token_injection,  # type: ignore[arg-type]
             event_stream=event_stream,  # type: ignore[arg-type]
             config=cfg,
         )

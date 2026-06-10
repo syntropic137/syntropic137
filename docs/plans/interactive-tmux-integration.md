@@ -130,7 +130,15 @@ We add **one knob, two layers**:
    override (kwarg, default = service's `provider_kind`), so a single
    service instance can serve both kinds in one execution.
 
-### 3.2 send_message / await_completion mapping
+### 3.2 send_message / await_completion mapping (documentation-only in v1)
+
+> **V1 scope clarification (orchestrator review, 2026-06-10):** the
+> dispatch from `AgentExecutionHandler` to
+> `send_message`/`await_completion`, and the `InjectContext` wiring in
+> §3.3, are **documentation only in this PR**. V1 ships the adapter +
+> flag + selection plumbing so the next step can build on a known seam
+> without touching the default `claude -p` path. Multi-turn within a
+> phase is explicitly out of scope (see §7).
 
 The Processor To-Do List pattern in
 `WorkflowExecutionProcessor` already runs each phase as: provision →
@@ -143,36 +151,42 @@ same outer loop but swap the inside of `AgentExecutionHandler.handle`:
 | Token usage + tool calls parsed from `stream-json`. | Not available from interactive transport in v1. We record `provider="claude-interactive"` on the agent session and a non-billing `interactive_pane_capture` artifact. UBS-shape token totals are explicitly **deferred** (see §6). |
 | Single-shot per phase. | Multi-turn within a phase: see §3.3. |
 
-Implementation seam (new file):
+Implementation seam (new file, follow-up PR):
 `packages/syn-adapters/.../workspace_backends/interactive_tmux/handler.py::run_interactive_phase(
     workspace, prompt, *, agent="claude", timeout, max_turns=1)`.
-`AgentExecutionHandler` dispatches on
-`isinstance(workspace._handle, InteractiveTmuxWorkspace)` (or, cleaner, on
-the new `WorkspaceServiceConfig.provider_kind` carried on
-`ManagedWorkspace`). Either way, **the dispatch lives in
-`AgentExecutionHandler`, not in the workspace lifecycle code** — provision
-stays uniform, the difference is purely in how the agent runs.
+`AgentExecutionHandler` will dispatch on
+`InteractiveTmuxIsolationAdapter.provider_handle(handle)` returning
+non-`None` (preferred over `isinstance(workspace._handle, ...)` — public
+accessor on the adapter rather than reaching into a private field).
+Either way, **the dispatch lives in `AgentExecutionHandler`, not in the
+workspace lifecycle code** — provision stays uniform, the difference is
+purely in how the agent runs.
 
-### 3.3 Mid-execution bidirectional comms → existing control plane
+### 3.3 Mid-execution bidirectional comms → existing control plane (documentation-only in v1)
+
+> **V1 scope:** this section is design intent for a follow-up PR. The
+> control plane already exists, but **no wiring lands in this PR**;
+> multi-turn within a phase is explicitly out of scope (see §7).
 
 `ExecutionController` already speaks four commands: `PauseExecution`,
 `ResumeExecution`, `CancelExecution`, `InjectContext`. For interactive
-phases we wire these straight through:
+phases the v2 design will wire these straight through:
 
 * `InjectContext(execution_id, phase_id, message)` →
-  `ws._handle.send_message("claude", message)` then
-  `ws._handle.await_completion("claude", timeout)`. Result is recorded as a
+  `adapter.provider_handle(handle).send_message("claude", message)` then
+  `.await_completion("claude", timeout)`. Result will be recorded as a
   `context_injected` Lane-1 event (already exists) plus a Lane-2
   `interactive_turn` capture.
 * `PauseExecution` → semantically a no-op for tmux (the REPL is idle
-  between turns by design); we still flip the controller state so the
+  between turns by design); the controller state still flips so the
   processor stops dispatching follow-ups.
 * `ResumeExecution` → re-enable processor dispatch.
-* `CancelExecution` → `ws._handle.stop()` + `cleanup_workspace(...)`.
+* `CancelExecution` → `provider_handle.stop()` + `cleanup_workspace(...)`.
 
-Out of scope for v1: streaming partial responses back through the
-collector. The interactive transport surfaces only "the agent went idle";
-we capture the pane *once* at idle. Streaming is a follow-up arc (see §6).
+Out of scope for v1 (and v2 initial): streaming partial responses back
+through the collector. The interactive transport surfaces only "the
+agent went idle"; we capture the pane *once* at idle. Streaming is a
+follow-up arc (see §6).
 
 ### 3.4 Credential mounting in this repo's Docker stack
 
@@ -205,6 +219,39 @@ operator login), `start_workspace` raises before any container starts. We
 surface that as a `WorkspaceProvisionError` with an actionable message:
 "interactive-tmux requires ~/.claude on the orchestrator host; run
 `claude login` on the host or fall back to provider=claude (claude -p)".
+
+**Envoy ext_authz bypass — explicit verification (orchestrator review,
+2026-06-10).** The interactive CLI authenticates outbound calls to
+`api.anthropic.com` via the OAuth credential it reads off the mounted
+`~/.claude/.credentials.json`. Syn137's Envoy sidecar separately injects
+`ANTHROPIC_API_KEY` via ext_authz for the default `claude -p` path.
+Silently doing *both* on the interactive path is a correctness and
+credential-confusion risk: two different identities reaching the
+provider, the OAuth one billing the Max plan and the API-key one
+charging the Anthropic account, with no way to tell from the dashboard
+which call did what. The interactive path therefore **must not** ride
+through ext_authz token injection.
+
+This is enforced in two layers:
+
+1. **Adapter construction:** `InteractiveTmuxIsolationAdapter.__init__`
+   does **not** accept or carry a `SidecarTokenInjectionAdapter`, and
+   `_create_interactive_tmux_impl` in `WorkspaceService` does **not**
+   instantiate `SidecarTokenInjectionAdapter` for the interactive path
+   (only the Docker path does). The factory wires a no-op sidecar so
+   the lifecycle code's optional sidecar plumbing stays uniform without
+   actually injecting any token.
+2. **Unit test gate (C2):** a regression test in
+   `tests/workspace_backends/interactive_tmux/test_token_injection_bypass.py`
+   asserts that
+   `WorkspaceService.create(backend=DOCKER, provider_kind="interactive-tmux")`
+   yields a service whose `token_injection` adapter is the no-op
+   variant (or `None`), and that no `ANTHROPIC_*` env var is forwarded
+   into the agent environment by the interactive provision path.
+
+The validation appendix (§9) records the actual no-op binding observed
+in the integration test (or the explicit "no integration test ran,
+unit-test gate is the live contract" entry).
 
 ### 3.5 Setup phase compatibility
 
@@ -284,6 +331,7 @@ In priority order, no more than is needed:
 | Unit — command builder dispatch | `tests/wiring/test_command_dispatch.py` (new) — `provider="claude"` builds `claude -p ...`; `provider="claude-interactive"` returns `[]` and carries the prompt out-of-band. |
 | Unit — flag gate | Workflow-template creation with `provider: claude-interactive` and `SYN_INTERACTIVE_TMUX_ENABLED=false` raises a typed error; with `=true` it succeeds. |
 | Integration | `tests/workspace_backends/interactive_tmux/test_integration.py` (skip if no Docker + no `~/.claude/`) — start a workspace, run `execute("echo hi")`, run a single `send_message → await_completion` round, assert `AwaitResult.ready` and a non-empty pane capture. |
+| Envoy bypass regression (NEW from orchestrator review) | `tests/workspace_backends/interactive_tmux/test_token_injection_bypass.py` — `WorkspaceService` configured with `provider_kind="interactive-tmux"` has a no-op token-injection wiring; no `ANTHROPIC_*` env var is forwarded into the agent environment by the interactive provision path. |
 | End-to-end | One real workflow execution against a one-phase workflow whose phase has `provider: claude-interactive` and a trivial prompt ("Reply with the literal string OK."). Asserts: agent session created, exit code 0, single artifact captured, no Envoy token injection attempted. Recorded as evidence in the §9 Validation appendix. |
 | QA gates | `just qa` end-to-end: `ruff check`, `ruff format --check`, `pyright`, `pytest`, `vsa-validate`, `just fitness-check`, `just docs-sync`. |
 
@@ -359,23 +407,109 @@ unless they block the goal stated in §1:
   merge into `main` in a follow-up issue and re-pin to `main` once it
   lands.
 
-## 9. Validation appendix (filled in during Phase C3)
+## 9. Validation appendix
 
-> Empty in C1. Phase C3 records here, in order:
->
-> 1. `just qa` exit code + duration.
-> 2. Output of the new unit-test files.
-> 3. Output of the integration test (if Docker + host creds available),
->    else the documented "skipped" reason.
-> 4. The end-to-end workflow run: workflow YAML used, execution_id,
->    exit_code, pane capture excerpt, links to the resulting events in the
->    event store.
+### C2 evidence (2026-06-10)
 
-## 10. Friction log (filled in across C2/C3)
+**Adapter unit tests** (`packages/syn-adapters/tests/workspace_backends/interactive_tmux/test_adapter.py`):
 
-> Append-only. Each entry: timestamp, what hurt, how we worked around it
-> (only if working around — first preference is to fix upstream and link
-> the agentic-primitives change here).
+```
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/tests/workspace_backends/interactive_tmux/ -q
+........                                                                 [100%]
+8 passed
+```
+
+Cases covered:
+
+* `test_create_delegates_to_provider_and_returns_handle` — `IsolationConfig` → `WorkspaceConfig` round-trip; `provider_handle(handle)` returns the underlying `InteractiveTmuxWorkspace`.
+* `test_destroy_calls_provider_destroy_and_drops_handle` — workspace removed from the adapter's tracking map after destroy.
+* `test_constructor_raises_when_provider_missing` — submodule pin without the provider → `InteractiveTmuxUnavailableError` with actionable message; no silent fallback.
+* `test_provider_handle_returns_none_for_unknown_handle` — defensive.
+* **`test_interactive_factory_uses_noop_token_injection`** (Envoy bypass, NEW from orchestrator review) — `WorkspaceService.create(provider_kind="interactive-tmux")` wires `NoopTokenInjectionAdapter` + `NoopSidecarAdapter`. Neither `SidecarTokenInjectionAdapter` nor `TokenVendingServiceAdapter` are instantiated on this path.
+* `test_noop_token_injection_inject_yields_zero_tokens` — belt-and-braces: `inject()` returns `tokens_injected=()`.
+* `test_flag_off_rejects_interactive_provider_kind` — `SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED=false` → `RuntimeError`, no silent fallback to Docker.
+* `test_provider_unavailable_raises_when_flag_on_but_import_missing` — clear error pointing at `agentic_isolation` + `agentprims-lab`.
+
+**Wider regression (touched packages):**
+
+```
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/tests/ packages/syn-shared/tests/ -q
+.................................................................. [100%]
+all passed (XFAILs unchanged from main)
+```
+
+**Lint + format + type-check:**
+
+```
+uv run ruff check packages/syn-adapters/src/syn_adapters/workspace_backends/ packages/syn-shared/src/syn_shared/settings/workspace.py packages/syn-adapters/tests/workspace_backends/interactive_tmux/
+All checks passed!
+
+uv run ruff format --check ...
+42 files already formatted
+
+uv run pyright packages/syn-adapters/src/syn_adapters/workspace_backends/interactive_tmux/ packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py packages/syn-shared/src/syn_shared/settings/workspace.py
+0 errors, 1 warning (pre-existing, unrelated _create_local_impl import)
+```
+
+**`just fitness-check`:** cognitive/cyclomatic gate completed with no new
+violations (the existing per-package warnings ratchet to #673 and are
+not regressed by this PR). The follow-up `topology-analyze` step failed
+on this VPS with an `aps` binary path glitch unrelated to this PR;
+logged in §10.
+
+**End-to-end workflow run:** intentionally **not executed in this PR**.
+Per §3.2/§3.3 of the plan (orchestrator review clarification), v1 ships
+only the adapter + flag + factory plumbing. There is no
+`AgentExecutionHandler` dispatch wired yet, so a workflow that asked for
+`provider: claude-interactive` would still hit the `claude -p` path
+during execution. End-to-end is gated on the follow-up handler-dispatch
+PR.
+
+### What this means for the Envoy bypass concern
+
+The orchestrator review called out: "your plan keeps the interactive
+container on agent-net but never verifies Envoy ext_authz token
+injection is bypassed or inert for the interactive CLI's
+OAuth-authenticated traffic to api.anthropic.com; silently injecting
+ANTHROPIC_API_KEY over the mounted-OAuth path is a correctness and
+credential-confusion risk."
+
+This is closed in v1 at the **factory boundary**:
+
+* `WorkspaceService._create_interactive_tmux_impl` does NOT call
+  `get_token_vending_service()`, does NOT instantiate
+  `TokenVendingServiceAdapter`, and does NOT instantiate
+  `SidecarTokenInjectionAdapter`. It instantiates `NoopTokenInjectionAdapter`
+  and `NoopSidecarAdapter` — both of which are inert and contain zero
+  reference to Envoy, ext_authz, or `ANTHROPIC_API_KEY`.
+* The factory branch is unit-tested
+  (`test_interactive_factory_uses_noop_token_injection`) so a future
+  refactor that re-introduces ext_authz wiring on this path will fail CI.
+* The actual on-the-wire confirmation (interactive CLI's OAuth call
+  reaches `api.anthropic.com` without Envoy injecting an extra
+  authorization header) is gated on the e2e step from the next PR. The
+  unit-test gate is the live contract until then.
+
+## 10. Friction log (append-only)
+
+* **2026-06-10** — `agentic-primitives` submodule was pinned at `main`
+  (`29e43e8`) on a fresh clone but the EXP-05 provider only lives on
+  `agentprims-lab`. Bumped the submodule pointer to `c2e7f66` (lab HEAD)
+  in this PR so `agentic_isolation.providers.interactive_tmux` is
+  importable. Follow-up: re-pin to `main` once lab merges upstream.
+* **2026-06-10** — `MemorySidecarAdapter` inherits `InMemoryAdapter` and
+  is therefore test-only (raises outside `APP_ENVIRONMENT=test`). The
+  interactive path needs a SidecarPort impl in production but doesn't
+  want a real sidecar. Solution: a dedicated `NoopSidecarAdapter` in the
+  `interactive_tmux/` package — no in-memory guard, just inert methods.
+  (Not a workaround — that's the right abstraction here; the in-memory
+  one is the wrong tool.)
+* **2026-06-10** — `just fitness-check` failed at the `topology-analyze`
+  step on this VPS because the freshly-built `aps` binary landed outside
+  the `lib/agent-paradise-standards-system/target/release/` path the
+  recipe expects. Cognitive/cyclomatic gate (the substantive part)
+  completed cleanly; topology was skipped. Not a regression introduced
+  by this PR; will follow up with a separate issue if it persists in CI.
 
 ---
 
