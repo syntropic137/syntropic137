@@ -296,12 +296,44 @@ class AgentExecutionHandler:
             len(pane),
         )
 
+        # Persist the pane capture as conversation content so the phase's
+        # actual response survives into conversation storage. Wrapped as a
+        # single synthetic JSONL line because ConversationRecorder stores
+        # JSONL (the claude -p path stores raw stream-json lines).
+        import json
+
+        conversation_lines: list[str] = []
+        if pane:
+            conversation_lines.append(
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": pane}],
+                        },
+                        "source": "interactive-tmux-capture",
+                    }
+                )
+            )
+
+        error_reason = (
+            None
+            if exit_code == 0
+            else (
+                f"interactive-tmux await_completion did not become ready "
+                f"within {timeout_seconds}s (reason={reason})"
+            )
+        )
+
         stream_result = StreamResult(
-            line_count=1,
+            line_count=len(conversation_lines),
             interrupt_requested=False,
             interrupt_reason=None,
             agent_task_result=None,
+            conversation_lines=conversation_lines,
             num_turns=1,
+            error_reason=error_reason,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
