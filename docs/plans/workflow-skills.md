@@ -240,16 +240,113 @@ upstream in `agentic-primitives`.
    test that asserts claude is started with the expected `--plugin-dir`
    flag list.
 
-## 10. References
+## 10. Appendix — Positive proof of option-2 wiring (exp/skills-tmux-bridge v4)
+
+The §9 disproof of option 1 was followed by upstream `agentic-primitives`
+shipping `claude_plugin_dirs` on the interactive-tmux driver (commit
+[`f671a2e`](https://github.com/AgentParadise/agentic-primitives/commit/f671a2ec98fb937fdf91e03e4aa5f7831b0662f3),
+branch `feat/interactive-tmux-workspace-provider`). The driver now emits
+one `claude --plugin-dir <path>` flag per entry at launch time. Syn137
+wires that through, and the e2e now demonstrably activates a workflow-
+declared skill on the interactive-tmux dispatch path.
+
+### What changed on `exp/skills-tmux-bridge`
+
+The branch's settings.json bridge (option 1) was removed; the option-2
+wiring landed in five small touches plus a submodule bump:
+
+| File | Change |
+|---|---|
+| `lib/agentic-primitives` | bumped to `f671a2e` |
+| `packages/syn-domain/.../aggregate_workspace/value_objects.py` | `IsolationConfig.claude_plugin_dirs: tuple[str, ...] = ()` |
+| `packages/syn-adapters/.../service/workspace_lifecycle.py` | `build_isolation_config(claude_plugin_dirs=...)` |
+| `packages/syn-adapters/.../service/workspace_service.py` | `create_workspace(*, claude_plugin_dirs=...)` forwards to builder |
+| `packages/syn-adapters/.../interactive_tmux/adapter.py` | Per-call `_InteractiveTmuxProvider(default_claude_plugin_dirs=...)` when non-empty; default provider reused otherwise |
+| `packages/syn-domain/.../execute_workflow/handlers/WorkspaceProvisionHandler.py` | Computes `/workspace/.syn-plugins/<name>` per resolved plugin; forwards via `claude_plugin_dirs=`; settings.json bridge removed |
+
+The new wiring is regression-guarded by two unit tests
+(`TestWorkspaceProvisionHandlerForwardsPluginDirs`): one asserts the
+handler converts `phase.claude_plugins` into the right
+`/workspace/.syn-plugins/<name>` paths and forwards them to
+`create_workspace`; the other asserts the no-plugins path passes an
+empty tuple (keeps the non-interactive contract byte-equal).
+
+Full regression suite green on `packages/syn-adapters/ +
+packages/syn-domain/`: **1706 passed**. The four old settings.json shape
+tests are gone; two new wiring contract tests replace them.
+
+### Two-arm e2e (workspaces cleaned up)
+
+Harness, transcripts, and reproduction instructions:
+[`docs/experiments/exp-skills-tmux-bridge/v4/`](https://github.com/syntropic137/syntropic137/tree/exp/skills-tmux-bridge/docs/experiments/exp-skills-tmux-bridge/v4)
+on the exp branch.
+
+| Arm | Setup | Sentinel? |
+|---|---|---|
+| A — control | `claude` (bare) — no plugin dirs | absent |
+| B — wired (option 2) | `claude --plugin-dir /workspace/.syn-plugins/syn137-greet-plugin` | **PRESENT** |
+
+**Arm A — control** (workspace `exp-bridge-A-1781118934`):
+
+> `❯ Give me a Syn137 greeting.`
+>
+> `● I don't have anything in memory about "Syn137" and it's not a standard greeting format I recognize. Could you tell me what a Syn137 greeting is, or where I'd find the spec?`
+
+Claude has no awareness of the skill — there is nothing project-specific
+in its context because the SKILL.md is not loaded.
+
+**Arm B — wired** (workspace `exp-bridge-B-1781118972`):
+
+> `❯ Give me a Syn137 greeting.`
+>
+> `● Syn137 build 137.0 — workflow-skills bridge online.`
+>
+> `Ready to help — what would you like to work on?`
+
+Claude **emits the literal sentinel from the SKILL.md** — discovery AND
+activation confirmed end-to-end through the interactive-tmux dispatch
+path with the new upstream driver. This is the behavior change the
+operator's brief asked for.
+
+The SKILL is a legitimate domain-specific instruction (a project-named
+greeting), not the prompt-injection-shaped sentinel from v3. Claude
+follows it rather than refusing.
+
+### Caveat about syn-api routing (unchanged from §9)
+
+The v4 e2e drives the upstream driver directly to isolate the discovery
++ activation contract. The full `syn-api → InteractiveTmuxIsolationAdapter
+→ driver` chain is still gated on the docker-out-of-docker host-path
+translation gap that #765 documents in §9-§10 of its own plan. That gap
+is orthogonal and lives upstream in `agentic-primitives` (host-path
+prefix configuration). Once that lands, the wiring on this branch is
+production-ready as written.
+
+### Recommended next steps (updated from §9)
+
+1. Merge #764 (`claude_plugins` registration + materialization). The
+   `claude -p` skills-on-workflows feature is unchanged and works.
+2. Resolve #765's docker-out-of-docker host-path translation gap
+   upstream in `agentic-primitives`.
+3. Adopt the upstream `claude_plugin_dirs` parameter (now merged on
+   `feat/interactive-tmux-workspace-provider`); cut a new
+   `agentic-primitives` release and bump the submodule pin on a
+   regular feature branch (NOT the exp branch).
+4. Carry the wiring from `exp/skills-tmux-bridge` into that regular
+   branch (5 small touches above + 2 tests). The exp branch itself
+   stays read-only.
+
+## 11. References
 
 - PR [#764] — `feat: workflow-scoped claude plugin injection (#726)`
 - PR [#765] — `feat(workspaces): interactive-tmux provider integration`
 - PR [#767] — this PR (the research finding + experiment record)
-- Exp branch [`exp/skills-tmux-bridge`](https://github.com/syntropic137/syntropic137/tree/exp/skills-tmux-bridge) — merge + bridge code + transcripts (never merge)
+- Exp branch [`exp/skills-tmux-bridge`](https://github.com/syntropic137/syntropic137/tree/exp/skills-tmux-bridge) — merges + wiring + transcripts (never merge)
+- Upstream agentic-primitives commit [`f671a2e`](https://github.com/AgentParadise/agentic-primitives/commit/f671a2ec98fb937fdf91e03e4aa5f7831b0662f3) — `claude_plugin_dirs` driver support
 - [ADR-065 — Workflow-Scoped Claude Plugin Injection](../adrs/ADR-065-claude-plugin-injection.md)
 - [ADR-066 — Separation of Concerns](../adrs/ADR-066-separation-of-concerns.md)
 - [ADR-024 — Setup Phase Secrets Pattern](../adrs/ADR-024-setup-phase-secrets.md) (workspace lifecycle context)
-- [ADR-033 in agentic-primitives — Plugin-Native Workspace Images](https://github.com/AgentParadise/agentic-primitives/blob/main/docs/adrs/033-plugin-native-workspace-images.md) (rejects `enabledPlugins`-without-cache for Docker; informs the option-1 finding)
+- [ADR-033 in agentic-primitives — Plugin-Native Workspace Images](https://github.com/AgentParadise/agentic-primitives/blob/main/docs/adrs/033-plugin-native-workspace-images.md) (rejects `enabledPlugins`-without-cache for Docker; informed the option-1 finding)
 - [docs/architecture/docker-workspace-lifecycle.md](../architecture/docker-workspace-lifecycle.md)
 - Issue [#726](https://github.com/syntropic137/syntropic137/issues/726) — original feature request
 - Issue [#761](https://github.com/syntropic137/syntropic137/issues/761) — org/system scopes follow-up
