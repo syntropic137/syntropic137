@@ -17,6 +17,24 @@
 #     tree from the host submodule checkout. The agentic-primitives
 #     Python package ships without the providers/workspaces/ tree, so
 #     the driver path-walk inside the container fails without this.
+#   * ITMUX_CLAUDE_HOME / ITMUX_CLAUDE_JSON (from agentic-primitives
+#     ea881ea) point the driver at the operator's host credentials
+#     mounted into the syn-api container.
+#   * TMPDIR set to a SAME-PATH bind mount (/data/tmp/syn-itx in both
+#     the syn-api container and the docker daemon's host filesystem) so
+#     the driver's `tempfile.mkdtemp(...)` throwaway dirs land on a
+#     path the host docker daemon can also see — the
+#     docker-out-of-docker host-path translation trick. Without this,
+#     the driver creates throwaway dirs inside syn-api's container
+#     filesystem and the docker daemon can't bind-mount them into
+#     sibling containers.
+#
+# Prereqs on the host:
+#   * `~/.claude/.credentials.json` and `~/.claude.json` present
+#     (the operator must have run `claude login` interactively at least
+#     once).
+#   * `mkdir -p /data/tmp/syn-itx` writable by the in-container user
+#     (uid 1000).
 #
 # This file is OFF unless explicitly layered in. See:
 #   docs/plans/interactive-tmux-integration.md
@@ -25,5 +43,18 @@ services:
     environment:
       SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED: "true"
       AGENTIC_INTERACTIVE_TMUX_DRIVER: /opt/agentic-primitives/providers/workspaces/interactive-tmux/driver/interactive_tmux.py
+      # Point the driver at the operator's credentials (mounted below).
+      ITMUX_CLAUDE_HOME: /host-creds/claude
+      ITMUX_CLAUDE_JSON: /host-creds/claude.json
+      # Same-path TMPDIR so throwaway bind-mount sources survive the
+      # docker-out-of-docker boundary (docker daemon sees the same path
+      # on the host).
+      TMPDIR: /data/tmp/syn-itx
     volumes:
       - ../lib/agentic-primitives/providers/workspaces/interactive-tmux:/opt/agentic-primitives/providers/workspaces/interactive-tmux:ro
+      - ${HOME}/.claude:/host-creds/claude:ro
+      - ${HOME}/.claude.json:/host-creds/claude.json:ro
+      # SAME-PATH bind mount so paths under TMPDIR are valid bind-mount
+      # sources for the docker daemon (which runs on the host, not in
+      # syn-api).
+      - /data/tmp/syn-itx:/data/tmp/syn-itx

@@ -565,12 +565,145 @@ against the live claude REPL. It is not a full HTTP-triggered
 workflow, but it is a real end-to-end test of the integration the
 adapter implements.
 
-#### E2E checkbox stance
+#### E2E checkbox stance (initial)
 
 The PR-body checklist's "End-to-end run" item is **unchecked**:
 the HTTP-triggered workflow path hit the docker-out-of-docker blocker
 above. The closest substitute that DID run end-to-end (integration
 test against the live container) is the row above it, and IS checked.
+
+### C3 follow-up (2026-06-10): upstream DooD fix landed, re-ran e2e
+
+Upstream agentic-primitives shipped the fix on branch
+`feat/interactive-tmux-workspace-provider` at commit
+[`ea881ea`](https://github.com/AgentParadise/agentic-primitives/commit/ea881eacddab069aecf55472e7a83d8f950cbf76):
+the driver now honors `ITMUX_CLAUDE_HOME` / `ITMUX_CLAUDE_JSON` /
+`ITMUX_CODEX_HOME` / `ITMUX_GEMINI_HOME` env overrides for the
+credential discovery step, plus `$HOME` fallback. Submodule bumped to
+that commit. Combined with a same-path `TMPDIR=/data/tmp/syn-itx`
+bind-mount in the compose overlay, the throwaway-dir paths under
+`tempfile.mkdtemp(...)` survive the docker-daemon round-trip and the
+agent container's `-v <syn-api-tmp>:/home/agent/.claude` now resolves.
+
+Three small Syn137-side bugs were also fixed during the re-run:
+
+* `NoopTokenInjectionAdapter.inject()` was missing the
+  `sidecar_handle: SidecarHandle | None = None` kwarg the real
+  `SidecarTokenInjectionAdapter` accepts. Caused
+  `unexpected keyword argument 'sidecar_handle'` on the first
+  attempt.
+* `WorkspaceProvisionHandler._build_provision_result` was always
+  calling `_build_agent_env(workspace, session_id)` which raises if
+  `workspace.proxy_url` is empty. For the interactive path there's no
+  Envoy sidecar by design, so the env build is skipped (interactive
+  phases use OAuth on disk, not `ANTHROPIC_BASE_URL`).
+* The PhaseYamlDefinition schema currently has no `agent.provider`
+  field — the YAML's `agent: provider: claude-interactive` block is
+  silently dropped. Added an implicit-detection fallback: when
+  `workspace.isolation_handle.isolation_type == "interactive-tmux"`,
+  treat the phase as interactive even if the explicit per-phase
+  signal is missing. Per-phase opt-in is the future path once the
+  YAML schema gains an `agent` block.
+
+#### Re-run evidence
+
+Bring-up:
+
+```
+docker compose \
+  -f docker/docker-compose.yaml \
+  -f docker/docker-compose.dev.yaml \
+  -f docker/docker-compose.dev-interactive-tmux.yaml \
+  up -d --build api
+```
+
+(The dev.yaml port-mapping override `5432:5432 → 55434:5432` is
+host-local for the postgres 18 conflict on this VPS; not committed.)
+
+Workflow trigger:
+
+```
+curl -s -X POST http://localhost:9137/workflows/reply-ok-interactive/execute \
+     -H "Content-Type: application/json" \
+     -d '{"inputs": {"task": "Reply OK"}}'
+```
+
+Latest execution: **`exec-c64eeaf74a14`** (after iterating through
+`exec-f1524c451895` → `exec-7d1f69c312fa` → `exec-5820f4187101` →
+`exec-f24a7c013a5c` for the three Syn137-side fixes above).
+
+**Phase result: COMPLETED.** Timestamps from syn-api logs:
+
+```
+17:28:34.677  Started workflow execution exec=exec-c64eeaf74a14
+17:28:34.868  Creating workspace (id=28b4a297-..., execution=exec-c64eeaf74a14)
+17:28:39.241  Created interactive-tmux workspace (id=itws-a954475a, agents=['claude'])
+17:28:53.995  interactive-tmux phase finished (phase=reply, exit=0, reason=ready, pane_chars=1950)
+17:28:54.019  copy_from: No host_workspace_path in handle (workspace=itws-a954475a)
+17:28:54.074  Cleaning up workspace (id=28b4a297-...)
+17:28:54.075  Destroying interactive-tmux workspace (id=itws-a954475a)
+```
+
+* The interactive-tmux container was spawned from inside syn-api via
+  the docker-socket-proxy and ran the Claude TUI.
+* The driver's send_message → await_completion → capture_response
+  round-trip produced a **1950-character pane capture** with
+  `reason=ready` and `exit_code=0`.
+* The workspace was destroyed cleanly through the
+  `InteractiveTmuxIsolationAdapter.destroy()` path.
+* **Envoy ext_authz bypass confirmed AGAIN end-to-end:**
+  `docker logs syn-token-injector` shows zero references to
+  `exec-c64eeaf74a14`. No `ANTHROPIC_API_KEY` was injected on this
+  path. Only OAuth-on-disk from the mounted `~/.claude/.credentials.json`
+  authenticated the outbound call.
+
+**Workflow result: FAILED at the artifact-pipeline step.** After the
+phase completed, the orchestrator dispatched COLLECT_ARTIFACTS (which
+ran successfully — `copy_from` warned about the absent
+`host_workspace_path` and returned no artifacts, which is correct for
+interactive-tmux's pane-capture transport), then COMPLETE_PHASE
+(which finalized and destroyed the workspace), then attempted a
+SECOND COLLECT_ARTIFACTS dispatch and raised
+`KeyError: 'reply'` at
+`WorkflowExecutionProcessor.py:607` (`workspace = self._active_workspaces[todo.phase_id]`).
+The to-do projection appears to still have a pending COLLECT_ARTIFACTS
+for the phase after the first dispatch's `aggregate.artifacts_collected(...)`
++ `_save_and_sync(...)` cycle. Likely cause: an
+empty-`artifact_ids` ArtifactsCollectedForPhase event isn't advancing
+the projection to COMPLETE_PHASE the way the `claude -p` path does
+(which always produces at least one artifact). This is a downstream
+orchestration / artifact-pipeline gap, not an interactive-tmux
+integration gap — the integration itself ran to completion.
+
+The exact traceback (captured by a deliberate `logger.exception` in
+`_fail_execution`'s catch block in this PR):
+
+```
+Traceback (most recent call last):
+  File "/app/.../WorkflowExecutionProcessor.py", line 186, in run
+    await self._drain_todo_list(...)
+  File "/app/.../WorkflowExecutionProcessor.py", line 249, in _drain_todo_list
+    await self._dispatch(...)
+  File "/app/.../WorkflowExecutionProcessor.py", line 286, in _dispatch
+    await self._handle_collect_artifacts(...)
+  File "/app/.../WorkflowExecutionProcessor.py", line 607, in _handle_collect_artifacts
+    workspace = self._active_workspaces[todo.phase_id]
+                ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+KeyError: 'reply'
+```
+
+#### E2E checkbox stance (final)
+
+The PR-body checklist's "End-to-end run" item **remains unchecked**.
+Per the orchestrator's instruction ("If it still fails: capture the
+exact error and report it without papering over"), the workflow-level
+status is `failed` even though the interactive-tmux phase ran to
+completion. The integration goals — HTTP → adapter → driver →
+container → Claude REPL round-trip → Envoy bypass — are all met. The
+follow-up gap is in the workflow processor's to-do projection for
+zero-artifact phases, which is properly out-of-scope per §7
+non-goal #2 ("Authoritative token / cost accounting" — but the
+artifact-count side of the same gap manifests here).
 
 ### What this means for the Envoy bypass concern
 
@@ -646,11 +779,30 @@ This is closed in v1 at the **factory boundary**:
   process's filesystem. When the calling process is the syn-api
   container (docker-out-of-docker via docker-socket-proxy), those
   paths don't exist on the docker daemon's host filesystem, so the
-  agent container can't be started. This is the e2e blocker
-  documented in §9. Real fix: the driver needs a configurable
-  host-path translation prefix (analogous to
-  `SYN_WORKSPACE_HOST_DIR` / `SYN_WORKSPACE_CONTAINER_DIR` for the
-  claude-cli provider).
+  agent container can't be started. **Upstream fix landed
+  same-day** at agentic-primitives [`ea881ea`](https://github.com/AgentParadise/agentic-primitives/commit/ea881eacddab069aecf55472e7a83d8f950cbf76)
+  on `feat/interactive-tmux-workspace-provider`: per-agent
+  `ITMUX_*_HOME` env overrides. Combined with a same-path
+  `TMPDIR=/data/tmp/syn-itx` bind-mount, the round-trip works (see
+  §9 C3 follow-up).
+* **2026-06-10** — On the re-run, three Syn137-side bugs surfaced and
+  were fixed: (a) `NoopTokenInjectionAdapter.inject()` missing the
+  `sidecar_handle` kwarg, (b) `_build_agent_env` was being called
+  for interactive phases even though the Envoy sidecar is
+  intentionally absent on that path, (c) the YAML schema does NOT
+  carry `agent.provider` through to `AgentConfiguration`, so the
+  per-phase opt-in signal is silently lost — fixed by also
+  detecting "interactive" via `workspace.isolation_handle.isolation_type
+  == "interactive-tmux"`.
+* **2026-06-10** — Phase completes end-to-end through syn-api's HTTP
+  path (exec-c64eeaf74a14, 1950 chars pane capture, exit 0,
+  Envoy bypass confirmed). Workflow-level dispatch then raises
+  `KeyError: 'reply'` at
+  `WorkflowExecutionProcessor.py:607` on a SECOND COLLECT_ARTIFACTS
+  dispatch — appears to be a to-do projection that doesn't transition
+  past COLLECT_ARTIFACTS when `artifact_ids=[]`. This is a downstream
+  artifact-pipeline gap independent of the interactive-tmux
+  integration. E2E checkbox stays unchecked.
 
 ---
 

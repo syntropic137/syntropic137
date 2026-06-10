@@ -325,11 +325,27 @@ class WorkspaceProvisionHandler:
         # tmux pane instead of running claude -p. Skip the CLI command
         # builder (it would produce a noisy claude_cmd we never run) and
         # carry the prompt out-of-band on the ProvisionResult.
-        is_interactive = phase.agent_config.provider == "claude-interactive"
+        # Interactive detection: explicit per-phase (`provider:
+        # claude-interactive`) OR implicit (the workspace itself was
+        # provisioned through the interactive-tmux backend, e.g. when the
+        # API is wired with provider_kind="interactive-tmux" service-wide).
+        # The YAML schema currently has no `agent.provider` field, so the
+        # implicit signal is what carries the e2e today. Per-phase
+        # override is the future path once the YAML schema gains an
+        # `agent` block — handler logic doesn't need to change for that.
+        explicit_interactive = phase.agent_config.provider == "claude-interactive"
+        implicit_interactive = workspace.isolation_handle.isolation_type == "interactive-tmux"
+        is_interactive = explicit_interactive or implicit_interactive
         claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
         interactive_prompt = prompt if is_interactive else None
 
-        agent_env = await _build_agent_env(workspace, session_id)
+        # Interactive-tmux runs claude as a TUI with OAuth-on-disk;
+        # `_build_agent_env` requires the Envoy proxy URL because the
+        # claude -p path needs ANTHROPIC_BASE_URL to route SDK traffic
+        # through the sidecar. That sidecar is intentionally absent on
+        # this path (see _create_interactive_tmux_impl in
+        # WorkspaceService). Skip env build for interactive phases.
+        agent_env = {} if is_interactive else await _build_agent_env(workspace, session_id)
         assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
             execution_id=todo.execution_id,

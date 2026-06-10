@@ -212,6 +212,12 @@ class WorkflowExecutionProcessor:
                 started_at,
             )
         except Exception as e:
+            logger.exception(
+                "Workflow execution failed (exec=%s, workflow=%s): %s",
+                execution_id,
+                workflow_id,
+                e,
+            )
             return await self._fail_execution(
                 e,
                 aggregate,

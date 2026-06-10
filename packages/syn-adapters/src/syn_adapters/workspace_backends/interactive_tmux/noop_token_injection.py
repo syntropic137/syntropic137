@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
+        SidecarHandle,
         TokenInjectionResult,
         TokenType,
     )
@@ -45,6 +46,7 @@ class NoopTokenInjectionAdapter:
         execution_id: str,
         token_types: list[TokenType],
         *,
+        sidecar_handle: SidecarHandle | None = None,
         ttl_seconds: int = 300,
     ) -> TokenInjectionResult:
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -53,6 +55,7 @@ class NoopTokenInjectionAdapter:
         )
 
         del token_types  # explicitly ignored — interactive-tmux uses OAuth on disk
+        del sidecar_handle  # explicitly ignored — no sidecar on this path
         del ttl_seconds
         del execution_id
         return TokenInjectionResult(
