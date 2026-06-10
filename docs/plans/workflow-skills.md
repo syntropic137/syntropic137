@@ -10,7 +10,7 @@
 
 **PR [#764] already ships the primitive the operator asked for.** It is named `claude_plugins:` rather than `skills:`, but its design considered and explicitly rejected per-skill resolution (ADR-065 §"Alternatives considered"). A plugin is the natural Claude Code distribution unit; a single plugin can ship N skills (`skills/<name>/SKILL.md`), and the validation evidence in #764 covers a real-world 20-skill plugin (`software-leverage-points`). Building a parallel `skills:` field would duplicate the registration/storage/lock/materializer surface area for no functional gain and would fragment the YAML.
 
-The one place a follow-up is genuinely needed is the **interactive-tmux integration gap** with PR [#765] — see §6. That is a small, targeted fix, not a parallel mechanism.
+The one place a follow-up is genuinely needed is the **interactive-tmux integration gap** with PR [#765]; see §3 for the gap analysis and §10 for the experimentally proven fix (option 2, `claude_plugin_dirs` driver wiring). That is a small, targeted fix, not a parallel mechanism.
 
 [#764]: https://github.com/syntropic137/syntropic137/pull/764
 [#765]: https://github.com/syntropic137/syntropic137/pull/765
@@ -39,6 +39,8 @@ ADRs:
 - [ADR-065 — Workflow-Scoped Claude Plugin Injection](../adrs/ADR-065-claude-plugin-injection.md)
 - [ADR-066 — Separation of Concerns](../adrs/ADR-066-separation-of-concerns.md) (amends ADR-065's resolution tier)
 
+> **Note**: ADR-065 and ADR-066 land with #764. If this document merges before #764, the relative links above (and in §11) will not resolve on `main` until #764 merges.
+
 ## 2. Why `claude_plugins:` and not `skills:`
 
 ADR-065 §"Alternatives considered" rejected per-skill resolution explicitly:
@@ -54,13 +56,19 @@ If a workflow author wants a single skill out of a multi-skill plugin, they auth
 
 ### What about UX?
 
-The operator's brief suggested `skills: [name@version or repo paths]`. The same UX is reachable today: `claude_plugins: [name@version or repo paths]`. The field name `claude_plugins` is more accurate (because what gets shipped is a plugin tree, not a bare skill) and avoids the existing namespace collision the ADR called out — Syn137 already uses "plugin" in the workflow-plugin / marketplace sense, and `claude_plugins` is the disambiguated term.
+The operator's brief suggested `skills: [name@version or repo paths]`. A close equivalent is reachable today via `claude_plugins:`, whose parser (`ClaudePluginRef` in #764) accepts exactly three YAML forms:
+
+1. GitHub shorthand `org/repo@version` (e.g. `syntropic137/software-leverage-points@5.0.7`);
+2. full URL `<url>@<version>` (https / ssh / git forms; a bare host like `github.com/org/repo` in the verbose form expands to https);
+3. verbose mapping `{source, version, name}` (`source_url` accepted as an alias for `source`; `name` is an optional display-name override).
+
+Bare `name@version` (no org or host) is NOT a supported YAML form; there is no marketplace/bare-name resolution in #764, so any future bare-name support would be a CLI-side convenience, not a workflow YAML form. The field name `claude_plugins` is more accurate (because what gets shipped is a plugin tree, not a bare skill) and avoids the existing namespace collision the ADR called out: Syn137 already uses "plugin" in the workflow-plugin / marketplace sense, and `claude_plugins` is the disambiguated term.
 
 If a cosmetic alias is wanted later, the right shape is a YAML-loader-only synonym (`skills:` → parsed identically to `claude_plugins:`), not a parallel storage/lock/materializer pipeline. This document explicitly defers that decision.
 
 ## 3. Does it work for "both `claude -p` and the new interactive-tmux provider"?
 
-The operator's brief asked for both. The answer is: **yes for `claude -p` today; partial for interactive-tmux until a small bridging fix lands.**
+The operator's brief asked for both. The answer is: **yes for `claude -p` today; for interactive-tmux the gap is closed by the option-2 driver wiring proven in §10** (a small bridging fix, pending an upstream `agentic-primitives` release bump plus five wiring touches).
 
 PR #765 (`feat(workspaces): interactive-tmux provider integration`, branch `feat/interactive-tmux-workspaces`, OPEN, opened 2026-06-10) introduces a parallel dispatch path:
 
@@ -70,15 +78,15 @@ PR #765 (`feat(workspaces): interactive-tmux provider integration`, branch `feat
 
 The materializer in #764 still copies plugin trees into `<workspace>/.syn-plugins/<name>/` regardless of provider — that step is provider-agnostic (it's `docker cp` of files). But the `--plugin-dir` flag emission lives in `_build_provision_result` and lands on `claude_cmd`, which is empty for the interactive path. Result: files are on disk in the workspace, but the long-lived claude process started by the tmux driver does not load them via plugin discovery.
 
-### Bridging options (out of scope for this PR; flagged for follow-up)
+### Bridging options (historical analysis; resolved experimentally in §9-§10)
 
-Pick one when both #764 and #765 are merged:
+Three options were originally identified, to be picked up once both #764 and #765 merged. The experiments in §9 and §10 have since settled the choice; the list is kept for the record with its outcome per option:
 
-1. **Workspace-side**: emit a `<workspace>/.claude/settings.json` (or the equivalent project-level discovery hook) that lists `<workspace>/.syn-plugins/*` so any claude process started inside that workspace discovers them. Smallest change; lives entirely in Syn137.
-2. **Driver-side**: pass a list of plugin-dir paths via `WorkspaceServiceConfig` to the interactive-tmux provider, which forwards them when starting the claude binary. Requires an upstream change in `agentic-primitives` (provider config widening), then a Syn137 wiring change.
-3. **Hybrid**: materialize to a path the driver already discovers (e.g. `<workspace>/.claude/plugins/<name>/`). Avoids both a flag and a settings file but breaks the documented `.syn-plugins/` convention from ADR-065 §"Validation".
+1. **Workspace-side** (DISPROVEN; do not implement): emit a `<workspace>/.claude/settings.json` (or the equivalent project-level discovery hook) that lists `<workspace>/.syn-plugins/*` so any claude process started inside that workspace discovers them. This looked like the smallest change (entirely in Syn137), and an earlier draft of this document recommended it; the §9 experiment (Arm B) then proved the interactive-tmux-launched claude does NOT load plugins this way. Historical only.
+2. **Driver-side** (RECOMMENDED; proven end-to-end in §10): pass a list of plugin-dir paths to the interactive-tmux provider, which forwards them as `--plugin-dir` flags when starting the claude binary. The required upstream change has since shipped: `agentic-primitives` added `claude_plugin_dirs` to the driver (commit `f671a2e`), and the §10 e2e demonstrates discovery AND activation of a workflow-declared skill through this path.
+3. **Hybrid**: materialize to a path the driver already discovers (e.g. `<workspace>/.claude/plugins/<name>/`). Never explored; superseded by option 2 and it would break the documented `.syn-plugins/` convention from ADR-065 §"Validation".
 
-Recommendation: option 1. It's local, requires no upstream coordination, and matches the "workspace as the unit of context" convention that AGENTS.md / CLAUDE.md hydration already uses (`WorkspaceProvisionHandler._hydrate_workspace`).
+Recommendation: **option 2 is the single current recommendation.** The original option-1 recommendation is retained above only as history; §9 contains the experimental disproof and §10 the positive proof of the option-2 wiring.
 
 ## 4. Security / prompt-injection trust model
 
@@ -114,7 +122,7 @@ The actual operator goal — *"a workflow/phase declares skills; the executing a
 ## 6. Non-goals (this PR / this plan)
 
 - Implementing a `skills:` YAML alias for `claude_plugins:`. Deferred until the operator decides whether terminology should change. Cheap to add later; cheaper to not add prematurely.
-- Bridging #764 to #765's interactive dispatch. Requires both to be merged (or rebased onto a common base) before either bridge option in §3 can be written without churn. Captured here for the next agent to pick up.
+- Bridging #764 to #765's interactive dispatch. Requires both to be merged (or rebased onto a common base) before the option-2 bridge from §3/§10 can land without churn. Captured here for the next agent to pick up.
 - Org-scope and system-scope plugin sets. Already tracked as issue #761 by #764's author.
 - Auth for private plugin sources. v1 returns a typed `auth_required` error; deferred per ADR-065 §"Consequences".
 - Skill activation gating / sandboxing inside the agent. Out of platform scope; belongs to upstream claude-cli + plugin loader.
@@ -133,11 +141,11 @@ When the bridge from §3 is implemented, it will need a small new test: a workfl
 
 **Decision**: STOP Phase 2 / Phase 3. Do not build a parallel skills pipeline. Open a PR with this document only.
 
-**Recommended next-agent actions** (not blocking on this PR):
+**Recommended next-agent actions** (not blocking on this PR; updated after the §9-§10 experiments):
 
 1. **Review and merge #764**. It is fully validated and on the OPEN list.
-2. **Review and merge #765**. Its only unchecked test-plan item is the dod-host-path issue (`tempfile.mkdtemp` inside the syn-api container not reachable by the docker daemon spawning the agent container) — orthogonal to plugin injection.
-3. **After both are merged**, file a small follow-up to implement bridge option 1 (`<workspace>/.claude/settings.json` listing materialized plugin dirs) so `claude_plugins:` works on the interactive-tmux path. Estimate: one slice change to `WorkspaceProvisionHandler._materialize_claude_plugins`, plus one integration test.
+2. **Review and merge #765**. The docker-out-of-docker host-path gap is FIXED on its branch (upstream `agentic-primitives` commit `ea881ea` plus a same-path `TMPDIR` bind-mount; HTTP-triggered interactive phase completed in execution `exec-c64eeaf74a14`). Its remaining unchecked test-plan item is a downstream artifact-pipeline gap: the workflow processor dispatches a SECOND `COLLECT_ARTIFACTS` for zero-artifact phases and raises `KeyError` at `WorkflowExecutionProcessor.py:607`; orthogonal to plugin injection.
+3. **After both are merged**, file a small follow-up to implement bridge option 2 (NOT option 1, which §9 experimentally disproved): bump the `agentic-primitives` submodule to a release containing the `claude_plugin_dirs` driver parameter and carry the five-touch wiring plus two unit tests from `exp/skills-tmux-bridge` (§10) into a regular feature branch so `claude_plugins:` works on the interactive-tmux path. Add one integration test asserting claude is started with the expected `--plugin-dir` flag list.
 
 ## 9. Appendix — Experimental proof (exp/skills-tmux-bridge)
 
@@ -224,14 +232,15 @@ Bypassing syn-api isolates the bridge mechanism cleanly; it does not
 validate the full dispatch path. That gap is orthogonal and lives
 upstream in `agentic-primitives`.
 
-### Recommended next steps
+### Recommended next steps (historical; superseded by §10's updated list)
 
 1. Merge #764. The `claude -p` skills-on-workflows feature works today.
 2. Resolve #765's docker-out-of-docker host-path translation gap upstream
-   in `agentic-primitives`.
+   in `agentic-primitives`. (Since fixed; see §10's caveat.)
 3. Add a `plugin_dirs` parameter to the `interactive_tmux` driver
    upstream; wire it through `InteractiveTmuxIsolationAdapter` on the
-   Syn137 side. After that, merge #765.
+   Syn137 side. After that, merge #765. (Since shipped upstream as
+   `claude_plugin_dirs`; see §10.)
 4. **Skip the bridge slice from `exp/skills-tmux-bridge`** — the evidence
    above shows option 1 doesn't work. The right follow-up is the upstream
    driver change plus the tiny wiring change in
@@ -312,22 +321,37 @@ The SKILL is a legitimate domain-specific instruction (a project-named
 greeting), not the prompt-injection-shaped sentinel from v3. Claude
 follows it rather than refusing.
 
-### Caveat about syn-api routing (unchanged from §9)
+### Caveat about syn-api routing (updated against #765's current branch)
 
 The v4 e2e drives the upstream driver directly to isolate the discovery
-+ activation contract. The full `syn-api → InteractiveTmuxIsolationAdapter
-→ driver` chain is still gated on the docker-out-of-docker host-path
-translation gap that #765 documents in §9-§10 of its own plan. That gap
-is orthogonal and lives upstream in `agentic-primitives` (host-path
-prefix configuration). Once that lands, the wiring on this branch is
++ activation contract; it does not itself route through syn-api. The
+docker-out-of-docker host-path gap that previously blocked the full
+`syn-api -> InteractiveTmuxIsolationAdapter -> driver` chain has since
+been FIXED on `feat/interactive-tmux-workspaces`: upstream
+`agentic-primitives` commit `ea881ea` added `ITMUX_*` credential-path
+overrides, and combined with a same-path `TMPDIR=/data/tmp/syn-itx`
+bind-mount the HTTP-triggered chain completed an interactive phase
+end-to-end (execution `exec-c64eeaf74a14`: phase COMPLETED, exit 0,
+1950-char pane capture, Envoy bypass confirmed). The remaining blocker
+on that chain is downstream of the integration: the workflow processor
+dispatches a SECOND `COLLECT_ARTIFACTS` for zero-artifact phases and
+raises `KeyError` at `WorkflowExecutionProcessor.py:607`, so the
+workflow-level status is `failed` even though the interactive phase ran
+to completion. That gap lives in Syn137's workflow processor / to-do
+projection (empty-`artifact_ids` transition), not in
+`agentic-primitives`. Once it is fixed, the wiring on this branch is
 production-ready as written.
 
 ### Recommended next steps (updated from §9)
 
 1. Merge #764 (`claude_plugins` registration + materialization). The
    `claude -p` skills-on-workflows feature is unchanged and works.
-2. Resolve #765's docker-out-of-docker host-path translation gap
-   upstream in `agentic-primitives`.
+2. Fix the zero-artifact `COLLECT_ARTIFACTS` transition gap in the
+   workflow processor (`KeyError` at `WorkflowExecutionProcessor.py:607`
+   on the second dispatch); this is now the only remaining blocker on
+   the syn-api-routed interactive chain. The docker-out-of-docker
+   host-path gap is already fixed on #765's branch (upstream `ea881ea`
+   + `TMPDIR` overlay). Then merge #765.
 3. Adopt the upstream `claude_plugin_dirs` parameter (now merged on
    `feat/interactive-tmux-workspace-provider`); cut a new
    `agentic-primitives` release and bump the submodule pin on a
@@ -343,8 +367,8 @@ production-ready as written.
 - PR [#767] — this PR (the research finding + experiment record)
 - Exp branch [`exp/skills-tmux-bridge`](https://github.com/syntropic137/syntropic137/tree/exp/skills-tmux-bridge) — merges + wiring + transcripts (never merge)
 - Upstream agentic-primitives commit [`f671a2e`](https://github.com/AgentParadise/agentic-primitives/commit/f671a2ec98fb937fdf91e03e4aa5f7831b0662f3) — `claude_plugin_dirs` driver support
-- [ADR-065 — Workflow-Scoped Claude Plugin Injection](../adrs/ADR-065-claude-plugin-injection.md)
-- [ADR-066 — Separation of Concerns](../adrs/ADR-066-separation-of-concerns.md)
+- [ADR-065 — Workflow-Scoped Claude Plugin Injection](../adrs/ADR-065-claude-plugin-injection.md) (lands with #764; link broken on `main` until #764 merges)
+- [ADR-066 — Separation of Concerns](../adrs/ADR-066-separation-of-concerns.md) (lands with #764; link broken on `main` until #764 merges)
 - [ADR-024 — Setup Phase Secrets Pattern](../adrs/ADR-024-setup-phase-secrets.md) (workspace lifecycle context)
 - [ADR-033 in agentic-primitives — Plugin-Native Workspace Images](https://github.com/AgentParadise/agentic-primitives/blob/main/docs/adrs/033-plugin-native-workspace-images.md) (rejects `enabledPlugins`-without-cache for Docker; informed the option-1 finding)
 - [docs/architecture/docker-workspace-lifecycle.md](../architecture/docker-workspace-lifecycle.md)
