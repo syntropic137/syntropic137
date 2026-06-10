@@ -116,10 +116,7 @@ def _decode_files(entries: list[ClaudePluginFileEntry]) -> list[ClaudePluginFile
     if len(entries) > MAX_PLUGIN_TREE_FILES:
         raise HTTPException(
             status_code=413,
-            detail=(
-                f"Plugin tree has {len(entries)} files; "
-                f"the limit is {MAX_PLUGIN_TREE_FILES}"
-            ),
+            detail=(f"Plugin tree has {len(entries)} files; the limit is {MAX_PLUGIN_TREE_FILES}"),
         )
     decoded: list[ClaudePluginFile] = []
     total_bytes = 0
@@ -165,7 +162,7 @@ async def register_claude_plugin_endpoint(
     contents here. The API decodes the base64 file contents, computes the
     sha256 over the normalized tree, uploads to storage, and dispatches a
     ``RegisterClaudePluginCommand`` against the existing aggregate. Idempotent
-    on re-submission of the same ``(source_url, version)``.
+    on re-submission of the same ``(source_url, version, name)``.
     """
     files = _decode_files(body.files)
     await ensure_connected()

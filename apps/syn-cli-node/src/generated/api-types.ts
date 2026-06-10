@@ -530,7 +530,7 @@ export interface paths {
          *     contents here. The API decodes the base64 file contents, computes the
          *     sha256 over the normalized tree, uploads to storage, and dispatches a
          *     ``RegisterClaudePluginCommand`` against the existing aggregate. Idempotent
-         *     on re-submission of the same ``(source_url, version)``.
+         *     on re-submission of the same ``(source_url, version, name)``.
          */
         post: operations["register_claude_plugin_endpoint_claude_plugins_registrations_post"];
         delete?: never;
@@ -3169,7 +3169,7 @@ export interface components {
          *     The CLI uploads the entire plugin tree inline alongside the parsed manifest;
          *     the API hashes the normalized tree, stores it via the storage port, and
          *     persists the registration aggregate. Idempotent on existing
-         *     ``(source_url, version)`` (re-uploading is a safe no-op).
+         *     ``(source_url, version, name)`` (re-uploading is a safe no-op).
          */
         RegisterClaudePluginRequest: {
             /** Source Url */

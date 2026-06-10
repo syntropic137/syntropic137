@@ -1486,7 +1486,7 @@ class RegisterClaudePluginRequest(BaseModel):
     The CLI uploads the entire plugin tree inline alongside the parsed manifest;
     the API hashes the normalized tree, stores it via the storage port, and
     persists the registration aggregate. Idempotent on existing
-    ``(source_url, version)`` (re-uploading is a safe no-op).
+    ``(source_url, version, name)`` (re-uploading is a safe no-op).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

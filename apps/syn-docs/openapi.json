@@ -1670,7 +1670,7 @@
           "claude-plugins"
         ],
         "summary": "Register Claude Plugin Endpoint",
-        "description": "Register a plugin by uploading the cloned tree (Phase A redesign).\n\nThe CLI clones the source locally, parses the manifest, and POSTs the tree\ncontents here. The API decodes the base64 file contents, computes the\nsha256 over the normalized tree, uploads to storage, and dispatches a\n``RegisterClaudePluginCommand`` against the existing aggregate. Idempotent\non re-submission of the same ``(source_url, version)``.",
+        "description": "Register a plugin by uploading the cloned tree (Phase A redesign).\n\nThe CLI clones the source locally, parses the manifest, and POSTs the tree\ncontents here. The API decodes the base64 file contents, computes the\nsha256 over the normalized tree, uploads to storage, and dispatches a\n``RegisterClaudePluginCommand`` against the existing aggregate. Idempotent\non re-submission of the same ``(source_url, version, name)``.",
         "operationId": "register_claude_plugin_endpoint_claude_plugins_registrations_post",
         "requestBody": {
           "content": {
@@ -8342,7 +8342,7 @@
           "files"
         ],
         "title": "RegisterClaudePluginRequest",
-        "description": "Request body for ``POST /claude-plugins/registrations`` (Phase A).\n\nThe CLI uploads the entire plugin tree inline alongside the parsed manifest;\nthe API hashes the normalized tree, stores it via the storage port, and\npersists the registration aggregate. Idempotent on existing\n``(source_url, version)`` (re-uploading is a safe no-op)."
+        "description": "Request body for ``POST /claude-plugins/registrations`` (Phase A).\n\nThe CLI uploads the entire plugin tree inline alongside the parsed manifest;\nthe API hashes the normalized tree, stores it via the storage port, and\npersists the registration aggregate. Idempotent on existing\n``(source_url, version, name)`` (re-uploading is a safe no-op)."
       },
       "RegisterClaudePluginResponse": {
         "properties": {

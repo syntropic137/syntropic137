@@ -49,8 +49,8 @@ Org and system scopes are deferred to [#761](https://github.com/syntropic137/syn
 
 | Concern | Choice |
 |---|---|
-| Lock key | `(source_url, version)` -> `resolved_sha + tree_storage_prefix` |
-| Aggregate stream id | `claude-plugin-{sha256(source_url\|version)}` (deterministic) |
+| Lock key | `(source_url, version, name)` -> `resolved_sha + tree_storage_prefix` (`name` joined later so marketplace repos can register multiple plugins from one source) |
+| Aggregate stream id | `claude-plugin-{sha256(source_url\|version\|name)}` (deterministic) |
 | Singleton aggregate stream id | `global-claude-plugins` |
 | Storage backend | New MinIO bucket `claude-plugins`, content-addressed `sha256-<hash>/...` |
 | First-writer-wins | `ExpectedVersion.NoStream` on first event (pattern from `WorkflowExecutionProcessor.py`) |
@@ -86,7 +86,7 @@ Default empty. PR2 reads this field in `WorkspaceProvisionHandler`, materializes
 ### Negative
 
 - Per-phase granularity is plugin-only. You cannot pick individual skills out of a plugin without authoring a sub-plugin. Acceptable: plugins are the natural unit of distribution in the Claude Code ecosystem.
-- First use of a new `(source_url, version)` pays registration latency: clone + hash + per-file MinIO upload. Subsequent uses are projection-read fast.
+- First use of a new `(source_url, version, name)` pays registration latency: clone + hash + per-file MinIO upload. Subsequent uses are projection-read fast.
 - No GC of unreferenced lock entries in v1. Storage is cheap; defer until it grows.
 - Private sources require auth that v1 does not implement. Failures return a clear `auth_required` typed error.
 
@@ -124,6 +124,6 @@ Original wording in the "Resolution timing" and "PR2 routing primitive" sections
 
 - The CLI (`syn claude-plugin install <ref>` and `syn workflow install <yaml>` pre-flight) does the `gitClone`, the tree walk, and the base64 packaging.
 - The API exposes a thin `POST /claude-plugins/registrations` endpoint that accepts the pre-built tree as JSON, validates the manifest, computes the SHA, uploads to MinIO, and dispatches the domain command. No subprocess spawn, no `git` binary in the API image.
-- The lock projection still pins by `(source_url, version) -> resolved_sha + tree_storage_prefix` and remains the canonical reproducibility primitive. Everything below the resolution tier (aggregates, events, projections, materializer, `--plugin-dir` flag emission) is unchanged.
+- The lock projection still pins by `(source_url, version, name) -> resolved_sha + tree_storage_prefix` and remains the canonical reproducibility primitive. Everything below the resolution tier (aggregates, events, projections, materializer, `--plugin-dir` flag emission) is unchanged.
 
 The amendment does not change any of the locked design decisions in the table above (terminology, bounded context placement, scopes, lock key, conflict rule, materialization path, or rejection of `@latest`). Only the *runtime tier* in which fetch + upload happens moved from the API to the CLI. See `docs/experiments/cycle-004/dogfood-platform-726/redesign-thin-api.md` for the full redesign and `retro-git-in-api.md` for what went wrong and what changed in the agent's process to prevent recurrence.

@@ -50,7 +50,7 @@ phases:
 ### Reference forms
 
 A `claude_plugins:` entry accepts three input forms; the platform
-normalizes all three to a single `(source_url, version)` lock key.
+normalizes all three to a single `(source_url, version, name)` lock key.
 
 | Form | Example |
 |---|---|
@@ -58,9 +58,10 @@ normalizes all three to a single `(source_url, version)` lock key.
 | Full URL | `https://gitlab.com/example/extra.git@1.0.0` |
 | Verbose mapping | `{ source: github.com/obra/superpowers, version: 2.1.0, name: superpowers }` |
 
-The verbose form lets you override the display name. Identity remains
-`(source_url, version)` so the same plugin declared at workflow and phase
-scope deduplicates cleanly.
+The verbose form lets you override the display name. Identity is
+`(source_url, version, name)`: the same plugin declared at workflow and
+phase scope deduplicates cleanly, while the same source registered under
+two different names produces two distinct lock entries.
 
 ### What is rejected
 
@@ -96,7 +97,7 @@ syn claude-plugin global add software-leverage-points 5.0.7
 syn claude-plugin global list
 
 # Remove a global registration. The lock entry stays in place so any
-# workflow that pinned the same (source_url, version) keeps resolving.
+# workflow that pinned the same (source_url, version, name) keeps resolving.
 syn claude-plugin global remove software-leverage-points
 
 # List every entry in the lock projection (workflow-fetched and global).
@@ -151,7 +152,7 @@ parsing log output.
 | Env var | Default | Purpose |
 |---|---|---|
 | `SYN_STORAGE_CLAUDE_PLUGIN_BUCKET_NAME` | `claude-plugins` | MinIO bucket for materialized plugin trees |
-| `DEV__WORKFLOW_FAIL_ON_PLUGIN_FETCH` | `true` | When seeding workflows from disk, fail boot on a bad plugin reference. Set to `false` in dev/CI to log and skip. |
+| `DEV__WORKFLOW_FAIL_ON_PLUGIN_NOT_REGISTERED` | `true` | When seeding workflows from disk, fail boot on an unregistered plugin reference. Set to `false` in dev/CI to log and skip. |
 
 ## Status and roadmap
 
