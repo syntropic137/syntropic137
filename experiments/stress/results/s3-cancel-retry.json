@@ -1,0 +1,35 @@
+{
+  "scenario": "S3b-cancel-retry",
+  "description": "Retest of S3b cancel with projection-visibility-aware wait. Establishes that the cancel endpoint has two distinct defects.",
+  "execution_id": "exec-e45a95f159e1",
+  "projection_visibility_lag_ms": 4535,
+  "cancel_http_response": {
+    "success": true,
+    "execution_id": "exec-e45a95f159e1",
+    "state": "running",
+    "message": "Cancel signal queued",
+    "error": null
+  },
+  "outcome_after_cancel": {
+    "workflow_status": "failed",
+    "workflow_error": "'reply'",
+    "phase_status": "completed",
+    "phase_duration_seconds": 18.446982,
+    "cancel_to_terminal_ms": 17875,
+    "interpretation": "Phase ran the full 18s as if no cancel had been issued. The cancel signal was acknowledged at the HTTP layer but the interactive-tmux agent loop did not honor it."
+  },
+  "defects_surfaced": [
+    {
+      "id": "D3.b.1",
+      "severity": "blocker",
+      "title": "Control-plane Cancel is silently ignored on interactive-tmux executions",
+      "evidence": "HTTP returns 200 success=true message='Cancel signal queued' but the phase still runs to its natural ~18s completion; no interrupt was honored."
+    },
+    {
+      "id": "D3.b.2",
+      "severity": "major",
+      "title": "Cancel returns 404 during 4.5s projection-visibility lag after submit",
+      "evidence": "POST /executions/{eid}/cancel returns 'Execution not found' for several seconds after the submit response carrying that eid, because the cancel route resolves via the workflow_execution_details projection."
+    }
+  ]
+}

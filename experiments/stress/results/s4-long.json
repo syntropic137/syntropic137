@@ -1,0 +1,16 @@
+{
+  "scenario": "S4-long-conversation",
+  "execution_id": "exec-5fcc2e844036",
+  "workflow_status": "failed",
+  "workflow_error": "Agent execution failed for phase reply-long (exit_code=124) (tokens=0+0)",
+  "phase_status": "running",
+  "phase_duration_seconds": 0.0,
+  "phase_model": "haiku",
+  "wall_ms": 250707,
+  "pane_chars_from_log": 1834,
+  "sentinel_in_largest_dump": true,
+  "largest_dump_bytes": 5716,
+  "sentinel_in_last_dump": true,
+  "last_dump_bytes": 5121,
+  "finished_log_line": "  interactive-tmux phase finished (phase=reply-long, exit=124, reason=timeout_never_ready, pane_chars=1834)"
+}

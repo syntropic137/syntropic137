@@ -1,0 +1,15 @@
+S2 start: 2026-06-10T17:48:41.003Z
+baseline_itmux_ids:
+0ef661555b2f
+e2f051dd522d
+eb8416735629
+submit 1: eid=exec-dc2bf66a480c
+submit 2: eid=exec-c26bff4bd809
+submit 3: eid=exec-906cf4661d47
+mid-flight new containers (t+6s): 2
+80233f46d878
+8dcf2e667eef
+  exec-dc2bf66a480c -> failed
+  exec-c26bff4bd809 -> completed
+  exec-906cf4661d47 -> completed
+S2 done -> experiments/stress/results/s2-concurrency.json

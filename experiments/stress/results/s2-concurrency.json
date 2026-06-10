@@ -1,0 +1,43 @@
+{
+  "scenario": "S2-concurrency",
+  "n_concurrent": 3,
+  "total_wall_ms": 36343,
+  "mid_flight_new_containers": 2,
+  "post_flight_new_containers": 0,
+  "distinct_session_ids": 3,
+  "phase_completed_count": 3,
+  "workflow_completed_count": 2,
+  "workflow_failed_count": 1,
+  "runs": [
+    {
+      "execution_id": "exec-dc2bf66a480c",
+      "workflow_status": "failed",
+      "phase_status": "completed",
+      "phase_duration_seconds": 29.592742,
+      "phase_session_id": "7c757b88-1deb-4141-92d8-2d0123dcb802",
+      "workflow_error": "'reply'",
+      "phase_started_at": "2026-06-10 17:48:41.397167+00:00",
+      "phase_completed_at": "2026-06-10 17:49:10.999150+00:00"
+    },
+    {
+      "execution_id": "exec-c26bff4bd809",
+      "workflow_status": "completed",
+      "phase_status": "completed",
+      "phase_duration_seconds": 27.324362,
+      "phase_session_id": "863b2dea-ca76-4f8e-ab2a-b2eee632a745",
+      "workflow_error": null,
+      "phase_started_at": "2026-06-10 17:48:41.400766+00:00",
+      "phase_completed_at": "2026-06-10 17:49:12.998139+00:00"
+    },
+    {
+      "execution_id": "exec-906cf4661d47",
+      "workflow_status": "completed",
+      "phase_status": "completed",
+      "phase_duration_seconds": 21.519341,
+      "phase_session_id": "9de4669d-a0b5-41eb-a581-9287bea9ec08",
+      "workflow_error": null,
+      "phase_started_at": "2026-06-10 17:48:41.402629+00:00",
+      "phase_completed_at": "2026-06-10 17:49:11.649894+00:00"
+    }
+  ]
+}

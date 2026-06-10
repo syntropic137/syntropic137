@@ -1,0 +1,23 @@
+# Stress campaign — curated evidence policy.
+#
+# The full pane-dump run and the streamed syn-api log are kept locally
+# for forensics but only a small representative subset is committed
+# (the dumps that prove D-block-2 / D-block-3 — sentinel arrival and
+# steady-state pane size).
+
+# Drop the bulky syn-api log captured during S4.
+evidence/s4-syn-api.log
+
+# Drop every pane dump EXCEPT the eight checkpoints below.
+evidence/s4-pane-dumps/dump-*.txt
+!evidence/s4-pane-dumps/dump-1.txt
+!evidence/s4-pane-dumps/dump-5.txt
+!evidence/s4-pane-dumps/dump-10.txt
+!evidence/s4-pane-dumps/dump-15.txt
+!evidence/s4-pane-dumps/dump-20.txt
+!evidence/s4-pane-dumps/dump-30.txt
+!evidence/s4-pane-dumps/dump-45.txt
+!evidence/s4-pane-dumps/dump-60.txt
+
+# logs/ used to be the dir name; renamed to evidence/ to escape the root
+# .gitignore line 'logs/' which would otherwise drop the whole tree.

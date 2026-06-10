@@ -1,0 +1,20 @@
+S3 start: 2026-06-10T17:50:27.205Z
+baseline_itmux_ids:
+0ef661555b2f
+e2f051dd522d
+eb8416735629
+--- S3a kill @ 2026-06-10T17:50:27.222Z ---
+submit: {"execution_id":"exec-c36b2171052d","workflow_id":"reply-ok-interactive","status":"started","message":"Workflow execution started with provider 'claude'"}
+S3a: killing container ef8da693db2b
+ef8da693db2b
+  status_a=failed   kill→terminal=1375ms
+  post-S3a new containers: 0
+
+--- S3b cancel @ 2026-06-10T17:50:33.196Z ---
+submit: {"execution_id":"exec-766bdb7dc2e0","workflow_id":"reply-ok-interactive","status":"started","message":"Workflow execution started with provider 'claude'"}
+S3b: detected new container=463c3b6007c9
+cancel resp: {"detail":"Execution not found: exec-766bdb7dc2e0"}
+  status_b=completed   cancel→terminal=16945ms
+  post-S3b new containers: 0
+
+S3 done -> experiments/stress/results/s3-resilience.json

@@ -1,0 +1,6 @@
+S4 start: 2026-06-10T17:53:43.081Z
+register: {"id":"reply-long-interactive","name":"Reply Long (interactive-tmux)","workflow_type":"research","classification":"standard","repository_url":"","requires_repos":false,"status":"created"}
+submit: {"execution_id":"exec-5fcc2e844036","workflow_id":"reply-long-interactive","status":"started","message":"Workflow execution started with provider 'claude'"}
+container: 611ea503ca37
+  status=failed wall_ms=250707
+S4 done -> experiments/stress/results/s4-long.json

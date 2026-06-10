@@ -1,0 +1,146 @@
+{
+  "scenario": "S5-budget-reality",
+  "campaign_cutoff": "2026-06-10T17:42",
+  "executions_in_campaign": 18,
+  "min_duration_seconds": 2.183098,
+  "max_duration_seconds": 249.835214,
+  "avg_duration_seconds": 33.136097444444445,
+  "median_duration_seconds": 19.1118605,
+  "completed_count": 7,
+  "failed_count": 11,
+  "cancelled_count": 0,
+  "total_tokens_observed": 0,
+  "runs": [
+    {
+      "execution_id": "exec-d90c97a4cfe2",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 19.220102,
+      "error_message": "'reply'"
+    },
+    {
+      "execution_id": "exec-417e720667cd",
+      "workflow_id": "reply-ok-interactive",
+      "status": "completed",
+      "duration_seconds": 18.550648,
+      "error_message": null
+    },
+    {
+      "execution_id": "exec-aa6a84dc2914",
+      "workflow_id": "reply-ok-interactive",
+      "status": "completed",
+      "duration_seconds": 18.736123,
+      "error_message": null
+    },
+    {
+      "execution_id": "exec-23dede2bae93",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 19.071711,
+      "error_message": "'reply'"
+    },
+    {
+      "execution_id": "exec-9fc9474a5162",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 19.15201,
+      "error_message": "'reply'"
+    },
+    {
+      "execution_id": "exec-c77e0c4b65a5",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 18.593226,
+      "error_message": "'reply'"
+    },
+    {
+      "execution_id": "exec-7440adb89bbb",
+      "workflow_id": "reply-ok-interactive",
+      "status": "completed",
+      "duration_seconds": 18.957132,
+      "error_message": null
+    },
+    {
+      "execution_id": "exec-11e8566e1069",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 20.276591,
+      "error_message": "'reply'"
+    },
+    {
+      "execution_id": "exec-68b9615270aa",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 20.542831,
+      "error_message": "'reply'"
+    },
+    {
+      "execution_id": "exec-4d3257aae962",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 17.808065,
+      "error_message": "'reply'"
+    },
+    {
+      "execution_id": "exec-672b90bebe02",
+      "workflow_id": "reply-ok-interactive",
+      "status": "completed",
+      "duration_seconds": 18.753063,
+      "error_message": null
+    },
+    {
+      "execution_id": "exec-dc2bf66a480c",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 30.276261,
+      "error_message": "'reply'"
+    },
+    {
+      "execution_id": "exec-c26bff4bd809",
+      "workflow_id": "reply-ok-interactive",
+      "status": "completed",
+      "duration_seconds": 32.340039,
+      "error_message": null
+    },
+    {
+      "execution_id": "exec-906cf4661d47",
+      "workflow_id": "reply-ok-interactive",
+      "status": "completed",
+      "duration_seconds": 30.954774,
+      "error_message": null
+    },
+    {
+      "execution_id": "exec-c36b2171052d",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 2.183098,
+      "error_message": "Command '['docker', 'exec', 'interactive-tmux-itws-3cef84e7-86b6c920', 'tmux', 'capture-pane', '-p', '-t', 'agents:claude']' returned non-zero exit status 137."
+    },
+    {
+      "execution_id": "exec-766bdb7dc2e0",
+      "workflow_id": "reply-ok-interactive",
+      "status": "completed",
+      "duration_seconds": 19.010813,
+      "error_message": null
+    },
+    {
+      "execution_id": "exec-e45a95f159e1",
+      "workflow_id": "reply-ok-interactive",
+      "status": "failed",
+      "duration_seconds": 22.188053,
+      "error_message": "'reply'"
+    },
+    {
+      "execution_id": "exec-5fcc2e844036",
+      "workflow_id": "reply-long-interactive",
+      "status": "failed",
+      "duration_seconds": 249.835214,
+      "error_message": "Agent execution failed for phase reply-long (exit_code=124) (tokens=0+0)"
+    }
+  ],
+  "quota_log_excerpt": [
+    "  ANTHROPIC_API_KEY not configured \u2014 agent execution disabled. Set it in .env or 1Password to enable workflow runs.",
+    "[17:46:19.429] \u2139\ufe0f  INFO     syn_adapters.projections.session_tools_helpers",
+    "INFO:     127.0.0.1:42948 - \"GET /health HTTP/1.1\" 200 OK"
+  ]
+}

@@ -1,0 +1,42 @@
+id: reply-long-interactive
+name: Reply Long (interactive-tmux)
+description: |
+  S4 (stress) — multi-paragraph response to probe capture completeness
+  vs tmux scrollback. Same agent provider as reply-ok-interactive but
+  with a verbose prompt and a generous max_tokens budget.
+
+type: research
+classification: standard
+repository: null
+requires_repos: false
+project_name: null
+
+inputs:
+  - name: task
+    description: "Placeholder task (unused — prompt is hard-coded)."
+    required: false
+
+phases:
+  - id: reply-long
+    name: Reply Long
+    order: 1
+    execution_type: sequential
+    argument_hint: "(none)"
+    description: |
+      Asks the interactive Claude REPL to emit a long, structured
+      response so we can compare pane-capture bytes against the
+      expected response shape.
+    input_artifacts: []
+    output_artifacts: []
+    max_tokens: 4096
+    timeout_seconds: 240
+    agent:
+      provider: claude-interactive
+      model: sonnet
+    prompt_template: |
+      Write a five-paragraph reflection on the history of operating system
+      virtualization, from chroot in 1979 through containers, hypervisors,
+      and modern microVMs. Each paragraph must be at least four sentences.
+      Conclude with a numbered list of five distinct lessons for engineers
+      designing isolation primitives today. End the response with the
+      literal sentinel string `[END-OF-LONG-REPLY-SENTINEL]` on its own line.

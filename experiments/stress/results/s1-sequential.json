@@ -1,0 +1,73 @@
+{
+  "scenario": "S1-sequential",
+  "n_runs": 5,
+  "phase_completed_count": 5,
+  "workflow_completed_count": 2,
+  "workflow_failed_count": 3,
+  "any_new_leaks": false,
+  "phase_duration_min": 17.043515,
+  "phase_duration_max": 19.735513,
+  "phase_duration_avg": 18.3746748,
+  "runs": [
+    {
+      "run": 1,
+      "execution_id": "exec-7440adb89bbb",
+      "workflow_status": "completed",
+      "wall_ms": 20336,
+      "new_leak_count": 0,
+      "phase_status": "completed",
+      "phase_duration_seconds": 18.11147,
+      "phase_model": "haiku",
+      "workflow_error": null,
+      "completed_phases": 1
+    },
+    {
+      "run": 2,
+      "execution_id": "exec-11e8566e1069",
+      "workflow_status": "failed",
+      "wall_ms": 22518,
+      "new_leak_count": 0,
+      "phase_status": "completed",
+      "phase_duration_seconds": 19.031228,
+      "phase_model": "haiku",
+      "workflow_error": "'reply'",
+      "completed_phases": 1
+    },
+    {
+      "run": 3,
+      "execution_id": "exec-68b9615270aa",
+      "workflow_status": "failed",
+      "wall_ms": 22123,
+      "new_leak_count": 0,
+      "phase_status": "completed",
+      "phase_duration_seconds": 19.735513,
+      "phase_model": "haiku",
+      "workflow_error": "'reply'",
+      "completed_phases": 1
+    },
+    {
+      "run": 4,
+      "execution_id": "exec-4d3257aae962",
+      "workflow_status": "failed",
+      "wall_ms": 19147,
+      "new_leak_count": 0,
+      "phase_status": "completed",
+      "phase_duration_seconds": 17.043515,
+      "phase_model": "haiku",
+      "workflow_error": "'reply'",
+      "completed_phases": 1
+    },
+    {
+      "run": 5,
+      "execution_id": "exec-672b90bebe02",
+      "workflow_status": "completed",
+      "wall_ms": 20264,
+      "new_leak_count": 0,
+      "phase_status": "completed",
+      "phase_duration_seconds": 17.951648,
+      "phase_model": "haiku",
+      "workflow_error": null,
+      "completed_phases": 1
+    }
+  ]
+}
