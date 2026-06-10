@@ -162,6 +162,20 @@ class InputYamlDefinition(BaseModel):
         )
 
 
+class AgentYamlDefinition(BaseModel):
+    """Per-phase ``agent`` block as parsed from YAML.
+
+    Selects which agent provider drives the phase (e.g. ``claude`` for the
+    default ``claude -p`` Docker path, ``claude-interactive`` for the
+    interactive-tmux workspace provider) and optionally the model.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    provider: str | None = None
+    model: str | None = None
+
+
 class PhaseYamlDefinition(BaseModel):
     """Phase definition as parsed from YAML.
 
@@ -190,6 +204,10 @@ class PhaseYamlDefinition(BaseModel):
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
+
+    # Per-phase agent provider selection (interactive-tmux integration).
+    # ``agent.model`` is a fallback for the top-level ``model`` field.
+    agent: AgentYamlDefinition | None = None
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
@@ -226,7 +244,9 @@ class PhaseYamlDefinition(BaseModel):
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
             argument_hint=self.argument_hint,
-            model=self.model,
+            # Top-level model wins; agent.model is the fallback.
+            model=self.model or (self.agent.model if self.agent else None),
+            provider=self.agent.provider if self.agent else None,
         )
 
 
