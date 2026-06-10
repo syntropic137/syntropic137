@@ -1,0 +1,5 @@
+{
+  "name": "sentinel-skill-plugin",
+  "version": "0.0.1",
+  "description": "Experiment plugin for exp/skills-tmux-bridge — ships a single SKILL that asks the agent to prefix every reply with a distinctive sentinel string."
+}
