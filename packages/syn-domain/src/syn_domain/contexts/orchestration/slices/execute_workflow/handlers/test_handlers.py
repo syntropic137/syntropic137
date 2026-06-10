@@ -1169,3 +1169,113 @@ class TestWorkspaceProvisionClaudePlugins:
 
         materializer.fetch_for_workspace.assert_not_called()
         assert "--plugin-dir" not in result.claude_cmd
+
+
+# =========================================================================
+# exp/skills-tmux-bridge: option-1 bridge contract
+# =========================================================================
+
+
+@pytest.mark.unit
+class TestWorkspaceProvisionHandlerSkillsBridge:
+    """Contract tests for the workspace-level .claude/settings.json bridge.
+
+    The interactive-tmux path (#765) launches claude with no CLI flags, so
+    the ``--plugin-dir`` flag emission in ``_build_provision_result`` never
+    reaches the agent. The option-1 bridge writes a project-level
+    ``.claude/settings.json`` so the interactive driver-launched claude has
+    a discovery hook. These tests pin the shape so the next agent picks up
+    the contract from the test, not from comments.
+    """
+
+    def test_empty_plugin_tuple_returns_none(self) -> None:
+        """No plugins means no bridge file — caller must skip the inject."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        assert WorkspaceProvisionHandler._build_workspace_settings_for_plugins(()) is None
+
+    def test_single_plugin_emits_enabled_marker_and_dir(self) -> None:
+        """One plugin emits one enabledPlugins entry and one extraKnownPluginDirs path."""
+        import json as _json
+
+        from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+            ResolvedClaudePlugin,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        plugin = ResolvedClaudePlugin(
+            name="hello-world",
+            source_url="https://github.com/syntropic137/hello-world",
+            version="1.0.0",
+            resolved_sha="sha256-deadbeef",
+            tree_storage_prefix="claude-plugins/sha256-deadbeef",
+        )
+        body = WorkspaceProvisionHandler._build_workspace_settings_for_plugins((plugin,))
+        assert body is not None
+        decoded = _json.loads(body)
+        assert decoded["enabledPlugins"] == {"hello-world@syn": True}
+        assert decoded["extraKnownPluginDirs"] == ["/workspace/.syn-plugins/hello-world"]
+
+    def test_multi_plugin_preserves_declaration_order(self) -> None:
+        """Two plugins emit two entries in declaration order — deterministic for tests."""
+        import json as _json
+
+        from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+            ResolvedClaudePlugin,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        plugins = (
+            ResolvedClaudePlugin(
+                name="hello-world",
+                source_url="https://github.com/x/hello",
+                version="1.0.0",
+                resolved_sha="sha256-a",
+                tree_storage_prefix="claude-plugins/sha256-a",
+            ),
+            ResolvedClaudePlugin(
+                name="goodbye-world",
+                source_url="https://github.com/x/goodbye",
+                version="2.0.0",
+                resolved_sha="sha256-b",
+                tree_storage_prefix="claude-plugins/sha256-b",
+            ),
+        )
+        body = WorkspaceProvisionHandler._build_workspace_settings_for_plugins(plugins)
+        assert body is not None
+        decoded = _json.loads(body)
+        assert decoded["enabledPlugins"] == {
+            "hello-world@syn": True,
+            "goodbye-world@syn": True,
+        }
+        assert decoded["extraKnownPluginDirs"] == [
+            "/workspace/.syn-plugins/hello-world",
+            "/workspace/.syn-plugins/goodbye-world",
+        ]
+
+    def test_body_is_valid_utf8_json_with_trailing_newline(self) -> None:
+        """Bytes are utf-8 JSON with a final newline — POSIX-friendly file shape."""
+        from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+            ResolvedClaudePlugin,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        plugin = ResolvedClaudePlugin(
+            name="x",
+            source_url="https://github.com/x/x",
+            version="1.0.0",
+            resolved_sha="sha256-x",
+            tree_storage_prefix="claude-plugins/sha256-x",
+        )
+        body = WorkspaceProvisionHandler._build_workspace_settings_for_plugins((plugin,))
+        assert body is not None
+        assert body.endswith(b"\n")
+        body.decode("utf-8")
