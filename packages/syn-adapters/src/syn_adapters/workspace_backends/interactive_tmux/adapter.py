@@ -161,12 +161,16 @@ class InteractiveTmuxIsolationAdapter:
         )
 
     async def destroy(self, handle: IsolationHandle) -> None:
-        workspace = self._workspaces.pop(handle.isolation_id, None)
+        workspace = self._workspaces.get(handle.isolation_id)
         if workspace is None:
             logger.warning("Interactive-tmux workspace not found: %s", handle.isolation_id)
             return
         logger.info("Destroying interactive-tmux workspace (id=%s)", handle.isolation_id)
+        # Pop only AFTER a successful provider destroy. If destroy raises
+        # (e.g. docker timeout), the handle stays in _workspaces so the
+        # caller can retry instead of leaking the tmux/Docker resources.
         await self._provider.destroy(workspace)
+        self._workspaces.pop(handle.isolation_id, None)
 
     async def execute(
         self,
