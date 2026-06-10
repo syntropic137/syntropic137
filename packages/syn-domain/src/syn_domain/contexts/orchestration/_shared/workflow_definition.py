@@ -22,6 +22,9 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
+    ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
 from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
@@ -191,6 +194,10 @@ class PhaseYamlDefinition(BaseModel):
     argument_hint: str | None = None
     model: str | None = None
 
+    # Phase-scope claude plugin refs (issue #726). Workflow-scope refs live on
+    # WorkflowDefinition. PR1 carries them through; PR2 resolves them.
+    claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
         """Ensure at most one of prompt_template or prompt_file is set."""
@@ -227,6 +234,7 @@ class PhaseYamlDefinition(BaseModel):
             allowed_tools=self.allowed_tools,
             argument_hint=self.argument_hint,
             model=self.model,
+            claude_plugins=tuple(self.claude_plugins),
         )
 
 
@@ -300,6 +308,10 @@ class WorkflowDefinition(BaseModel):
 
     # Phases
     phases: list[PhaseYamlDefinition] = Field(..., min_length=1)
+
+    # Workflow-scope claude plugin refs (issue #726). The Phase 5 resolution
+    # service walks both this list and per-phase refs to populate the lock.
+    claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
 
     @field_validator("phases")
     @classmethod

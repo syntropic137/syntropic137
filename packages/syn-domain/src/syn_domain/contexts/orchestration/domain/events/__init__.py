@@ -12,6 +12,9 @@ from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEven
 from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
     ArtifactsCollectedForPhaseEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.ClaudePluginRegisteredEvent import (
+    ClaudePluginRegisteredEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
     CommandExecutedEvent,
 )
@@ -26,6 +29,12 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionPausedEvent import
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.GlobalClaudePluginAddedEvent import (
+    GlobalClaudePluginAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.GlobalClaudePluginRemovedEvent import (
+    GlobalClaudePluginRemovedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.IsolationStartedEvent import (
     IsolationStartedEvent,
@@ -88,11 +97,14 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceTerminatedEvent im
 __all__ = [
     "AgentExecutionCompletedEvent",
     "ArtifactsCollectedForPhaseEvent",
+    "ClaudePluginRegisteredEvent",
     "CommandExecutedEvent",
     "CommandFailedEvent",
     "ExecutionCancelledEvent",
     "ExecutionPausedEvent",
     "ExecutionResumedEvent",
+    "GlobalClaudePluginAddedEvent",
+    "GlobalClaudePluginRemovedEvent",
     "IsolationStartedEvent",
     "NextPhaseReadyEvent",
     "PhaseCompletedEvent",

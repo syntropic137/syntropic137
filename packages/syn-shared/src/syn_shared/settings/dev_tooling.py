@@ -61,6 +61,19 @@ class DevToolingSettings(BaseSettings):
         ),
     )
 
+    workflow_fail_on_plugin_not_registered: bool = Field(
+        default=True,
+        description=(
+            "When seeding workflows from disk (issue #726, Phase A), fail boot "
+            "if a claude_plugins ref is not in the lock projection. Set to "
+            "false in dev/CI to log the error and skip the failing workflow "
+            "while still seeding the rest. Production should leave this true "
+            "so an unregistered plugin ref never silently lands a half-"
+            "installed workflow set. Plugins must be registered via "
+            "POST /claude-plugins/registrations before seeding."
+        ),
+    )
+
 
 def get_dev_api_url() -> str:
     """Resolve API URL for dev tools.
