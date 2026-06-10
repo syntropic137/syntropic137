@@ -33,7 +33,9 @@ and ``phase_progress`` is merged monotonically (max rank per phase)
 against the freshly-read record at save time. The monotonic merge also
 bounds the damage if a writer ever bypasses the lock (e.g. a future
 out-of-process consumer): it can write stale ``items`` but can never
-regress a phase's recorded rank.
+regress a phase's recorded rank. ``get_pending`` closes the remaining
+gap by filtering out items whose rank sits below the phase's recorded
+highwater mark, so a resurrected stale todo is never served.
 """
 
 from __future__ import annotations
@@ -154,11 +156,32 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         """Get all pending to-do items for an execution.
 
         Returns items in insertion order (FIFO).
+
+        Defense in depth: items whose action rank is strictly below the
+        phase's recorded highwater mark are filtered out. Every save site
+        writes an item together with its rank, so fresh items always have
+        rank == progress; only resurrected/stale items rank below. A
+        writer that bypasses the per-execution lock (e.g. a future
+        out-of-process consumer on a shared Postgres store, where the
+        asyncio lock is useless) can persist stale ``items`` but can never
+        regress ``phase_progress`` (monotonic merge), so this read-time
+        filter guarantees a stale todo is never served to the processor.
+        Phase-done (_RANK_PHASE_DONE) suppresses every action for that
+        phase; items rank-equal to progress are still served.
         """
         data = await self._store.get(self.PROJECTION_NAME, execution_id)
         if data is None:
             return []
-        return [_item_from_dict(d) for d in data.get("items", [])]
+        items = [_item_from_dict(d) for d in data.get("items", [])]
+        raw_progress = data.get("phase_progress")
+        progress: dict[str, int] = raw_progress if isinstance(raw_progress, dict) else {}
+        return [
+            item
+            for item in items
+            if item.phase_id is None
+            or item.action not in _ACTION_RANK
+            or progress.get(item.phase_id, 0) <= _ACTION_RANK[item.action]
+        ]
 
     # =========================================================================
     # Event handlers

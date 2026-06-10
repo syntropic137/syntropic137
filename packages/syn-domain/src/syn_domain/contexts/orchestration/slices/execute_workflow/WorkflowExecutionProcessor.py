@@ -668,7 +668,22 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Dispatch COLLECT_ARTIFACTS."""
         assert todo.phase_id is not None
-        workspace = self._active_workspaces[todo.phase_id]
+        workspace = self._active_workspaces.get(todo.phase_id)
+        if workspace is None:
+            # Defense in depth: in-process this branch is unreachable
+            # (_finalize_phase pops _active_workspaces only after
+            # on_phase_completed locks the phase at rank 99, and
+            # get_pending filters stale items), but a lock-bypassing
+            # projection writer (e.g. a future out-of-process consumer on
+            # a shared Postgres store) could resurrect a stale todo.
+            # Skip it instead of crashing the workflow with KeyError.
+            logger.warning(
+                "Skipping stale COLLECT_ARTIFACTS for finalized phase %s "
+                "(execution %s): no active workspace",
+                todo.phase_id,
+                todo.execution_id,
+            )
+            return
         artifacts = ArtifactCollector(
             self._artifact_repo,
             self._artifact_content_storage,
