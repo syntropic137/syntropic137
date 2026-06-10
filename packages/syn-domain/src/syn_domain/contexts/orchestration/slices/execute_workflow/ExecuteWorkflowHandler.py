@@ -253,12 +253,11 @@ class ExecuteWorkflowHandler:
         for phase in workflow.phases:
             phase_model = getattr(phase, "model", None)
             phase_provider = getattr(phase, "provider", None)
-            overrides: dict[str, str] = {}
-            if phase_model:
-                overrides["model"] = phase_model
-            if phase_provider:
-                overrides["provider"] = phase_provider
-            agent_config = AgentConfiguration(**overrides)
+            defaults = AgentConfiguration()
+            agent_config = AgentConfiguration(
+                provider=phase_provider or defaults.provider,
+                model=phase_model or defaults.model,
+            )
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,
