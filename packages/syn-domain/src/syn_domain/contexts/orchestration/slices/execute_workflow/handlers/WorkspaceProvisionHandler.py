@@ -381,6 +381,23 @@ class WorkspaceProvisionHandler:
             )
 
     @staticmethod
+    def _append_plugin_dir_flags(
+        claude_cmd: list[str],
+        plugins: tuple[ResolvedClaudePlugin, ...],
+    ) -> None:
+        """Append ``--plugin-dir <workspace-path>`` per plugin to claude_cmd.
+
+        Extracted to keep ``_build_provision_result`` under the cognitive
+        complexity gate. Validated against the production base image: the
+        entrypoint's baked-in plugin flags and these per-workflow flags are
+        additive — claude CLI accepts multiple ``--plugin-dir`` instances
+        and merges them (issue #726 / ADR-065).
+        """
+        for plugin in plugins:
+            claude_cmd.append("--plugin-dir")
+            claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
+
+    @staticmethod
     def _build_workspace_settings_for_plugins(
         plugins: tuple[ResolvedClaudePlugin, ...],
     ) -> bytes | None:
@@ -456,17 +473,11 @@ class WorkspaceProvisionHandler:
         claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
         interactive_prompt = prompt if is_interactive else None
 
-        # CLI-flag activation for claude_plugins (#764, #726):
-        # ``--plugin-dir`` only reaches the agent via the claude -p path.
-        # For the interactive-tmux path the driver-launched claude does
-        # not consume these flags, so plugin discovery there is carried
-        # by the workspace-level <workspace>/.claude/settings.json that
-        # ``_materialize_claude_plugins`` writes (option-1 bridge —
-        # exp/skills-tmux-bridge).
+        # CLI-flag activation for claude_plugins on the claude -p path only.
+        # Interactive-tmux plugins are discovered via the workspace-level
+        # .claude/settings.json bridge in _materialize_claude_plugins.
         if not is_interactive:
-            for plugin in phase.claude_plugins:
-                claude_cmd.append("--plugin-dir")
-                claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
+            self._append_plugin_dir_flags(claude_cmd, phase.claude_plugins)
 
         # Interactive-tmux runs claude as a TUI with OAuth-on-disk and no
         # sidecar; ``_build_agent_env`` requires the Envoy proxy URL the
