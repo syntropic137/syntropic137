@@ -15,6 +15,7 @@ Usage:
 from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
     ClaudePluginError,
     ClaudePluginInvalidName,
+    ClaudePluginInvalidPath,
     ClaudePluginManifestInvalid,
     ClaudePluginManifestMissing,
     ClaudePluginNotRegistered,
@@ -127,6 +128,7 @@ __all__ = [
     # Claude plugin types + errors (issue #726)
     "ClaudePluginError",
     "ClaudePluginInvalidName",
+    "ClaudePluginInvalidPath",
     "ClaudePluginManifestInvalid",
     "ClaudePluginManifestMissing",
     "ClaudePluginNotFoundError",

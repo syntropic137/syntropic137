@@ -75,6 +75,27 @@ class ClaudePluginInvalidName(ClaudePluginError):
         self.reason = reason
 
 
+class ClaudePluginInvalidPath(ClaudePluginError):
+    """A file path in the uploaded plugin tree fails safety validation.
+
+    Raised by ``RegisterClaudePluginHandler`` before any hashing or storage
+    so a hostile ``rel_path`` (traversal, absolute, backslash, control
+    characters) can never be persisted and later materialized into a
+    workspace path (issue #726).
+    """
+
+    error_code = "claude_plugin_invalid_path"
+
+    def __init__(self, rel_path: str, reason: str) -> None:
+        super().__init__(
+            f"Claude plugin file path {rel_path!r} is invalid: {reason}. "
+            "Paths must be POSIX-relative with no empty or '.'/'..' segments, "
+            "no backslashes, and no control characters."
+        )
+        self.rel_path = rel_path
+        self.reason = reason
+
+
 class ClaudePluginNotRegistered(ClaudePluginError):
     """A referenced plugin is not present in the lock projection.
 

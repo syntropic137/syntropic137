@@ -71,6 +71,17 @@ if TYPE_CHECKING:
 
 router = APIRouter(prefix="/claude-plugins", tags=["claude-plugins"])
 
+# WHY (issue #726 review): the CLI enforces MAX_TREE_BYTES (50 MiB) in
+# apps/syn-cli-node/src/packages/claude-plugin.ts before uploading, but direct
+# API clients bypass that. Mirror the cap server-side so a hostile or buggy
+# client cannot make the API accumulate arbitrarily large decoded trees.
+# Keep the two constants in sync.
+MAX_PLUGIN_TREE_BYTES = 50 * 1024 * 1024
+
+# WHY: a generous ceiling on file count; real plugin trees are a few hundred
+# files at most. Checked before any base64 decoding happens.
+MAX_PLUGIN_TREE_FILES = 10_000
+
 
 def _to_global_response(entry: GlobalClaudePluginEntry) -> GlobalClaudePluginResponse:
     return GlobalClaudePluginResponse(
@@ -97,10 +108,32 @@ def _decode_files(entries: list[ClaudePluginFileEntry]) -> list[ClaudePluginFile
     """Decode the base64-encoded request files into domain value objects.
 
     Bad base64 surfaces as a 400 (caller-controlled input shape) rather than a
-    500.
+    500. Over-limit trees surface as 413: the file count is checked before any
+    decoding, and the cumulative decoded size is estimated from the base64
+    length (4 chars encode 3 bytes) BEFORE each decode so a hostile payload is
+    rejected without materializing the decoded bytes.
     """
+    if len(entries) > MAX_PLUGIN_TREE_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Plugin tree has {len(entries)} files; "
+                f"the limit is {MAX_PLUGIN_TREE_FILES}"
+            ),
+        )
     decoded: list[ClaudePluginFile] = []
+    total_bytes = 0
     for raw in entries:
+        estimated = (len(raw.content_b64) * 3) // 4
+        if total_bytes + estimated > MAX_PLUGIN_TREE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Plugin tree exceeds {MAX_PLUGIN_TREE_BYTES} bytes "
+                    f"({MAX_PLUGIN_TREE_BYTES // (1024 * 1024)} MiB); "
+                    "refusing the registration"
+                ),
+            )
         try:
             content = base64.b64decode(raw.content_b64, validate=True)
         except (binascii.Error, ValueError) as exc:
@@ -108,6 +141,7 @@ def _decode_files(entries: list[ClaudePluginFileEntry]) -> list[ClaudePluginFile
                 status_code=400,
                 detail=f"Invalid base64 content for {raw.rel_path!r}: {exc}",
             ) from exc
+        total_bytes += len(content)
         decoded.append(ClaudePluginFile(rel_path=raw.rel_path, content=content))
     return decoded
 
@@ -118,7 +152,8 @@ def _decode_files(entries: list[ClaudePluginFileEntry]) -> list[ClaudePluginFile
     status_code=201,
     responses={
         400: {"description": "Malformed file payload (bad base64, missing fields)"},
-        422: {"description": "Manifest missing or malformed in the uploaded tree"},
+        413: {"description": "Plugin tree exceeds the size or file-count limit"},
+        422: {"description": "Manifest missing, malformed, or unsafe file path in the tree"},
     },
 )
 async def register_claude_plugin_endpoint(

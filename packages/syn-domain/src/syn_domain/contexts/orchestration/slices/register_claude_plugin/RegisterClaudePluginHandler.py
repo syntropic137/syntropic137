@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
+    ClaudePluginInvalidPath,
     ClaudePluginManifestInvalid,
     ClaudePluginManifestMissing,
 )
@@ -101,6 +102,11 @@ class RegisterClaudePluginHandler:
             The lock-entry data, idempotent on re-submission of the same
             ``(source_url, version, name)``.
         """
+        # WHY first (issue #726 review): rel_path values are caller-controlled
+        # and later materialized into workspace paths. A hostile path must be
+        # rejected BEFORE anything is hashed, stored, or persisted.
+        _validate_tree_paths(files)
+
         merged_manifest = _build_merged_manifest(files, source_url, version, manifest)
         effective_name = _resolve_effective_name(name, merged_manifest, source_url)
 
@@ -180,6 +186,39 @@ class RegisterClaudePluginHandler:
                 raise RuntimeError(msg) from None
             return _result_from_aggregate(existing_after)
         return None
+
+
+def _rel_path_problem(rel_path: str) -> str | None:
+    """Return a human-readable reason if ``rel_path`` is unsafe, else ``None``.
+
+    Rules (issue #726 review): POSIX-relative only -- no leading slash, no
+    backslash, no NUL/control characters, and no empty / ``.`` / ``..``
+    segments. These paths are stored verbatim and later joined under
+    ``.syn-plugins/<name>/`` in workspaces, so anything that could escape
+    that prefix (or smuggle separators past docker-cp) is rejected outright.
+    """
+    if not rel_path.strip():
+        return "path is empty"
+    if rel_path.startswith("/"):
+        return "path is absolute"
+    if "\\" in rel_path:
+        return "path contains a backslash"
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in rel_path):
+        return "path contains control characters"
+    for segment in rel_path.split("/"):
+        if segment == "":
+            return "path contains an empty segment"
+        if segment in (".", ".."):
+            return f"path contains a {segment!r} segment"
+    return None
+
+
+def _validate_tree_paths(files: list[ClaudePluginFile]) -> None:
+    """Reject the whole registration on the first unsafe ``rel_path``."""
+    for f in files:
+        reason = _rel_path_problem(f.rel_path)
+        if reason is not None:
+            raise ClaudePluginInvalidPath(f.rel_path, reason)
 
 
 def _build_merged_manifest(

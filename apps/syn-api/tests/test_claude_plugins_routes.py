@@ -196,6 +196,106 @@ async def test_post_registrations_bad_base64_returns_400() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Hostile tree paths (issue #726 review): rejected before hashing/storage
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hostile_path",
+    [
+        "../AGENTS.md",
+        "foo/../../CLAUDE.md",
+        "/abs/path.md",
+        "back\\slash.md",
+        "nul\x00byte.md",
+        "ctrl\x01char.md",
+        "double//slash.md",
+        "trailing/",
+        "./dotted.md",
+        "   ",
+    ],
+)
+async def test_post_registrations_rejects_hostile_rel_path(hostile_path: str) -> None:
+    body = RegisterClaudePluginRequest(
+        source_url="https://github.com/example/hostile",
+        version="1.0.0",
+        name="hostile",
+        manifest=_manifest("hostile"),
+        files=[
+            *_plugin_files("hostile"),
+            ClaudePluginFileEntry(rel_path=hostile_path, content_b64=_b64(b"evil")),
+        ],
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await register_claude_plugin_endpoint(body)
+    assert exc_info.value.status_code == 422
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    assert detail["error_code"] == "claude_plugin_invalid_path"
+
+    # Nothing must have been persisted: the lock projection stays empty.
+    listing = await list_claude_plugins_endpoint()
+    assert listing.total == 0
+
+
+# ---------------------------------------------------------------------------
+# Upload limits (issue #726 review): server-side caps for direct API clients
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_registrations_rejects_oversized_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import syn_api.routes.claude_plugins as routes_module
+
+    monkeypatch.setattr(routes_module, "MAX_PLUGIN_TREE_BYTES", 64)
+    body = RegisterClaudePluginRequest(
+        source_url="https://github.com/example/too-big",
+        version="1.0.0",
+        name="too-big",
+        manifest=_manifest("too-big"),
+        files=[
+            *_plugin_files("too-big"),
+            ClaudePluginFileEntry(rel_path="big.bin", content_b64=_b64(b"x" * 128)),
+        ],
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await register_claude_plugin_endpoint(body)
+    assert exc_info.value.status_code == 413
+
+    listing = await list_claude_plugins_endpoint()
+    assert listing.total == 0
+
+
+@pytest.mark.asyncio
+async def test_post_registrations_rejects_too_many_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import syn_api.routes.claude_plugins as routes_module
+
+    monkeypatch.setattr(routes_module, "MAX_PLUGIN_TREE_FILES", 2)
+    body = RegisterClaudePluginRequest(
+        source_url="https://github.com/example/too-many",
+        version="1.0.0",
+        name="too-many",
+        manifest=_manifest("too-many"),
+        files=[
+            *_plugin_files("too-many"),
+            ClaudePluginFileEntry(rel_path="a.md", content_b64=_b64(b"a")),
+            ClaudePluginFileEntry(rel_path="b.md", content_b64=_b64(b"b")),
+        ],
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await register_claude_plugin_endpoint(body)
+    assert exc_info.value.status_code == 413
+
+    listing = await list_claude_plugins_endpoint()
+    assert listing.total == 0
+
+
+# ---------------------------------------------------------------------------
 # Global registry routes
 # ---------------------------------------------------------------------------
 
