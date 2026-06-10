@@ -361,6 +361,111 @@ class TestMonotonicRaceGuards:
         assert todos[0].phase_id == "p-2"
 
 
+@pytest.mark.unit
+class TestStaleItemFiltering:
+    """get_pending must never serve items below a phase's highwater mark.
+
+    Defense in depth for writers that bypass the per-execution asyncio
+    lock (e.g. a future out-of-process consumer on a shared Postgres
+    store): such a writer can persist stale ``items`` but can never
+    regress ``phase_progress`` (monotonic merge), so filtering at read
+    time guarantees a resurrected todo is never dispatched.
+    """
+
+    @pytest.mark.anyio
+    async def test_replay_zero_artifact_phase_late_agent_completed(self) -> None:
+        """Replay of the original incident sequence: a zero-artifact phase
+        finalizes, then a LATE AgentExecutionCompleted arrives via a second
+        projection instance (the persistent subscription). The stale
+        COLLECT_ARTIFACTS must never become pending again."""
+        store = InMemoryProjectionStore()
+        processor_proj = ExecutionTodoProjection(store=store)
+
+        await processor_proj.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
+        await processor_proj.on_workspace_provisioned_for_phase(
+            {"execution_id": "exec-1", "phase_id": "p-1", "workspace_id": "ws-1"}
+        )
+        await processor_proj.on_agent_execution_completed(
+            {"execution_id": "exec-1", "phase_id": "p-1", "session_id": "sess-1"}
+        )
+        await processor_proj.on_artifacts_collected_for_phase(
+            {"execution_id": "exec-1", "phase_id": "p-1", "artifact_ids": []}
+        )
+        todos = await processor_proj.get_pending("exec-1")
+        assert [t.action for t in todos] == [TodoAction.COMPLETE_PHASE]
+
+        await processor_proj.on_phase_completed({"execution_id": "exec-1", "phase_id": "p-1"})
+
+        # Late duplicate replayed by a second instance on the same store
+        coordinator_proj = ExecutionTodoProjection(store=store)
+        await coordinator_proj.on_agent_execution_completed(
+            {"execution_id": "exec-1", "phase_id": "p-1", "session_id": "sess-1"}
+        )
+
+        assert await processor_proj.get_pending("exec-1") == []
+        record = await store.get("execution_todo", "exec-1")
+        assert record is not None
+        assert record["phase_progress"]["p-1"] == _RANK_PHASE_DONE
+
+    @pytest.mark.anyio
+    async def test_get_pending_filters_items_below_phase_highwater(self) -> None:
+        """A record holding a stale item (rank below the phase's recorded
+        progress) is filtered out of get_pending. Simulates a lock-bypassing
+        writer that persisted stale items but could not regress the rank."""
+        store = InMemoryProjectionStore()
+        proj = ExecutionTodoProjection(store=store)
+
+        await store.save(
+            "execution_todo",
+            "exec-1",
+            {
+                "execution_id": "exec-1",
+                "items": [
+                    {
+                        "execution_id": "exec-1",
+                        "action": TodoAction.COLLECT_ARTIFACTS.value,
+                        "phase_id": "p-1",
+                        "workspace_id": None,
+                        "session_id": "sess-1",
+                    }
+                ],
+                "phase_progress": {"p-1": _RANK_PHASE_DONE},
+            },
+        )
+
+        assert await proj.get_pending("exec-1") == []
+
+    @pytest.mark.anyio
+    async def test_get_pending_serves_items_at_phase_highwater(self) -> None:
+        """An item whose rank EQUALS the phase's recorded progress is fresh
+        (every save site writes the item together with its rank) and must
+        still be served."""
+        store = InMemoryProjectionStore()
+        proj = ExecutionTodoProjection(store=store)
+
+        await store.save(
+            "execution_todo",
+            "exec-1",
+            {
+                "execution_id": "exec-1",
+                "items": [
+                    {
+                        "execution_id": "exec-1",
+                        "action": TodoAction.COLLECT_ARTIFACTS.value,
+                        "phase_id": "p-1",
+                        "workspace_id": None,
+                        "session_id": "sess-1",
+                    }
+                ],
+                "phase_progress": {"p-1": _ACTION_RANK[TodoAction.COLLECT_ARTIFACTS]},
+            },
+        )
+
+        todos = await proj.get_pending("exec-1")
+        assert [t.action for t in todos] == [TodoAction.COLLECT_ARTIFACTS]
+        assert todos[0].phase_id == "p-1"
+
+
 # =========================================================================
 # Restart resilience
 # =========================================================================

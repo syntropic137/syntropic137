@@ -575,3 +575,58 @@ class TestConcurrentFailureAttribution:
         assert result_b.status == "failed"
         assert failed_phase_by_execution["exec-a"] == "phase-a-1"
         assert failed_phase_by_execution["exec-b"] == "phase-b-1"
+
+
+@pytest.mark.unit
+class TestStaleCollectArtifactsGuard:
+    """Stale COLLECT_ARTIFACTS dispatch for a finalized phase must be a no-op.
+
+    Defense in depth: in-process the projection's monotonic rank +
+    get_pending filtering prevent this dispatch entirely, but a
+    lock-bypassing projection writer (e.g. a future out-of-process
+    consumer on a shared Postgres store) could still resurrect a stale
+    todo. The processor must skip it instead of crashing with KeyError.
+    """
+
+    @pytest.mark.anyio
+    async def test_collect_artifacts_for_finalized_phase_is_skipped(self) -> None:
+        """_handle_collect_artifacts for a phase absent from
+        _active_workspaces returns without raising and emits no aggregate
+        events (the original incident raised KeyError here)."""
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        processor._save_and_sync = AsyncMock()
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.COLLECT_ARTIFACTS,
+            phase_id="p-1",
+            session_id="sess-1",
+        )
+        phase = ExecutablePhase(phase_id="p-1", name="Research", order=1, prompt_template="x")
+        aggregate = MagicMock()
+        all_artifact_ids: list[str] = []
+        phase_outputs: dict[str, str] = {}
+
+        assert "p-1" not in processor._active_workspaces
+
+        await processor._handle_collect_artifacts(
+            todo,
+            phase,
+            aggregate,
+            all_artifact_ids,
+            phase_outputs,
+        )
+
+        aggregate.artifacts_collected.assert_not_called()
+        processor._save_and_sync.assert_not_called()
+        assert all_artifact_ids == []
+        assert phase_outputs == {}
+        assert "p-1" not in processor._phase_artifact_ids
