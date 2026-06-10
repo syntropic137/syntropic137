@@ -340,3 +340,91 @@ class TestProcessorCancellation:
         assert processor._active_cmds == {}
         assert result.status == "cancelled"
         assert result.error_message == "timeout"
+
+
+@pytest.mark.unit
+class TestConcurrentFailureAttribution:
+    """failed_phase_id stays execution-local when one processor instance
+    serves multiple concurrent executions (BackgroundWorkflowDispatcher
+    shares a single processor across up to max_concurrent runs)."""
+
+    @pytest.mark.anyio
+    async def test_failed_phase_id_is_execution_local(self) -> None:
+        """Two concurrent failing executions each attribute the failure to
+        their OWN phase. With the old processor-instance _current_phase_id
+        this deterministically cross-attributed: A is parked until B has
+        dispatched (overwriting the shared field), then A fails.
+        """
+        import asyncio
+
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        processor._execution_repo.save_new = AsyncMock()
+
+        failed_phase_by_execution: dict[str, str | None] = {}
+
+        async def _capture_save(aggregate: object) -> None:
+            for envelope in list(aggregate._uncommitted_events):  # type: ignore[attr-defined]
+                event = envelope.event
+                if type(event).__name__ == "WorkflowFailedEvent":
+                    failed_phase_by_execution[event.execution_id] = event.failed_phase_id
+
+        processor._execution_repo.save = AsyncMock(side_effect=_capture_save)
+
+        b_dispatched = asyncio.Event()
+        a_failed = asyncio.Event()
+
+        class _FailingWorkspaceCM:
+            """Workspace CM whose __aenter__ enforces the racing interleave."""
+
+            def __init__(self, execution_id: str) -> None:
+                self._execution_id = execution_id
+
+            async def __aenter__(self) -> object:
+                if self._execution_id == "exec-a":
+                    # Park A until B has entered dispatch (which, with
+                    # shared instance state, overwrote the current phase).
+                    await asyncio.wait_for(b_dispatched.wait(), timeout=5)
+                    a_failed.set()
+                    raise RuntimeError("boom-a")
+                b_dispatched.set()
+                await asyncio.wait_for(a_failed.wait(), timeout=5)
+                raise RuntimeError("boom-b")
+
+            async def __aexit__(self, *args: object) -> bool:
+                return False
+
+        workspace_service = MagicMock()
+        workspace_service.create_workspace = MagicMock(
+            side_effect=lambda **kwargs: _FailingWorkspaceCM(kwargs["execution_id"])
+        )
+        processor._workspace_service = workspace_service
+
+        result_a, result_b = await asyncio.gather(
+            processor.run(
+                workflow_id="wf-a",
+                workflow_name="A",
+                phases=[
+                    ExecutablePhase(phase_id="phase-a-1", name="A1", order=1, prompt_template="x")
+                ],
+                inputs={},
+                execution_id="exec-a",
+            ),
+            processor.run(
+                workflow_id="wf-b",
+                workflow_name="B",
+                phases=[
+                    ExecutablePhase(phase_id="phase-b-1", name="B1", order=1, prompt_template="x")
+                ],
+                inputs={},
+                execution_id="exec-b",
+            ),
+        )
+
+        assert result_a.status == "failed"
+        assert result_b.status == "failed"
+        assert failed_phase_by_execution["exec-a"] == "phase-a-1"
+        assert failed_phase_by_execution["exec-b"] == "phase-b-1"
