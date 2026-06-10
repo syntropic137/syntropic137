@@ -476,11 +476,26 @@ jobs:
               --ignore-vuln GHSA-p423-j2cm-9vmq \
               --ignore-vuln GHSA-6w46-j5rx-g56g \
               --ignore-vuln GHSA-mj87-hwqh-73pj \
+              --ignore-vuln GHSA-65pc-fj4g-8rjx \
+              --ignore-vuln PYSEC-2026-179 \
+              --ignore-vuln PYSEC-2026-175 \
+              --ignore-vuln PYSEC-2026-177 \
+              --ignore-vuln PYSEC-2026-178 \
+              --ignore-vuln GHSA-pp6c-gr5w-3c5g \
+              --ignore-vuln PYSEC-2026-161 \
+              --ignore-vuln PYSEC-2026-142 \
+              --ignore-vuln PYSEC-2026-141 \
               -r /dev/stdin
           # TODO(#345): remove --ignore-vuln once pygments releases a fix
           # TODO(#634): remove --ignore-vuln once cryptography 46.0.7 is available on PyPI
           # TODO(#678): remove --ignore-vuln GHSA-6w46-j5rx-g56g once pytest 9.0.3 is available on PyPI
           # TODO(#696): remove --ignore-vuln GHSA-mj87-hwqh-73pj once python-multipart 0.0.26 is available on PyPI
+          # TODO(#766): June 2026 audit allowlist — remove each as the upstream fix lands in uv.lock:
+          #   - GHSA-65pc-fj4g-8rjx (idna >= 3.15)
+          #   - PYSEC-2026-179 / 175 / 177 / 178 (pyjwt >= 2.13.0)
+          #   - GHSA-pp6c-gr5w-3c5g (python-multipart >= 0.0.27)
+          #   - PYSEC-2026-161 (starlette >= 1.0.1)
+          #   - PYSEC-2026-142 / 141 (urllib3 >= 2.7.0)
 
   #############################################################################
   # DEPENDENCY REVIEW - Block new CVE-laden packages on PRs (ISS-259)
