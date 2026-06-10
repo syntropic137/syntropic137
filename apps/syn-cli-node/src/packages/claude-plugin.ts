@@ -30,6 +30,12 @@ export interface ParsedClaudePluginRef {
   readonly source_url: string;
   /** Tag, branch, or sha. Never the literal string "latest". */
   readonly version: string;
+  /**
+   * True when the verbose mapping form supplied an explicit `name:` override.
+   * The override is authoritative over the manifest name (mirrors the Python
+   * ClaudePluginRef, whose lock key is (source_url, version, name)).
+   */
+  readonly name_overridden?: boolean;
 }
 
 export interface PluginFileEntry {

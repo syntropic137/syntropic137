@@ -114,6 +114,97 @@ describe("runClaudePluginPreflight", () => {
     expect(lastReq.url).toContain("/claude-plugins/registrations");
   });
 
+  it("preserves a verbose ref's name override through register and lock lookup", async () => {
+    fs.writeFileSync(
+      path.join(tmp, "workflow.yaml"),
+      [
+        "id: foo",
+        "name: foo",
+        "claude_plugins:",
+        "  - source: acme/multi",
+        "    version: v1",
+        "    name: alias-a",
+        "phases: []",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    // Sequence:
+    //   GET /claude-plugins/alias-a/v1 -> 404 (lock lookup uses the ALIAS)
+    //   POST /claude-plugins/registrations -> 201
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ detail: "not found" }, 404))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { name: "alias-a", version: "v1", sha256: "abcd".repeat(16) },
+          201,
+        ),
+      );
+
+    const r = await runClaudePluginPreflight(tmp);
+    expect(r).not.toBeNull();
+    expect(r!.registered.map((p) => p.name)).toEqual(["alias-a"]);
+
+    const lockReq = mockFetch.mock.calls[0]![0] as Request;
+    expect(lockReq.url).toContain("/claude-plugins/alias-a/v1");
+
+    // The register POST must carry the alias, not the manifest name
+    // ("preflight-fixture" in the gitClone mock): the lock key is
+    // (source_url, version, name).
+    const registerReq = mockFetch.mock.calls[1]![0] as Request;
+    expect(registerReq.url).toContain("/claude-plugins/registrations");
+    const body = (await registerReq.json()) as { name: string };
+    expect(body.name).toBe("alias-a");
+  });
+
+  it("registers two aliases of the same source/version as distinct refs", async () => {
+    fs.writeFileSync(
+      path.join(tmp, "workflow.yaml"),
+      [
+        "id: foo",
+        "name: foo",
+        "claude_plugins:",
+        "  - source: acme/multi",
+        "    version: v1",
+        "    name: alias-b",
+        "  - source: acme/multi",
+        "    version: v1",
+        "    name: alias-c",
+        "phases: []",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    // Sequence: lock-miss + register for EACH alias (no dedupe collapse).
+    // WHY alias-b/alias-c: the local install registry persists across tests
+    // in this process; reusing alias-a would cache-hit from the prior test.
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ detail: "not found" }, 404))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { name: "alias-b", version: "v1", sha256: "abcd".repeat(16) },
+          201,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ detail: "not found" }, 404))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { name: "alias-c", version: "v1", sha256: "ef01".repeat(16) },
+          201,
+        ),
+      );
+
+    const r = await runClaudePluginPreflight(tmp);
+    expect(r).not.toBeNull();
+    expect(r!.registered.map((p) => p.name).sort()).toEqual([
+      "alias-b",
+      "alias-c",
+    ]);
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+  });
+
   it("aborts the whole pre-flight if a register call fails", async () => {
     fs.writeFileSync(
       path.join(tmp, "workflow.yaml"),

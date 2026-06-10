@@ -61,15 +61,23 @@ interface RegisterPaths {
   readonly sourceUrl: string;
   readonly version: string;
   readonly fallbackName: string;
+  /**
+   * When true, `fallbackName` is an explicit alias from a verbose
+   * `claude_plugins` ref and wins over the manifest name. The lock key is
+   * (source_url, version, name), so an alias must be registered under the
+   * alias or workflow install fails its lock lookup for that name.
+   */
+  readonly nameOverridden?: boolean;
 }
 
 async function registerFromDirectory(paths: RegisterPaths): Promise<RegisterResult> {
   const manifest = readPluginManifest(paths.pluginRoot);
   const files = walkPluginTree(paths.pluginRoot);
-  const name =
+  const manifestName =
     typeof manifest["name"] === "string" && manifest["name"].trim() !== ""
       ? manifest["name"]
       : paths.fallbackName;
+  const name = paths.nameOverridden === true ? paths.fallbackName : manifestName;
 
   printDim(`  Uploading ${files.length} file(s)...`);
   const result = unwrap(
@@ -107,6 +115,7 @@ export async function registerClaudePluginFromRef(
       sourceUrl: parsed.source_url,
       version: parsed.version,
       fallbackName: parsed.name,
+      nameOverridden: parsed.name_overridden === true,
     });
   } finally {
     removeTempDir(tmpdir);
