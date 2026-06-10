@@ -30,10 +30,24 @@ issue = "#316"
 value = 20
 issue = "#624"
 
+# --- interactive-tmux transport (stress-fix poll-then-race) ---
+
+[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler::_run_interactive_driver"]
+value = 20
+issue = "#768"  # multi-agent stacked on #765; refactor scheduled with the interactive-tmux post-launch polish
+
+[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler::_race_completion_against_cancel"]
+value = 50
+issue = "#768"  # poll-then-race cancel loop from fix/interactive-tmux-stress-blockers; D-block-1 fix
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler::_race_completion_against_cancel"]
+value = 15
+issue = "#768"  # interactive-tmux cancel-polling loop; landed via fix/interactive-tmux-stress-blockers
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum LOC (function-level, threshold: 100)
