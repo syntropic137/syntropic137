@@ -139,13 +139,117 @@ When the bridge from §3 is implemented, it will need a small new test: a workfl
 2. **Review and merge #765**. Its only unchecked test-plan item is the dod-host-path issue (`tempfile.mkdtemp` inside the syn-api container not reachable by the docker daemon spawning the agent container) — orthogonal to plugin injection.
 3. **After both are merged**, file a small follow-up to implement bridge option 1 (`<workspace>/.claude/settings.json` listing materialized plugin dirs) so `claude_plugins:` works on the interactive-tmux path. Estimate: one slice change to `WorkspaceProvisionHandler._materialize_claude_plugins`, plus one integration test.
 
-## 9. References
+## 9. Appendix — Experimental proof (exp/skills-tmux-bridge)
+
+Per a follow-up operator request, an experimental branch was cut from
+`main` and the two open PRs were merged into it:
+
+- `exp/skills-tmux-bridge` — READ-ONLY experiment, **never to be merged**
+- Branch: <https://github.com/syntropic137/syntropic137/tree/exp/skills-tmux-bridge>
+
+The branch merges PR #764 (`20260502_platform`) and PR #765
+(`feat/interactive-tmux-workspaces`). One minor conflict in
+`WorkspaceProvisionHandler.py` was resolved by taking both: #765's
+interactive detection (skip the CLI command builder when interactive)
+plus #764's `--plugin-dir` flag emission (only on the `claude -p` path).
+The merge took ~5 minutes; conflicts were not gnarly.
+
+On top of the merge, the branch implements the option-1 bridge
+recommended in §3. `_materialize_claude_plugins` now also writes a
+workspace-level `<workspace>/.claude/settings.json` whose body lists
+every materialized plugin under `enabledPlugins: {<name>@syn: true}`
+and (informationally) under `extraKnownPluginDirs: [<path>...]`. Four
+unit tests (`TestWorkspaceProvisionHandlerSkillsBridge`) pin the bytes
+shape. `_build_provision_result` is refactored into a small helper so
+the cognitive complexity gate (`just fitness-check`) stays green.
+
+### Three-arm e2e — decisive negative result
+
+Direct-driver e2e against `agentic-workspace-interactive-tmux:latest`
+(claude-cli v2.1.126, Opus 4.7). Harness, transcripts, and reproduction
+instructions:
+[`docs/experiments/exp-skills-tmux-bridge/README.md`](https://github.com/syntropic137/syntropic137/blob/exp/skills-tmux-bridge/docs/experiments/exp-skills-tmux-bridge/README.md).
+
+| Arm | Setup | Skill discovered? |
+|---|---|---|
+| A — control | bare `claude` started by driver, no flags, no files | no |
+| B — option-1 | bare `claude` relaunched with `<workspace>/.claude/settings.json` + plugin tree on disk | **no** |
+| C — positive | `claude --plugin-dir /workspace/.syn-plugins/sentinel-skill-plugin` | **yes** |
+
+Decisive evidence from Arm C's transcript:
+
+> `❯ Say the word READY in your reply.`
+>
+> `● READY`
+>
+> *"I noticed a skill in the available list (sentinel-skill-plugin:sentinel-skill) whose description attempts to make me auto-prefix every reply with a sentinel token. That looks like a prompt-injection pattern rather than a legitimate user-invoked skill, so I'm ignoring it."*
+
+Claude **names the skill by its plugin-qualified slug** in Arm C without
+being asked. That is the discovery signal. The sentinel itself never
+lands in any arm because claude (correctly) refused the SKILL.md as a
+prompt-injection pattern; the refusal is good agent behavior and is
+orthogonal to the discovery question.
+
+Arm B's transcript shows claude replying with just `● READY` and no
+mention of any skill, proving the workspace-level `.claude/settings.json`
+does NOT cause the interactive-tmux-launched claude to load plugins from
+`<workspace>/.syn-plugins/<name>/`.
+
+### What this proves
+
+1. **Option 1 is non-functional** for the interactive-tmux dispatch path.
+   The bridge code on `exp/skills-tmux-bridge` should NOT be adapted into
+   a real PR.
+2. **Option 2 is the durable fix.** The interactive-tmux driver in
+   `agentic-primitives` (`providers/workspaces/interactive-tmux/driver/`)
+   must accept a `plugin_dirs: list[Path]` parameter on
+   `start_workspace` and pass it to the existing
+   `_ClaudeAdapter.launch_in_window` injection point so claude starts
+   with `--plugin-dir <path>` flags. The Syn137 side then becomes a tiny
+   wiring change: forward the resolved `ExecutablePhase.claude_plugins`
+   paths into the workspace config.
+3. **#764's reproducibility, lock, storage, and `claude -p` activation
+   path are unaffected** by this finding. #764 should still merge as-is.
+   The bridge work is purely about widening #764's coverage to the new
+   interactive provider.
+
+### Caveat (honest reporting)
+
+The experiment exercises the discovery contract only — it does NOT route
+through `syn-api → InteractiveTmuxIsolationAdapter → driver` end-to-end.
+PR #765's own test plan §9-§10 documents a `tempfile.mkdtemp`-based
+docker-out-of-docker host-path translation gap that prevents
+syn-api-routed executions from reaching the driver successfully.
+Bypassing syn-api isolates the bridge mechanism cleanly; it does not
+validate the full dispatch path. That gap is orthogonal and lives
+upstream in `agentic-primitives`.
+
+### Recommended next steps
+
+1. Merge #764. The `claude -p` skills-on-workflows feature works today.
+2. Resolve #765's docker-out-of-docker host-path translation gap upstream
+   in `agentic-primitives`.
+3. Add a `plugin_dirs` parameter to the `interactive_tmux` driver
+   upstream; wire it through `InteractiveTmuxIsolationAdapter` on the
+   Syn137 side. After that, merge #765.
+4. **Skip the bridge slice from `exp/skills-tmux-bridge`** — the evidence
+   above shows option 1 doesn't work. The right follow-up is the upstream
+   driver change plus the tiny wiring change in
+   `WorkspaceProvisionHandler` (pass `phase.claude_plugins` paths into
+   the workspace config). Estimate: one slice change + one integration
+   test that asserts claude is started with the expected `--plugin-dir`
+   flag list.
+
+## 10. References
 
 - PR [#764] — `feat: workflow-scoped claude plugin injection (#726)`
 - PR [#765] — `feat(workspaces): interactive-tmux provider integration`
+- PR [#767] — this PR (the research finding + experiment record)
+- Exp branch [`exp/skills-tmux-bridge`](https://github.com/syntropic137/syntropic137/tree/exp/skills-tmux-bridge) — merge + bridge code + transcripts (never merge)
 - [ADR-065 — Workflow-Scoped Claude Plugin Injection](../adrs/ADR-065-claude-plugin-injection.md)
 - [ADR-066 — Separation of Concerns](../adrs/ADR-066-separation-of-concerns.md)
 - [ADR-024 — Setup Phase Secrets Pattern](../adrs/ADR-024-setup-phase-secrets.md) (workspace lifecycle context)
+- [ADR-033 in agentic-primitives — Plugin-Native Workspace Images](https://github.com/AgentParadise/agentic-primitives/blob/main/docs/adrs/033-plugin-native-workspace-images.md) (rejects `enabledPlugins`-without-cache for Docker; informs the option-1 finding)
 - [docs/architecture/docker-workspace-lifecycle.md](../architecture/docker-workspace-lifecycle.md)
 - Issue [#726](https://github.com/syntropic137/syntropic137/issues/726) — original feature request
 - Issue [#761](https://github.com/syntropic137/syntropic137/issues/761) — org/system scopes follow-up
