@@ -362,6 +362,38 @@ class WorkspaceProvisionHandler:
             interactive_prompt=interactive_prompt,
         )
 
+    async def build_followup_result(
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        workflow_id: str,
+        session_id: str,
+        workspace: ManagedWorkspace,
+        workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
+        phase_outputs: dict[str, str] | None = None,
+        inputs: dict[str, object] | None = None,
+    ) -> ProvisionResult:
+        """Build a ProvisionResult for a follow-up phase in a shared workspace.
+
+        Multi-agent (docs/plans/multi-agent-workspaces.md): when the
+        execution's first phase already provisioned an
+        interactive-tmux workspace, subsequent phases reuse it
+        without re-running setup / context injection / artifact
+        injection. This method builds only the prompt + per-phase
+        ProvisionResult shell.
+        """
+        return await self._build_provision_result(
+            workspace=workspace,
+            workspace_cm=workspace_cm,
+            todo=todo,
+            phase=phase,
+            workflow_id=workflow_id,
+            session_id=session_id,
+            effective_repos=[],
+            outputs=phase_outputs or {},
+            inputs=inputs,
+        )
+
     @staticmethod
     def _repo_name(url: str) -> str:
         """Return repo name from a full GitHub URL.

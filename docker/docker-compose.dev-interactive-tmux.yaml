@@ -46,6 +46,12 @@ services:
       # Point the driver at the operator's credentials (mounted below).
       ITMUX_CLAUDE_HOME: /host-creds/claude
       ITMUX_CLAUDE_JSON: /host-creds/claude.json
+      # Multi-agent (PR feat/multi-agent-workspaces): same env contract,
+      # one var per agent. Driver's _default_host_auth_from_env reads
+      # these first, then falls back to $HOME/.{agent}. Missing dirs are
+      # dropped silently — an agent without creds simply isn't launched.
+      ITMUX_CODEX_HOME: /host-creds/codex
+      ITMUX_GEMINI_HOME: /host-creds/gemini
       # Same-path TMPDIR so throwaway bind-mount sources survive the
       # docker-out-of-docker boundary (docker daemon sees the same path
       # on the host).
@@ -54,6 +60,12 @@ services:
       - ../lib/agentic-primitives/providers/workspaces/interactive-tmux:/opt/agentic-primitives/providers/workspaces/interactive-tmux:ro
       - ${HOME}/.claude:/host-creds/claude:ro
       - ${HOME}/.claude.json:/host-creds/claude.json:ro
+      # Multi-agent: codex + gemini creds mounted same shape as claude.
+      # Marked read-only; if a host doesn't have these dirs the
+      # operator just removes the corresponding line. Driver gracefully
+      # disables the agent when the env var points at a missing path.
+      - ${HOME}/.codex:/host-creds/codex:ro
+      - ${HOME}/.gemini:/host-creds/gemini:ro
       # SAME-PATH bind mount so paths under TMPDIR are valid bind-mount
       # sources for the docker daemon (which runs on the host, not in
       # syn-api).

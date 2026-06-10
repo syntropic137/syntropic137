@@ -99,3 +99,16 @@ class PhaseDefinition(BaseModel):
 
     model: str | None = None
     """Per-phase model override (e.g., 'sonnet', 'opus')."""
+
+    provider: str | None = None
+    """Per-phase agent provider override.
+
+    Valid values: "claude" (default; runs claude -p) or "claude-interactive"
+    (drives the interactive-tmux pane via send_message/await_completion).
+    See docs/plans/multi-agent-workspaces.md.
+    """
+
+    agent_id: str | None = None
+    """Which tmux pane the phase targets in a multi-agent interactive-tmux
+    workspace. Valid values: "claude", "codex", "gemini". Defaults to
+    "claude" when omitted. Ignored by the default claude -p path."""

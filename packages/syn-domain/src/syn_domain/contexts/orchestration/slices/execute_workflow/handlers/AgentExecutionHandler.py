@@ -109,6 +109,7 @@ class AgentExecutionHandler:
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,
+        agent_id: str = "claude",
     ) -> AgentExecutionResult:
         """Run agent in workspace and stream output.
 
@@ -118,10 +119,14 @@ class AgentExecutionHandler:
             into Lane-2 events.
           * `interactive_prompt is not None` → interactive-tmux path:
             drive the workspace's interactive-tmux driver via
-            send_message / await_completion / capture_response and
-            synthesize a single Lane-2 capture event. Token/cost
-            accounting is not available on this path in v1
-            (see docs/plans/interactive-tmux-integration.md §7).
+            send_message(agent_id, prompt) / await_completion(agent_id)
+            / capture_response(agent_id). Token/cost accounting is not
+            available on this path in v1 (see
+            docs/plans/interactive-tmux-integration.md §7).
+
+        `agent_id` selects the tmux pane for the interactive path
+        (`claude` / `codex` / `gemini`). Defaults to `claude` for
+        back-compat with PR #765.
         """
         assert todo.phase_id is not None
 
@@ -138,6 +143,7 @@ class AgentExecutionHandler:
                 session_id=session_id,
                 timeout_seconds=timeout_seconds,
                 collector=collector,
+                agent_id=agent_id,
             )
 
         processor = EventStreamProcessor(
@@ -211,6 +217,7 @@ class AgentExecutionHandler:
         session_id: str,
         timeout_seconds: int,
         collector: ObservabilityCollector | None,
+        agent_id: str = "claude",
     ) -> AgentExecutionResult:
         """Drive a claude-interactive phase through send_message/await_completion.
 
@@ -268,9 +275,9 @@ class AgentExecutionHandler:
         loop = asyncio.get_running_loop()
 
         def _drive() -> tuple[int, str, str]:
-            driver.send_message("claude", prompt)
-            result = driver.await_completion("claude", timeout=float(timeout_seconds))
-            pane = driver.capture_response("claude")
+            driver.send_message(agent_id, prompt)
+            result = driver.await_completion(agent_id, timeout=float(timeout_seconds))
+            pane = driver.capture_response(agent_id)
             exit_code = 0 if result.ready else 124  # 124 = standard timeout exit code
             reason = getattr(result, "reason", "ready" if result.ready else "timeout")
             return exit_code, pane, reason
@@ -289,8 +296,9 @@ class AgentExecutionHandler:
             )
 
         logger.info(
-            "interactive-tmux phase finished (phase=%s, exit=%d, reason=%s, pane_chars=%d)",
+            "interactive-tmux phase finished (phase=%s, agent=%s, exit=%d, reason=%s, pane_chars=%d)",
             todo.phase_id,
+            agent_id,
             exit_code,
             reason,
             len(pane),

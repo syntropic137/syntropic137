@@ -132,6 +132,18 @@ class WorkflowExecutionProcessor:
         ] = {}  # (input, output, cache_creation, cache_read)
         self._phase_artifact_ids: dict[str, list[str]] = {}
         self._phase_started_at: dict[str, datetime] = {}
+        # Multi-agent (interactive-tmux): the EXP-04 swarm container is
+        # the natural unit of "shared state" — one container per
+        # execution, multiple phases drive different agents. When the
+        # backend is interactive-tmux, the FIRST provision creates the
+        # workspace and stores it here; subsequent phases reuse it. The
+        # workspace is destroyed at execution end (complete / cancel /
+        # fail) instead of at each phase end. See
+        # docs/plans/multi-agent-workspaces.md §3.
+        # Key: execution_id → (workspace, workspace_cm).
+        self._shared_workspaces: dict[
+            str, tuple[ManagedWorkspace, AbstractAsyncContextManager[ManagedWorkspace]]
+        ] = {}
 
     async def run(
         self,
@@ -327,6 +339,7 @@ class WorkflowExecutionProcessor:
         self._active_envs.clear()
         self._active_cmds.clear()
         self._active_prompts.clear()
+        await self._cleanup_shared_workspace(execution_id)
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -364,6 +377,7 @@ class WorkflowExecutionProcessor:
         )
         aggregate.complete_execution(complete_cmd)
         await self._save_and_sync(aggregate)
+        await self._cleanup_shared_workspace(execution_id)
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -401,6 +415,7 @@ class WorkflowExecutionProcessor:
         self._active_envs.clear()
         self._active_cmds.clear()
         self._active_prompts.clear()
+        await self._cleanup_shared_workspace(execution_id)
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
             error=str(error),
@@ -425,6 +440,34 @@ class WorkflowExecutionProcessor:
             metrics=ExecutionMetrics.from_results(phase_results),
             error_message=str(error),
         )
+
+    async def _cleanup_shared_workspace(self, execution_id: str) -> None:
+        """Destroy a shared workspace at execution end.
+
+        Multi-agent (docs/plans/multi-agent-workspaces.md): per-execution
+        shared workspaces created on the interactive-tmux backend stay
+        alive across phase boundaries. This method is the SINGLE place
+        they are torn down — called from `_complete_execution`,
+        `_cancel_execution`, `_fail_execution`. Idempotent.
+        """
+        shared = self._shared_workspaces.pop(execution_id, None)
+        if shared is None:
+            return
+        _workspace, workspace_cm = shared
+        try:
+            await workspace_cm.__aexit__(None, None, None)
+        except Exception:
+            logger.exception(
+                "Error tearing down shared interactive-tmux workspace (execution=%s)",
+                execution_id,
+            )
+
+    def _is_interactive_tmux_backend(self) -> bool:
+        """True when the configured workspace service uses the EXP-05
+        interactive-tmux provider. Triggers the multi-agent shared-
+        workspace lifecycle (see docs/plans/multi-agent-workspaces.md)."""
+        cfg = getattr(self._workspace_service, "_config", None)
+        return getattr(cfg, "provider_kind", "docker") == "interactive-tmux"
 
     async def _handle_provision(
         self,
@@ -476,17 +519,48 @@ class WorkflowExecutionProcessor:
         # WorkspaceProvisionHandler consumes URLs (git clone, secret hydration);
         # the typed value object stops here.
         repo_urls = [r.https_url for r in (repos or [])]
-        result = await provision_handler.handle(
-            todo=todo,
-            phase=phase,
-            workflow_id=aggregate.workflow_id or "",
-            session_id=session_id,
-            repos=repo_urls,
-            artifacts=artifacts,
-            completed_phase_ids=completed_phase_ids,
-            phase_outputs=phase_outputs,
-            inputs=self._inputs,
+
+        # Multi-agent (interactive-tmux): if a shared workspace exists for
+        # this execution, reuse it instead of provisioning a fresh one.
+        # See docs/plans/multi-agent-workspaces.md §3. The setup phase,
+        # context-file injection, and prior-phase artifact injection are
+        # all one-shot during the FIRST provision; subsequent phases
+        # rebuild only the prompt + agent_env (interactive path is {})
+        # + claude_cmd ([]) + the ProvisionResult shell.
+        existing = (
+            self._shared_workspaces.get(todo.execution_id)
+            if self._is_interactive_tmux_backend()
+            else None
         )
+        if existing is not None:
+            shared_ws, shared_cm = existing
+            result = await provision_handler.build_followup_result(
+                todo=todo,
+                phase=phase,
+                workflow_id=aggregate.workflow_id or "",
+                session_id=session_id,
+                workspace=shared_ws,
+                workspace_cm=shared_cm,
+                phase_outputs=phase_outputs,
+                inputs=self._inputs,
+            )
+        else:
+            result = await provision_handler.handle(
+                todo=todo,
+                phase=phase,
+                workflow_id=aggregate.workflow_id or "",
+                session_id=session_id,
+                repos=repo_urls,
+                artifacts=artifacts,
+                completed_phase_ids=completed_phase_ids,
+                phase_outputs=phase_outputs,
+                inputs=self._inputs,
+            )
+            if self._is_interactive_tmux_backend():
+                self._shared_workspaces[todo.execution_id] = (
+                    result.workspace,
+                    result.workspace_cm,
+                )
 
         self._active_workspaces[todo.phase_id] = result.workspace
         self._active_workspace_cms[todo.phase_id] = result.workspace_cm
@@ -536,6 +610,7 @@ class WorkflowExecutionProcessor:
             timeout_seconds=timeout,
             collector=collector,
             interactive_prompt=interactive_prompt,
+            agent_id=phase.agent_config.agent_id,
         )
 
         recorder = ConversationRecorder(self._conversation_storage)
@@ -728,7 +803,11 @@ class WorkflowExecutionProcessor:
         self._active_cmds.pop(phase_id, None)
         self._active_prompts.pop(phase_id, None)
         workspace_cm = self._active_workspace_cms.pop(phase_id, None)
-        if workspace_cm is not None:
+        # Multi-agent: if this workspace is shared across phases of an
+        # execution (interactive-tmux backend), DON'T tear it down here.
+        # Cleanup happens once at execution end (complete / fail / cancel).
+        is_shared = any(cm is workspace_cm for _, cm in self._shared_workspaces.values())
+        if workspace_cm is not None and not is_shared:
             await workspace_cm.__aexit__(None, None, None)
 
     async def _save_new_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:

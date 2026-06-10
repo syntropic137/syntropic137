@@ -1,0 +1,55 @@
+id: multi-agent-write-then-read
+name: Multi-agent shared workspace (claude → codex)
+description: |
+  Two-phase workflow proving shared workspace state across agents.
+  Phase 1 runs on Claude and writes /workspace/note.txt.
+  Phase 2 runs on Codex (same EXP-04 swarm container, same filesystem)
+  and reads the file. Used for the e2e bring-up of
+  feat/multi-agent-workspaces.
+
+type: research
+classification: standard
+repository: null
+requires_repos: false
+project_name: null
+
+inputs: []
+
+phases:
+  - id: write
+    name: Write the note (claude)
+    order: 1
+    execution_type: sequential
+    argument_hint: "(none)"
+    description: |
+      Asks Claude to write the literal string "hello multi-agent" to
+      /workspace/note.txt.
+    input_artifacts: []
+    output_artifacts: []
+    max_tokens: 1024
+    timeout_seconds: 180
+    agent:
+      provider: claude-interactive
+      agent_id: claude
+    prompt_template: |
+      Run the shell command: `echo hello multi-agent > /workspace/note.txt`
+      Then confirm the file exists.
+
+  - id: read
+    name: Read the note (codex)
+    order: 2
+    execution_type: sequential
+    argument_hint: "(none)"
+    description: |
+      Asks Codex (running in the SAME tmux container as Claude) to
+      read /workspace/note.txt. Proves shared workspace state.
+    input_artifacts: []
+    output_artifacts: []
+    max_tokens: 1024
+    timeout_seconds: 180
+    agent:
+      provider: claude-interactive
+      agent_id: codex
+    prompt_template: |
+      Read the file at /workspace/note.txt and reply with its contents
+      verbatim.

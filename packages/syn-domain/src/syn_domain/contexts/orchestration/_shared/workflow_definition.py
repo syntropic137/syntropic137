@@ -162,6 +162,29 @@ class InputYamlDefinition(BaseModel):
         )
 
 
+class PhaseAgentSpec(BaseModel):
+    """YAML `agent:` block on a phase.
+
+    Selects the agent provider (default `claude-cli` via the
+    `claude -p` path) and, for the interactive-tmux multi-agent
+    backend, which tmux pane the phase drives. See
+    docs/plans/multi-agent-workspaces.md.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: str = "claude"
+    """One of: `claude` (default; `claude -p` path),
+    `claude-interactive` (drives the interactive-tmux pane)."""
+
+    agent_id: str = "claude"
+    """Which tmux pane the phase targets when provider is
+    `claude-interactive`. One of: `claude`, `codex`, `gemini`."""
+
+    model: str | None = None
+    """Per-phase model override (e.g. `sonnet`, `opus`)."""
+
+
 class PhaseYamlDefinition(BaseModel):
     """Phase definition as parsed from YAML.
 
@@ -191,6 +214,9 @@ class PhaseYamlDefinition(BaseModel):
     argument_hint: str | None = None
     model: str | None = None
 
+    # Multi-agent interactive-tmux: optional `agent:` block.
+    agent: PhaseAgentSpec | None = None
+
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
         """Ensure at most one of prompt_template or prompt_file is set."""
@@ -213,6 +239,16 @@ class PhaseYamlDefinition(BaseModel):
             )
             raise ValueError(msg)
 
+        # Multi-agent (interactive-tmux): per-phase agent block. When
+        # absent, leave provider/agent_id as None so the domain default
+        # ("claude") applies. The model override on the agent block
+        # takes precedence over the top-level model field if both are
+        # set (rare; usually only one is used).
+        provider = self.agent.provider if self.agent else None
+        agent_id = self.agent.agent_id if self.agent else None
+        agent_model = self.agent.model if self.agent else None
+        model = agent_model or self.model
+
         return PhaseDefinition(
             phase_id=self.id,
             name=self.name,
@@ -226,7 +262,9 @@ class PhaseYamlDefinition(BaseModel):
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
             argument_hint=self.argument_hint,
-            model=self.model,
+            model=model,
+            provider=provider,
+            agent_id=agent_id,
         )
 
 

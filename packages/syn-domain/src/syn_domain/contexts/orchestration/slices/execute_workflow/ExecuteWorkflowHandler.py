@@ -252,9 +252,20 @@ class ExecuteWorkflowHandler:
         executable_phases = []
         for phase in workflow.phases:
             phase_model = getattr(phase, "model", None)
-            agent_config = (
-                AgentConfiguration(model=phase_model) if phase_model else AgentConfiguration()
-            )
+            # Multi-agent: carry per-phase provider + agent_id from the YAML
+            # `agent:` block (Phase docs/plans/multi-agent-workspaces.md).
+            phase_provider = getattr(phase, "provider", None)
+            phase_agent_id = getattr(phase, "agent_id", None)
+            # Build kwargs only for fields that were set, so we keep the
+            # AgentConfiguration defaults for anything not overridden.
+            cfg_kwargs: dict[str, object] = {}
+            if phase_model:
+                cfg_kwargs["model"] = phase_model
+            if phase_provider:
+                cfg_kwargs["provider"] = phase_provider
+            if phase_agent_id:
+                cfg_kwargs["agent_id"] = phase_agent_id
+            agent_config = AgentConfiguration(**cfg_kwargs) if cfg_kwargs else AgentConfiguration()
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,
