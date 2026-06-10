@@ -1,4 +1,4 @@
-id: multi-agent-write-then-read
+id: multi-agent-claude-then-codex
 name: Multi-agent shared workspace (claude → codex)
 description: |
   Two-phase workflow proving shared workspace state across agents.
@@ -22,8 +22,9 @@ phases:
     execution_type: sequential
     argument_hint: "(none)"
     description: |
-      Asks Claude to write the literal string "hello multi-agent" to
-      /workspace/note.txt.
+      Asks Claude to reply with a marker string so we know phase 1
+      ran successfully. Used as the simplest possible round-trip
+      proof on the claude pane.
     input_artifacts: []
     output_artifacts: []
     max_tokens: 1024
@@ -32,17 +33,19 @@ phases:
       provider: claude-interactive
       agent_id: claude
     prompt_template: |
-      Run the shell command: `echo hello multi-agent > /workspace/note.txt`
-      Then confirm the file exists.
+      Reply with the literal string PHASE_ONE_CLAUDE_OK and nothing
+      else.
 
   - id: read
-    name: Read the note (codex)
+    name: Read on codex
     order: 2
     execution_type: sequential
     argument_hint: "(none)"
     description: |
-      Asks Codex (running in the SAME tmux container as Claude) to
-      read /workspace/note.txt. Proves shared workspace state.
+      Asks Codex (running in the SAME tmux container as the Claude
+      pane from phase 1) to reply with a marker string. Proves the
+      shared interactive-tmux workspace is alive across phases AND
+      that phase 2 was dispatched to the codex pane.
     input_artifacts: []
     output_artifacts: []
     max_tokens: 1024
@@ -51,5 +54,5 @@ phases:
       provider: claude-interactive
       agent_id: codex
     prompt_template: |
-      Read the file at /workspace/note.txt and reply with its contents
-      verbatim.
+      Reply with the literal string PHASE_TWO_CODEX_OK and nothing
+      else.

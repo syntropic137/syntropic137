@@ -131,6 +131,27 @@ def _resolve_repos_from_template(
     return []
 
 
+def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
+    """Build an AgentConfiguration from a workflow-template phase.
+
+    Multi-agent (docs/plans/multi-agent-workspaces.md): the YAML
+    `agent:` block contributes `provider` + `agent_id`; the top-level
+    `model` field still feeds the model. All three are optional;
+    AgentConfiguration's defaults preserve back-compat with PR #765.
+    """
+    phase_model: str | None = getattr(phase, "model", None)
+    phase_provider: str | None = getattr(phase, "provider", None)
+    phase_agent_id: str | None = getattr(phase, "agent_id", None)
+    if not (phase_model or phase_provider or phase_agent_id):
+        return AgentConfiguration()
+    defaults = AgentConfiguration()
+    return AgentConfiguration(
+        provider=phase_provider or defaults.provider,
+        model=phase_model or defaults.model,
+        agent_id=phase_agent_id or defaults.agent_id,
+    )
+
+
 class WorkflowRepository(Protocol):
     """Repository protocol for Workflow aggregates."""
 
@@ -251,21 +272,7 @@ class ExecuteWorkflowHandler:
         """Convert workflow template phases to executable phases."""
         executable_phases = []
         for phase in workflow.phases:
-            phase_model = getattr(phase, "model", None)
-            # Multi-agent: carry per-phase provider + agent_id from the YAML
-            # `agent:` block (Phase docs/plans/multi-agent-workspaces.md).
-            phase_provider = getattr(phase, "provider", None)
-            phase_agent_id = getattr(phase, "agent_id", None)
-            # Build kwargs only for fields that were set, so we keep the
-            # AgentConfiguration defaults for anything not overridden.
-            cfg_kwargs: dict[str, object] = {}
-            if phase_model:
-                cfg_kwargs["model"] = phase_model
-            if phase_provider:
-                cfg_kwargs["provider"] = phase_provider
-            if phase_agent_id:
-                cfg_kwargs["agent_id"] = phase_agent_id
-            agent_config = AgentConfiguration(**cfg_kwargs) if cfg_kwargs else AgentConfiguration()
+            agent_config = _build_agent_config_from_phase(phase)
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,

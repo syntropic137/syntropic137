@@ -13,7 +13,7 @@ of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -371,7 +371,7 @@ class WorkspaceProvisionHandler:
         workspace: ManagedWorkspace,
         workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
         phase_outputs: dict[str, str] | None = None,
-        inputs: dict[str, object] | None = None,
+        inputs: Mapping[str, object] | None = None,
     ) -> ProvisionResult:
         """Build a ProvisionResult for a follow-up phase in a shared workspace.
 

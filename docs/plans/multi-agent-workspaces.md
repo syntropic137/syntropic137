@@ -228,11 +228,141 @@ For non-interactive phases, `agent_id` is ignored.
 
 ## 9. Validation appendix
 
-> Filled in during Phase 3.
+### Phase 2 evidence (build-side)
+
+Plumbing changes verified by the full regression on
+`packages/syn-domain` + `packages/syn-adapters` — all tests pass
+with XFAILs unchanged from PR #765. Lint, format, pyright clean
+on touched files.
+
+### Phase 3 evidence (e2e)
+
+Bring-up:
+
+```
+docker compose \
+  -f docker/docker-compose.yaml \
+  -f docker/docker-compose.dev.yaml \
+  -f docker/docker-compose.dev-interactive-tmux.yaml \
+  up -d --build api
+```
+
+Host has all three credentials at `~/.claude`, `~/.codex`,
+`~/.gemini`. They mount into syn-api at `/host-creds/{claude,codex,gemini}`
+and the driver finds them via `ITMUX_CLAUDE_HOME` /
+`ITMUX_CODEX_HOME` / `ITMUX_GEMINI_HOME` (upstream env-var contract
+from agentic-primitives `ea881ea`).
+
+Workflow upload + trigger:
+
+```
+curl -X POST http://localhost:9137/workflows/from-yaml \
+  -H "Content-Type: application/yaml" \
+  --data-binary @workflows/examples/multi-agent-write-then-read.yaml
+
+curl -X POST http://localhost:9137/workflows/multi-agent-claude-then-codex/execute \
+  -H "Content-Type: application/json" -d '{"inputs": {}}'
+# → execution_id = "exec-c0e45ddf3f3a"
+```
+
+#### What worked end-to-end (multi-agent integration goals)
+
+* **All three agents launched in ONE container.** syn-api log:
+  ```
+  Created interactive-tmux workspace
+  (id=itws-f32da067, execution=exec-c0e45ddf3f3a,
+   agents=['claude', 'codex', 'gemini'])
+  ```
+  This is the EXP-04 swarm container materialized through Syn137's
+  HTTP API: the InteractiveTmuxProvider read the three
+  `ITMUX_*_HOME` env vars set by the compose overlay, enabled all
+  three agent panes, and the upstream `ea881ea` DooD fix made the
+  bind-mount paths survive the docker-out-of-docker boundary.
+* **Per-phase agent dispatch worked.** syn-api log:
+  ```
+  interactive-tmux phase finished
+  (phase=write, agent=claude, exit=0, reason=ready, pane_chars=1797)
+  ```
+  Phase 1's `agent: { agent_id: claude }` YAML block was parsed end
+  to end (`PhaseAgentSpec` → `PhaseDefinition.agent_id` →
+  `AgentConfiguration.agent_id` → handler kwarg →
+  `provider_handle.send_message("claude", prompt)`). Phase 1
+  returned `ready` with a 1797-char pane capture.
+* **Shared workspace lifecycle wired correctly.** The processor's
+  `_shared_workspaces[exec_id]` was populated by phase 1's provision
+  (`_is_interactive_tmux_backend()` returned True). On the
+  subsequent failure path, `_cleanup_shared_workspace` tore down
+  exactly one container:
+  ```
+  Destroying interactive-tmux workspace (id=itws-f32da067)
+  ```
+  No phase-end teardown ran (`is_shared` guard in `_finalize_phase`
+  did the right thing).
+
+#### What did NOT work (same blocker as PR #765 §9)
+
+The workflow failed at the artifact-pipeline transition between
+phase 1's COLLECT_ARTIFACTS dispatch and phase 1's COMPLETE_PHASE
+dispatch:
+
+```
+[17:??:??] interactive-tmux phase finished (phase=write, agent=claude, exit=0, ...)
+[17:??:??] Workflow execution failed: 'write'
+[17:??:??] KeyError: 'write'
+[17:??:??] Destroying interactive-tmux workspace (id=itws-f32da067)
+```
+
+This is the **same KeyError observed on PR #765's
+`exec-c64eeaf74a14`** (then the key was `'reply'`, now it's `'write'`
+because the phase has a different id). The to-do projection
+doesn't advance past COLLECT_ARTIFACTS when `artifact_ids=[]` for
+an interactive-tmux phase. Inherited from the parent branch; NOT
+introduced by this PR.
+
+Because the workflow failed at phase 1's artifact step,
+**phase 2 (codex) was never dispatched**. The multi-agent
+chain's claude→codex hand-off across the shared filesystem
+therefore went unverified end-to-end through the HTTP path.
+
+#### E2E checkbox stance
+
+The PR-body checklist's "End-to-end run on HTTP path: phase 2
+reads file phase 1 wrote" item is **unchecked**, in keeping with
+the orchestrator's instruction not to paper over partial passes.
+What IS proven (and IS checked):
+
+* multi-agent EXP-04 swarm container materialized via Syn137 wiring
+* per-phase YAML `agent.agent_id` → handler dispatch → tmux pane
+* shared workspace state managed (created once, destroyed once)
+* upstream env-var contract honored
+* same artifact-pipeline blocker as PR #765 (inherited)
+
+Validating phase 2 codex end-to-end requires fixing the
+artifact-pipeline KeyError — owned by the next PR in the stack,
+not this one (per stacking convention).
 
 ## 10. Friction log
 
-> Append-only during Phases 2 / 3.
+* **2026-06-10** — Workflow YAML `from-yaml` endpoint uses event
+  versioning; uploading the same workflow id twice raises
+  `Concurrency conflict: expected version 0, got 1`. Worked around
+  by renaming the workflow id (`multi-agent-write-then-read` →
+  `multi-agent-claude-then-codex`). Operator-facing UX gap;
+  separate issue.
+* **2026-06-10** — First multi-agent e2e attempt
+  (`exec-a0220fac66ce`) timed out at 180s with
+  `reason=timeout_never_ready` because the prompt asked Claude to
+  run a shell command, which the interactive Claude TUI gates on
+  permission and never reached its idle heuristic. Reworked the
+  prompt to a simple "reply with a marker string" round-trip
+  (`exec-c0e45ddf3f3a`) and phase 1 completed cleanly. The
+  "phase 1 writes a file" demo prompt is one prompt-engineering
+  fix away; the integration plumbing isn't the blocker.
+* **2026-06-10** — Same artifact-pipeline KeyError as PR #765 §9
+  surfaced again on phase 1 completion (`KeyError: 'write'` here vs
+  `KeyError: 'reply'` on #765). Not a multi-agent issue; same
+  downstream gap inherited from the parent branch. Phase 2 (codex)
+  never dispatched as a result.
 
 ---
 
