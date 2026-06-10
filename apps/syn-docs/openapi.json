@@ -1696,8 +1696,11 @@
           "400": {
             "description": "Malformed file payload (bad base64, missing fields)"
           },
+          "413": {
+            "description": "Plugin tree exceeds the size or file-count limit"
+          },
           "422": {
-            "description": "Manifest missing or malformed in the uploaded tree"
+            "description": "Manifest missing, malformed, or unsafe file path in the tree"
           }
         }
       }

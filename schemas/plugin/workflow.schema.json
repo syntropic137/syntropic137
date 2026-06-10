@@ -56,37 +56,56 @@
       "type": "object"
     },
     "ClaudePluginRef": {
-      "additionalProperties": false,
-      "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version, name)`` to match the lock\nprojection key (issue #726). A workflow author who installs the same\nplugin under two different display names produces two distinct lock\nentries -- the materializer needs both to write the right files.",
-      "properties": {
-        "name": {
+      "anyOf": [
+        {
+          "description": "Shorthand form: 'org/repo@version' or '<url>@<version>'. '@latest' is rejected.",
           "minLength": 1,
-          "title": "Name",
           "type": "string"
         },
-        "source_url": {
-          "minLength": 1,
-          "title": "Source Url",
-          "type": "string"
-        },
-        "version": {
-          "minLength": 1,
-          "title": "Version",
-          "type": "string"
-        },
-        "name_overridden": {
-          "default": false,
-          "title": "Name Overridden",
-          "type": "boolean"
+        {
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "source"
+              ]
+            },
+            {
+              "required": [
+                "source_url"
+              ]
+            }
+          ],
+          "description": "Verbose mapping form: 'source' (or 'source_url') plus 'version', with an optional 'name' override.",
+          "properties": {
+            "source": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_url": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "version": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "name_overridden": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "name",
-        "source_url",
-        "version"
       ],
-      "title": "ClaudePluginRef",
-      "type": "object"
+      "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version, name)`` to match the lock\nprojection key (issue #726). A workflow author who installs the same\nplugin under two different display names produces two distinct lock\nentries -- the materializer needs both to write the right files.",
+      "title": "ClaudePluginRef"
     },
     "InputYamlDefinition": {
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",

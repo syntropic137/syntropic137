@@ -5939,7 +5939,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Manifest missing or malformed in the uploaded tree */
+            /** @description Plugin tree exceeds the size or file-count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Manifest missing, malformed, or unsafe file path in the tree */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -155,3 +155,39 @@ class TestIdentity:
         assert a != b
         assert hash(a) != hash(b)
         assert len({a, b}) == 2
+
+
+class TestJsonSchema:
+    """The published JSON schema must cover every accepted input form.
+
+    Regression for PR #764 review: the generated workflow.schema.json only
+    allowed the canonical object shape, so editors/CI validating YAML against
+    it rejected the documented string shorthand examples.
+    """
+
+    def test_schema_is_anyof_string_or_object(self) -> None:
+        schema = ClaudePluginRef.model_json_schema()
+        forms = schema["anyOf"]
+        types = [form["type"] for form in forms]
+        assert types == ["string", "object"]
+
+    def test_string_form_allows_shorthand_examples(self) -> None:
+        schema = ClaudePluginRef.model_json_schema()
+        string_form = schema["anyOf"][0]
+        assert string_form["type"] == "string"
+        assert string_form["minLength"] == 1
+
+    def test_object_form_matches_verbose_mapping(self) -> None:
+        schema = ClaudePluginRef.model_json_schema()
+        object_form = schema["anyOf"][1]
+        assert object_form["required"] == ["version"]
+        # Either ``source`` or ``source_url`` satisfies the mapping form.
+        assert {"required": ["source"]} in object_form["anyOf"]
+        assert {"required": ["source_url"]} in object_form["anyOf"]
+        assert set(object_form["properties"]) == {
+            "source",
+            "source_url",
+            "version",
+            "name",
+            "name_overridden",
+        }

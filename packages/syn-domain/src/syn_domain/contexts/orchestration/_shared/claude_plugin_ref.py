@@ -20,9 +20,14 @@ reproducibility (see ADR / plan for #726).
 from __future__ import annotations
 
 import re
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from pydantic import GetJsonSchemaHandler
+    from pydantic.json_schema import JsonSchemaValue
+    from pydantic_core import CoreSchema
 
 
 class _ParsedRefDict(TypedDict):
@@ -234,6 +239,67 @@ class ClaudePluginRef(BaseModel):
         coerced = _coerce_to_canonical_dict(value)
         _reject_latest_version(coerced)
         return coerced
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        core_schema: CoreSchema,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        """Publish an ``anyOf`` schema covering every accepted input form.
+
+        WHY: the model-validator accepts string shorthand
+        (``org/repo@version``, ``<url>@<version>``) and the verbose mapping
+        (``source``/``source_url`` + ``version`` + optional ``name``), but
+        pydantic's default schema only describes the canonical object shape.
+        Editors and CI validating workflow YAML against the generated
+        ``workflow.schema.json`` would reject the documented string examples.
+        See scripts/export_plugin_schemas.py (ADR-053) for the generation flow.
+        """
+        json_schema = handler(core_schema)
+        resolved = handler.resolve_ref_schema(json_schema)
+        description = resolved.get(
+            "description",
+            "A workflow-declared reference to a Claude Code plugin.",
+        )
+        resolved.clear()
+        resolved.update(
+            {
+                "title": "ClaudePluginRef",
+                "description": description,
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": (
+                            "Shorthand form: 'org/repo@version' or "
+                            "'<url>@<version>'. '@latest' is rejected."
+                        ),
+                    },
+                    {
+                        "type": "object",
+                        "description": (
+                            "Verbose mapping form: 'source' (or 'source_url') "
+                            "plus 'version', with an optional 'name' override."
+                        ),
+                        "properties": {
+                            "source": {"type": "string", "minLength": 1},
+                            "source_url": {"type": "string", "minLength": 1},
+                            "version": {"type": "string", "minLength": 1},
+                            "name": {"type": "string", "minLength": 1},
+                            "name_overridden": {"type": "boolean"},
+                        },
+                        "required": ["version"],
+                        "anyOf": [
+                            {"required": ["source"]},
+                            {"required": ["source_url"]},
+                        ],
+                        "additionalProperties": False,
+                    },
+                ],
+            }
+        )
+        return json_schema
 
     def __eq__(self, other: object) -> bool:
         # Identity is the lock projection key: (source_url, version, name).
