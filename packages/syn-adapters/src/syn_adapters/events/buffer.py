@@ -65,7 +65,7 @@ class EventBuffer:
         self,
         store: AgentEventStore,
         flush_size: int = 1000,
-        flush_interval: float = 0.1,
+        flush_interval: float = 1.0,
     ) -> None:
         """Initialize the event buffer.
 

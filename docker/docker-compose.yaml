@@ -69,6 +69,11 @@ services:
       SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
       EVENT_BATCH_SIZE: "100"
       EVENT_BATCH_INTERVAL_MS: "1000"
+      # Cap glibc arenas at 2 (default num_cpus*8 = 128 on a 16-core host).
+      # PYTHONMALLOC=malloc disables pymalloc's small-object pool so the arena
+      # cap actually applies. Saves 15-25MB RSS under load.
+      MALLOC_ARENA_MAX: "2"
+      PYTHONMALLOC: malloc
     depends_on:
       timescaledb:
         condition: service_healthy
