@@ -500,8 +500,20 @@ class WorkflowExecutionProcessor:
         except Exception:
             logger.exception("Error tearing down shared workspace (exec=%s)", execution_id)
 
-    def _is_interactive_tmux_backend(self) -> bool:
-        cfg = getattr(self._workspace_service, "_config", None)
+    def _is_interactive_tmux_backend(self, phase: ExecutablePhase | None = None) -> bool:
+        """Return True when this phase will provision through interactive-tmux.
+
+        When ``phase`` is provided the check follows the selector
+        (``_workspace_service_for``), so shared-workspace tracking and
+        reuse stay correct under per-phase ``agent.provider="claude-interactive"``
+        routing even if the processor's default service is docker. Without a
+        phase the legacy default-service check is preserved for callers that
+        do not have a phase in scope.
+        """
+        service = (
+            self._workspace_service_for(phase) if phase is not None else self._workspace_service
+        )
+        cfg = getattr(service, "_config", None)
         return getattr(cfg, "provider_kind", "docker") == "interactive-tmux"
 
     async def _handle_provision(
@@ -578,7 +590,7 @@ class WorkflowExecutionProcessor:
         )
         existing = (
             self._shared_workspaces.get(todo.execution_id)
-            if self._is_interactive_tmux_backend()
+            if self._is_interactive_tmux_backend(phase)
             else None
         )
         if existing is not None:
@@ -592,6 +604,7 @@ class WorkflowExecutionProcessor:
                 workspace_cm=shared_cm,
                 phase_outputs=phase_outputs,
                 inputs=self._inputs,
+                repos=repo_urls,
             )
         artifacts = ArtifactCollector(
             self._artifact_repo,
@@ -609,7 +622,7 @@ class WorkflowExecutionProcessor:
             phase_outputs=phase_outputs,
             inputs=self._inputs,
         )
-        if self._is_interactive_tmux_backend():
+        if self._is_interactive_tmux_backend(phase):
             self._shared_workspaces[todo.execution_id] = (
                 result.workspace,
                 result.workspace_cm,

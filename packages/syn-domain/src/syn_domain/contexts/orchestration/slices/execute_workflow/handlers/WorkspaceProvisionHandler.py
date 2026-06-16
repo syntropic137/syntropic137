@@ -372,6 +372,7 @@ class WorkspaceProvisionHandler:
         workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
         phase_outputs: dict[str, str] | None = None,
         inputs: Mapping[str, object] | None = None,
+        repos: list[str] | None = None,
     ) -> ProvisionResult:
         """Build a ProvisionResult for a follow-up phase in a shared workspace.
 
@@ -381,6 +382,13 @@ class WorkspaceProvisionHandler:
         without re-running setup / context injection / artifact
         injection. This method builds only the prompt + per-phase
         ProvisionResult shell.
+
+        ``repos`` is the original execution-scoped repo URL list. It is
+        threaded through ONLY for ``{{repo_url}}`` prompt-template
+        substitution (see ``_build_provision_result``); workspace
+        hydration is still skipped on follow-up phases. Callers that
+        already provisioned the workspace in a prior phase should pass
+        the same list they passed to ``handle()``.
         """
         return await self._build_provision_result(
             workspace=workspace,
@@ -389,7 +397,7 @@ class WorkspaceProvisionHandler:
             phase=phase,
             workflow_id=workflow_id,
             session_id=session_id,
-            effective_repos=[],
+            effective_repos=repos or [],
             outputs=phase_outputs or {},
             inputs=dict(inputs) if inputs is not None else None,
         )
