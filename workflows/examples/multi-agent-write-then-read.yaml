@@ -1,0 +1,58 @@
+id: multi-agent-claude-then-codex-v2
+name: Multi-agent shared workspace (claude writes / codex reads)
+description: |
+  Two-phase workflow proving shared workspace state across agents.
+  Phase 1 runs on Claude and writes /workspace/note.txt.
+  Phase 2 runs on Codex (same EXP-04 swarm container, same filesystem)
+  and reads the file. Used for the e2e bring-up of
+  feat/multi-agent-workspaces.
+
+type: research
+classification: standard
+repository: null
+requires_repos: false
+project_name: null
+
+inputs: []
+
+phases:
+  - id: write
+    name: Write the note (claude)
+    order: 1
+    execution_type: sequential
+    argument_hint: "(none)"
+    description: |
+      Phase 1: claude writes /workspace/note.txt with the marker
+      string. Uses Claude's Write tool (auto-trusted for the
+      pre-seeded /workspace project per the driver's claude.json).
+    input_artifacts: []
+    output_artifacts: []
+    max_tokens: 1024
+    timeout_seconds: 240
+    agent:
+      provider: claude-interactive
+      agent_id: claude
+    prompt_template: |
+      Use your Write tool to create the file at /workspace/note.txt
+      with the contents PHASE_ONE_CLAUDE_WROTE. After the file is
+      written, reply with the literal string DONE.
+
+  - id: read
+    name: Read on codex
+    order: 2
+    execution_type: sequential
+    argument_hint: "(none)"
+    description: |
+      Phase 2: codex reads /workspace/note.txt that claude wrote in
+      phase 1. Proves shared filesystem state across agent boundaries
+      within the same interactive-tmux swarm container.
+    input_artifacts: []
+    output_artifacts: []
+    max_tokens: 1024
+    timeout_seconds: 240
+    agent:
+      provider: claude-interactive
+      agent_id: codex
+    prompt_template: |
+      Open the file at /workspace/note.txt and reply with its
+      contents verbatim.

@@ -127,6 +127,24 @@ class WorkspaceSettings(BaseSettings):
         description="Docker network for containers.",
     )
 
+    interactive_tmux_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the interactive-tmux workspace provider "
+            "(agentic-primitives / EXP-05). When false, attempts to use "
+            "provider_kind='interactive-tmux' are rejected. Default off "
+            "so the default 'claude -p' Docker path is the only live path."
+        ),
+    )
+
+    interactive_tmux_image: str = Field(
+        default="agentic-workspace-interactive-tmux:latest",
+        description=(
+            "Docker image for the interactive-tmux workspace provider. "
+            "Bundles tmux + interactive claude/codex/gemini CLIs."
+        ),
+    )
+
 
 def get_default_isolation_backend() -> IsolationBackend:
     """Select the best available isolation backend for the current platform."""

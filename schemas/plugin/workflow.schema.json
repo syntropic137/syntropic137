@@ -1,7 +1,60 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.25.4/workflow.schema.json",
   "$defs": {
+    "AgentYamlDefinition": {
+      "additionalProperties": false,
+      "description": "Per-phase ``agent`` block as parsed from YAML.\n\nSelects which agent provider drives the phase (e.g. ``claude`` for the\ndefault ``claude -p`` Docker path, ``claude-interactive`` for the\ninteractive-tmux workspace provider), which tmux pane the phase\ntargets, and optionally the model. See\ndocs/plans/multi-agent-workspaces.md.",
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "enum": [
+                "claude",
+                "claude-interactive"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "enum": [
+                "claude",
+                "codex",
+                "gemini"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "title": "AgentYamlDefinition",
+      "type": "object"
+    },
     "InputYamlDefinition": {
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
       "properties": {
@@ -183,6 +236,17 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentYamlDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -223,19 +287,6 @@
       ],
       "title": "WorkflowClassification",
       "type": "string"
-    },
-    "WorkflowType": {
-      "description": "Type of workflow execution.",
-      "enum": [
-        "research",
-        "planning",
-        "implementation",
-        "review",
-        "deployment",
-        "custom"
-      ],
-      "title": "WorkflowType",
-      "type": "string"
     }
   },
   "description": "Complete workflow definition as parsed from YAML.\n\nThis is the root model for workflow YAML files.",
@@ -265,8 +316,9 @@
       "title": "Description"
     },
     "type": {
-      "$ref": "#/$defs/WorkflowType",
-      "default": "custom"
+      "default": "custom",
+      "title": "Type",
+      "type": "string"
     },
     "classification": {
       "$ref": "#/$defs/WorkflowClassification",
@@ -282,6 +334,18 @@
         }
       ],
       "default": null
+    },
+    "requires_repos": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Requires Repos"
     },
     "project_name": {
       "anyOf": [

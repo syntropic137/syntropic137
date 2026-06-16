@@ -131,6 +131,27 @@ def _resolve_repos_from_template(
     return []
 
 
+def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
+    """Build an AgentConfiguration from a workflow-template phase.
+
+    Multi-agent (docs/plans/multi-agent-workspaces.md): the YAML
+    `agent:` block contributes `provider` + `agent_id`; the top-level
+    `model` field still feeds the model. All three are optional;
+    AgentConfiguration's defaults preserve back-compat with PR #765.
+    """
+    phase_model: str | None = getattr(phase, "model", None)
+    phase_provider: str | None = getattr(phase, "provider", None)
+    phase_agent_id: str | None = getattr(phase, "agent_id", None)
+    if not (phase_model or phase_provider or phase_agent_id):
+        return AgentConfiguration()
+    defaults = AgentConfiguration()
+    return AgentConfiguration(
+        provider=phase_provider or defaults.provider,
+        model=phase_model or defaults.model,
+        agent_id=phase_agent_id or defaults.agent_id,
+    )
+
+
 class WorkflowRepository(Protocol):
     """Repository protocol for Workflow aggregates."""
 
@@ -251,10 +272,7 @@ class ExecuteWorkflowHandler:
         """Convert workflow template phases to executable phases."""
         executable_phases = []
         for phase in workflow.phases:
-            phase_model = getattr(phase, "model", None)
-            agent_config = (
-                AgentConfiguration(model=phase_model) if phase_model else AgentConfiguration()
-            )
+            agent_config = _build_agent_config_from_phase(phase)
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,

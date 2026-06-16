@@ -251,28 +251,37 @@ class ObservabilityCollector:
         cache_read: int,
         num_turns: int | None,
         duration_ms: int | None,
+        agent_id: str | None = None,
     ) -> None:
         """Record end-of-session summary with authoritative CLI totals (ISS-217).
 
         Emits a session_summary observation so SessionCostProjection.on_session_summary()
         can overwrite accumulated estimates with the SDK-reported values.
+
+        ``agent_id`` identifies which interactive-tmux pane produced the
+        summary (multi-agent workspaces) so observability consumers can
+        group per pane; None for the default claude -p path.
         """
         if self._writer is None:
             return
 
+        data = {
+            "total_cost_usd": total_cost_usd,
+            "total_input_tokens": input_tokens,
+            "total_output_tokens": output_tokens,
+            "cache_creation_tokens": cache_creation,
+            "cache_read_tokens": cache_read,
+            "num_turns": num_turns,
+            "duration_ms": duration_ms,
+            "model": self._agent_model,
+        }
+        if agent_id is not None:
+            data["agent_id"] = agent_id
+
         await self._writer.record_observation(
             session_id=self._session_id,
             observation_type=SESSION_SUMMARY,
-            data={
-                "total_cost_usd": total_cost_usd,
-                "total_input_tokens": input_tokens,
-                "total_output_tokens": output_tokens,
-                "cache_creation_tokens": cache_creation,
-                "cache_read_tokens": cache_read,
-                "num_turns": num_turns,
-                "duration_ms": duration_ms,
-                "model": self._agent_model,
-            },
+            data=data,
             execution_id=self._execution_id,
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,

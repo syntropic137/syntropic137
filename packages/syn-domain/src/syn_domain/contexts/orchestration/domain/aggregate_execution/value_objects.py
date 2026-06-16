@@ -66,6 +66,11 @@ class AgentConfiguration:
     temperature: float = 0.7
     timeout_seconds: int = 300
     allowed_tools: tuple[str, ...] = ()  # Tools allowed during execution
+    # Multi-agent interactive-tmux: which tmux pane the phase targets.
+    # Valid values: "claude", "codex", "gemini". Defaults to "claude" so
+    # single-agent workflows (PR #765) keep behaving identically. Ignored
+    # by the default claude -p path. See docs/plans/multi-agent-workspaces.md.
+    agent_id: str = "claude"
 
 
 @dataclass(frozen=True)

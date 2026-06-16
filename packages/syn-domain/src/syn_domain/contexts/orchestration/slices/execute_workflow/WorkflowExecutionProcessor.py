@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -38,6 +39,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Artifact
     ArtifactCollectionHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+    ProvisionResult,
     WorkspaceProvisionHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
@@ -84,6 +86,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class _DispatchContext:
+    """Execution-local dispatch state, created per run().
+
+    D3 fix (stress 2026-06-10), hardened for concurrent dispatch: tracks
+    the phase currently being dispatched so a workflow-level failure can
+    mark the inner phase record as ``failed`` instead of stranding it at
+    ``running``. Carried as a per-run object (not processor instance
+    state) because BackgroundWorkflowDispatcher shares one processor
+    across up to max_concurrent executions; instance state would let a
+    concurrent execution overwrite the value and _fail_execution would
+    emit a failed_phase_id belonging to a different execution.
+    """
+
+    current_phase_id: str | None = None
+
+
 class WorkflowExecutionProcessor:
     """Reads the to-do list and dispatches to handlers. Zero business logic."""
 
@@ -102,10 +121,16 @@ class WorkflowExecutionProcessor:
         command_builder: CommandBuilder,
         todo_projection: TodoProjection | None = None,
         agent_handler: AgentHandlerProtocol | None = None,
+        interactive_workspace_service: WorkspaceService | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
         self._workspace_service = workspace_service
+        # Optional second service for phases that declare
+        # agent.provider="claude-interactive" (interactive-tmux backend).
+        # The default workspace_service stays on the Docker claude -p path
+        # so normal claude phases keep Envoy token accounting + telemetry.
+        self._interactive_workspace_service = interactive_workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
         self._artifact_query = artifact_query
@@ -119,6 +144,9 @@ class WorkflowExecutionProcessor:
         self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
+        # Per-phase prompt set out-of-band when provider="claude-interactive"
+        # (claude_cmd is empty for that path). None for the default claude -p path.
+        self._active_prompts: dict[str, str | None] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
         self._active_envs: dict[str, dict[str, str]] = {}
         self._active_cmds: dict[str, list[str]] = {}
@@ -129,6 +157,12 @@ class WorkflowExecutionProcessor:
         ] = {}  # (input, output, cache_creation, cache_read)
         self._phase_artifact_ids: dict[str, list[str]] = {}
         self._phase_started_at: dict[str, datetime] = {}
+        # Multi-agent (interactive-tmux): per-execution shared workspace
+        # holding one container across phases. See
+        # docs/plans/multi-agent-workspaces.md §3.
+        self._shared_workspaces: dict[
+            str, tuple[ManagedWorkspace, AbstractAsyncContextManager[ManagedWorkspace]]
+        ] = {}
 
     async def run(
         self,
@@ -178,6 +212,7 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str] = []
         completed_phase_ids: list[str] = []
         phase_outputs: dict[str, str] = {}
+        dispatch_ctx = _DispatchContext()
 
         try:
             await self._drain_todo_list(
@@ -189,6 +224,7 @@ class WorkflowExecutionProcessor:
                 completed_phase_ids=completed_phase_ids,
                 phase_outputs=phase_outputs,
                 repos=repos,
+                dispatch_ctx=dispatch_ctx,
             )
             if aggregate.status == ExecutionStatus.CANCELLED:
                 return await self._cancel_execution(
@@ -209,6 +245,12 @@ class WorkflowExecutionProcessor:
                 started_at,
             )
         except Exception as e:
+            logger.exception(
+                "Workflow execution failed (exec=%s, workflow=%s): %s",
+                execution_id,
+                workflow_id,
+                e,
+            )
             return await self._fail_execution(
                 e,
                 aggregate,
@@ -219,6 +261,7 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids,
                 completed_phase_ids,
                 started_at,
+                failed_phase_id=dispatch_ctx.current_phase_id,
             )
 
     async def _drain_todo_list(
@@ -231,6 +274,7 @@ class WorkflowExecutionProcessor:
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
         repos: list[RepositoryRef] | None,
+        dispatch_ctx: _DispatchContext,
     ) -> None:
         """Process to-do items until the list is empty (all phases done or cancelled)."""
         while True:
@@ -246,6 +290,7 @@ class WorkflowExecutionProcessor:
                 completed_phase_ids=completed_phase_ids,
                 phase_outputs=phase_outputs,
                 repos=repos,
+                dispatch_ctx=dispatch_ctx,
             )
 
     async def _dispatch(
@@ -258,10 +303,16 @@ class WorkflowExecutionProcessor:
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
         repos: list[RepositoryRef] | None,
+        dispatch_ctx: _DispatchContext,
     ) -> None:
         """Dispatch a single to-do item to its handler."""
         assert todo.phase_id is not None
         phase = phase_map[todo.phase_id]
+        # D3 (stress 2026-06-10): record the phase under dispatch so
+        # _fail_execution can attribute a workflow-level failure to a
+        # real phase id and unstrand the inner phase record. Stored on
+        # the per-run _DispatchContext, never on the shared processor.
+        dispatch_ctx.current_phase_id = todo.phase_id
         if todo.action == TodoAction.PROVISION_WORKSPACE:
             await self._handle_provision(
                 todo,
@@ -289,6 +340,9 @@ class WorkflowExecutionProcessor:
                 phase_results,
                 completed_phase_ids,
             )
+            # The phase finished cleanly; a later workflow-level failure
+            # (between phases) must not be attributed to it.
+            dispatch_ctx.current_phase_id = None
 
     async def _cancel_execution(
         self,
@@ -308,15 +362,12 @@ class WorkflowExecutionProcessor:
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_cancelled(reason=reason)
         self._session_managers.clear()
-        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
-            try:
-                await workspace_cm.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("Error cleaning up workspace during cancel")
-        self._active_workspace_cms.clear()
+        await self._close_phase_workspace_cms(context="cancel")
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
+        self._active_prompts.clear()
+        await self._cleanup_shared_workspace(execution_id)
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -354,6 +405,7 @@ class WorkflowExecutionProcessor:
         )
         aggregate.complete_execution(complete_cmd)
         await self._save_and_sync(aggregate)
+        await self._cleanup_shared_workspace(execution_id)
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -376,25 +428,28 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
         started_at: datetime,
+        failed_phase_id: str | None = None,
     ) -> WorkflowExecutionResult:
-        """Close open sessions, save failure event, and return failed result."""
+        """Close open sessions, save failure event, and return failed result.
+
+        ``failed_phase_id`` comes from the run's own _DispatchContext so
+        it always belongs to THIS execution, even with concurrent runs
+        sharing the processor instance.
+        """
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_failure(error_message=str(error))
         self._session_managers.clear()
-        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
-            try:
-                await workspace_cm.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("Error cleaning up workspace during failure")
-        self._active_workspace_cms.clear()
+        await self._close_phase_workspace_cms(context="failure")
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
+        self._active_prompts.clear()
+        await self._cleanup_shared_workspace(execution_id)
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
             error=str(error),
             error_type=type(error).__name__,
-            failed_phase_id=None,
+            failed_phase_id=failed_phase_id,
             completed_phases=len(completed_phase_ids),
             total_phases=len(phases),
         )
@@ -414,6 +469,52 @@ class WorkflowExecutionProcessor:
             metrics=ExecutionMetrics.from_results(phase_results),
             error_message=str(error),
         )
+
+    async def _close_phase_workspace_cms(self, context: str) -> None:
+        """Close per-phase workspace context managers and clear per-phase state.
+
+        Shared interactive-tmux context managers are skipped here: they are
+        owned by ``_shared_workspaces`` and torn down exactly once via
+        ``_cleanup_shared_workspace`` (the callers invoke it right after).
+        Closing them in this loop too would double-exit the same context
+        manager and destroy the shared container twice.
+        """
+        shared_cms = {id(cm) for _, cm in self._shared_workspaces.values()}
+        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
+            if id(workspace_cm) in shared_cms:
+                continue
+            try:
+                await workspace_cm.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Error cleaning up workspace during %s", context)
+        self._active_workspace_cms.clear()
+
+    async def _cleanup_shared_workspace(self, execution_id: str) -> None:
+        """Tear down the shared workspace at execution end. Idempotent."""
+        shared = self._shared_workspaces.pop(execution_id, None)
+        if shared is None:
+            return
+        _, workspace_cm = shared
+        try:
+            await workspace_cm.__aexit__(None, None, None)
+        except Exception:
+            logger.exception("Error tearing down shared workspace (exec=%s)", execution_id)
+
+    def _is_interactive_tmux_backend(self, phase: ExecutablePhase | None = None) -> bool:
+        """Return True when this phase will provision through interactive-tmux.
+
+        When ``phase`` is provided the check follows the selector
+        (``_workspace_service_for``), so shared-workspace tracking and
+        reuse stay correct under per-phase ``agent.provider="claude-interactive"``
+        routing even if the processor's default service is docker. Without a
+        phase the legacy default-service check is preserved for callers that
+        do not have a phase in scope.
+        """
+        service = (
+            self._workspace_service_for(phase) if phase is not None else self._workspace_service
+        )
+        cfg = getattr(service, "_config", None)
+        return getattr(cfg, "provider_kind", "docker") == "interactive-tmux"
 
     async def _handle_provision(
         self,
@@ -451,20 +552,65 @@ class WorkflowExecutionProcessor:
         self._session_managers[todo.phase_id] = session_mgr
         self._phase_started_at[todo.phase_id] = datetime.now(UTC)
 
+        # ADR-063: convert typed RepositoryRef → HTTPS URL at the workspace seam.
+        repo_urls = [r.https_url for r in (repos or [])]
+        result = await self._provision_or_reuse_workspace(
+            todo=todo,
+            phase=phase,
+            aggregate=aggregate,
+            session_id=session_id,
+            repo_urls=repo_urls,
+            completed_phase_ids=completed_phase_ids,
+            phase_outputs=phase_outputs,
+        )
+        self._active_workspaces[todo.phase_id] = result.workspace
+        self._active_workspace_cms[todo.phase_id] = result.workspace_cm
+        self._active_envs[todo.phase_id] = result.agent_env
+        self._active_cmds[todo.phase_id] = result.claude_cmd
+        self._active_prompts[todo.phase_id] = result.interactive_prompt
+        aggregate.provision_workspace_completed(result.command)
+        await self._save_and_sync(aggregate)
+
+    async def _provision_or_reuse_workspace(
+        self,
+        *,
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        aggregate: WorkflowExecutionAggregate,
+        session_id: str,
+        repo_urls: list[str],
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+    ) -> ProvisionResult:
+        """Build a ProvisionResult — reusing the shared workspace when applicable."""
+        provision_handler = WorkspaceProvisionHandler(
+            workspace_service=self._workspace_service_for(phase),
+            prompt_builder=self._prompt_builder,
+            command_builder=self._command_builder,
+        )
+        existing = (
+            self._shared_workspaces.get(todo.execution_id)
+            if self._is_interactive_tmux_backend(phase)
+            else None
+        )
+        if existing is not None:
+            shared_ws, shared_cm = existing
+            return await provision_handler.build_followup_result(
+                todo=todo,
+                phase=phase,
+                workflow_id=aggregate.workflow_id or "",
+                session_id=session_id,
+                workspace=shared_ws,
+                workspace_cm=shared_cm,
+                phase_outputs=phase_outputs,
+                inputs=self._inputs,
+                repos=repo_urls,
+            )
         artifacts = ArtifactCollector(
             self._artifact_repo,
             self._artifact_content_storage,
             self._artifact_query,
         )
-        provision_handler = WorkspaceProvisionHandler(
-            workspace_service=self._workspace_service,
-            prompt_builder=self._prompt_builder,
-            command_builder=self._command_builder,
-        )
-        # ADR-063: convert typed RepositoryRef → HTTPS URL at the workspace seam.
-        # WorkspaceProvisionHandler consumes URLs (git clone, secret hydration);
-        # the typed value object stops here.
-        repo_urls = [r.https_url for r in (repos or [])]
         result = await provision_handler.handle(
             todo=todo,
             phase=phase,
@@ -476,13 +622,32 @@ class WorkflowExecutionProcessor:
             phase_outputs=phase_outputs,
             inputs=self._inputs,
         )
+        if self._is_interactive_tmux_backend(phase):
+            self._shared_workspaces[todo.execution_id] = (
+                result.workspace,
+                result.workspace_cm,
+            )
+        return result
 
-        self._active_workspaces[todo.phase_id] = result.workspace
-        self._active_workspace_cms[todo.phase_id] = result.workspace_cm
-        self._active_envs[todo.phase_id] = result.agent_env
-        self._active_cmds[todo.phase_id] = result.claude_cmd
-        aggregate.provision_workspace_completed(result.command)
-        await self._save_and_sync(aggregate)
+    def _workspace_service_for(self, phase: ExecutablePhase) -> WorkspaceService:
+        """Select the workspace service for a phase by its agent provider.
+
+        Default: the Docker-backed claude -p service. Phases declaring
+        agent.provider="claude-interactive" route to the interactive-tmux
+        service; if none is configured, fail loudly instead of silently
+        running the phase on the wrong provider.
+        """
+        if phase.agent_config.provider != "claude-interactive":
+            return self._workspace_service
+        if self._interactive_workspace_service is None:
+            msg = (
+                f"Phase '{phase.phase_id}' declares agent provider "
+                "'claude-interactive' but no interactive workspace service "
+                "is configured. Set SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED=true "
+                "so the interactive-tmux provider is wired in."
+            )
+            raise RuntimeError(msg)
+        return self._interactive_workspace_service
 
     def _get_agent_handler(self) -> AgentHandlerProtocol:
         """Return the injected handler, or create a fresh real one (default behaviour)."""
@@ -501,6 +666,7 @@ class WorkflowExecutionProcessor:
         workspace = self._active_workspaces[todo.phase_id]
         agent_env = self._active_envs[todo.phase_id]
         claude_cmd = self._active_cmds[todo.phase_id]
+        interactive_prompt = self._active_prompts.get(todo.phase_id)
         session_id = todo.session_id or ""
         workflow_id = aggregate.workflow_id or ""
         timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
@@ -522,6 +688,8 @@ class WorkflowExecutionProcessor:
             agent_model=phase.agent_config.model,
             timeout_seconds=timeout,
             collector=collector,
+            interactive_prompt=interactive_prompt,
+            agent_id=phase.agent_config.agent_id,
         )
 
         recorder = ConversationRecorder(self._conversation_storage)
@@ -590,7 +758,22 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Dispatch COLLECT_ARTIFACTS."""
         assert todo.phase_id is not None
-        workspace = self._active_workspaces[todo.phase_id]
+        workspace = self._active_workspaces.get(todo.phase_id)
+        if workspace is None:
+            # Defense in depth: in-process this branch is unreachable
+            # (_finalize_phase pops _active_workspaces only after
+            # on_phase_completed locks the phase at rank 99, and
+            # get_pending filters stale items), but a lock-bypassing
+            # projection writer (e.g. a future out-of-process consumer on
+            # a shared Postgres store) could resurrect a stale todo.
+            # Skip it instead of crashing the workflow with KeyError.
+            logger.warning(
+                "Skipping stale COLLECT_ARTIFACTS for finalized phase %s "
+                "(execution %s): no active workspace",
+                todo.phase_id,
+                todo.execution_id,
+            )
+            return
         artifacts = ArtifactCollector(
             self._artifact_repo,
             self._artifact_content_storage,
@@ -712,8 +895,13 @@ class WorkflowExecutionProcessor:
         self._active_workspaces.pop(phase_id, None)
         self._active_envs.pop(phase_id, None)
         self._active_cmds.pop(phase_id, None)
+        self._active_prompts.pop(phase_id, None)
         workspace_cm = self._active_workspace_cms.pop(phase_id, None)
-        if workspace_cm is not None:
+        # Multi-agent: if this workspace is shared across phases of an
+        # execution (interactive-tmux backend), DON'T tear it down here.
+        # Cleanup happens once at execution end (complete / fail / cancel).
+        is_shared = any(cm is workspace_cm for _, cm in self._shared_workspaces.values())
+        if workspace_cm is not None and not is_shared:
             await workspace_cm.__aexit__(None, None, None)
 
     async def _save_new_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:

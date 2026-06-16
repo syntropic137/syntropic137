@@ -94,6 +94,8 @@ class AgentHandlerProtocol(Protocol):
         agent_model: str,
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
+        interactive_prompt: str | None = None,
+        agent_id: str = "claude",
     ) -> AgentExecutionResult: ...
 
 

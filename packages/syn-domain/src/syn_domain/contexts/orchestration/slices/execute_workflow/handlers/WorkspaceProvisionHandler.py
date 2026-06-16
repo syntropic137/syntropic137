@@ -13,7 +13,7 @@ of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -146,7 +146,14 @@ async def _resolve_github_app_token() -> str | None:
 class ProvisionResult:
     """Result of workspace provisioning."""
 
-    __slots__ = ("agent_env", "claude_cmd", "command", "workspace", "workspace_cm")
+    __slots__ = (
+        "agent_env",
+        "claude_cmd",
+        "command",
+        "interactive_prompt",
+        "workspace",
+        "workspace_cm",
+    )
 
     def __init__(
         self,
@@ -155,12 +162,19 @@ class ProvisionResult:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         command: ProvisionWorkspaceCompletedCommand,
+        interactive_prompt: str | None = None,
     ) -> None:
         self.workspace = workspace
         self.workspace_cm = workspace_cm  # async context manager for cleanup
         self.agent_env = agent_env
         self.claude_cmd = claude_cmd
         self.command = command
+        # When non-None, AgentExecutionHandler dispatches to the
+        # interactive-tmux path (send_message/await_completion/
+        # capture_response) instead of workspace.stream(claude_cmd).
+        # Populated by WorkspaceProvisionHandler when the phase's
+        # agent_config.provider == "claude-interactive".
+        self.interactive_prompt = interactive_prompt
 
 
 class WorkspaceProvisionHandler:
@@ -305,8 +319,33 @@ class WorkspaceProvisionHandler:
         prompt = await self._prompt_builder(
             phase, todo.execution_id, workflow_id, repo_url_for_prompt, outputs, inputs or {}
         )
-        claude_cmd = self._command_builder(phase, prompt)
-        agent_env = await _build_agent_env(workspace, session_id)
+        # Interactive-tmux dispatch: when the phase declares
+        # provider="claude-interactive", AgentExecutionHandler will drive
+        # the agent through send_message/await_completion against the
+        # tmux pane instead of running claude -p. Skip the CLI command
+        # builder (it would produce a noisy claude_cmd we never run) and
+        # carry the prompt out-of-band on the ProvisionResult.
+        # Interactive detection: explicit per-phase (`provider:
+        # claude-interactive`) OR implicit (the workspace itself was
+        # provisioned through the interactive-tmux backend, e.g. when the
+        # API is wired with provider_kind="interactive-tmux" service-wide).
+        # The YAML schema currently has no `agent.provider` field, so the
+        # implicit signal is what carries the e2e today. Per-phase
+        # override is the future path once the YAML schema gains an
+        # `agent` block — handler logic doesn't need to change for that.
+        explicit_interactive = phase.agent_config.provider == "claude-interactive"
+        implicit_interactive = workspace.isolation_handle.isolation_type == "interactive-tmux"
+        is_interactive = explicit_interactive or implicit_interactive
+        claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
+        interactive_prompt = prompt if is_interactive else None
+
+        # Interactive-tmux runs claude as a TUI with OAuth-on-disk;
+        # `_build_agent_env` requires the Envoy proxy URL because the
+        # claude -p path needs ANTHROPIC_BASE_URL to route SDK traffic
+        # through the sidecar. That sidecar is intentionally absent on
+        # this path (see _create_interactive_tmux_impl in
+        # WorkspaceService). Skip env build for interactive phases.
+        agent_env = {} if is_interactive else await _build_agent_env(workspace, session_id)
         assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
             execution_id=todo.execution_id,
@@ -320,6 +359,47 @@ class WorkspaceProvisionHandler:
             agent_env=agent_env,
             claude_cmd=claude_cmd,
             command=command,
+            interactive_prompt=interactive_prompt,
+        )
+
+    async def build_followup_result(
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        workflow_id: str,
+        session_id: str,
+        workspace: ManagedWorkspace,
+        workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
+        phase_outputs: dict[str, str] | None = None,
+        inputs: Mapping[str, object] | None = None,
+        repos: list[str] | None = None,
+    ) -> ProvisionResult:
+        """Build a ProvisionResult for a follow-up phase in a shared workspace.
+
+        Multi-agent (docs/plans/multi-agent-workspaces.md): when the
+        execution's first phase already provisioned an
+        interactive-tmux workspace, subsequent phases reuse it
+        without re-running setup / context injection / artifact
+        injection. This method builds only the prompt + per-phase
+        ProvisionResult shell.
+
+        ``repos`` is the original execution-scoped repo URL list. It is
+        threaded through ONLY for ``{{repo_url}}`` prompt-template
+        substitution (see ``_build_provision_result``); workspace
+        hydration is still skipped on follow-up phases. Callers that
+        already provisioned the workspace in a prior phase should pass
+        the same list they passed to ``handle()``.
+        """
+        return await self._build_provision_result(
+            workspace=workspace,
+            workspace_cm=workspace_cm,
+            todo=todo,
+            phase=phase,
+            workflow_id=workflow_id,
+            session_id=session_id,
+            effective_repos=repos or [],
+            outputs=phase_outputs or {},
+            inputs=dict(inputs) if inputs is not None else None,
         )
 
     @staticmethod

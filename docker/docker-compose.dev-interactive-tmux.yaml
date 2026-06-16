@@ -1,0 +1,92 @@
+# Interactive-tmux dev overlay.
+#
+# Layered on top of docker-compose.{yaml,dev.yaml} when a developer wants
+# the dev stack to route through the EXP-05 interactive-tmux workspace
+# provider instead of the default claude -p Docker provider:
+#
+#   docker compose \
+#     -f docker/docker-compose.yaml \
+#     -f docker/docker-compose.dev.yaml \
+#     -f docker/docker-compose.dev-interactive-tmux.yaml \
+#     up -d --build api
+#
+# What this overlay adds:
+#   * SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED=true so the wiring picks
+#     the interactive-tmux factory branch.
+#   * AGENTIC_INTERACTIVE_TMUX_DRIVER + a read-only mount of the driver
+#     tree from the host submodule checkout. The agentic-primitives
+#     Python package ships without the providers/workspaces/ tree, so
+#     the driver path-walk inside the container fails without this.
+#   * ITMUX_CLAUDE_HOME / ITMUX_CLAUDE_JSON (from agentic-primitives
+#     ea881ea) point the driver at the operator's host credentials
+#     mounted into the syn-api container.
+#   * TMPDIR set to a SAME-PATH bind mount (/data/tmp/syn-itx in both
+#     the syn-api container and the docker daemon's host filesystem) so
+#     the driver's `tempfile.mkdtemp(...)` throwaway dirs land on a
+#     path the host docker daemon can also see — the
+#     docker-out-of-docker host-path translation trick. Without this,
+#     the driver creates throwaway dirs inside syn-api's container
+#     filesystem and the docker daemon can't bind-mount them into
+#     sibling containers.
+#
+# Prereqs on the host:
+#   * `~/.claude/.credentials.json` and `~/.claude.json` present
+#     (the operator must have run `claude login` interactively at least
+#     once).
+#   * `mkdir -p /data/tmp/syn-itx` writable by the in-container user
+#     (uid 1000).
+#
+# This file is OFF unless explicitly layered in. See:
+#   docs/plans/interactive-tmux-integration.md
+services:
+  # One-shot fix-up of the bind-mounted workspaces directory so the syn-api
+  # container user (uid 1000) can create per-execution workspace subdirs.
+  # Without this, the first run of any interactive-tmux phase dies with
+  # `[Errno 13] Permission denied: '/workspaces/ws-XXX'` because the host
+  # directory was created by the docker daemon as root:root 0755 the first
+  # time the bind mount resolved. Runs as root, exits immediately, and the
+  # api waits on `service_completed_successfully` before starting.
+  workspaces-init:
+    image: alpine:3.20
+    user: "0:0"
+    command: sh -c "mkdir -p /workspaces && chown 1000:1000 /workspaces && chmod 0775 /workspaces"
+    volumes:
+      - ../workspaces:/workspaces
+    restart: "no"
+  api:
+    depends_on:
+      workspaces-init:
+        condition: service_completed_successfully
+    environment:
+      SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED: "true"
+      AGENTIC_INTERACTIVE_TMUX_DRIVER: /opt/agentic-primitives/providers/workspaces/interactive-tmux/driver/interactive_tmux.py
+      # Point the driver at the operator's credentials (mounted below).
+      ITMUX_CLAUDE_HOME: /host-creds/claude
+      ITMUX_CLAUDE_JSON: /host-creds/claude.json
+      # Multi-agent (PR feat/multi-agent-workspaces): same env contract,
+      # one var per agent. Driver's _default_host_auth_from_env reads
+      # these first, then falls back to $HOME/.{agent}. Missing dirs are
+      # dropped silently - an agent without creds simply isn't launched.
+      # Leave codex/gemini env vars UNSET by default so the driver brings
+      # up just the claude pane; layer in -interactive-tmux-multi-agent
+      # (TODO) to enable the others once their auth is wired.
+      # ITMUX_CODEX_HOME: /host-creds/codex
+      # ITMUX_GEMINI_HOME: /host-creds/gemini
+      # Same-path TMPDIR so throwaway bind-mount sources survive the
+      # docker-out-of-docker boundary (docker daemon sees the same path
+      # on the host).
+      TMPDIR: /data/tmp/syn-itx
+    volumes:
+      - ../lib/agentic-primitives/providers/workspaces/interactive-tmux:/opt/agentic-primitives/providers/workspaces/interactive-tmux:ro
+      - ${HOME}/.claude:/host-creds/claude:ro
+      - ${HOME}/.claude.json:/host-creds/claude.json:ro
+      # Multi-agent: codex + gemini creds mounted same shape as claude.
+      # Marked read-only; if a host doesn't have these dirs the
+      # operator just removes the corresponding line. Driver gracefully
+      # disables the agent when the env var points at a missing path.
+      - ${HOME}/.codex:/host-creds/codex:ro
+      - ${HOME}/.gemini:/host-creds/gemini:ro
+      # SAME-PATH bind mount so paths under TMPDIR are valid bind-mount
+      # sources for the docker daemon (which runs on the host, not in
+      # syn-api).
+      - /data/tmp/syn-itx:/data/tmp/syn-itx

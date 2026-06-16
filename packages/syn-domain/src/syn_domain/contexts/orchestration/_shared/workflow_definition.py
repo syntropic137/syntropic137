@@ -17,7 +17,7 @@ semantics) — no runtime coupling to the library.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -162,6 +162,30 @@ class InputYamlDefinition(BaseModel):
         )
 
 
+class AgentYamlDefinition(BaseModel):
+    """Per-phase ``agent`` block as parsed from YAML.
+
+    Selects which agent provider drives the phase (e.g. ``claude`` for the
+    default ``claude -p`` Docker path, ``claude-interactive`` for the
+    interactive-tmux workspace provider), which tmux pane the phase
+    targets, and optionally the model. See
+    docs/plans/multi-agent-workspaces.md.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: Literal["claude", "claude-interactive"] | None = None
+    """One of: ``claude`` (default; ``claude -p`` path),
+    ``claude-interactive`` (drives the interactive-tmux pane)."""
+
+    agent_id: Literal["claude", "codex", "gemini"] | None = None
+    """Which tmux pane the phase targets when provider is
+    ``claude-interactive``."""
+
+    model: str | None = None
+    """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
+
+
 class PhaseYamlDefinition(BaseModel):
     """Phase definition as parsed from YAML.
 
@@ -191,6 +215,10 @@ class PhaseYamlDefinition(BaseModel):
     argument_hint: str | None = None
     model: str | None = None
 
+    # Per-phase agent provider selection (interactive-tmux integration).
+    # ``agent.model`` is a fallback for the top-level ``model`` field.
+    agent: AgentYamlDefinition | None = None
+
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
         """Ensure at most one of prompt_template or prompt_file is set."""
@@ -213,6 +241,15 @@ class PhaseYamlDefinition(BaseModel):
             )
             raise ValueError(msg)
 
+        # Multi-agent (interactive-tmux): per-phase agent block. When
+        # absent, leave provider/agent_id as None so the domain default
+        # ("claude") applies. Top-level model wins; agent.model is the
+        # fallback.
+        provider = self.agent.provider if self.agent else None
+        agent_id = self.agent.agent_id if self.agent else None
+        agent_model = self.agent.model if self.agent else None
+        model = self.model or agent_model
+
         return PhaseDefinition(
             phase_id=self.id,
             name=self.name,
@@ -226,7 +263,9 @@ class PhaseYamlDefinition(BaseModel):
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
             argument_hint=self.argument_hint,
-            model=self.model,
+            model=model,
+            provider=provider,
+            agent_id=agent_id,
         )
 
 

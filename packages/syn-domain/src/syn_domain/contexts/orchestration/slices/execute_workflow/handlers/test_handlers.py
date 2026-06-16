@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
+    InteractiveTmuxDriver,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
@@ -241,6 +242,201 @@ class TestAgentExecutionHandler:
             num_turns=7,
             duration_ms=48000,
         )
+
+    @staticmethod
+    def _interactive_workspace(driver: MagicMock) -> MagicMock:
+        """Workspace whose isolation adapter exposes provider_handle()."""
+        workspace = MagicMock()
+        workspace._service._isolation.provider_handle = MagicMock(return_value=driver)
+        return workspace
+
+    @pytest.mark.anyio
+    async def test_interactive_pane_capture_persisted_as_conversation(self) -> None:
+        """Interactive path stores the pane capture as a conversation line."""
+        import json
+
+        handler = AgentExecutionHandler(controller=None)
+
+        driver = MagicMock(spec=InteractiveTmuxDriver)
+        driver.await_completion.return_value = MagicMock(ready=True, reason="ready")
+        driver.capture_response.return_value = "OK"
+        workspace = self._interactive_workspace(driver)
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.RUN_AGENT,
+            phase_id="p-1",
+        )
+        result = await handler.handle(
+            todo=todo,
+            workspace=workspace,
+            agent_env={},
+            claude_cmd=[],
+            session_id="sess-1",
+            agent_model="sonnet",
+            timeout_seconds=60,
+            interactive_prompt="Reply with OK.",
+        )
+
+        driver.send_message.assert_called_once_with("claude", "Reply with OK.")
+        assert result.command.exit_code == 0
+        assert result.stream_result.error_reason is None
+        assert len(result.stream_result.conversation_lines) == 1
+        captured = json.loads(result.stream_result.conversation_lines[0])
+        assert captured["message"]["content"][0]["text"] == "OK"
+        assert captured["source"] == "interactive-tmux-capture"
+
+    @pytest.mark.anyio
+    async def test_interactive_timeout_sets_error_reason(self) -> None:
+        """await_completion timeout yields exit 124 with an explicit error_reason."""
+        handler = AgentExecutionHandler(controller=None)
+
+        driver = MagicMock(spec=InteractiveTmuxDriver)
+        driver.await_completion.return_value = MagicMock(ready=False, reason="timeout")
+        driver.capture_response.return_value = "partial pane output"
+        workspace = self._interactive_workspace(driver)
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.RUN_AGENT,
+            phase_id="p-1",
+        )
+        result = await handler.handle(
+            todo=todo,
+            workspace=workspace,
+            agent_env={},
+            claude_cmd=[],
+            session_id="sess-1",
+            agent_model="sonnet",
+            timeout_seconds=60,
+            interactive_prompt="Reply with OK.",
+        )
+
+        assert result.command.exit_code == 124
+        assert result.stream_result.error_reason is not None
+        assert "60s" in result.stream_result.error_reason
+        assert "timeout" in result.stream_result.error_reason
+        # Partial pane output is still persisted for diagnosis.
+        assert len(result.stream_result.conversation_lines) == 1
+
+    @pytest.mark.anyio
+    async def test_interactive_agent_id_targets_pane_and_reaches_observability(self) -> None:
+        """agent_id selects the tmux pane and is threaded into the session summary."""
+        handler = AgentExecutionHandler(controller=None)
+
+        driver = MagicMock(spec=InteractiveTmuxDriver)
+        driver.await_completion.return_value = MagicMock(ready=True, reason="ready")
+        driver.capture_response.return_value = "OK"
+        workspace = self._interactive_workspace(driver)
+        collector = AsyncMock()
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.RUN_AGENT,
+            phase_id="p-1",
+        )
+        await handler.handle(
+            todo=todo,
+            workspace=workspace,
+            agent_env={},
+            claude_cmd=[],
+            session_id="sess-1",
+            agent_model="sonnet",
+            timeout_seconds=60,
+            interactive_prompt="Reply with OK.",
+            collector=collector,
+            agent_id="codex",
+        )
+
+        # Driver calls target the selected pane, not the default.
+        driver.send_message.assert_called_once_with("codex", "Reply with OK.")
+        driver.await_completion.assert_called_once_with("codex", timeout=60.0)
+        driver.capture_response.assert_called_once_with("codex")
+
+        # Observability summary carries the pane identity.
+        collector.record_session_summary.assert_awaited_once()
+        assert collector.record_session_summary.call_args.kwargs["agent_id"] == "codex"
+
+    @pytest.mark.anyio
+    async def test_interactive_cancel_during_await_returns_interrupt(self) -> None:
+        """CANCEL during await_completion drives driver.stop and surfaces interrupt.
+
+        Covers `_race_completion_against_cancel` (fitness-excepted at
+        cognitive=47): the synchronous driver runs in a worker thread,
+        the asyncio loop polls `controller.check_signal` every 0.5 s,
+        and a CANCEL signal must (a) call `driver.stop()` to unblock
+        the thread and (b) return an AgentExecutionResult with
+        `interrupt_requested=True` so the processor routes through
+        `_handle_cancel_signal`.
+        """
+        import threading
+        from subprocess import CalledProcessError
+
+        from syn_adapters.control.commands import ControlSignal, ControlSignalType
+
+        driver = MagicMock(spec=InteractiveTmuxDriver)
+        await_started = threading.Event()
+        stop_called = threading.Event()
+
+        def slow_await(_agent: str, timeout: float) -> None:
+            del timeout  # signature must match the driver protocol
+            await_started.set()
+            # Block until driver.stop() is called by the race loop. The
+            # 3.0 s wall-clock cap stops the test wedging if the cancel
+            # path regresses; the race loop's 0.5 s poll should detect
+            # the signal well before that.
+            stop_called.wait(timeout=3.0)
+            # Real driver raises CalledProcessError when the container
+            # disappears mid-call: mimic that so the executor surfaces
+            # the same exception shape the production code expects.
+            raise CalledProcessError(returncode=137, cmd=["docker", "exec"])
+
+        def stop_now() -> None:
+            stop_called.set()
+
+        driver.await_completion.side_effect = slow_await
+        driver.stop.side_effect = stop_now
+        driver.capture_response.return_value = ""
+        workspace = self._interactive_workspace(driver)
+
+        cancel_signal = ControlSignal(
+            signal_type=ControlSignalType.CANCEL,
+            execution_id="exec-1",
+            reason="cancel from test",
+        )
+        emitted = {"done": False}
+
+        async def check_signal(_execution_id: str) -> ControlSignal | None:
+            # Only emit CANCEL once the driver has actually started its
+            # blocking call. Returning CANCEL before send_message lands
+            # would race with the executor scheduling.
+            if await_started.is_set() and not emitted["done"]:
+                emitted["done"] = True
+                return cancel_signal
+            return None
+
+        controller = MagicMock()
+        controller.check_signal = check_signal
+
+        handler = AgentExecutionHandler(controller=controller)
+        todo = TodoItem(execution_id="exec-1", action=TodoAction.RUN_AGENT, phase_id="p-1")
+
+        result = await handler.handle(
+            todo=todo,
+            workspace=workspace,
+            agent_env={},
+            claude_cmd=[],
+            session_id="sess-1",
+            agent_model="sonnet",
+            timeout_seconds=60,
+            interactive_prompt="will be cancelled",
+        )
+
+        assert result.stream_result.interrupt_requested is True
+        assert result.stream_result.interrupt_reason == "cancel from test"
+        driver.stop.assert_called_once()
+        # Race loop must not double-call await_completion after stop.
+        driver.await_completion.assert_called_once()
 
 
 # =========================================================================
