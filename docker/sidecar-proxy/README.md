@@ -16,10 +16,11 @@ Shared Envoy Proxy (bridges agent-net + default network)
   │   ├─ api.anthropic.com → injects x-api-key or Authorization: Bearer
   │   ├─ api.github.com    → passthrough (agent uses setup-phase token)
   │   ├─ github.com         → passthrough (agent uses ~/.git-credentials)
-  │   ├─ pypi.org           → passthrough (no injection)
-  │   ├─ registry.npmjs.org → passthrough (no injection)
   │   └─ *                  → 403 Forbidden
   └─ Upstream (TLS to external APIs)
+
+Note: pip and npm hit pypi.org / files.pythonhosted.org / registry.npmjs.org
+directly via agent-net egress; they do not flow through this proxy.
 ```
 
 ### Network Isolation
@@ -78,9 +79,6 @@ traffic but does not inject credentials.
 | `api.github.com` | GitHub API |
 | `github.com` | Git HTTPS (clone/push) |
 | `raw.githubusercontent.com` | GitHub raw content |
-| `pypi.org` | Python packages |
-| `files.pythonhosted.org` | Python package downloads |
-| `registry.npmjs.org` | npm packages |
 
 ### Blocked
 

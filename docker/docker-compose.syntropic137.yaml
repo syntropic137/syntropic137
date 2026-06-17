@@ -125,6 +125,8 @@ services:
       SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
       EVENT_BATCH_SIZE: "100"
       EVENT_BATCH_INTERVAL_MS: "1000"
+      MALLOC_ARENA_MAX: "2"
+      PYTHONMALLOC: malloc
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -165,7 +167,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${COLLECTOR_MEMORY_LIMIT:-256m}
+          memory: ${COLLECTOR_MEMORY_LIMIT:-96m}
           cpus: ${COLLECTOR_CPU_LIMIT:-0.25}
     logging:
       driver: json-file
@@ -475,18 +477,38 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
-    image: ghcr.io/syntropic137/sidecar-proxy:${SYN_VERSION:-latest}
     container_name: syn137-envoy-proxy
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: ${ENVOY_MEMORY_LIMIT:-80m}
+          cpus: ${ENVOY_CPU_LIMIT:-0.25}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    image: ghcr.io/syntropic137/sidecar-proxy:${SYN_VERSION:-latest}
   token-injector:
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     networks:
     - syn-internal
-    image: ghcr.io/syntropic137/token-injector:${SYN_VERSION:-latest}
     container_name: syn137-token-injector
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: ${TOKEN_INJECTOR_MEMORY_LIMIT:-32m}
+          cpus: ${TOKEN_INJECTOR_CPU_LIMIT:-0.1}
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+    image: ghcr.io/syntropic137/token-injector:${SYN_VERSION:-latest}
 secrets:
   db_password:
     file: ./secrets/db-password.secret

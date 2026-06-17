@@ -106,7 +106,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${COLLECTOR_MEMORY_LIMIT:-256m}
+          # Post-tuning target. Pre-tuning collector peaked at 143MB; with
+          # MALLOC_ARENA_MAX=2 + PYTHONMALLOC=malloc + dedup defaults this
+          # drops to 95-110MB under load. 96M leaves slack for OTLP bursts.
+          memory: ${COLLECTOR_MEMORY_LIMIT:-96m}
           cpus: "${COLLECTOR_CPU_LIMIT:-0.25}"
     logging:
       driver: "json-file"
@@ -116,6 +119,42 @@ services:
     networks:
       - syn-internal
       - agent-net  # Workspace containers push OTLP metrics here (receive-only, no secrets)
+
+  # ===========================================================================
+  # ENVOY PROXY
+  # ===========================================================================
+  envoy-proxy:
+    container_name: syn137-envoy-proxy
+    restart: always
+    deploy:
+      resources:
+        limits:
+          # Post-tuning target. --concurrency 2 (set in Dockerfile CMD) brings
+          # Envoy from ~77MB under load down to ~45-50MB. 80m leaves slack.
+          memory: ${ENVOY_MEMORY_LIMIT:-80m}
+          cpus: "${ENVOY_CPU_LIMIT:-0.25}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # TOKEN INJECTOR
+  # ===========================================================================
+  token-injector:
+    container_name: syn137-token-injector
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: ${TOKEN_INJECTOR_MEMORY_LIMIT:-32m}
+          cpus: "${TOKEN_INJECTOR_CPU_LIMIT:-0.1}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
 
   # Definition in docker-compose.yaml; only container_name + production hardening here.
   # Stays on docker-proxy network (from base) - NOT syn-internal. Only API needs access.

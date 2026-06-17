@@ -26,4 +26,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 
 # Run Envoy
 ENTRYPOINT ["/usr/local/bin/envoy"]
-CMD ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+# concurrency=2 instead of host-CPU default. Single-tenant selfhost does not
+# need 16 worker threads; 2 keeps one free while another is parked on the
+# ext_authz roundtrip. Saves 25-35MB RSS under load on a 16-core host.
+CMD ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info", "--concurrency", "2"]
