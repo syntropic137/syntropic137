@@ -188,6 +188,15 @@ class RegisterClaudePluginHandler:
         return None
 
 
+def _rel_path_segment_problem(rel_path: str) -> str | None:
+    for segment in rel_path.split("/"):
+        if segment == "":
+            return "path contains an empty segment"
+        if segment in (".", ".."):
+            return f"path contains a {segment!r} segment"
+    return None
+
+
 def _rel_path_problem(rel_path: str) -> str | None:
     """Return a human-readable reason if ``rel_path`` is unsafe, else ``None``.
 
@@ -205,12 +214,7 @@ def _rel_path_problem(rel_path: str) -> str | None:
         return "path contains a backslash"
     if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in rel_path):
         return "path contains control characters"
-    for segment in rel_path.split("/"):
-        if segment == "":
-            return "path contains an empty segment"
-        if segment in (".", ".."):
-            return f"path contains a {segment!r} segment"
-    return None
+    return _rel_path_segment_problem(rel_path)
 
 
 def _validate_tree_paths(files: list[ClaudePluginFile]) -> None:

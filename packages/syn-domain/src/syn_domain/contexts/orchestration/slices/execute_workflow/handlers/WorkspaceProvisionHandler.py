@@ -70,6 +70,27 @@ PromptBuilder = Callable[
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 
 
+def _is_interactive_phase(workspace: ManagedWorkspace, phase: ExecutablePhase) -> bool:
+    explicit_interactive = phase.agent_config.provider == "claude-interactive"
+    implicit_interactive = workspace.isolation_handle.isolation_type == "interactive-tmux"
+    return explicit_interactive or implicit_interactive
+
+
+def _append_claude_plugin_dirs(
+    claude_cmd: list[str],
+    phase: ExecutablePhase,
+) -> None:
+    # WHY append after command_builder (issue #726, PR2): the entrypoint of
+    # the production base image already discovers baked-in plugins under
+    # /opt/agentic/plugins/ via AGENTIC_PLUGIN_FLAGS. Per-workflow
+    # ``--plugin-dir`` flags are additive: claude CLI accepts multiple
+    # ``--plugin-dir`` instances and merges them. Validated against the
+    # production image in cycle-004/dogfood-platform-726/validation-experiment.
+    for plugin in phase.claude_plugins:
+        claude_cmd.append("--plugin-dir")
+        claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
+
+
 async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
     """Build agent environment for workspace execution.
 
@@ -397,21 +418,11 @@ class WorkspaceProvisionHandler:
         # implicit signal is what carries the e2e today. Per-phase
         # override is the future path once the YAML schema gains an
         # `agent` block — handler logic doesn't need to change for that.
-        explicit_interactive = phase.agent_config.provider == "claude-interactive"
-        implicit_interactive = workspace.isolation_handle.isolation_type == "interactive-tmux"
-        is_interactive = explicit_interactive or implicit_interactive
+        is_interactive = _is_interactive_phase(workspace, phase)
         claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
         interactive_prompt = prompt if is_interactive else None
         if not is_interactive:
-            # WHY append after command_builder (issue #726, PR2): the entrypoint of
-            # the production base image already discovers baked-in plugins under
-            # /opt/agentic/plugins/ via AGENTIC_PLUGIN_FLAGS. Per-workflow
-            # ``--plugin-dir`` flags are additive: claude CLI accepts multiple
-            # ``--plugin-dir`` instances and merges them. Validated against the
-            # production image in cycle-004/dogfood-platform-726/validation-experiment.
-            for plugin in phase.claude_plugins:
-                claude_cmd.append("--plugin-dir")
-                claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
+            _append_claude_plugin_dirs(claude_cmd, phase)
 
         # Interactive-tmux runs claude as a TUI with OAuth-on-disk;
         # `_build_agent_env` requires the Envoy proxy URL because the

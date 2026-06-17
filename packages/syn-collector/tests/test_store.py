@@ -124,14 +124,14 @@ class TestProductionGuard:
 
     def test_raises_in_production(self) -> None:
         """InMemoryObservabilityStore should raise in production environment."""
-        from syn_adapters.storage.in_memory import InMemoryStorageError
+        from syn_adapters.in_memory import InMemoryAdapterError
         from syn_shared.settings import get_settings
 
         get_settings.cache_clear()
         try:
             with (
                 patch.dict(os.environ, {"APP_ENVIRONMENT": "production"}),
-                pytest.raises(InMemoryStorageError, match="test or offline"),
+                pytest.raises(InMemoryAdapterError, match="test/offline"),
             ):
                 InMemoryObservabilityStore()
         finally:

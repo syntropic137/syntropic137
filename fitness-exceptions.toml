@@ -58,7 +58,7 @@ issue = "#768"  # interactive-tmux cancel-polling loop; landed via fix/interacti
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 820
+value = 830
 issue = "#768"  # grew absorbing 769's _DispatchContext + shared-workspace exactly-once cleanup, the stale-COLLECT_ARTIFACTS skip guard, and the codex-review phase-aware interactive-tmux gate / followup repos threading; split scheduled with the interactive-tmux post-launch polish
 
 [max-loc-file."apps.syn-api.src.syn_api._wiring"]

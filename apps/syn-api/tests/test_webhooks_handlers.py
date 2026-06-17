@@ -24,16 +24,11 @@ async def test_handle_installation_event_created() -> None:
 
     with (
         patch(
-            "syn_api.routes.webhooks.handlers.get_installation_projection",
-            return_value=mock_projection,
-            create=True,
-        ),
-        patch(
-            "syn_domain.contexts.github.domain.events.AppInstalledEvent",
+            "syn_domain.contexts.github.AppInstalledEvent",
             mock_event_cls,
         ),
         patch(
-            "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+            "syn_domain.contexts.github.get_installation_projection",
             return_value=mock_projection,
         ),
     ):
@@ -52,11 +47,11 @@ async def test_handle_installation_unrelated_event_noop() -> None:
 async def test_handle_installation_exception_swallowed() -> None:
     with (
         patch(
-            "syn_domain.contexts.github.domain.events.AppInstalledEvent",
+            "syn_domain.contexts.github.AppInstalledEvent",
             side_effect=RuntimeError("boom"),
         ),
         patch(
-            "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+            "syn_domain.contexts.github.get_installation_projection",
             return_value=AsyncMock(),
         ),
     ):
@@ -82,7 +77,7 @@ async def test_installation_repositories_added() -> None:
     }
 
     with patch(
-        "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+        "syn_domain.contexts.github.get_installation_projection",
         return_value=mock_projection,
     ):
         await _apply_installation_repositories_changed(payload, "added")
@@ -104,7 +99,7 @@ async def test_installation_repositories_removed() -> None:
     }
 
     with patch(
-        "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+        "syn_domain.contexts.github.get_installation_projection",
         return_value=mock_projection,
     ):
         await _apply_installation_repositories_changed(payload, "removed")
@@ -120,7 +115,7 @@ async def test_installation_repositories_missing_id_noop() -> None:
     payload = {"repositories_added": [{"full_name": "acme/repo-a"}], "repositories_removed": []}
 
     with patch(
-        "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+        "syn_domain.contexts.github.get_installation_projection",
         return_value=mock_projection,
     ):
         await _apply_installation_repositories_changed(payload, "added")
@@ -140,7 +135,7 @@ async def test_handle_installation_event_repositories_added() -> None:
     }
 
     with patch(
-        "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+        "syn_domain.contexts.github.get_installation_projection",
         return_value=mock_projection,
     ):
         await _handle_installation_event("installation_repositories", "added", payload)
@@ -152,28 +147,15 @@ async def test_handle_installation_event_repositories_added() -> None:
 
 
 def test_classify_trigger_results_mixed() -> None:
-    with patch(
-        "syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler"
-    ) as mock_module:
-        TriggerMatchResult = type("TriggerMatchResult", (), {"trigger_id": "t1"})
-        TriggerDeferredResult = type("TriggerDeferredResult", (), {"trigger_id": "d1"})
+    TriggerMatchResult = type("TriggerMatchResult", (), {"trigger_id": "t1"})
+    TriggerDeferredResult = type("TriggerDeferredResult", (), {"trigger_id": "d1"})
 
-        mock_module.TriggerMatchResult = TriggerMatchResult
-        mock_module.TriggerDeferredResult = TriggerDeferredResult
-
-        results = [TriggerMatchResult(), TriggerDeferredResult(), TriggerMatchResult()]
-        # Need to patch the imports inside the function
-        with (
-            patch(
-                "syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler.TriggerMatchResult",
-                TriggerMatchResult,
-            ),
-            patch(
-                "syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler.TriggerDeferredResult",
-                TriggerDeferredResult,
-            ),
-        ):
-            fired, deferred = _classify_trigger_results(results)
+    results = [TriggerMatchResult(), TriggerDeferredResult(), TriggerMatchResult()]
+    with (
+        patch("syn_domain.contexts.github.TriggerMatchResult", TriggerMatchResult),
+        patch("syn_domain.contexts.github.TriggerDeferredResult", TriggerDeferredResult),
+    ):
+        fired, deferred = _classify_trigger_results(results)
 
     assert len(fired) == 2
     assert len(deferred) == 1
@@ -190,7 +172,7 @@ async def test_evaluate_triggers_exception_returns_empty() -> None:
         ),
         patch("syn_api.routes.webhooks.handlers.get_trigger_repo", return_value=MagicMock()),
         patch(
-            "syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler.EvaluateWebhookHandler",
+            "syn_domain.contexts.github.EvaluateWebhookHandler",
             side_effect=RuntimeError("boom"),
         ),
     ):

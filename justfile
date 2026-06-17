@@ -1579,7 +1579,7 @@ deps-audit-py:
     echo "=== Python Dependency Audit ==="
     uv tool install pip-audit==2.7.3 --quiet
     uv export --format requirements-txt --no-hashes --frozen --quiet \
-        | uv tool run pip-audit --disable-pip -r /dev/stdin
+        | uv tool run pip-audit --disable-pip --no-deps -r /dev/stdin
 
 # Audit Node.js dependencies via OSV Scanner (same tool as CI)
 deps-audit-npm:

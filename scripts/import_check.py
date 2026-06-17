@@ -59,12 +59,12 @@ def main() -> int:
 
         # Adapters
         from syn_adapters.storage import (
-            ArtifactRepositoryProtocol,
-            SessionRepositoryProtocol,
+            get_artifact_repository,
+            get_session_repository,
         )
 
-        modules_tested.append(SessionRepositoryProtocol.__name__)
-        modules_tested.append(ArtifactRepositoryProtocol.__name__)
+        modules_tested.append(get_session_repository.__name__)
+        modules_tested.append(get_artifact_repository.__name__)
 
         print(f"✅ All {len(modules_tested)} package imports OK")
 
