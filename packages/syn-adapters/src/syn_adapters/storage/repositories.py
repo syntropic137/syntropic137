@@ -36,8 +36,14 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
         TriggerRuleAggregate,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
+        ClaudePluginRegistrationAggregate,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_global_claude_plugin_registry.GlobalClaudePluginRegistryAggregate import (
+        GlobalClaudePluginRegistryAggregate,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
@@ -126,6 +132,12 @@ _organization_repository: RepositoryAdapter[OrganizationAggregate] | None = None
 _system_repository: RepositoryAdapter[SystemAggregate] | None = None
 _repo_repository: RepositoryAdapter[RepoAggregate] | None = None
 _repo_claim_repository: RepositoryAdapter[RepoClaimAggregate] | None = None
+_claude_plugin_registration_repository: (
+    RepositoryAdapter[ClaudePluginRegistrationAggregate] | None
+) = None
+_global_claude_plugin_registry_repository: (
+    RepositoryAdapter[GlobalClaudePluginRegistryAggregate] | None
+) = None
 
 
 def _get_repository_factory() -> RepositoryFactory:
@@ -308,6 +320,48 @@ def get_repo_claim_repository() -> RepositoryAdapter[RepoClaimAggregate]:
     return _repo_claim_repository
 
 
+def get_claude_plugin_registration_repository() -> RepositoryAdapter[
+    ClaudePluginRegistrationAggregate
+]:
+    """Get a ClaudePluginRegistrationAggregate repository (issue #726)."""
+    global _claude_plugin_registration_repository
+    if _claude_plugin_registration_repository is not None:
+        return _claude_plugin_registration_repository
+
+    from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
+        ClaudePluginRegistrationAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        ClaudePluginRegistrationAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+        aggregate_type="ClaudePluginRegistration",
+    )
+    _claude_plugin_registration_repository = RepositoryAdapter(sdk_repo)
+    return _claude_plugin_registration_repository
+
+
+def get_global_claude_plugin_registry_repository() -> RepositoryAdapter[
+    GlobalClaudePluginRegistryAggregate
+]:
+    """Get a GlobalClaudePluginRegistryAggregate repository (issue #726)."""
+    global _global_claude_plugin_registry_repository
+    if _global_claude_plugin_registry_repository is not None:
+        return _global_claude_plugin_registry_repository
+
+    from syn_domain.contexts.orchestration.domain.aggregate_global_claude_plugin_registry.GlobalClaudePluginRegistryAggregate import (
+        GlobalClaudePluginRegistryAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        GlobalClaudePluginRegistryAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+        aggregate_type="GlobalClaudePluginRegistry",
+    )
+    _global_claude_plugin_registry_repository = RepositoryAdapter(sdk_repo)
+    return _global_claude_plugin_registry_repository
+
+
 def reset_repositories() -> None:
     """Reset all cached repository instances.
 
@@ -325,7 +379,9 @@ def reset_repositories() -> None:
         _organization_repository, \
         _system_repository, \
         _repo_repository, \
-        _repo_claim_repository
+        _repo_claim_repository, \
+        _claude_plugin_registration_repository, \
+        _global_claude_plugin_registry_repository
     _workflow_repository = None
     _workflow_execution_repository = None
     _session_repository = None
@@ -335,3 +391,5 @@ def reset_repositories() -> None:
     _system_repository = None
     _repo_repository = None
     _repo_claim_repository = None
+    _claude_plugin_registration_repository = None
+    _global_claude_plugin_registry_repository = None

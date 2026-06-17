@@ -55,6 +55,58 @@
       "title": "AgentYamlDefinition",
       "type": "object"
     },
+    "ClaudePluginRef": {
+      "anyOf": [
+        {
+          "description": "Shorthand form: 'org/repo@version' or '<url>@<version>'. '@latest' is rejected.",
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "source"
+              ]
+            },
+            {
+              "required": [
+                "source_url"
+              ]
+            }
+          ],
+          "description": "Verbose mapping form: 'source' (or 'source_url') plus 'version', with an optional 'name' override.",
+          "properties": {
+            "source": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_url": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "version": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "name_overridden": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version, name)`` to match the lock\nprojection key (issue #726). A workflow author who installs the same\nplugin under two different display names produces two distinct lock\nentries -- the materializer needs both to write the right files.",
+      "title": "ClaudePluginRef"
+    },
     "InputYamlDefinition": {
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
       "properties": {
@@ -247,6 +299,13 @@
             }
           ],
           "default": null
+        },
+        "claude_plugins": {
+          "items": {
+            "$ref": "#/$defs/ClaudePluginRef"
+          },
+          "title": "Claude Plugins",
+          "type": "array"
         }
       },
       "required": [
@@ -372,6 +431,13 @@
       },
       "minItems": 1,
       "title": "Phases",
+      "type": "array"
+    },
+    "claude_plugins": {
+      "items": {
+        "$ref": "#/$defs/ClaudePluginRef"
+      },
+      "title": "Claude Plugins",
       "type": "array"
     }
   },

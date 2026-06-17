@@ -10,7 +10,7 @@
 
 This diagram shows which events feed which projections in the Syn137 system.
 
-**Total Relationships:** 57 events → 22 projections
+**Total Relationships:** 60 events → 24 projections
 
 ```mermaid
 graph LR
@@ -19,61 +19,60 @@ graph LR
         e2[workflow_failed]
         e3[workflow_completed]
         e4[phase_completed]
-        e5[execution_cancelled]
-        e6[workflow_interrupted]
-        e7[workflow_template_created]
-        e8[phase_started]
-        e9[trigger_fired]
-        e10[session_cost_finalized]
+        e5[workflow_template_created]
+        e6[phase_started]
+        e7[trigger_fired]
+        e8[execution_cancelled]
+        e9[workflow_interrupted]
+        e10[session_summary]
     end
 
     subgraph projections["Projections"]
         p1[ArtifactListProjection]
-        p2[DashboardMetricsProjection]
-        p3[ExecutionCostProjection]
-        p4[ExecutionTodoProjection]
-        p5[InstallationProjection]
-        p6[RepoCorrelationProjection]
-        p7[RepoCostProjection]
-        p8[RepoHealthProjection]
-        p9[RepoProjection]
-        p10[SessionCostProjection]
-        p11[SessionListProjection]
-        p12[SystemProjection]
-        p13[TokenMetricsProjection]
-        p14[ToolTimelineProjection]
-        p15[TriggerHistoryProjection]
+        p2[ClaudePluginLockProjection]
+        p3[DashboardMetricsProjection]
+        p4[ExecutionCostProjection]
+        p5[ExecutionTodoProjection]
+        p6[GlobalClaudePluginsProjection]
+        p7[InstallationProjection]
+        p8[RepoCorrelationProjection]
+        p9[RepoCostProjection]
+        p10[RepoHealthProjection]
+        p11[RepoProjection]
+        p12[SessionCostProjection]
+        p13[SessionListProjection]
+        p14[SystemProjection]
+        p15[TokenMetricsProjection]
     end
 
-    e10 --> p10
-    e10 --> p3
-    e4 --> p4
-    e2 --> p8
-    e2 --> p7
-    e2 --> p4
-    e2 --> p2
-    e5 --> p4
-    e6 --> p4
-    e7 --> p2
-    e8 --> p2
-    e3 --> p8
-    e3 --> p7
-    e3 --> p4
-    e3 --> p2
-    e1 --> p6
-    e1 --> p4
-    e1 --> p2
-    e9 --> p6
-    e9 --> p15
+    e2 --> p10
+    e2 --> p9
+    e2 --> p5
+    e2 --> p3
+    e4 --> p5
+    e10 --> p12
+    e10 --> p4
+    e1 --> p8
+    e1 --> p5
+    e1 --> p3
+    e5 --> p3
+    e6 --> p3
+    e7 --> p8
+    e8 --> p5
+    e9 --> p5
+    e3 --> p10
+    e3 --> p9
+    e3 --> p5
+    e3 --> p3
 ```
 
 ---
 
 ## Statistics
 
-- **Events with projections:** 57
-- **Unique projections:** 22
-- **Total event-to-projection mappings:** 92
+- **Events with projections:** 60
+- **Unique projections:** 24
+- **Total event-to-projection mappings:** 95
 
 ---
 
@@ -85,12 +84,12 @@ graph LR
 | workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | workflow_completed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
-| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
-| workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
 | workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
 | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
 | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
-| session_cost_finalized | SessionCostProjection, ExecutionCostProjection | 2 |
+| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
+| session_summary | SessionCostProjection, ExecutionCostProjection | 2 |
 
 ---
 

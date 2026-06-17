@@ -79,6 +79,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        ClaudePluginMaterializerProtocol,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
         TokenAccumulator,
     )
@@ -122,6 +125,7 @@ class WorkflowExecutionProcessor:
         todo_projection: TodoProjection | None = None,
         agent_handler: AgentHandlerProtocol | None = None,
         interactive_workspace_service: WorkspaceService | None = None,
+        claude_plugin_materializer: ClaudePluginMaterializerProtocol | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -142,6 +146,10 @@ class WorkflowExecutionProcessor:
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
         self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
+        # WHY (issue #726, PR2): the materializer is the optional collaborator
+        # that turns ResolvedClaudePlugin entries on the phase into workspace
+        # files. Wired through to ``WorkspaceProvisionHandler`` per call.
+        self._claude_plugin_materializer = claude_plugin_materializer
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         # Per-phase prompt set out-of-band when provider="claude-interactive"
@@ -587,6 +595,7 @@ class WorkflowExecutionProcessor:
             workspace_service=self._workspace_service_for(phase),
             prompt_builder=self._prompt_builder,
             command_builder=self._command_builder,
+            claude_plugin_materializer=self._claude_plugin_materializer,
         )
         existing = (
             self._shared_workspaces.get(todo.execution_id)

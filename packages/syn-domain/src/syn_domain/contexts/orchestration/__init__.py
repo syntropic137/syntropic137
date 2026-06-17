@@ -12,6 +12,20 @@ Usage:
     )
 """
 
+from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
+    ClaudePluginError,
+    ClaudePluginInvalidName,
+    ClaudePluginInvalidPath,
+    ClaudePluginManifestInvalid,
+    ClaudePluginManifestMissing,
+    ClaudePluginNotRegistered,
+)
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
+    ClaudePluginRef,
+)
+from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+    ResolvedClaudePlugin,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     validate_workflow_yaml,
@@ -90,6 +104,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt 
 from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
     ExecutionCostQueryService,
 )
+from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
+    GlobalClaudePluginEntry,
+    GlobalClaudePluginNotFoundError,
+)
+from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
+    ClaudePluginNotFoundError,
+)
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
@@ -104,6 +125,15 @@ __all__ = [
     "ArchiveWorkflowTemplateCommand",
     # Handlers
     "ArchiveWorkflowTemplateHandler",
+    # Claude plugin types + errors (issue #726)
+    "ClaudePluginError",
+    "ClaudePluginInvalidName",
+    "ClaudePluginInvalidPath",
+    "ClaudePluginManifestInvalid",
+    "ClaudePluginManifestMissing",
+    "ClaudePluginNotFoundError",
+    "ClaudePluginNotRegistered",
+    "ClaudePluginRef",
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
@@ -116,6 +146,8 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "GlobalClaudePluginEntry",
+    "GlobalClaudePluginNotFoundError",
     # Aggregates
     "HandlerResult",
     # Value objects - workspace
@@ -127,6 +159,7 @@ __all__ = [
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
+    "ResolvedClaudePlugin",
     "SecurityPolicy",
     "SidecarConfig",
     "StreamResult",

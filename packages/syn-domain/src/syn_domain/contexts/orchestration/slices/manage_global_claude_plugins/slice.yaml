@@ -1,0 +1,11 @@
+name: manage-global-claude-plugins
+type: command
+aggregate: GlobalClaudePluginRegistry
+emits:
+  - GlobalClaudePluginAddedEvent
+  - GlobalClaudePluginRemovedEvent
+projection: GlobalClaudePluginsProjection
+subscribes_to:
+  - GlobalClaudePluginAddedEvent
+  - GlobalClaudePluginRemovedEvent
+returns: list[GlobalClaudePluginEntry]

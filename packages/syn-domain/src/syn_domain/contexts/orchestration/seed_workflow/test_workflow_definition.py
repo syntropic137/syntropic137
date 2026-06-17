@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -409,7 +410,8 @@ phases:
     assert domain_phase.provider == "claude-interactive"
 
 
-def test_agent_provider_reaches_executable_phase() -> None:
+@pytest.mark.anyio
+async def test_agent_provider_reaches_executable_phase() -> None:
     """agent.provider flows into ExecutablePhase.agent_config.provider."""
     from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
         ExecuteWorkflowHandler,
@@ -419,8 +421,13 @@ def test_agent_provider_reaches_executable_phase() -> None:
 
     class _StubTemplate:
         phases = definition.get_domain_phases()
+        claude_plugins = ()
 
-    executable = ExecuteWorkflowHandler._get_executable_phases(_StubTemplate())  # type: ignore[arg-type]
+    handler = ExecuteWorkflowHandler(
+        processor=MagicMock(),
+        workflow_repository=MagicMock(),
+    )
+    executable = await handler._get_executable_phases(_StubTemplate())  # type: ignore[arg-type]
 
     assert executable[0].agent_config.provider == "claude-interactive"
     assert executable[0].agent_config.agent_id == "codex"

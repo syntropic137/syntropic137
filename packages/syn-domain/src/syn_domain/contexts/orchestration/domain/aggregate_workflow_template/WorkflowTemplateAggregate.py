@@ -18,6 +18,9 @@ from event_sourcing import (
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
+        ClaudePluginRef,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         InputDeclaration,
         PhaseDefinition,
@@ -52,6 +55,7 @@ _EVENT_FIELDS = [
     "project_name",
     "description",
     "input_declarations",
+    "claude_plugins",
 ]
 
 
@@ -64,7 +68,10 @@ def _normalize_event_data(event: DomainEvent) -> dict[str, Any]:
     data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
     # Ensure all expected keys exist
     for field in _EVENT_FIELDS:
-        data.setdefault(field, [] if field in ("phases", "input_declarations") else None)
+        data.setdefault(
+            field,
+            [] if field in ("phases", "input_declarations", "claude_plugins") else None,
+        )
     return data
 
 
@@ -173,6 +180,10 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._description: str | None = None
         self._is_archived: bool = False
         self._requires_repos: bool = True
+        # WHY (issue #726, PR2): workflow-scope claude_plugin refs are
+        # part of the aggregate's identity at execute time so the resolver
+        # can union them with per-phase refs without re-reading YAML.
+        self._claude_plugins: list[ClaudePluginRef] = []
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -212,6 +223,15 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def repos(self) -> list[str]:
         """Get template-level GitHub URLs for workspace hydration (ADR-058)."""
         return list(self._repos)
+
+    @property
+    def claude_plugins(self) -> list[ClaudePluginRef]:
+        """Get workflow-scope claude plugin refs (issue #726).
+
+        Per-phase refs live on each ``PhaseDefinition.claude_plugins``;
+        this list applies to every phase via the resolution service union.
+        """
+        return list(self._claude_plugins)
 
     # =========================================================================
     # COMMAND HANDLERS - Validate business rules, emit events
@@ -258,6 +278,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             input_declarations=command.input_declarations,
             repos=command.repos,
             requires_repos=command.requires_repos,
+            claude_plugins=command.claude_plugins,
         )
 
         self._apply(event)
@@ -327,6 +348,19 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._input_declarations = _parse_typed_list(data["input_declarations"], "InputDeclaration")
         self._repos = [str(r) for r in data.get("repos", [])]
         self._requires_repos = bool(data.get("requires_repos", True))
+        # WHY (issue #726): legacy events have no claude_plugins field; coerce
+        # raw dicts (gRPC GenericDomainEvent) into ClaudePluginRef instances so
+        # the aggregate exposes the same typed list whether it just emitted the
+        # event or rehydrated from an older one.
+        from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
+            ClaudePluginRef,
+        )
+
+        raw_plugins = data.get("claude_plugins") or []
+        self._claude_plugins = [
+            item if isinstance(item, ClaudePluginRef) else ClaudePluginRef.model_validate(item)
+            for item in raw_plugins
+        ]
 
     @command_handler("ArchiveWorkflowTemplateCommand")
     def archive_workflow(self, command: ArchiveWorkflowTemplateCommand) -> None:

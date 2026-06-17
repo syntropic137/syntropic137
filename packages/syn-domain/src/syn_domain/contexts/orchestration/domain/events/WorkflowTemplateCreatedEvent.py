@@ -6,6 +6,9 @@ from event_sourcing import DomainEvent, event
 from pydantic import Field
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (  # noqa: TC001
+    ClaudePluginRef,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
@@ -57,3 +60,7 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
     # Execution gate (ADR-058 #666)
     requires_repos: bool = True
     """Whether this workflow requires repository access. Default True for backward compat with existing events."""
+
+    # Workflow-scope claude plugin refs (issue #726, PR2). Defaults to an
+    # empty list so older events without this field rehydrate cleanly.
+    claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)

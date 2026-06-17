@@ -1444,3 +1444,124 @@ class SSEHealthResponse(BaseModel):
     status: str
     active_executions: int | None = None
     active_connections: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# Claude plugin response models (issue #726)
+# ---------------------------------------------------------------------------
+
+
+class AddGlobalClaudePluginRequest(BaseModel):
+    """Request body for ``POST /claude-plugins/global`` (Phase A redesign).
+
+    Takes the display name plus version of an already-registered plugin. The
+    handler looks the entry up in the lock projection and refuses to add
+    anything that has not been registered first via
+    ``POST /claude-plugins/registrations``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(..., min_length=1)
+    version: str = Field(..., min_length=1)
+
+
+class ClaudePluginFileEntry(BaseModel):
+    """One file in the uploaded plugin tree (``POST /claude-plugins/registrations``).
+
+    ``content_b64`` is the base64-encoded byte content; the API decodes it back
+    into raw bytes before hashing/uploading. base64 keeps binary-safe payloads
+    inside the JSON envelope without forcing the caller to choose an encoding.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rel_path: str = Field(..., min_length=1)
+    content_b64: str
+
+
+class RegisterClaudePluginRequest(BaseModel):
+    """Request body for ``POST /claude-plugins/registrations`` (Phase A).
+
+    The CLI uploads the entire plugin tree inline alongside the parsed manifest;
+    the API hashes the normalized tree, stores it via the storage port, and
+    persists the registration aggregate. Idempotent on existing
+    ``(source_url, version, name)`` (re-uploading is a safe no-op).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_url: str = Field(..., min_length=1)
+    version: str = Field(..., min_length=1)
+    name: str | None = Field(
+        default=None,
+        description=("Display name override; when omitted the manifest's ``name`` is used."),
+    )
+    manifest: dict[str, object] = Field(
+        ..., description="Pre-parsed contents of .claude-plugin/plugin.json."
+    )
+    files: list[ClaudePluginFileEntry] = Field(
+        ..., min_length=1, description="Every file in the plugin tree (base64-encoded)."
+    )
+
+
+class RegisterClaudePluginResponse(BaseModel):
+    """Response payload for ``POST /claude-plugins/registrations``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    version: str
+    sha256: str = Field(..., description="Content-addressed sha of the normalized tree.")
+
+
+class GlobalClaudePluginResponse(BaseModel):
+    """A single entry in the global claude plugin registry."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    source_url: str
+    version: str
+    resolved_sha: str
+    added_at: datetime | None = None
+
+
+class GlobalClaudePluginListResponse(BaseModel):
+    """List of currently-registered global claude plugins."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    plugins: list[GlobalClaudePluginResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class ClaudePluginLockResponse(BaseModel):
+    """A single lock entry (one ``(source_url, version)`` pair)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    source_url: str
+    version: str
+    resolved_sha: str
+    tree_storage_prefix: str
+    registered_at: datetime | None = None
+
+
+class ClaudePluginLockListResponse(BaseModel):
+    """List of every entry currently in the claude plugin lock projection."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    plugins: list[ClaudePluginLockResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class RemoveGlobalClaudePluginResponse(BaseModel):
+    """Confirmation payload for ``DELETE /claude-plugins/global/{name}``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    status: str

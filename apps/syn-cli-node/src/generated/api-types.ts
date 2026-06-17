@@ -513,6 +513,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/claude-plugins/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Claude Plugin Endpoint
+         * @description Register a plugin by uploading the cloned tree (Phase A redesign).
+         *
+         *     The CLI clones the source locally, parses the manifest, and POSTs the tree
+         *     contents here. The API decodes the base64 file contents, computes the
+         *     sha256 over the normalized tree, uploads to storage, and dispatches a
+         *     ``RegisterClaudePluginCommand`` against the existing aggregate. Idempotent
+         *     on re-submission of the same ``(source_url, version, name)``.
+         */
+        post: operations["register_claude_plugin_endpoint_claude_plugins_registrations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/global": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Global Claude Plugins Endpoint
+         * @description List currently-active global claude plugins (sorted by name).
+         */
+        get: operations["list_global_claude_plugins_endpoint_claude_plugins_global_get"];
+        put?: never;
+        /**
+         * Add Global Claude Plugin Endpoint
+         * @description Add an already-registered plugin to the global registry.
+         *
+         *     Looks up ``(name, version)`` in the lock projection and dispatches the add
+         *     command. Returns 404 with ``error_code=claude_plugin_not_registered`` if the
+         *     plugin has not been registered yet.
+         */
+        post: operations["add_global_claude_plugin_endpoint_claude_plugins_global_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/global/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Global Claude Plugin Endpoint
+         * @description Remove a plugin from the global registry by display name.
+         *
+         *     The underlying lock entry is left in place so any workflow that pinned the
+         *     same ``(source_url, version)`` continues to resolve.
+         */
+        delete: operations["remove_global_claude_plugin_endpoint_claude_plugins_global__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Claude Plugins Endpoint
+         * @description List every entry currently in the lock projection.
+         */
+        get: operations["list_claude_plugins_endpoint_claude_plugins_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/{name}/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show Claude Plugin Endpoint
+         * @description Look up a single lock entry by display name and version.
+         */
+        get: operations["show_claude_plugin_endpoint_claude_plugins__name___version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/metrics": {
         parameters: {
             query?: never;
@@ -1542,6 +1659,21 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AddGlobalClaudePluginRequest
+         * @description Request body for ``POST /claude-plugins/global`` (Phase A redesign).
+         *
+         *     Takes the display name plus version of an already-registered plugin. The
+         *     handler looks the entry up in the lock projection and refuses to add
+         *     anything that has not been registered first via
+         *     ``POST /claude-plugins/registrations``.
+         */
+        AddGlobalClaudePluginRequest: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+        };
+        /**
          * ArtifactActionResponse
          * @description Response for artifact update/delete actions.
          */
@@ -1652,6 +1784,51 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * ClaudePluginFileEntry
+         * @description One file in the uploaded plugin tree (``POST /claude-plugins/registrations``).
+         *
+         *     ``content_b64`` is the base64-encoded byte content; the API decodes it back
+         *     into raw bytes before hashing/uploading. base64 keeps binary-safe payloads
+         *     inside the JSON envelope without forcing the caller to choose an encoding.
+         */
+        ClaudePluginFileEntry: {
+            /** Rel Path */
+            rel_path: string;
+            /** Content B64 */
+            content_b64: string;
+        };
+        /**
+         * ClaudePluginLockListResponse
+         * @description List of every entry currently in the claude plugin lock projection.
+         */
+        ClaudePluginLockListResponse: {
+            /** Plugins */
+            plugins?: components["schemas"]["ClaudePluginLockResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * ClaudePluginLockResponse
+         * @description A single lock entry (one ``(source_url, version)`` pair).
+         */
+        ClaudePluginLockResponse: {
+            /** Name */
+            name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+            /** Registered At */
+            registered_at?: string | null;
         };
         /**
          * ConditionRequest
@@ -2513,6 +2690,35 @@ export interface components {
             installation_id: string;
         };
         /**
+         * GlobalClaudePluginListResponse
+         * @description List of currently-registered global claude plugins.
+         */
+        GlobalClaudePluginListResponse: {
+            /** Plugins */
+            plugins?: components["schemas"]["GlobalClaudePluginResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * GlobalClaudePluginResponse
+         * @description A single entry in the global claude plugin registry.
+         */
+        GlobalClaudePluginResponse: {
+            /** Name */
+            name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Added At */
+            added_at?: string | null;
+        };
+        /**
          * GlobalCostResponse
          * @description Global cost breakdown across all repos.
          */
@@ -2957,6 +3163,53 @@ export interface components {
             success: boolean;
         };
         /**
+         * RegisterClaudePluginRequest
+         * @description Request body for ``POST /claude-plugins/registrations`` (Phase A).
+         *
+         *     The CLI uploads the entire plugin tree inline alongside the parsed manifest;
+         *     the API hashes the normalized tree, stores it via the storage port, and
+         *     persists the registration aggregate. Idempotent on existing
+         *     ``(source_url, version, name)`` (re-uploading is a safe no-op).
+         */
+        RegisterClaudePluginRequest: {
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Name
+             * @description Display name override; when omitted the manifest's ``name`` is used.
+             */
+            name?: string | null;
+            /**
+             * Manifest
+             * @description Pre-parsed contents of .claude-plugin/plugin.json.
+             */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /**
+             * Files
+             * @description Every file in the plugin tree (base64-encoded).
+             */
+            files: components["schemas"]["ClaudePluginFileEntry"][];
+        };
+        /**
+         * RegisterClaudePluginResponse
+         * @description Response payload for ``POST /claude-plugins/registrations``.
+         */
+        RegisterClaudePluginResponse: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /**
+             * Sha256
+             * @description Content-addressed sha of the normalized tree.
+             */
+            sha256: string;
+        };
+        /**
          * RegisterRepoRequest
          * @description Request body for registering a new repo.
          */
@@ -3034,6 +3287,16 @@ export interface components {
              * @default api
              */
             created_by: string;
+        };
+        /**
+         * RemoveGlobalClaudePluginResponse
+         * @description Confirmation payload for ``DELETE /claude-plugins/global/{name}``.
+         */
+        RemoveGlobalClaudePluginResponse: {
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
         };
         /**
          * RepoActionResponse
@@ -4459,7 +4722,7 @@ export interface components {
             filename: string;
             /**
              * File
-             * @description Deprecated — file paths are no longer supported. Use 'content' instead.
+             * @description Deprecated; file paths are no longer supported. Use 'content' instead.
              */
             file?: string | null;
         };
@@ -4790,7 +5053,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Conflict — workflow has active executions or is already archived */
+            /** @description Conflict; workflow has active executions or is already archived */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5635,6 +5898,208 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UploadArtifactResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_claude_plugin_endpoint_claude_plugins_registrations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterClaudePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisterClaudePluginResponse"];
+                };
+            };
+            /** @description Malformed file payload (bad base64, missing fields) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Plugin tree exceeds the size or file-count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Manifest missing, malformed, or unsafe file path in the tree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_global_claude_plugins_endpoint_claude_plugins_global_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalClaudePluginListResponse"];
+                };
+            };
+        };
+    };
+    add_global_claude_plugin_endpoint_claude_plugins_global_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddGlobalClaudePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalClaudePluginResponse"];
+                };
+            };
+            /** @description Plugin not registered; register via /registrations first */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_global_claude_plugin_endpoint_claude_plugins_global__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoveGlobalClaudePluginResponse"];
+                };
+            };
+            /** @description Plugin not present in the global registry */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_claude_plugins_endpoint_claude_plugins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudePluginLockListResponse"];
+                };
+            };
+        };
+    };
+    show_claude_plugin_endpoint_claude_plugins__name___version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudePluginLockResponse"];
+                };
+            };
+            /** @description No lock entry for the given (name, version) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

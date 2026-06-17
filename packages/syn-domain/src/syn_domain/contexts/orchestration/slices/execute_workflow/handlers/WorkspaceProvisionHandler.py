@@ -32,15 +32,33 @@ from syn_shared.env_constants import (
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
+    from typing import Protocol
 
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+        ResolvedClaudePlugin,
+    )
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
     )
+
+    class ClaudePluginMaterializerProtocol(Protocol):
+        """Minimal surface the handler needs (issue #726, PR2).
+
+        The concrete implementation lives in ``syn_api.services``; the
+        handler depends only on the structural protocol so the domain layer
+        does not import the application service module.
+        """
+
+        async def fetch_for_workspace(
+            self,
+            plugins: tuple[ResolvedClaudePlugin, ...],
+        ) -> list[tuple[str, bytes]]: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +68,27 @@ PromptBuilder = Callable[
     Awaitable[str],
 ]
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
+
+
+def _is_interactive_phase(workspace: ManagedWorkspace, phase: ExecutablePhase) -> bool:
+    explicit_interactive = phase.agent_config.provider == "claude-interactive"
+    implicit_interactive = workspace.isolation_handle.isolation_type == "interactive-tmux"
+    return explicit_interactive or implicit_interactive
+
+
+def _append_claude_plugin_dirs(
+    claude_cmd: list[str],
+    phase: ExecutablePhase,
+) -> None:
+    # WHY append after command_builder (issue #726, PR2): the entrypoint of
+    # the production base image already discovers baked-in plugins under
+    # /opt/agentic/plugins/ via AGENTIC_PLUGIN_FLAGS. Per-workflow
+    # ``--plugin-dir`` flags are additive: claude CLI accepts multiple
+    # ``--plugin-dir`` instances and merges them. Validated against the
+    # production image in cycle-004/dogfood-platform-726/validation-experiment.
+    for plugin in phase.claude_plugins:
+        claude_cmd.append("--plugin-dir")
+        claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
 
 
 async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
@@ -192,10 +231,17 @@ class WorkspaceProvisionHandler:
         workspace_service: WorkspaceService,
         prompt_builder: PromptBuilder,
         command_builder: CommandBuilder,
+        claude_plugin_materializer: ClaudePluginMaterializerProtocol | None = None,
     ) -> None:
         self._workspace_service = workspace_service
         self._prompt_builder = prompt_builder
         self._command_builder = command_builder
+        # WHY optional (issue #726, PR2): existing tests construct the handler
+        # without a materializer, and any phase whose ``claude_plugins`` tuple
+        # is empty does not need one. The handler short-circuits the
+        # materialization branch when the field is empty, so passing None is
+        # safe in those cases.
+        self._claude_plugin_materializer = claude_plugin_materializer
 
     async def handle(
         self,
@@ -237,6 +283,7 @@ class WorkspaceProvisionHandler:
         workspace = await workspace_cm.__aenter__()
         try:
             await self._hydrate_workspace(workspace, effective_repos)
+            await self._materialize_claude_plugins(workspace, phase)
             await self._inject_phase_artifacts(
                 workspace, artifacts, completed_phase_ids or [], phase_outputs or {}, todo
             )
@@ -287,6 +334,44 @@ class WorkspaceProvisionHandler:
                 "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(effective_repos)
             )
 
+    async def _materialize_claude_plugins(
+        self,
+        workspace: ManagedWorkspace,
+        phase: ExecutablePhase,
+    ) -> None:
+        """Inject resolved claude plugin trees into the workspace (issue #726).
+
+        Runs after secrets clear and the AGENTS.md context inject, so the
+        plugin trees land alongside the agent's project context but are
+        never visible to the setup script. The orchestrator emits
+        ``--plugin-dir`` flags in ``_build_provision_result`` so the agent
+        actually loads them.
+        """
+        if not phase.claude_plugins:
+            return
+        if self._claude_plugin_materializer is None:
+            # WHY warn-instead-of-raise: a workflow that declares plugins but
+            # is dispatched through a code path that forgot to wire the
+            # materializer should still execute (no plugins is degraded but
+            # not broken). Surfaces clearly in logs for the operator.
+            logger.warning(
+                "Phase %s declared claude_plugins but no materializer is wired; "
+                "skipping plugin materialization (issue #726)",
+                phase.phase_id,
+            )
+            return
+        plugin_files = await self._claude_plugin_materializer.fetch_for_workspace(
+            phase.claude_plugins
+        )
+        if plugin_files:
+            await workspace.inject_files(plugin_files)
+            logger.info(
+                "Materialized %d claude plugin file(s) across %d plugin(s) into %s",
+                len(plugin_files),
+                len(phase.claude_plugins),
+                workspace.workspace_id,
+            )
+
     async def _inject_phase_artifacts(
         self,
         workspace: ManagedWorkspace,
@@ -333,11 +418,11 @@ class WorkspaceProvisionHandler:
         # implicit signal is what carries the e2e today. Per-phase
         # override is the future path once the YAML schema gains an
         # `agent` block — handler logic doesn't need to change for that.
-        explicit_interactive = phase.agent_config.provider == "claude-interactive"
-        implicit_interactive = workspace.isolation_handle.isolation_type == "interactive-tmux"
-        is_interactive = explicit_interactive or implicit_interactive
+        is_interactive = _is_interactive_phase(workspace, phase)
         claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
         interactive_prompt = prompt if is_interactive else None
+        if not is_interactive:
+            _append_claude_plugin_dirs(claude_cmd, phase)
 
         # Interactive-tmux runs claude as a TUI with OAuth-on-disk;
         # `_build_agent_env` requires the Envoy proxy URL because the
