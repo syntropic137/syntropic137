@@ -1,0 +1,6 @@
+HOME=/home/agent
+agent
+/usr/local/bin/claude
+2.1.126 (Claude Code)
+/usr/bin/tmux
+/usr/bin/curl

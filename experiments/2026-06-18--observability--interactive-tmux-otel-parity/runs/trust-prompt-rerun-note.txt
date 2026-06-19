@@ -1,0 +1,1 @@
+Second C1/C2 attempts got past auth/config but stopped at Claude workspace trust prompt for /workspace. Final interactive rerun confirms that prompt before sending the frozen question, so the recorded C1/C2 turns are real completed model turns.

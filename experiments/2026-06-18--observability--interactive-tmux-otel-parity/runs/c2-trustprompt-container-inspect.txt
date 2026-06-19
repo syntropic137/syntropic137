@@ -1,0 +1,8 @@
+HOME=/home/agent
+agent
+/usr/local/bin/claude
+2.1.126 (Claude Code)
+/usr/bin/tmux
+/usr/bin/curl
+-rw------- 1 agent agent 99783 Jun 19 03:46 /home/agent/.claude.json
+-rw------- 1 agent agent   471 Jun 19 03:16 /home/agent/.claude/.credentials.json

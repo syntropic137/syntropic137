@@ -1,0 +1,15 @@
+NAMES                                  IMAGE                                      NETWORKS                               PORTS
+syn-db                                 timescale/timescaledb:2.25.1-pg16          syn-dev-network                        0.0.0.0:55434->5432/tcp, [::]:55434->5432/tcp
+syn-api                                syn-dev-api                                syn-dev-network,syn-dev_docker-proxy   0.0.0.0:9137->8000/tcp, [::]:9137->8000/tcp
+seshmagic-api                          seshmagic-eval-api                         seshmagic-eval_sesh-internal           
+sesh-socat-ollama                      alpine/socat                               host                                   
+seshmagic-minio                        minio/minio:latest                         seshmagic-eval_sesh-internal           9000/tcp
+syn-collector                          syn-dev-collector                          syn-dev-network,syn-dev_agent-net      0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp
+syn-event-store                        syn-dev-event-store                        syn-dev-network                        0.0.0.0:50051->50051/tcp, [::]:50051->50051/tcp
+syn-envoy-proxy                        syn-dev-envoy-proxy                        syn-dev-network,syn-dev_agent-net      0.0.0.0:8081->8081/tcp, [::]:8081->8081/tcp, 0.0.0.0:9901->9901/tcp, [::]:9901->9901/tcp, 10000/tcp
+syn-token-injector                     syn-dev-token-injector                     syn-dev-network                        9002/tcp
+syn-docker-socket-proxy                tecnativa/docker-socket-proxy:0.3.0        syn-dev_docker-proxy                   2375/tcp
+syn-redis                              redis:7.2.5-alpine                         syn-dev-network                        0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+syn-minio                              minio/minio:RELEASE.2025-04-22T22-12-26Z   syn-dev-network                        0.0.0.0:9000-9001->9000-9001/tcp, [::]:9000-9001->9000-9001/tcp
+flywheel-observability-grafana         grafana/grafana:11.3.0                     flywheel-observability_default         100.114.86.77:3000->3000/tcp, 127.0.0.1:3000->3000/tcp
+flywheel-observability-node-exporter   prom/node-exporter:v1.8.2                  host                                   

@@ -1,0 +1,1 @@
+Initial C1/C2 attempts mounted .claude only and stalled at interactive Claude login/onboarding despite C0 -p completing. Rerun mounts /home/ubuntu/.claude and /home/ubuntu/.claude.json read-only into /home/agent to satisfy the execution note that the in-container interactive Claude must authenticate as the box Max-plan OAuth and complete a real turn.

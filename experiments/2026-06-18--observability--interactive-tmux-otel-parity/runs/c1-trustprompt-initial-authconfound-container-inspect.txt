@@ -1,0 +1,8 @@
+HOME=/home/agent
+agent
+/usr/local/bin/claude
+2.1.126 (Claude Code)
+/usr/bin/tmux
+/usr/bin/curl
+CLAUDE_CODE_ENABLE_TELEMETRY=1
+OTEL_EXPORTER_OTLP_ENDPOINT=http://syn-collector:8080

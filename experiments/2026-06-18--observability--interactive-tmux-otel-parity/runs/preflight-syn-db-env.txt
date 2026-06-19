@@ -1,0 +1,13 @@
+DOCKER_PG_LLVM_DEPS=llvm19-dev 		clang19
+GOSU_VERSION=1.19
+HOME=/root
+HOSTNAME=e7f3ee126d8d
+LANG=en_US.utf8
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PGDATA=/var/lib/postgresql/data
+PG_MAJOR=16
+PG_SHA256=6deb08c23d03d77d8f8bd1c14049eeef64aef8968fd8891df2dfc0b42f178eac
+PG_VERSION=16.11
+POSTGRES_DB=syn
+POSTGRES_PASSWORD=syn_dev_password
+POSTGRES_USER=syn
