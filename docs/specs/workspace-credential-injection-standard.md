@@ -123,3 +123,37 @@ single-authority + flock is the durable answer.
 3. Implement the CredentialAdapter interface (Mode A Envoy + Mode B mount) as the
    credential plank of the Workspace Standard, starting with Claude + Codex.
 4. Defer the broker until codex stabilizes external-auth.
+
+## 6b. Easy remote re-login (no env var, no SSH, one tap)
+
+Syntropic137 runs on a remote box, so re-auth must NOT require pushing a secret
+or env var to the box - and it does not. The Codex credential is a FILE on the
+authority (~/.codex/auth.json), and device-auth is designed so the operator
+authorizes from a DIFFERENT device than the one being authed. The flow:
+
+1. DETECT (automatic): a credential watcher / the workspace doctor sees
+   refresh_token_reused on the authority and marks Codex Max degraded.
+2. AUTO-TRIGGER: a service/recipe runs `codex login --device-auth` on the box and
+   captures the verification URL + user code.
+3. NOTIFY (pager): push the URL + code to the operator's pager channel (NTFY,
+   pager-only per Syntropic137 notification routing): "Codex Max auth expired -
+   tap to re-authorize: <url> (code <code>)".
+4. OPERATOR APPROVES: taps the link on a phone or laptop, signs into ChatGPT,
+   enters the code. About 15 seconds, from anywhere - no SSH.
+5. BOX COMPLETES: device-auth finishes and writes a fresh auth.json to the single
+   live authority.
+6. PROPAGATE: the live mount means every workspace picks up the fresh token
+   automatically. No env var pushed, no secret sent to the box, no per-container
+   action.
+
+Manual trigger: a `just codex-reauth` recipe (or a dashboard button / endpoint)
+runs the same device-auth + notify flow on demand.
+
+This is the decisive reason the OAuth-mount + device-auth design beats a
+token-injection design for a remote box: with env-var / token injection the
+operator WOULD have to push a new secret to the remote and every container on
+every rotation; device-auth pushes NOTHING - the box self-services its own
+credential after a single approval tap. The standard therefore REQUIRES every
+rotating Mode-B adapter to expose: an auto-detect probe, a one-command/one-tap
+re-auth trigger, and a notification delivery of the authorize-from-anywhere
+prompt. Recovery is a pager tap, never a secret hand-off.
