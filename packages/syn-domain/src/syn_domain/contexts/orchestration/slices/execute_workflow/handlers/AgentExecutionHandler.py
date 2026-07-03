@@ -365,6 +365,31 @@ def _interactive_driver_unavailable(
     )
 
 
+def _drive_round_trip(
+    driver: InteractiveTmuxDriver,
+    agent_id: str,
+    prompt: str,
+    timeout_seconds: int,
+) -> tuple[int, str, str]:
+    """Blocking send -> await -> capture round-trip; runs in a worker thread.
+
+    Raises InteractiveTmuxTransportError (D2 fix) on raw subprocess
+    failures so the workflow's error_message is operator-readable
+    instead of a raw Python repr leaking the docker-exec arglist.
+    """
+    from subprocess import CalledProcessError
+
+    try:
+        driver.send_message(agent_id, prompt)
+        result = driver.await_completion(agent_id, timeout=float(timeout_seconds))
+        pane = driver.capture_response(agent_id)
+    except CalledProcessError as exc:
+        raise InteractiveTmuxTransportError.from_called_process(exc) from exc
+    exit_code = 0 if result.ready else 124  # 124 = standard timeout exit code
+    reason = getattr(result, "reason", "ready" if result.ready else "timeout")
+    return exit_code, pane, reason
+
+
 async def _run_interactive_driver(
     *,
     driver: InteractiveTmuxDriver,
@@ -397,24 +422,10 @@ async def _run_interactive_driver(
     assert todo.phase_id is not None
     loop = asyncio.get_running_loop()
 
-    def _drive() -> tuple[int, str, str]:
-        from subprocess import CalledProcessError
-
-        try:
-            driver.send_message(agent_id, prompt)
-            result = driver.await_completion(agent_id, timeout=float(timeout_seconds))
-            pane = driver.capture_response(agent_id)
-        except CalledProcessError as exc:
-            # D2: convert raw subprocess errors to a typed domain error
-            # so error_message is not a raw Python repr leaking the
-            # docker-exec arglist.
-            raise InteractiveTmuxTransportError.from_called_process(exc) from exc
-        exit_code = 0 if result.ready else 124  # 124 = standard timeout exit code
-        reason = getattr(result, "reason", "ready" if result.ready else "timeout")
-        return exit_code, pane, reason
-
     round_trip_started_at = time.monotonic()
-    completion_future = loop.run_in_executor(None, _drive)
+    completion_future = loop.run_in_executor(
+        None, _drive_round_trip, driver, agent_id, prompt, timeout_seconds
+    )
 
     # Bound the entire wait (cancel-race + drive) at timeout_seconds + margin
     # (#771 item 1). A stalled transport (e.g. a wedged `docker exec`) would
