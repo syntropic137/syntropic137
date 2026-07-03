@@ -6,6 +6,8 @@ so they run without Docker or any host credentials.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -92,6 +94,109 @@ async def test_destroy_calls_provider_destroy_and_drops_handle() -> None:
 
     fake_provider.destroy.assert_awaited_once()
     assert "itws-xyz" not in adapter._workspaces
+
+
+async def _run_ticker(iterations: int, *, interval_s: float = 0.01) -> int:
+    """Advance a counter on the event loop via `asyncio.sleep`, and return the count.
+
+    Used as a canary: if a concurrently-running coroutine is blocking the
+    event loop, this ticker starves and its final count stays low even
+    though `iterations * interval_s` of wall-clock time elapsed.
+    """
+    ticks = 0
+    for _ in range(iterations):
+        await asyncio.sleep(interval_s)
+        ticks += 1
+    return ticks
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_block_event_loop() -> None:
+    """create() must offload the blocking provider call to a worker thread.
+
+    `agentic_isolation.providers.interactive_tmux.InteractiveTmuxProvider.create()`
+    is async-def but synchronous internally (subprocess + sleep loops up
+    to ~45s) — its own docstring says callers needing concurrency must
+    wrap the call in their own thread. Simulate that blocking behaviour
+    with a fake provider whose create() does a real `time.sleep()`, and
+    assert a concurrently-scheduled ticker keeps making progress
+    throughout (issue #771 item 2).
+    """
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+    )
+
+    fake_workspace = MagicMock()
+    fake_workspace.id = "itws-block-create"
+    fake_workspace.metadata = {}
+    fake_workspace._handle = MagicMock()
+
+    async def blocking_create(_config: object) -> MagicMock:
+        time.sleep(0.3)  # simulates the provider's synchronous subprocess/sleep work
+        return fake_workspace
+
+    fake_provider_cls = MagicMock()
+    fake_provider_cls.return_value.create = blocking_create
+
+    with (
+        patch.object(adapter_mod, "_InteractiveTmuxProvider", fake_provider_cls),
+        patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
+    ):
+        adapter = InteractiveTmuxIsolationAdapter()
+        ticker_task = asyncio.ensure_future(_run_ticker(30))
+        await adapter.create(
+            IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
+        )
+        ticks = await ticker_task
+
+    # 30 x 10ms ticks should complete uninterrupted while create() blocks
+    # for 300ms in its own thread. If create() blocked this event loop
+    # instead, the ticker would have made near-zero progress by the time
+    # create() returned.
+    assert ticks > 10
+
+
+@pytest.mark.asyncio
+async def test_destroy_does_not_block_event_loop() -> None:
+    """destroy() must also offload its blocking provider call (issue #771 item 2)."""
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+        IsolationHandle,
+    )
+
+    fake_workspace = MagicMock()
+    fake_workspace.id = "itws-block-destroy"
+    fake_workspace.metadata = {}
+    fake_workspace._handle = MagicMock()
+
+    async def blocking_destroy(_workspace: object) -> None:
+        time.sleep(0.3)  # simulates the provider's synchronous stop() call
+
+    fake_provider_cls = MagicMock()
+    fake_provider_cls.return_value.create = AsyncMock(return_value=fake_workspace)
+    fake_provider_cls.return_value.destroy = blocking_destroy
+
+    with (
+        patch.object(adapter_mod, "_InteractiveTmuxProvider", fake_provider_cls),
+        patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
+    ):
+        adapter = InteractiveTmuxIsolationAdapter()
+        await adapter.create(
+            IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
+        )
+        ticker_task = asyncio.ensure_future(_run_ticker(30))
+        await adapter.destroy(
+            IsolationHandle(
+                isolation_id="itws-block-destroy",
+                isolation_type="interactive-tmux",
+                proxy_url=None,
+                workspace_path="/workspace",
+                host_workspace_path="",
+            )
+        )
+        ticks = await ticker_task
+
+    assert ticks > 10
 
 
 @pytest.mark.asyncio

@@ -298,12 +298,13 @@ class WorkspaceService:
         top — see ``docs/plans/interactive-tmux-integration.md`` §3.4
         for the rationale (credential-confusion risk).
         """
-        from syn_adapters.workspace_backends.agentic import AgenticEventStreamAdapter
+        from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
         from syn_adapters.workspace_backends.interactive_tmux import (
             INTERACTIVE_TMUX_AVAILABLE,
             InteractiveTmuxIsolationAdapter,
             NoopSidecarAdapter,
             NoopTokenInjectionAdapter,
+            NoStreamEventStreamAdapter,
         )
         from syn_shared.settings.workspace import WorkspaceSettings
 
@@ -316,7 +317,7 @@ class WorkspaceService:
                 "docs/plans/interactive-tmux-integration.md for the "
                 "rollout plan."
             )
-            raise RuntimeError(msg)
+            raise WorkspaceProvisionError(msg)
 
         if not INTERACTIVE_TMUX_AVAILABLE:
             msg = (
@@ -326,15 +327,19 @@ class WorkspaceService:
                 "commit on the `agentprims-lab` branch (or its "
                 "successor) that ships the provider."
             )
-            raise RuntimeError(msg)
+            raise WorkspaceProvisionError(msg)
 
         isolation = InteractiveTmuxIsolationAdapter(
             default_image=settings.interactive_tmux_image,
         )
-        # Reuse the agentic event-stream adapter shape; interactive-tmux
-        # does not emit stream-json today, so the stream is effectively
-        # a single-shot capture, but the adapter remains plumbable.
-        event_stream = AgenticEventStreamAdapter()
+        # interactive-tmux does not emit stream-json - it's driven through
+        # the tmux pane API (send_message/await_completion/capture_response,
+        # reached via provider_handle()), not workspace.stream(). Wiring a
+        # bare, un-configured AgenticEventStreamAdapter here used to make any
+        # accidental stream() call fail with a confusing "Provider not set"
+        # RuntimeError; NoStreamEventStreamAdapter fails loudly and
+        # explicitly instead (issue #771 item 5).
+        event_stream = NoStreamEventStreamAdapter()
 
         # NO SidecarTokenInjectionAdapter on this path — OAuth-on-disk
         # authenticates outbound calls; injecting an API key on top is

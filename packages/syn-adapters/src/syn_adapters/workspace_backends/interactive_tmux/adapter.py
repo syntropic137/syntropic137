@@ -23,6 +23,7 @@ See:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 from typing import TYPE_CHECKING, Any
@@ -142,7 +143,16 @@ class InteractiveTmuxIsolationAdapter:
             },
         )
 
-        workspace_obj = await self._provider.create(ws_config)
+        # The provider's create() is async-def but blocking internally
+        # (subprocess + sleep loops up to startup_timeout_s, ~45s by
+        # default) — see the provider's own docstring, which explicitly
+        # says a caller needing concurrency should wrap its call in a
+        # separate thread. `await`ing it directly here would hold up this
+        # adapter's event loop (and every other workspace multiplexed on
+        # it) for the full container-start window. Run the coroutine to
+        # completion inside a worker thread's own event loop instead, so
+        # this loop stays free to service other workspaces concurrently.
+        workspace_obj = await asyncio.to_thread(asyncio.run, self._provider.create(ws_config))
         self._workspaces[workspace_obj.id] = workspace_obj
 
         logger.info(
@@ -166,10 +176,13 @@ class InteractiveTmuxIsolationAdapter:
             logger.warning("Interactive-tmux workspace not found: %s", handle.isolation_id)
             return
         logger.info("Destroying interactive-tmux workspace (id=%s)", handle.isolation_id)
+        # Same blocking-in-async concern as create() (~2s of docker rm /
+        # stop() calls this time): offload to a worker thread so this
+        # event loop isn't held up for the duration.
         # Pop only AFTER a successful provider destroy. If destroy raises
         # (e.g. docker timeout), the handle stays in _workspaces so the
         # caller can retry instead of leaking the tmux/Docker resources.
-        await self._provider.destroy(workspace)
+        await asyncio.to_thread(asyncio.run, self._provider.destroy(workspace))
         self._workspaces.pop(handle.isolation_id, None)
 
     async def execute(

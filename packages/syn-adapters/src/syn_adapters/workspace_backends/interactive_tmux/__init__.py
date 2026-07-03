@@ -16,6 +16,10 @@ from syn_adapters.workspace_backends.interactive_tmux.adapter import (
     InteractiveTmuxIsolationAdapter,
     InteractiveTmuxUnavailableError,
 )
+from syn_adapters.workspace_backends.interactive_tmux.no_stream_event_stream_adapter import (
+    InteractiveTmuxStreamingUnsupportedError,
+    NoStreamEventStreamAdapter,
+)
 from syn_adapters.workspace_backends.interactive_tmux.noop_sidecar import (
     NoopSidecarAdapter,
 )
@@ -26,7 +30,9 @@ from syn_adapters.workspace_backends.interactive_tmux.noop_token_injection impor
 __all__ = [
     "INTERACTIVE_TMUX_AVAILABLE",
     "InteractiveTmuxIsolationAdapter",
+    "InteractiveTmuxStreamingUnsupportedError",
     "InteractiveTmuxUnavailableError",
+    "NoStreamEventStreamAdapter",
     "NoopSidecarAdapter",
     "NoopTokenInjectionAdapter",
 ]
