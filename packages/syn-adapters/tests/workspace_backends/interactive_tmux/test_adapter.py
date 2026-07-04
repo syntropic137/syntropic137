@@ -325,6 +325,42 @@ async def test_concurrent_creates_survive_provider_loop_affine_lock() -> None:
     assert {h.isolation_id for h in handles} == {"itws-lock-1", "itws-lock-2"}
 
 
+@pytest.mark.asyncio
+async def test_create_destroy_create_cycle_does_not_rebind_lock() -> None:
+    """A create -> destroy(all) -> create cycle on one adapter must not crash.
+
+    Regression for the loop-teardown rebind (focused review of #773): an
+    earlier version tore the provider loop down when the adapter's workspace
+    set drained, then lazily started a fresh loop on the next create(). The
+    provider instance (and its loop-affine asyncio.Lock) is reused across that
+    teardown, so the second round of concurrent creates acquired the lock -
+    still bound to the closed loop - from the new loop and raised RuntimeError.
+    The process-wide loop is never torn down, so this cycle must run cleanly.
+    """
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+    )
+
+    with (
+        patch.object(adapter_mod, "_InteractiveTmuxProvider", _LockOwningProvider),
+        patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
+    ):
+        adapter = InteractiveTmuxIsolationAdapter()
+        cfg = IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
+        # Round 1: concurrent creates bind the lock (contention), then destroy
+        # both so the adapter's workspace set drains to empty.
+        r1 = await asyncio.gather(adapter.create(cfg), adapter.create(cfg))
+        for handle in r1:
+            await adapter.destroy(handle)
+        assert adapter._workspaces == {}
+        # Round 2: concurrent creates again on the SAME adapter instance. This
+        # is where the torn-down-loop version raised "bound to a different
+        # event loop".
+        r2 = await asyncio.gather(adapter.create(cfg), adapter.create(cfg))
+
+    assert {h.isolation_id for h in r2} == {"itws-lock-3", "itws-lock-4"}
+
+
 def test_constructor_raises_when_provider_missing() -> None:
     """Constructor MUST fail loudly when the provider class is absent.
 

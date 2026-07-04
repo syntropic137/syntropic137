@@ -36,6 +36,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
+    from concurrent.futures import Future as ConcurrentFuture
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
@@ -81,6 +82,37 @@ def _try_import_provider() -> tuple[Any, str | None]:
 
 _InteractiveTmuxProvider, _IMPORT_ERROR = _try_import_provider()
 
+
+# One process-wide background event loop for ALL interactive-tmux provider
+# calls. The provider's asyncio.Lock is loop-affine (binds to the first loop
+# that acquires it, RuntimeError from any other), so every provider coroutine
+# must run on a single loop that outlives the provider instance. A per-adapter
+# loop that is torn down when its workspaces drain would rebind the lock on the
+# next create() (crash) and race concurrent destroys; a process-wide loop that
+# is never closed avoids both and costs exactly one idle daemon thread total.
+_provider_loop_lock = threading.Lock()
+_provider_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _shared_provider_loop() -> asyncio.AbstractEventLoop:
+    """Return the process-wide provider loop, starting it on first use."""
+    global _provider_loop
+    loop = _provider_loop
+    if loop is not None:
+        return loop
+    with _provider_loop_lock:
+        if _provider_loop is None:
+            new_loop = asyncio.new_event_loop()
+            thread = threading.Thread(
+                target=new_loop.run_forever,
+                name="itmux-provider-loop",
+                daemon=True,
+            )
+            thread.start()
+            _provider_loop = new_loop
+        return _provider_loop
+
+
 INTERACTIVE_TMUX_AVAILABLE: bool = _InteractiveTmuxProvider is not None
 """True when `agentic_isolation.providers.interactive_tmux` was importable
 at adapter-module load time. False when the agentic-primitives submodule
@@ -123,57 +155,49 @@ class InteractiveTmuxIsolationAdapter:
             strict_startup=strict_startup,
         )
         self._workspaces: dict[str, Any] = {}
-        # Dedicated event loop (in a background thread) that runs every
-        # provider coroutine. The provider owns an `asyncio.Lock`, which is
-        # loop-affine: it binds to the first loop that acquires it and
-        # raises RuntimeError from any other loop. Driving each call on a
-        # fresh `asyncio.run` loop would therefore crash on the second
-        # provider call - including the ordinary create() -> destroy()
-        # sequence, since create() binds the lock to a loop that is closed
-        # by the time destroy() runs. One stable loop keeps the lock valid
-        # across the whole workspace lifetime and keeps the blocking driver
-        # work off the caller's loop. Lazily started on first use.
-        self._provider_loop_obj: asyncio.AbstractEventLoop | None = None
-        self._provider_loop_thread: threading.Thread | None = None
-
-    def _provider_loop(self) -> asyncio.AbstractEventLoop:
-        loop = self._provider_loop_obj
-        if loop is not None and not loop.is_closed():
-            return loop
-        loop = asyncio.new_event_loop()
-        thread = threading.Thread(
-            target=loop.run_forever,
-            name=f"itmux-provider-{id(self):x}",
-            daemon=True,
-        )
-        thread.start()
-        self._provider_loop_obj = loop
-        self._provider_loop_thread = thread
-        return loop
 
     async def _call_provider(self, coro: Coroutine[Any, Any, _T]) -> _T:
-        """Run a provider coroutine on the dedicated loop, awaited from ours.
+        """Run a provider coroutine on the shared provider loop, awaited from ours.
 
-        `run_coroutine_threadsafe` schedules `coro` on the provider loop and
-        returns a concurrent future; `wrap_future` lets us await it on the
-        caller's loop without blocking it.
+        The provider owns an `asyncio.Lock`, which is loop-affine: it binds to
+        the first loop that acquires it and raises RuntimeError from any other
+        loop. So every provider call must run on ONE stable loop for the
+        provider instance's lifetime. We use a single process-wide background
+        loop (see `_shared_provider_loop`): it is never torn down, so the lock
+        binds once and stays valid, and the blocking driver work stays off the
+        caller's loop. `run_coroutine_threadsafe` schedules `coro` there and
+        `wrap_future` lets us await it on the caller's loop without blocking it.
         """
-        loop = self._provider_loop()
+        loop = _shared_provider_loop()
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         return await asyncio.wrap_future(future)
 
-    def _shutdown_provider_loop(self) -> None:
-        """Stop the dedicated loop once no workspaces remain on this adapter."""
-        loop = self._provider_loop_obj
-        if loop is None:
-            return
-        loop.call_soon_threadsafe(loop.stop)
-        thread = self._provider_loop_thread
-        if thread is not None:
-            thread.join(timeout=5.0)
-        loop.close()
-        self._provider_loop_obj = None
-        self._provider_loop_thread = None
+    async def _create_on_provider_loop(self, coro: Coroutine[Any, Any, _T]) -> _T:
+        """Run provider.create on the shared loop, cleaning up on cancellation.
+
+        A provider coroutine already running on the background loop cannot be
+        cancelled, so a cancelled caller (e.g. execution timeout) would leave a
+        started, credential-seeded container that this adapter never recorded
+        in `_workspaces` and therefore never destroys. On CancelledError we
+        attach a callback that destroys the workspace if the create still
+        completes, so no container is orphaned.
+        """
+        loop = _shared_provider_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        try:
+            return await asyncio.wrap_future(future)
+        except asyncio.CancelledError:
+
+            def _destroy_if_created(done: ConcurrentFuture[_T]) -> None:
+                try:
+                    workspace = done.result()
+                except BaseException:
+                    return
+                if workspace is not None:
+                    asyncio.run_coroutine_threadsafe(self._provider.destroy(workspace), loop)
+
+            future.add_done_callback(_destroy_if_created)
+            raise
 
     @staticmethod
     def is_available() -> bool:
@@ -201,10 +225,11 @@ class InteractiveTmuxIsolationAdapter:
 
         # The provider's create() is async-def but blocking internally
         # (subprocess + sleep loops up to startup_timeout_s, ~45s by
-        # default). Running it on the dedicated provider loop keeps that
-        # blocking window off this adapter's event loop while satisfying
-        # the provider lock's loop affinity (see `_call_provider`).
-        workspace_obj = await self._call_provider(self._provider.create(ws_config))
+        # default). Running it on the shared provider loop keeps that blocking
+        # window off this adapter's event loop while satisfying the provider
+        # lock's loop affinity (see `_call_provider`). Use the cancellation-
+        # safe variant so a cancelled create() cannot orphan a container.
+        workspace_obj = await self._create_on_provider_loop(self._provider.create(ws_config))
         self._workspaces[workspace_obj.id] = workspace_obj
 
         logger.info(
@@ -236,11 +261,6 @@ class InteractiveTmuxIsolationAdapter:
         # caller can retry instead of leaking the tmux/Docker resources.
         await self._call_provider(self._provider.destroy(workspace))
         self._workspaces.pop(handle.isolation_id, None)
-        # Once the adapter holds no workspaces, the dedicated provider loop
-        # has nothing left to serve; stop it so a long-lived syn-api process
-        # does not accumulate idle loop threads across executions.
-        if not self._workspaces:
-            self._shutdown_provider_loop()
 
     async def execute(
         self,
