@@ -29,6 +29,9 @@ from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
 from syn_domain.contexts.orchestration._shared.resolved_skill import (
     ResolvedSkill,
 )
+from syn_domain.contexts.orchestration._shared.skill_errors import (
+    SkillInvalidName,
+)
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
 )
@@ -169,6 +172,7 @@ __all__ = [
     "ResolvedSkill",
     "SecurityPolicy",
     "SidecarConfig",
+    "SkillInvalidName",
     "SkillRef",
     "StreamResult",
     "SubagentTracker",
