@@ -251,6 +251,80 @@ async def test_destroy_failure_retains_handle_for_retry() -> None:
     assert "itws-fail" not in adapter._workspaces
 
 
+class _LockOwningProvider:
+    """Fake provider that owns an asyncio.Lock like the real one.
+
+    The real InteractiveTmuxProvider guards its `_workspaces` dict with a
+    single `asyncio.Lock` created in __init__ and acquired in create() and
+    destroy(). `asyncio.Lock` is loop-affine: it binds to the first event
+    loop that acquires it and raises RuntimeError from any other loop. This
+    fake reproduces that so a regression in how the adapter schedules
+    provider coroutines (e.g. a fresh `asyncio.run` per call) surfaces as
+    the same RuntimeError a real workspace would hit on its second call.
+    """
+
+    def __init__(self, **_kwargs: object) -> None:
+        self._lock = asyncio.Lock()
+        self._workspaces: dict[str, object] = {}
+        self._counter = 0
+
+    async def create(self, _config: object) -> MagicMock:
+        ws = MagicMock()
+        ws.metadata = {}
+        ws._handle = MagicMock()
+        async with self._lock:
+            self._counter += 1
+            ws.id = f"itws-lock-{self._counter}"
+            self._workspaces[ws.id] = ws
+            # Hold the lock across an await so concurrent creates actually
+            # contend it - contention is what forces asyncio.Lock to bind to
+            # a loop (uncontended acquisitions take a fast path that never
+            # binds, so they would not surface the cross-loop bug).
+            await asyncio.sleep(0.05)
+        return ws
+
+    async def execute(self, _workspace: object, _command: str, **_kwargs: object) -> MagicMock:
+        result = MagicMock()
+        result.exit_code = 0
+        result.success = True
+        result.duration_ms = 1.0
+        result.stdout = ""
+        result.stderr = ""
+        result.timed_out = False
+        return result
+
+    async def destroy(self, workspace: MagicMock) -> None:
+        async with self._lock:
+            self._workspaces.pop(workspace.id, None)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_creates_survive_provider_loop_affine_lock() -> None:
+    """Concurrent create() calls must not trip the provider's loop-affine lock.
+
+    Regression for the cross-loop RuntimeError (Codex review of #773): the
+    provider guards its state with a single asyncio.Lock, which binds to
+    whichever loop first contends it and raises RuntimeError from any other
+    loop. Driving each provider call on a throwaway `asyncio.run` loop makes
+    two concurrent provisions (the multi-agent workflow case, #768) acquire
+    that lock from two different loops and crash. The adapter must run every
+    provider coroutine on one stable loop, so this must complete cleanly.
+    """
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+    )
+
+    with (
+        patch.object(adapter_mod, "_InteractiveTmuxProvider", _LockOwningProvider),
+        patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
+    ):
+        adapter = InteractiveTmuxIsolationAdapter()
+        cfg = IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
+        handles = await asyncio.gather(adapter.create(cfg), adapter.create(cfg))
+
+    assert {h.isolation_id for h in handles} == {"itws-lock-1", "itws-lock-2"}
+
+
 def test_constructor_raises_when_provider_missing() -> None:
     """Constructor MUST fail loudly when the provider class is absent.
 

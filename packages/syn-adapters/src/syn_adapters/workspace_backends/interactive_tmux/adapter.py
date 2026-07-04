@@ -26,7 +26,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from typing import TYPE_CHECKING, Any
+import threading
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
     check_workspace_health,
@@ -34,11 +35,15 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationConfig,
         IsolationHandle,
     )
+
+_T = TypeVar("_T")
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +123,57 @@ class InteractiveTmuxIsolationAdapter:
             strict_startup=strict_startup,
         )
         self._workspaces: dict[str, Any] = {}
+        # Dedicated event loop (in a background thread) that runs every
+        # provider coroutine. The provider owns an `asyncio.Lock`, which is
+        # loop-affine: it binds to the first loop that acquires it and
+        # raises RuntimeError from any other loop. Driving each call on a
+        # fresh `asyncio.run` loop would therefore crash on the second
+        # provider call - including the ordinary create() -> destroy()
+        # sequence, since create() binds the lock to a loop that is closed
+        # by the time destroy() runs. One stable loop keeps the lock valid
+        # across the whole workspace lifetime and keeps the blocking driver
+        # work off the caller's loop. Lazily started on first use.
+        self._provider_loop_obj: asyncio.AbstractEventLoop | None = None
+        self._provider_loop_thread: threading.Thread | None = None
+
+    def _provider_loop(self) -> asyncio.AbstractEventLoop:
+        loop = self._provider_loop_obj
+        if loop is not None and not loop.is_closed():
+            return loop
+        loop = asyncio.new_event_loop()
+        thread = threading.Thread(
+            target=loop.run_forever,
+            name=f"itmux-provider-{id(self):x}",
+            daemon=True,
+        )
+        thread.start()
+        self._provider_loop_obj = loop
+        self._provider_loop_thread = thread
+        return loop
+
+    async def _call_provider(self, coro: Coroutine[Any, Any, _T]) -> _T:
+        """Run a provider coroutine on the dedicated loop, awaited from ours.
+
+        `run_coroutine_threadsafe` schedules `coro` on the provider loop and
+        returns a concurrent future; `wrap_future` lets us await it on the
+        caller's loop without blocking it.
+        """
+        loop = self._provider_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return await asyncio.wrap_future(future)
+
+    def _shutdown_provider_loop(self) -> None:
+        """Stop the dedicated loop once no workspaces remain on this adapter."""
+        loop = self._provider_loop_obj
+        if loop is None:
+            return
+        loop.call_soon_threadsafe(loop.stop)
+        thread = self._provider_loop_thread
+        if thread is not None:
+            thread.join(timeout=5.0)
+        loop.close()
+        self._provider_loop_obj = None
+        self._provider_loop_thread = None
 
     @staticmethod
     def is_available() -> bool:
@@ -145,19 +201,10 @@ class InteractiveTmuxIsolationAdapter:
 
         # The provider's create() is async-def but blocking internally
         # (subprocess + sleep loops up to startup_timeout_s, ~45s by
-        # default) - see the provider's own docstring, which explicitly
-        # says a caller needing concurrency should wrap its call in a
-        # separate thread. `await`ing it directly here would hold up this
-        # adapter's event loop (and every other workspace multiplexed on
-        # it) for the full container-start window. Run the coroutine to
-        # completion inside a worker thread's own event loop instead, so
-        # this loop stays free to service other workspaces concurrently.
-        # The coroutine is created inside the worker thread (not on this
-        # loop) so a cancellation before the thread starts cannot leave
-        # an un-awaited coroutine behind.
-        workspace_obj = await asyncio.to_thread(
-            lambda: asyncio.run(self._provider.create(ws_config))
-        )
+        # default). Running it on the dedicated provider loop keeps that
+        # blocking window off this adapter's event loop while satisfying
+        # the provider lock's loop affinity (see `_call_provider`).
+        workspace_obj = await self._call_provider(self._provider.create(ws_config))
         self._workspaces[workspace_obj.id] = workspace_obj
 
         logger.info(
@@ -182,13 +229,18 @@ class InteractiveTmuxIsolationAdapter:
             return
         logger.info("Destroying interactive-tmux workspace (id=%s)", handle.isolation_id)
         # Same blocking-in-async concern as create() (~2s of docker rm /
-        # stop() calls this time): offload to a worker thread so this
-        # event loop isn't held up for the duration.
+        # stop() calls this time): run on the dedicated provider loop so
+        # this event loop isn't held up for the duration.
         # Pop only AFTER a successful provider destroy. If destroy raises
         # (e.g. docker timeout), the handle stays in _workspaces so the
         # caller can retry instead of leaking the tmux/Docker resources.
-        await asyncio.to_thread(lambda: asyncio.run(self._provider.destroy(workspace)))
+        await self._call_provider(self._provider.destroy(workspace))
         self._workspaces.pop(handle.isolation_id, None)
+        # Once the adapter holds no workspaces, the dedicated provider loop
+        # has nothing left to serve; stop it so a long-lived syn-api process
+        # does not accumulate idle loop threads across executions.
+        if not self._workspaces:
+            self._shutdown_provider_loop()
 
     async def execute(
         self,
@@ -219,12 +271,14 @@ class InteractiveTmuxIsolationAdapter:
             )
 
         cmd_str = " ".join(command)
-        result = await self._provider.execute(
-            workspace,
-            cmd_str,
-            timeout=float(timeout_seconds) if timeout_seconds else None,
-            cwd=working_directory,
-            env=environment,
+        result = await self._call_provider(
+            self._provider.execute(
+                workspace,
+                cmd_str,
+                timeout=float(timeout_seconds) if timeout_seconds else None,
+                cwd=working_directory,
+                env=environment,
+            )
         )
 
         return ExecutionResult(
@@ -255,7 +309,7 @@ class InteractiveTmuxIsolationAdapter:
             raise FileNotFoundError(f"Interactive-tmux workspace not found: {handle.isolation_id}")
         for relative_path, content in files:
             full_path = f"{base_path.rstrip('/')}/{relative_path}" if relative_path else base_path
-            await self._provider.write_file(workspace, full_path, content)
+            await self._call_provider(self._provider.write_file(workspace, full_path, content))
 
     async def copy_from(
         self,
