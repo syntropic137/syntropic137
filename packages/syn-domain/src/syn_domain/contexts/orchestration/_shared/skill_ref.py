@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -225,7 +225,7 @@ def _parse_dict_form(raw: _VerboseSkillInput) -> _ParsedRefDict:
     }
 
 
-def _is_verbose_dict_form(value: dict[Any, Any]) -> bool:
+def _is_verbose_dict_form(value: dict[object, object]) -> bool:
     """Distinguish the verbose YAML form from a fully-built model dump.
 
     WHY: a model dump always has the canonical fields exactly; the verbose

@@ -1368,7 +1368,7 @@ class TestWorkspaceProvisionClaudePlugins:
 
 
 # =========================================================================
-# WorkspaceProvisionHandler — skill materialization + install (issue #772)
+# WorkspaceProvisionHandler - skill materialization + install (issue #772)
 # =========================================================================
 
 

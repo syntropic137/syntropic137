@@ -201,7 +201,7 @@ class ExecutablePhase:
     claude_plugins: tuple[ResolvedClaudePlugin, ...] = ()
 
     # Resolved skills for the workspace materializer (issue #772). Additive
-    # alongside claude_plugins. This task leaves it empty; a follow-up
-    # resolution service populates it from the workflow- and phase-scope
-    # SkillRefs, with phase scope winning on identity collision.
+    # alongside claude_plugins. ExecuteWorkflowHandler._resolve_phase_skills
+    # populates it from the workflow- and phase-scope SkillRefs, with phase
+    # scope winning on identity collision.
     skills: tuple[ResolvedSkill, ...] = ()
