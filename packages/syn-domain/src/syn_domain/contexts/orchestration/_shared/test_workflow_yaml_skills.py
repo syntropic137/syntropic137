@@ -85,12 +85,15 @@ class TestWorkflowYamlSkills:
         # Display name comes from the URL basename minus .git suffix.
         assert url_form.skill_name == "extra-skill"
 
-    def test_workflow_and_phase_scope_are_additive_and_dedup_by_identity(self) -> None:
-        # WHY: phase-level refs are additive on top of workflow-level refs;
-        # the same (source_url, version, skill_name) identity declared at
-        # both scopes must not double-count once merged downstream. This
-        # test proves the raw YAML lists parse independently and cleanly
-        # (the actual merge/dedup happens in the resolution service).
+    def test_workflow_and_phase_scope_parse_independently_with_shared_identity(self) -> None:
+        # WHY: workflow-level and phase-level skill refs parse independently
+        # into separate lists, and SkillRef identity (source_url + version +
+        # skill_name) is preserved across both scopes. This test covers YAML
+        # parsing and identity semantics only. The applied merge/dedup behavior
+        # (phase wins when the same ref appears at both scopes) lives in
+        # ExecuteWorkflowHandler and will be covered when skills resolution
+        # threading lands (issue #772). This test proves the raw YAML lists
+        # parse cleanly and identity equality holds.
         yaml_content = """
 id: additive-test
 name: Additive Test
