@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api.services.claude_plugin_materializer import ClaudePluginMaterializer
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
+    from syn_api.services.skill_materializer import SkillMaterializer
     from syn_api.services.skill_resolution_service import SkillResolutionService
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.github.services import WebhookHealthTracker
@@ -184,6 +185,11 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     # through to ``WorkspaceProvisionHandler`` per dispatch.
     claude_plugin_materializer = await get_claude_plugin_materializer()
 
+    # WHY (issue #772): mirrors the claude-plugin materializer above; turns
+    # ResolvedSkill entries on each phase into workspace files, then the
+    # processor threads it through to WorkspaceProvisionHandler per dispatch.
+    skill_materializer = await get_skill_materializer()
+
     return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
         session_repository=get_session_repository(),
@@ -202,6 +208,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         todo_projection=ExecutionTodoProjection(store=get_projection_store()),
         interactive_workspace_service=interactive_workspace_service,
         claude_plugin_materializer=claude_plugin_materializer,
+        skill_materializer=skill_materializer,
     )
 
 
@@ -1186,6 +1193,7 @@ def reset_claude_plugin_singletons() -> None:
 _skill_storage_singleton: MinioSkillStorage | InMemorySkillStorage | None = None
 _register_skill_handler_singleton: RegisterSkillHandler | None = None
 _skill_resolution_service_singleton: SkillResolutionService | None = None
+_skill_materializer_singleton: SkillMaterializer | None = None
 
 
 async def get_skill_storage() -> MinioSkillStorage | InMemorySkillStorage:
@@ -1255,12 +1263,32 @@ async def get_skill_resolution_service() -> SkillResolutionService:
     return _skill_resolution_service_singleton
 
 
+async def get_skill_materializer() -> SkillMaterializer:
+    """Return the process-wide ``SkillMaterializer`` (issue #772).
+
+    Mirrors ``get_claude_plugin_materializer``: construction is async because
+    the storage singleton is async; the materializer itself is stateless
+    apart from its LRU cache.
+    """
+    global _skill_materializer_singleton
+    if _skill_materializer_singleton is not None:
+        return _skill_materializer_singleton
+
+    from syn_api.services.skill_materializer import SkillMaterializer
+
+    storage = await get_skill_storage()
+    _skill_materializer_singleton = SkillMaterializer(storage=storage)
+    return _skill_materializer_singleton
+
+
 def reset_skill_singletons() -> None:
     """Reset every skill singleton (test isolation only)."""
     global _skill_storage_singleton
     global _register_skill_handler_singleton
     global _skill_resolution_service_singleton
+    global _skill_materializer_singleton
 
     _skill_storage_singleton = None
     _register_skill_handler_singleton = None
     _skill_resolution_service_singleton = None
+    _skill_materializer_singleton = None
