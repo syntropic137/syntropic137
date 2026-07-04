@@ -26,6 +26,12 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,
 )
+from syn_domain.contexts.orchestration._shared.resolved_skill import (
+    ResolvedSkill,
+)
+from syn_domain.contexts.orchestration._shared.skill_ref import (
+    SkillRef,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     validate_workflow_yaml,
@@ -160,8 +166,10 @@ __all__ = [
     "PhaseDefinition",
     "PhaseExecutionType",
     "ResolvedClaudePlugin",
+    "ResolvedSkill",
     "SecurityPolicy",
     "SidecarConfig",
+    "SkillRef",
     "StreamResult",
     "SubagentTracker",
     "TerminateWorkspaceCommand",

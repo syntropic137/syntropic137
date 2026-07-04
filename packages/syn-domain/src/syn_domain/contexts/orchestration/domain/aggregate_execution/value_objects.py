@@ -10,6 +10,9 @@ from typing import Any
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
+from syn_domain.contexts.orchestration._shared.resolved_skill import (
+    ResolvedSkill,  # noqa: TC001 - needed at runtime for dataclass field default
+)
 
 
 class ExecutionStatus(StrEnum):
@@ -196,3 +199,9 @@ class ExecutablePhase:
     # this empty; PR2's resolution service populates it from the workflow- and
     # phase-scope ClaudePluginRefs.
     claude_plugins: tuple[ResolvedClaudePlugin, ...] = ()
+
+    # Resolved skills for the workspace materializer (issue #772). Additive
+    # alongside claude_plugins. This task leaves it empty; a follow-up
+    # resolution service populates it from the workflow- and phase-scope
+    # SkillRefs, with phase scope winning on identity collision.
+    skills: tuple[ResolvedSkill, ...] = ()

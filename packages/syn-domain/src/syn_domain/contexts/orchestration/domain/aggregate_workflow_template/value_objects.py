@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
+from syn_domain.contexts.orchestration._shared.skill_ref import (
+    SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
 
 
 class WorkflowType(StrEnum):
@@ -122,3 +125,8 @@ class PhaseDefinition(BaseModel):
     # them through the YAML to the domain; PR2's resolution service rewrites them
     # into ResolvedClaudePlugin entries on ExecutablePhase.
     claude_plugins: tuple[ClaudePluginRef, ...] = Field(default_factory=tuple)
+    # Workflow-author-declared skill refs at phase scope (issue #772). Additive
+    # alongside claude_plugins; carried through the YAML to the domain. A
+    # follow-up resolution service rewrites them into ResolvedSkill entries
+    # on ExecutablePhase.
+    skills: tuple[SkillRef, ...] = Field(default_factory=tuple)
