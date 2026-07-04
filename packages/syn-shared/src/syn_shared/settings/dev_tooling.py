@@ -74,6 +74,19 @@ class DevToolingSettings(BaseSettings):
         ),
     )
 
+    workflow_fail_on_skill_not_registered: bool = Field(
+        default=True,
+        description=(
+            "When seeding workflows from disk (issue #772), fail boot "
+            "if a skills ref is not in the lock projection. Set to "
+            "false in dev/CI to log the error and skip the failing workflow "
+            "while still seeding the rest. Production should leave this true "
+            "so an unregistered skill ref never silently lands a half-"
+            "installed workflow set. Skills must be registered via "
+            "POST /skills/registrations before seeding."
+        ),
+    )
+
 
 def get_dev_api_url() -> str:
     """Resolve API URL for dev tools.
