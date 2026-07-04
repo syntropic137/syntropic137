@@ -12,6 +12,10 @@ from datetime import datetime  # noqa: TC003  Pydantic needs runtime types
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
+from syn_domain.contexts.orchestration._shared.skill_ref import (
+    SkillManifest,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
+
 
 @event("SkillRegistered", "v1")
 class SkillRegisteredEvent(DomainEvent):
@@ -20,8 +24,8 @@ class SkillRegisteredEvent(DomainEvent):
     resolved_sha: str
     skill_name: str
     tree_storage_prefix: str
-    # WHY ``dict[str, object]`` (issue #772): SKILL.md frontmatter is opaque
-    # metadata downstream so we preserve the original shape rather than
-    # collapsing to scalars.
-    manifest: dict[str, object] = Field(default_factory=dict)
+    # WHY SkillManifest (issue #772): SKILL.md frontmatter is opaque metadata
+    # downstream so we preserve the original shape rather than collapsing to
+    # scalars.
+    manifest: SkillManifest = Field(default_factory=dict)
     registered_at: datetime

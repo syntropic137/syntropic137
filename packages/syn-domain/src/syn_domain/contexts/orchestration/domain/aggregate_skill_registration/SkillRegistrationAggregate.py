@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.skill_ref import SkillManifest
     from syn_domain.contexts.orchestration.domain.commands.RegisterSkillCommand import (
         RegisterSkillCommand,
     )
@@ -59,9 +60,9 @@ class SkillRegistrationAggregate(AggregateRoot["SkillRegisteredEvent"]):
         self._resolved_sha: str | None = None
         self._skill_name: str | None = None
         self._tree_storage_prefix: str | None = None
-        # WHY ``dict[str, object]`` (issue #772): SKILL.md frontmatter may
-        # contain nested structures; manifest is opaque metadata downstream.
-        self._manifest: dict[str, object] = {}
+        # WHY SkillManifest (issue #772): SKILL.md frontmatter may contain
+        # nested structures; manifest is opaque metadata downstream.
+        self._manifest: SkillManifest = {}
         self._registered_at: datetime | None = None
 
     def get_aggregate_type(self) -> str:
@@ -92,7 +93,7 @@ class SkillRegistrationAggregate(AggregateRoot["SkillRegisteredEvent"]):
         return self._tree_storage_prefix
 
     @property
-    def manifest(self) -> dict[str, object]:
+    def manifest(self) -> SkillManifest:
         return dict(self._manifest)
 
     @property

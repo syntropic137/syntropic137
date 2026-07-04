@@ -11,6 +11,10 @@ from __future__ import annotations
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
+from syn_domain.contexts.orchestration._shared.skill_ref import (
+    SkillManifest,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
+
 
 @command("RegisterSkill", "Registers a fetched skill tree as a lock entry")
 class RegisterSkillCommand(BaseModel):
@@ -24,7 +28,7 @@ class RegisterSkillCommand(BaseModel):
     resolved_sha: str
     skill_name: str
     tree_storage_prefix: str
-    # WHY ``dict[str, object]`` (issue #772): SKILL.md frontmatter is opaque
-    # metadata downstream so we preserve the original shape rather than
-    # losing structure to scalar coercion.
-    manifest: dict[str, object] = Field(default_factory=dict)
+    # WHY SkillManifest (issue #772): SKILL.md frontmatter is opaque metadata
+    # downstream so we preserve the original shape rather than losing
+    # structure to scalar coercion.
+    manifest: SkillManifest = Field(default_factory=dict)

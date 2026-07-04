@@ -22,9 +22,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TypedDict
 
 from event_sourcing import AutoDispatchProjection
+
+
+class _SkillRegisteredEventData(TypedDict, total=False):
+    """Wire shape of SkillRegisteredEvent's payload after JSON decode."""
+
+    source_url: str
+    version: str
+    skill_name: str
+    resolved_sha: str
+    tree_storage_prefix: str
+    registered_at: str
+
+
+class _SkillLockEntryStored(TypedDict, total=False):
+    """Row shape persisted to the projection store."""
+
+    source_url: str
+    version: str
+    skill_name: str
+    resolved_sha: str
+    tree_storage_prefix: str
+    registered_at: str
 
 
 @dataclass(frozen=True)
@@ -86,7 +108,7 @@ class SkillLockProjection(AutoDispatchProjection):
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)  # type: ignore[attr-defined]
 
-    async def on_skill_registered(self, event_data: dict[str, Any]) -> None:
+    async def on_skill_registered(self, event_data: _SkillRegisteredEventData) -> None:
         """Persist a registered skill lock entry."""
         source_url = event_data.get("source_url")
         version = event_data.get("version")
@@ -148,7 +170,7 @@ class SkillLockProjection(AutoDispatchProjection):
         )
 
 
-def _entry_to_dict(entry: SkillLockEntry) -> dict[str, Any]:
+def _entry_to_dict(entry: SkillLockEntry) -> _SkillLockEntryStored:
     return {
         "source_url": entry.source_url,
         "version": entry.version,
@@ -159,10 +181,10 @@ def _entry_to_dict(entry: SkillLockEntry) -> dict[str, Any]:
     }
 
 
-def _entry_from_dict(data: dict[str, Any]) -> SkillLockEntry:
+def _entry_from_dict(data: _SkillLockEntryStored) -> SkillLockEntry:
     return SkillLockEntry(
-        source_url=str(data["source_url"]),
-        version=str(data["version"]),
+        source_url=str(data.get("source_url", "")),
+        version=str(data.get("version", "")),
         skill_name=str(data.get("skill_name", "")),
         resolved_sha=str(data.get("resolved_sha", "")),
         tree_storage_prefix=str(data.get("tree_storage_prefix", "")),

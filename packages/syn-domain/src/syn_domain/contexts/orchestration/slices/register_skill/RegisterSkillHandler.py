@@ -48,6 +48,7 @@ from syn_domain.contexts.orchestration.domain.commands.RegisterSkillCommand impo
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.skill_ref import SkillManifest
     from syn_domain.contexts.orchestration.ports.SkillRegistrationRepositoryPort import (
         SkillRegistrationRepositoryPort,
     )
@@ -231,7 +232,7 @@ def _validate_tree_paths(files: list[SkillFile]) -> None:
 
 def _resolve_effective_name(
     explicit_name: str | None,
-    frontmatter: dict[str, object],
+    frontmatter: SkillManifest,
     source_url: str,
 ) -> str:
     """Determine the canonical skill name.
@@ -265,7 +266,7 @@ def _extract_skill_frontmatter(
     files: list[SkillFile],
     source_url: str,
     version: str,
-) -> dict[str, object]:
+) -> SkillManifest:
     """Parse the YAML frontmatter of the tree's root SKILL.md.
 
     A skill tree is one skill folder; SKILL.md MUST sit at the tree root.
@@ -295,7 +296,7 @@ def _extract_skill_frontmatter(
     return frontmatter
 
 
-def _name_from_frontmatter(frontmatter: dict[str, object]) -> str:
+def _name_from_frontmatter(frontmatter: SkillManifest) -> str:
     """Return ``frontmatter['name']`` as a clean string, or empty if missing."""
     name_value = frontmatter.get("name")
     if isinstance(name_value, str) and name_value.strip():

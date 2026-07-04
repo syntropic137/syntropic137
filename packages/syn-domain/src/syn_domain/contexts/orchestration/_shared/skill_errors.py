@@ -34,9 +34,7 @@ class SkillManifestMissing(SkillError):
     error_code = "not_a_skill"
 
     def __init__(self, source_url: str, version: str) -> None:
-        super().__init__(
-            f"Skill tree at {source_url}@{version} is missing a root SKILL.md file"
-        )
+        super().__init__(f"Skill tree at {source_url}@{version} is missing a root SKILL.md file")
         self.source_url = source_url
         self.version = version
 

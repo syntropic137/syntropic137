@@ -25,7 +25,8 @@ reproducibility (see ADR / plan for #772).
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, TypedDict
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -42,6 +43,28 @@ class _ParsedRefDict(TypedDict):
     source_url: str
     version: str
     name_overridden: bool
+
+
+# Opaque SKILL.md frontmatter payload (issue #772). Author-defined keys, no
+# closed schema -- a single named alias avoids repeating the same annotation
+# across the aggregate, command, event, and handler layers that all pass this
+# payload through unopened. Mapping (not dict): every consumer only reads it;
+# copies are made explicitly with dict(...) where mutation is needed.
+SkillManifest = Mapping[str, object]
+
+
+class _VerboseSkillInput(TypedDict, total=False):
+    """Raw verbose mapping form as authored in workflow YAML.
+
+    All keys are optional at this stage -- ``_parse_dict_form`` validates
+    presence/type before producing a ``_ParsedRefDict``.
+    """
+
+    source: str
+    source_url: str
+    version: str
+    name: str
+    names: list[str]
 
 
 # Anchored shorthand parser: org/repo/skill-name@version.
@@ -174,7 +197,7 @@ def _parse_string_form(raw: str) -> _ParsedRefDict:
     raise ValueError(msg)
 
 
-def _parse_dict_form(raw: dict[str, Any]) -> _ParsedRefDict:
+def _parse_dict_form(raw: _VerboseSkillInput) -> _ParsedRefDict:
     """Parse the verbose mapping form."""
     # Accept either ``source`` or ``source_url`` for ergonomic flexibility.
     source_value = raw.get("source") or raw.get("source_url")
@@ -216,7 +239,9 @@ def _coerce_to_canonical_dict(value: object) -> object:
     if isinstance(value, str):
         return _parse_string_form(value)
     if isinstance(value, dict) and _is_verbose_dict_form(value):
-        return _parse_dict_form(value)
+        # Untyped input crossing a trust boundary (workflow YAML) -- shape is
+        # runtime-validated inside _parse_dict_form, not just asserted here.
+        return _parse_dict_form(cast("_VerboseSkillInput", value))
     return value
 
 

@@ -54,9 +54,7 @@ class TestWorkflowYamlSkills:
 
         shorthand = defn.skills[0]
         assert shorthand.skill_name == "code-review"
-        assert (
-            shorthand.source_url == "https://github.com/syntropic137/agentic-skills"
-        )
+        assert shorthand.source_url == "https://github.com/syntropic137/agentic-skills"
         assert shorthand.version == "3.2.1"
         assert shorthand.name_overridden is False
 

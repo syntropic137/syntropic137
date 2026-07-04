@@ -30,7 +30,7 @@ from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     normalize_frontmatter,
 )
 from syn_domain.contexts.orchestration._shared.skill_ref import (
-    SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
+    SkillRef,
     expand_skill_entry,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
