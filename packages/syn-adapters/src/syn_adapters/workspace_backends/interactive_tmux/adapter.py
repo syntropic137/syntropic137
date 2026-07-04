@@ -212,11 +212,26 @@ class InteractiveTmuxIsolationAdapter:
             IsolationHandle,
         )
 
+        # The interactive-tmux provider only honors working_dir and labels
+        # (agent selection + informational syn.* tags); it rejects `image`,
+        # `environment`, mounts, secrets, etc. as non-default WorkspaceConfig
+        # fields (it runs a fixed entrypoint with its own credential layout).
+        # The image is supplied to the provider via `default_image=` at
+        # construction, so we must NOT also set it here. Environment injection
+        # is unsupported: fail loudly rather than silently drop it (interactive
+        # phases run with agent_env={} - see the provision handler).
+        if config.environment:
+            msg = (
+                "interactive-tmux workspaces do not support environment "
+                f"injection (got keys {sorted(config.environment)}); the "
+                "provider runs a fixed entrypoint with its own credential "
+                "layout. claude-interactive phases must not set agent env."
+            )
+            raise InteractiveTmuxUnavailableError(msg)
+
         ws_config = WorkspaceConfig(
             provider="interactive-tmux",
-            image=config.image or self._default_image or "",
             working_dir="/workspace",
-            environment=dict(config.environment) if config.environment else {},
             labels={
                 "syn.execution_id": config.execution_id,
                 "syn.workspace_id": config.workspace_id,

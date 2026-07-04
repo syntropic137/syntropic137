@@ -45,7 +45,7 @@ async def test_create_delegates_to_provider_and_returns_handle() -> None:
                 execution_id="exec-1",
                 workspace_id="ws-1",
                 image="img:tag",
-                environment={"FOO": "bar"},
+                environment={},
             )
         )
 
@@ -55,6 +55,35 @@ async def test_create_delegates_to_provider_and_returns_handle() -> None:
     assert handle.workspace_path == "/workspace"
     # provider_handle exposes the underlying InteractiveTmuxWorkspace driver
     assert adapter.provider_handle(handle) is fake_workspace._handle
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_environment_injection() -> None:
+    """Interactive-tmux does not support env injection; create() must fail loud.
+
+    The provider rejects a non-default WorkspaceConfig.environment (it runs a
+    fixed entrypoint with its own credential layout). The adapter surfaces
+    that as a clear error at its own boundary instead of silently dropping
+    the env or letting a deeper ValueError leak.
+    """
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+    )
+
+    with (
+        patch.object(adapter_mod, "_InteractiveTmuxProvider", MagicMock()),
+        patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
+    ):
+        adapter = InteractiveTmuxIsolationAdapter()
+        with pytest.raises(InteractiveTmuxUnavailableError, match="environment"):
+            await adapter.create(
+                IsolationConfig(
+                    execution_id="e",
+                    workspace_id="w",
+                    image="i",
+                    environment={"FOO": "bar"},
+                )
+            )
 
 
 @pytest.mark.asyncio
