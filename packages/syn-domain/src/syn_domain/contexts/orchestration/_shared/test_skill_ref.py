@@ -27,6 +27,12 @@ class TestShorthandForm:
         with pytest.raises(ValidationError, match="latest"):
             SkillRef.model_validate("anthropics/skills/frontend-design@latest")
 
+    def test_domain_qualified_shorthand_rejected(self) -> None:
+        # A hostname-looking first segment is not GitHub shorthand; require the
+        # explicit URL or verbose form instead of silently mis-parsing.
+        with pytest.raises(ValidationError, match="looks like a host"):
+            SkillRef.model_validate("gitlab.example.com/org/repo@v1")
+
 
 class TestUrlForm:
     def test_url_at_version_uses_basename_as_skill_name(self) -> None:

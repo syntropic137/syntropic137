@@ -97,6 +97,12 @@ def _try_parse_skill_shorthand(raw: str) -> _ParsedRefDict | None:
     """
     if "://" in raw or raw.startswith("git@"):
         return None
+    if _BARE_HOST_RE.match(raw):
+        msg = (
+            f"skill reference {raw!r} looks like a host-qualified path; "
+            "use the full URL form '<url>@<version>' or the verbose mapping form"
+        )
+        raise ValueError(msg)
     match = _SKILL_SHORTHAND_RE.match(raw)
     if match is not None:
         org, repo, skill, version = match.groups()
