@@ -1893,6 +1893,47 @@
         }
       }
     },
+    "/skills/registrations": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Register Skill Endpoint",
+        "description": "Register a skill by uploading the cloned tree (issue #772).\n\nThe CLI clones the source locally and POSTs the tree contents here. The\nAPI decodes the base64 file contents, computes the sha256 over the\nnormalized tree, uploads to storage, and dispatches a\n``RegisterSkillCommand`` against the existing aggregate. Idempotent on\nre-submission of the same ``(source_url, version, skill_name)``.",
+        "operationId": "register_skill_endpoint_skills_registrations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillRegistrationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed file payload (bad base64, missing fields)"
+          },
+          "413": {
+            "description": "Skill tree exceeds the size or file-count limit"
+          },
+          "422": {
+            "description": "Manifest missing, malformed, or unsafe file path in the tree"
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "tags": [
@@ -8425,6 +8466,50 @@
         "title": "RegisterRepoRequest",
         "description": "Request body for registering a new repo."
       },
+      "RegisterSkillRequest": {
+        "properties": {
+          "source_url": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source Url"
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Version"
+          },
+          "skill_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Name",
+            "description": "Display name override; when omitted the SKILL.md frontmatter's 'name' is used."
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SkillFilePayload"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Files",
+            "description": "Every file in the skill tree (base64-encoded)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source_url",
+          "version",
+          "files"
+        ],
+        "title": "RegisterSkillRequest",
+        "description": "Request body for ``POST /skills/registrations`` (issue #772).\n\nThe CLI uploads the entire skill tree inline; the API hashes the\nnormalized tree, stores it via the storage port, and persists the\nregistration aggregate. Idempotent on existing\n``(source_url, version, skill_name)``. Unlike claude plugins, there is no\ncaller-supplied manifest: the SKILL.md frontmatter at the tree root is the\nmanifest."
+      },
       "RegisterTriggerRequest": {
         "properties": {
           "name": {
@@ -9809,6 +9894,63 @@
         ],
         "title": "SessionTokenMetrics",
         "description": "Token usage metrics for a session."
+      },
+      "SkillFilePayload": {
+        "properties": {
+          "rel_path": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Rel Path"
+          },
+          "content_base64": {
+            "type": "string",
+            "title": "Content Base64"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rel_path",
+          "content_base64"
+        ],
+        "title": "SkillFilePayload",
+        "description": "One file in the uploaded skill tree (``POST /skills/registrations``).\n\nMirrors ``ClaudePluginFileEntry``. ``content_base64`` is the base64-encoded\nbyte content; the API decodes it back into raw bytes before hashing and\nuploading."
+      },
+      "SkillRegistrationResponse": {
+        "properties": {
+          "skill_name": {
+            "type": "string",
+            "title": "Skill Name"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "resolved_sha": {
+            "type": "string",
+            "title": "Resolved Sha",
+            "description": "Content-addressed sha of the normalized tree."
+          },
+          "tree_storage_prefix": {
+            "type": "string",
+            "title": "Tree Storage Prefix"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "skill_name",
+          "source_url",
+          "version",
+          "resolved_sha",
+          "tree_storage_prefix"
+        ],
+        "title": "SkillRegistrationResponse",
+        "description": "Response payload for ``POST /skills/registrations``."
       },
       "StateResponse": {
         "properties": {
@@ -11512,6 +11654,10 @@
     {
       "name": "sessions",
       "description": "List and inspect agent sessions"
+    },
+    {
+      "name": "skills",
+      "description": ""
     },
     {
       "name": "sse",

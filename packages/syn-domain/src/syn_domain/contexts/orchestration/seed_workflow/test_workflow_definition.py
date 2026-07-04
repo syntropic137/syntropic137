@@ -422,6 +422,7 @@ async def test_agent_provider_reaches_executable_phase() -> None:
     class _StubTemplate:
         phases = definition.get_domain_phases()
         claude_plugins = ()
+        skills = ()
 
     handler = ExecuteWorkflowHandler(
         processor=MagicMock(),

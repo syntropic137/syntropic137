@@ -13,6 +13,7 @@ from syn_api.routes.observability import router as observability_router
 from syn_api.routes.organizations import router as organizations_router
 from syn_api.routes.repos import router as repos_router
 from syn_api.routes.sessions import router as sessions_router
+from syn_api.routes.skills import router as skills_router
 from syn_api.routes.sse import router as sse_router
 from syn_api.routes.systems import router as systems_router
 from syn_api.routes.triggers import router as triggers_router
@@ -33,6 +34,7 @@ __all__ = [
     "organizations_router",
     "repos_router",
     "sessions_router",
+    "skills_router",
     "sse_router",
     "systems_router",
     "triggers_router",

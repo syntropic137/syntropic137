@@ -1565,3 +1565,60 @@ class RemoveGlobalClaudePluginResponse(BaseModel):
 
     name: str
     status: str
+
+
+# ---------------------------------------------------------------------------
+# Skill response models (issue #772)
+# ---------------------------------------------------------------------------
+
+
+class SkillFilePayload(BaseModel):
+    """One file in the uploaded skill tree (``POST /skills/registrations``).
+
+    Mirrors ``ClaudePluginFileEntry``. ``content_base64`` is the base64-encoded
+    byte content; the API decodes it back into raw bytes before hashing and
+    uploading.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rel_path: str = Field(..., min_length=1)
+    content_base64: str
+
+
+class RegisterSkillRequest(BaseModel):
+    """Request body for ``POST /skills/registrations`` (issue #772).
+
+    The CLI uploads the entire skill tree inline; the API hashes the
+    normalized tree, stores it via the storage port, and persists the
+    registration aggregate. Idempotent on existing
+    ``(source_url, version, skill_name)``. Unlike claude plugins, there is no
+    caller-supplied manifest: the SKILL.md frontmatter at the tree root is the
+    manifest.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_url: str = Field(..., min_length=1)
+    version: str = Field(..., min_length=1)
+    skill_name: str | None = Field(
+        default=None,
+        description=(
+            "Display name override; when omitted the SKILL.md frontmatter's 'name' is used."
+        ),
+    )
+    files: list[SkillFilePayload] = Field(
+        ..., min_length=1, description="Every file in the skill tree (base64-encoded)."
+    )
+
+
+class SkillRegistrationResponse(BaseModel):
+    """Response payload for ``POST /skills/registrations``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skill_name: str
+    source_url: str
+    version: str
+    resolved_sha: str = Field(..., description="Content-addressed sha of the normalized tree.")
+    tree_storage_prefix: str
