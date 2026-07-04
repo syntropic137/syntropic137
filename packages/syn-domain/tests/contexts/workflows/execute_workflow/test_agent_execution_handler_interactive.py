@@ -187,7 +187,9 @@ async def test_interactive_driver_hang_fails_within_bounded_timeout(
     assert result.command.exit_code != 0
     assert result.stream_result.error_reason is not None
     assert "did not return within" in result.stream_result.error_reason
-    assert "0s" in result.stream_result.error_reason
+    # error_reason reports the bounded timeout (timeout_seconds + margin),
+    # matching what was actually enforced.
+    assert "transport hang" in result.stream_result.error_reason
 
 
 @pytest.mark.asyncio

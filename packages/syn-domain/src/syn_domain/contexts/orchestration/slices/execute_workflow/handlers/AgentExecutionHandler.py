@@ -462,7 +462,7 @@ async def _run_interactive_driver(
             tokens=tokens,
             subagents=subagents,
             error_reason=(
-                f"interactive driver did not return within {timeout_seconds}s (transport hang?)"
+                f"interactive driver did not return within {overall_timeout_s:g}s (transport hang?)"
             ),
         )
 
