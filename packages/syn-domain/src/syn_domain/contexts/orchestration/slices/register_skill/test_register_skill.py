@@ -77,26 +77,30 @@ async def test_register_skill_happy_path(handler: RegisterSkillHandler) -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_missing_skill_md_rejected(handler: RegisterSkillHandler) -> None:
-    with pytest.raises(SkillManifestMissing):
+    with pytest.raises(SkillManifestMissing) as excinfo:
         await handler.handle(
             source_url="https://github.com/acme/agent-skills",
             version="v2.0.0",
             skill_name="x",
             files=[SkillFile(rel_path="README.md", content=b"nope")],
         )
+    assert "SKILL.md" in str(excinfo.value)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_frontmatter_without_name_rejected(handler: RegisterSkillHandler) -> None:
     bad = b"---\ndescription: no name here\n---\nbody"
-    with pytest.raises(SkillManifestInvalid, match="frontmatter must declare 'name'"):
+    with pytest.raises(SkillManifestInvalid) as excinfo:
         await handler.handle(
             source_url="https://github.com/acme/agent-skills",
             version="v2.0.0",
             skill_name=None,
             files=[SkillFile(rel_path="SKILL.md", content=bad)],
         )
+    error_msg = str(excinfo.value)
+    assert "SKILL.md" in error_msg
+    assert "frontmatter must declare 'name'" in error_msg
 
 
 @pytest.mark.unit

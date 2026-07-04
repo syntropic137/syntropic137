@@ -8,7 +8,7 @@ After the #772 Phase A redesign, only two error families remain at the API
 tier:
 
 - Manifest validation errors raised by ``RegisterSkillHandler`` when
-  the uploaded tree is missing or has a malformed ``.syn-skill/skill.json``.
+  the uploaded tree is missing or has malformed SKILL.md frontmatter.
 - ``SkillNotRegistered`` raised by ``AddGlobalSkillHandler`` and
   ``SkillResolutionService`` when a referenced skill has not yet been
   registered via ``POST /skills/registrations``.
@@ -29,26 +29,25 @@ class SkillError(Exception):
 
 
 class SkillManifestMissing(SkillError):
-    """The uploaded tree does not contain `.syn-skill/skill.json`."""
+    """The uploaded tree does not contain a root SKILL.md file."""
 
     error_code = "not_a_skill"
 
     def __init__(self, source_url: str, version: str) -> None:
         super().__init__(
-            f"Source {source_url}@{version} is not a skill "
-            f"(missing .syn-skill/skill.json)"
+            f"Skill tree at {source_url}@{version} is missing a root SKILL.md file"
         )
         self.source_url = source_url
         self.version = version
 
 
 class SkillManifestInvalid(SkillError):
-    """The skill.json exists but failed to parse or validate."""
+    """The SKILL.md frontmatter exists but failed to parse or validate."""
 
     error_code = "skill_manifest_invalid"
 
     def __init__(self, source_url: str, version: str, detail: str) -> None:
-        super().__init__(f"Invalid skill.json in {source_url}@{version}: {detail}")
+        super().__init__(f"SKILL.md frontmatter for {source_url}@{version} is invalid: {detail}")
         self.source_url = source_url
         self.version = version
         self.detail = detail
