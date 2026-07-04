@@ -152,11 +152,7 @@ class WorkflowExecutionProcessor:
         # that turns ResolvedClaudePlugin entries on the phase into workspace
         # files. Wired through to ``WorkspaceProvisionHandler`` per call.
         self._claude_plugin_materializer = claude_plugin_materializer
-        # WHY (issue #772): mirrors the claude plugin materializer above, but
-        # for ResolvedSkill entries. Wired through to
-        # ``WorkspaceProvisionHandler`` per call; unlike the plugin
-        # materializer, the handler treats declared-skills-with-no-materializer
-        # as a hard failure rather than a silent skip.
+        # WHY (#772): mirrors claude_plugin_materializer above but for skills; handler hard-fails (no silent skip) on unmatched skills
         self._skill_materializer = skill_materializer
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
