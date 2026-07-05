@@ -84,6 +84,7 @@ def build_isolation_config(
     workflow_id: str | None,
     phase_id: str | None,
     extra_environment: dict[str, str] | None,
+    agents: tuple[str, ...] = (),
 ) -> IsolationConfig:
     """Build IsolationConfig with merged environment variables.
 
@@ -94,6 +95,7 @@ def build_isolation_config(
         workflow_id: Optional workflow ID
         phase_id: Optional phase ID
         extra_environment: Additional environment variables
+        agents: Interactive agent name(s) to provision (interactive-tmux only)
 
     Returns:
         IsolationConfig for container creation
@@ -115,6 +117,7 @@ def build_isolation_config(
             cpu_limit_cores=config.cpu_limit_cores,
         ),
         environment=merged_environment,
+        agents=agents,
     )
 
 

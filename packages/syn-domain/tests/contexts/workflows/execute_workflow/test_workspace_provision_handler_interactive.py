@@ -24,15 +24,16 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
     _is_interactive_phase,
+    _provisioned_agents,
 )
 
 
-def _phase(provider: str) -> ExecutablePhase:
+def _phase(provider: str, agent_id: str = "claude") -> ExecutablePhase:
     return ExecutablePhase(
         phase_id="p1",
         name="Phase 1",
         order=1,
-        agent_config=AgentConfiguration(provider=provider),
+        agent_config=AgentConfiguration(provider=provider, agent_id=agent_id),
         prompt_template="do it",
     )
 
@@ -87,3 +88,19 @@ class TestIsInteractivePhaseMismatchGuard:
         workspace = _workspace("interactive-tmux")
         with pytest.raises(WorkspaceMisconfiguredError, match="interactive-tmux"):
             _is_interactive_phase(workspace, _phase("claude"))
+
+
+class TestProvisionedAgents:
+    """Interactive phases provision only the agent they drive."""
+
+    def test_interactive_phase_provisions_only_its_agent(self) -> None:
+        assert _provisioned_agents(_phase("claude-interactive", "claude")) == ("claude",)
+
+    def test_interactive_phase_honors_non_claude_agent(self) -> None:
+        # Forward-compatible: a codex/gemini interactive phase stages that agent.
+        assert _provisioned_agents(_phase("claude-interactive", "codex")) == ("codex",)
+
+    def test_docker_phase_provisions_no_specific_agent(self) -> None:
+        # Empty -> the docker backend ignores it and the interactive provider
+        # would fall back to all agents (not reachable on the docker path).
+        assert _provisioned_agents(_phase("claude", "claude")) == ()

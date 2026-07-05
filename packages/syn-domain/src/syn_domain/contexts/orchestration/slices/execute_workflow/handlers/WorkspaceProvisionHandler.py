@@ -105,6 +105,21 @@ def _is_interactive_phase(workspace: ManagedWorkspace, phase: ExecutablePhase) -
     return explicit_interactive
 
 
+def _provisioned_agents(phase: ExecutablePhase) -> tuple[str, ...]:
+    """Interactive agent name(s) to stage for this phase's workspace.
+
+    For an interactive-tmux phase (`provider == "claude-interactive"`) return
+    just the agent the phase drives - `agent_config.agent_id` is the canonical
+    claude/codex/gemini name the driver stages auth and launches a pane for.
+    Staging only the needed agent avoids the multi-minute cost of copying the
+    other two agents' credentials. Returns () for the default docker path
+    (which ignores agent selection entirely).
+    """
+    if phase.agent_config.provider == "claude-interactive":
+        return (phase.agent_config.agent_id,)
+    return ()
+
+
 def _append_claude_plugin_dirs(
     claude_cmd: list[str],
     phase: ExecutablePhase,
@@ -306,6 +321,7 @@ class WorkspaceProvisionHandler:
             phase_id=todo.phase_id,
             with_sidecar=True,
             inject_tokens=True,
+            agents=_provisioned_agents(phase),
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)

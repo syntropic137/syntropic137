@@ -58,6 +58,42 @@ async def test_create_delegates_to_provider_and_returns_handle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_sets_agents_label_from_config() -> None:
+    """config.agents becomes WorkspaceConfig.labels['agents'] so the provider
+    stages only those agents; empty config.agents omits the label (default)."""
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+    )
+
+    fake_workspace = MagicMock()
+    fake_workspace.id = "itws-agents"
+    fake_workspace.metadata = {}
+    fake_workspace._handle = MagicMock()
+
+    fake_provider_cls = MagicMock()
+    fake_provider = fake_provider_cls.return_value
+    fake_provider.create = AsyncMock(return_value=fake_workspace)
+
+    with (
+        patch.object(adapter_mod, "_InteractiveTmuxProvider", fake_provider_cls),
+        patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
+    ):
+        adapter = InteractiveTmuxIsolationAdapter()
+        # With agents -> label set.
+        await adapter.create(
+            IsolationConfig(execution_id="e", workspace_id="w", image="i", agents=("claude",))
+        )
+        ws_config = fake_provider.create.await_args.args[0]
+        assert ws_config.labels["agents"] == "claude"
+
+        # Without agents -> no label (provider default: all agents).
+        fake_provider.create.reset_mock()
+        await adapter.create(IsolationConfig(execution_id="e", workspace_id="w", image="i"))
+        ws_config = fake_provider.create.await_args.args[0]
+        assert "agents" not in ws_config.labels
+
+
+@pytest.mark.asyncio
 async def test_create_rejects_environment_injection() -> None:
     """Interactive-tmux does not support env injection; create() must fail loud.
 

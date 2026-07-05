@@ -478,6 +478,7 @@ class WorkspaceService:
         workflow_id: str | None,
         phase_id: str | None,
         extra_environment: dict[str, str] | None,
+        agents: tuple[str, ...] = (),
     ) -> tuple[WorkspaceAggregate, IsolationConfig]:
         """Create aggregate and isolation config for a new workspace.
 
@@ -487,6 +488,7 @@ class WorkspaceService:
             workflow_id: Optional workflow ID
             phase_id: Optional phase ID
             extra_environment: Additional environment variables
+            agents: Interactive agent name(s) to provision (interactive-tmux only)
 
         Returns:
             Tuple of (WorkspaceAggregate, IsolationConfig).
@@ -508,6 +510,7 @@ class WorkspaceService:
             workflow_id=workflow_id,
             phase_id=phase_id,
             extra_environment=extra_environment,
+            agents=agents,
         )
 
         return aggregate, isolation_config
@@ -523,6 +526,7 @@ class WorkspaceService:
         inject_tokens: bool = False,
         token_types: list[TokenType] | None = None,
         extra_environment: dict[str, str] | None = None,
+        agents: tuple[str, ...] = (),
     ) -> AsyncIterator[ManagedWorkspace]:
         """Create a managed workspace with full lifecycle.
 
@@ -537,6 +541,7 @@ class WorkspaceService:
             inject_tokens: Whether to inject tokens automatically
             token_types: Token types to inject (if inject_tokens=True)
             extra_environment: Additional environment variables
+            agents: Interactive agent name(s) to provision (interactive-tmux only)
 
         Yields:
             ManagedWorkspace for command execution
@@ -551,6 +556,7 @@ class WorkspaceService:
             workflow_id,
             phase_id,
             extra_environment,
+            agents=agents,
         )
 
         isolation_handle: IsolationHandle | None = None

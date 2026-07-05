@@ -229,13 +229,21 @@ class InteractiveTmuxIsolationAdapter:
             )
             raise InteractiveTmuxUnavailableError(msg)
 
+        labels = {
+            "syn.execution_id": config.execution_id,
+            "syn.workspace_id": config.workspace_id,
+        }
+        # Stage auth and launch a pane only for the requested agent(s). Without
+        # this the provider stages all default agents (claude/codex/gemini),
+        # which for a claude-only phase wastes minutes copying codex/gemini
+        # credentials. Empty `agents` falls back to the provider default.
+        if config.agents:
+            labels["agents"] = ",".join(config.agents)
+
         ws_config = WorkspaceConfig(
             provider="interactive-tmux",
             working_dir="/workspace",
-            labels={
-                "syn.execution_id": config.execution_id,
-                "syn.workspace_id": config.workspace_id,
-            },
+            labels=labels,
         )
 
         # The provider's create() is async-def but blocking internally
