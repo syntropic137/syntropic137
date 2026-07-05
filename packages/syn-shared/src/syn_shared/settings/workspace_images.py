@@ -29,6 +29,7 @@ class WorkspaceImageProvider(StrEnum):
     """
 
     CLAUDE_CLI = "claude-cli"
+    INTERACTIVE_TMUX = "interactive-tmux"
 
 
 # ---------------------------------------------------------------------------
@@ -62,4 +63,15 @@ def workspace_image_ref(
 # ---------------------------------------------------------------------------
 
 DEFAULT_WORKSPACE_IMAGE: str = workspace_image_ref()
-"""Default workspace image — Claude CLI provider, latest tag, from GHCR."""
+"""Default workspace image - Claude CLI provider, latest tag, from GHCR."""
+
+INTERACTIVE_TMUX_WORKSPACE_IMAGE: str = (
+    f"{IMAGE_PREFIX}-{WorkspaceImageProvider.INTERACTIVE_TMUX.value}:{DEFAULT_TAG}"
+)
+"""Default interactive-tmux workspace image - bare local tag, not yet published to GHCR.
+
+Unlike DEFAULT_WORKSPACE_IMAGE, this is built and run locally by agentic-primitives
+(EXP-05) and has not been published to a registry. Once it is published, switch this
+to `workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)` to become
+GHCR-qualified like the default image.
+"""

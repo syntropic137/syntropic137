@@ -23,9 +23,11 @@ See:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
-from typing import TYPE_CHECKING, Any
+import threading
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
     check_workspace_health,
@@ -33,11 +35,16 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
+    from concurrent.futures import Future as ConcurrentFuture
+
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationConfig,
         IsolationHandle,
     )
+
+_T = TypeVar("_T")
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +81,37 @@ def _try_import_provider() -> tuple[Any, str | None]:
 
 
 _InteractiveTmuxProvider, _IMPORT_ERROR = _try_import_provider()
+
+
+# One process-wide background event loop for ALL interactive-tmux provider
+# calls. The provider's asyncio.Lock is loop-affine (binds to the first loop
+# that acquires it, RuntimeError from any other), so every provider coroutine
+# must run on a single loop that outlives the provider instance. A per-adapter
+# loop that is torn down when its workspaces drain would rebind the lock on the
+# next create() (crash) and race concurrent destroys; a process-wide loop that
+# is never closed avoids both and costs exactly one idle daemon thread total.
+_provider_loop_lock = threading.Lock()
+_provider_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _shared_provider_loop() -> asyncio.AbstractEventLoop:
+    """Return the process-wide provider loop, starting it on first use."""
+    global _provider_loop
+    loop = _provider_loop
+    if loop is not None:
+        return loop
+    with _provider_loop_lock:
+        if _provider_loop is None:
+            new_loop = asyncio.new_event_loop()
+            thread = threading.Thread(
+                target=new_loop.run_forever,
+                name="itmux-provider-loop",
+                daemon=True,
+            )
+            thread.start()
+            _provider_loop = new_loop
+        return _provider_loop
+
 
 INTERACTIVE_TMUX_AVAILABLE: bool = _InteractiveTmuxProvider is not None
 """True when `agentic_isolation.providers.interactive_tmux` was importable
@@ -118,6 +156,49 @@ class InteractiveTmuxIsolationAdapter:
         )
         self._workspaces: dict[str, Any] = {}
 
+    async def _call_provider(self, coro: Coroutine[Any, Any, _T]) -> _T:
+        """Run a provider coroutine on the shared provider loop, awaited from ours.
+
+        The provider owns an `asyncio.Lock`, which is loop-affine: it binds to
+        the first loop that acquires it and raises RuntimeError from any other
+        loop. So every provider call must run on ONE stable loop for the
+        provider instance's lifetime. We use a single process-wide background
+        loop (see `_shared_provider_loop`): it is never torn down, so the lock
+        binds once and stays valid, and the blocking driver work stays off the
+        caller's loop. `run_coroutine_threadsafe` schedules `coro` there and
+        `wrap_future` lets us await it on the caller's loop without blocking it.
+        """
+        loop = _shared_provider_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return await asyncio.wrap_future(future)
+
+    async def _create_on_provider_loop(self, coro: Coroutine[Any, Any, _T]) -> _T:
+        """Run provider.create on the shared loop, cleaning up on cancellation.
+
+        A provider coroutine already running on the background loop cannot be
+        cancelled, so a cancelled caller (e.g. execution timeout) would leave a
+        started, credential-seeded container that this adapter never recorded
+        in `_workspaces` and therefore never destroys. On CancelledError we
+        attach a callback that destroys the workspace if the create still
+        completes, so no container is orphaned.
+        """
+        loop = _shared_provider_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        try:
+            return await asyncio.wrap_future(future)
+        except asyncio.CancelledError:
+
+            def _destroy_if_created(done: ConcurrentFuture[_T]) -> None:
+                try:
+                    workspace = done.result()
+                except BaseException:
+                    return
+                if workspace is not None:
+                    asyncio.run_coroutine_threadsafe(self._provider.destroy(workspace), loop)
+
+            future.add_done_callback(_destroy_if_created)
+            raise
+
     @staticmethod
     def is_available() -> bool:
         """Check Docker is on PATH and the provider class was importable."""
@@ -131,18 +212,47 @@ class InteractiveTmuxIsolationAdapter:
             IsolationHandle,
         )
 
+        # The interactive-tmux provider only honors working_dir and labels
+        # (agent selection + informational syn.* tags); it rejects `image`,
+        # `environment`, mounts, secrets, etc. as non-default WorkspaceConfig
+        # fields (it runs a fixed entrypoint with its own credential layout).
+        # The image is supplied to the provider via `default_image=` at
+        # construction, so we must NOT also set it here. Environment injection
+        # is unsupported: fail loudly rather than silently drop it (interactive
+        # phases run with agent_env={} - see the provision handler).
+        if config.environment:
+            msg = (
+                "interactive-tmux workspaces do not support environment "
+                f"injection (got keys {sorted(config.environment)}); the "
+                "provider runs a fixed entrypoint with its own credential "
+                "layout. claude-interactive phases must not set agent env."
+            )
+            raise InteractiveTmuxUnavailableError(msg)
+
+        labels = {
+            "syn.execution_id": config.execution_id,
+            "syn.workspace_id": config.workspace_id,
+        }
+        # Stage auth and launch a pane only for the requested agent(s). Without
+        # this the provider stages all default agents (claude/codex/gemini),
+        # which for a claude-only phase wastes minutes copying codex/gemini
+        # credentials. Empty `agents` falls back to the provider default.
+        if config.agents:
+            labels["agents"] = ",".join(config.agents)
+
         ws_config = WorkspaceConfig(
             provider="interactive-tmux",
-            image=config.image or self._default_image or "",
             working_dir="/workspace",
-            environment=dict(config.environment) if config.environment else {},
-            labels={
-                "syn.execution_id": config.execution_id,
-                "syn.workspace_id": config.workspace_id,
-            },
+            labels=labels,
         )
 
-        workspace_obj = await self._provider.create(ws_config)
+        # The provider's create() is async-def but blocking internally
+        # (subprocess + sleep loops up to startup_timeout_s, ~45s by
+        # default). Running it on the shared provider loop keeps that blocking
+        # window off this adapter's event loop while satisfying the provider
+        # lock's loop affinity (see `_call_provider`). Use the cancellation-
+        # safe variant so a cancelled create() cannot orphan a container.
+        workspace_obj = await self._create_on_provider_loop(self._provider.create(ws_config))
         self._workspaces[workspace_obj.id] = workspace_obj
 
         logger.info(
@@ -166,10 +276,13 @@ class InteractiveTmuxIsolationAdapter:
             logger.warning("Interactive-tmux workspace not found: %s", handle.isolation_id)
             return
         logger.info("Destroying interactive-tmux workspace (id=%s)", handle.isolation_id)
+        # Same blocking-in-async concern as create() (~2s of docker rm /
+        # stop() calls this time): run on the dedicated provider loop so
+        # this event loop isn't held up for the duration.
         # Pop only AFTER a successful provider destroy. If destroy raises
         # (e.g. docker timeout), the handle stays in _workspaces so the
         # caller can retry instead of leaking the tmux/Docker resources.
-        await self._provider.destroy(workspace)
+        await self._call_provider(self._provider.destroy(workspace))
         self._workspaces.pop(handle.isolation_id, None)
 
     async def execute(
@@ -201,12 +314,14 @@ class InteractiveTmuxIsolationAdapter:
             )
 
         cmd_str = " ".join(command)
-        result = await self._provider.execute(
-            workspace,
-            cmd_str,
-            timeout=float(timeout_seconds) if timeout_seconds else None,
-            cwd=working_directory,
-            env=environment,
+        result = await self._call_provider(
+            self._provider.execute(
+                workspace,
+                cmd_str,
+                timeout=float(timeout_seconds) if timeout_seconds else None,
+                cwd=working_directory,
+                env=environment,
+            )
         )
 
         return ExecutionResult(
@@ -237,7 +352,7 @@ class InteractiveTmuxIsolationAdapter:
             raise FileNotFoundError(f"Interactive-tmux workspace not found: {handle.isolation_id}")
         for relative_path, content in files:
             full_path = f"{base_path.rstrip('/')}/{relative_path}" if relative_path else base_path
-            await self._provider.write_file(workspace, full_path, content)
+            await self._call_provider(self._provider.write_file(workspace, full_path, content))
 
     async def copy_from(
         self,
