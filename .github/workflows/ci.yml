@@ -485,8 +485,10 @@ jobs:
               --ignore-vuln PYSEC-2026-161 \
               --ignore-vuln PYSEC-2026-142 \
               --ignore-vuln PYSEC-2026-141 \
+              --ignore-vuln GHSA-4xgf-cpjx-pc3j \
               -r /dev/stdin
           # TODO(#345): remove --ignore-vuln once pygments releases a fix
+          # TODO(#776): remove --ignore-vuln GHSA-4xgf-cpjx-pc3j once pydantic-settings 2.14.2 is on PyPI (secrets_nested_subdir symlink escape; feature unused here)
           # TODO(#634): remove --ignore-vuln once cryptography 46.0.7 is available on PyPI
           # TODO(#678): remove --ignore-vuln GHSA-6w46-j5rx-g56g once pytest 9.0.3 is available on PyPI
           # TODO(#696): remove --ignore-vuln GHSA-mj87-hwqh-73pj once python-multipart 0.0.26 is available on PyPI
