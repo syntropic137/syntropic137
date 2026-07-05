@@ -76,6 +76,10 @@ async def test_send_message_round_trip_against_real_container() -> None:
         workspace_id="itws-integration-test-ws",
         image="agentic-workspace-interactive-tmux:latest",
         environment={},
+        # Stage only claude (the agent this test drives) - matches what the
+        # real provision path does and avoids the multi-minute cost of also
+        # staging codex/gemini credentials.
+        agents=("claude",),
     )
     handle = None
     try:
