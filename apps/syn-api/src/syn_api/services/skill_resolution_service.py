@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration._shared.skill_errors import SkillNotRegistered
+from syn_domain.contexts.orchestration import SkillNotRegistered
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

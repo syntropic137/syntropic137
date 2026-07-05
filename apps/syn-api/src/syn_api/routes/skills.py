@@ -27,7 +27,7 @@ from syn_api._wiring import (
 )
 from syn_api.services.skill_error_mapping import http_exception_for_skill_error
 from syn_api.types import RegisterSkillRequest, SkillFilePayload, SkillRegistrationResponse
-from syn_domain.contexts.orchestration._shared.skill_errors import SkillError
+from syn_domain.contexts.orchestration import SkillError
 from syn_domain.contexts.orchestration.ports.SkillStoragePort import SkillFile
 
 router = APIRouter(prefix="/skills", tags=["skills"])

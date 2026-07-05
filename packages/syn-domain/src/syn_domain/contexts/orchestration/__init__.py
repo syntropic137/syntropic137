@@ -30,7 +30,9 @@ from syn_domain.contexts.orchestration._shared.resolved_skill import (
     ResolvedSkill,
 )
 from syn_domain.contexts.orchestration._shared.skill_errors import (
+    SkillError,
     SkillInvalidName,
+    SkillNotRegistered,
 )
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
@@ -172,7 +174,9 @@ __all__ = [
     "ResolvedSkill",
     "SecurityPolicy",
     "SidecarConfig",
+    "SkillError",
     "SkillInvalidName",
+    "SkillNotRegistered",
     "SkillRef",
     "StreamResult",
     "SubagentTracker",
