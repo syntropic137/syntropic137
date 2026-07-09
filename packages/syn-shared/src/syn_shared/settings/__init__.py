@@ -68,6 +68,7 @@ from syn_shared.settings.workspace import (
 )
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_IMAGE,
+    INTERACTIVE_TMUX_WORKSPACE_IMAGE,
     WorkspaceImageProvider,
     workspace_image_ref,
 )
@@ -78,6 +79,7 @@ from syn_shared.settings.workspace_security import (
 
 __all__ = [
     "DEFAULT_WORKSPACE_IMAGE",
+    "INTERACTIVE_TMUX_WORKSPACE_IMAGE",
     "AppEnvironment",
     "CloudProvider",
     "ContainerLoggingSettings",

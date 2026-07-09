@@ -93,9 +93,17 @@ class TestWorkspaceServiceSelection:
         assert selected is interactive
 
     def test_interactive_phase_without_service_fails_loudly(self) -> None:
+        """Also asserts the typed error (issue #771 item 7): a bare RuntimeError
+        gives error-mapping layers nothing to match against."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+            WorkspaceMisconfiguredError,
+        )
+
         processor = _make_processor(interactive_workspace_service=None)
 
-        with pytest.raises(RuntimeError, match="SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED"):
+        with pytest.raises(
+            WorkspaceMisconfiguredError, match="SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED"
+        ):
             processor._workspace_service_for(self._phase("claude-interactive"))
 
 

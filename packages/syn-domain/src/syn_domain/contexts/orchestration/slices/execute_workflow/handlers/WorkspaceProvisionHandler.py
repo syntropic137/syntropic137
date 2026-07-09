@@ -23,6 +23,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    WorkspaceMisconfiguredError,
+)
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_ANTHROPIC_BASE_URL,
@@ -99,9 +102,50 @@ CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 
 
 def _is_interactive_phase(workspace: ManagedWorkspace, phase: ExecutablePhase) -> bool:
+    """Return whether this phase should dispatch via the interactive-tmux path.
+
+    Explicit signal only: ``phase.agent_config.provider ==
+    "claude-interactive"``. The YAML schema has carried an `agent.provider`
+    field since PR #765, so `workspace.isolation_handle.isolation_type` is
+    no longer consulted as an implicit fallback (issue #771 item 5).
+
+    Raises WorkspaceMisconfiguredError if the phase's declared provider
+    and the workspace's actual isolation backend disagree.
+    `WorkflowExecutionProcessor._workspace_service_for` is responsible for
+    routing `claude-interactive` phases to the interactive-tmux
+    WorkspaceService and every other phase to the default one — if that
+    routing broke, proceeding here would silently flip which path runs
+    (previously masked by the implicit OR) instead of failing loudly.
+    """
     explicit_interactive = phase.agent_config.provider == "claude-interactive"
-    implicit_interactive = workspace.isolation_handle.isolation_type == "interactive-tmux"
-    return explicit_interactive or implicit_interactive
+    workspace_is_interactive_tmux = workspace.isolation_handle.isolation_type == "interactive-tmux"
+    if explicit_interactive != workspace_is_interactive_tmux:
+        msg = (
+            f"Phase '{phase.phase_id}' agent_config.provider="
+            f"{phase.agent_config.provider!r} but its workspace was provisioned "
+            f"with isolation_type={workspace.isolation_handle.isolation_type!r}. "
+            "WorkflowExecutionProcessor._workspace_service_for must route "
+            "claude-interactive phases to the interactive-tmux WorkspaceService "
+            "and all other phases to the default one - this mismatch means that "
+            "routing picked the wrong backend for this phase."
+        )
+        raise WorkspaceMisconfiguredError(msg)
+    return explicit_interactive
+
+
+def _provisioned_agents(phase: ExecutablePhase) -> tuple[str, ...]:
+    """Interactive agent name(s) to stage for this phase's workspace.
+
+    For an interactive-tmux phase (`provider == "claude-interactive"`) return
+    just the agent the phase drives - `agent_config.agent_id` is the canonical
+    claude/codex/gemini name the driver stages auth and launches a pane for.
+    Staging only the needed agent avoids the multi-minute cost of copying the
+    other two agents' credentials. Returns () for the default docker path
+    (which ignores agent selection entirely).
+    """
+    if phase.agent_config.provider == "claude-interactive":
+        return (phase.agent_config.agent_id,)
+    return ()
 
 
 def _append_claude_plugin_dirs(
@@ -338,6 +382,7 @@ class WorkspaceProvisionHandler:
             phase_id=todo.phase_id,
             with_sidecar=True,
             inject_tokens=True,
+            agents=_provisioned_agents(phase),
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
@@ -530,14 +575,9 @@ class WorkspaceProvisionHandler:
         # tmux pane instead of running claude -p. Skip the CLI command
         # builder (it would produce a noisy claude_cmd we never run) and
         # carry the prompt out-of-band on the ProvisionResult.
-        # Interactive detection: explicit per-phase (`provider:
-        # claude-interactive`) OR implicit (the workspace itself was
-        # provisioned through the interactive-tmux backend, e.g. when the
-        # API is wired with provider_kind="interactive-tmux" service-wide).
-        # The YAML schema currently has no `agent.provider` field, so the
-        # implicit signal is what carries the e2e today. Per-phase
-        # override is the future path once the YAML schema gains an
-        # `agent` block — handler logic doesn't need to change for that.
+        # Interactive detection is explicit-only (issue #771 item 5); see
+        # `_is_interactive_phase` for the mismatch guard against the
+        # workspace's actual isolation backend.
         is_interactive = _is_interactive_phase(workspace, phase)
         claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
         interactive_prompt = prompt if is_interactive else None

@@ -9,6 +9,7 @@ Reports AgentExecutionCompletedCommand to the aggregate.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
@@ -36,6 +37,15 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+# Margin added on top of a phase's timeout_seconds when bounding the total
+# wait for the interactive driver round-trip (send_message + await_completion
+# + capture_response). await_completion already has its own internal deadline
+# equal to timeout_seconds; the margin covers the driver's own bookkeeping
+# (send_message, capture_response) plus scheduling jitter so we don't fire the
+# outer timeout before the driver's own has a fair chance to return normally.
+# See issue #771, item 1.
+_INTERACTIVE_TIMEOUT_MARGIN_SECONDS: float = 30.0
 
 
 class InteractiveCompletionResult(Protocol):
@@ -355,6 +365,31 @@ def _interactive_driver_unavailable(
     )
 
 
+def _drive_round_trip(
+    driver: InteractiveTmuxDriver,
+    agent_id: str,
+    prompt: str,
+    timeout_seconds: int,
+) -> tuple[int, str, str]:
+    """Blocking send -> await -> capture round-trip; runs in a worker thread.
+
+    Raises InteractiveTmuxTransportError (D2 fix) on raw subprocess
+    failures so the workflow's error_message is operator-readable
+    instead of a raw Python repr leaking the docker-exec arglist.
+    """
+    from subprocess import CalledProcessError
+
+    try:
+        driver.send_message(agent_id, prompt)
+        result = driver.await_completion(agent_id, timeout=float(timeout_seconds))
+        pane = driver.capture_response(agent_id)
+    except CalledProcessError as exc:
+        raise InteractiveTmuxTransportError.from_called_process(exc) from exc
+    exit_code = 0 if result.ready else 124  # 124 = standard timeout exit code
+    reason = getattr(result, "reason", "ready" if result.ready else "timeout")
+    return exit_code, pane, reason
+
+
 async def _run_interactive_driver(
     *,
     driver: InteractiveTmuxDriver,
@@ -387,30 +422,49 @@ async def _run_interactive_driver(
     assert todo.phase_id is not None
     loop = asyncio.get_running_loop()
 
-    def _drive() -> tuple[int, str, str]:
-        from subprocess import CalledProcessError
-
-        try:
-            driver.send_message(agent_id, prompt)
-            result = driver.await_completion(agent_id, timeout=float(timeout_seconds))
-            pane = driver.capture_response(agent_id)
-        except CalledProcessError as exc:
-            # D2: convert raw subprocess errors to a typed domain error
-            # so error_message is not a raw Python repr leaking the
-            # docker-exec arglist.
-            raise InteractiveTmuxTransportError.from_called_process(exc) from exc
-        exit_code = 0 if result.ready else 124  # 124 = standard timeout exit code
-        reason = getattr(result, "reason", "ready" if result.ready else "timeout")
-        return exit_code, pane, reason
-
-    completion_future = loop.run_in_executor(None, _drive)
-
-    cancel_signal_obj = await _race_completion_against_cancel(
-        completion_future=completion_future,
-        controller=controller,
-        execution_id=todo.execution_id,
-        driver=driver,
+    round_trip_started_at = time.monotonic()
+    completion_future = loop.run_in_executor(
+        None, _drive_round_trip, driver, agent_id, prompt, timeout_seconds
     )
+
+    # Bound the entire wait (cancel-race + drive) at timeout_seconds + margin
+    # (#771 item 1). A stalled transport (e.g. a wedged `docker exec`) would
+    # otherwise wedge the execution forever, since `await_completion`'s own
+    # internal deadline is advisory only - a hung subprocess can ignore it.
+    #
+    # NOTE: `run_in_executor` futures cannot be cancelled once the underlying
+    # callable is running in its worker thread - cancelling `completion_future`
+    # (or the wrapping `wait_for`) does not stop `_drive()`. That thread is
+    # abandoned to run to completion (or forever) in the background. This is
+    # an accepted limitation: the goal here is unwedging the *execution*
+    # (returning control to the processor so it can fail/retry the phase),
+    # not killing the stuck thread.
+    overall_timeout_s = float(timeout_seconds) + _INTERACTIVE_TIMEOUT_MARGIN_SECONDS
+    try:
+        cancel_signal_obj = await asyncio.wait_for(
+            _race_completion_against_cancel(
+                completion_future=completion_future,
+                controller=controller,
+                execution_id=todo.execution_id,
+                driver=driver,
+            ),
+            timeout=overall_timeout_s,
+        )
+    except TimeoutError:
+        error_msg = (
+            f"interactive driver did not return within {overall_timeout_s:g}s "
+            f"(transport hang?) (phase={todo.phase_id})"
+        )
+        logger.error(error_msg)
+        return _build_failed_result(
+            todo=todo,
+            session_id=session_id,
+            tokens=tokens,
+            subagents=subagents,
+            error_reason=(
+                f"interactive driver did not return within {overall_timeout_s:g}s (transport hang?)"
+            ),
+        )
 
     if cancel_signal_obj is not None:
         return _build_cancelled_result(
@@ -437,6 +491,8 @@ async def _run_interactive_driver(
             error_reason=str(exc),
         )
 
+    round_trip_duration_ms = int((time.monotonic() - round_trip_started_at) * 1000)
+
     if collector is not None:
         await collector.record_session_summary(
             total_cost_usd=0.0,
@@ -445,7 +501,7 @@ async def _run_interactive_driver(
             cache_creation=0,
             cache_read=0,
             num_turns=1,
-            duration_ms=0,
+            duration_ms=round_trip_duration_ms,
             agent_id=agent_id,
         )
 

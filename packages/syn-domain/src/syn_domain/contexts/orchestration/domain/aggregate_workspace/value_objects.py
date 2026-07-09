@@ -205,6 +205,13 @@ class IsolationConfig:
     # Labels for tracking
     labels: Mapping[str, str] = field(default_factory=dict)
 
+    # Interactive-agent selection: the agent name(s) to provision (e.g.
+    # ("claude",)). Only the interactive-tmux backend reads this - it stages
+    # auth and launches a tmux pane for each named agent, so a claude-only
+    # phase does not pay to stage codex/gemini. Empty means "backend default"
+    # (the docker `claude -p` backend ignores it entirely).
+    agents: tuple[str, ...] = ()
+
 
 @dataclass(frozen=True)
 class SidecarConfig:

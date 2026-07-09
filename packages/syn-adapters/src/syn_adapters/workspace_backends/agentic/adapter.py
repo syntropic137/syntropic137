@@ -23,6 +23,13 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_from_workspace,
     copy_files_to_workspace,
 )
+
+# Re-exported for backward compatibility (issue #771 item 7): the canonical
+# definition moved to `syn_adapters.workspace_backends.errors` so other
+# backends (interactive-tmux) can raise/import it without depending on this
+# Docker-specific module. Existing `from ...agentic.adapter import
+# WorkspaceProvisionError` call sites keep working unchanged.
+from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
 from syn_shared.env_constants import (
     ENV_SYN_AGENT_NETWORK,
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
@@ -41,14 +48,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-class WorkspaceProvisionError(RuntimeError):
-    """Raised when Docker-backed workspace provisioning fails.
-
-    Wraps the underlying error with execution/workspace context so the
-    `_fail_execution` path in the workflow processor can surface an
-    actionable message through to the CLI (instead of "Unknown error").
-    """
+__all__ = ["AgenticIsolationAdapter", "WorkspaceProvisionError"]
 
 
 class AgenticIsolationAdapter:

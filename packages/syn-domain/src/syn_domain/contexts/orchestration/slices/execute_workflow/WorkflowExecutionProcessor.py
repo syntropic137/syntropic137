@@ -31,6 +31,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
 from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import (
     ConversationRecorder,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    WorkspaceMisconfiguredError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
@@ -660,7 +663,7 @@ class WorkflowExecutionProcessor:
                 "is configured. Set SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED=true "
                 "so the interactive-tmux provider is wired in."
             )
-            raise RuntimeError(msg)
+            raise WorkspaceMisconfiguredError(msg)
         return self._interactive_workspace_service
 
     def _get_agent_handler(self) -> AgentHandlerProtocol:
