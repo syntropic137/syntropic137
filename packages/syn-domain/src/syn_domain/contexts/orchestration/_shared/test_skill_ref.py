@@ -53,6 +53,25 @@ class TestUrlForm:
         with pytest.raises(ValidationError, match="verbose mapping form"):
             SkillRef.model_validate("https://github.com/acme/tdd-skill@feature/foo")
 
+    def test_ambiguous_double_at_rejected(self) -> None:
+        # Splitting on the LAST '@' would silently produce source_url
+        # '.../skills@release' + version '2026' -- a corrupted pin -- if a
+        # git ref itself is named 'release@2026'. Must be rejected instead.
+        with pytest.raises(ValidationError, match="ambiguous '@'"):
+            SkillRef.model_validate("https://github.com/org/skills@release@2026")
+
+    def test_ssh_form_still_parses(self) -> None:
+        # The ssh user-info '@' (git@host) is the one legitimate '@' before
+        # the version delimiter and must continue to parse.
+        ref = SkillRef.model_validate("git@github.com:org/skills@v1")
+        assert ref.source_url == "git@github.com:org/skills"
+        assert ref.version == "v1"
+
+    def test_git_ssh_prefixed_form_still_parses(self) -> None:
+        ref = SkillRef.model_validate("git+ssh://git@github.com/org/skills@v1")
+        assert ref.source_url == "git+ssh://git@github.com/org/skills"
+        assert ref.version == "v1"
+
 
 class TestVerboseForm:
     def test_single_name(self) -> None:
@@ -75,6 +94,19 @@ class TestVerboseForm:
             }
         )
         assert ref.version == "feature/foo"
+
+    def test_at_containing_version_accepted(self) -> None:
+        # The verbose mapping form splits source and version explicitly, so
+        # a ref name literally containing '@' (e.g. 'release@2026') parses
+        # cleanly here even though the compact string form must reject it.
+        ref = SkillRef.model_validate(
+            {
+                "source": "https://github.com/org/skills",
+                "version": "release@2026",
+                "name": "code-review",
+            }
+        )
+        assert ref.version == "release@2026"
 
 
 class TestExpandSkillEntry:

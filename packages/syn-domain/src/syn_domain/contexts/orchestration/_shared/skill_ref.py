@@ -165,13 +165,51 @@ def _slash_in_version_error(raw: str) -> ValueError:
     )
 
 
+def _ambiguous_at_error(raw: str) -> ValueError:
+    # WHY reject rather than parse: splitting on the LAST '@' silently
+    # corrupts the pin when the ref name itself contains '@' (e.g. a git
+    # tag literally named 'release@2026') -- 'https://.../skills@release@2026'
+    # would parse as source_url '.../skills@release' + version '2026', a
+    # different identity than the author declared. We only tolerate the
+    # single '@' used by the ssh user-info prefix (git@host, ssh://git@host,
+    # git+ssh://git@host); any other residual '@' must be disambiguated
+    # explicitly.
+    return ValueError(
+        f"skill reference {raw!r} has an ambiguous '@' (the ref name itself "
+        "contains '@'); use the verbose mapping form with separate source "
+        "and version"
+    )
+
+
+def _check_no_ambiguous_at(raw: str, url_part: str) -> None:
+    """Reject a residual '@' in ``url_part`` beyond the ssh-user prefix.
+
+    ``url_part`` is everything before the last '@' in the raw string. It is
+    expected to start with a recognized URL prefix (the caller only invokes
+    this after confirming that). Strip that prefix, then strip one leading
+    'git@' ssh user-info segment if present, then anything left over is an
+    '@' that came from the ref name itself.
+    """
+    remainder = url_part
+    for prefix in ("git+ssh://", "ssh://", "git://", "https://", "http://", "git@"):
+        if remainder.startswith(prefix):
+            remainder = remainder[len(prefix) :]
+            break
+    if remainder.startswith("git@"):
+        remainder = remainder[len("git@") :]
+    if "@" in remainder:
+        raise _ambiguous_at_error(raw)
+
+
 def _parse_url_form(raw: str) -> _ParsedRefDict:
     """Form B parser: ``<url>@<version>``.
 
     WHY split on LAST @: git@host: and git+ssh://git@host both contain @ before
     any version delimiter. We also defend against an @ that is purely part of
     the protocol prefix (no real version) and against a "version" that is
-    actually still part of the URL (contains "/" or "://").
+    actually still part of the URL (contains "/" or "://"). Any further '@'
+    in url_part beyond the recognized ssh-user prefix means the ref name
+    itself contains '@' -- see ``_check_no_ambiguous_at``.
     """
     last_at = raw.rfind("@")
     if last_at < 0 or last_at < len("git@"):
@@ -185,6 +223,7 @@ def _parse_url_form(raw: str) -> _ParsedRefDict:
         raise _missing_version_error(raw)
     if "/" in version:
         raise _slash_in_version_error(raw)
+    _check_no_ambiguous_at(raw, url_part)
     return {
         "skill_name": _basename_from_url(url_part),
         "source_url": url_part,

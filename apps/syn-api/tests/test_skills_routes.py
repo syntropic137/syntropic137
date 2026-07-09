@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from syn_api._wiring import reset_skill_singletons
 from syn_api.routes.skills import register_skill_endpoint
@@ -193,6 +194,24 @@ async def test_post_registrations_rejects_oversized_tree(
     with pytest.raises(HTTPException) as exc_info:
         await register_skill_endpoint(body)
     assert exc_info.value.status_code == 413
+
+
+def test_skill_file_payload_rejects_oversized_rel_path() -> None:
+    # Unbounded request fields let a hostile client force the API to hold
+    # huge garbage strings before the decoded-size cap in _decode_files ever
+    # runs. Pydantic's max_length rejects this at validation time (422).
+    with pytest.raises(ValidationError, match="rel_path"):
+        SkillFilePayload(rel_path="a" * 1025, content_base64=_b64(b"x"))
+
+
+def test_register_skill_request_rejects_oversized_skill_name() -> None:
+    with pytest.raises(ValidationError, match="skill_name"):
+        RegisterSkillRequest(
+            source_url="https://github.com/example/oversized-name",
+            version="1.0.0",
+            skill_name="a" * 257,
+            files=_skill_files("oversized-name"),
+        )
 
 
 @pytest.mark.asyncio

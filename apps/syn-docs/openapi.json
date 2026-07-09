@@ -8470,18 +8470,21 @@
         "properties": {
           "source_url": {
             "type": "string",
+            "maxLength": 2048,
             "minLength": 1,
             "title": "Source Url"
           },
           "version": {
             "type": "string",
+            "maxLength": 256,
             "minLength": 1,
             "title": "Version"
           },
           "skill_name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -8495,6 +8498,7 @@
               "$ref": "#/components/schemas/SkillFilePayload"
             },
             "type": "array",
+            "maxItems": 10000,
             "minItems": 1,
             "title": "Files",
             "description": "Every file in the skill tree (base64-encoded)."
@@ -9899,11 +9903,13 @@
         "properties": {
           "rel_path": {
             "type": "string",
+            "maxLength": 1024,
             "minLength": 1,
             "title": "Rel Path"
           },
           "content_base64": {
             "type": "string",
+            "maxLength": 96000000,
             "title": "Content Base64"
           }
         },

@@ -1582,8 +1582,14 @@ class SkillFilePayload(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    rel_path: str = Field(..., min_length=1)
-    content_base64: str
+    rel_path: str = Field(..., min_length=1, max_length=1024)
+    # WHY 96_000_000: comfortably above the legitimate per-tree decoded-size
+    # cap (MAX_SKILL_TREE_BYTES = 50 MiB in routes/skills.py) once base64
+    # expansion (~4/3) is accounted for, so the decoded-size check in
+    # `_decode_files` stays the meaningful gate -- this field bound only
+    # stops a client from forcing pydantic to hold an unbounded string
+    # before that check ever runs.
+    content_base64: str = Field(..., max_length=96_000_000)
 
 
 class RegisterSkillRequest(BaseModel):
@@ -1599,16 +1605,24 @@ class RegisterSkillRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    source_url: str = Field(..., min_length=1)
-    version: str = Field(..., min_length=1)
+    source_url: str = Field(..., min_length=1, max_length=2048)
+    version: str = Field(..., min_length=1, max_length=256)
     skill_name: str | None = Field(
         default=None,
+        max_length=256,
         description=(
             "Display name override; when omitted the SKILL.md frontmatter's 'name' is used."
         ),
     )
+    # WHY max_length=10_000: matches MAX_SKILL_TREE_FILES in routes/skills.py
+    # -- the route already rejects a longer list at runtime (413), but a
+    # matching model bound rejects it at validation time (422) before the
+    # request body is even fully materialized into domain objects.
     files: list[SkillFilePayload] = Field(
-        ..., min_length=1, description="Every file in the skill tree (base64-encoded)."
+        ...,
+        min_length=1,
+        max_length=10_000,
+        description="Every file in the skill tree (base64-encoded).",
     )
 
 
