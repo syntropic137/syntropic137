@@ -73,4 +73,8 @@ def build_command_from_definition(
         # into the create command so the aggregate persists them; PR2's
         # resolution service unions them with per-phase refs at execute time.
         claude_plugins=list(definition.claude_plugins),
+        # WHY (issue #772): carry workflow-scope skills alongside
+        # claude_plugins into the create command so the aggregate persists
+        # them, mirroring the claude_plugins wiring above.
+        skills=list(definition.skills),
     )

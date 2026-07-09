@@ -11,6 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (  # noqa: TC001
     ClaudePluginRef,
 )
+from syn_domain.contexts.orchestration._shared.skill_ref import (  # noqa: TC001
+    SkillRef,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
@@ -65,3 +68,9 @@ class CreateWorkflowTemplateCommand(BaseModel):
     # apply to every phase and live here so the aggregate carries the full
     # declaration through to execute time.
     claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+
+    # Workflow-scope skill refs (issue #772). Additive alongside
+    # claude_plugins; per-phase refs are carried inside
+    # ``PhaseDefinition.skills``. A follow-up task wires this through the
+    # aggregate the same way claude_plugins is wired.
+    skills: list[SkillRef] = Field(default_factory=list)
