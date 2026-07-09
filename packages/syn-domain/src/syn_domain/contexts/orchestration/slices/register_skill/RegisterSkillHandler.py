@@ -262,6 +262,28 @@ def _compute_tree_sha(files: list[SkillFile]) -> str:
     return hasher.hexdigest()
 
 
+def _require_frontmatter_key(
+    frontmatter: dict[str, object],
+    key: str,
+    source_url: str,
+    version: str,
+) -> None:
+    """Validate that frontmatter declares a non-empty string for the given key.
+
+    Args:
+        frontmatter: Parsed YAML frontmatter dict.
+        key: Key name (e.g., 'name', 'description').
+        source_url: Source URL for error context.
+        version: Version for error context.
+
+    Raises:
+        SkillManifestInvalid: If key is missing or not a non-empty string.
+    """
+    value = frontmatter.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise SkillManifestInvalid(source_url, version, f"frontmatter must declare {key!r}")
+
+
 def _extract_skill_frontmatter(
     files: list[SkillFile],
     source_url: str,
@@ -290,12 +312,8 @@ def _extract_skill_frontmatter(
     if not isinstance(parsed, dict):
         raise SkillManifestInvalid(source_url, version, "frontmatter must be a YAML mapping")
     frontmatter = {str(k): v for k, v in parsed.items() if isinstance(k, str)}
-    name = frontmatter.get("name")
-    if not isinstance(name, str) or not name.strip():
-        raise SkillManifestInvalid(source_url, version, "frontmatter must declare 'name'")
-    description = frontmatter.get("description")
-    if not isinstance(description, str) or not description.strip():
-        raise SkillManifestInvalid(source_url, version, "frontmatter must declare 'description'")
+    _require_frontmatter_key(frontmatter, "name", source_url, version)
+    _require_frontmatter_key(frontmatter, "description", source_url, version)
     return frontmatter
 
 
