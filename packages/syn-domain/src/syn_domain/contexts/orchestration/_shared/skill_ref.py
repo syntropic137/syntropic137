@@ -150,6 +150,21 @@ def _missing_version_error(raw: str) -> ValueError:
     )
 
 
+def _slash_in_version_error(raw: str) -> ValueError:
+    # WHY reject rather than parse: a "/" in the version is inherently
+    # ambiguous in the compact '<url>@<version>' string form -- we cannot
+    # tell whether it is still part of the URL or a slash-containing version
+    # like a branch pin ('feature/foo'). The verbose mapping form ('source'/
+    # 'version' keys) has no such ambiguity because the two fields are
+    # already split, so it accepts slash-containing versions.
+    return ValueError(
+        f"skill reference {raw!r} has a '/' in the version segment, which is "
+        "ambiguous in the '<url>@<version>' string form; use the verbose "
+        "mapping form ('source'/'version' keys) to express versions "
+        "containing '/' (e.g. a branch pin like 'feature/foo')"
+    )
+
+
 def _parse_url_form(raw: str) -> _ParsedRefDict:
     """Form B parser: ``<url>@<version>``.
 
@@ -166,8 +181,10 @@ def _parse_url_form(raw: str) -> _ParsedRefDict:
     if not version:
         msg = f"skill reference {raw!r} has empty version after '@'"
         raise ValueError(msg)
-    if "://" in version or "/" in version:
+    if "://" in version:
         raise _missing_version_error(raw)
+    if "/" in version:
+        raise _slash_in_version_error(raw)
     return {
         "skill_name": _basename_from_url(url_part),
         "source_url": url_part,

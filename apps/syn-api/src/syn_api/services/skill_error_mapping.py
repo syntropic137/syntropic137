@@ -34,4 +34,7 @@ def http_exception_for_skill_error(exc: SkillError) -> HTTPException:
     version = getattr(exc, "version", None)
     if isinstance(version, str) and version:
         detail["version"] = version
+    skill_name = getattr(exc, "skill_name", None)
+    if isinstance(skill_name, str) and skill_name:
+        detail["skill_name"] = skill_name
     return HTTPException(status_code=422, detail=detail)

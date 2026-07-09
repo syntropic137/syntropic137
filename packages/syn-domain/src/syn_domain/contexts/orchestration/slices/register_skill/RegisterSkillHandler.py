@@ -293,6 +293,9 @@ def _extract_skill_frontmatter(
     name = frontmatter.get("name")
     if not isinstance(name, str) or not name.strip():
         raise SkillManifestInvalid(source_url, version, "frontmatter must declare 'name'")
+    description = frontmatter.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise SkillManifestInvalid(source_url, version, "frontmatter must declare 'description'")
     return frontmatter
 
 

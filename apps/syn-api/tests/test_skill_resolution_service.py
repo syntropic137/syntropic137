@@ -118,8 +118,31 @@ async def test_resolve_for_phase_raises_skill_not_registered_on_miss() -> None:
     service, _lock = _make_service()
     ghost = _ref("ghost", "https://github.com/example/ghost", "1.0.0")
 
-    with pytest.raises(SkillNotRegistered):
+    with pytest.raises(SkillNotRegistered) as excinfo:
         await service.resolve_for_phase([ghost], [])
+
+    # Structured attributes must be present so the API-tier error mapping can
+    # surface them without re-parsing the human-readable message.
+    assert excinfo.value.source_url == "https://github.com/example/ghost"
+    assert excinfo.value.version == "1.0.0"
+    assert excinfo.value.skill_name == "ghost"
+
+
+@pytest.mark.unit
+def test_skill_not_registered_maps_to_422_with_structured_context() -> None:
+    from syn_api.services.skill_error_mapping import http_exception_for_skill_error
+
+    exc = SkillNotRegistered("https://github.com/example/ghost", "1.0.0", "ghost")
+    http_exc = http_exception_for_skill_error(exc)
+
+    assert http_exc.status_code == 422
+    assert http_exc.detail == {
+        "error_code": "skill_not_registered",
+        "message": str(exc),
+        "source_url": "https://github.com/example/ghost",
+        "version": "1.0.0",
+        "skill_name": "ghost",
+    }
 
 
 @pytest.mark.unit

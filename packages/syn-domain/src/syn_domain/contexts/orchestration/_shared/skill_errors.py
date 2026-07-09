@@ -1,17 +1,24 @@
 # See ADR-066: typed domain errors live in syn-domain because they are part of
-# the application contract; only manifest validation and registry-lookup errors
-# remain after Phase A (#772). Source/version/auth fetch errors are CLI-tier
-# concerns now (the API does no git work) and were dropped from this module.
+# the application contract; only manifest validation, safety, and
+# registry-lookup errors remain after Phase A (#772). Source/version/auth
+# fetch errors are CLI-tier concerns now (the API does no git work) and were
+# dropped from this module.
 """Typed errors for the skill injection feature (issue #772).
 
-After the #772 Phase A redesign, only two error families remain at the API
-tier:
+After the #772 Phase A redesign, these error families remain at the API tier:
 
-- Manifest validation errors raised by ``RegisterSkillHandler`` when
-  the uploaded tree is missing or has malformed SKILL.md frontmatter.
-- ``SkillNotRegistered`` raised by ``AddGlobalSkillHandler`` and
-  ``SkillResolutionService`` when a referenced skill has not yet been
-  registered via ``POST /skills/registrations``.
+- ``SkillManifestMissing`` / ``SkillManifestInvalid`` raised by
+  ``RegisterSkillHandler`` when the uploaded tree is missing a root
+  SKILL.md, or its frontmatter fails to parse or validate.
+- ``SkillInvalidPath`` raised by ``RegisterSkillHandler`` when a file's
+  ``rel_path`` in the uploaded tree fails safety validation.
+- ``SkillInvalidName`` raised by ``skill_materializer`` when a registered
+  skill's name fails workspace-path safety validation.
+- ``SkillNotRegistered`` raised by ``SkillResolutionService`` when a
+  workflow references a skill that has not yet been registered via
+  ``POST /skills/registrations``.
+- ``SkillInstallFailed`` raised by ``WorkspaceProvisionHandler`` when the
+  in-container ``skills add`` invocation exits nonzero.
 
 The previous ``SkillSourceUnreachable`` / ``SkillVersionNotFound`` /
 ``SkillAuthRequired`` errors were CLI-emitted (git clone failures) and
@@ -103,6 +110,9 @@ class SkillNotRegistered(SkillError):
             f"skill {skill_name!r} from {source_url}@{version} is not registered; "
             "register it first (Plan 2: 'syn skill add', or POST /skills/registrations)"
         )
+        self.source_url = source_url
+        self.version = version
+        self.skill_name = skill_name
 
 
 class SkillInstallFailed(SkillError):

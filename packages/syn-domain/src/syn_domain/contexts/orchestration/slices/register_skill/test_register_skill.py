@@ -105,6 +105,22 @@ async def test_frontmatter_without_name_rejected(handler: RegisterSkillHandler) 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_frontmatter_without_description_rejected(handler: RegisterSkillHandler) -> None:
+    bad = b"---\nname: code-review\n---\nbody"
+    with pytest.raises(SkillManifestInvalid) as excinfo:
+        await handler.handle(
+            source_url="https://github.com/acme/agent-skills",
+            version="v2.0.0",
+            skill_name=None,
+            files=[SkillFile(rel_path="SKILL.md", content=bad)],
+        )
+    error_msg = str(excinfo.value)
+    assert "SKILL.md" in error_msg
+    assert "frontmatter must declare 'description'" in error_msg
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_explicit_skill_name_wins_over_frontmatter() -> None:
     handler, _storage, _repo = _make_handler()
 

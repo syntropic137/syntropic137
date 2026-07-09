@@ -45,6 +45,14 @@ class TestUrlForm:
         with pytest.raises(ValidationError, match="missing '@<version>'"):
             SkillRef.model_validate("https://github.com/acme/tdd-skill")
 
+    def test_slash_in_version_rejected_with_verbose_form_hint(self) -> None:
+        # A branch pin like 'feature/foo' cannot be expressed unambiguously
+        # in the compact '<url>@<version>' string form; the error should
+        # point at the verbose mapping form rather than claim the version is
+        # simply missing.
+        with pytest.raises(ValidationError, match="verbose mapping form"):
+            SkillRef.model_validate("https://github.com/acme/tdd-skill@feature/foo")
+
 
 class TestVerboseForm:
     def test_single_name(self) -> None:
@@ -54,6 +62,19 @@ class TestVerboseForm:
         assert ref.skill_name == "code-review"
         assert ref.source_url == "https://github.com/acme/agent-skills"
         assert ref.name_overridden is True
+
+    def test_slash_containing_version_accepted(self) -> None:
+        # The verbose mapping form has no url/version ambiguity, so branch
+        # pins like 'feature/foo' parse cleanly here even though they are
+        # rejected in the compact '<url>@<version>' string form.
+        ref = SkillRef.model_validate(
+            {
+                "source": "https://github.com/acme/agent-skills",
+                "version": "feature/foo",
+                "name": "code-review",
+            }
+        )
+        assert ref.version == "feature/foo"
 
 
 class TestExpandSkillEntry:
