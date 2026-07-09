@@ -263,7 +263,7 @@ def _compute_tree_sha(files: list[SkillFile]) -> str:
 
 
 def _require_frontmatter_key(
-    frontmatter: dict[str, object],
+    frontmatter: SkillManifest,
     key: str,
     source_url: str,
     version: str,
