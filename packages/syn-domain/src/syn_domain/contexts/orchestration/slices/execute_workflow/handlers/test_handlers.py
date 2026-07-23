@@ -267,9 +267,7 @@ class TestAgentExecutionHandler:
                 "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.EventStreamProcessor"
             ) as mock_claude_processor,
         ):
-            mock_codex_processor.return_value.process_stream = AsyncMock(
-                return_value=stream_result
-            )
+            mock_codex_processor.return_value.process_stream = AsyncMock(return_value=stream_result)
             result = await handler.handle(
                 todo=TodoItem(
                     execution_id="exec-1",

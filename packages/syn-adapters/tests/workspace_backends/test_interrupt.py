@@ -62,9 +62,7 @@ class TestManagedWorkspaceInterrupt:
         assert "exec" in call_args
         assert "my-container-id" in call_args
         assert "sh" in call_args
-        assert call_args[-1] == (
-            "PID=$(pgrep -n claude || pgrep -n codex) && kill -INT $PID"
-        )
+        assert call_args[-1] == ("PID=$(pgrep -n claude || pgrep -n codex) && kill -INT $PID")
 
     @pytest.mark.asyncio
     async def test_falls_back_to_codex_process(self) -> None:
@@ -81,9 +79,7 @@ class TestManagedWorkspaceInterrupt:
         assert result is True
         command = mock_exec.call_args.args
         assert "codex-container-id" in command
-        assert command[-1] == (
-            "PID=$(pgrep -n claude || pgrep -n codex) && kill -INT $PID"
-        )
+        assert command[-1] == ("PID=$(pgrep -n claude || pgrep -n codex) && kill -INT $PID")
 
     @pytest.mark.asyncio
     async def test_returns_false_on_subprocess_failure(self) -> None:
