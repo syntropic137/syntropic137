@@ -69,6 +69,9 @@ services:
       SYN_GITHUB_WEBHOOK_SECRET: ${SYN_GITHUB_WEBHOOK_SECRET:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Codex auth.json contents for `provider: codex` phases (bridge). Injected
+      # into the agent workspace over the setup phase; scoped to codex phases only.
+      CODEX_AUTH_JSON: ${CODEX_AUTH_JSON:-}
       # Workspace directory configuration for Docker-in-Docker
       # Container path where workspaces are accessible
       SYN_WORKSPACE_CONTAINER_DIR: /workspaces
