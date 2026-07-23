@@ -49,3 +49,6 @@ ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
 
 ENV_CLAUDE_CODE_OAUTH_TOKEN = "CLAUDE_CODE_OAUTH_TOKEN"
 """Env var for the Claude Code OAuth token."""
+
+ENV_CODEX_AUTH_JSON = "CODEX_AUTH_JSON"
+"""Env var carrying the contents of ~/.codex/auth.json for codex-runner phases."""

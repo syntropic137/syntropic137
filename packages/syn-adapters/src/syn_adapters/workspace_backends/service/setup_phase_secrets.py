@@ -283,7 +283,11 @@ class SetupPhaseSecrets:
         """
         import os
 
-        from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_CLAUDE_CODE_OAUTH_TOKEN
+        from syn_shared.env_constants import (
+            ENV_ANTHROPIC_API_KEY,
+            ENV_CLAUDE_CODE_OAUTH_TOKEN,
+            ENV_CODEX_AUTH_JSON,
+        )
 
         return cls(
             repo_tokens=repo_tokens or {},
@@ -291,7 +295,7 @@ class SetupPhaseSecrets:
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
-            codex_auth_json=codex_auth_json or os.environ.get("CODEX_AUTH_JSON"),
+            codex_auth_json=codex_auth_json or os.environ.get(ENV_CODEX_AUTH_JSON),
             git_author_name=git_author_name,
             git_author_email=git_author_email,
         )
