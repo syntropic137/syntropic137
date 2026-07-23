@@ -108,29 +108,44 @@ async def run_setup_phase(
         base_path="/workspace",
     )
 
-    # Run setup script WITH secrets
-    logger.info("Running setup phase with secrets (workspace=%s)", ws.workspace_id)
-    from syn_shared.settings import get_settings
+    try:
+        if secrets.codex_auth_json:
+            await ws.execute(
+                ["install", "-d", "-m", "700", "/home/agent/.codex"],
+                timeout_seconds=10,
+            )
+            await ws.inject_files(
+                [("auth.json", secrets.codex_auth_json.encode())],
+                base_path="/home/agent/.codex",
+            )
+            await ws.execute(
+                ["chmod", "600", "/home/agent/.codex/auth.json"],
+                timeout_seconds=10,
+            )
 
-    result = await ws.execute(
-        ["bash", "/workspace/.setup/setup.sh"],
-        environment=setup_env,
-        timeout_seconds=get_settings().setup_phase_timeout_seconds,
-    )
+        # Run setup script WITH secrets
+        logger.info("Running setup phase with secrets (workspace=%s)", ws.workspace_id)
+        from syn_shared.settings import get_settings
 
-    if result.exit_code != 0:
-        logger.error(
-            "Setup phase failed (exit=%d): %s",
-            result.exit_code,
-            result.stderr,
+        result = await ws.execute(
+            ["bash", "/workspace/.setup/setup.sh"],
+            environment=setup_env,
+            timeout_seconds=get_settings().setup_phase_timeout_seconds,
         )
+
+        if result.exit_code != 0:
+            logger.error(
+                "Setup phase failed (exit=%d): %s",
+                result.exit_code,
+                result.stderr,
+            )
+
         return result
-
-    # Clear secrets from environment
-    await clear_secrets(ws)
-
-    logger.info("Setup phase complete, secrets cleared (workspace=%s)", ws.workspace_id)
-    return result
+    finally:
+        await clear_secrets(ws)
+        logger.info(
+            "Setup phase complete, transient material cleared (workspace=%s)", ws.workspace_id
+        )
 
 
 async def clear_secrets(workspace: object) -> None:

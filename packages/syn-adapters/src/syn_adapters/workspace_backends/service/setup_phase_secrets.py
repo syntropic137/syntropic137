@@ -66,6 +66,14 @@ def _resolve_claude_credentials() -> tuple[str | None, str | None]:
     return claude_code_oauth_token, anthropic_api_key
 
 
+def _resolve_codex_credentials() -> str | None:
+    """Resolve the Codex auth file contents from settings."""
+    from syn_shared.settings import get_settings
+
+    codex_auth_json = get_settings().codex_auth_json
+    return codex_auth_json.get_secret_value() if codex_auth_json else None
+
+
 class GitHubAppNotConfiguredError(Exception):
     """Raised when GitHub App is required but not configured."""
 
@@ -180,6 +188,7 @@ class SetupPhaseSecrets:
         repositories: Full repo URLs to clone during setup phase
         claude_code_oauth_token: Claude Code OAuth token (takes priority over API key)
         anthropic_api_key: Claude API key (fallback when OAuth token not set)
+        codex_auth_json: Full contents of the Codex auth.json file
         git_author_name: Git commit author name (from GitHub App bot)
         git_author_email: Git commit author email (from GitHub App bot)
     """
@@ -188,6 +197,7 @@ class SetupPhaseSecrets:
     repositories: list[str] = field(default_factory=list)
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
+    codex_auth_json: str | None = None
     git_author_name: str | None = None
     git_author_email: str | None = None
 
@@ -231,12 +241,14 @@ class SetupPhaseSecrets:
             )
 
         claude_code_oauth_token, anthropic_api_key = _resolve_claude_credentials()
+        codex_auth_json = _resolve_codex_credentials()
 
         return cls(
             repo_tokens=repo_tokens,
             repositories=repos,
             claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
+            codex_auth_json=codex_auth_json,
             git_author_name=git_author_name,
             git_author_email=git_author_email,
         )
@@ -247,6 +259,7 @@ class SetupPhaseSecrets:
         *,
         claude_code_oauth_token: str | None = None,
         anthropic_api_key: str | None = None,
+        codex_auth_json: str | None = None,
         git_author_name: str = "Test Agent",
         git_author_email: str = "test@example.com",
         repositories: list[str] | None = None,
@@ -259,6 +272,7 @@ class SetupPhaseSecrets:
         Args:
             claude_code_oauth_token: Optional OAuth token for Claude
             anthropic_api_key: Optional API key for Claude
+            codex_auth_json: Optional full contents of Codex auth.json
             git_author_name: Git author name (default: "Test Agent")
             git_author_email: Git author email (default: "test@example.com")
             repositories: Optional list of repo URLs (no tokens fetched)
@@ -274,6 +288,7 @@ class SetupPhaseSecrets:
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
+            codex_auth_json=codex_auth_json or os.environ.get("CODEX_AUTH_JSON"),
             git_author_name=git_author_name,
             git_author_email=git_author_email,
         )
@@ -281,10 +296,8 @@ class SetupPhaseSecrets:
     def build_setup_script(self) -> str:
         """Build the complete bash setup script for this execution.
 
-        When no repositories are configured, returns DEFAULT_SETUP_SCRIPT unchanged
-        (backward-compatible with pre-ADR-058 executions).
-
-        When repositories are configured:
+        Codex authentication setup is included independently of repositories.
+        When repositories are configured, the script also:
         - Writes per-repo credential entries to ~/.git-credentials (not one blanket
           github.com entry) so git picks the correct token for each clone
         - Appends git clone commands with idempotency guards (safe to re-run)
@@ -293,12 +306,32 @@ class SetupPhaseSecrets:
         Returns:
             Complete bash script string to run during the setup phase.
         """
-        if not self.repositories:
-            return DEFAULT_SETUP_SCRIPT
-
         lines: list[str] = [DEFAULT_SETUP_SCRIPT.rstrip()]
+        self._append_codex_auth(lines)
 
-        # Per-repo credentials (not one blanket github.com entry)
+        if self.repositories:
+            self._append_git_credentials(lines)
+            self._append_repo_clones(lines)
+
+        return "\n".join(lines) + "\n"
+
+    def _append_codex_auth(self, lines: list[str]) -> None:
+        """Append permission setup for an auth file injected separately."""
+        if not self.codex_auth_json:
+            return
+
+        lines.extend(
+            [
+                "",
+                "# Configure Codex auth injected as a file during setup",
+                "mkdir -p -m 700 ~/.codex",
+                "chmod 700 ~/.codex",
+                "chmod 600 ~/.codex/auth.json",
+            ]
+        )
+
+    def _append_git_credentials(self, lines: list[str]) -> None:
+        """Append per-repository GitHub credential configuration."""
         if self.repo_tokens:
             lines.append("")
             lines.append("# Configure per-repo GitHub credentials (ADR-058)")
@@ -324,7 +357,8 @@ class SetupPhaseSecrets:
             lines.append("GHEOF")
             lines.append("chmod 600 ~/.config/gh/hosts.yml")
 
-        # Clone repositories with idempotency guard
+    def _append_repo_clones(self, lines: list[str]) -> None:
+        """Append repository clone commands with idempotency guards."""
         lines.append("")
         lines.append("# Clone repositories (ADR-058)")
         lines.append("mkdir -p /workspace/repos")
@@ -333,8 +367,6 @@ class SetupPhaseSecrets:
             lines.append(
                 f'[ -d "/workspace/repos/{name}" ] || git clone "{url}" "/workspace/repos/{name}"'
             )
-
-        return "\n".join(lines) + "\n"
 
 
 # Minimal setup script for credentials that require secure injection.

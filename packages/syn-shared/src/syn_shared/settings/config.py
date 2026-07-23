@@ -253,6 +253,14 @@ class Settings(BaseSettings):
         ),
     )
 
+    codex_auth_json: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Full contents of Codex ~/.codex/auth.json for ChatGPT subscription auth. "
+            "Injected file-only during setup and never passed through argv or logs."
+        ),
+    )
+
     default_agent_timeout_seconds: int = Field(
         default=300,
         ge=10,

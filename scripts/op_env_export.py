@@ -41,6 +41,7 @@ from infra_config import (
 
 _OP_ITEM_TITLE = "syntropic137-config"
 _OP_SAT_PREFIX = "OP_SERVICE_ACCOUNT_TOKEN_"
+_CODEX_AUTH_JSON = "CODEX_AUTH_JSON"
 
 # Canonical env-to-vault mapping (mirrored from op_resolver.py).
 _ENV_TO_VAULT: dict[str, str] = {
@@ -62,6 +63,7 @@ _KEYS = {
     ENV_SYN_PUBLIC_HOSTNAME,
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
+    _CODEX_AUTH_JSON,
     ENV_SYN_API_PASSWORD,
 }
 
