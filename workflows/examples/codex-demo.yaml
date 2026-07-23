@@ -1,0 +1,50 @@
+# Codex Demo Workflow
+# One codex phase that writes a small artifact and reports a one-line
+# summary, producing a real dashboard observability timeline (tokens /
+# cost / tool-ops streamed live). Proves the codex provider dispatches
+# on the same docker workspace path as claude - no `claude-interactive`
+# / tmux involvement.
+#
+# NOTE: the live end-to-end codex execution (AgentExecutionHandler
+# runner branch) is a later task - this file is schema-valid and loads
+# via WorkflowDefinition.from_file(), but is not yet wired to a live
+# run in this worktree.
+
+id: codex-demo-workflow-v1
+name: Codex Bridge Demo
+description: |
+  A minimal demonstration workflow with a single codex phase. Codex
+  writes a small file under the workspace and prints a one-line
+  summary, giving the dashboard timeline something real to show
+  (tool-ops, tokens, an artifact).
+
+type: research
+classification: simple
+
+# No repository needed for this demo
+repository: null
+requires_repos: false
+project_name: null
+
+phases:
+  - id: codex-implement
+    name: Codex implements a small feature
+    order: 1
+    execution_type: sequential
+    description: |
+      Codex writes a tiny palindrome-check module plus a couple of
+      tests, runs them, and reports the result in one line.
+    input_artifacts: []
+    output_artifacts:
+      - text
+    max_tokens: 4096
+    timeout_seconds: 600
+    agent:
+      provider: codex
+      model: gpt-5.6
+    prompt_template: |
+      Create palindrome.py with is_palindrome(s: str) -> bool and a
+      pytest file with three test cases. Run the tests. Then write a
+      one-line summary of the result to
+      /workspace/artifacts/output/result.txt and print that same
+      one-line summary to stdout.
