@@ -224,8 +224,29 @@ def _build_claude_command(
     return cmd
 
 
+# Claude CLI model aliases (the AgentConfiguration.model default is "haiku").
+# Codex rejects these ("model not supported when using Codex with a ChatGPT
+# account"), so we must NOT forward a Claude model to `codex exec` - codex uses
+# its own account default instead. TODO(#780): resolve/validate a real codex
+# model for accurate cost labelling on codex phases.
+_CLAUDE_MODEL_ALIASES = frozenset({"haiku", "sonnet", "opus"})
+
+
+def _is_codex_model(model: str | None) -> bool:
+    """True only for a model id worth forwarding to `codex exec --model`."""
+    if model is None:
+        return False
+    lowered = model.lower()
+    return lowered not in _CLAUDE_MODEL_ALIASES and not lowered.startswith("claude")
+
+
 def _build_codex_command(prompt: str, model: str | None) -> list[str]:
-    """Build the Codex CLI command for agent execution."""
+    """Build the Codex CLI command for agent execution.
+
+    A codex phase inherits the domain default model ("haiku", a Claude alias)
+    unless the YAML sets one. We only forward `--model` when it is a genuine
+    codex/OpenAI model id; otherwise codex selects its ChatGPT-account default.
+    """
     cmd = [
         "codex",
         "exec",
@@ -234,7 +255,7 @@ def _build_codex_command(prompt: str, model: str | None) -> list[str]:
         "danger-full-access",
         "--skip-git-repo-check",
     ]
-    if model is not None:
+    if _is_codex_model(model):
         cmd.extend(["--model", model])
     cmd.append(prompt)
     return cmd
