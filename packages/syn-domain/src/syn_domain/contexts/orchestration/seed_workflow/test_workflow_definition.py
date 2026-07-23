@@ -595,3 +595,76 @@ async def test_codex_provider_reaches_executable_phase_without_agent_id_coercion
 
     assert executable[0].agent_config.provider == "codex"
     assert executable[0].agent_config.agent_id is None
+
+
+# =============================================================================
+# Mixed-workflow back-compat (codex bridge demo, Task 9)
+# =============================================================================
+
+MIXED_PROVIDER_WORKFLOW_YAML = """
+id: mixed-provider-wf
+name: Mixed Provider Workflow
+requires_repos: false
+
+phases:
+  - id: claude-phase
+    name: Claude Phase
+    order: 1
+    agent:
+      provider: claude
+    prompt_template: Reply with CLAUDE_OK.
+
+  - id: claude-interactive-phase
+    name: Claude Interactive Phase
+    order: 2
+    agent:
+      provider: claude-interactive
+    prompt_template: Reply with CLAUDE_INTERACTIVE_OK.
+
+  - id: codex-phase
+    name: Codex Phase
+    order: 3
+    agent:
+      provider: codex
+    prompt_template: Reply with CODEX_OK.
+"""
+
+
+def test_mixed_workflow_with_claude_claude_interactive_and_codex_parses() -> None:
+    """A workflow mixing all three providers parses without error.
+
+    Proves the back-compat guarantee: adding the codex provider does not
+    disturb parsing of pre-existing claude / claude-interactive phases
+    when all three appear together in one workflow.
+    """
+    definition = WorkflowDefinition.from_yaml(MIXED_PROVIDER_WORKFLOW_YAML)
+
+    domain_phases = definition.get_domain_phases()
+    assert [p.provider for p in domain_phases] == ["claude", "claude-interactive", "codex"]
+
+    claude_phase, interactive_phase, codex_phase = domain_phases
+    assert claude_phase.agent_id is None
+    assert interactive_phase.agent_id is None
+    assert codex_phase.agent_id is None
+
+
+def test_codex_demo_example_yaml_loads_and_validates() -> None:
+    """workflows/examples/codex-demo.yaml is schema-valid and loads via from_file()."""
+    repo_root = Path(__file__).resolve().parents[7]
+    demo_path = repo_root / "workflows" / "examples" / "codex-demo.yaml"
+
+    definition = WorkflowDefinition.from_file(demo_path)
+
+    assert definition.id == "codex-demo-workflow-v1"
+    assert definition.requires_repos is False
+    assert len(definition.phases) == 1
+
+    phase = definition.phases[0]
+    assert phase.agent is not None
+    assert phase.agent.provider == "codex"
+    assert phase.agent.agent_id is None
+    assert phase.agent.model == "gpt-5.6"
+
+    domain_phase = definition.get_domain_phases()[0]
+    assert domain_phase.provider == "codex"
+    assert domain_phase.agent_id is None
