@@ -191,7 +191,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         observability_writer=event_store,
         controller=get_controller(),
         prompt_builder=_build_workspace_prompt,
-        command_builder=_build_claude_command,
+        command_builder=_build_agent_command,
         todo_projection=ExecutionTodoProjection(store=get_projection_store()),
         interactive_workspace_service=interactive_workspace_service,
         claude_plugin_materializer=claude_plugin_materializer,
@@ -221,6 +221,32 @@ def _build_claude_command(
             cmd.extend(["--allowedTools", tool])
 
     return cmd
+
+
+def _build_codex_command(prompt: str, model: str | None) -> list[str]:
+    """Build the Codex CLI command for agent execution."""
+    cmd = [
+        "codex",
+        "exec",
+        "--json",
+        "--sandbox",
+        "danger-full-access",
+        "--skip-git-repo-check",
+    ]
+    if model is not None:
+        cmd.extend(["--model", model])
+    cmd.append(prompt)
+    return cmd
+
+
+def _build_agent_command(
+    phase: ExecutablePhase,
+    prompt: str,
+) -> list[str]:
+    """Build the command selected by the phase provider."""
+    if phase.agent_config.provider == "codex":
+        return _build_codex_command(prompt, phase.agent_config.model)
+    return _build_claude_command(phase, prompt)
 
 
 def _owner_repo_from_url(url: str | None) -> str:

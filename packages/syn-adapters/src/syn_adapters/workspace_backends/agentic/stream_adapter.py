@@ -121,6 +121,7 @@ class AgenticEventStreamAdapter:
         start_time = time.monotonic()
         proc = await asyncio.create_subprocess_exec(
             *exec_cmd,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             limit=10 * 1024 * 1024,
