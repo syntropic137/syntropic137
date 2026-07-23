@@ -62,6 +62,28 @@ class TestManagedWorkspaceInterrupt:
         assert "exec" in call_args
         assert "my-container-id" in call_args
         assert "sh" in call_args
+        assert call_args[-1] == (
+            "PID=$(pgrep -n claude || pgrep -n codex) && kill -INT $PID"
+        )
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_codex_process(self) -> None:
+        """interrupt() targets codex when no claude process is active."""
+        workspace = _make_managed_workspace("codex-container-id")
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            result = await workspace.interrupt()
+
+        assert result is True
+        command = mock_exec.call_args.args
+        assert "codex-container-id" in command
+        assert command[-1] == (
+            "PID=$(pgrep -n claude || pgrep -n codex) && kill -INT $PID"
+        )
 
     @pytest.mark.asyncio
     async def test_returns_false_on_subprocess_failure(self) -> None:
