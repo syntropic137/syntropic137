@@ -41,7 +41,9 @@ phases:
     timeout_seconds: 600
     agent:
       provider: codex
-      model: gpt-5.6
+      # No model override: codex uses its ChatGPT-account default. A claude-style
+      # id (e.g. "gpt-5.6") is rejected by codex ("model not supported when using
+      # Codex with a ChatGPT account"); omit it unless you have a valid codex model id.
     prompt_template: |
       Create palindrome.py with is_palindrome(s: str) -> bool and a
       pytest file with three test cases. Run the tests. Then write a
