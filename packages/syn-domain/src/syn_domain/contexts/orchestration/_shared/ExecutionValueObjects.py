@@ -36,21 +36,47 @@ class AgentConfiguration:
     Immutable to ensure configuration integrity.
 
     NOTE: 'mock' provider is ONLY valid in test environments (APP_ENVIRONMENT=test).
-    Production/development MUST use 'claude' or 'openai' with valid API keys.
+    Production/development MUST use 'claude', 'claude-interactive', or 'codex'
+    (or 'openai') with valid API keys/auth.
 
     Model Aliases (CLI-compatible, recommended):
         - "sonnet" -> latest Claude Sonnet
         - "opus" -> latest Claude Opus
         - "haiku" -> latest Claude Haiku
+
+    'codex' selects the programmatic codex harness on the same docker path
+    as 'claude' (not the interactive-tmux path). ``agent_id`` is meaningless
+    on that path, so it MUST be ``None`` or ``"codex"`` when
+    ``provider == "codex"`` - see ``__post_init__``.
     """
 
-    provider: str = "claude"  # claude, openai (mock only in tests)
+    provider: str = "claude"  # claude, claude-interactive, codex, openai (mock only in tests)
     # NOTE: Temporarily using Haiku to reduce costs during testing
     model: str = "haiku"  # CLI alias - auto-resolves to latest version
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout_seconds: int = 300
     allowed_tools: tuple[str, ...] = ()  # Tools allowed during execution
+    # Multi-agent interactive-tmux: which tmux pane the phase targets.
+    # Valid values: "claude", "codex", "gemini". None means "not selected" -
+    # distinguishable from an explicit "claude" pane choice. Ignored by the
+    # default claude -p / codex docker path. See docs/plans/multi-agent-workspaces.md.
+    agent_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject nonsensical provider/agent_id combinations.
+
+        Mirrors ``aggregate_execution.value_objects.AgentConfiguration`` -
+        keep both in sync.
+        """
+        if self.provider == "codex" and self.agent_id not in (None, "codex"):
+            msg = (
+                f"AgentConfiguration.provider='codex' selects the programmatic "
+                f"codex harness; agent_id must be None or 'codex', got "
+                f"{self.agent_id!r} (agent_id does not select a tmux pane on "
+                "the docker path)."
+            )
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True)

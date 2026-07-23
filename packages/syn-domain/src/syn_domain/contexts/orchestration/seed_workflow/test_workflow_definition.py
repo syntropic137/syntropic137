@@ -472,3 +472,126 @@ phases:
 """
     with pytest.raises(ValueError, match="agent_id"):
         WorkflowDefinition.from_yaml(bad_agent_id)
+
+
+CODEX_WORKFLOW_YAML = """
+id: codex-wf
+name: Codex Workflow
+requires_repos: false
+
+phases:
+  - id: codex-phase
+    name: Codex Phase
+    order: 1
+    agent:
+      provider: codex
+    prompt_template: Reply with OK.
+"""
+
+
+def test_agent_block_parses_codex_provider() -> None:
+    """agent.provider: codex parses and threads through to the domain phase."""
+    definition = WorkflowDefinition.from_yaml(CODEX_WORKFLOW_YAML)
+
+    phase = definition.phases[0]
+    assert phase.agent is not None
+    assert phase.agent.provider == "codex"
+    assert phase.agent.agent_id is None
+
+    domain_phase = definition.get_domain_phases()[0]
+    assert domain_phase.provider == "codex"
+    assert domain_phase.agent_id is None
+
+
+def test_agent_block_codex_with_explicit_codex_agent_id_parses() -> None:
+    """agent_id='codex' is the one explicit value allowed alongside provider=codex."""
+    yaml_content = """
+id: codex-explicit-wf
+name: Codex Explicit Workflow
+requires_repos: false
+
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    agent:
+      provider: codex
+      agent_id: codex
+    prompt_template: Reply with OK.
+"""
+    definition = WorkflowDefinition.from_yaml(yaml_content)
+    assert definition.phases[0].agent is not None
+    assert definition.phases[0].agent.agent_id == "codex"
+
+
+def test_agent_block_rejects_codex_provider_with_contradicting_agent_id() -> None:
+    """provider=codex + agent_id=gemini is a contradiction rejected at parse time."""
+    yaml_content = """
+id: codex-contradiction-wf
+name: Codex Contradiction Workflow
+requires_repos: false
+
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    agent:
+      provider: codex
+      agent_id: gemini
+    prompt_template: Reply with OK.
+"""
+    with pytest.raises(ValueError, match="codex"):
+        WorkflowDefinition.from_yaml(yaml_content)
+
+
+def test_agent_block_claude_interactive_with_codex_agent_id_still_parses() -> None:
+    """provider=claude-interactive + agent_id=codex is unrelated and still valid."""
+    yaml_content = """
+id: interactive-codex-wf
+name: Interactive Codex Workflow
+requires_repos: false
+
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    agent:
+      provider: claude-interactive
+      agent_id: codex
+    prompt_template: Reply with OK.
+"""
+    definition = WorkflowDefinition.from_yaml(yaml_content)
+    assert definition.phases[0].agent is not None
+    assert definition.phases[0].agent.provider == "claude-interactive"
+    assert definition.phases[0].agent.agent_id == "codex"
+
+
+@pytest.mark.anyio
+async def test_codex_provider_reaches_executable_phase_without_agent_id_coercion() -> None:
+    """A codex phase must not silently read back agent_id='claude'.
+
+    This is the must-fix regression: `_build_agent_config_from_phase` used to
+    fill agent_id from the domain default ("claude") whenever the YAML
+    omitted it, so `provider="codex"` silently paired with
+    `agent_id="claude"`. AgentConfiguration.agent_id now defaults to None,
+    so a codex phase with no agent_id in the YAML must round-trip to
+    `agent_id is None`, never `"claude"`.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
+    )
+
+    definition = WorkflowDefinition.from_yaml(CODEX_WORKFLOW_YAML)
+
+    class _StubTemplate:
+        phases = definition.get_domain_phases()
+        claude_plugins = ()
+
+    handler = ExecuteWorkflowHandler(
+        processor=MagicMock(),
+        workflow_repository=MagicMock(),
+    )
+    executable = await handler._get_executable_phases(_StubTemplate())  # type: ignore[arg-type]
+
+    assert executable[0].agent_config.provider == "codex"
+    assert executable[0].agent_config.agent_id is None

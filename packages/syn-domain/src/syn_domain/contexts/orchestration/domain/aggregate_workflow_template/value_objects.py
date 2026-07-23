@@ -105,18 +105,24 @@ class PhaseDefinition(BaseModel):
     """Per-phase model override (e.g., 'sonnet', 'opus')."""
 
     provider: str | None = None
-    """Per-phase agent provider override (e.g., 'claude', 'claude-interactive').
+    """Per-phase agent provider override (e.g., 'claude', 'claude-interactive',
+    'codex').
 
     None means the execution default ('claude', the claude -p Docker path).
     'claude-interactive' routes the phase through the interactive-tmux
-    workspace provider. Sourced from the workflow YAML ``agent.provider``
-    field. See docs/plans/multi-agent-workspaces.md.
+    workspace provider. 'codex' routes the phase through the programmatic
+    codex harness on the same Docker path as 'claude' - it does not use
+    ``agent_id`` (that only selects a tmux pane on the interactive path).
+    Sourced from the workflow YAML ``agent.provider`` field. See
+    docs/plans/multi-agent-workspaces.md.
     """
 
     agent_id: str | None = None
     """Which tmux pane the phase targets in a multi-agent interactive-tmux
-    workspace. Valid values: "claude", "codex", "gemini". Defaults to
-    "claude" when omitted. Ignored by the default claude -p path."""
+    workspace. Valid values: "claude", "codex", "gemini". None means
+    "not selected" - the interactive-tmux provisioning boundary coerces
+    this to "claude" only when it needs to name a pane. Ignored by the
+    default claude -p / codex Docker path."""
 
     # Workflow-author-declared plugin refs at phase scope (issue #726). PR1 carries
     # them through the YAML to the domain; PR2's resolution service rewrites them
