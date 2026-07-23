@@ -117,6 +117,18 @@ def _detect_exit_code(
     return 0
 
 
+def _resolve_final_totals(
+    stream_result: StreamResult, tokens: TokenAccumulator
+) -> tuple[int, int, int, int]:
+    """Prefer authoritative result-event totals over accumulated per-turn counts."""
+    return (
+        stream_result.result_input_tokens or tokens.input_tokens,
+        stream_result.result_output_tokens or tokens.output_tokens,
+        stream_result.result_cache_creation or tokens.cache_creation_tokens,
+        stream_result.result_cache_read or tokens.cache_read_tokens,
+    )
+
+
 class AgentExecutionResult:
     """Result of agent execution."""
 
@@ -196,9 +208,37 @@ class AgentExecutionHandler:
                 agent_id=agent_id,
             )
 
+        return await self._run_headless(
+            runner=runner,
+            todo=todo,
+            workspace=workspace,
+            agent_env=agent_env,
+            claude_cmd=claude_cmd,
+            session_id=session_id,
+            agent_model=agent_model,
+            timeout_seconds=timeout_seconds,
+            collector=collector,
+            tokens=tokens,
+            subagents=subagents,
+        )
+
+    def _select_stream_processor(
+        self,
+        *,
+        runner: Literal["claude", "codex"],
+        tokens: TokenAccumulator,
+        subagents: SubagentTracker,
+        todo: TodoItem,
+        workspace: ManagedWorkspace,
+        session_id: str,
+        agent_model: str,
+        collector: ObservabilityCollector | None,
+    ) -> EventStreamProcessor | CodexStreamProcessor:
+        """Pick the codex or claude stream processor for a headless phase."""
+        assert todo.phase_id is not None
         if runner == "codex":
             assert collector is not None
-            processor = CodexStreamProcessor(
+            return CodexStreamProcessor(
                 tokens=tokens,
                 collector=collector,
                 controller=self._controller,
@@ -207,19 +247,46 @@ class AgentExecutionHandler:
                 session_id=session_id,
                 agent_model=agent_model,
             )
-        else:
-            processor = EventStreamProcessor(
-                tokens=tokens,
-                subagents=subagents,
-                observability=None,  # Not used when collector is provided
-                controller=self._controller,
-                execution_id=todo.execution_id,
-                phase_id=todo.phase_id,
-                session_id=session_id,
-                workspace_id=getattr(workspace, "id", None),
-                agent_model=agent_model,
-                collector=collector,
-            )
+        return EventStreamProcessor(
+            tokens=tokens,
+            subagents=subagents,
+            observability=None,  # Not used when collector is provided
+            controller=self._controller,
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            session_id=session_id,
+            workspace_id=getattr(workspace, "id", None),
+            agent_model=agent_model,
+            collector=collector,
+        )
+
+    async def _run_headless(
+        self,
+        *,
+        runner: Literal["claude", "codex"],
+        todo: TodoItem,
+        workspace: ManagedWorkspace,
+        agent_env: dict[str, str],
+        claude_cmd: list[str],
+        session_id: str,
+        agent_model: str,
+        timeout_seconds: int,
+        collector: ObservabilityCollector | None,
+        tokens: TokenAccumulator,
+        subagents: SubagentTracker,
+    ) -> AgentExecutionResult:
+        """Stream a headless (claude -p / codex exec) phase and build its result."""
+        assert todo.phase_id is not None
+        processor = self._select_stream_processor(
+            runner=runner,
+            tokens=tokens,
+            subagents=subagents,
+            todo=todo,
+            workspace=workspace,
+            session_id=session_id,
+            agent_model=agent_model,
+            collector=collector,
+        )
 
         stream_result = await processor.process_stream(
             workspace.stream(
@@ -232,9 +299,14 @@ class AgentExecutionHandler:
 
         exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
         if runner == "codex" and stream_result.error_reason is not None and exit_code == 0:
+            # The codex parser reserves error_reason for a BROKEN stream
+            # (malformed JSON / missing terminal turn.completed); force a
+            # non-zero phase exit even when the process exit was 0.
             exit_code = 1
 
-        # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2)
+        # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2).
+        # The codex path already emits its summary inside CodexStreamProcessor
+        # (single-layer), so the handler skips it for runner == "codex".
         if collector is not None and runner != "codex":
             await collector.record_session_summary(
                 total_cost_usd=stream_result.total_cost_usd,
@@ -246,11 +318,9 @@ class AgentExecutionHandler:
                 duration_ms=stream_result.duration_ms,
             )
 
-        # Prefer result event totals (authoritative) over accumulated per-turn counts
-        final_input = stream_result.result_input_tokens or tokens.input_tokens
-        final_output = stream_result.result_output_tokens or tokens.output_tokens
-        final_cache_creation = stream_result.result_cache_creation or tokens.cache_creation_tokens
-        final_cache_read = stream_result.result_cache_read or tokens.cache_read_tokens
+        final_input, final_output, final_cache_creation, final_cache_read = _resolve_final_totals(
+            stream_result, tokens
+        )
 
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,

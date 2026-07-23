@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     CodexStreamProcessor,
@@ -33,7 +33,7 @@ _FIXTURES_DIR = Path(__file__).resolve().parents[6] / "tests" / "fixtures" / "co
 
 @dataclass
 class _RecordingCollector:
-    calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+    calls: list[tuple[str, Mapping[str, object]]] = field(default_factory=list)
 
     async def record_tool_started(self, **kwargs: object) -> None:
         self.calls.append(("tool_started", kwargs))

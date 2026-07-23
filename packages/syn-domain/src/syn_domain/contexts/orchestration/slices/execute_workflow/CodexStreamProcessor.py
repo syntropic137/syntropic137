@@ -45,7 +45,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypedDict
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
@@ -84,6 +84,46 @@ def _as_int(value: object) -> int:
     if isinstance(value, int | float):
         return int(value)
     return 0
+
+
+class _CodexChange(TypedDict, total=False):
+    """A single file change inside a codex ``file_change`` item."""
+
+    path: str
+    kind: str
+
+
+class _CodexItem(TypedDict, total=False):
+    """A codex stream ``item`` (command_execution / file_change / agent_message).
+
+    ``total=False``: codex only populates the fields relevant to the item
+    type, so every field is optional and read via ``.get(...)``.
+    """
+
+    id: str
+    type: str
+    command: str
+    aggregated_output: str
+    exit_code: int
+    status: str
+    changes: list[_CodexChange]
+
+
+class _CodexUsage(TypedDict, total=False):
+    """The ``usage`` block on a codex ``turn.completed`` event."""
+
+    input_tokens: int
+    cached_input_tokens: int
+    output_tokens: int
+    reasoning_output_tokens: int
+
+
+class _CodexEvent(TypedDict, total=False):
+    """A single codex ``--json`` stream event (typed JSON-boundary shape)."""
+
+    type: str
+    item: _CodexItem
+    usage: _CodexUsage
 
 
 class CodexObservabilityRecorder(Protocol):
@@ -147,7 +187,7 @@ class _TurnUsage:
     billable_output: int
 
     @classmethod
-    def from_usage(cls, usage: dict[str, object]) -> _TurnUsage:
+    def from_usage(cls, usage: _CodexUsage) -> _TurnUsage:
         input_tokens = _as_int(usage.get("input_tokens"))
         cached_input_tokens = _as_int(usage.get("cached_input_tokens"))
         output_tokens = _as_int(usage.get("output_tokens"))
@@ -293,28 +333,37 @@ class CodexStreamProcessor:
             )
         )
 
-    async def _process_line(self, line: str) -> None:
-        """Parse and dispatch a single codex JSONL line.
+    def _parse_event(self, line: str) -> _CodexEvent | None:
+        """Parse one stdout line into a codex event, or ``None`` to skip it.
 
-        Lines that don't even look like JSON (don't start with ``{``) are
-        inert CLI noise (warnings, banners, interleaved log lines - see
-        module docstring) and are silently skipped: they are neither
-        recorded as tool ops nor treated as parse failures.
+        Lines that don't even look like JSON (don't start with ``{``) are inert
+        CLI noise (warnings, banners, interleaved log lines - see module
+        docstring) and are silently skipped: neither recorded nor treated as
+        failures. A ``{``-prefixed line that fails to parse is a real broken
+        event - it sets ``error_reason`` (the handler forces a non-zero phase
+        exit) and is skipped.
         """
         stripped = line.strip()
         if not stripped or not stripped.startswith("{"):
-            return
+            return None
 
         try:
-            event = json.loads(stripped)
+            event: _CodexEvent = json.loads(stripped)
         except json.JSONDecodeError:
             logger.debug("Malformed codex JSON line: %s", stripped[:100])
             self._error_reason = self._error_reason or (
                 f"malformed codex JSON line: {stripped[:100]}"
             )
-            return
+            return None
 
         if not isinstance(event, dict):
+            return None
+        return event
+
+    async def _process_line(self, line: str) -> None:
+        """Parse and dispatch a single codex JSONL line."""
+        event = self._parse_event(line)
+        if event is None:
             return
 
         event_type = event.get("type", "")
@@ -326,7 +375,7 @@ class CodexStreamProcessor:
             await self._handle_turn_completed(event)
         # "thread.started" / "turn.started": no observability call needed.
 
-    async def _handle_item_started(self, event: dict[str, object]) -> None:
+    async def _handle_item_started(self, event: _CodexEvent) -> None:
         """Handle ``item.started``: only ``command_execution`` starts a tool op.
 
         ``file_change`` items only carry useful data on ``item.completed``
@@ -345,7 +394,7 @@ class CodexStreamProcessor:
             input_preview=command[:_MAX_PREVIEW_LEN],
         )
 
-    async def _handle_item_completed(self, event: dict[str, object]) -> None:
+    async def _handle_item_completed(self, event: _CodexEvent) -> None:
         """Handle ``item.completed`` for command_execution and file_change items."""
         item = event.get("item")
         if not isinstance(item, dict):
@@ -358,7 +407,7 @@ class CodexStreamProcessor:
             await self._handle_file_change_completed(item)
         # "agent_message" items are conversational text, not a tool op.
 
-    async def _handle_command_execution_completed(self, item: dict[str, object]) -> None:
+    async def _handle_command_execution_completed(self, item: _CodexItem) -> None:
         tool_use_id = str(item.get("id", "unknown"))
         exit_code = item.get("exit_code")
         success = exit_code == 0
@@ -382,7 +431,7 @@ class CodexStreamProcessor:
             output_preview=output[:_MAX_PREVIEW_LEN] if output else None,
         )
 
-    async def _handle_file_change_completed(self, item: dict[str, object]) -> None:
+    async def _handle_file_change_completed(self, item: _CodexItem) -> None:
         tool_use_id = str(item.get("id", "unknown"))
         changes = item.get("changes")
         paths = (
@@ -405,7 +454,7 @@ class CodexStreamProcessor:
             output_preview=preview or None,
         )
 
-    async def _handle_turn_completed(self, event: dict[str, object]) -> None:
+    async def _handle_turn_completed(self, event: _CodexEvent) -> None:
         usage = event.get("usage")
         if not isinstance(usage, dict):
             return
