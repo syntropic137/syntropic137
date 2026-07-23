@@ -19,11 +19,11 @@ from decimal import Decimal
 
 _MILLION = Decimal("1_000_000")
 
-# TODO(confirm-openai-pricing): GPT-5.6 codex rate
+# TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
 _GPT_5_6_CODEX_INPUT_PER_MILLION = Decimal("15.0")
-# TODO(confirm-openai-pricing): GPT-5.6 codex rate
+# TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
 _GPT_5_6_CODEX_OUTPUT_PER_MILLION = Decimal("60.0")
-# TODO(confirm-openai-pricing): GPT-5.6 codex rate
+# TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
 _GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION = Decimal("1.5")
 
 

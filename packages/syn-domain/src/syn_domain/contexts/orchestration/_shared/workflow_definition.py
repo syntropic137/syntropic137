@@ -35,6 +35,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseExecutionType,
     WorkflowClassification,
 )
+from syn_shared.agents import AgentProvider
 
 _SHARED_PREFIX = "shared://"
 
@@ -202,7 +203,10 @@ class AgentYamlDefinition(BaseModel):
         the only sensible values here - anything else (e.g. ``"gemini"``)
         is a contradiction we reject at parse time.
         """
-        if self.provider == "codex" and self.agent_id not in (None, "codex"):
+        if self.provider == AgentProvider.CODEX and self.agent_id not in (
+            None,
+            AgentProvider.CODEX,
+        ):
             msg = (
                 "agent.provider='codex' selects the programmatic codex harness; "
                 "agent_id must be omitted or 'codex' (it does not select a tmux "

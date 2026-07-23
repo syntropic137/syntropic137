@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -28,6 +28,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker i
 from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
 )
+from syn_shared.agents import AgentProvider, AgentRunner
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -170,8 +171,8 @@ class AgentExecutionHandler:
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,
-        agent_id: str = "claude",
-        runner: Literal["claude", "codex"] = "claude",
+        agent_id: str = AgentProvider.CLAUDE,
+        runner: AgentRunner = AgentRunner.CLAUDE,
     ) -> AgentExecutionResult:
         """Run agent in workspace and stream output.
 
@@ -225,7 +226,7 @@ class AgentExecutionHandler:
     def _select_stream_processor(
         self,
         *,
-        runner: Literal["claude", "codex"],
+        runner: AgentRunner,
         tokens: TokenAccumulator,
         subagents: SubagentTracker,
         todo: TodoItem,
@@ -236,7 +237,7 @@ class AgentExecutionHandler:
     ) -> EventStreamProcessor | CodexStreamProcessor:
         """Pick the codex or claude stream processor for a headless phase."""
         assert todo.phase_id is not None
-        if runner == "codex":
+        if runner == AgentRunner.CODEX:
             assert collector is not None
             return CodexStreamProcessor(
                 tokens=tokens,
@@ -263,7 +264,7 @@ class AgentExecutionHandler:
     async def _run_headless(
         self,
         *,
-        runner: Literal["claude", "codex"],
+        runner: AgentRunner,
         todo: TodoItem,
         workspace: ManagedWorkspace,
         agent_env: dict[str, str],
@@ -298,7 +299,11 @@ class AgentExecutionHandler:
         )
 
         exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
-        if runner == "codex" and stream_result.error_reason is not None and exit_code == 0:
+        if (
+            runner == AgentRunner.CODEX
+            and stream_result.error_reason is not None
+            and exit_code == 0
+        ):
             # The codex parser reserves error_reason for a BROKEN stream
             # (malformed JSON / missing terminal turn.completed); force a
             # non-zero phase exit even when the process exit was 0.
@@ -307,7 +312,7 @@ class AgentExecutionHandler:
         # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2).
         # The codex path already emits its summary inside CodexStreamProcessor
         # (single-layer), so the handler skips it for runner == "codex".
-        if collector is not None and runner != "codex":
+        if collector is not None and runner != AgentRunner.CODEX:
             await collector.record_session_summary(
                 total_cost_usd=stream_result.total_cost_usd,
                 input_tokens=stream_result.result_input_tokens,
@@ -351,7 +356,7 @@ class AgentExecutionHandler:
         session_id: str,
         timeout_seconds: int,
         collector: ObservabilityCollector | None,
-        agent_id: str = "claude",
+        agent_id: str = AgentProvider.CLAUDE,
     ) -> AgentExecutionResult:
         """Drive a claude-interactive phase through send_message/await_completion.
 

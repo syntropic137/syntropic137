@@ -207,6 +207,7 @@ class SetupPhaseSecrets:
         *,
         repositories: list[str] | None = None,
         require_github: bool = True,
+        include_codex_auth: bool = False,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets using GitHub App.
 
@@ -241,7 +242,9 @@ class SetupPhaseSecrets:
             )
 
         claude_code_oauth_token, anthropic_api_key = _resolve_claude_credentials()
-        codex_auth_json = _resolve_codex_credentials()
+        # Scope the codex credential to codex phases only: a claude phase's agent
+        # must never be able to read the OpenAI auth file (and vice-versa).
+        codex_auth_json = _resolve_codex_credentials() if include_codex_auth else None
 
         return cls(
             repo_tokens=repo_tokens,
@@ -316,17 +319,24 @@ class SetupPhaseSecrets:
         return "\n".join(lines) + "\n"
 
     def _append_codex_auth(self, lines: list[str]) -> None:
-        """Append permission setup for an auth file injected separately."""
+        """Relocate the staged codex auth file to ~/.codex/auth.json (0600).
+
+        The auth contents are injected separately as
+        ``/workspace/.setup/codex-auth.json`` (never embedded in this script),
+        because the docker copy path always writes under /workspace. This moves
+        it to ~/.codex/auth.json with mode 0600 and removes the staged copy so
+        no credential remains readable under /workspace.
+        """
         if not self.codex_auth_json:
             return
 
         lines.extend(
             [
                 "",
-                "# Configure Codex auth injected as a file during setup",
+                "# Relocate the codex auth file staged under .setup during injection",
                 "mkdir -p -m 700 ~/.codex",
-                "chmod 700 ~/.codex",
-                "chmod 600 ~/.codex/auth.json",
+                "install -m 600 /workspace/.setup/codex-auth.json ~/.codex/auth.json",
+                "rm -f /workspace/.setup/codex-auth.json",
             ]
         )
 

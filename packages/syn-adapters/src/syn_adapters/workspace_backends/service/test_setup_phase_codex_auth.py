@@ -33,8 +33,29 @@ def test_codex_auth_written_even_without_repos() -> None:
     assert secrets.repositories == []
     script = secrets.build_setup_script()
     assert "mkdir -p -m 700 ~/.codex" in script
-    assert "chmod 600 ~/.codex/auth.json" in script
+    assert "install -m 600 /workspace/.setup/codex-auth.json ~/.codex/auth.json" in script
+    assert "rm -f /workspace/.setup/codex-auth.json" in script
     assert "secret" not in script
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_codex_auth_scoped_to_codex_phases() -> None:
+    # A claude phase (include_codex_auth=False) must NOT resolve/carry the codex
+    # credential, so a non-codex phase's agent can never read the OpenAI auth.
+    with patch(
+        "syn_adapters.workspace_backends.service.setup_phase_secrets._resolve_codex_credentials",
+        return_value='{"a":1}',
+    ):
+        claude_secrets = await SetupPhaseSecrets.create(
+            require_github=False, include_codex_auth=False
+        )
+        codex_secrets = await SetupPhaseSecrets.create(
+            require_github=False, include_codex_auth=True
+        )
+
+    assert claude_secrets.codex_auth_json is None
+    assert codex_secrets.codex_auth_json == '{"a":1}'
 
 
 @pytest.mark.unit
@@ -63,9 +84,11 @@ async def test_run_setup_phase_injects_codex_auth_as_file() -> None:
     ):
         await run_setup_phase(workspace, secrets)
 
+    # Staged under .setup/ at the /workspace mount (the docker copy path ignores
+    # base_path); the setup script relocates it to ~/.codex/auth.json with 0600.
     workspace.inject_files.assert_any_await(
-        [("auth.json", b'{"a":1}')],
-        base_path="/home/agent/.codex",
+        [(".setup/codex-auth.json", b'{"a":1}')],
+        base_path="/workspace",
     )
 
 

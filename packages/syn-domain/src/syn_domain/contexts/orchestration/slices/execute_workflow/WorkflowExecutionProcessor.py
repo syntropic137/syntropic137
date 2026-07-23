@@ -65,6 +65,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
+from syn_shared.agents import AgentProvider, AgentRunner
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -650,7 +651,7 @@ class WorkflowExecutionProcessor:
         service; if none is configured, fail loudly instead of silently
         running the phase on the wrong provider.
         """
-        if phase.agent_config.provider != "claude-interactive":
+        if phase.agent_config.provider != AgentProvider.CLAUDE_INTERACTIVE:
             return self._workspace_service
         if self._interactive_workspace_service is None:
             msg = (
@@ -683,7 +684,8 @@ class WorkflowExecutionProcessor:
         session_id = todo.session_id or ""
         workflow_id = aggregate.workflow_id or ""
         timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
-        runner: Runner = "codex" if phase.agent_config.provider == "codex" else "claude"
+        is_codex = phase.agent_config.provider == AgentProvider.CODEX
+        runner: Runner = AgentRunner.CODEX if is_codex else AgentRunner.CLAUDE
 
         collector = ObservabilityCollector(
             writer=self._observability_writer,
@@ -703,7 +705,8 @@ class WorkflowExecutionProcessor:
             timeout_seconds=timeout,
             collector=collector,
             interactive_prompt=interactive_prompt,
-            agent_id=phase.agent_config.agent_id,
+            # coerce a missing agent_id to the claude pane (see _provisioned_agents)
+            agent_id=phase.agent_config.agent_id or AgentProvider.CLAUDE,
             runner=runner,
         )
 

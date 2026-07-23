@@ -86,6 +86,7 @@ from syn_adapters.storage.repositories import (
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
+from syn_shared.agents import AgentProvider
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -244,7 +245,7 @@ def _build_agent_command(
     prompt: str,
 ) -> list[str]:
     """Build the command selected by the phase provider."""
-    if phase.agent_config.provider == "codex":
+    if phase.agent_config.provider == AgentProvider.CODEX:
         return _build_codex_command(prompt, phase.agent_config.model)
     return _build_claude_command(phase, prompt)
 

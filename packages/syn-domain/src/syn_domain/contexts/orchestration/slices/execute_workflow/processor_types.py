@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
     PhaseResult,
 )
+from syn_shared.agents import AgentProvider, AgentRunner
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -39,7 +40,7 @@ PromptBuilder = Callable[
 ]
 
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
-Runner = Literal["claude", "codex"]
+Runner = AgentRunner
 
 
 class TodoProjection(Protocol):
@@ -96,8 +97,8 @@ class AgentHandlerProtocol(Protocol):
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,
-        agent_id: str = "claude",
-        runner: Runner = "claude",
+        agent_id: str = AgentProvider.CLAUDE,
+        runner: Runner = AgentRunner.CLAUDE,
     ) -> AgentExecutionResult: ...
 
 

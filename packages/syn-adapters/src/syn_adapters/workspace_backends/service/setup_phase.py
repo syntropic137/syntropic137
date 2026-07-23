@@ -108,21 +108,20 @@ async def run_setup_phase(
         base_path="/workspace",
     )
 
-    try:
-        if secrets.codex_auth_json:
-            await ws.execute(
-                ["install", "-d", "-m", "700", "/home/agent/.codex"],
-                timeout_seconds=10,
-            )
-            await ws.inject_files(
-                [("auth.json", secrets.codex_auth_json.encode())],
-                base_path="/home/agent/.codex",
-            )
-            await ws.execute(
-                ["chmod", "600", "/home/agent/.codex/auth.json"],
-                timeout_seconds=10,
-            )
+    # Stage the codex auth file for the setup script to relocate. The docker
+    # copy path IGNORES base_path (it always writes under the /workspace mount),
+    # so we cannot inject straight to ~/.codex. Instead we stage it under
+    # .setup/ and the setup script (SetupPhaseSecrets._append_codex_auth) moves
+    # it to ~/.codex/auth.json with mode 0600 and removes the staged copy, so no
+    # credential is left readable under /workspace. The secret contents never
+    # appear in the setup script text (only the injected file carries them).
+    if secrets.codex_auth_json:
+        await ws.inject_files(
+            [(".setup/codex-auth.json", secrets.codex_auth_json.encode())],
+            base_path="/workspace",
+        )
 
+    try:
         # Run setup script WITH secrets
         logger.info("Running setup phase with secrets (workspace=%s)", ws.workspace_id)
         from syn_shared.settings import get_settings

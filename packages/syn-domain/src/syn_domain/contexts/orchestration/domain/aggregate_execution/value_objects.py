@@ -10,6 +10,7 @@ from typing import Any
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
+from syn_shared.agents import AgentProvider
 
 
 class ExecutionStatus(StrEnum):
@@ -69,7 +70,7 @@ class AgentConfiguration:
     ``provider == "codex"`` - see ``__post_init__``.
     """
 
-    provider: str = "claude"  # claude, claude-interactive, codex, openai (mock only in tests)
+    provider: str = AgentProvider.CLAUDE  # + claude-interactive, codex, openai (mock in tests)
     # NOTE: Temporarily using Haiku to reduce costs during testing
     model: str = "haiku"  # CLI alias - auto-resolves to latest version
     max_tokens: int = 4096
@@ -95,7 +96,10 @@ class AgentConfiguration:
         contradiction we reject at construction time rather than silently
         misrouting later.
         """
-        if self.provider == "codex" and self.agent_id not in (None, "codex"):
+        if self.provider == AgentProvider.CODEX and self.agent_id not in (
+            None,
+            AgentProvider.CODEX,
+        ):
             msg = (
                 f"AgentConfiguration.provider='codex' selects the programmatic "
                 f"codex harness; agent_id must be None or 'codex', got "
