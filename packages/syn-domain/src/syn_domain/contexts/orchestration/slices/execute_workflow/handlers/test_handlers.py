@@ -243,6 +243,148 @@ class TestAgentExecutionHandler:
             duration_ms=48000,
         )
 
+    @pytest.mark.anyio
+    async def test_codex_runner_uses_codex_stream_processor_only(self) -> None:
+        """Codex runner selects its parser and preserves the existing stream call."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        collector = AsyncMock()
+        stream_result = StreamResult(
+            line_count=3,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            result_input_tokens=12,
+            result_output_tokens=7,
+        )
+
+        with (
+            patch(
+                "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+            ) as mock_codex_processor,
+            patch(
+                "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.EventStreamProcessor"
+            ) as mock_claude_processor,
+        ):
+            mock_codex_processor.return_value.process_stream = AsyncMock(
+                return_value=stream_result
+            )
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                ),
+                workspace=workspace,
+                agent_env={"CODEX_HOME": "/home/agent/.codex"},
+                claude_cmd=["codex", "exec", "--json", "do work"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=collector,
+                runner="codex",
+            )
+
+        mock_codex_processor.assert_called_once()
+        mock_claude_processor.assert_not_called()
+        workspace.stream.assert_called_once_with(
+            ["codex", "exec", "--json", "do work"],
+            timeout_seconds=300,
+            environment={"CODEX_HOME": "/home/agent/.codex"},
+        )
+        assert result.command.input_tokens == 12
+        assert result.command.output_tokens == 7
+
+    @pytest.mark.anyio
+    async def test_broken_codex_stream_forces_nonzero_exit(self) -> None:
+        """Parser-level stream failure overrides a clean process exit for Codex."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        collector = AsyncMock()
+        stream_result = StreamResult(
+            line_count=1,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            error_reason="missing terminal turn.completed",
+        )
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+        ) as mock_processor:
+            mock_processor.return_value.process_stream = AsyncMock(return_value=stream_result)
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                ),
+                workspace=workspace,
+                agent_env={},
+                claude_cmd=["codex", "exec", "--json", "do work"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=collector,
+                runner="codex",
+            )
+
+        assert result.command.exit_code == 1
+
+    @pytest.mark.anyio
+    async def test_clean_codex_stream_keeps_zero_exit_and_one_summary(self) -> None:
+        """Codex processor owns the sole session summary emission."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        collector = AsyncMock()
+        stream_result = StreamResult(
+            line_count=3,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            result_input_tokens=12,
+            result_output_tokens=7,
+        )
+
+        async def process_stream(*_args: object) -> StreamResult:
+            await collector.record_session_summary(
+                total_cost_usd=0.01,
+                input_tokens=12,
+                output_tokens=7,
+                cache_creation=0,
+                cache_read=0,
+                num_turns=1,
+                duration_ms=25,
+                agent_id=None,
+            )
+            return stream_result
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+        ) as mock_processor:
+            mock_processor.return_value.process_stream = process_stream
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                ),
+                workspace=workspace,
+                agent_env={},
+                claude_cmd=["codex", "exec", "--json", "do work"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=collector,
+                runner="codex",
+            )
+
+        assert result.command.exit_code == 0
+        collector.record_session_summary.assert_awaited_once()
+
     @staticmethod
     def _interactive_workspace(driver: MagicMock) -> MagicMock:
         """Workspace whose isolation adapter exposes provider_handle()."""

@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         AgentHandlerProtocol,
+        Runner,
     )
 
 
@@ -62,6 +63,7 @@ class FakeAgentExecutionHandler:
         self._interrupt = interrupt
         self._exit_code = exit_code
         self.calls: list[TodoItem] = []
+        self.runners: list[Runner] = []
 
     # ------------------------------------------------------------------
     # Protocol-required method
@@ -79,8 +81,10 @@ class FakeAgentExecutionHandler:
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,
         agent_id: str = "claude",
+        runner: Runner = "claude",
     ) -> AgentExecutionResult:
         self.calls.append(todo)
+        self.runners.append(runner)
         stream_result = StreamResult(
             line_count=0,
             interrupt_requested=self._interrupt,

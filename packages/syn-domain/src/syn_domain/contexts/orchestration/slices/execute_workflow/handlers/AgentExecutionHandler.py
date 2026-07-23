@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    CodexStreamProcessor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
@@ -156,6 +159,7 @@ class AgentExecutionHandler:
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,
         agent_id: str = "claude",
+        runner: Literal["claude", "codex"] = "claude",
     ) -> AgentExecutionResult:
         """Run agent in workspace and stream output.
 
@@ -192,18 +196,30 @@ class AgentExecutionHandler:
                 agent_id=agent_id,
             )
 
-        processor = EventStreamProcessor(
-            tokens=tokens,
-            subagents=subagents,
-            observability=None,  # Not used when collector is provided
-            controller=self._controller,
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            session_id=session_id,
-            workspace_id=getattr(workspace, "id", None),
-            agent_model=agent_model,
-            collector=collector,
-        )
+        if runner == "codex":
+            assert collector is not None
+            processor = CodexStreamProcessor(
+                tokens=tokens,
+                collector=collector,
+                controller=self._controller,
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                session_id=session_id,
+                agent_model=agent_model,
+            )
+        else:
+            processor = EventStreamProcessor(
+                tokens=tokens,
+                subagents=subagents,
+                observability=None,  # Not used when collector is provided
+                controller=self._controller,
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                session_id=session_id,
+                workspace_id=getattr(workspace, "id", None),
+                agent_model=agent_model,
+                collector=collector,
+            )
 
         stream_result = await processor.process_stream(
             workspace.stream(
@@ -215,9 +231,11 @@ class AgentExecutionHandler:
         )
 
         exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
+        if runner == "codex" and stream_result.error_reason is not None and exit_code == 0:
+            exit_code = 1
 
         # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2)
-        if collector is not None:
+        if collector is not None and runner != "codex":
             await collector.record_session_summary(
                 total_cost_usd=stream_result.total_cost_usd,
                 input_tokens=stream_result.result_input_tokens,

@@ -57,6 +57,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     CommandBuilder,
     ExecutionRepository,
     PromptBuilder,
+    Runner,
     SessionRepository,
     TodoProjection,
     WorkflowExecutionResult,  # re-exported for backward compatibility
@@ -682,6 +683,7 @@ class WorkflowExecutionProcessor:
         session_id = todo.session_id or ""
         workflow_id = aggregate.workflow_id or ""
         timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
+        runner: Runner = "codex" if phase.agent_config.provider == "codex" else "claude"
 
         collector = ObservabilityCollector(
             writer=self._observability_writer,
@@ -702,6 +704,7 @@ class WorkflowExecutionProcessor:
             collector=collector,
             interactive_prompt=interactive_prompt,
             agent_id=phase.agent_config.agent_id,
+            runner=runner,
         )
 
         recorder = ConversationRecorder(self._conversation_storage)

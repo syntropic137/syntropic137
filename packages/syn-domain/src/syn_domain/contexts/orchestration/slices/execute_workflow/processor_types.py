@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -39,6 +39,7 @@ PromptBuilder = Callable[
 ]
 
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
+Runner = Literal["claude", "codex"]
 
 
 class TodoProjection(Protocol):
@@ -96,6 +97,7 @@ class AgentHandlerProtocol(Protocol):
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,
         agent_id: str = "claude",
+        runner: Runner = "claude",
     ) -> AgentExecutionResult: ...
 
 
