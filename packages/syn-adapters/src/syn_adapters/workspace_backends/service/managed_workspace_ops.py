@@ -26,7 +26,7 @@ async def _send_sigint(container_id: str) -> bool:
         container_id,
         "sh",
         "-c",
-        "PID=$(pgrep -n claude) && kill -INT $PID",
+        "PID=$(pgrep -n claude || pgrep -n codex) && kill -INT $PID",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -43,10 +43,10 @@ async def _send_sigint(container_id: str) -> bool:
 
     success = proc.returncode == 0
     if success:
-        logger.info("interrupt(): SIGINT delivered to claude process in %s", container_id)
+        logger.info("interrupt(): SIGINT delivered to agent process in %s", container_id)
     else:
         logger.warning(
-            "interrupt(): no claude process found or SIGINT failed (exit=%d) for container %s",
+            "interrupt(): no agent process found or SIGINT failed (exit=%d) for container %s",
             proc.returncode,
             container_id,
         )
@@ -54,10 +54,10 @@ async def _send_sigint(container_id: str) -> bool:
 
 
 async def interrupt_container(isolation_handle: IsolationHandle) -> bool:
-    """Send SIGINT to the Claude CLI process inside the container.
+    """Send SIGINT to the active agent CLI process inside the container.
 
-    Uses docker exec to find and signal the claude process:
-        docker exec <container> sh -c "kill -INT $(pgrep -n claude)"
+    Uses docker exec to find and signal Claude, falling back to Codex:
+        docker exec <container> sh -c "PID=$(pgrep -n claude || pgrep -n codex) ..."
 
     Returns True if signal was delivered successfully. Non-fatal on failure
     so cleanup can continue even if the process is already gone.
