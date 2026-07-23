@@ -10896,6 +10896,17 @@
             ],
             "title": "Model"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
           "timeout_seconds": {
             "anyOf": [
               {
