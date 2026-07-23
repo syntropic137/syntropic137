@@ -148,6 +148,8 @@ def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDef
             allowed_tools=list(p.allowed_tools),
             argument_hint=p.argument_hint,
             model=p.model,
+            provider=p.provider,
+            agent_id=p.agent_id,
             execution_type=p.execution_type,
             max_tokens=p.max_tokens,
             input_artifact_types=list(p.input_artifact_types),

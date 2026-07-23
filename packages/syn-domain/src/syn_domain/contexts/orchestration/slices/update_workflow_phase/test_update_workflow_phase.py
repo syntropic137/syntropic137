@@ -26,6 +26,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent i
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
+from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
@@ -330,3 +331,59 @@ class TestWorkflowPhaseUpdatedEvent:
 
         with pytest.raises(ValidationError):
             event.prompt_template = "Changed"  # type: ignore[misc]
+
+
+class TestPhaseProviderUpdate:
+    """Provider is settable via update and preserved on prompt-only edits."""
+
+    def _codex_aggregate(self) -> WorkflowTemplateAggregate:
+        aggregate = WorkflowTemplateAggregate()
+        aggregate._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id=_WORKFLOW_ID,
+                name="Codex Workflow",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="phase-1",
+                        name="Codex Phase",
+                        order=1,
+                        prompt_template="original",
+                        provider=AgentProvider.CODEX,
+                    ),
+                ],
+            )
+        )
+        aggregate.mark_events_as_committed()
+        return aggregate
+
+    def test_update_can_set_provider(self) -> None:
+        aggregate = _create_aggregate_with_phases()
+        aggregate._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID,
+                phase_id="phase-1",
+                prompt_template="kept",
+                provider=AgentProvider.CODEX,
+            )
+        )
+        phase = next(p for p in aggregate.phases if p.phase_id == "phase-1")
+        assert phase.provider == AgentProvider.CODEX
+
+    def test_prompt_only_update_preserves_provider(self) -> None:
+        # Regression: _apply_phase_update used to drop provider on any edit,
+        # silently reverting a codex phase to the claude default.
+        aggregate = self._codex_aggregate()
+        aggregate._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID,
+                phase_id="phase-1",
+                prompt_template="new prompt",
+            )
+        )
+        phase = next(p for p in aggregate.phases if p.phase_id == "phase-1")
+        assert phase.provider == AgentProvider.CODEX
+        assert phase.prompt_template == "new prompt"

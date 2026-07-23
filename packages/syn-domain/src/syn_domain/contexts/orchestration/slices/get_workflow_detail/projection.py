@@ -100,6 +100,8 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
+                provider=p.get("provider"),
+                agent_id=p.get("agent_id"),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),

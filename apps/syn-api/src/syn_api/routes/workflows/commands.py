@@ -321,6 +321,7 @@ class UpdatePhasePromptRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     prompt_template: str = Field(..., min_length=1)
     model: str | None = None
+    provider: str | None = None
     timeout_seconds: int | None = None
     allowed_tools: list[str] | None = None
 
@@ -465,6 +466,7 @@ async def update_phase_prompt(
     phase_id: str,
     prompt_template: str,
     model: str | None = None,
+    provider: str | None = None,
     timeout_seconds: int | None = None,
     allowed_tools: list[str] | None = None,
 ) -> Result[str, WorkflowError]:
@@ -491,6 +493,7 @@ async def update_phase_prompt(
         phase_id=phase_id,
         prompt_template=prompt_template,
         model=model,
+        provider=provider,
         timeout_seconds=timeout_seconds,
         allowed_tools=allowed_tools,
     )
@@ -526,6 +529,7 @@ async def update_phase_prompt_endpoint(
         phase_id=phase_id,
         prompt_template=body.prompt_template,
         model=body.model,
+        provider=body.provider,
         timeout_seconds=body.timeout_seconds,
         allowed_tools=body.allowed_tools,
     )

@@ -53,6 +53,12 @@ class PhaseDefinitionDetail:
     model: str | None = None
     """Per-phase model override (e.g., 'sonnet', 'opus')."""
 
+    provider: str | None = None
+    """Per-phase agent provider ('claude', 'claude-interactive', 'codex')."""
+
+    agent_id: str | None = None
+    """Per-phase agent id (tmux pane selector; interactive path only)."""
+
     execution_type: str = "sequential"
     """How this phase executes: sequential, parallel, or human_in_loop."""
 

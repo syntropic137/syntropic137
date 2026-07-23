@@ -24,5 +24,6 @@ class WorkflowPhaseUpdatedEvent(DomainEvent):
 
     # Optional config overrides (None = unchanged from previous state)
     model: str | None = None
+    provider: str | None = None
     timeout_seconds: int | None = None
     allowed_tools: list[str] | None = None

@@ -85,6 +85,7 @@ _PHASE_UPDATE_FIELDS = [
     "phase_id",
     "prompt_template",
     "model",
+    "provider",
     "timeout_seconds",
     "allowed_tools",
 ]
@@ -126,6 +127,8 @@ def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDe
         allowed_tools=_coalesce(data["allowed_tools"], list(phase.allowed_tools)),
         argument_hint=phase.argument_hint,
         model=_coalesce(data["model"], phase.model),
+        provider=_coalesce(data["provider"], phase.provider),
+        agent_id=phase.agent_id,
     )
 
 
@@ -309,6 +312,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             phase_id=command.phase_id,
             prompt_template=command.prompt_template,
             model=command.model,
+            provider=command.provider,
             timeout_seconds=command.timeout_seconds,
             allowed_tools=command.allowed_tools,
         )

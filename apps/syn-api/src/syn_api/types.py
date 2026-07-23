@@ -383,6 +383,8 @@ class PhaseDefinitionResponse(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     argument_hint: str | None = None
     model: str | None = None
+    provider: str | None = None
+    agent_id: str | None = None
     execution_type: str = "sequential"
     max_tokens: int | None = None
     input_artifact_types: list[str] = Field(default_factory=list)
