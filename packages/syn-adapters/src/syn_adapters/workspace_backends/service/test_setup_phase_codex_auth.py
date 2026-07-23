@@ -118,6 +118,30 @@ async def test_cleanup_runs_when_setup_fails() -> None:
 
 @pytest.mark.unit
 @pytest.mark.anyio
+async def test_cleanup_runs_when_codex_injection_fails() -> None:
+    # The codex-auth staging is INSIDE the try, so a failed injection still runs
+    # clear_secrets in the finally - no credential is left staged under /workspace.
+    workspace = _workspace()
+    # inject #1 = setup.sh (ok), inject #2 = codex-auth (raises)
+    workspace.inject_files = AsyncMock(side_effect=[None, RuntimeError("inject boom")])
+    workspace.execute.return_value = ExecutionResult(
+        exit_code=0, success=True, duration_ms=1, stdout="", stderr=""
+    )
+    secrets = SetupPhaseSecrets.for_testing(codex_auth_json='{"a":1}')
+    cleanup = AsyncMock()
+
+    with patch(
+        "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
+        new=cleanup,
+    ):
+        with pytest.raises(RuntimeError, match="inject boom"):
+            await run_setup_phase(workspace, secrets)
+
+    cleanup.assert_awaited_once_with(workspace)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
 async def test_codex_auth_survives_clear_secrets() -> None:
     workspace = _workspace()
     workspace.execute.return_value = ExecutionResult(

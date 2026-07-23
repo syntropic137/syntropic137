@@ -29,6 +29,7 @@ from syn_shared.env_constants import (
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
@@ -108,20 +109,20 @@ async def run_setup_phase(
         base_path="/workspace",
     )
 
-    # Stage the codex auth file for the setup script to relocate. The docker
-    # copy path IGNORES base_path (it always writes under the /workspace mount),
-    # so we cannot inject straight to ~/.codex. Instead we stage it under
-    # .setup/ and the setup script (SetupPhaseSecrets._append_codex_auth) moves
-    # it to ~/.codex/auth.json with mode 0600 and removes the staged copy, so no
-    # credential is left readable under /workspace. The secret contents never
-    # appear in the setup script text (only the injected file carries them).
-    if secrets.codex_auth_json:
-        await ws.inject_files(
-            [(".setup/codex-auth.json", secrets.codex_auth_json.encode())],
-            base_path="/workspace",
-        )
-
     try:
+        # Stage the codex auth file INSIDE the try so the finally-block cleanup
+        # always runs even if this injection raises. The docker copy path IGNORES
+        # base_path (it always writes under the /workspace mount), so we cannot
+        # inject straight to ~/.codex; we stage it under .setup/ and the setup
+        # script (SetupPhaseSecrets._append_codex_auth) relocates it to
+        # ~/.codex/auth.json (0600) and removes the staged copy. The secret
+        # contents never appear in the setup script text (only the file carries them).
+        if secrets.codex_auth_json:
+            await ws.inject_files(
+                [(".setup/codex-auth.json", secrets.codex_auth_json.encode())],
+                base_path="/workspace",
+            )
+
         # Run setup script WITH secrets
         logger.info("Running setup phase with secrets (workspace=%s)", ws.workspace_id)
         from syn_shared.settings import get_settings
@@ -142,8 +143,36 @@ async def run_setup_phase(
         return result
     finally:
         await clear_secrets(ws)
+        # Fail-closed: guarantee no codex credential lingers under /workspace even
+        # if the injection or setup script raised before the relocation step ran.
+        if secrets.codex_auth_json:
+            await _assert_codex_credential_removed(ws)
         logger.info(
             "Setup phase complete, transient material cleared (workspace=%s)", ws.workspace_id
+        )
+
+
+async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
+    """Verify (and force) removal of the staged codex credential under /workspace.
+
+    ``clear_secrets`` removes /workspace/.setup, but if that cleanup failed the
+    staged ``codex-auth.json`` could linger and be readable by the agent. Check
+    it is gone; if not, force-remove it and log a SECURITY error so the failure
+    is observable instead of silently reported as "cleared".
+    """
+    check = await ws.execute(
+        ["sh", "-c", "test ! -e /workspace/.setup/codex-auth.json"],
+        timeout_seconds=5,
+    )
+    if check.exit_code != 0:
+        logger.error(
+            "SECURITY: staged codex credential still present under /workspace after "
+            "cleanup (workspace=%s); force-removing",
+            ws.workspace_id,
+        )
+        await ws.execute(
+            ["rm", "-f", "/workspace/.setup/codex-auth.json"],
+            timeout_seconds=5,
         )
 
 
@@ -184,10 +213,17 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
         [(".cleanup/clear.sh", clear_script.encode())],
         base_path="/workspace",
     )
-    await ws.execute(
+    cleanup = await ws.execute(
         ["bash", "/workspace/.cleanup/clear.sh"],
         timeout_seconds=10,
     )
+    if cleanup.exit_code != 0:
+        logger.warning(
+            "Secret cleanup script exited non-zero (exit=%d, workspace=%s): %s",
+            cleanup.exit_code,
+            ws.workspace_id,
+            cleanup.stderr,
+        )
 
     # Clean up the cleanup script too
     await ws.execute(
