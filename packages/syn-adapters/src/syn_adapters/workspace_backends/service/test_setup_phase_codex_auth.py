@@ -26,6 +26,32 @@ def _workspace() -> MagicMock:
     return workspace
 
 
+def _execute_side_effect(default_exit: int = 0, *, staged_present: bool = False):
+    """AsyncMock side_effect for ws.execute.
+
+    The fail-closed ``test -e <staged codex auth>`` check reports the file GONE
+    (exit 1) by default (the setup script relocated + removed it); pass
+    ``staged_present=True`` to simulate a cleanup that could not remove it. All
+    other commands return ``default_exit``.
+    """
+
+    def _run(cmd: list[str], **_kwargs: object) -> ExecutionResult:
+        joined = " ".join(cmd)
+        if "test -e" in joined and "codex-auth.json" in joined:
+            exit_code = 0 if staged_present else 1
+        else:
+            exit_code = default_exit
+        return ExecutionResult(
+            exit_code=exit_code,
+            success=exit_code == 0,
+            duration_ms=1,
+            stdout="",
+            stderr="",
+        )
+
+    return _run
+
+
 @pytest.mark.unit
 def test_codex_auth_written_even_without_repos() -> None:
     secrets = SetupPhaseSecrets.for_testing(codex_auth_json='{"tokens":{"access_token":"secret"}}')
@@ -69,13 +95,7 @@ def test_codex_auth_not_in_setup_env() -> None:
 @pytest.mark.anyio
 async def test_run_setup_phase_injects_codex_auth_as_file() -> None:
     workspace = _workspace()
-    workspace.execute.return_value = ExecutionResult(
-        exit_code=0,
-        success=True,
-        duration_ms=1,
-        stdout="",
-        stderr="",
-    )
+    workspace.execute = AsyncMock(side_effect=_execute_side_effect(0))
     secrets = SetupPhaseSecrets.for_testing(codex_auth_json='{"a":1}')
 
     with patch(
@@ -124,9 +144,7 @@ async def test_cleanup_runs_when_codex_injection_fails() -> None:
     workspace = _workspace()
     # inject #1 = setup.sh (ok), inject #2 = codex-auth (raises)
     workspace.inject_files = AsyncMock(side_effect=[None, RuntimeError("inject boom")])
-    workspace.execute.return_value = ExecutionResult(
-        exit_code=0, success=True, duration_ms=1, stdout="", stderr=""
-    )
+    workspace.execute = AsyncMock(side_effect=_execute_side_effect(0))
     secrets = SetupPhaseSecrets.for_testing(codex_auth_json='{"a":1}')
     cleanup = AsyncMock()
 
@@ -138,6 +156,23 @@ async def test_cleanup_runs_when_codex_injection_fails() -> None:
             await run_setup_phase(workspace, secrets)
 
     cleanup.assert_awaited_once_with(workspace)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_lingering_codex_credential_fails_closed() -> None:
+    # If cleanup cannot remove the staged codex credential, run_setup_phase must
+    # FAIL CLOSED (raise) rather than silently report the secret as cleared.
+    workspace = _workspace()
+    workspace.execute = AsyncMock(side_effect=_execute_side_effect(0, staged_present=True))
+    secrets = SetupPhaseSecrets.for_testing(codex_auth_json='{"a":1}')
+
+    with patch(
+        "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
+        new=AsyncMock(),
+    ):
+        with pytest.raises(RuntimeError, match="unable to remove staged codex credential"):
+            await run_setup_phase(workspace, secrets)
 
 
 @pytest.mark.unit

@@ -142,38 +142,48 @@ async def run_setup_phase(
 
         return result
     finally:
-        await clear_secrets(ws)
-        # Fail-closed: guarantee no codex credential lingers under /workspace even
-        # if the injection or setup script raised before the relocation step ran.
-        if secrets.codex_auth_json:
-            await _assert_codex_credential_removed(ws)
+        try:
+            await clear_secrets(ws)
+        finally:
+            # Runs even if clear_secrets raised. Fail-closed: guarantee no codex
+            # credential lingers under /workspace, or raise a security failure.
+            if secrets.codex_auth_json:
+                await _assert_codex_credential_removed(ws)
         logger.info(
             "Setup phase complete, transient material cleared (workspace=%s)", ws.workspace_id
         )
 
 
+_CODEX_STAGED_AUTH = "/workspace/.setup/codex-auth.json"
+
+
 async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
-    """Verify (and force) removal of the staged codex credential under /workspace.
+    """Guarantee no staged codex credential lingers under /workspace, or raise.
 
     ``clear_secrets`` removes /workspace/.setup, but if that cleanup failed the
-    staged ``codex-auth.json`` could linger and be readable by the agent. Check
-    it is gone; if not, force-remove it and log a SECURITY error so the failure
-    is observable instead of silently reported as "cleared".
+    staged ``codex-auth.json`` could remain readable by the agent. Check,
+    force-remove, and RE-VERIFY. If the credential still exists we FAIL CLOSED
+    (raise) so a lingering secret is never silently reported as "cleared".
     """
-    check = await ws.execute(
-        ["sh", "-c", "test ! -e /workspace/.setup/codex-auth.json"],
-        timeout_seconds=5,
+    # `test -e <path>`: exit 0 == present, nonzero == gone.
+    present = await ws.execute(["sh", "-c", f"test -e {_CODEX_STAGED_AUTH}"], timeout_seconds=5)
+    if present.exit_code != 0:
+        return
+
+    logger.error(
+        "SECURITY: staged codex credential still present under /workspace after "
+        "cleanup (workspace=%s); force-removing",
+        ws.workspace_id,
     )
-    if check.exit_code != 0:
-        logger.error(
-            "SECURITY: staged codex credential still present under /workspace after "
-            "cleanup (workspace=%s); force-removing",
-            ws.workspace_id,
+    await ws.execute(["rm", "-f", _CODEX_STAGED_AUTH], timeout_seconds=5)
+
+    recheck = await ws.execute(["sh", "-c", f"test -e {_CODEX_STAGED_AUTH}"], timeout_seconds=5)
+    if recheck.exit_code == 0:
+        msg = (
+            f"SECURITY: unable to remove staged codex credential {_CODEX_STAGED_AUTH} "
+            f"(workspace={ws.workspace_id})"
         )
-        await ws.execute(
-            ["rm", "-f", "/workspace/.setup/codex-auth.json"],
-            timeout_seconds=5,
-        )
+        raise RuntimeError(msg)
 
 
 async def clear_secrets(workspace: object) -> None:
