@@ -116,7 +116,11 @@ def _provisioned_agents(phase: ExecutablePhase) -> tuple[str, ...]:
     (which ignores agent selection entirely).
     """
     if phase.agent_config.provider == "claude-interactive":
-        return (phase.agent_config.agent_id,)
+        # `agent_id` now defaults to None (codex-bridge: fixes the
+        # provider->agent_id invariant); at the interactive-tmux boundary a
+        # pane MUST be named, so coerce a missing agent_id to "claude" here
+        # (preserving the pre-existing default) rather than at construction.
+        return (phase.agent_config.agent_id or "claude",)
     return ()
 
 
