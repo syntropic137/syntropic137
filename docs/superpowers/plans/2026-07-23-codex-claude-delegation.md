@@ -111,7 +111,7 @@ git commit -m "feat(claude-cli): install codex CLI alongside claude for delegati
 - Possibly create: `lib/agentic-primitives/plugins/delegation/plugin.yaml` (only if the bake step requires it — verified in Step 2)
 
 **Interfaces:**
-- Produces: `/opt/agentic/plugins/delegation/skills/{delegating-to-codex,delegating-to-claude-p}/SKILL.md` present in the image, discoverable by claude via `--plugin-dir /opt/agentic`.
+- Produces: `/opt/agentic/plugins/delegation/skills/{delegating-to-codex,delegating-to-claude-p}/SKILL.md` baked into the image as an on-disk reference. Runtime delegation *guidance* is delivered via the injected `CLAUDE.md`/`AGENTS.md` (Task B4), not via `--plugin-dir`; the baked SKILL.md is the fuller reference those notes point at.
 
 - [ ] **Step 1: Add `delegation` to the include list AND bump the manifest version**
 
@@ -398,7 +398,7 @@ def test_prompt_update_preserves_provider_agentid_and_delegation() -> None:
         classification=WorkflowClassification.SIMPLE, repository_url="", repository_ref="main",
         phases=[PhaseDefinition(
             phase_id="p1", name="p", order=1, prompt_template="orig",
-            provider=AgentProvider.CODEX, allow_delegation=True,
+            provider=AgentProvider.CODEX, agent_id=AgentProvider.CODEX, allow_delegation=True,
         )],
     ))
     agg.mark_events_as_committed()
@@ -407,6 +407,7 @@ def test_prompt_update_preserves_provider_agentid_and_delegation() -> None:
     ))
     p = next(x for x in agg.phases if x.phase_id == "p1")
     assert p.provider == AgentProvider.CODEX
+    assert p.agent_id == AgentProvider.CODEX
     assert p.allow_delegation is True
     assert p.prompt_template == "new"
 ```
@@ -607,17 +608,40 @@ Both files get identical content (as today); a non-delegating phase gets an empt
 Run: `uv run pytest <handler test> -k delegation_note -v`
 Expected: PASS.
 
+- [ ] **Step 5b: Integration test - the note is actually injected into BOTH files (round-2 review)**
+
+Unit-testing `_delegation_note` alone does not prove delivery. Add a handler test with `allow_delegation=True`, NO repositories (the `requires_repos: false` case), that asserts the workspace's `inject_files` receives both `AGENTS.md` and `CLAUDE.md` whose content contains the provider-appropriate recipe. Cover both primary providers.
+
+```python
+async def test_delegation_recipe_injected_into_both_files_no_repos() -> None:
+    # Arrange a codex-primary, allow_delegation phase with no repos; use the
+    # handler's fake/managed workspace test double that records inject_files.
+    injected = await _provision_and_capture_injected_files(
+        provider="codex", allow_delegation=True, repos=[],
+    )  # helper returns {filename: content} passed to workspace.inject_files
+    assert "AGENTS.md" in injected and "CLAUDE.md" in injected
+    assert "claude -p" in injected["AGENTS.md"]
+    assert "claude -p" in injected["CLAUDE.md"]
+
+async def test_delegation_recipe_claude_primary_injects_codex_recipe() -> None:
+    injected = await _provision_and_capture_injected_files(
+        provider="claude", allow_delegation=True, repos=[],
+    )
+    assert "codex exec" in injected["AGENTS.md"]
+```
+(Reuse the existing WorkspaceProvisionHandler test harness/doubles; if none records `inject_files`, add a minimal fake that captures the `[(name, bytes)]` argument.)
+
 - [ ] **Step 6: Commit**
 
 ```bash
 git add packages/syn-domain/.../WorkspaceProvisionHandler.py <test file>
-git commit -m "feat(provisioning): surface delegation recipe to codex phases via AGENTS.md"
+git commit -m "feat(provisioning): deliver provider-aware delegation recipe via CLAUDE.md/AGENTS.md"
 ```
 
 ### Task B5: Example workflows + regenerate + local unit gate
 
 **Files:**
-- Create: `workflows/examples/multi-agent-programmatic.yaml` (phase 1 `provider: claude`, phase 2 `provider: codex`, shared workspace - the mixed-driver proof)
+- Create: `workflows/examples/multi-agent-programmatic.yaml` (phase 1 `provider: claude`, phase 2 `provider: codex`, separate headless workspaces with artifact-mediated handoff - the mixed-driver proof)
 - Create: `workflows/examples/codex-delegates-to-claude.yaml` (single codex phase, `allow_delegation: true`, prompt instructs a `claude -p` delegation)
 - Modify: none generated (schema change adds an optional field; run `just codegen` only if any API response model surfaces `allow_delegation` - it does not in this plan).
 
