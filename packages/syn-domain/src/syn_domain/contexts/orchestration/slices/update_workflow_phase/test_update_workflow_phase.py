@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import ClaudePluginRef
+from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseDefinition,
     WorkflowClassification,
@@ -355,6 +357,16 @@ class TestPhaseUpdatePreservesDelegationFields:
                         provider=AgentProvider.CODEX,
                         agent_id=AgentProvider.CODEX,
                         allow_delegation=True,
+                        skills=(
+                            SkillRef(
+                                skill_name="review", source_url="acme/skills", version="v1.0.0"
+                            ),
+                        ),
+                        claude_plugins=(
+                            ClaudePluginRef(
+                                name="sdlc", source_url="acme/plugins", version="v1.0.0"
+                            ),
+                        ),
                     )
                 ],
             )
@@ -372,3 +384,6 @@ class TestPhaseUpdatePreservesDelegationFields:
         assert p.agent_id == AgentProvider.CODEX
         assert p.allow_delegation is True
         assert p.prompt_template == "new"
+        # #772 skills + #726 claude_plugins must survive a prompt edit too.
+        assert len(p.skills) == 1 and p.skills[0].skill_name == "review"
+        assert len(p.claude_plugins) == 1 and p.claude_plugins[0].name == "sdlc"

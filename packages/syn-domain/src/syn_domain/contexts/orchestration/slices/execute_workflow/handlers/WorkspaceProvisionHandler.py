@@ -103,6 +103,21 @@ _DELEGATION_TARGET_SKILL: dict[str, str] = {
     AgentProvider.CLAUDE: "delegating-to-codex",  # claude learns to call codex exec
 }
 
+
+def _skills_cli_agent_selector(provider: str, agent_id: str | None) -> str:
+    """Skills-CLI agent-key source for a phase.
+
+    Interactive-tmux phases key by the pane's ``agent_id``; every headless phase
+    keys by ``provider`` (``agent_id`` is meaningless off the interactive path).
+    Keying by ``agent_id`` unconditionally would install skills for the wrong
+    harness when a headless phase carries a stray ``agent_id`` (e.g.
+    ``provider="claude"`` with ``agent_id="codex"``, which YAML validation
+    currently permits): the phase runs ``claude -p`` but skills would target codex.
+    """
+    if provider == AgentProvider.CLAUDE_INTERACTIVE:
+        return agent_id or AgentProvider.CLAUDE
+    return provider
+
 # Callable types for dependency injection
 PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, object]],
@@ -545,7 +560,9 @@ class WorkspaceProvisionHandler:
         # pane's agent_id; headless phases have agent_id=None and key by provider
         # (claude / codex). Prefer agent_id, fall back to provider so a headless
         # codex or claude phase resolves too.
-        agent_selector = phase.agent_config.agent_id or phase.agent_config.provider
+        agent_selector = _skills_cli_agent_selector(
+            phase.agent_config.provider, phase.agent_config.agent_id
+        )
         agent_key = _SKILLS_CLI_AGENT_KEYS.get(agent_selector)
         if agent_key is None:
             raise SkillInstallFailed(
@@ -734,7 +751,9 @@ class WorkspaceProvisionHandler:
             return
         # Install the skill teaching the PRIMARY agent to call the OTHER CLI.
         skill_name = _DELEGATION_TARGET_SKILL.get(cfg.provider)
-        agent_key = _SKILLS_CLI_AGENT_KEYS.get(cfg.agent_id or cfg.provider)
+        agent_key = _SKILLS_CLI_AGENT_KEYS.get(
+            _skills_cli_agent_selector(cfg.provider, cfg.agent_id)
+        )
         if skill_name is None or agent_key is None:
             # allow_delegation is validated headless-only (claude/codex); defensive.
             return

@@ -133,6 +133,8 @@ def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDe
         provider=phase.provider,
         agent_id=phase.agent_id,
         allow_delegation=phase.allow_delegation,
+        skills=phase.skills,
+        claude_plugins=phase.claude_plugins,
     )
 
 

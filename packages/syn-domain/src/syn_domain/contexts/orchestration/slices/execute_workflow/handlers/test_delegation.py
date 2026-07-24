@@ -126,13 +126,30 @@ class _RecordingWorkspace:
         return _FakeResult(self._exit_code)
 
 
-def _phase(provider: str, allow_delegation: bool) -> ExecutablePhase:
+def _phase(
+    provider: str, allow_delegation: bool, agent_id: str | None = None
+) -> ExecutablePhase:
     return ExecutablePhase(
         phase_id="p1",
         name="p",
         order=1,
-        agent_config=AgentConfiguration(provider=provider, allow_delegation=allow_delegation),
+        agent_config=AgentConfiguration(
+            provider=provider, allow_delegation=allow_delegation, agent_id=agent_id
+        ),
     )
+
+
+async def test_stray_agent_id_ignored_provider_wins() -> None:
+    # provider=claude with a stray agent_id=codex (permitted by YAML validation)
+    # must install for claude-code, not codex (the phase runs claude -p).
+    ws = _RecordingWorkspace()
+    await WorkspaceProvisionHandler._install_baked_delegation_skill(
+        ws,
+        _phase(AgentProvider.CLAUDE, True, agent_id="codex"),  # type: ignore[arg-type]
+    )
+    cmd = ws.calls[0]
+    assert cmd[2].endswith("delegating-to-codex")
+    assert cmd[3:5] == ["--agent", "claude-code"]
 
 
 async def test_codex_phase_installs_delegating_to_claude_skill() -> None:
