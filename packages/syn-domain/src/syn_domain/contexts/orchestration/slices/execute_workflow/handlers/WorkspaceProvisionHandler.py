@@ -511,13 +511,18 @@ class WorkspaceProvisionHandler:
                 "is wired; refusing to run the agent without them (issue #772)"
             )
             raise RuntimeError(msg)
-        agent_key = _SKILLS_CLI_AGENT_KEYS.get(phase.agent_config.agent_id)
+        # Resolve the skills-CLI agent key. Interactive-tmux phases key by the
+        # pane's agent_id; headless phases have agent_id=None and key by provider
+        # (claude / codex). Prefer agent_id, fall back to provider so a headless
+        # codex or claude phase resolves too.
+        agent_selector = phase.agent_config.agent_id or phase.agent_config.provider
+        agent_key = _SKILLS_CLI_AGENT_KEYS.get(agent_selector)
         if agent_key is None:
             raise SkillInstallFailed(
                 phase.skills[0].skill_name,
-                phase.agent_config.agent_id,
+                agent_selector,
                 exit_code=-1,
-                stderr=f"no skills-cli agent key for agent_id {phase.agent_config.agent_id!r}",
+                stderr=f"no skills-cli agent key for agent {agent_selector!r}",
             )
         skill_files = await self._skill_materializer.fetch_for_workspace(phase.skills)
         if skill_files:
