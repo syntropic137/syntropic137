@@ -45,6 +45,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_global_claude_plugin_registry.GlobalClaudePluginRegistryAggregate import (
         GlobalClaudePluginRegistryAggregate,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_skill_registration.SkillRegistrationAggregate import (
+        SkillRegistrationAggregate,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
@@ -138,6 +141,7 @@ _claude_plugin_registration_repository: (
 _global_claude_plugin_registry_repository: (
     RepositoryAdapter[GlobalClaudePluginRegistryAggregate] | None
 ) = None
+_skill_registration_repository: RepositoryAdapter[SkillRegistrationAggregate] | None = None
 
 
 def _get_repository_factory() -> RepositoryFactory:
@@ -362,6 +366,25 @@ def get_global_claude_plugin_registry_repository() -> RepositoryAdapter[
     return _global_claude_plugin_registry_repository
 
 
+def get_skill_registration_repository() -> RepositoryAdapter[SkillRegistrationAggregate]:
+    """Get a SkillRegistrationAggregate repository (issue #772)."""
+    global _skill_registration_repository
+    if _skill_registration_repository is not None:
+        return _skill_registration_repository
+
+    from syn_domain.contexts.orchestration.domain.aggregate_skill_registration.SkillRegistrationAggregate import (
+        SkillRegistrationAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        SkillRegistrationAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+        aggregate_type="SkillRegistration",
+    )
+    _skill_registration_repository = RepositoryAdapter(sdk_repo)
+    return _skill_registration_repository
+
+
 def reset_repositories() -> None:
     """Reset all cached repository instances.
 
@@ -381,7 +404,8 @@ def reset_repositories() -> None:
         _repo_repository, \
         _repo_claim_repository, \
         _claude_plugin_registration_repository, \
-        _global_claude_plugin_registry_repository
+        _global_claude_plugin_registry_repository, \
+        _skill_registration_repository
     _workflow_repository = None
     _workflow_execution_repository = None
     _session_repository = None
@@ -393,3 +417,4 @@ def reset_repositories() -> None:
     _repo_claim_repository = None
     _claude_plugin_registration_repository = None
     _global_claude_plugin_registry_repository = None
+    _skill_registration_repository = None

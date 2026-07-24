@@ -28,6 +28,9 @@ from typing import TYPE_CHECKING, Protocol
 from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
     ClaudePluginError,
 )
+from syn_domain.contexts.orchestration._shared.skill_errors import (
+    SkillNotRegistered,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
@@ -38,8 +41,12 @@ from syn_domain.contexts.orchestration._shared.yaml_to_command import (
 from syn_shared.logging import get_logger
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
     from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
         CreateWorkflowTemplateHandler,
+    )
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockEntry,
     )
 
 
@@ -52,6 +59,23 @@ class _ClaudePluginResolver(Protocol):
     """
 
     async def ensure_registered(self, workflow_def: WorkflowDefinition) -> None: ...
+
+
+class _SkillLockLookup(Protocol):
+    """Minimal contract the seeder needs from the skill lock projection.
+
+    Defined locally (mirrors ``_ClaudePluginResolver`` above) so the domain
+    layer never depends on a concrete projection store implementation.
+    Production wires ``SkillLockProjection`` here; tests pass a no-op,
+    a stub, or an in-memory-store-backed ``SkillLockProjection`` directly.
+    """
+
+    async def get(
+        self,
+        source_url: str,
+        version: str,
+        skill_name: str,
+    ) -> SkillLockEntry | None: ...
 
 
 logger = get_logger(__name__)
@@ -84,6 +108,24 @@ class SeedReport:
 
 
 _DUPLICATE_MARKERS = ("already exists", "precondition failed", "concurrency conflict", "duplicate")
+
+
+def _collect_unique_skill_refs(definition: WorkflowDefinition) -> list[SkillRef]:
+    """Union of workflow-scope and per-phase skill refs, deduped by identity.
+
+    Identity is ``(source_url, version, skill_name)`` -- the same key used by
+    the lock projection and ``SkillRef.__hash__``. Mirrors
+    ``ClaudePluginResolutionService._collect_unique_refs``.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    ordered: list[SkillRef] = []
+    for ref in (*definition.skills, *(ref for phase in definition.phases for ref in phase.skills)):
+        key = (ref.source_url, ref.version, ref.skill_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(ref)
+    return ordered
 
 
 def _handle_seed_error(
@@ -123,6 +165,8 @@ class WorkflowSeeder:
         skip_existing: bool = True,
         claude_plugin_resolver: _ClaudePluginResolver | None = None,
         fail_on_plugin_not_registered: bool = True,
+        skill_lock: _SkillLockLookup | None = None,
+        fail_on_skill_not_registered: bool = True,
     ) -> None:
         """Initialize the seeder.
 
@@ -138,12 +182,23 @@ class WorkflowSeeder:
                 missing plugin registration aborts the seeder by re-raising.
                 When False (dev/CI), the failure is logged and the workflow is
                 recorded as failed but seeding continues.
+            skill_lock: Optional lock projection for ``skills`` refs
+                (issue #772). When provided, every YAML's skill refs are
+                validated against the lock projection before the workflow is
+                registered. When ``None``, skill validation is skipped
+                entirely -- safe for legacy seed paths that pre-date #772.
+            fail_on_skill_not_registered: When True (production default), a
+                missing skill registration aborts the seeder by re-raising.
+                When False (dev/CI), the failure is logged and the workflow
+                is recorded as failed but seeding continues.
         """
         self._handler = handler
         self._skip_existing = skip_existing
         self._existing_ids: set[str] = set()
         self._claude_plugin_resolver = claude_plugin_resolver
         self._fail_on_plugin_not_registered = fail_on_plugin_not_registered
+        self._skill_lock = skill_lock
+        self._fail_on_skill_not_registered = fail_on_skill_not_registered
 
     async def seed_from_directory(
         self,
@@ -229,6 +284,10 @@ class WorkflowSeeder:
         if plugin_failure is not None:
             return plugin_failure
 
+        skill_failure = await self._validate_skills(definition)
+        if skill_failure is not None:
+            return skill_failure
+
         return await self._dispatch_create(definition, workflow_id)
 
     def _skip_if_existing(self, definition: WorkflowDefinition) -> SeedResult | None:
@@ -277,6 +336,40 @@ class WorkflowSeeder:
                 name=definition.name,
                 success=False,
                 error=f"claude_plugin_not_registered: {exc}",
+            )
+        return None
+
+    async def _validate_skills(self, definition: WorkflowDefinition) -> SeedResult | None:
+        """Validate skill refs against the lock projection (issue #772).
+
+        Walks workflow-scope refs plus every phase's refs, deduped by
+        identity (source_url, version, skill_name), and checks each against
+        the skill lock projection. Returns ``None`` on success (caller
+        continues), a failure ``SeedResult`` when dev/CI mode tolerates the
+        miss, or re-raises in prod mode.
+        """
+        if self._skill_lock is None:
+            return None
+
+        for ref in _collect_unique_skill_refs(definition):
+            entry = await self._skill_lock.get(ref.source_url, ref.version, ref.skill_name)
+            if entry is not None:
+                continue
+            error = SkillNotRegistered(ref.source_url, ref.version, ref.skill_name)
+            if self._fail_on_skill_not_registered:
+                raise error
+            logger.error(
+                "Skipping workflow seed: skill not registered",
+                workflow_id=definition.id,
+                name=definition.name,
+                error_code=error.error_code,
+                error=str(error),
+            )
+            return SeedResult(
+                workflow_id=definition.id,
+                name=definition.name,
+                success=False,
+                error=f"skill_not_registered: {error}",
             )
         return None
 

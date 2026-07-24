@@ -29,6 +29,10 @@ from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
 )
+from syn_domain.contexts.orchestration._shared.skill_ref import (
+    SkillRef,
+    expand_skill_entry,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
     PhaseDefinition,
@@ -270,6 +274,20 @@ class PhaseYamlDefinition(BaseModel):
     # Phase-scope claude plugin refs (issue #726). Workflow-scope refs live on
     # WorkflowDefinition. PR1 carries them through; PR2 resolves them.
     claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+    # Phase-scope skill refs (issue #772). Additive alongside claude_plugins.
+    # Workflow-scope refs live on WorkflowDefinition; phase scope wins on
+    # identity collision when the two lists are merged at resolution time.
+    skills: list[SkillRef] = Field(default_factory=list)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _expand_skills(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        expanded: list[SkillRef] = []
+        for entry in value:
+            expanded.extend(expand_skill_entry(entry))
+        return expanded
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
@@ -321,6 +339,7 @@ class PhaseYamlDefinition(BaseModel):
             agent_id=agent_id,
             allow_delegation=allow_delegation,
             claude_plugins=tuple(self.claude_plugins),
+            skills=tuple(self.skills),
         )
 
 
@@ -398,6 +417,21 @@ class WorkflowDefinition(BaseModel):
     # Workflow-scope claude plugin refs (issue #726). The Phase 5 resolution
     # service walks both this list and per-phase refs to populate the lock.
     claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+    # Workflow-scope skill refs (issue #772). Additive alongside
+    # claude_plugins. The resolution service walks both this list and
+    # per-phase refs to populate the lock, with phase scope winning on
+    # identity collision.
+    skills: list[SkillRef] = Field(default_factory=list)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _expand_skills(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        expanded: list[SkillRef] = []
+        for entry in value:
+            expanded.extend(expand_skill_entry(entry))
+        return expanded
 
     @field_validator("phases")
     @classmethod

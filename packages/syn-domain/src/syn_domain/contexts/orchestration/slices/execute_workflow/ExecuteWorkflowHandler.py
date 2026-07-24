@@ -30,6 +30,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
         ResolvedClaudePlugin,
     )
+    from syn_domain.contexts.orchestration._shared.resolved_skill import (
+        ResolvedSkill,
+    )
+    from syn_domain.contexts.orchestration._shared.skill_ref import (
+        SkillRef,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
@@ -47,6 +53,13 @@ if TYPE_CHECKING:
 PhasePluginResolver = Callable[
     ["Sequence[ClaudePluginRef]", "Sequence[ClaudePluginRef]"],
     Awaitable["tuple[ResolvedClaudePlugin, ...]"],
+]
+
+# WHY (issue #772): mirrors PhasePluginResolver. The wiring layer binds this
+# to ``SkillResolutionService.resolve_for_phase``.
+PhaseSkillResolver = Callable[
+    ["Sequence[SkillRef]", "Sequence[SkillRef]"],
+    Awaitable["tuple[ResolvedSkill, ...]"],
 ]
 
 logger = logging.getLogger(__name__)
@@ -187,6 +200,7 @@ class ExecuteWorkflowHandler:
         processor: WorkflowExecutionProcessor,
         workflow_repository: WorkflowRepository,
         phase_plugin_resolver: PhasePluginResolver | None = None,
+        phase_skill_resolver: PhaseSkillResolver | None = None,
     ) -> None:
         self._processor = processor
         self._workflow_repo = workflow_repository
@@ -195,6 +209,9 @@ class ExecuteWorkflowHandler:
         # ``_get_executable_phases`` leaves ``ExecutablePhase.claude_plugins``
         # at its empty default and PR1 behaviour is preserved.
         self._phase_plugin_resolver = phase_plugin_resolver
+        # WHY optional (issue #772): mirrors phase_plugin_resolver. When None,
+        # ``ExecutablePhase.skills`` stays at its empty default.
+        self._phase_skill_resolver = phase_skill_resolver
 
     async def handle(
         self,
@@ -303,12 +320,17 @@ class ExecuteWorkflowHandler:
         # though the workflow-scope refs are the same across all phases.
         # Resolution unions global + workflow + phase scopes per phase.
         workflow_refs = workflow.claude_plugins
+        workflow_skill_refs = workflow.skills
         executable_phases: list[ExecutablePhase] = []
         for phase in workflow.phases:
             agent_config = _build_agent_config_from_phase(phase)
             resolved = await self._resolve_phase_plugins(
                 workflow_refs=workflow_refs,
                 phase_refs=list(phase.claude_plugins),
+            )
+            resolved_skills = await self._resolve_phase_skills(
+                workflow_refs=workflow_skill_refs,
+                phase_refs=list(phase.skills),
             )
             executable_phases.append(
                 ExecutablePhase(
@@ -323,6 +345,7 @@ class ExecuteWorkflowHandler:
                     ),
                     timeout_seconds=phase.timeout_seconds,
                     claude_plugins=resolved,
+                    skills=resolved_skills,
                 )
             )
         return executable_phases
@@ -343,3 +366,19 @@ class ExecuteWorkflowHandler:
             empty_global = await self._phase_plugin_resolver([], [])
             return empty_global
         return await self._phase_plugin_resolver(workflow_refs, phase_refs)
+
+    async def _resolve_phase_skills(
+        self,
+        workflow_refs: Sequence[SkillRef],
+        phase_refs: Sequence[SkillRef],
+    ) -> tuple[ResolvedSkill, ...]:
+        """Delegate to the injected skill resolver (issue #772).
+
+        Mirrors ``_resolve_phase_plugins``. Unlike claude plugins, skills have
+        no global scope in this plan, so (unlike the plugin path) there is no
+        need to call the resolver when both scopes are empty -- an empty
+        result is correct without touching the lock projection.
+        """
+        if self._phase_skill_resolver is None or (not workflow_refs and not phase_refs):
+            return ()
+        return await self._phase_skill_resolver(workflow_refs, phase_refs)

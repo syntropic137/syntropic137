@@ -16,6 +16,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
 )
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
         ResolvedClaudePlugin,
     )
+    from syn_domain.contexts.orchestration._shared.resolved_skill import ResolvedSkill
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
     )
@@ -63,8 +65,34 @@ if TYPE_CHECKING:
             plugins: tuple[ResolvedClaudePlugin, ...],
         ) -> list[tuple[str, bytes]]: ...
 
+    class SkillMaterializerProtocol(Protocol):
+        """Minimal surface the handler needs (issue #772).
+
+        Mirrors ``ClaudePluginMaterializerProtocol``: the concrete
+        implementation (``syn_api.services.skill_materializer.SkillMaterializer``)
+        lives in the application layer, so the domain handler depends only on
+        this structural protocol.
+        """
+
+        async def fetch_for_workspace(
+            self,
+            skills: tuple[ResolvedSkill, ...],
+        ) -> list[tuple[str, bytes]]: ...
+
 
 logger = logging.getLogger(__name__)
+
+# Maps our phase agent_id values onto the vercel skills-cli --agent keys.
+# The skills CLI (pinned 1.5.14 in the workspace images) owns the per-harness
+# install location; we only translate our identifier vocabulary to theirs.
+# Verify against `skills add --help` inside the image whenever the pin bumps.
+_SKILLS_CLI_AGENT_KEYS: dict[str, str] = {
+    "claude": "claude-code",
+    "codex": "codex",
+    "gemini": "gemini-cli",
+}
+
+_SKILL_INSTALL_TIMEOUT_SECONDS = 120
 
 # Callable types for dependency injection
 PromptBuilder = Callable[
@@ -153,6 +181,33 @@ def _append_claude_plugin_dirs(
     for plugin in phase.claude_plugins:
         claude_cmd.append("--plugin-dir")
         claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
+
+
+def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> None:
+    """Reject a phase whose skills contain two different versions of one skill_name.
+
+    WHY (Task 7 review note, issue #772): identity-triple dedup at the
+    workflow/phase merge layer means a workflow-level skill declaration and a
+    phase-level override could legitimately resolve to two different
+    ``resolved_sha`` values for the same ``skill_name``. Both would
+    materialize to the same ``.syn-skills/<skill_name>/`` workspace path,
+    silently clobbering one version with the other on disk. Fail fast
+    instead of letting the last-materialized write win unnoticed.
+    """
+    seen_sha_by_name: dict[str, str] = {}
+    for skill in skills:
+        prior_sha = seen_sha_by_name.get(skill.skill_name)
+        if prior_sha is not None and prior_sha != skill.resolved_sha:
+            raise SkillInstallFailed(
+                skill.skill_name,
+                "n/a",
+                exit_code=-1,
+                stderr=(
+                    f"conflicting versions of skill {skill.skill_name!r}: "
+                    f"{prior_sha!r} vs {skill.resolved_sha!r}"
+                ),
+            )
+        seen_sha_by_name[skill.skill_name] = skill.resolved_sha
 
 
 async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
@@ -296,6 +351,7 @@ class WorkspaceProvisionHandler:
         prompt_builder: PromptBuilder,
         command_builder: CommandBuilder,
         claude_plugin_materializer: ClaudePluginMaterializerProtocol | None = None,
+        skill_materializer: SkillMaterializerProtocol | None = None,
     ) -> None:
         self._workspace_service = workspace_service
         self._prompt_builder = prompt_builder
@@ -306,6 +362,11 @@ class WorkspaceProvisionHandler:
         # materialization branch when the field is empty, so passing None is
         # safe in those cases.
         self._claude_plugin_materializer = claude_plugin_materializer
+        # WHY optional (issue #772): mirrors the plugin materializer above,
+        # but unlike plugins, a phase that declares skills with no
+        # materializer wired is a hard error (see
+        # ``_materialize_and_install_skills``) rather than a silent skip.
+        self._skill_materializer = skill_materializer
 
     async def handle(
         self,
@@ -361,6 +422,7 @@ class WorkspaceProvisionHandler:
                 ),
             )
             await self._materialize_claude_plugins(workspace, phase)
+            await self._materialize_and_install_skills(workspace, phase)
             await self._inject_phase_artifacts(
                 workspace, artifacts, completed_phase_ids or [], phase_outputs or {}, todo
             )
@@ -452,6 +514,69 @@ class WorkspaceProvisionHandler:
                 len(phase.claude_plugins),
                 workspace.workspace_id,
             )
+
+    async def _materialize_and_install_skills(
+        self,
+        workspace: ManagedWorkspace,
+        phase: ExecutablePhase,
+    ) -> None:
+        """Inject skill trees and install them for the phase's harness (issue #772).
+
+        Unlike the plugin path, this FAILS FAST: a phase that declares skills
+        must get them or must not run. Silent skill-less execution produces
+        confusing agent behavior that is worse than a loud provisioning error.
+        """
+        if not phase.skills:
+            return
+        _check_no_conflicting_skill_versions(phase.skills)
+        if self._skill_materializer is None:
+            msg = (
+                f"phase {phase.phase_id} declares skills but no skill materializer "
+                "is wired; refusing to run the agent without them (issue #772)"
+            )
+            raise RuntimeError(msg)
+        # Resolve the skills-CLI agent key. Interactive-tmux phases key by the
+        # pane's agent_id; headless phases have agent_id=None and key by provider
+        # (claude / codex). Prefer agent_id, fall back to provider so a headless
+        # codex or claude phase resolves too.
+        agent_selector = phase.agent_config.agent_id or phase.agent_config.provider
+        agent_key = _SKILLS_CLI_AGENT_KEYS.get(agent_selector)
+        if agent_key is None:
+            raise SkillInstallFailed(
+                phase.skills[0].skill_name,
+                agent_selector,
+                exit_code=-1,
+                stderr=f"no skills-cli agent key for agent {agent_selector!r}",
+            )
+        skill_files = await self._skill_materializer.fetch_for_workspace(phase.skills)
+        if skill_files:
+            await workspace.inject_files(skill_files)
+        for skill in phase.skills:
+            result = await workspace.execute(
+                [
+                    "skills",
+                    "add",
+                    f"/workspace/.syn-skills/{skill.skill_name}",
+                    "--agent",
+                    agent_key,
+                    "-y",
+                ],
+                timeout_seconds=_SKILL_INSTALL_TIMEOUT_SECONDS,
+                working_directory="/workspace",
+            )
+            if result.exit_code != 0:
+                raise SkillInstallFailed(
+                    skill.skill_name,
+                    agent_key,
+                    result.exit_code,
+                    result.stderr or result.stdout or "",
+                )
+        logger.info(
+            "Installed %d skill(s) for agent %s in %s",
+            len(phase.skills),
+            agent_key,
+            workspace.workspace_id,
+        )
 
     async def _inject_phase_artifacts(
         self,
