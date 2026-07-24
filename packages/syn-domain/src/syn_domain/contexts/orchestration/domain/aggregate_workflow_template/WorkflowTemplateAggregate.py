@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
         ClaudePluginRef,
     )
+    from syn_domain.contexts.orchestration._shared.skill_ref import (
+        SkillRef,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         InputDeclaration,
         PhaseDefinition,
@@ -56,6 +59,7 @@ _EVENT_FIELDS = [
     "description",
     "input_declarations",
     "claude_plugins",
+    "skills",
 ]
 
 
@@ -70,7 +74,7 @@ def _normalize_event_data(event: DomainEvent) -> dict[str, Any]:
     for field in _EVENT_FIELDS:
         data.setdefault(
             field,
-            [] if field in ("phases", "input_declarations", "claude_plugins") else None,
+            [] if field in ("phases", "input_declarations", "claude_plugins", "skills") else None,
         )
     return data
 
@@ -184,6 +188,10 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # part of the aggregate's identity at execute time so the resolver
         # can union them with per-phase refs without re-reading YAML.
         self._claude_plugins: list[ClaudePluginRef] = []
+        # WHY (issue #772): workflow-scope skill refs mirror claude_plugins so
+        # the skill resolution service can union them with per-phase refs at
+        # execute time without re-reading YAML.
+        self._skills: list[SkillRef] = []
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -233,6 +241,15 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         """
         return list(self._claude_plugins)
 
+    @property
+    def skills(self) -> list[SkillRef]:
+        """Get workflow-scope skill refs (issue #772).
+
+        Per-phase refs live on each ``PhaseDefinition.skills``; this list
+        applies to every phase via the skill resolution service union.
+        """
+        return list(self._skills)
+
     # =========================================================================
     # COMMAND HANDLERS - Validate business rules, emit events
     # =========================================================================
@@ -279,6 +296,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             repos=command.repos,
             requires_repos=command.requires_repos,
             claude_plugins=command.claude_plugins,
+            skills=command.skills,
         )
 
         self._apply(event)
@@ -360,6 +378,16 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._claude_plugins = [
             item if isinstance(item, ClaudePluginRef) else ClaudePluginRef.model_validate(item)
             for item in raw_plugins
+        ]
+
+        # WHY (issue #772): mirrors the claude_plugins coercion above; legacy
+        # events have no skills field.
+        from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
+
+        raw_skills = data.get("skills") or []
+        self._skills = [
+            item if isinstance(item, SkillRef) else SkillRef.model_validate(item)
+            for item in raw_skills
         ]
 
     @command_handler("ArchiveWorkflowTemplateCommand")

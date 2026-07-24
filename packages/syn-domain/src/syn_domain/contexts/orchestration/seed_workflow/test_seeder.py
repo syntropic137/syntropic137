@@ -212,6 +212,106 @@ phases:
 # =========================================================================
 
 
+SAMPLE_WORKFLOW_YAML_WITH_SKILL = """
+id: seeder-skills-test-workflow
+name: Seeder Skills Test Workflow
+description: A workflow referencing an unregistered skill
+skills:
+  - https://github.com/example/skills-repo@1.0.0
+
+phases:
+  - id: test-phase
+    name: Test Phase
+    order: 1
+"""
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_seed_fails_when_skill_not_registered(handler: CreateWorkflowTemplateHandler) -> None:
+    """Seeding a workflow referencing an unregistered skill raises SkillNotRegistered (#772)."""
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_domain.contexts.orchestration._shared.skill_errors import SkillNotRegistered
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockProjection,
+    )
+
+    skill_lock = SkillLockProjection(InMemoryProjectionStore())
+    seeder = WorkflowSeeder(handler, skill_lock=skill_lock)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(SAMPLE_WORKFLOW_YAML_WITH_SKILL)
+        f.flush()
+        path = Path(f.name)
+
+    try:
+        with pytest.raises(SkillNotRegistered):
+            await seeder.seed_from_file(path)
+    finally:
+        path.unlink()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_seed_succeeds_after_skill_registered(handler: CreateWorkflowTemplateHandler) -> None:
+    """Registering the referenced skill (Task 4 handler) unblocks re-seeding (#772)."""
+    from datetime import UTC, datetime
+
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_adapters.storage.in_memory_skill_repositories import (
+        InMemorySkillRegistrationRepository,
+    )
+    from syn_adapters.storage.skill_storage.memory import InMemorySkillStorage
+    from syn_domain.contexts.orchestration.ports.SkillStoragePort import SkillFile
+    from syn_domain.contexts.orchestration.slices.register_skill import RegisterSkillHandler
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockProjection,
+    )
+
+    register_handler = RegisterSkillHandler(
+        storage=InMemorySkillStorage(),
+        repo=InMemorySkillRegistrationRepository(),
+    )
+    result = await register_handler.handle(
+        source_url="https://github.com/example/skills-repo",
+        version="1.0.0",
+        skill_name=None,
+        files=[
+            SkillFile(
+                rel_path="SKILL.md",
+                content=(b"---\nname: skills-repo\ndescription: example\n---\n\n# skills-repo\n"),
+            ),
+        ],
+    )
+
+    store = InMemoryProjectionStore()
+    skill_lock = SkillLockProjection(store)
+    await skill_lock.on_skill_registered(
+        {
+            "source_url": result.source_url,
+            "version": result.version,
+            "resolved_sha": result.resolved_sha,
+            "skill_name": result.skill_name,
+            "tree_storage_prefix": result.tree_storage_prefix,
+            "registered_at": datetime.now(UTC).isoformat(),
+        }
+    )
+
+    seeder = WorkflowSeeder(handler, skill_lock=skill_lock)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(SAMPLE_WORKFLOW_YAML_WITH_SKILL)
+        f.flush()
+        path = Path(f.name)
+
+    try:
+        seed_result = await seeder.seed_from_file(path)
+        assert seed_result.success is True
+        assert seed_result.error is None
+    finally:
+        path.unlink()
+
+
 @pytest.mark.unit
 class TestHandleSeedError:
     """Tests for _handle_seed_error helper."""

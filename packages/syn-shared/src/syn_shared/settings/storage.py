@@ -107,6 +107,11 @@ class StorageSettings(BaseSettings):
         ),
     )
 
+    skill_bucket_name: str = Field(
+        default="skills",
+        description="Bucket for content-addressed skill trees (issue #772)",
+    )
+
     # =========================================================================
     # MINIO STORAGE SETTINGS
     # =========================================================================
