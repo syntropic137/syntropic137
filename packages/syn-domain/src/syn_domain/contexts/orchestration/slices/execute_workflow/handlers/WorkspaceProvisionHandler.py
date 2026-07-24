@@ -94,6 +94,15 @@ _SKILLS_CLI_AGENT_KEYS: dict[str, str] = {
 
 _SKILL_INSTALL_TIMEOUT_SECONDS = 120
 
+# Baked delegation skills live in the agentic-primitives image under this root
+# (claude-cli manifest plugins.include: delegation). A delegation-enabled phase
+# installs the skill teaching its PRIMARY agent to hand off to the OTHER CLI.
+_DELEGATION_SKILL_ROOT = "/opt/agentic/plugins/delegation/skills"
+_DELEGATION_TARGET_SKILL: dict[str, str] = {
+    AgentProvider.CODEX: "delegating-to-claude-p",  # codex learns to call claude -p
+    AgentProvider.CLAUDE: "delegating-to-codex",  # claude learns to call codex exec
+}
+
 # Callable types for dependency injection
 PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, object]],
@@ -417,12 +426,10 @@ class WorkspaceProvisionHandler:
                 workspace,
                 effective_repos,
                 include_codex_auth=include_codex_auth,
-                delegation_note=self._delegation_note(
-                    phase.agent_config.provider, phase.agent_config.allow_delegation
-                ),
             )
             await self._materialize_claude_plugins(workspace, phase)
             await self._materialize_and_install_skills(workspace, phase)
+            await self._install_baked_delegation_skill(workspace, phase)
             await self._inject_phase_artifacts(
                 workspace, artifacts, completed_phase_ids or [], phase_outputs or {}, todo
             )
@@ -447,7 +454,6 @@ class WorkspaceProvisionHandler:
         effective_repos: list[str],
         *,
         include_codex_auth: bool,
-        delegation_note: str = "",
     ) -> None:
         """Run setup phase and inject synthetic context files (ADR-058)."""
         from syn_adapters.workspace_backends.service import SetupPhaseSecrets
@@ -468,13 +474,13 @@ class WorkspaceProvisionHandler:
         # Both files are identical: direct @-imports of each repo's AGENTS.md and
         # CLAUDE.md. Direct imports keep repo content at L2 (not L3 via indirection),
         # preserving maximum @import depth for repo-internal context.
-        files = self._context_files(effective_repos, delegation_note)
-        if files:
-            await workspace.inject_files(files)
+        context = self._generate_workspace_context(effective_repos)
+        if context:
+            await workspace.inject_files(
+                [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
+            )
             logger.info(
-                "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s), delegation=%s)",
-                len(effective_repos),
-                bool(delegation_note),
+                "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(effective_repos)
             )
 
     async def _materialize_claude_plugins(
@@ -711,45 +717,49 @@ class WorkspaceProvisionHandler:
         return url.rstrip("/").split("/")[-1].removesuffix(".git")
 
     @staticmethod
-    def _delegation_note(provider: str, allow_delegation: bool) -> str:
-        """Delegation recipe for the phase's primary agent, targeting the OTHER
-        CLI. Appended to the injected /workspace/CLAUDE.md + AGENTS.md so it
-        reaches whichever harness runs (claude auto-loads CLAUDE.md, codex reads
-        AGENTS.md) - independent of --plugin-dir / entrypoint plugin discovery.
+    async def _install_baked_delegation_skill(
+        workspace: ManagedWorkspace, phase: ExecutablePhase
+    ) -> None:
+        """Install the baked delegation skill for a delegation-enabled phase.
+
+        Rides #772's ``skills add`` seam (harness-agnostic), sourced from the
+        image's baked ``delegation`` plugin instead of a registered/materialized
+        skill - the base-skill (tier 1) surfacing that #772 plan-1 does not yet
+        generalize. ``allow_delegation`` itself only stages both auths (see
+        ``_auth_staging_for``); this teaches the primary agent HOW to hand off to
+        the other CLI. No-op when the phase does not opt in.
         """
-        if not allow_delegation:
-            return ""
-        if provider == AgentProvider.CODEX:
-            return (
-                "\n## Delegation available\n"
-                "You may delegate a subtask one-shot to Claude Code (both auths are\n"
-                "staged here). Fuller guide: /opt/agentic/plugins/delegation/skills/"
-                "delegating-to-claude-p/SKILL.md.\n"
-                'Recipe: `claude -p --permission-mode bypassPermissions '
-                '--output-format stream-json --verbose "<task>"`.\n'
-            )
-        # Headless claude primary (provider claude); interactive is rejected at parse.
-        return (
-            "\n## Delegation available\n"
-            "You may delegate a subtask one-shot to OpenAI Codex (both auths are\n"
-            "staged here). Fuller guide: /opt/agentic/plugins/delegation/skills/"
-            "delegating-to-codex/SKILL.md.\n"
-            'Recipe: `codex exec --full-auto --json --skip-git-repo-check "<task>"`.\n'
+        cfg = phase.agent_config
+        if not cfg.allow_delegation:
+            return
+        # Install the skill teaching the PRIMARY agent to call the OTHER CLI.
+        skill_name = _DELEGATION_TARGET_SKILL.get(cfg.provider)
+        agent_key = _SKILLS_CLI_AGENT_KEYS.get(cfg.agent_id or cfg.provider)
+        if skill_name is None or agent_key is None:
+            # allow_delegation is validated headless-only (claude/codex); defensive.
+            return
+        result = await workspace.execute(
+            [
+                "skills",
+                "add",
+                f"{_DELEGATION_SKILL_ROOT}/{skill_name}",
+                "--agent",
+                agent_key,
+                "-y",
+            ],
+            timeout_seconds=_SKILL_INSTALL_TIMEOUT_SECONDS,
+            working_directory="/workspace",
         )
-
-    @staticmethod
-    def _context_files(repos: list[str], delegation_note: str) -> list[tuple[str, bytes]]:
-        """Build the (AGENTS.md, CLAUDE.md) inject list, identical content in both.
-
-        Returns an empty list when there is nothing to inject (no repos AND no
-        delegation note), which preserves today's behavior. When delegation is
-        on but there are no repos, the note alone still injects both files - so
-        the recipe reaches the agent even for ``requires_repos: false`` workflows.
-        """
-        context = WorkspaceProvisionHandler._generate_workspace_context(repos) + delegation_note
-        if not context:
-            return []
-        return [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
+        if result.exit_code != 0:
+            raise SkillInstallFailed(
+                skill_name, agent_key, result.exit_code, result.stderr or result.stdout or ""
+            )
+        logger.info(
+            "Installed baked delegation skill %s for agent %s in %s",
+            skill_name,
+            agent_key,
+            workspace.workspace_id,
+        )
 
     @staticmethod
     def _generate_workspace_context(repos: list[str]) -> str:

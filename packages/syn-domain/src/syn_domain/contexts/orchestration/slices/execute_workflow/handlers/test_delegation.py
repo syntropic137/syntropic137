@@ -5,6 +5,10 @@ from __future__ import annotations
 import pytest
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    AgentConfiguration,
+    ExecutablePhase,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseDefinition,
 )
@@ -92,37 +96,71 @@ def test_interactive_never_needs_claude_env() -> None:
     assert _auth_staging_for(AgentProvider.CLAUDE, True, True)[1] is False
 
 
-# === B4: delegation note (provider-aware, both directions) ===
+# === B4: baked delegation skill install (rides #772's `skills add`) ===
 
 
-def test_delegation_note_codex_primary_targets_claude() -> None:
-    note = WorkspaceProvisionHandler._delegation_note(AgentProvider.CODEX, True)
-    assert "claude -p" in note
-    assert "delegating-to-claude-p" in note
+class _FakeResult:
+    def __init__(self, exit_code: int = 0) -> None:
+        self.exit_code = exit_code
+        self.stdout = ""
+        self.stderr = ""
 
 
-def test_delegation_note_claude_primary_targets_codex() -> None:
-    note = WorkspaceProvisionHandler._delegation_note(AgentProvider.CLAUDE, True)
-    assert "codex exec" in note
-    assert "delegating-to-codex" in note
+class _RecordingWorkspace:
+    """Minimal workspace double that records `execute` calls."""
+
+    workspace_id = "ws-test"
+
+    def __init__(self, exit_code: int = 0) -> None:
+        self.calls: list[list[str]] = []
+        self._exit_code = exit_code
+
+    async def execute(
+        self,
+        command: list[str],
+        *,
+        timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+    ) -> _FakeResult:
+        self.calls.append(command)
+        return _FakeResult(self._exit_code)
 
 
-def test_no_delegation_note_when_disabled() -> None:
-    assert WorkspaceProvisionHandler._delegation_note(AgentProvider.CODEX, False) == ""
-    assert WorkspaceProvisionHandler._delegation_note(AgentProvider.CLAUDE, False) == ""
+def _phase(provider: str, allow_delegation: bool) -> ExecutablePhase:
+    return ExecutablePhase(
+        phase_id="p1",
+        name="p",
+        order=1,
+        agent_config=AgentConfiguration(provider=provider, allow_delegation=allow_delegation),
+    )
 
 
-# === B4 delivery integration: note reaches both files even with no repos ===
+async def test_codex_phase_installs_delegating_to_claude_skill() -> None:
+    ws = _RecordingWorkspace()
+    await WorkspaceProvisionHandler._install_baked_delegation_skill(
+        ws, _phase(AgentProvider.CODEX, True)
+    )  # type: ignore[arg-type]
+    assert len(ws.calls) == 1
+    cmd = ws.calls[0]
+    assert cmd[:2] == ["skills", "add"]
+    assert cmd[2] == "/opt/agentic/plugins/delegation/skills/delegating-to-claude-p"
+    assert cmd[3:5] == ["--agent", "codex"]
 
 
-def test_delegation_note_injected_into_both_files_no_repos() -> None:
-    note = WorkspaceProvisionHandler._delegation_note(AgentProvider.CODEX, True)
-    files = WorkspaceProvisionHandler._context_files([], note)
-    names = {name for name, _ in files}
-    assert names == {"AGENTS.md", "CLAUDE.md"}
-    for _, content in files:
-        assert b"claude -p" in content
+async def test_claude_phase_installs_delegating_to_codex_skill() -> None:
+    ws = _RecordingWorkspace()
+    await WorkspaceProvisionHandler._install_baked_delegation_skill(
+        ws, _phase(AgentProvider.CLAUDE, True)
+    )  # type: ignore[arg-type]
+    assert len(ws.calls) == 1
+    cmd = ws.calls[0]
+    assert cmd[2] == "/opt/agentic/plugins/delegation/skills/delegating-to-codex"
+    assert cmd[3:5] == ["--agent", "claude-code"]
 
 
-def test_no_files_injected_when_no_repos_and_no_delegation() -> None:
-    assert WorkspaceProvisionHandler._context_files([], "") == []
+async def test_no_install_when_delegation_disabled() -> None:
+    ws = _RecordingWorkspace()
+    await WorkspaceProvisionHandler._install_baked_delegation_skill(
+        ws, _phase(AgentProvider.CODEX, False)
+    )  # type: ignore[arg-type]
+    assert ws.calls == []
