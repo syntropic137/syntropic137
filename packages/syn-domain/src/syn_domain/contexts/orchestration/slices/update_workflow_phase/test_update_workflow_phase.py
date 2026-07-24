@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import ClaudePluginRef
+from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseDefinition,
     WorkflowClassification,
@@ -387,3 +389,81 @@ class TestPhaseProviderUpdate:
         phase = next(p for p in aggregate.phases if p.phase_id == "phase-1")
         assert phase.provider == AgentProvider.CODEX
         assert phase.prompt_template == "new prompt"
+
+    def test_provider_switch_to_headless_clears_stale_agent_id(self) -> None:
+        # Regression: switching an interactive phase (agent_id set) to a headless
+        # provider must drop agent_id, else AgentConfiguration.__post_init__ rejects
+        # the codex + non-codex-agent_id combo at execution.
+        agg = WorkflowTemplateAggregate()
+        agg._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id=_WORKFLOW_ID,
+                name="W",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="phase-1",
+                        name="p",
+                        order=1,
+                        prompt_template="orig",
+                        provider="claude-interactive",
+                        agent_id="gemini",
+                    )
+                ],
+            )
+        )
+        agg.mark_events_as_committed()
+        agg._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID,
+                phase_id="phase-1",
+                prompt_template="new",
+                provider="codex",
+            )
+        )
+        phase = next(p for p in agg.phases if p.phase_id == "phase-1")
+        assert phase.provider == AgentProvider.CODEX
+        assert phase.agent_id is None
+
+    def test_prompt_update_preserves_skills_and_plugins(self) -> None:
+        agg = WorkflowTemplateAggregate()
+        agg._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id=_WORKFLOW_ID,
+                name="W",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="phase-1",
+                        name="p",
+                        order=1,
+                        prompt_template="orig",
+                        skills=(
+                            SkillRef(
+                                skill_name="review", source_url="acme/skills", version="v1.0.0"
+                            ),
+                        ),
+                        claude_plugins=(
+                            ClaudePluginRef(
+                                name="sdlc", source_url="acme/plugins", version="v1.0.0"
+                            ),
+                        ),
+                    )
+                ],
+            )
+        )
+        agg.mark_events_as_committed()
+        agg._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID, phase_id="phase-1", prompt_template="new"
+            )
+        )
+        phase = next(p for p in agg.phases if p.phase_id == "phase-1")
+        assert len(phase.skills) == 1 and phase.skills[0].skill_name == "review"
+        assert len(phase.claude_plugins) == 1 and phase.claude_plugins[0].name == "sdlc"

@@ -212,3 +212,17 @@ async def test_delete_workflow_endpoint_already_archived() -> None:
     ):
         await delete_workflow_endpoint("wf-old")
     assert exc_info.value.status_code == 409
+
+
+def test_update_phase_request_rejects_unsupported_provider() -> None:
+    """The phase-update request validates provider against AgentProvider (codex review)."""
+    import pytest
+    from pydantic import ValidationError
+
+    from syn_api.routes.workflows.commands import UpdatePhasePromptRequest
+
+    with pytest.raises(ValidationError):
+        UpdatePhasePromptRequest(prompt_template="x", provider="not-a-provider")
+    # valid providers are accepted
+    assert UpdatePhasePromptRequest(prompt_template="x", provider="codex").provider == "codex"
+    assert UpdatePhasePromptRequest(prompt_template="x", provider=None).provider is None

@@ -40,6 +40,7 @@ def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> No
     phase[PhaseFields.PROMPT_TEMPLATE] = event_data.get("prompt_template")
     for event_key, phase_key in (
         ("model", "model"),
+        ("provider", "provider"),
         ("timeout_seconds", PhaseFields.TIMEOUT_SECONDS),
         ("allowed_tools", PhaseFields.ALLOWED_TOOLS),
     ):
@@ -61,7 +62,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 6  # Bumped: added requires_repos field (ADR-058 #666)
+    VERSION = 7  # Bumped: surface per-phase provider/agent_id + apply provider on phase update
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""

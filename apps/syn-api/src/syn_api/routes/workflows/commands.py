@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from syn_api._wiring import (
     ensure_connected,
@@ -26,6 +26,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
+from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
@@ -324,6 +325,20 @@ class UpdatePhasePromptRequest(BaseModel):
     provider: str | None = None
     timeout_seconds: int | None = None
     allowed_tools: list[str] | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, value: str | None) -> str | None:
+        """Reject unsupported provider values at the API boundary.
+
+        Without this an unknown provider (typo) persists, then execution silently
+        falls through to the Claude path while telemetry reports the bad value.
+        """
+        if value is not None and value not in set(AgentProvider):
+            allowed = ", ".join(sorted(AgentProvider))
+            msg = f"provider must be one of: {allowed}"
+            raise ValueError(msg)
+        return value
 
 
 # =============================================================================
