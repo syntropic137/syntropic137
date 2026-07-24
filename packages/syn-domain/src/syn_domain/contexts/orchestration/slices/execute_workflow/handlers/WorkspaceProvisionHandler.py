@@ -125,6 +125,21 @@ def _provisioned_agents(phase: ExecutablePhase) -> tuple[str, ...]:
     return ()
 
 
+def _auth_staging_for(
+    provider: str, allow_delegation: bool, is_interactive: bool
+) -> tuple[bool, bool]:
+    """Return ``(include_codex_auth, needs_claude_env)`` for a phase.
+
+    Delegation opt-in stages BOTH auths so the primary agent can shell out to
+    the other CLI; otherwise auth is scoped to the phase's single provider (the
+    codex ``~/.codex/auth.json`` file for codex phases, the claude env
+    otherwise). Interactive-tmux never uses the claude sidecar env.
+    """
+    include_codex_auth = allow_delegation or provider == AgentProvider.CODEX
+    needs_claude_env = not is_interactive and (allow_delegation or provider != AgentProvider.CODEX)
+    return include_codex_auth, needs_claude_env
+
+
 def _append_claude_plugin_dirs(
     claude_cmd: list[str],
     phase: ExecutablePhase,
@@ -332,10 +347,18 @@ class WorkspaceProvisionHandler:
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
         workspace = await workspace_cm.__aenter__()
         try:
+            include_codex_auth, _ = _auth_staging_for(
+                phase.agent_config.provider,
+                phase.agent_config.allow_delegation,
+                is_interactive=False,
+            )
             await self._hydrate_workspace(
                 workspace,
                 effective_repos,
-                include_codex_auth=phase.agent_config.provider == AgentProvider.CODEX,
+                include_codex_auth=include_codex_auth,
+                delegation_note=self._delegation_note(
+                    phase.agent_config.provider, phase.agent_config.allow_delegation
+                ),
             )
             await self._materialize_claude_plugins(workspace, phase)
             await self._inject_phase_artifacts(
@@ -362,6 +385,7 @@ class WorkspaceProvisionHandler:
         effective_repos: list[str],
         *,
         include_codex_auth: bool,
+        delegation_note: str = "",
     ) -> None:
         """Run setup phase and inject synthetic context files (ADR-058)."""
         from syn_adapters.workspace_backends.service import SetupPhaseSecrets
@@ -382,13 +406,13 @@ class WorkspaceProvisionHandler:
         # Both files are identical: direct @-imports of each repo's AGENTS.md and
         # CLAUDE.md. Direct imports keep repo content at L2 (not L3 via indirection),
         # preserving maximum @import depth for repo-internal context.
-        context = self._generate_workspace_context(effective_repos)
-        if context:
-            await workspace.inject_files(
-                [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
-            )
+        files = self._context_files(effective_repos, delegation_note)
+        if files:
+            await workspace.inject_files(files)
             logger.info(
-                "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(effective_repos)
+                "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s), delegation=%s)",
+                len(effective_repos),
+                bool(delegation_note),
             )
 
     async def _materialize_claude_plugins(
@@ -489,7 +513,11 @@ class WorkspaceProvisionHandler:
         # claude env creds; a codex phase must not receive CLAUDE_CODE_OAUTH_TOKEN /
         # ANTHROPIC_API_KEY (cross-provider secret exposure), so it gets an empty
         # agent env like the interactive path.
-        needs_claude_env = not is_interactive and phase.agent_config.provider != AgentProvider.CODEX
+        _, needs_claude_env = _auth_staging_for(
+            phase.agent_config.provider,
+            phase.agent_config.allow_delegation,
+            is_interactive=is_interactive,
+        )
         agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
         assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
@@ -556,6 +584,47 @@ class WorkspaceProvisionHandler:
             "https://github.com/org/repo-b/"   → "repo-b"
         """
         return url.rstrip("/").split("/")[-1].removesuffix(".git")
+
+    @staticmethod
+    def _delegation_note(provider: str, allow_delegation: bool) -> str:
+        """Delegation recipe for the phase's primary agent, targeting the OTHER
+        CLI. Appended to the injected /workspace/CLAUDE.md + AGENTS.md so it
+        reaches whichever harness runs (claude auto-loads CLAUDE.md, codex reads
+        AGENTS.md) - independent of --plugin-dir / entrypoint plugin discovery.
+        """
+        if not allow_delegation:
+            return ""
+        if provider == AgentProvider.CODEX:
+            return (
+                "\n## Delegation available\n"
+                "You may delegate a subtask one-shot to Claude Code (both auths are\n"
+                "staged here). Fuller guide: /opt/agentic/plugins/delegation/skills/"
+                "delegating-to-claude-p/SKILL.md.\n"
+                'Recipe: `claude -p --permission-mode bypassPermissions '
+                '--output-format stream-json --verbose "<task>"`.\n'
+            )
+        # Headless claude primary (provider claude); interactive is rejected at parse.
+        return (
+            "\n## Delegation available\n"
+            "You may delegate a subtask one-shot to OpenAI Codex (both auths are\n"
+            "staged here). Fuller guide: /opt/agentic/plugins/delegation/skills/"
+            "delegating-to-codex/SKILL.md.\n"
+            'Recipe: `codex exec --full-auto --json --skip-git-repo-check "<task>"`.\n'
+        )
+
+    @staticmethod
+    def _context_files(repos: list[str], delegation_note: str) -> list[tuple[str, bytes]]:
+        """Build the (AGENTS.md, CLAUDE.md) inject list, identical content in both.
+
+        Returns an empty list when there is nothing to inject (no repos AND no
+        delegation note), which preserves today's behavior. When delegation is
+        on but there are no repos, the note alone still injects both files - so
+        the recipe reaches the agent even for ``requires_repos: false`` workflows.
+        """
+        context = WorkspaceProvisionHandler._generate_workspace_context(repos) + delegation_note
+        if not context:
+            return []
+        return [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
 
     @staticmethod
     def _generate_workspace_context(repos: list[str]) -> str:
