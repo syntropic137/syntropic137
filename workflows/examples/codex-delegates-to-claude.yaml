@@ -1,0 +1,25 @@
+id: codex-delegates-to-claude
+name: Codex delegates a subtask to Claude
+description: A codex-primary phase that shells out to `claude -p` one-shot (opt-in delegation).
+type: research
+classification: simple
+requires_repos: false
+phases:
+  - id: build-and-delegate
+    name: Codex builds, delegates review to Claude
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - text
+    max_tokens: 4096
+    timeout_seconds: 600
+    agent:
+      provider: codex
+      allow_delegation: true
+    prompt_template: |
+      Implement palindrome.py with is_palindrome(s: str) -> bool. Then delegate a
+      code review to Claude Code with one shell command:
+      `claude -p --permission-mode bypassPermissions --output-format stream-json
+      --verbose "Review /workspace/palindrome.py for correctness; reply with a
+      one-line verdict"`. Print Claude's verdict, then a one-line summary.
