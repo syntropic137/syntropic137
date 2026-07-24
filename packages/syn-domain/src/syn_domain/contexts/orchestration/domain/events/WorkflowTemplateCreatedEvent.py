@@ -9,6 +9,9 @@ from pydantic import Field
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (  # noqa: TC001
     ClaudePluginRef,
 )
+from syn_domain.contexts.orchestration._shared.skill_ref import (  # noqa: TC001
+    SkillRef,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
@@ -64,3 +67,8 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
     # Workflow-scope claude plugin refs (issue #726, PR2). Defaults to an
     # empty list so older events without this field rehydrate cleanly.
     claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+
+    # Workflow-scope skill refs (issue #772). Additive alongside
+    # claude_plugins; defaults to an empty list so older events without this
+    # field rehydrate cleanly.
+    skills: list[SkillRef] = Field(default_factory=list)

@@ -1567,3 +1567,74 @@ class RemoveGlobalClaudePluginResponse(BaseModel):
 
     name: str
     status: str
+
+
+# ---------------------------------------------------------------------------
+# Skill response models (issue #772)
+# ---------------------------------------------------------------------------
+
+
+class SkillFilePayload(BaseModel):
+    """One file in the uploaded skill tree (``POST /skills/registrations``).
+
+    Mirrors ``ClaudePluginFileEntry``. ``content_base64`` is the base64-encoded
+    byte content; the API decodes it back into raw bytes before hashing and
+    uploading.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rel_path: str = Field(..., min_length=1, max_length=1024)
+    # WHY 96_000_000: comfortably above the legitimate per-tree decoded-size
+    # cap (MAX_SKILL_TREE_BYTES = 50 MiB in routes/skills.py) once base64
+    # expansion (~4/3) is accounted for, so the decoded-size check in
+    # `_decode_files` stays the meaningful gate -- this field bound only
+    # stops a client from forcing pydantic to hold an unbounded string
+    # before that check ever runs.
+    content_base64: str = Field(..., max_length=96_000_000)
+
+
+class RegisterSkillRequest(BaseModel):
+    """Request body for ``POST /skills/registrations`` (issue #772).
+
+    The CLI uploads the entire skill tree inline; the API hashes the
+    normalized tree, stores it via the storage port, and persists the
+    registration aggregate. Idempotent on existing
+    ``(source_url, version, skill_name)``. Unlike claude plugins, there is no
+    caller-supplied manifest: the SKILL.md frontmatter at the tree root is the
+    manifest.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_url: str = Field(..., min_length=1, max_length=2048)
+    version: str = Field(..., min_length=1, max_length=256)
+    skill_name: str | None = Field(
+        default=None,
+        max_length=256,
+        description=(
+            "Display name override; when omitted the SKILL.md frontmatter's 'name' is used."
+        ),
+    )
+    # WHY max_length=10_000: matches MAX_SKILL_TREE_FILES in routes/skills.py
+    # -- the route already rejects a longer list at runtime (413), but a
+    # matching model bound rejects it at validation time (422) before the
+    # request body is even fully materialized into domain objects.
+    files: list[SkillFilePayload] = Field(
+        ...,
+        min_length=1,
+        max_length=10_000,
+        description="Every file in the skill tree (base64-encoded).",
+    )
+
+
+class SkillRegistrationResponse(BaseModel):
+    """Response payload for ``POST /skills/registrations``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skill_name: str
+    source_url: str
+    version: str
+    resolved_sha: str = Field(..., description="Content-addressed sha of the normalized tree.")
+    tree_storage_prefix: str

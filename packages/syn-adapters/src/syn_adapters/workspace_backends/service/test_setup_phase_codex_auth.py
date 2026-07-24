@@ -148,12 +148,14 @@ async def test_cleanup_runs_when_codex_injection_fails() -> None:
     secrets = SetupPhaseSecrets.for_testing(codex_auth_json='{"a":1}')
     cleanup = AsyncMock()
 
-    with patch(
-        "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
-        new=cleanup,
+    with (
+        patch(
+            "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
+            new=cleanup,
+        ),
+        pytest.raises(RuntimeError, match="inject boom"),
     ):
-        with pytest.raises(RuntimeError, match="inject boom"):
-            await run_setup_phase(workspace, secrets)
+        await run_setup_phase(workspace, secrets)
 
     cleanup.assert_awaited_once_with(workspace)
 
@@ -167,12 +169,14 @@ async def test_lingering_codex_credential_fails_closed() -> None:
     workspace.execute = AsyncMock(side_effect=_execute_side_effect(0, staged_present=True))
     secrets = SetupPhaseSecrets.for_testing(codex_auth_json='{"a":1}')
 
-    with patch(
-        "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
-        new=AsyncMock(),
+    with (
+        patch(
+            "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
+            new=AsyncMock(),
+        ),
+        pytest.raises(RuntimeError, match="unable to remove staged codex credential"),
     ):
-        with pytest.raises(RuntimeError, match="unable to remove staged codex credential"):
-            await run_setup_phase(workspace, secrets)
+        await run_setup_phase(workspace, secrets)
 
 
 @pytest.mark.unit

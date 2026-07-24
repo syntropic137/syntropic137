@@ -422,6 +422,7 @@ async def test_agent_provider_reaches_executable_phase() -> None:
     class _StubTemplate:
         phases = definition.get_domain_phases()
         claude_plugins = ()
+        skills = ()
 
     handler = ExecuteWorkflowHandler(
         processor=MagicMock(),
@@ -586,6 +587,7 @@ async def test_codex_provider_reaches_executable_phase_without_agent_id_coercion
     class _StubTemplate:
         phases = definition.get_domain_phases()
         claude_plugins = ()
+        skills = ()  # #772: _get_executable_phases reads workflow.skills
 
     handler = ExecuteWorkflowHandler(
         processor=MagicMock(),
@@ -663,7 +665,9 @@ def test_codex_demo_example_yaml_loads_and_validates() -> None:
     assert phase.agent is not None
     assert phase.agent.provider == "codex"
     assert phase.agent.agent_id is None
-    assert phase.agent.model == "gpt-5.6"
+    # No model override: codex uses its ChatGPT-account default (a claude-style
+    # id like "gpt-5.6" is rejected by codex, so codex-demo.yaml omits it).
+    assert phase.agent.model is None
 
     domain_phase = definition.get_domain_phases()[0]
     assert domain_phase.provider == "codex"
