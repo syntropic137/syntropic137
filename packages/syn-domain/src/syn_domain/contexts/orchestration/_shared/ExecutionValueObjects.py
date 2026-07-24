@@ -64,6 +64,9 @@ class AgentConfiguration:
     # distinguishable from an explicit "claude" pane choice. Ignored by the
     # default claude -p / codex docker path. See docs/plans/multi-agent-workspaces.md.
     agent_id: str | None = None
+    # When true, both agent auths are staged so this phase's primary agent may
+    # delegate one-shot to the other CLI. Default false = single-provider isolation.
+    allow_delegation: bool = False
 
     def __post_init__(self) -> None:
         """Reject nonsensical provider/agent_id combinations.

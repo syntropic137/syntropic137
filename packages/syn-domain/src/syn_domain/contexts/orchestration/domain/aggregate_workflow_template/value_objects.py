@@ -124,6 +124,11 @@ class PhaseDefinition(BaseModel):
     this to "claude" only when it needs to name a pane. Ignored by the
     default claude -p / codex Docker path."""
 
+    allow_delegation: bool = False
+    """When true, both agent auths are staged so the phase's primary agent can
+    delegate one-shot to the other CLI. Headless providers only. Sourced from
+    the workflow YAML ``agent.allow_delegation`` field."""
+
     # Workflow-author-declared plugin refs at phase scope (issue #726). PR1 carries
     # them through the YAML to the domain; PR2's resolution service rewrites them
     # into ResolvedClaudePlugin entries on ExecutablePhase.

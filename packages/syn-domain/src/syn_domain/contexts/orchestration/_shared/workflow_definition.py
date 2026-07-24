@@ -193,15 +193,26 @@ class AgentYamlDefinition(BaseModel):
     model: str | None = None
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
 
+    allow_delegation: bool = False
+    """When true, stage BOTH agent auths in this phase's workspace so the
+    primary agent can shell out one-shot to the other CLI (codex -> ``claude
+    -p`` or claude -> ``codex exec``). Headless providers only. Default false
+    preserves single-provider isolation. See
+    docs/superpowers/plans/2026-07-23-codex-claude-delegation.md."""
+
     @model_validator(mode="after")
     def _validate_provider_agent_combo(self) -> AgentYamlDefinition:
-        """Reject a codex provider paired with an unrelated agent_id.
+        """Reject a codex provider paired with an unrelated agent_id, and
+        reject delegation on the interactive-tmux path.
 
         ``provider="codex"`` selects the programmatic codex harness on the
         docker path; ``agent_id`` only means "which tmux pane" on the
         ``claude-interactive`` path. Omitted or explicitly ``"codex"`` are
         the only sensible values here - anything else (e.g. ``"gemini"``)
         is a contradiction we reject at parse time.
+
+        ``allow_delegation`` is headless-only: the interactive-tmux path has a
+        different image/auth model that this feature does not verify.
         """
         if self.provider == AgentProvider.CODEX and self.agent_id not in (
             None,
@@ -211,6 +222,13 @@ class AgentYamlDefinition(BaseModel):
                 "agent.provider='codex' selects the programmatic codex harness; "
                 "agent_id must be omitted or 'codex' (it does not select a tmux "
                 "pane here)."
+            )
+            raise ValueError(msg)
+        if self.allow_delegation and self.provider == AgentProvider.CLAUDE_INTERACTIVE:
+            msg = (
+                "agent.allow_delegation is only supported on the headless "
+                "providers ('claude', 'codex'); the interactive-tmux path has a "
+                "different image/auth model. Remove allow_delegation or switch provider."
             )
             raise ValueError(msg)
         return self
@@ -282,6 +300,7 @@ class PhaseYamlDefinition(BaseModel):
         provider = self.agent.provider if self.agent else None
         agent_id = self.agent.agent_id if self.agent else None
         agent_model = self.agent.model if self.agent else None
+        allow_delegation = self.agent.allow_delegation if self.agent else False
         model = self.model or agent_model
 
         return PhaseDefinition(
@@ -300,6 +319,7 @@ class PhaseYamlDefinition(BaseModel):
             model=model,
             provider=provider,
             agent_id=agent_id,
+            allow_delegation=allow_delegation,
             claude_plugins=tuple(self.claude_plugins),
         )
 

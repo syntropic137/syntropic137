@@ -126,6 +126,9 @@ def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDe
         allowed_tools=_coalesce(data["allowed_tools"], list(phase.allowed_tools)),
         argument_hint=phase.argument_hint,
         model=_coalesce(data["model"], phase.model),
+        provider=phase.provider,
+        agent_id=phase.agent_id,
+        allow_delegation=phase.allow_delegation,
     )
 
 

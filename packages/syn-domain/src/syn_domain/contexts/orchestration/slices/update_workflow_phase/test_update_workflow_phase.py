@@ -26,6 +26,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent i
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
+from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
@@ -330,3 +331,44 @@ class TestWorkflowPhaseUpdatedEvent:
 
         with pytest.raises(ValidationError):
             event.prompt_template = "Changed"  # type: ignore[misc]
+
+
+class TestPhaseUpdatePreservesDelegationFields:
+    """Regression: prompt/model edits must not wipe provider/agent_id/allow_delegation."""
+
+    def test_prompt_update_preserves_provider_agentid_and_delegation(self) -> None:
+        agg = WorkflowTemplateAggregate()
+        agg._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id="w1",
+                name="W",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="p1",
+                        name="p",
+                        order=1,
+                        prompt_template="orig",
+                        provider=AgentProvider.CODEX,
+                        agent_id=AgentProvider.CODEX,
+                        allow_delegation=True,
+                    )
+                ],
+            )
+        )
+        agg.mark_events_as_committed()
+        agg._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id="w1",
+                phase_id="p1",
+                prompt_template="new",
+            )
+        )
+        p = next(x for x in agg.phases if x.phase_id == "p1")
+        assert p.provider == AgentProvider.CODEX
+        assert p.agent_id == AgentProvider.CODEX
+        assert p.allow_delegation is True
+        assert p.prompt_template == "new"
