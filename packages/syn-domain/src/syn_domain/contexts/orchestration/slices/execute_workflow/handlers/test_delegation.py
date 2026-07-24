@@ -126,9 +126,7 @@ class _RecordingWorkspace:
         return _FakeResult(self._exit_code)
 
 
-def _phase(
-    provider: str, allow_delegation: bool, agent_id: str | None = None
-) -> ExecutablePhase:
+def _phase(provider: str, allow_delegation: bool, agent_id: str | None = None) -> ExecutablePhase:
     return ExecutablePhase(
         phase_id="p1",
         name="p",

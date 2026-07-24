@@ -118,6 +118,7 @@ def _skills_cli_agent_selector(provider: str, agent_id: str | None) -> str:
         return agent_id or AgentProvider.CLAUDE
     return provider
 
+
 # Callable types for dependency injection
 PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, object]],
