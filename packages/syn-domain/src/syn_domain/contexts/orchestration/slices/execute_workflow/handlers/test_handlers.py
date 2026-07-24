@@ -1556,7 +1556,8 @@ def _make_resolved_skill(name: str = "code-review", resolved_sha: str = "sha-1")
 
 def _make_skill_phase(
     *,
-    agent_id: str = "codex",
+    provider: str = "codex",
+    agent_id: str | None = None,
     skills: tuple[object, ...],
 ) -> object:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -1569,7 +1570,7 @@ def _make_skill_phase(
         name="Phase 1",
         order=1,
         description="",
-        agent_config=AgentConfiguration(agent_id=agent_id),
+        agent_config=AgentConfiguration(provider=provider, agent_id=agent_id),
         prompt_template="Do the task",
         output_artifact_type="text",
         skills=skills,
@@ -1583,6 +1584,24 @@ def _make_skill_todo() -> object:
         execution_id="exec-1",
         action=TodoAction.PROVISION_WORKSPACE,
         phase_id="phase-1",
+    )
+
+
+def test_skills_cli_agent_selector_keys_by_provider_for_headless() -> None:
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        _skills_cli_agent_selector,
+    )
+    from syn_shared.agents import AgentProvider
+
+    # Headless: provider drives the harness; agent_id is ignored.
+    assert _skills_cli_agent_selector(AgentProvider.CLAUDE, None) == AgentProvider.CLAUDE
+    assert _skills_cli_agent_selector(AgentProvider.CODEX, None) == AgentProvider.CODEX
+    # Headless with a stray agent_id: provider still wins (the bug fix).
+    assert _skills_cli_agent_selector(AgentProvider.CLAUDE, "codex") == AgentProvider.CLAUDE
+    # Interactive-tmux: agent_id names the pane.
+    assert _skills_cli_agent_selector(AgentProvider.CLAUDE_INTERACTIVE, "codex") == "codex"
+    assert (
+        _skills_cli_agent_selector(AgentProvider.CLAUDE_INTERACTIVE, None) == AgentProvider.CLAUDE
     )
 
 
@@ -1614,7 +1633,7 @@ class TestWorkspaceProvisionSkills:
         handler, _ = _make_skill_provision_handler(
             workspace=workspace, skill_materializer=materializer
         )
-        phase = _make_skill_phase(agent_id="codex", skills=(skill,))
+        phase = _make_skill_phase(provider="codex", skills=(skill,))
         todo = _make_skill_todo()
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
@@ -1659,7 +1678,7 @@ class TestWorkspaceProvisionSkills:
         handler, _ = _make_skill_provision_handler(
             workspace=workspace, skill_materializer=materializer
         )
-        phase = _make_skill_phase(agent_id="codex", skills=(skill,))
+        phase = _make_skill_phase(provider="codex", skills=(skill,))
         todo = _make_skill_todo()
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
@@ -1683,7 +1702,7 @@ class TestWorkspaceProvisionSkills:
 
         skill = _make_resolved_skill()
         handler, _ = _make_skill_provision_handler(workspace=workspace, skill_materializer=None)
-        phase = _make_skill_phase(agent_id="codex", skills=(skill,))
+        phase = _make_skill_phase(provider="codex", skills=(skill,))
         todo = _make_skill_todo()
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
@@ -1715,7 +1734,8 @@ class TestWorkspaceProvisionSkills:
         handler, _ = _make_skill_provision_handler(
             workspace=workspace, skill_materializer=materializer
         )
-        phase = _make_skill_phase(agent_id="mystery", skills=(skill,))
+        # An unsupported provider yields no skills-cli agent key (headless keys by provider).
+        phase = _make_skill_phase(provider="mystery", skills=(skill,))
         todo = _make_skill_todo()
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
