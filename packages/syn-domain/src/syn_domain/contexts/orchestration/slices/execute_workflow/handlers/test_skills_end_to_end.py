@@ -146,7 +146,8 @@ async def test_skills_pipeline_end_to_end_registration_to_install() -> None:
         name="Review",
         order=1,
         description="",
-        agent_config=AgentConfiguration(agent_id=phase_def.agent_id or "claude"),
+        # Headless codex phase: skills-cli agent key derives from provider.
+        agent_config=AgentConfiguration(provider=phase_def.provider or "codex"),
         prompt_template="Review this.",
         output_artifact_type="text",
         skills=resolved_skills,
