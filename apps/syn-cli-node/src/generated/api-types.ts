@@ -3080,6 +3080,10 @@ export interface components {
             argument_hint?: string | null;
             /** Model */
             model?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Agent Id */
+            agent_id?: string | null;
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {

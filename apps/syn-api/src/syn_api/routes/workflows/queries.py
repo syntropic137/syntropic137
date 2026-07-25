@@ -62,6 +62,8 @@ class PhaseDefinition(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     argument_hint: str | None = None
     model: str | None = None
+    provider: str | None = None
+    agent_id: str | None = None
 
 
 class WorkflowResponse(BaseModel):
@@ -548,6 +550,8 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
                 allowed_tools=list(p.allowed_tools),
                 argument_hint=p.argument_hint,
                 model=p.model,
+                provider=p.provider,
+                agent_id=p.agent_id,
             )
             for p in detail.phases
         ],
