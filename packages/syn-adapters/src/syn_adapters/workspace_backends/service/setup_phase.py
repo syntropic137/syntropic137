@@ -29,6 +29,7 @@ from syn_shared.env_constants import (
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
@@ -108,29 +109,81 @@ async def run_setup_phase(
         base_path="/workspace",
     )
 
-    # Run setup script WITH secrets
-    logger.info("Running setup phase with secrets (workspace=%s)", ws.workspace_id)
-    from syn_shared.settings import get_settings
+    try:
+        # Stage the codex auth file INSIDE the try so the finally-block cleanup
+        # always runs even if this injection raises. The docker copy path IGNORES
+        # base_path (it always writes under the /workspace mount), so we cannot
+        # inject straight to ~/.codex; we stage it under .setup/ and the setup
+        # script (SetupPhaseSecrets._append_codex_auth) relocates it to
+        # ~/.codex/auth.json (0600) and removes the staged copy. The secret
+        # contents never appear in the setup script text (only the file carries them).
+        if secrets.codex_auth_json:
+            await ws.inject_files(
+                [(".setup/codex-auth.json", secrets.codex_auth_json.encode())],
+                base_path="/workspace",
+            )
 
-    result = await ws.execute(
-        ["bash", "/workspace/.setup/setup.sh"],
-        environment=setup_env,
-        timeout_seconds=get_settings().setup_phase_timeout_seconds,
-    )
+        # Run setup script WITH secrets
+        logger.info("Running setup phase with secrets (workspace=%s)", ws.workspace_id)
+        from syn_shared.settings import get_settings
 
-    if result.exit_code != 0:
-        logger.error(
-            "Setup phase failed (exit=%d): %s",
-            result.exit_code,
-            result.stderr,
+        result = await ws.execute(
+            ["bash", "/workspace/.setup/setup.sh"],
+            environment=setup_env,
+            timeout_seconds=get_settings().setup_phase_timeout_seconds,
         )
+
+        if result.exit_code != 0:
+            logger.error(
+                "Setup phase failed (exit=%d): %s",
+                result.exit_code,
+                result.stderr,
+            )
+
         return result
+    finally:
+        try:
+            await clear_secrets(ws)
+        finally:
+            # Runs even if clear_secrets raised. Fail-closed: guarantee no codex
+            # credential lingers under /workspace, or raise a security failure.
+            if secrets.codex_auth_json:
+                await _assert_codex_credential_removed(ws)
+        logger.info(
+            "Setup phase complete, transient material cleared (workspace=%s)", ws.workspace_id
+        )
 
-    # Clear secrets from environment
-    await clear_secrets(ws)
 
-    logger.info("Setup phase complete, secrets cleared (workspace=%s)", ws.workspace_id)
-    return result
+_CODEX_STAGED_AUTH = "/workspace/.setup/codex-auth.json"
+
+
+async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
+    """Guarantee no staged codex credential lingers under /workspace, or raise.
+
+    ``clear_secrets`` removes /workspace/.setup, but if that cleanup failed the
+    staged ``codex-auth.json`` could remain readable by the agent. Check,
+    force-remove, and RE-VERIFY. If the credential still exists we FAIL CLOSED
+    (raise) so a lingering secret is never silently reported as "cleared".
+    """
+    # `test -e <path>`: exit 0 == present, nonzero == gone.
+    present = await ws.execute(["sh", "-c", f"test -e {_CODEX_STAGED_AUTH}"], timeout_seconds=5)
+    if present.exit_code != 0:
+        return
+
+    logger.error(
+        "SECURITY: staged codex credential still present under /workspace after "
+        "cleanup (workspace=%s); force-removing",
+        ws.workspace_id,
+    )
+    await ws.execute(["rm", "-f", _CODEX_STAGED_AUTH], timeout_seconds=5)
+
+    recheck = await ws.execute(["sh", "-c", f"test -e {_CODEX_STAGED_AUTH}"], timeout_seconds=5)
+    if recheck.exit_code == 0:
+        msg = (
+            f"SECURITY: unable to remove staged codex credential {_CODEX_STAGED_AUTH} "
+            f"(workspace={ws.workspace_id})"
+        )
+        raise RuntimeError(msg)
 
 
 async def clear_secrets(workspace: object) -> None:
@@ -170,10 +223,17 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
         [(".cleanup/clear.sh", clear_script.encode())],
         base_path="/workspace",
     )
-    await ws.execute(
+    cleanup = await ws.execute(
         ["bash", "/workspace/.cleanup/clear.sh"],
         timeout_seconds=10,
     )
+    if cleanup.exit_code != 0:
+        logger.warning(
+            "Secret cleanup script exited non-zero (exit=%d, workspace=%s): %s",
+            cleanup.exit_code,
+            ws.workspace_id,
+            cleanup.stderr,
+        )
 
     # Clean up the cleanup script too
     await ws.execute(

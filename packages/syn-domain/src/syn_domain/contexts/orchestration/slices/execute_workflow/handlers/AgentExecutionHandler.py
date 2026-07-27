@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    CodexStreamProcessor,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
     StreamResult,
@@ -25,6 +28,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker i
 from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
 )
+from syn_shared.agents import AgentProvider, AgentRunner
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -114,6 +118,18 @@ def _detect_exit_code(
     return 0
 
 
+def _resolve_final_totals(
+    stream_result: StreamResult, tokens: TokenAccumulator
+) -> tuple[int, int, int, int]:
+    """Prefer authoritative result-event totals over accumulated per-turn counts."""
+    return (
+        stream_result.result_input_tokens or tokens.input_tokens,
+        stream_result.result_output_tokens or tokens.output_tokens,
+        stream_result.result_cache_creation or tokens.cache_creation_tokens,
+        stream_result.result_cache_read or tokens.cache_read_tokens,
+    )
+
+
 class AgentExecutionResult:
     """Result of agent execution."""
 
@@ -155,7 +171,8 @@ class AgentExecutionHandler:
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,
-        agent_id: str = "claude",
+        agent_id: str = AgentProvider.CLAUDE,
+        runner: AgentRunner = AgentRunner.CLAUDE,
     ) -> AgentExecutionResult:
         """Run agent in workspace and stream output.
 
@@ -192,7 +209,46 @@ class AgentExecutionHandler:
                 agent_id=agent_id,
             )
 
-        processor = EventStreamProcessor(
+        return await self._run_headless(
+            runner=runner,
+            todo=todo,
+            workspace=workspace,
+            agent_env=agent_env,
+            claude_cmd=claude_cmd,
+            session_id=session_id,
+            agent_model=agent_model,
+            timeout_seconds=timeout_seconds,
+            collector=collector,
+            tokens=tokens,
+            subagents=subagents,
+        )
+
+    def _select_stream_processor(
+        self,
+        *,
+        runner: AgentRunner,
+        tokens: TokenAccumulator,
+        subagents: SubagentTracker,
+        todo: TodoItem,
+        workspace: ManagedWorkspace,
+        session_id: str,
+        agent_model: str,
+        collector: ObservabilityCollector | None,
+    ) -> EventStreamProcessor | CodexStreamProcessor:
+        """Pick the codex or claude stream processor for a headless phase."""
+        assert todo.phase_id is not None
+        if runner == AgentRunner.CODEX:
+            assert collector is not None
+            return CodexStreamProcessor(
+                tokens=tokens,
+                collector=collector,
+                controller=self._controller,
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                session_id=session_id,
+                agent_model=agent_model,
+            )
+        return EventStreamProcessor(
             tokens=tokens,
             subagents=subagents,
             observability=None,  # Not used when collector is provided
@@ -201,6 +257,34 @@ class AgentExecutionHandler:
             phase_id=todo.phase_id,
             session_id=session_id,
             workspace_id=getattr(workspace, "id", None),
+            agent_model=agent_model,
+            collector=collector,
+        )
+
+    async def _run_headless(
+        self,
+        *,
+        runner: AgentRunner,
+        todo: TodoItem,
+        workspace: ManagedWorkspace,
+        agent_env: dict[str, str],
+        claude_cmd: list[str],
+        session_id: str,
+        agent_model: str,
+        timeout_seconds: int,
+        collector: ObservabilityCollector | None,
+        tokens: TokenAccumulator,
+        subagents: SubagentTracker,
+    ) -> AgentExecutionResult:
+        """Stream a headless (claude -p / codex exec) phase and build its result."""
+        assert todo.phase_id is not None
+        processor = self._select_stream_processor(
+            runner=runner,
+            tokens=tokens,
+            subagents=subagents,
+            todo=todo,
+            workspace=workspace,
+            session_id=session_id,
             agent_model=agent_model,
             collector=collector,
         )
@@ -215,9 +299,20 @@ class AgentExecutionHandler:
         )
 
         exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
+        if (
+            runner == AgentRunner.CODEX
+            and stream_result.error_reason is not None
+            and exit_code == 0
+        ):
+            # The codex parser reserves error_reason for a BROKEN stream
+            # (malformed JSON / missing terminal turn.completed); force a
+            # non-zero phase exit even when the process exit was 0.
+            exit_code = 1
 
-        # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2)
-        if collector is not None:
+        # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2).
+        # The codex path already emits its summary inside CodexStreamProcessor
+        # (single-layer), so the handler skips it for runner == "codex".
+        if collector is not None and runner != AgentRunner.CODEX:
             await collector.record_session_summary(
                 total_cost_usd=stream_result.total_cost_usd,
                 input_tokens=stream_result.result_input_tokens,
@@ -228,11 +323,9 @@ class AgentExecutionHandler:
                 duration_ms=stream_result.duration_ms,
             )
 
-        # Prefer result event totals (authoritative) over accumulated per-turn counts
-        final_input = stream_result.result_input_tokens or tokens.input_tokens
-        final_output = stream_result.result_output_tokens or tokens.output_tokens
-        final_cache_creation = stream_result.result_cache_creation or tokens.cache_creation_tokens
-        final_cache_read = stream_result.result_cache_read or tokens.cache_read_tokens
+        final_input, final_output, final_cache_creation, final_cache_read = _resolve_final_totals(
+            stream_result, tokens
+        )
 
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -263,7 +356,7 @@ class AgentExecutionHandler:
         session_id: str,
         timeout_seconds: int,
         collector: ObservabilityCollector | None,
-        agent_id: str = "claude",
+        agent_id: str = AgentProvider.CLAUDE,
     ) -> AgentExecutionResult:
         """Drive a claude-interactive phase through send_message/await_completion.
 

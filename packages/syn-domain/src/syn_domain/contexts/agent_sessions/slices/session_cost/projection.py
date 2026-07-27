@@ -186,6 +186,7 @@ class SessionCostProjection:
             output_tokens=output_tokens,
             cache_creation=cache_creation,
             cache_read=cache_read,
+            model=data.get("model"),
         )
         session_cost.token_cost_usd += token_cost
         session_cost.total_cost_usd += token_cost

@@ -243,6 +243,146 @@ class TestAgentExecutionHandler:
             duration_ms=48000,
         )
 
+    @pytest.mark.anyio
+    async def test_codex_runner_uses_codex_stream_processor_only(self) -> None:
+        """Codex runner selects its parser and preserves the existing stream call."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        collector = AsyncMock()
+        stream_result = StreamResult(
+            line_count=3,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            result_input_tokens=12,
+            result_output_tokens=7,
+        )
+
+        with (
+            patch(
+                "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+            ) as mock_codex_processor,
+            patch(
+                "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.EventStreamProcessor"
+            ) as mock_claude_processor,
+        ):
+            mock_codex_processor.return_value.process_stream = AsyncMock(return_value=stream_result)
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                ),
+                workspace=workspace,
+                agent_env={"CODEX_HOME": "/home/agent/.codex"},
+                claude_cmd=["codex", "exec", "--json", "do work"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=collector,
+                runner="codex",
+            )
+
+        mock_codex_processor.assert_called_once()
+        mock_claude_processor.assert_not_called()
+        workspace.stream.assert_called_once_with(
+            ["codex", "exec", "--json", "do work"],
+            timeout_seconds=300,
+            environment={"CODEX_HOME": "/home/agent/.codex"},
+        )
+        assert result.command.input_tokens == 12
+        assert result.command.output_tokens == 7
+
+    @pytest.mark.anyio
+    async def test_broken_codex_stream_forces_nonzero_exit(self) -> None:
+        """Parser-level stream failure overrides a clean process exit for Codex."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        collector = AsyncMock()
+        stream_result = StreamResult(
+            line_count=1,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            error_reason="missing terminal turn.completed",
+        )
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+        ) as mock_processor:
+            mock_processor.return_value.process_stream = AsyncMock(return_value=stream_result)
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                ),
+                workspace=workspace,
+                agent_env={},
+                claude_cmd=["codex", "exec", "--json", "do work"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=collector,
+                runner="codex",
+            )
+
+        assert result.command.exit_code == 1
+
+    @pytest.mark.anyio
+    async def test_clean_codex_stream_keeps_zero_exit_and_one_summary(self) -> None:
+        """Codex processor owns the sole session summary emission."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        collector = AsyncMock()
+        stream_result = StreamResult(
+            line_count=3,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            result_input_tokens=12,
+            result_output_tokens=7,
+        )
+
+        async def process_stream(*_args: object) -> StreamResult:
+            await collector.record_session_summary(
+                total_cost_usd=0.01,
+                input_tokens=12,
+                output_tokens=7,
+                cache_creation=0,
+                cache_read=0,
+                num_turns=1,
+                duration_ms=25,
+                agent_id=None,
+            )
+            return stream_result
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+        ) as mock_processor:
+            mock_processor.return_value.process_stream = process_stream
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                ),
+                workspace=workspace,
+                agent_env={},
+                claude_cmd=["codex", "exec", "--json", "do work"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=collector,
+                runner="codex",
+            )
+
+        assert result.command.exit_code == 0
+        collector.record_session_summary.assert_awaited_once()
+
     @staticmethod
     def _interactive_workspace(driver: MagicMock) -> MagicMock:
         """Workspace whose isolation adapter exposes provider_handle()."""
@@ -1416,7 +1556,8 @@ def _make_resolved_skill(name: str = "code-review", resolved_sha: str = "sha-1")
 
 def _make_skill_phase(
     *,
-    agent_id: str = "codex",
+    provider: str = "codex",
+    agent_id: str | None = None,
     skills: tuple[object, ...],
 ) -> object:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -1429,7 +1570,7 @@ def _make_skill_phase(
         name="Phase 1",
         order=1,
         description="",
-        agent_config=AgentConfiguration(agent_id=agent_id),
+        agent_config=AgentConfiguration(provider=provider, agent_id=agent_id),
         prompt_template="Do the task",
         output_artifact_type="text",
         skills=skills,
@@ -1443,6 +1584,24 @@ def _make_skill_todo() -> object:
         execution_id="exec-1",
         action=TodoAction.PROVISION_WORKSPACE,
         phase_id="phase-1",
+    )
+
+
+def test_skills_cli_agent_selector_keys_by_provider_for_headless() -> None:
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        _skills_cli_agent_selector,
+    )
+    from syn_shared.agents import AgentProvider
+
+    # Headless: provider drives the harness; agent_id is ignored.
+    assert _skills_cli_agent_selector(AgentProvider.CLAUDE, None) == AgentProvider.CLAUDE
+    assert _skills_cli_agent_selector(AgentProvider.CODEX, None) == AgentProvider.CODEX
+    # Headless with a stray agent_id: provider still wins (the bug fix).
+    assert _skills_cli_agent_selector(AgentProvider.CLAUDE, "codex") == AgentProvider.CLAUDE
+    # Interactive-tmux: agent_id names the pane.
+    assert _skills_cli_agent_selector(AgentProvider.CLAUDE_INTERACTIVE, "codex") == "codex"
+    assert (
+        _skills_cli_agent_selector(AgentProvider.CLAUDE_INTERACTIVE, None) == AgentProvider.CLAUDE
     )
 
 
@@ -1474,7 +1633,7 @@ class TestWorkspaceProvisionSkills:
         handler, _ = _make_skill_provision_handler(
             workspace=workspace, skill_materializer=materializer
         )
-        phase = _make_skill_phase(agent_id="codex", skills=(skill,))
+        phase = _make_skill_phase(provider="codex", skills=(skill,))
         todo = _make_skill_todo()
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
@@ -1519,7 +1678,7 @@ class TestWorkspaceProvisionSkills:
         handler, _ = _make_skill_provision_handler(
             workspace=workspace, skill_materializer=materializer
         )
-        phase = _make_skill_phase(agent_id="codex", skills=(skill,))
+        phase = _make_skill_phase(provider="codex", skills=(skill,))
         todo = _make_skill_todo()
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
@@ -1543,7 +1702,7 @@ class TestWorkspaceProvisionSkills:
 
         skill = _make_resolved_skill()
         handler, _ = _make_skill_provision_handler(workspace=workspace, skill_materializer=None)
-        phase = _make_skill_phase(agent_id="codex", skills=(skill,))
+        phase = _make_skill_phase(provider="codex", skills=(skill,))
         todo = _make_skill_todo()
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
@@ -1575,7 +1734,8 @@ class TestWorkspaceProvisionSkills:
         handler, _ = _make_skill_provision_handler(
             workspace=workspace, skill_materializer=materializer
         )
-        phase = _make_skill_phase(agent_id="mystery", skills=(skill,))
+        # An unsupported provider yields no skills-cli agent key (headless keys by provider).
+        phase = _make_skill_phase(provider="mystery", skills=(skill,))
         todo = _make_skill_todo()
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:

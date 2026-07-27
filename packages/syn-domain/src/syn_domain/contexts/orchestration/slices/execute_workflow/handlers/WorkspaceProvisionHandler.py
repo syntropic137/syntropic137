@@ -26,6 +26,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     WorkspaceMisconfiguredError,
 )
+from syn_shared.agents import AgentProvider
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_ANTHROPIC_BASE_URL,
@@ -93,6 +94,22 @@ _SKILLS_CLI_AGENT_KEYS: dict[str, str] = {
 
 _SKILL_INSTALL_TIMEOUT_SECONDS = 120
 
+
+def _skills_cli_agent_selector(provider: str, agent_id: str | None) -> str:
+    """Skills-CLI agent-key source for a phase.
+
+    Interactive-tmux phases key by the pane's ``agent_id``; every headless phase
+    keys by ``provider`` (``agent_id`` is meaningless off the interactive path).
+    Keying by ``agent_id`` unconditionally would install skills for the wrong
+    harness when a headless phase carries a stray ``agent_id`` (e.g.
+    ``provider="claude"`` with ``agent_id="codex"``, which YAML validation
+    currently permits): the phase runs ``claude -p`` but skills would target codex.
+    """
+    if provider == AgentProvider.CLAUDE_INTERACTIVE:
+        return agent_id or AgentProvider.CLAUDE
+    return provider
+
+
 # Callable types for dependency injection
 PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, object]],
@@ -117,7 +134,7 @@ def _is_interactive_phase(workspace: ManagedWorkspace, phase: ExecutablePhase) -
     routing broke, proceeding here would silently flip which path runs
     (previously masked by the implicit OR) instead of failing loudly.
     """
-    explicit_interactive = phase.agent_config.provider == "claude-interactive"
+    explicit_interactive = phase.agent_config.provider == AgentProvider.CLAUDE_INTERACTIVE
     workspace_is_interactive_tmux = workspace.isolation_handle.isolation_type == "interactive-tmux"
     if explicit_interactive != workspace_is_interactive_tmux:
         msg = (
@@ -143,8 +160,12 @@ def _provisioned_agents(phase: ExecutablePhase) -> tuple[str, ...]:
     other two agents' credentials. Returns () for the default docker path
     (which ignores agent selection entirely).
     """
-    if phase.agent_config.provider == "claude-interactive":
-        return (phase.agent_config.agent_id,)
+    if phase.agent_config.provider == AgentProvider.CLAUDE_INTERACTIVE:
+        # `agent_id` now defaults to None (codex-bridge: fixes the
+        # provider->agent_id invariant); at the interactive-tmux boundary a
+        # pane MUST be named, so coerce a missing agent_id to "claude" here
+        # (preserving the pre-existing default) rather than at construction.
+        return (phase.agent_config.agent_id or AgentProvider.CLAUDE,)
     return ()
 
 
@@ -388,7 +409,11 @@ class WorkspaceProvisionHandler:
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
         workspace = await workspace_cm.__aenter__()
         try:
-            await self._hydrate_workspace(workspace, effective_repos)
+            await self._hydrate_workspace(
+                workspace,
+                effective_repos,
+                include_codex_auth=phase.agent_config.provider == AgentProvider.CODEX,
+            )
             await self._materialize_claude_plugins(workspace, phase)
             await self._materialize_and_install_skills(workspace, phase)
             await self._inject_phase_artifacts(
@@ -413,6 +438,8 @@ class WorkspaceProvisionHandler:
         self,
         workspace: ManagedWorkspace,
         effective_repos: list[str],
+        *,
+        include_codex_auth: bool,
     ) -> None:
         """Run setup phase and inject synthetic context files (ADR-058)."""
         from syn_adapters.workspace_backends.service import SetupPhaseSecrets
@@ -420,6 +447,7 @@ class WorkspaceProvisionHandler:
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             require_github=bool(effective_repos),
+            include_codex_auth=include_codex_auth,
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
@@ -499,13 +527,20 @@ class WorkspaceProvisionHandler:
                 "is wired; refusing to run the agent without them (issue #772)"
             )
             raise RuntimeError(msg)
-        agent_key = _SKILLS_CLI_AGENT_KEYS.get(phase.agent_config.agent_id)
+        # Resolve the skills-CLI agent key. Interactive-tmux phases key by the
+        # pane's agent_id; headless phases have agent_id=None and key by provider
+        # (claude / codex). Prefer agent_id, fall back to provider so a headless
+        # codex or claude phase resolves too.
+        agent_selector = _skills_cli_agent_selector(
+            phase.agent_config.provider, phase.agent_config.agent_id
+        )
+        agent_key = _SKILLS_CLI_AGENT_KEYS.get(agent_selector)
         if agent_key is None:
             raise SkillInstallFailed(
                 phase.skills[0].skill_name,
-                phase.agent_config.agent_id,
+                agent_selector,
                 exit_code=-1,
-                stderr=f"no skills-cli agent key for agent_id {phase.agent_config.agent_id!r}",
+                stderr=f"no skills-cli agent key for agent {agent_selector!r}",
             )
         skill_files = await self._skill_materializer.fetch_for_workspace(phase.skills)
         if skill_files:
@@ -581,7 +616,10 @@ class WorkspaceProvisionHandler:
         is_interactive = _is_interactive_phase(workspace, phase)
         claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
         interactive_prompt = prompt if is_interactive else None
-        if not is_interactive:
+        # `--plugin-dir` is a claude-only flag; appending it to a `codex exec`
+        # argv (after the prompt) produces an invalid command, so restrict the
+        # plugin-dir augmentation to the claude headless path.
+        if not is_interactive and phase.agent_config.provider != AgentProvider.CODEX:
             _append_claude_plugin_dirs(claude_cmd, phase)
 
         # Interactive-tmux runs claude as a TUI with OAuth-on-disk;
@@ -590,7 +628,12 @@ class WorkspaceProvisionHandler:
         # through the sidecar. That sidecar is intentionally absent on
         # this path (see _create_interactive_tmux_impl in
         # WorkspaceService). Skip env build for interactive phases.
-        agent_env = {} if is_interactive else await _build_agent_env(workspace, session_id)
+        # Codex authenticates via the injected ~/.codex/auth.json file, NOT the
+        # claude env creds; a codex phase must not receive CLAUDE_CODE_OAUTH_TOKEN /
+        # ANTHROPIC_API_KEY (cross-provider secret exposure), so it gets an empty
+        # agent env like the interactive path.
+        needs_claude_env = not is_interactive and phase.agent_config.provider != AgentProvider.CODEX
+        agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
         assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
             execution_id=todo.execution_id,

@@ -186,12 +186,12 @@ onboard-dev *flags:
         # Audit each secret: show status (in .env, missing, needs vault)
         _HAS_VALUES=""
         _MISSING=""
-        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
+        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON; do
             _VAL="${!_VAR:-}"
             if [ -n "$_VAL" ]; then
                 # Show redacted for secrets, full for non-secrets
                 case "$_VAR" in
-                    *KEY*|*SECRET*|*TOKEN*|*PASSWORD*)
+                    *KEY*|*SECRET*|*TOKEN*|*PASSWORD*|*AUTH_JSON*)
                         _DISPLAY="${_VAL:0:4}****${_VAL: -4}"
                         ;;
                     *)
@@ -217,6 +217,7 @@ onboard-dev *flags:
                     ANTHROPIC_API_KEY)   echo "     $_VAR — needed if not using CLAUDE_CODE_OAUTH_TOKEN" ;;
                     CLAUDE_CODE_OAUTH_TOKEN) echo "     $_VAR — needed if not using ANTHROPIC_API_KEY" ;;
                     CLOUDFLARE_TUNNEL_TOKEN) echo "     $_VAR — needed only for selfhost (just selfhost-up-tunnel)" ;;
+                    CODEX_AUTH_JSON) echo "     $_VAR — needed for codex-runner workflow phases (just codex-auth-clip)" ;;
                 esac
             done
             echo ""
@@ -266,7 +267,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# Try edit first; if item doesn't exist, create it"
                 echo -n "op item edit \"$_ITEM\" --vault \"$_VAULT\""
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         echo " \\"
@@ -276,7 +277,7 @@ onboard-dev *flags:
                 echo " 2>/dev/null \\"
                 echo "|| op item create --category=login --title=\"$_ITEM\" --vault=\"$_VAULT\" \\"
                 _FIRST=true
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         if [ "$_FIRST" = true ]; then _FIRST=false; else echo " \\"; fi
@@ -290,7 +291,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# --- Clean secret values from .env files (keep keys with empty values) ---"
                 echo "echo '🧹 Cleaning secret values from .env files...'"
-                echo "_ROOT_SECRETS=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN)"
+                echo "_ROOT_SECRETS=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CODEX_AUTH_JSON)"
                 echo "for _KEY in \"\${_ROOT_SECRETS[@]}\"; do"
                 echo "  if grep -q \"^\${_KEY}=\" .env 2>/dev/null; then"
                 echo "    sed -i.bak \"s|^\${_KEY}=.*|# \${_KEY}= # managed by 1Password|\" .env && rm -f .env.bak"
@@ -1476,6 +1477,11 @@ submodules-update:
 # Generate .env.example from Settings class
 gen-env:
     uv run python scripts/generate_env_example.py
+
+# Copy local ~/.codex/auth.json (compacted) to clipboard for 1Password or .env.
+# Pass --dotenv for a ready-to-paste `CODEX_AUTH_JSON='...'` .env line.
+codex-auth-clip *flags:
+    uv run python scripts/copy_codex_auth.py {{flags}}
 
 # Generate published Docker Compose (docker-compose.syntropic137.yaml) from base + selfhost
 gen-compose:

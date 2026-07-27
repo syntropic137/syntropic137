@@ -19,12 +19,12 @@ graph LR
         e2[workflow_failed]
         e3[workflow_completed]
         e4[phase_completed]
-        e5[workflow_template_created]
-        e6[phase_started]
-        e7[trigger_fired]
-        e8[execution_cancelled]
-        e9[workflow_interrupted]
-        e10[session_summary]
+        e5[phase_started]
+        e6[execution_cancelled]
+        e7[workflow_interrupted]
+        e8[trigger_fired]
+        e9[workflow_template_created]
+        e10[agent_observation]
     end
 
     subgraph projections["Projections"]
@@ -50,20 +50,20 @@ graph LR
     e2 --> p5
     e2 --> p3
     e4 --> p5
-    e10 --> p12
-    e10 --> p4
     e1 --> p8
     e1 --> p5
     e1 --> p3
     e5 --> p3
-    e6 --> p3
-    e7 --> p8
-    e8 --> p5
-    e9 --> p5
     e3 --> p10
     e3 --> p9
     e3 --> p5
     e3 --> p3
+    e10 --> p12
+    e10 --> p4
+    e6 --> p5
+    e7 --> p5
+    e8 --> p8
+    e9 --> p3
 ```
 
 ---
@@ -84,12 +84,12 @@ graph LR
 | workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | workflow_completed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
-| workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
 | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
-| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
 | workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
-| session_summary | SessionCostProjection, ExecutionCostProjection | 2 |
+| trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
+| workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
+| agent_observation | SessionCostProjection, ExecutionCostProjection | 2 |
 
 ---
 

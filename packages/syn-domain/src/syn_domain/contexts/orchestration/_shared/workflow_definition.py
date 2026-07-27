@@ -39,6 +39,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseExecutionType,
     WorkflowClassification,
 )
+from syn_shared.agents import AgentProvider
 
 _SHARED_PREFIX = "shared://"
 
@@ -174,23 +175,49 @@ class AgentYamlDefinition(BaseModel):
 
     Selects which agent provider drives the phase (e.g. ``claude`` for the
     default ``claude -p`` Docker path, ``claude-interactive`` for the
-    interactive-tmux workspace provider), which tmux pane the phase
-    targets, and optionally the model. See
+    interactive-tmux workspace provider, ``codex`` for the programmatic
+    codex harness on the same Docker path as ``claude``), which tmux pane
+    the phase targets, and optionally the model. See
     docs/plans/multi-agent-workspaces.md.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    provider: Literal["claude", "claude-interactive"] | None = None
+    provider: Literal["claude", "claude-interactive", "codex"] | None = None
     """One of: ``claude`` (default; ``claude -p`` path),
-    ``claude-interactive`` (drives the interactive-tmux pane)."""
+    ``claude-interactive`` (drives the interactive-tmux pane),
+    ``codex`` (programmatic codex harness on the ``claude`` Docker path)."""
 
     agent_id: Literal["claude", "codex", "gemini"] | None = None
     """Which tmux pane the phase targets when provider is
-    ``claude-interactive``."""
+    ``claude-interactive``. Meaningless when provider is ``codex``
+    (docker path) - must be omitted or ``"codex"`` there; see
+    ``_validate_provider_agent_combo``."""
 
     model: str | None = None
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
+
+    @model_validator(mode="after")
+    def _validate_provider_agent_combo(self) -> AgentYamlDefinition:
+        """Reject a codex provider paired with an unrelated agent_id.
+
+        ``provider="codex"`` selects the programmatic codex harness on the
+        docker path; ``agent_id`` only means "which tmux pane" on the
+        ``claude-interactive`` path. Omitted or explicitly ``"codex"`` are
+        the only sensible values here - anything else (e.g. ``"gemini"``)
+        is a contradiction we reject at parse time.
+        """
+        if self.provider == AgentProvider.CODEX and self.agent_id not in (
+            None,
+            AgentProvider.CODEX,
+        ):
+            msg = (
+                "agent.provider='codex' selects the programmatic codex harness; "
+                "agent_id must be omitted or 'codex' (it does not select a tmux "
+                "pane here)."
+            )
+            raise ValueError(msg)
+        return self
 
 
 class PhaseYamlDefinition(BaseModel):

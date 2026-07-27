@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -94,6 +94,7 @@ from syn_adapters.storage.repositories import (
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
+from syn_shared.agents import AgentProvider
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -204,7 +205,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         observability_writer=event_store,
         controller=get_controller(),
         prompt_builder=_build_workspace_prompt,
-        command_builder=_build_claude_command,
+        command_builder=_build_agent_command,
         todo_projection=ExecutionTodoProjection(store=get_projection_store()),
         interactive_workspace_service=interactive_workspace_service,
         claude_plugin_materializer=claude_plugin_materializer,
@@ -235,6 +236,53 @@ def _build_claude_command(
             cmd.extend(["--allowedTools", tool])
 
     return cmd
+
+
+# Claude CLI model aliases (the AgentConfiguration.model default is "haiku").
+# Codex rejects these ("model not supported when using Codex with a ChatGPT
+# account"), so we must NOT forward a Claude model to `codex exec` - codex uses
+# its own account default instead. TODO(#780): resolve/validate a real codex
+# model for accurate cost labelling on codex phases.
+_CLAUDE_MODEL_ALIASES = frozenset({"haiku", "sonnet", "opus"})
+
+
+def _is_codex_model(model: str | None) -> TypeGuard[str]:
+    """True only for a model id worth forwarding to `codex exec --model`."""
+    if model is None:
+        return False
+    lowered = model.lower()
+    return lowered not in _CLAUDE_MODEL_ALIASES and not lowered.startswith("claude")
+
+
+def _build_codex_command(prompt: str, model: str | None) -> list[str]:
+    """Build the Codex CLI command for agent execution.
+
+    A codex phase inherits the domain default model ("haiku", a Claude alias)
+    unless the YAML sets one. We only forward `--model` when it is a genuine
+    codex/OpenAI model id; otherwise codex selects its ChatGPT-account default.
+    """
+    cmd = [
+        "codex",
+        "exec",
+        "--json",
+        "--sandbox",
+        "danger-full-access",
+        "--skip-git-repo-check",
+    ]
+    if _is_codex_model(model):
+        cmd.extend(["--model", model])
+    cmd.append(prompt)
+    return cmd
+
+
+def _build_agent_command(
+    phase: ExecutablePhase,
+    prompt: str,
+) -> list[str]:
+    """Build the command selected by the phase provider."""
+    if phase.agent_config.provider == AgentProvider.CODEX:
+        return _build_codex_command(prompt, phase.agent_config.model)
+    return _build_claude_command(phase, prompt)
 
 
 def _owner_repo_from_url(url: str | None) -> str:

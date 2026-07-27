@@ -136,6 +136,7 @@ class TimescaleSessionCostQuery:
         output_tokens: int,
         cache_creation: int,
         cache_read: int,
+        agent_model: str | None,
     ) -> Decimal:
         """Calculate cost from SDK value or token-based estimation."""
         sdk_cost = exec_result.get("sdk_cost") if exec_result else None
@@ -146,6 +147,7 @@ class TimescaleSessionCostQuery:
             output_tokens=output_tokens,
             cache_creation=cache_creation,
             cache_read=cache_read,
+            model=agent_model,
         )
 
     @staticmethod
@@ -200,8 +202,14 @@ class TimescaleSessionCostQuery:
                 started_at = token_result.get("started_at")
 
             input_tokens, output_tokens, cache_creation, cache_read = _extract_tokens(token_result)
+            agent_model = _resolve_agent_model(exec_result, token_result)
             total_cost = self._calculate_cost(
-                exec_result, input_tokens, output_tokens, cache_creation, cache_read
+                exec_result,
+                input_tokens,
+                output_tokens,
+                cache_creation,
+                cache_read,
+                agent_model,
             )
             completed_at, duration_ms = _resolve_duration(exec_result, token_result, started_at)
 

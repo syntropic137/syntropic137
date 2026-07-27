@@ -108,6 +108,63 @@ class TestWorkspaceServiceSelection:
 
 
 @pytest.mark.unit
+class TestAgentRunnerSelection:
+    """Provider selects the parser runner without consulting agent_id."""
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("provider", "expected_runner"),
+        [
+            ("claude", "claude"),
+            ("claude-interactive", "claude"),
+            ("codex", "codex"),
+        ],
+    )
+    async def test_provider_is_forwarded_as_typed_runner(
+        self,
+        provider: str,
+        expected_runner: str,
+    ) -> None:
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        handler = MagicMock()
+        handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
+        processor._agent_handler = handler
+        processor._active_workspaces["p-1"] = MagicMock()
+        processor._active_envs["p-1"] = {}
+        processor._active_cmds["p-1"] = ["agent"]
+        phase = ExecutablePhase(
+            phase_id="p-1",
+            name="Phase 1",
+            order=1,
+            agent_config=AgentConfiguration(provider=provider, agent_id="codex"),
+            prompt_template="do it",
+        )
+
+        with pytest.raises(RuntimeError, match="stop after dispatch"):
+            await processor._handle_run_agent(
+                TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                    session_id="sess-1",
+                ),
+                phase,
+                MagicMock(workflow_id="wf-1"),
+            )
+
+        assert handler.handle.await_args.kwargs["runner"] == expected_runner
+
+
+@pytest.mark.unit
 class TestProcessorTermination:
     """Tests for processor termination."""
 
