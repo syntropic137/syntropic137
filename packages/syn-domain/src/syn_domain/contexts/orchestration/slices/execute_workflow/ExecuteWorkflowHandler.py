@@ -170,13 +170,15 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     phase_model: str | None = getattr(phase, "model", None)
     phase_provider: str | None = getattr(phase, "provider", None)
     phase_agent_id: str | None = getattr(phase, "agent_id", None)
-    if not (phase_model or phase_provider or phase_agent_id):
+    allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
+    if not (phase_model or phase_provider or phase_agent_id or allow_delegation):
         return AgentConfiguration()
     defaults = AgentConfiguration()
     return AgentConfiguration(
         provider=phase_provider or defaults.provider,
         model=phase_model or defaults.model,
         agent_id=phase_agent_id or defaults.agent_id,
+        allow_delegation=allow_delegation,
     )
 
 

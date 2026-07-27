@@ -139,6 +139,7 @@ def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDe
         model=_coalesce(data["model"], phase.model),
         provider=updated_provider,
         agent_id=agent_id,
+        allow_delegation=phase.allow_delegation,
         skills=phase.skills,
         claude_plugins=phase.claude_plugins,
     )

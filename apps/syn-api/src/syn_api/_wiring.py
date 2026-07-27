@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -246,7 +246,7 @@ def _build_claude_command(
 _CLAUDE_MODEL_ALIASES = frozenset({"haiku", "sonnet", "opus"})
 
 
-def _is_codex_model(model: str | None) -> bool:
+def _is_codex_model(model: str | None) -> TypeGuard[str]:
     """True only for a model id worth forwarding to `codex exec --model`."""
     if model is None:
         return False

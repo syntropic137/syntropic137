@@ -335,6 +335,62 @@ class TestWorkflowPhaseUpdatedEvent:
             event.prompt_template = "Changed"  # type: ignore[misc]
 
 
+
+class TestPhaseUpdatePreservesDelegationFields:
+    """Regression: prompt/model edits must not wipe provider/allow_delegation/skills."""
+
+    def test_prompt_update_preserves_provider_and_delegation(self) -> None:
+        # A codex phase is headless, so it carries no agent_id; the fields that
+        # must survive a prompt-only edit are provider, allow_delegation, and the
+        # #772 skills / #726 claude_plugins.
+        agg = WorkflowTemplateAggregate()
+        agg._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id=_WORKFLOW_ID,
+                name="W",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="phase-1",
+                        name="p",
+                        order=1,
+                        prompt_template="orig",
+                        provider=AgentProvider.CODEX,
+                        allow_delegation=True,
+                        skills=(
+                            SkillRef(
+                                skill_name="review", source_url="acme/skills", version="v1.0.0"
+                            ),
+                        ),
+                        claude_plugins=(
+                            ClaudePluginRef(
+                                name="sdlc", source_url="acme/plugins", version="v1.0.0"
+                            ),
+                        ),
+                    )
+                ],
+            )
+        )
+        agg.mark_events_as_committed()
+        agg._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID,
+                phase_id="phase-1",
+                prompt_template="new",
+            )
+        )
+        p = next(x for x in agg.phases if x.phase_id == "phase-1")
+        assert p.provider == AgentProvider.CODEX
+        assert p.allow_delegation is True
+        assert p.prompt_template == "new"
+        # #772 skills + #726 claude_plugins must survive a prompt edit too.
+        assert len(p.skills) == 1 and p.skills[0].skill_name == "review"
+        assert len(p.claude_plugins) == 1 and p.claude_plugins[0].name == "sdlc"
+
+
 class TestPhaseProviderUpdate:
     """Provider is settable via update and preserved on prompt-only edits."""
 

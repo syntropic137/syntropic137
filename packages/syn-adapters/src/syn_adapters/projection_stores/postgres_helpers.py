@@ -11,9 +11,27 @@ from typing import Any
 import asyncpg
 
 
+def _strip_nul_bytes(obj: object) -> object:
+    """Recursively drop NUL (U+0000) chars from string values.
+
+    Postgres jsonb cannot store a NUL character ("\\u0000 cannot be converted to
+    text"), so any projection whose event payload carries one (e.g. raw agent
+    output captured as an artifact) would crash the write. Stripping at the
+    single serialize boundary protects every projection. Only real NUL bytes are
+    removed; a literal "\\u0000" text sequence is preserved.
+    """
+    if isinstance(obj, str):
+        return obj.replace("\x00", "") if "\x00" in obj else obj
+    if isinstance(obj, dict):
+        return {k: _strip_nul_bytes(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_strip_nul_bytes(v) for v in obj]
+    return obj
+
+
 def serialize(data: dict[str, Any]) -> str:
-    """Serialize data to JSON, handling datetime objects."""
-    return json.dumps(data, default=json_serializer)
+    """Serialize data to JSON, handling datetime objects and NUL bytes."""
+    return json.dumps(_strip_nul_bytes(data), default=json_serializer)
 
 
 def deserialize(data: str | dict[str, Any]) -> dict[str, Any]:
