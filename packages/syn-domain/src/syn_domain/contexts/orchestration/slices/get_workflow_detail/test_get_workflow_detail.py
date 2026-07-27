@@ -241,6 +241,40 @@ class TestWorkflowPhaseUpdatedProjection:
         assert list(phase.allowed_tools) == ["Bash", "Read", "Write"]
 
     @pytest.mark.asyncio
+    async def test_updates_provider(self, projection: WorkflowDetailProjection):
+        """A provider change must reach the detail projection, not stay stale."""
+        await projection.on_workflow_template_created(
+            {
+                "workflow_id": "wf-1",
+                "name": "Test Workflow",
+                "workflow_type": "research",
+                "classification": "technical",
+                "phases": [
+                    {
+                        "id": "p1",
+                        "name": "Research",
+                        "prompt_template": "Original",
+                        "provider": "claude",
+                        "order": 0,
+                    },
+                ],
+            }
+        )
+
+        await projection.on_workflow_phase_updated(
+            {
+                "workflow_id": "wf-1",
+                "phase_id": "p1",
+                "prompt_template": "Updated",
+                "provider": "codex",
+            }
+        )
+
+        detail = await projection.get_by_id("wf-1")
+        assert detail is not None
+        assert detail.phases[0].provider == "codex"
+
+    @pytest.mark.asyncio
     async def test_preserves_fields_when_none(self, projection: WorkflowDetailProjection):
         """Test projection preserves existing values when optional fields are None."""
         await projection.on_workflow_template_created(

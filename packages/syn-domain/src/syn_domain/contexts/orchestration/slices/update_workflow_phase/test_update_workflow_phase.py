@@ -336,13 +336,16 @@ class TestWorkflowPhaseUpdatedEvent:
 
 
 class TestPhaseUpdatePreservesDelegationFields:
-    """Regression: prompt/model edits must not wipe provider/agent_id/allow_delegation."""
+    """Regression: prompt/model edits must not wipe provider/allow_delegation/skills."""
 
-    def test_prompt_update_preserves_provider_agentid_and_delegation(self) -> None:
+    def test_prompt_update_preserves_provider_and_delegation(self) -> None:
+        # A codex phase is headless, so it carries no agent_id; the fields that
+        # must survive a prompt-only edit are provider, allow_delegation, and the
+        # #772 skills / #726 claude_plugins.
         agg = WorkflowTemplateAggregate()
         agg._handle_command(
             CreateWorkflowTemplateCommand(
-                aggregate_id="w1",
+                aggregate_id=_WORKFLOW_ID,
                 name="W",
                 workflow_type=WorkflowType.RESEARCH,
                 classification=WorkflowClassification.SIMPLE,
@@ -350,12 +353,11 @@ class TestPhaseUpdatePreservesDelegationFields:
                 repository_ref="main",
                 phases=[
                     PhaseDefinition(
-                        phase_id="p1",
+                        phase_id="phase-1",
                         name="p",
                         order=1,
                         prompt_template="orig",
                         provider=AgentProvider.CODEX,
-                        agent_id=AgentProvider.CODEX,
                         allow_delegation=True,
                         skills=(
                             SkillRef(
@@ -374,16 +376,149 @@ class TestPhaseUpdatePreservesDelegationFields:
         agg.mark_events_as_committed()
         agg._handle_command(
             UpdatePhasePromptCommand(
-                aggregate_id="w1",
-                phase_id="p1",
+                aggregate_id=_WORKFLOW_ID,
+                phase_id="phase-1",
                 prompt_template="new",
             )
         )
-        p = next(x for x in agg.phases if x.phase_id == "p1")
+        p = next(x for x in agg.phases if x.phase_id == "phase-1")
         assert p.provider == AgentProvider.CODEX
-        assert p.agent_id == AgentProvider.CODEX
         assert p.allow_delegation is True
         assert p.prompt_template == "new"
         # #772 skills + #726 claude_plugins must survive a prompt edit too.
         assert len(p.skills) == 1 and p.skills[0].skill_name == "review"
         assert len(p.claude_plugins) == 1 and p.claude_plugins[0].name == "sdlc"
+
+
+class TestPhaseProviderUpdate:
+    """Provider is settable via update and preserved on prompt-only edits."""
+
+    def _codex_aggregate(self) -> WorkflowTemplateAggregate:
+        aggregate = WorkflowTemplateAggregate()
+        aggregate._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id=_WORKFLOW_ID,
+                name="Codex Workflow",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="phase-1",
+                        name="Codex Phase",
+                        order=1,
+                        prompt_template="original",
+                        provider=AgentProvider.CODEX,
+                    ),
+                ],
+            )
+        )
+        aggregate.mark_events_as_committed()
+        return aggregate
+
+    def test_update_can_set_provider(self) -> None:
+        aggregate = _create_aggregate_with_phases()
+        aggregate._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID,
+                phase_id="phase-1",
+                prompt_template="kept",
+                provider=AgentProvider.CODEX,
+            )
+        )
+        phase = next(p for p in aggregate.phases if p.phase_id == "phase-1")
+        assert phase.provider == AgentProvider.CODEX
+
+    def test_prompt_only_update_preserves_provider(self) -> None:
+        # Regression: _apply_phase_update used to drop provider on any edit,
+        # silently reverting a codex phase to the claude default.
+        aggregate = self._codex_aggregate()
+        aggregate._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID,
+                phase_id="phase-1",
+                prompt_template="new prompt",
+            )
+        )
+        phase = next(p for p in aggregate.phases if p.phase_id == "phase-1")
+        assert phase.provider == AgentProvider.CODEX
+        assert phase.prompt_template == "new prompt"
+
+    def test_provider_switch_to_headless_clears_stale_agent_id(self) -> None:
+        # Regression: switching an interactive phase (agent_id set) to a headless
+        # provider must drop agent_id, else AgentConfiguration.__post_init__ rejects
+        # the codex + non-codex-agent_id combo at execution.
+        agg = WorkflowTemplateAggregate()
+        agg._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id=_WORKFLOW_ID,
+                name="W",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="phase-1",
+                        name="p",
+                        order=1,
+                        prompt_template="orig",
+                        provider="claude-interactive",
+                        agent_id="gemini",
+                    )
+                ],
+            )
+        )
+        agg.mark_events_as_committed()
+        agg._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID,
+                phase_id="phase-1",
+                prompt_template="new",
+                provider="codex",
+            )
+        )
+        phase = next(p for p in agg.phases if p.phase_id == "phase-1")
+        assert phase.provider == AgentProvider.CODEX
+        assert phase.agent_id is None
+
+    def test_prompt_update_preserves_skills_and_plugins(self) -> None:
+        agg = WorkflowTemplateAggregate()
+        agg._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id=_WORKFLOW_ID,
+                name="W",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="phase-1",
+                        name="p",
+                        order=1,
+                        prompt_template="orig",
+                        skills=(
+                            SkillRef(
+                                skill_name="review", source_url="acme/skills", version="v1.0.0"
+                            ),
+                        ),
+                        claude_plugins=(
+                            ClaudePluginRef(
+                                name="sdlc", source_url="acme/plugins", version="v1.0.0"
+                            ),
+                        ),
+                    )
+                ],
+            )
+        )
+        agg.mark_events_as_committed()
+        agg._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID, phase_id="phase-1", prompt_template="new"
+            )
+        )
+        phase = next(p for p in agg.phases if p.phase_id == "phase-1")
+        assert len(phase.skills) == 1 and phase.skills[0].skill_name == "review"
+        assert len(phase.claude_plugins) == 1 and phase.claude_plugins[0].name == "sdlc"

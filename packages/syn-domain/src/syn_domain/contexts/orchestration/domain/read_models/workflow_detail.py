@@ -53,6 +53,12 @@ class PhaseDefinitionDetail:
     model: str | None = None
     """Per-phase model override (e.g., 'sonnet', 'opus')."""
 
+    provider: str | None = None
+    """Per-phase agent provider ('claude', 'claude-interactive', 'codex')."""
+
+    agent_id: str | None = None
+    """Per-phase agent id (tmux pane selector; interactive path only)."""
+
     execution_type: str = "sequential"
     """How this phase executes: sequential, parallel, or human_in_loop."""
 
@@ -137,6 +143,8 @@ class WorkflowDetail:
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
+                provider=p.get("provider"),
+                agent_id=p.get("agent_id"),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),
@@ -198,6 +206,8 @@ class WorkflowDetail:
                 PhaseFields.ALLOWED_TOOLS: list(p.allowed_tools),
                 "argument_hint": p.argument_hint,
                 "model": p.model,
+                "provider": p.provider,
+                "agent_id": p.agent_id,
                 "execution_type": p.execution_type,
                 PhaseFields.MAX_TOKENS: p.max_tokens,
                 "input_artifact_types": list(p.input_artifact_types),

@@ -3080,6 +3080,10 @@ export interface components {
             argument_hint?: string | null;
             /** Model */
             model?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Agent Id */
+            agent_id?: string | null;
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
@@ -4743,6 +4747,8 @@ export interface components {
             prompt_template: string;
             /** Model */
             model?: string | null;
+            /** Provider */
+            provider?: string | null;
             /** Timeout Seconds */
             timeout_seconds?: number | null;
             /** Allowed Tools */
