@@ -32,6 +32,7 @@ KNOWN_DATACLASS_EVENTS: set[str] = set()
 # Classes ending in "Event" that are NOT domain events (value objects, DTOs, etc.)
 NOT_DOMAIN_EVENTS: set[str] = {
     "NormalizedEvent",  # ISS-386: value object bridging webhook/Events API payloads
+    "_CodexEvent",  # TypedDict JSON-boundary shape for a codex --json stream line, not a domain event
 }
 
 
