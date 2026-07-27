@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import ClaudePluginRef
+from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseDefinition,
     WorkflowClassification,
@@ -26,6 +28,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent i
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
+from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
@@ -330,3 +333,57 @@ class TestWorkflowPhaseUpdatedEvent:
 
         with pytest.raises(ValidationError):
             event.prompt_template = "Changed"  # type: ignore[misc]
+
+
+class TestPhaseUpdatePreservesDelegationFields:
+    """Regression: prompt/model edits must not wipe provider/agent_id/allow_delegation."""
+
+    def test_prompt_update_preserves_provider_agentid_and_delegation(self) -> None:
+        agg = WorkflowTemplateAggregate()
+        agg._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id="w1",
+                name="W",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="p1",
+                        name="p",
+                        order=1,
+                        prompt_template="orig",
+                        provider=AgentProvider.CODEX,
+                        agent_id=AgentProvider.CODEX,
+                        allow_delegation=True,
+                        skills=(
+                            SkillRef(
+                                skill_name="review", source_url="acme/skills", version="v1.0.0"
+                            ),
+                        ),
+                        claude_plugins=(
+                            ClaudePluginRef(
+                                name="sdlc", source_url="acme/plugins", version="v1.0.0"
+                            ),
+                        ),
+                    )
+                ],
+            )
+        )
+        agg.mark_events_as_committed()
+        agg._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id="w1",
+                phase_id="p1",
+                prompt_template="new",
+            )
+        )
+        p = next(x for x in agg.phases if x.phase_id == "p1")
+        assert p.provider == AgentProvider.CODEX
+        assert p.agent_id == AgentProvider.CODEX
+        assert p.allow_delegation is True
+        assert p.prompt_template == "new"
+        # #772 skills + #726 claude_plugins must survive a prompt edit too.
+        assert len(p.skills) == 1 and p.skills[0].skill_name == "review"
+        assert len(p.claude_plugins) == 1 and p.claude_plugins[0].name == "sdlc"
