@@ -335,7 +335,6 @@ class TestWorkflowPhaseUpdatedEvent:
             event.prompt_template = "Changed"  # type: ignore[misc]
 
 
-
 class TestPhaseUpdatePreservesDelegationFields:
     """Regression: prompt/model edits must not wipe provider/allow_delegation/skills."""
 
