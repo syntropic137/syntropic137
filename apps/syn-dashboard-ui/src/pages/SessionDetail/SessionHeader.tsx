@@ -1,17 +1,30 @@
-import { Activity, Container, FileText } from 'lucide-react'
+import { Activity, Bot, Container, FileText } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { StatusBadge } from '../../components'
 import type { SessionResponse } from '../../types'
-import { PROVIDER_ENVIRONMENTS } from './sessionConstants'
+import { AGENT_PROVIDER_LABELS, PROVIDER_ENVIRONMENTS } from './sessionConstants'
+
+function AgentProviderBadge({ provider }: { provider: string | null }) {
+  if (!provider) return null
+  const label = AGENT_PROVIDER_LABELS[provider.toLowerCase()] ?? provider
+  return (
+    <span className="flex items-center gap-1.5 rounded-full bg-[var(--color-accent)]/15 px-2.5 py-0.5 font-medium text-[var(--color-accent)]">
+      <Bot className="h-3.5 w-3.5" />
+      Agent: {label}
+    </span>
+  )
+}
 
 function WorkspaceEnvironmentBadge({ provider }: { provider: string | null }) {
   if (!provider) return null
+  // Only render when there is a real image mapping; never show the bare
+  // provider string as if it were a container image.
   const env = PROVIDER_ENVIRONMENTS[provider.toLowerCase()]
-  const label = env ? `${env.backend}:${env.image}` : provider
+  if (!env) return null
   return (
     <span className="flex items-center gap-1.5">
       <Container className="h-3.5 w-3.5" />
-      <code className="font-mono">{label}</code>
+      <code className="font-mono">{`${env.backend}:${env.image}`}</code>
     </span>
   )
 }
@@ -50,7 +63,8 @@ export function SessionHeader({
               )}
               {session.phase_id && <span>Phase: {session.phase_id}</span>}
             </div>
-            <div className="mt-1 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
+            <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+              <AgentProviderBadge provider={session.agent_provider} />
               <WorkspaceEnvironmentBadge provider={session.agent_provider} />
             </div>
           </div>

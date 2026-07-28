@@ -7,10 +7,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from syn_api._wiring import ensure_connected, get_conversation_store
 from syn_api.types import (
@@ -21,6 +25,12 @@ from syn_api.types import (
     ObservabilityError,
     Ok,
     Result,
+)
+from syn_shared.codex_stream import (
+    CODEX_TOOL_NAME_COMMAND,
+    CODEX_TOOL_NAME_FILE_CHANGE,
+    CodexItemType,
+    CodexStreamType,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,23 +127,127 @@ def _extract_content_preview(data: dict[str, Any]) -> str:
     return _get_top_level_content(data) or _get_message_content(data) or _get_result_content(data)
 
 
+class TranscriptEventType(StrEnum):
+    """Normalized display event-type a transcript line renders as.
+
+    Claude's ``stream-json`` already emits ``assistant`` / ``user`` / ``result``
+    / ``system`` as its top-level ``type``; the codex path is normalized ONTO
+    the same vocabulary so the dashboard's single color map styles both. These
+    strings are mirrored by ``conversationEventColors`` in the frontend
+    (``sessionConstants.ts``) — keep them in sync.
+    """
+
+    ASSISTANT = "assistant"
+    TOOL_USE = "tool_use"
+    SYSTEM = "system"
+    RESULT = "result"
+    ERROR = "error"
+    LOG = "log"
+    """A non-JSON CLI diagnostic line (codex writes these to stdout)."""
+
+
+_PREVIEW_LEN = 200
+
+# Codex writes plain-text banners to stdout alongside its JSONL events. These
+# are pure CLI chrome (not conversation, not diagnostics) and are dropped from
+# the transcript entirely. Matched by prefix on non-JSON lines only.
+# Source: CodexStreamProcessor golden-fixture note (2026-07-23).
+_CODEX_CLI_NOISE_PREFIXES = (
+    "Reading additional input from stdin",
+    "warning: --full-auto is deprecated",
+)
+
+_CODEX_STREAM_TYPES = frozenset(t.value for t in CodexStreamType)
+
+
+def _is_codex_cli_noise(raw: str) -> bool:
+    """True for a codex plain-text banner line that should not appear at all."""
+    stripped = raw.strip()
+    if not stripped or stripped.startswith("{"):
+        return False
+    return any(stripped.startswith(prefix) for prefix in _CODEX_CLI_NOISE_PREFIXES)
+
+
+def _codex_file_change_preview(item: Mapping[str, object]) -> str | None:
+    """Join the changed paths in a codex ``file_change`` item into a preview."""
+    changes = item.get("changes")
+    if not isinstance(changes, list):
+        return None
+    paths = [str(c.get("path", "")) for c in changes if isinstance(c, dict) and c.get("path")]
+    joined = ", ".join(paths)
+    return joined[:_PREVIEW_LEN] if joined else None
+
+
+def _codex_item_fields(item: Mapping[str, object]) -> tuple[str, str | None, str | None]:
+    """Map a codex stream ``item`` to (event_type, tool_name, preview)."""
+    item_type = item.get("type")
+    if item_type == CodexItemType.AGENT_MESSAGE:
+        text = item.get("text")
+        preview = text[:_PREVIEW_LEN] if isinstance(text, str) and text else None
+        return TranscriptEventType.ASSISTANT, None, preview
+    if item_type == CodexItemType.COMMAND_EXECUTION:
+        command = item.get("command")
+        preview = command[:_PREVIEW_LEN] if isinstance(command, str) and command else None
+        return TranscriptEventType.TOOL_USE, CODEX_TOOL_NAME_COMMAND, preview
+    if item_type == CodexItemType.FILE_CHANGE:
+        return (
+            TranscriptEventType.TOOL_USE,
+            CODEX_TOOL_NAME_FILE_CHANGE,
+            _codex_file_change_preview(item),
+        )
+    return TranscriptEventType.SYSTEM, None, None
+
+
+def _extract_codex_fields(
+    data: Mapping[str, object],
+) -> tuple[str, str | None, str | None] | None:
+    """Normalize a codex stream event, or None if the line is not codex-shaped.
+
+    Codex's ``--json`` events use a closed set of top-level ``type`` values
+    (``item.completed`` etc.) unrelated to claude's ``stream-json`` types, so a
+    ``type`` in that set unambiguously identifies a codex line. Returning None
+    lets the caller fall back to claude parsing.
+    """
+    raw_type = data.get("type")
+    if raw_type not in _CODEX_STREAM_TYPES:
+        return None
+    if raw_type == CodexStreamType.TURN_COMPLETED:
+        return TranscriptEventType.RESULT, None, None
+    if raw_type == CodexStreamType.TURN_FAILED:
+        error = data.get("error")
+        preview = str(error)[:_PREVIEW_LEN] if error else None
+        return TranscriptEventType.ERROR, None, preview
+    item = data.get("item")
+    if not isinstance(item, dict):
+        return TranscriptEventType.SYSTEM, None, None
+    return _codex_item_fields(item)
+
+
 def _extract_line_fields(
     raw: str,
 ) -> tuple[str | None, str | None, str | None]:
     """Extract event_type, tool_name, and content preview from a JSONL line.
 
+    Handles both claude ``stream-json`` and codex ``--json`` line shapes.
     Returns (event_type, tool_name, preview) — all None-able.
     """
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, AttributeError):
-        preview = raw[:200] if raw else None
-        return None, None, preview
+        # Non-JSON line: a codex CLI diagnostic (e.g. an ERROR trace) on stdout.
+        # Label it ``log`` rather than leaving it to render as "unknown".
+        stripped = raw.strip() if raw else ""
+        preview = stripped[:_PREVIEW_LEN] if stripped else None
+        return TranscriptEventType.LOG, None, preview
+
+    codex = _extract_codex_fields(data)
+    if codex is not None:
+        return codex
 
     event_type = data.get("type") or data.get("event_type")
     tool_name = data.get("tool_name") or data.get("name")
     content = _extract_content_preview(data)
-    preview = content[:200] if content else None
+    preview = content[:_PREVIEW_LEN] if content else None
     return event_type, tool_name, preview
 
 
@@ -174,6 +288,10 @@ async def get_conversation_log(
                 ObservabilityError.NOT_FOUND,
                 message=f"Conversation log not found for session {session_id}",
             )
+
+        # Drop codex CLI banner noise before numbering so line numbers and
+        # total_lines reflect only real transcript content.
+        raw_lines = [line for line in raw_lines if not _is_codex_cli_noise(line)]
 
         total = len(raw_lines)
         page = raw_lines[offset : offset + limit]

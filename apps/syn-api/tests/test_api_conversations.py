@@ -120,6 +120,101 @@ async def test_get_conversation_log_parses_json(mock_conversation_store):
     assert lines[1].tool_name is None
 
 
+async def test_codex_agent_message_renders_as_talking(mock_conversation_store):
+    """A codex ``agent_message`` item surfaces its text as readable conversation."""
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"item.completed","item":{"id":"item_0","type":"agent_message",'
+        '"text":"I will read the plan and implement it."}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "assistant"
+    assert line.tool_name is None
+    assert line.content_preview == "I will read the plan and implement it."
+
+
+async def test_codex_command_execution_maps_to_bash_tool(mock_conversation_store):
+    """A codex ``command_execution`` item maps to the Bash tool with its command."""
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"item.completed","item":{"id":"item_2","type":"command_execution",'
+        '"command":"cat one.txt","aggregated_output":"alpha","exit_code":0,'
+        '"status":"completed"}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "tool_use"
+    assert line.tool_name == "Bash"
+    assert line.content_preview == "cat one.txt"
+
+
+async def test_codex_file_change_maps_to_edit_tool(mock_conversation_store):
+    """A codex ``file_change`` item maps to the Edit tool with the changed paths."""
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"item.completed","item":{"id":"item_3","type":"file_change",'
+        '"status":"completed","changes":[{"path":"src/a.py","kind":"modify"},'
+        '{"path":"src/b.py","kind":"add"}]}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "tool_use"
+    assert line.tool_name == "Edit"
+    assert line.content_preview == "src/a.py, src/b.py"
+
+
+async def test_codex_cli_stdin_banner_is_filtered(mock_conversation_store):
+    """The codex ``Reading additional input from stdin`` banner is dropped entirely."""
+    mock_conversation_store.retrieve_session.return_value = [
+        "Reading additional input from stdin...",
+        '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hello"}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    log = result.value
+    assert log.total_lines == 1
+    assert len(log.lines) == 1
+    assert log.lines[0].content_preview == "hello"
+
+
+async def test_codex_diagnostic_line_labelled_log_not_unknown(mock_conversation_store):
+    """A non-JSON codex diagnostic line is labelled ``log``, never ``unknown``."""
+    mock_conversation_store.retrieve_session.return_value = [
+        "ERROR codex_models_manager::manager: transient upstream hiccup",
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "log"
+    assert line.content_preview is not None
+
+
 async def test_get_conversation_metadata(mock_conversation_store):
     """Retrieve conversation metadata from store."""
     mock_conversation_store.get_session_metadata.return_value = {

@@ -75,13 +75,30 @@ export const operationColors: Record<string, string> = {
   validation: 'text-green-400 bg-green-500/10',
 }
 
+// Keep the keys in sync with TranscriptEventType in the API
+// (apps/syn-api/src/syn_api/routes/conversations.py).
 export const conversationEventColors: Record<string, string> = {
   system: 'text-gray-400 bg-gray-500/10',
   assistant: 'text-blue-400 bg-blue-500/10',
   user: 'text-green-400 bg-green-500/10',
   result: 'text-purple-400 bg-purple-500/10',
+  tool_use: 'text-amber-400 bg-amber-500/10',
+  error: 'text-red-400 bg-red-500/10',
+  log: 'text-gray-500 bg-gray-500/10',
 }
 
+// Workspace container image per provider. Codex has no distinct image — it runs
+// the codex CLI inside the shared claude-cli workspace image — so it is
+// deliberately absent here; the agent identity is carried by AGENT_PROVIDER_LABELS.
 export const PROVIDER_ENVIRONMENTS: Record<string, { backend: string; image: string }> = {
   claude: { backend: 'docker', image: 'agentic-workspace-claude-cli' },
+}
+
+// Human-readable name for the agent that ran a session/phase, keyed by the
+// domain provider value (syn_shared/agents.py AgentProvider). Distinct from the
+// workspace image: the badge answers "which agent", not "which container".
+export const AGENT_PROVIDER_LABELS: Record<string, string> = {
+  claude: 'Claude',
+  'claude-interactive': 'Claude (interactive)',
+  codex: 'Codex',
 }
