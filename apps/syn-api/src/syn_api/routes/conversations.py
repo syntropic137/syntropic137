@@ -184,7 +184,31 @@ def _codex_file_change_preview(item: Mapping[str, object]) -> str | None:
     return joined[:_PREVIEW_LEN] if joined else None
 
 
-def _codex_item_fields(item: Mapping[str, object]) -> tuple[str, str | None, str | None]:
+def _codex_command_execution_preview(
+    item: Mapping[str, object], stream_type: CodexStreamType
+) -> str | None:
+    """Preview for a codex ``command_execution`` item.
+
+    Codex emits both ``item.started`` and ``item.completed`` for the same
+    command. ``item.started`` carries the invocation (the ``command``);
+    ``item.completed`` carries the result (``aggregated_output``). Without
+    this split, both rows show the same command string, so the same tool
+    call renders twice in the transcript with no new information on the
+    second line. Falls back to the command when the output is empty (e.g.
+    a command that produced no stdout).
+    """
+    command = item.get("command")
+    command_preview = command[:_PREVIEW_LEN] if isinstance(command, str) and command else None
+    if stream_type == CodexStreamType.ITEM_COMPLETED:
+        output = item.get("aggregated_output")
+        if isinstance(output, str) and output:
+            return output[:_PREVIEW_LEN]
+    return command_preview
+
+
+def _codex_item_fields(
+    item: Mapping[str, object], stream_type: CodexStreamType
+) -> tuple[str, str | None, str | None]:
     """Map a codex stream ``item`` to (event_type, tool_name, preview)."""
     item_type = item.get("type")
     if item_type == CodexItemType.AGENT_MESSAGE:
@@ -192,8 +216,7 @@ def _codex_item_fields(item: Mapping[str, object]) -> tuple[str, str | None, str
         preview = text[:_PREVIEW_LEN] if isinstance(text, str) and text else None
         return TranscriptEventType.ASSISTANT, None, preview
     if item_type == CodexItemType.COMMAND_EXECUTION:
-        command = item.get("command")
-        preview = command[:_PREVIEW_LEN] if isinstance(command, str) and command else None
+        preview = _codex_command_execution_preview(item, stream_type)
         return TranscriptEventType.TOOL_USE, CODEX_TOOL_NAME_COMMAND, preview
     if item_type == CodexItemType.FILE_CHANGE:
         return (
@@ -226,7 +249,7 @@ def _extract_codex_fields(
     item = data.get("item")
     if not isinstance(item, dict):
         return TranscriptEventType.SYSTEM, None, None
-    return _codex_item_fields(item)
+    return _codex_item_fields(item, CodexStreamType(raw_type))
 
 
 def _extract_line_fields(

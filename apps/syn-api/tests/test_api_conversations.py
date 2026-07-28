@@ -156,6 +156,72 @@ async def test_codex_command_execution_maps_to_bash_tool(mock_conversation_store
     line = result.value.lines[0]
     assert line.event_type == "tool_use"
     assert line.tool_name == "Bash"
+    # item.completed shows the result (aggregated_output), not the invocation -
+    # see test_codex_command_execution_started_shows_invocation for the
+    # started-side preview.
+    assert line.content_preview == "alpha"
+
+
+async def test_codex_command_execution_started_shows_invocation(mock_conversation_store):
+    """An ``item.started`` command_execution shows the command being invoked."""
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"item.started","item":{"id":"item_2","type":"command_execution",'
+        '"command":"cat one.txt","status":"in_progress"}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "tool_use"
+    assert line.tool_name == "Bash"
+    assert line.content_preview == "cat one.txt"
+
+
+async def test_codex_command_execution_started_and_completed_differ(mock_conversation_store):
+    """The started/completed pair for the SAME command carry different content.
+
+    Regression guard: before the fix, both rows normalized to the command
+    string and rendered as byte-identical duplicates.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"item.started","item":{"id":"item_2","type":"command_execution",'
+        '"command":"cat one.txt","status":"in_progress"}}',
+        '{"type":"item.completed","item":{"id":"item_2","type":"command_execution",'
+        '"command":"cat one.txt","aggregated_output":"alpha","exit_code":0,'
+        '"status":"completed"}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    started, completed = result.value.lines
+    assert started.content_preview == "cat one.txt"
+    assert completed.content_preview == "alpha"
+    assert started.content_preview != completed.content_preview
+
+
+async def test_codex_command_execution_completed_falls_back_to_command(mock_conversation_store):
+    """An ``item.completed`` with empty aggregated_output falls back to the command."""
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"item.completed","item":{"id":"item_2","type":"command_execution",'
+        '"command":"cat one.txt","aggregated_output":"","exit_code":0,'
+        '"status":"completed"}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
     assert line.content_preview == "cat one.txt"
 
 
