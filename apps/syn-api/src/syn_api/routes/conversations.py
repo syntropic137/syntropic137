@@ -160,6 +160,12 @@ _CODEX_CLI_NOISE_PREFIXES = (
 _CODEX_STREAM_TYPES = frozenset(t.value for t in CodexStreamType)
 
 
+def _log_line_preview(raw: str) -> str | None:
+    """Preview for a non-object transcript line (CLI diagnostic or JSON scalar)."""
+    stripped = raw.strip() if raw else ""
+    return stripped[:_PREVIEW_LEN] if stripped else None
+
+
 def _is_codex_cli_noise(raw: str) -> bool:
     """True for a codex plain-text banner line that should not appear at all."""
     stripped = raw.strip()
@@ -236,9 +242,14 @@ def _extract_line_fields(
     except (json.JSONDecodeError, AttributeError):
         # Non-JSON line: a codex CLI diagnostic (e.g. an ERROR trace) on stdout.
         # Label it ``log`` rather than leaving it to render as "unknown".
-        stripped = raw.strip() if raw else ""
-        preview = stripped[:_PREVIEW_LEN] if stripped else None
-        return TranscriptEventType.LOG, None, preview
+        return TranscriptEventType.LOG, None, _log_line_preview(raw)
+
+    # Valid JSON but not an object (a bare scalar/array). Both the codex and
+    # claude extractors call ``.get()``, so guard here — otherwise one odd line
+    # (``null``, ``[]``, ``"diagnostic"``) would raise and fail the WHOLE
+    # transcript request with QUERY_FAILED.
+    if not isinstance(data, dict):
+        return TranscriptEventType.LOG, None, _log_line_preview(raw)
 
     codex = _extract_codex_fields(data)
     if codex is not None:

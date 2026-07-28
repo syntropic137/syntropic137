@@ -215,6 +215,45 @@ async def test_codex_diagnostic_line_labelled_log_not_unknown(mock_conversation_
     assert line.content_preview is not None
 
 
+async def test_non_object_json_line_does_not_fail_whole_transcript(mock_conversation_store):
+    """A bare JSON scalar/array line is labelled ``log``, not crash the request."""
+    mock_conversation_store.retrieve_session.return_value = [
+        "null",
+        '["not", "an", "object"]',
+        '{"type": "assistant", "content": "still here"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    lines = result.value.lines
+    assert lines[0].event_type == "log"
+    assert lines[1].event_type == "log"
+    assert lines[2].event_type == "assistant"
+    assert lines[2].content_preview == "still here"
+
+
+async def test_claude_jsonl_lines_survive_noise_filter(mock_conversation_store):
+    """Claude transcripts are pure JSONL, so the codex noise filter never drops them."""
+    mock_conversation_store.retrieve_session.return_value = [
+        # A claude assistant message whose text happens to mention a codex banner.
+        '{"type": "assistant", "content": "Reading additional input from stdin is a codex banner"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    log = result.value
+    assert log.total_lines == 1
+    assert log.lines[0].event_type == "assistant"
+
+
 async def test_get_conversation_metadata(mock_conversation_store):
     """Retrieve conversation metadata from store."""
     mock_conversation_store.get_session_metadata.return_value = {
