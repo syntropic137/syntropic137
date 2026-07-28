@@ -94,11 +94,5 @@ export const PROVIDER_ENVIRONMENTS: Record<string, { backend: string; image: str
   claude: { backend: 'docker', image: 'agentic-workspace-claude-cli' },
 }
 
-// Human-readable name for the agent that ran a session/phase, keyed by the
-// domain provider value (syn_shared/agents.py AgentProvider). Distinct from the
-// workspace image: the badge answers "which agent", not "which container".
-export const AGENT_PROVIDER_LABELS: Record<string, string> = {
-  claude: 'Claude',
-  'claude-interactive': 'Claude (interactive)',
-  codex: 'Codex',
-}
+// Agent name labels (AGENT_PROVIDER_LABELS) live in the shared AgentBadge
+// component — the single source reused by the detail header and sessions list.

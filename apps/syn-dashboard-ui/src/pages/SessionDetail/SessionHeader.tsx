@@ -1,8 +1,8 @@
 import { Activity, Bot, Container, FileText } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { StatusBadge } from '../../components'
+import { AGENT_PROVIDER_LABELS, StatusBadge } from '../../components'
 import type { SessionResponse } from '../../types'
-import { AGENT_PROVIDER_LABELS, PROVIDER_ENVIRONMENTS } from './sessionConstants'
+import { PROVIDER_ENVIRONMENTS } from './sessionConstants'
 
 function AgentProviderBadge({ provider }: { provider: string | null }) {
   if (!provider) return null

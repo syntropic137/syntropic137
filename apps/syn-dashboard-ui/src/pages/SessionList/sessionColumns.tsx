@@ -11,7 +11,7 @@
 import type { ColumnDef } from '../../components'
 import type { SortKey } from '../../hooks/useSortUrlState'
 import type { SessionSummary } from '../../types'
-import { StatusBadge } from '../../components'
+import { AgentBadge, StatusBadge } from '../../components'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
 
 const EM_DASH = '—'
@@ -22,6 +22,14 @@ const STATUS: ColumnDef<SessionSummary, SortKey> = {
   align: 'left',
   sortKey: 'status',
   render: (s) => <StatusBadge status={s.status} size="sm" />,
+}
+
+const AGENT: ColumnDef<SessionSummary, SortKey> = {
+  key: 'agent',
+  label: 'Agent',
+  align: 'left',
+  cellTitle: (s) => s.agent_provider ?? undefined,
+  render: (s) => (s.agent_provider ? <AgentBadge provider={s.agent_provider} /> : EM_DASH),
 }
 
 const WORKFLOW: ColumnDef<SessionSummary, SortKey> = {
@@ -93,6 +101,7 @@ const STARTED: ColumnDef<SessionSummary, SortKey> = {
 export const SESSION_COLUMNS: ColumnDef<SessionSummary, SortKey>[] = [
   STATUS,
   WORKFLOW,
+  AGENT,
   PHASE,
   REPOS,
   TOKENS,
