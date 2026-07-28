@@ -8,7 +8,7 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { StatusBadge } from '../../components'
+import { AgentBadge, StatusBadge } from '../../components'
 import type { SessionSummary } from '../../types'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
 
@@ -33,6 +33,7 @@ export function SessionCard({ session }: { session: SessionSummary }) {
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex items-center gap-2">
           <StatusBadge status={session.status} size="sm" />
+          <AgentBadge provider={session.agent_provider} />
           <span
             className="truncate text-sm font-medium text-[var(--color-text-primary)]"
             title={workflowLabel}

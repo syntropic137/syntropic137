@@ -1,3 +1,5 @@
+export { AgentBadge } from './AgentBadge'
+export { AGENT_PROVIDER_LABELS, agentProviderLabel } from './agentProvider'
 export { Breadcrumbs } from './Breadcrumbs'
 export { ChartTooltip } from './ChartTooltip'
 export { Card, CardContent, CardHeader } from './Card'
