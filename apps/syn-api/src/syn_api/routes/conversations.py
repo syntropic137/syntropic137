@@ -184,40 +184,47 @@ def _codex_file_change_preview(item: Mapping[str, object]) -> str | None:
     return joined[:_PREVIEW_LEN] if joined else None
 
 
-def _codex_command_execution_preview(
-    item: Mapping[str, object], stream_type: CodexStreamType
-) -> str | None:
-    """Preview for a codex ``command_execution`` item.
+def _codex_command_execution_preview(item: Mapping[str, object]) -> str | None:
+    """Preview for a completed codex ``command_execution`` item.
 
-    Codex emits both ``item.started`` and ``item.completed`` for the same
-    command. ``item.started`` carries the invocation (the ``command``);
-    ``item.completed`` carries the result (``aggregated_output``). Without
-    this split, both rows show the same command string, so the same tool
-    call renders twice in the transcript with no new information on the
-    second line. Falls back to the command when the output is empty (e.g.
-    a command that produced no stdout).
+    Prefers the result (``aggregated_output``); falls back to the invocation
+    (``command``) when the output is empty (e.g. a command that produced no
+    stdout), so the row is never blank.
     """
+    output = item.get("aggregated_output")
+    if isinstance(output, str) and output:
+        return output[:_PREVIEW_LEN]
     command = item.get("command")
-    command_preview = command[:_PREVIEW_LEN] if isinstance(command, str) and command else None
-    if stream_type == CodexStreamType.ITEM_COMPLETED:
-        output = item.get("aggregated_output")
-        if isinstance(output, str) and output:
-            return output[:_PREVIEW_LEN]
-    return command_preview
+    return command[:_PREVIEW_LEN] if isinstance(command, str) and command else None
+
+
+_CODEX_TOOL_ITEM_TYPES = frozenset((CodexItemType.COMMAND_EXECUTION, CodexItemType.FILE_CHANGE))
 
 
 def _codex_item_fields(
     item: Mapping[str, object], stream_type: CodexStreamType
 ) -> tuple[str, str | None, str | None]:
-    """Map a codex stream ``item`` to (event_type, tool_name, preview)."""
+    """Map a codex stream ``item`` to (event_type, tool_name, preview).
+
+    Codex emits both ``item.started`` and ``item.completed`` for the same
+    tool call. Only ``item.completed`` renders a tool row - ``item.started``
+    is normalized to a plain ``system`` line with no tool_name/preview, so
+    the raw line still appears (expandable) but never duplicates the
+    completed row, whether or not the completed side has output.
+    """
     item_type = item.get("type")
     if item_type == CodexItemType.AGENT_MESSAGE:
         text = item.get("text")
         preview = text[:_PREVIEW_LEN] if isinstance(text, str) and text else None
         return TranscriptEventType.ASSISTANT, None, preview
+    if item_type in _CODEX_TOOL_ITEM_TYPES and stream_type == CodexStreamType.ITEM_STARTED:
+        return TranscriptEventType.SYSTEM, None, None
     if item_type == CodexItemType.COMMAND_EXECUTION:
-        preview = _codex_command_execution_preview(item, stream_type)
-        return TranscriptEventType.TOOL_USE, CODEX_TOOL_NAME_COMMAND, preview
+        return (
+            TranscriptEventType.TOOL_USE,
+            CODEX_TOOL_NAME_COMMAND,
+            _codex_command_execution_preview(item),
+        )
     if item_type == CodexItemType.FILE_CHANGE:
         return (
             TranscriptEventType.TOOL_USE,

@@ -162,8 +162,12 @@ async def test_codex_command_execution_maps_to_bash_tool(mock_conversation_store
     assert line.content_preview == "alpha"
 
 
-async def test_codex_command_execution_started_shows_invocation(mock_conversation_store):
-    """An ``item.started`` command_execution shows the command being invoked."""
+async def test_codex_command_execution_started_is_system_no_tool_row(mock_conversation_store):
+    """An ``item.started`` command_execution renders as a plain system line.
+
+    It must NOT produce a tool_use row - only ``item.completed`` does, so
+    the same tool call never renders twice regardless of output emptiness.
+    """
     mock_conversation_store.retrieve_session.return_value = [
         '{"type":"item.started","item":{"id":"item_2","type":"command_execution",'
         '"command":"cat one.txt","status":"in_progress"}}',
@@ -176,16 +180,36 @@ async def test_codex_command_execution_started_shows_invocation(mock_conversatio
 
     assert isinstance(result, Ok)
     line = result.value.lines[0]
-    assert line.event_type == "tool_use"
-    assert line.tool_name == "Bash"
-    assert line.content_preview == "cat one.txt"
+    assert line.event_type == "system"
+    assert line.tool_name is None
+    assert line.content_preview is None
 
 
-async def test_codex_command_execution_started_and_completed_differ(mock_conversation_store):
-    """The started/completed pair for the SAME command carry different content.
+async def test_codex_file_change_started_is_system_no_tool_row(mock_conversation_store):
+    """An ``item.started`` file_change renders as a plain system line, not a tool row."""
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"item.started","item":{"id":"item_1","type":"file_change",'
+        '"status":"in_progress","changes":[{"path":"src/a.py","kind":"modify"}]}}',
+    ]
 
-    Regression guard: before the fix, both rows normalized to the command
-    string and rendered as byte-identical duplicates.
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "system"
+    assert line.tool_name is None
+    assert line.content_preview is None
+
+
+async def test_codex_command_execution_started_and_completed_no_duplicate(mock_conversation_store):
+    """The started/completed pair for the SAME command renders exactly ONE tool row.
+
+    Regression guard: before this fix, both rows normalized to the same
+    (event_type, tool_name, preview) triple and rendered as byte-identical
+    duplicates in the transcript.
     """
     mock_conversation_store.retrieve_session.return_value = [
         '{"type":"item.started","item":{"id":"item_2","type":"command_execution",'
@@ -202,14 +226,23 @@ async def test_codex_command_execution_started_and_completed_differ(mock_convers
 
     assert isinstance(result, Ok)
     started, completed = result.value.lines
-    assert started.content_preview == "cat one.txt"
+    assert started.event_type == "system"
+    assert started.tool_name is None
+    assert completed.event_type == "tool_use"
+    assert completed.tool_name == "Bash"
     assert completed.content_preview == "alpha"
-    assert started.content_preview != completed.content_preview
 
 
 async def test_codex_command_execution_completed_falls_back_to_command(mock_conversation_store):
-    """An ``item.completed`` with empty aggregated_output falls back to the command."""
+    """An ``item.completed`` with empty aggregated_output falls back to the command.
+
+    This is the case that used to produce a duplicate row: started and
+    completed both showed the bare command with no distinguishing preview.
+    Now started is suppressed entirely, so there is exactly one row.
+    """
     mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"item.started","item":{"id":"item_2","type":"command_execution",'
+        '"command":"cat one.txt","status":"in_progress"}}',
         '{"type":"item.completed","item":{"id":"item_2","type":"command_execution",'
         '"command":"cat one.txt","aggregated_output":"","exit_code":0,'
         '"status":"completed"}}',
@@ -221,12 +254,16 @@ async def test_codex_command_execution_completed_falls_back_to_command(mock_conv
         result = await get_conversation_log("codex-1")
 
     assert isinstance(result, Ok)
-    line = result.value.lines[0]
-    assert line.content_preview == "cat one.txt"
+    started, completed = result.value.lines
+    assert started.event_type == "system"
+    assert started.tool_name is None
+    assert completed.event_type == "tool_use"
+    assert completed.tool_name == "Bash"
+    assert completed.content_preview == "cat one.txt"
 
 
 async def test_codex_file_change_maps_to_edit_tool(mock_conversation_store):
-    """A codex ``file_change`` item maps to the Edit tool with the changed paths."""
+    """A codex ``file_change`` item.completed maps to the Edit tool with the changed paths."""
     mock_conversation_store.retrieve_session.return_value = [
         '{"type":"item.completed","item":{"id":"item_3","type":"file_change",'
         '"status":"completed","changes":[{"path":"src/a.py","kind":"modify"},'
@@ -243,6 +280,74 @@ async def test_codex_file_change_maps_to_edit_tool(mock_conversation_store):
     assert line.event_type == "tool_use"
     assert line.tool_name == "Edit"
     assert line.content_preview == "src/a.py, src/b.py"
+
+
+async def test_codex_file_change_started_and_completed_no_duplicate(mock_conversation_store):
+    """The started/completed pair for the SAME file_change renders exactly ONE tool row.
+
+    Regression guard for the fixture case where ``changes`` is present on
+    BOTH started and completed with identical paths.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"item.started","item":{"id":"item_1","type":"file_change",'
+        '"status":"in_progress","changes":[{"path":"src/a.py","kind":"modify"}]}}',
+        '{"type":"item.completed","item":{"id":"item_1","type":"file_change",'
+        '"status":"completed","changes":[{"path":"src/a.py","kind":"modify"}]}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    started, completed = result.value.lines
+    assert started.event_type == "system"
+    assert started.tool_name is None
+    assert completed.event_type == "tool_use"
+    assert completed.tool_name == "Edit"
+    assert completed.content_preview == "src/a.py"
+
+
+async def test_codex_real_fixture_has_no_duplicate_tool_rows(mock_conversation_store):
+    """Strong regression guard: run the real recorded codex fixture through the
+
+    full pipeline and assert no two rows share the same
+    (event_type, tool_name, content_preview) triple where tool_name is set.
+    This proves duplication is gone against real recorded data, not just
+    hand-crafted fixtures.
+    """
+    import pathlib
+
+    fixture_path = (
+        pathlib.Path(__file__).parents[3]
+        / "packages"
+        / "syn-domain"
+        / "tests"
+        / "fixtures"
+        / "codex"
+        / "codex_exec_recording.jsonl"
+    )
+    raw_lines = fixture_path.read_text().splitlines()
+    mock_conversation_store.retrieve_session.return_value = raw_lines
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("codex-1")
+
+    assert isinstance(result, Ok)
+    lines = result.value.lines
+    assert len(lines) > 0
+
+    tool_triples = [
+        (line.event_type, line.tool_name, line.content_preview)
+        for line in lines
+        if line.tool_name is not None
+    ]
+    assert len(tool_triples) == len(set(tool_triples)), (
+        f"Duplicate tool rows found in real fixture: {tool_triples}"
+    )
 
 
 async def test_codex_cli_stdin_banner_is_filtered(mock_conversation_store):
