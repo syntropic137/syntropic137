@@ -134,7 +134,7 @@ class TranscriptEventType(StrEnum):
     / ``system`` as its top-level ``type``; the codex path is normalized ONTO
     the same vocabulary so the dashboard's single color map styles both. These
     strings are mirrored by ``conversationEventColors`` in the frontend
-    (``sessionConstants.ts``) — keep them in sync.
+    (``sessionConstants.ts``) - keep them in sync.
     """
 
     ASSISTANT = "assistant"
@@ -268,7 +268,7 @@ def _extract_line_fields(
         return TranscriptEventType.LOG, None, _log_line_preview(raw)
 
     # Valid JSON but not an object (a bare scalar/array). Both the codex and
-    # claude extractors call ``.get()``, so guard here — otherwise one odd line
+    # claude extractors call ``.get()``, so guard here - otherwise one odd line
     # (``null``, ``[]``, ``"diagnostic"``) would raise and fail the WHOLE
     # transcript request with QUERY_FAILED.
     if not isinstance(data, dict):

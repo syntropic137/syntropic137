@@ -87,12 +87,12 @@ export const conversationEventColors: Record<string, string> = {
   log: 'text-gray-500 bg-gray-500/10',
 }
 
-// Workspace container image per provider. Codex has no distinct image — it runs
-// the codex CLI inside the shared claude-cli workspace image — so it is
+// Workspace container image per provider. Codex has no distinct image - it runs
+// the codex CLI inside the shared claude-cli workspace image - so it is
 // deliberately absent here; the agent identity is carried by AGENT_PROVIDER_LABELS.
 export const PROVIDER_ENVIRONMENTS: Record<string, { backend: string; image: string }> = {
   claude: { backend: 'docker', image: 'agentic-workspace-claude-cli' },
 }
 
 // Agent name labels (AGENT_PROVIDER_LABELS) live in the shared AgentBadge
-// component — the single source reused by the detail header and sessions list.
+// component - the single source reused by the detail header and sessions list.

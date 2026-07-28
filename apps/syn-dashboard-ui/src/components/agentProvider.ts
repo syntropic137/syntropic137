@@ -1,5 +1,5 @@
 /**
- * Agent-provider label vocabulary — the single source for "which agent" names.
+ * Agent-provider label vocabulary - the single source for "which agent" names.
  *
  * Keyed by the domain provider value (syn_shared/agents.py AgentProvider).
  * Kept separate from AgentBadge.tsx so the component file exports only a
