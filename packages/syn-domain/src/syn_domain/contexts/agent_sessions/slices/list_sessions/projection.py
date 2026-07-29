@@ -79,6 +79,7 @@ def _build_query_filters(
     workflow_id: str | None,
     status_filter: str | None,
     statuses: list[str] | None,
+    parent_session_id: str | None = None,
 ) -> dict[str, str]:
     """Build the equality filter map for store.query()."""
     filters: dict[str, str] = {}
@@ -86,6 +87,8 @@ def _build_query_filters(
         filters["workflow_id"] = workflow_id
     if status_filter and not statuses:
         filters["status"] = status_filter
+    if parent_session_id:
+        filters["parent_session_id"] = parent_session_id
     return filters
 
 
@@ -242,6 +245,8 @@ class SessionListProjection(AutoDispatchProjection):
             duration_seconds=None,
             phase_id=event_data.get("phase_id"),
             execution_id=event_data.get("execution_id"),
+            parent_session_id=event_data.get("parent_session_id"),
+            root_session_id=event_data.get("root_session_id"),
             repos=tuple(event_data.get("repos", ())),
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
@@ -343,6 +348,7 @@ class SessionListProjection(AutoDispatchProjection):
         limit: int = 100,
         offset: int = 0,
         order_by: str = "-started_at",
+        parent_session_id: str | None = None,
     ) -> list[SessionSummary]:
         """Query sessions with optional filtering.
 
@@ -353,8 +359,11 @@ class SessionListProjection(AutoDispatchProjection):
         post-fetch in Python because the underlying store filter only supports
         equality. We fetch without a row cap when bounds are present so the
         bounded slice is honoured even on installs with many sessions.
+
+        ``parent_session_id`` restricts results to sessions delegated by that
+        session (issue #792); it is an equality filter handled by the store.
         """
-        filters = _build_query_filters(workflow_id, status_filter, statuses)
+        filters = _build_query_filters(workflow_id, status_filter, statuses, parent_session_id)
         post_filtering = bool(statuses or started_after is not None or started_before is not None)
         store_limit = None if post_filtering else limit
         store_offset = 0 if post_filtering else offset
