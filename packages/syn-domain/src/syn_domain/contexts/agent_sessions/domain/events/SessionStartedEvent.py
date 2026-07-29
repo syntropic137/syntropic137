@@ -25,6 +25,12 @@ class SessionStartedEvent(DomainEvent):
     phase_id: str
     milestone_id: str | None = None
 
+    # Delegation linkage (issue #792). Optional with None default for backward
+    # compatibility with pre-delegation events; there is no upcaster framework,
+    # readers are tolerant.
+    parent_session_id: str | None = None
+    root_session_id: str | None = None
+
     # Agent info
     agent_provider: str
     agent_model: str | None = None

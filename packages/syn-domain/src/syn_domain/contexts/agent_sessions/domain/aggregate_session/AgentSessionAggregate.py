@@ -143,6 +143,8 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             execution_id=command.execution_id,
             phase_id=command.phase_id,
             milestone_id=command.milestone_id,
+            parent_session_id=command.parent_session_id,
+            root_session_id=command.root_session_id or session_id,
             agent_provider=command.agent_provider,
             agent_model=command.agent_model,
             repos=list(command.repos),
