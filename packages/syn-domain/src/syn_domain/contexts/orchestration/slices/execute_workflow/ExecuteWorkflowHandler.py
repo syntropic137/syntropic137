@@ -22,6 +22,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
     WorkflowNotFoundError,
 )
+from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
@@ -159,6 +160,29 @@ def _resolve_repos_from_template(
     return []
 
 
+def _default_model_for_provider(provider: str, claude_default_model: str) -> str:
+    """Pick the model to attribute cost/pricing to when a phase omits one.
+
+    ``AgentConfiguration.model`` defaults to a claude alias (``"haiku"``),
+    which is correct when the phase's provider is claude. But codex phases
+    routinely omit ``model`` on purpose (see ``workflows/examples/codex-demo.yaml``):
+    the codex CLI rejects claude-shaped model ids when authenticated via a
+    ChatGPT account, and codex does not report its own model in the
+    ``--json`` stream (verified against
+    ``packages/syn-domain/tests/fixtures/codex/codex_exec_recording.jsonl`` -
+    no ``model`` field on ``thread.started`` or ``turn.completed``). Falling
+    through to the claude default silently priced every unspecified-model
+    codex phase with CLAUDE HAIKU rates (issue #788).
+
+    ``AgentProvider.CODEX`` doubles as a ``MODEL_ALIASES`` key
+    (``"codex" -> "gpt-5.6"``), so using it here routes an unspecified-model
+    codex phase to codex pricing instead of a wrong claude number.
+    """
+    if provider == AgentProvider.CODEX:
+        return AgentProvider.CODEX.value
+    return claude_default_model
+
+
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
@@ -174,9 +198,10 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     if not (phase_model or phase_provider or phase_agent_id or allow_delegation):
         return AgentConfiguration()
     defaults = AgentConfiguration()
+    resolved_provider = phase_provider or defaults.provider
     return AgentConfiguration(
-        provider=phase_provider or defaults.provider,
-        model=phase_model or defaults.model,
+        provider=resolved_provider,
+        model=phase_model or _default_model_for_provider(resolved_provider, defaults.model),
         agent_id=phase_agent_id or defaults.agent_id,
         allow_delegation=allow_delegation,
     )
