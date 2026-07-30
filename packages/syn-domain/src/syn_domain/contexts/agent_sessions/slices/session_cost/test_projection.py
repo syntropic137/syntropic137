@@ -106,6 +106,7 @@ class TestAgentObservationHandling:
                 "output_tokens": 1_000_000,  # 1M tokens
                 "cache_creation_tokens": 0,
                 "cache_read_tokens": 0,
+                "model": "claude-sonnet-4-20250514",
             },
             "timestamp": datetime.now().isoformat(),
         }
@@ -252,6 +253,7 @@ class TestAgentObservationHandling:
                 "output_tokens": 0,
                 "cache_creation_tokens": 1_000_000,  # 1M tokens @ $3.75/MTok
                 "cache_read_tokens": 1_000_000,  # 1M tokens @ $0.30/MTok
+                "model": "claude-sonnet-4-20250514",
             },
         }
 
@@ -286,6 +288,78 @@ class TestAgentObservationHandling:
         assert session_cost is not None
         assert "claude-sonnet-4-20250514" in session_cost.cost_by_model
         assert session_cost.cost_by_model["claude-sonnet-4-20250514"] == Decimal("18.00")
+
+    @pytest.mark.asyncio
+    async def test_unknown_model_contributes_no_cost(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """A TOKEN_USAGE observation with no model MUST NOT be priced as any
+
+        real model (issue #788). Cost stays zero and the projection records
+        that the total is incomplete rather than confidently wrong.
+        """
+        await projection.on_agent_observation(
+            {
+                "session_id": "session-1",
+                "event_type": ObservationType.TOKEN_USAGE.value,
+                "data": {
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 1_000_000,
+                },
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-1")
+        assert session_cost is not None
+        assert session_cost.total_cost_usd == Decimal("0")
+        assert session_cost.token_cost_usd == Decimal("0")
+        assert session_cost.cost_by_model == {}
+        assert session_cost.unpriced_observation_count == 1
+
+    @pytest.mark.asyncio
+    async def test_unrecognized_model_contributes_no_cost(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """An explicit but unrecognized model id is also never priced."""
+        await projection.on_agent_observation(
+            {
+                "session_id": "session-1",
+                "event_type": ObservationType.TOKEN_USAGE.value,
+                "data": {
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 1_000_000,
+                    "model": "some-future-model-id",
+                },
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-1")
+        assert session_cost is not None
+        assert session_cost.total_cost_usd == Decimal("0")
+        assert session_cost.cost_by_model == {}
+        assert session_cost.unpriced_observation_count == 1
+
+    @pytest.mark.asyncio
+    async def test_codex_phase_not_priced_as_haiku_or_sonnet(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """A codex phase (no model reported) is not haiku-priced or sonnet-priced."""
+        await projection.on_agent_observation(
+            {
+                "session_id": "codex-session-1",
+                "event_type": ObservationType.TOKEN_USAGE.value,
+                "data": {
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 1_000_000,
+                },
+            }
+        )
+
+        session_cost = await projection.get_session_cost("codex-session-1")
+        assert session_cost is not None
+        # Haiku would be $1 + $5 = $6.00; Sonnet would be $3 + $15 = $18.00.
+        assert session_cost.total_cost_usd not in (Decimal("6.00"), Decimal("18.00"))
+        assert session_cost.total_cost_usd == Decimal("0")
 
     @pytest.mark.asyncio
     async def test_skip_observation_without_session_id(

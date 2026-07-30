@@ -19,8 +19,9 @@ class TestCostCalculator:
         cost = calc.calculate_token_cost(
             input_tokens=1_000_000,
             output_tokens=1_000_000,
+            model="claude-sonnet-4-20250514",
         )
-        # Default (Sonnet 4): $3 input + $15 output = $18
+        # Sonnet 4: $3 input + $15 output = $18
         assert cost == Decimal("18.00")
 
     def test_cache_token_costs(self) -> None:
@@ -30,9 +31,25 @@ class TestCostCalculator:
             output_tokens=0,
             cache_creation=1_000_000,
             cache_read=1_000_000,
+            model="claude-sonnet-4-20250514",
         )
-        # Default (Sonnet 4): $3.75 cache write + $0.30 cache read = $4.05
+        # Sonnet 4: $3.75 cache write + $0.30 cache read = $4.05
         assert cost == Decimal("4.05")
+
+    def test_unknown_model_contributes_zero_cost(self) -> None:
+        """An unknown/missing model MUST NOT be priced as any real model (#788)."""
+        calc = CostCalculator()
+        cost = calc.calculate_token_cost(
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+        )
+        assert cost == Decimal("0")
+
+    def test_missing_model_is_not_priced(self) -> None:
+        """model=None resolves to no pricing, never a guessed default."""
+        calc = CostCalculator()
+        assert calc.resolve_pricing(None) is None
+        assert calc.resolve_pricing("totally-unknown-model") is None
 
     def test_model_specific_pricing(self) -> None:
         calc = CostCalculator()
@@ -51,7 +68,9 @@ class TestCostCalculator:
 
     def test_small_token_counts(self) -> None:
         calc = CostCalculator()
-        cost = calc.calculate_token_cost(input_tokens=1000, output_tokens=500)
+        cost = calc.calculate_token_cost(
+            input_tokens=1000, output_tokens=500, model="claude-sonnet-4-20250514"
+        )
         expected = (Decimal("1000") / 1_000_000) * Decimal("3.00") + (
             Decimal("500") / 1_000_000
         ) * Decimal("15.00")

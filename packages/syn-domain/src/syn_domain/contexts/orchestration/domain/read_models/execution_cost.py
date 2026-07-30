@@ -95,6 +95,14 @@ class ExecutionCost:
     cost_by_tool: dict[str, Decimal] = field(default_factory=dict)
     """Cost breakdown by tool."""
 
+    unpriced_observation_count: int = 0
+    """Count of TOKEN_USAGE observations whose model was unknown/missing.
+
+    These contribute zero cost to ``total_cost_usd`` (never priced as a
+    default/guessed model - see issue #788). A non-zero count means the
+    total is incomplete, not confidently wrong.
+    """
+
     # Status
     is_complete: bool = False
     """Whether all sessions have completed."""
@@ -131,6 +139,7 @@ class ExecutionCost:
             cost_by_phase=_coerce_decimal_dict(data.get("cost_by_phase")),
             cost_by_model=_coerce_decimal_dict(data.get("cost_by_model")),
             cost_by_tool=_coerce_decimal_dict(data.get("cost_by_tool")),
+            unpriced_observation_count=data.get("unpriced_observation_count", 0),
             is_complete=data.get("is_complete", False),
             started_at=_coerce_datetime(data.get("started_at")),
             completed_at=_coerce_datetime(data.get("completed_at")),
@@ -157,6 +166,7 @@ class ExecutionCost:
             "cost_by_phase": {k: str(v) for k, v in self.cost_by_phase.items()},
             "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},
             "cost_by_tool": {k: str(v) for k, v in self.cost_by_tool.items()},
+            "unpriced_observation_count": self.unpriced_observation_count,
             "is_complete": self.is_complete,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,

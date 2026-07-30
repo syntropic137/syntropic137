@@ -1,6 +1,7 @@
 """Tests for ExecutionCostProjection with unified AgentObservation model."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -114,6 +115,80 @@ class TestAgentObservationHandling:
         assert "session-2" in execution_cost.session_ids
         assert execution_cost.input_tokens == 3000
         assert execution_cost.output_tokens == 1500
+
+    @pytest.mark.asyncio
+    async def test_unknown_model_contributes_no_cost(
+        self, projection: ExecutionCostProjection
+    ) -> None:
+        """A TOKEN_USAGE observation with no model MUST NOT be priced as any
+
+        real model (issue #788). Cost stays zero and the projection records
+        that the total is incomplete rather than confidently wrong.
+        """
+        await projection.on_agent_observation(
+            {
+                "session_id": "session-1",
+                "execution_id": "exec-1",
+                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "data": {
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 1_000_000,
+                },
+            }
+        )
+
+        execution_cost = await projection.get_execution_cost("exec-1")
+        assert execution_cost is not None
+        assert execution_cost.total_cost_usd == Decimal("0")
+        assert execution_cost.cost_by_model == {}
+        assert execution_cost.unpriced_observation_count == 1
+
+    @pytest.mark.asyncio
+    async def test_codex_phase_not_priced_as_haiku_or_sonnet(
+        self, projection: ExecutionCostProjection
+    ) -> None:
+        """A codex phase (no model reported) is not haiku-priced or sonnet-priced."""
+        await projection.on_agent_observation(
+            {
+                "session_id": "codex-session-1",
+                "execution_id": "codex-exec-1",
+                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "data": {
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 1_000_000,
+                },
+            }
+        )
+
+        execution_cost = await projection.get_execution_cost("codex-exec-1")
+        assert execution_cost is not None
+        # Haiku would be $1 + $5 = $6.00; Sonnet would be $3 + $15 = $18.00.
+        assert execution_cost.total_cost_usd not in (Decimal("6.00"), Decimal("18.00"))
+        assert execution_cost.total_cost_usd == Decimal("0")
+
+    @pytest.mark.asyncio
+    async def test_claude_phase_prices_exactly_as_before(
+        self, projection: ExecutionCostProjection
+    ) -> None:
+        """Regression guard: a claude phase with a real model prices unaffected."""
+        await projection.on_agent_observation(
+            {
+                "session_id": "session-1",
+                "execution_id": "exec-1",
+                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "data": {
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 1_000_000,
+                    "model": "claude-sonnet-4-20250514",
+                },
+            }
+        )
+
+        execution_cost = await projection.get_execution_cost("exec-1")
+        assert execution_cost is not None
+        assert execution_cost.total_cost_usd == Decimal("18.00")
+        assert execution_cost.cost_by_model == {"claude-sonnet-4-20250514": Decimal("18.00")}
+        assert execution_cost.unpriced_observation_count == 0
 
     @pytest.mark.asyncio
     async def test_observation_without_execution_skipped(
@@ -276,12 +351,23 @@ class TestExtractedHelpers:
         assert ec.started_at == first
 
     def test_calculate_token_cost(self) -> None:
-        """_calculate_token_cost computes correct cost."""
-        cost = _calculate_token_cost(1_000_000, 1_000_000, 0, 0)
+        """_calculate_token_cost computes correct cost for a known model."""
+        cost, priced = _calculate_token_cost(
+            1_000_000, 1_000_000, 0, 0, model="claude-sonnet-4-20250514"
+        )
         # 1M input @ $3 + 1M output @ $15 = $18
-        from decimal import Decimal
-
+        assert priced is True
         assert cost == Decimal("18.00")
+
+    def test_calculate_token_cost_unknown_model_is_unpriced(self) -> None:
+        """An unknown/missing model MUST NOT be priced as any real model (#788)."""
+        cost, priced = _calculate_token_cost(1_000_000, 1_000_000, 0, 0)
+        assert priced is False
+        assert cost == Decimal("0")
+
+        cost, priced = _calculate_token_cost(1_000_000, 1_000_000, 0, 0, model="unknown-model")
+        assert priced is False
+        assert cost == Decimal("0")
 
     def test_update_completed_at_sets_latest(self) -> None:
         """_update_completed_at updates to latest timestamp."""

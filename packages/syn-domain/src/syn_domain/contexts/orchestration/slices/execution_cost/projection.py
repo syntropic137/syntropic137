@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 from syn_domain.contexts.agent_sessions import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
-from syn_shared.pricing import get_model_pricing
+from syn_shared.pricing import resolve_model_pricing
 
 
 def _get_or_create(existing: dict[str, Any] | None, execution_id: str) -> ExecutionCost:
@@ -54,10 +54,24 @@ def _calculate_token_cost(
     cache_creation: int,
     cache_read: int,
     model: str | None = None,
-) -> Decimal:
-    """Calculate token cost from counts using model-specific pricing."""
-    pricing = get_model_pricing(model or "")
-    return pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
+) -> tuple[Decimal, bool]:
+    """Calculate token cost from counts using model-specific pricing.
+
+    Uses the STRICT resolver (``resolve_model_pricing``), never the
+    legacy-fallback ``get_model_pricing``. An unknown or missing model
+    MUST NOT be priced as any real model (issue #788).
+
+    Returns:
+        A ``(cost, priced)`` tuple. ``priced`` is ``False`` when the model
+        was unknown/missing, in which case ``cost`` is always
+        ``Decimal("0")`` rather than a guessed price.
+    """
+    if not model:
+        return Decimal("0"), False
+    pricing = resolve_model_pricing(model)
+    if pricing is None:
+        return Decimal("0"), False
+    return pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read), True
 
 
 def _apply_token_usage(
@@ -77,12 +91,14 @@ def _apply_token_usage(
     execution_cost.cache_read_tokens += cache_read
 
     model = data.get("model")
-    token_cost = _calculate_token_cost(
+    token_cost, priced = _calculate_token_cost(
         input_tokens, output_tokens, cache_creation, cache_read, model=model
     )
     execution_cost.token_cost_usd += token_cost
     execution_cost.total_cost_usd += token_cost
-    if model:
+    if not priced:
+        execution_cost.unpriced_observation_count += 1
+    if model and priced:
         current = execution_cost.cost_by_model.get(model, Decimal("0"))
         execution_cost.cost_by_model[model] = current + token_cost
 
