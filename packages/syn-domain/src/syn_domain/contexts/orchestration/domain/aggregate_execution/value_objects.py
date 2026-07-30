@@ -75,7 +75,11 @@ class AgentConfiguration:
 
     provider: str = AgentProvider.CLAUDE  # + claude-interactive, codex, openai (mock in tests)
     # NOTE: Temporarily using Haiku to reduce costs during testing
-    model: str = "haiku"  # CLI alias - auto-resolves to latest version
+    # None means "no model chosen" - the honest state for a codex phase that
+    # omits `model:` (codex does not report its own model on the wire, so we
+    # must not synthesize a value; see _default_model_for_provider in
+    # ExecuteWorkflowHandler.py, issue #788). Never a sentinel string.
+    model: str | None = "haiku"  # CLI alias - auto-resolves to latest version
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout_seconds: int = 300

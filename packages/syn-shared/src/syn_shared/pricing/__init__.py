@@ -131,8 +131,16 @@ DEFAULT_MODEL_ID = "claude-sonnet-4-20250514"
 # The workflow YAML and AgentConfiguration use short names like
 # ``sonnet``/``opus``/``haiku``; resolve them so pricing lookups don't
 # silently fall back to the default.
+#
+# NOTE: no "codex" -> "gpt-5.6" alias. "codex" is a provider name
+# (AgentProvider.CODEX), not a model id, and an earlier fix briefly used it
+# as both at once - synthesizing "codex" as the model for a codex phase
+# with no explicit `model:`. That collapsed "provider" and "model unknown"
+# into the same string, which then silently priced unspecified-model codex
+# phases as GPT-5.6 (issue #788 follow-up). A truly unknown model must
+# resolve to no pricing, not a guessed one - see
+# ExecuteWorkflowHandler._default_model_for_provider.
 MODEL_ALIASES: dict[str, str] = {
-    "codex": "gpt-5.6",
     "gpt-codex": "gpt-5.6",
     "opus": "claude-opus-4-20250514",
     "sonnet": "claude-sonnet-4-20250514",

@@ -238,7 +238,7 @@ class CodexStreamProcessor:
         execution_id: str,
         phase_id: str,
         session_id: str,
-        agent_model: str,
+        agent_model: str | None,
     ) -> None:
         self._tokens = tokens
         self._collector = collector
@@ -323,7 +323,16 @@ class CodexStreamProcessor:
         )
 
     def _estimate_cost(self) -> float | None:
-        """Estimate total cost via the STRICT resolver (never Sonnet default)."""
+        """Estimate total cost via the STRICT resolver (never Sonnet default).
+
+        ``self._agent_model`` is ``None`` when the phase omitted `model:`
+        (codex does not report its own model on the wire, so there is no
+        authoritative id to resolve). Returning ``None`` here - rather than
+        guessing a model to price against - leaves cost unpriced instead of
+        confidently wrong (issue #788 follow-up).
+        """
+        if self._agent_model is None:
+            return None
         pricing = resolve_model_pricing(self._agent_model)
         if pricing is None:
             return None

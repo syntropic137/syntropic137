@@ -84,6 +84,12 @@ def test_codex_phase_without_explicit_model_does_not_default_to_haiku() -> None:
     workflows/examples/codex-demo.yaml) must not silently resolve to the
     claude "haiku" default - that mispriced every codex phase with claude
     haiku rates (#788).
+
+    It also must not resolve to a synthesized "codex" model string (the
+    original #788 fix's over-correction): that string then flowed into
+    `codex exec --model codex` (a nonexistent model) and got confidently
+    priced as GPT-5.6 via a pricing alias, despite the real model being
+    unknown. The honest state is `None` - unforced model, unpriced cost.
     """
     phase = PhaseDefinition(
         phase_id="p1",
@@ -94,7 +100,7 @@ def test_codex_phase_without_explicit_model_does_not_default_to_haiku() -> None:
     )
     cfg = _build_agent_config_from_phase(phase)
     assert cfg.model != "haiku"
-    assert cfg.model == AgentProvider.CODEX.value
+    assert cfg.model is None
 
 
 def test_claude_phase_without_explicit_model_still_defaults_to_haiku() -> None:

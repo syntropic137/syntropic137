@@ -200,7 +200,7 @@ class EventStreamProcessor:
         phase_id: str,
         session_id: str,
         workspace_id: str | None,
-        agent_model: str,
+        agent_model: str | None,
         collector: ObservabilityCollector | None = None,
     ) -> None:
         self._tokens = tokens

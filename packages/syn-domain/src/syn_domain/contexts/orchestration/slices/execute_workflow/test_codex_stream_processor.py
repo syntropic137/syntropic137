@@ -61,7 +61,7 @@ async def _lines(path: Path) -> AsyncIterator[str]:
 
 
 def _make_processor(
-    collector: _RecordingCollector, agent_model: str = "gpt-5.6"
+    collector: _RecordingCollector, agent_model: str | None = "gpt-5.6"
 ) -> tuple[CodexStreamProcessor, TokenAccumulator]:
     tokens = TokenAccumulator()
     processor = CodexStreamProcessor(
@@ -191,6 +191,25 @@ async def test_unknown_model_marks_cost_unavailable() -> None:
     rec = _FIXTURES_DIR / "codex_exec_recording.jsonl"
     collector = _RecordingCollector()
     processor, _tokens = _make_processor(collector, agent_model="mystery-model")
+
+    result = await processor.process_stream(_lines(rec), _NoopWorkspace())
+
+    assert result.total_cost_usd is None
+    summary = next(c[1] for c in collector.calls if c[0] == "summary")
+    assert summary["total_cost_usd"] is None
+
+
+@pytest.mark.asyncio
+async def test_none_model_marks_cost_unavailable_not_haiku_not_gpt_5_6() -> None:
+    """A codex phase with no explicit model (agent_model=None) must NOT be
+    priced at all - specifically not claude haiku rates (the original #788
+    bug) and not GPT-5.6 rates (the #788 fix's over-correction, which
+    synthesized "codex" as the model and let it alias to gpt-5.6 pricing).
+    Cost must resolve to unknown/unpriced (None).
+    """
+    rec = _FIXTURES_DIR / "codex_exec_recording.jsonl"
+    collector = _RecordingCollector()
+    processor, _tokens = _make_processor(collector, agent_model=None)
 
     result = await processor.process_stream(_lines(rec), _NoopWorkspace())
 

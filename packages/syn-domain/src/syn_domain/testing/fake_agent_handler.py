@@ -77,7 +77,7 @@ class FakeAgentExecutionHandler:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         session_id: str,
-        agent_model: str,
+        agent_model: str | None,
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,

@@ -160,7 +160,7 @@ def _resolve_repos_from_template(
     return []
 
 
-def _default_model_for_provider(provider: str, claude_default_model: str) -> str:
+def _default_model_for_provider(provider: str, claude_default_model: str | None) -> str | None:
     """Pick the model to attribute cost/pricing to when a phase omits one.
 
     ``AgentConfiguration.model`` defaults to a claude alias (``"haiku"``),
@@ -174,12 +174,25 @@ def _default_model_for_provider(provider: str, claude_default_model: str) -> str
     through to the claude default silently priced every unspecified-model
     codex phase with CLAUDE HAIKU rates (issue #788).
 
-    ``AgentProvider.CODEX`` doubles as a ``MODEL_ALIASES`` key
-    (``"codex" -> "gpt-5.6"``), so using it here routes an unspecified-model
-    codex phase to codex pricing instead of a wrong claude number.
+    An earlier fix synthesized ``AgentProvider.CODEX.value`` (``"codex"``)
+    here so the phase would resolve to codex pricing instead of a claude
+    number. That over-corrected: ``"codex"`` then passed as a genuine model
+    id everywhere downstream too -  ``codex exec --model codex`` (a
+    nonexistent model, since ``_is_codex_model`` in ``_wiring.py`` can't
+    tell "unspecified" from "user chose the literal string codex") and
+    ``resolve_model_pricing("codex")`` confidently returned GPT-5.6 pricing
+    for a model we never actually ran. Both are worse than the original bug:
+    a wrong model argument can break the run, and a confidently-wrong price
+    is invisible in a dashboard (an absent price is at least visibly
+    missing).
+
+    So: codex phases with no explicit ``model`` get ``None`` here, not a
+    synthesized string. ``None`` means "run codex model-unforced (its own
+    account default) and leave cost unpriced until the real model is known"
+    - honest absence beats a guessed value in either direction.
     """
     if provider == AgentProvider.CODEX:
-        return AgentProvider.CODEX.value
+        return None
     return claude_default_model
 
 
