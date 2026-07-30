@@ -40,6 +40,7 @@ _ZERO_BREAKDOWN: dict[str, float] = {
     "output_tokens": 0.0,
     "cache_creation_tokens": 0.0,
     "cache_read_tokens": 0.0,
+    "unpriced_tokens": 0.0,
 }
 
 

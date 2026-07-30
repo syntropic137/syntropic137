@@ -407,6 +407,7 @@ class TestExecutionCostQueryServiceBuildFromTokenUsage:
 
         row: dict[str, object] = {
             "execution_id": "exec-1",
+            "model": "claude-sonnet-4-20250514",
             "total_input": 1000,
             "total_output": 500,
             "cache_creation": 0,
@@ -416,7 +417,7 @@ class TestExecutionCostQueryServiceBuildFromTokenUsage:
             "started_at": started,
             "last_observation": completed,
         }
-        result = service._build_from_token_usage(row, tool_counts={})
+        result = service._build_from_token_usage("exec-1", [row], tool_counts={})
 
         assert result.duration_ms == pytest.approx(150_000.0)  # 2.5 min = 150,000 ms
 
@@ -430,6 +431,7 @@ class TestExecutionCostQueryServiceBuildFromTokenUsage:
 
         row: dict[str, object] = {
             "execution_id": "exec-2",
+            "model": "claude-sonnet-4-20250514",
             "total_input": 500,
             "total_output": 200,
             "cache_creation": 0,
@@ -439,7 +441,7 @@ class TestExecutionCostQueryServiceBuildFromTokenUsage:
             "started_at": None,
             "last_observation": None,
         }
-        result = service._build_from_token_usage(row, tool_counts={})
+        result = service._build_from_token_usage("exec-2", [row], tool_counts={})
 
         assert result.duration_ms == 0.0
 

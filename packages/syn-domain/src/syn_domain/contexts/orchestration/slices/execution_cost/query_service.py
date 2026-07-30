@@ -19,6 +19,7 @@ from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
     TimescaleExecutionCostQuery,
+    price_grouped_token_usage,
 )
 from syn_shared.events import (
     SESSION_SUMMARY,
@@ -49,10 +50,17 @@ ORDER BY MAX(time) DESC
 LIMIT $2
 """
 
-# Fallback: list executions from token_usage (in-progress, no summary yet)
+# Fallback: list executions from token_usage (in-progress, no summary yet).
+#
+# Grouped by (execution_id, model): an execution can span multiple
+# sessions/phases on different models, so pricing must happen per model
+# group rather than flattening all tokens into one SUM per execution and
+# pricing them as a single model (issue #788). Rows for the same
+# execution_id are merged in Python via ``price_grouped_token_usage``.
 _LIST_ALL_FROM_TOKEN_USAGE_QUERY = """
 SELECT
     execution_id,
+    data->>'model' as model,
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -64,7 +72,7 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
   AND execution_id IS NOT NULL
-GROUP BY execution_id
+GROUP BY execution_id, data->>'model'
 """
 
 _TOOL_COUNT_BY_EXECUTION_QUERY = """
@@ -154,10 +162,15 @@ class ExecutionCostQueryService:
             results: list[ExecutionCost] = []
             for row in summary_rows:
                 results.append(self._build_from_summary(row, tool_counts, phase_map, model_map))
+
+            rows_by_execution: dict[str, list[asyncpg.Record]] = {}
             for row in token_rows:
                 eid = row["execution_id"]  # type: ignore[index]
-                if eid not in summarized_exec_ids:
-                    results.append(self._build_from_token_usage(row, tool_counts))
+                if eid in summarized_exec_ids:
+                    continue
+                rows_by_execution.setdefault(eid, []).append(row)
+            for eid, rows in rows_by_execution.items():
+                results.append(self._build_from_token_usage(eid, rows, tool_counts))
             return results
 
     async def _fetch_tool_counts(self, conn: object) -> dict[str, int]:
@@ -245,35 +258,33 @@ class ExecutionCostQueryService:
 
     def _build_from_token_usage(
         self,
-        row: object,
+        execution_id: str,
+        rows: list[asyncpg.Record],
         tool_counts: dict[str, int],
     ) -> ExecutionCost:
-        """Build an ExecutionCost from a token_usage aggregate row (in-progress)."""
-        eid = row["execution_id"]  # type: ignore[index]
-        total_input = row["total_input"] or 0  # type: ignore[index]
-        total_output = row["total_output"] or 0  # type: ignore[index]
-        cache_creation = row["cache_creation"] or 0  # type: ignore[index]
-        cache_read = row["cache_read"] or 0  # type: ignore[index]
-        cost = self._cost_calculator.calculate_token_cost(
-            input_tokens=total_input,
-            output_tokens=total_output,
-            cache_creation=cache_creation,
-            cache_read=cache_read,
-        )
-        started_at = row["started_at"]  # type: ignore[index]
-        completed_at = row.get("last_observation")  # type: ignore[union-attr]
+        """Build an ExecutionCost from model-grouped token_usage rows (in-progress).
+
+        ``rows`` are all groups for this execution from
+        ``_LIST_ALL_FROM_TOKEN_USAGE_QUERY`` (one row per model). They are
+        merged and priced per model group via ``price_grouped_token_usage`` -
+        an execution can span multiple sessions/models, so a flat SUM priced
+        as a single model would be wrong (issue #788).
+        """
+        grouped = price_grouped_token_usage(rows, self._cost_calculator)
         return ExecutionCost(
-            execution_id=eid,
-            session_count=row["session_count"] or 0,  # type: ignore[index]
-            session_ids=list(row["session_ids"] or []),  # type: ignore[index]
-            total_cost_usd=cost,
-            token_cost_usd=cost,
-            input_tokens=total_input,
-            output_tokens=total_output,
-            cache_creation_tokens=cache_creation,
-            cache_read_tokens=cache_read,
-            tool_calls=tool_counts.get(eid, 0),
-            duration_ms=self._resolve_duration(None, started_at, completed_at),
-            started_at=started_at,
-            completed_at=completed_at,
+            execution_id=execution_id,
+            session_count=len(grouped.session_ids),
+            session_ids=grouped.session_ids,
+            total_cost_usd=grouped.total_cost,
+            token_cost_usd=grouped.total_cost,
+            input_tokens=grouped.input_tokens,
+            output_tokens=grouped.output_tokens,
+            cache_creation_tokens=grouped.cache_creation,
+            cache_read_tokens=grouped.cache_read,
+            tool_calls=tool_counts.get(execution_id, 0),
+            duration_ms=self._resolve_duration(None, grouped.started_at, grouped.end_at),
+            cost_by_model=grouped.cost_by_model,
+            unpriced_observation_count=grouped.unpriced_observation_count,
+            started_at=grouped.started_at,
+            completed_at=grouped.end_at,
         )
