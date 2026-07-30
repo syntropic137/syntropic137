@@ -16,6 +16,7 @@ import pytest
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
     TimescaleExecutionCostQuery,
 )
+from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -72,9 +73,15 @@ def _grouped_token_rows() -> list[_FakeRow]:
 
 def _make_mock_pool() -> MagicMock:
     """No session_summary rows exist yet; only grouped token_usage rows."""
+
+    async def fetch_side_effect(_query: str, _execution_id: str, event_type: str) -> list[_FakeRow]:
+        if event_type == SESSION_SUMMARY:
+            return []  # no session_summary rows yet
+        assert event_type == TOKEN_USAGE
+        return _grouped_token_rows()
+
     conn = AsyncMock()
-    conn.fetchrow = AsyncMock(return_value=None)  # no session_summary
-    conn.fetch = AsyncMock(return_value=_grouped_token_rows())
+    conn.fetch = AsyncMock(side_effect=fetch_side_effect)
     conn.fetchval = AsyncMock(return_value=0)
 
     pool = MagicMock()

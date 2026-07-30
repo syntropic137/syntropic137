@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -29,8 +29,16 @@ from syn_shared.events import (
 
 # Prefer session_summary rows (authoritative totals from Claude CLI).
 # Aggregates across all sessions in the execution.
+#
+# Grouped by model, same as the token_usage fallback below: an execution
+# spanning multiple sessions/phases can span multiple models, and a flat
+# SUM(total_cost_usd) across mixed models silently drops any row whose
+# cost is NULL (PostgreSQL excludes NULLs from SUM) instead of raising or
+# falling back to that row's own token-based price - the same class of
+# bug as issue #788, surviving on the completed-execution summary path.
 _SESSION_SUMMARY_QUERY = """
 SELECT
+    data->>'model' as model,
     SUM((data->>'total_input_tokens')::int) as total_input,
     SUM((data->>'total_output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -41,9 +49,11 @@ SELECT
     COUNT(DISTINCT session_id) as session_count,
     ARRAY_AGG(DISTINCT session_id) as session_ids,
     MIN(time) as started_at,
-    MAX(time) as completed_at
+    MAX(time) as completed_at,
+    COUNT(*) as observation_count
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
+GROUP BY data->>'model'
 """
 
 # Fallback: aggregate from individual token_usage events when no
@@ -64,7 +74,8 @@ SELECT
     COUNT(DISTINCT session_id) as session_count,
     ARRAY_AGG(DISTINCT session_id) as session_ids,
     MIN(time) as started_at,
-    MAX(time) as last_observation
+    MAX(time) as last_observation,
+    COUNT(*) as observation_count
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
 GROUP BY data->>'model'
@@ -92,18 +103,6 @@ WHERE execution_id = $1
   AND event_type = $2
   AND phase_id IS NOT NULL
 GROUP BY phase_id
-"""
-
-# Per-model cost breakdown from session_summary events
-_COST_BY_MODEL_QUERY = """
-SELECT
-    data->>'model' as model,
-    SUM((data->>'total_cost_usd')::numeric) as model_cost
-FROM agent_events
-WHERE execution_id = $1
-  AND event_type = $2
-  AND data->>'model' IS NOT NULL
-GROUP BY data->>'model'
 """
 
 
@@ -157,6 +156,30 @@ class GroupedTokenUsage:
 
 
 @dataclass
+class GroupedSessionSummary:
+    """Aggregated + priced session_summary data merged from model-grouped rows.
+
+    Shared between ``TimescaleExecutionCostQuery`` (single execution) and
+    ``ExecutionCostQueryService`` (list_all) - both need to merge rows that
+    are grouped by (execution_id, model) into one priced total per execution,
+    mirroring ``GroupedTokenUsage`` for the token_usage fallback path.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_creation: int
+    cache_read: int
+    session_ids: list[str]
+    started_at: datetime | None
+    end_at: datetime | None
+    total_cost: Decimal
+    cost_by_model: dict[str, Decimal]
+    unpriced_observation_count: int
+    duration_ms_raw: int
+    total_turns: int
+
+
+@dataclass
 class _GroupTokens:
     """Token counts extracted from one model-grouped row."""
 
@@ -177,13 +200,20 @@ def _extract_group_tokens(row: asyncpg.Record) -> _GroupTokens:
 
 
 def _extend_time_range(
-    started_at: datetime | None, end_at: datetime | None, row: asyncpg.Record
+    started_at: datetime | None,
+    end_at: datetime | None,
+    row: asyncpg.Record,
+    end_key: str = "last_observation",
 ) -> tuple[datetime | None, datetime | None]:
-    """Widen (started_at, end_at) with a row's own timestamps, if any."""
+    """Widen (started_at, end_at) with a row's own timestamps, if any.
+
+    ``end_key`` names the row's end-of-range column: token_usage rows carry
+    it as ``last_observation``, session_summary rows as ``completed_at``.
+    """
     group_started_at = row.get("started_at")
     if group_started_at and (started_at is None or group_started_at < started_at):
         started_at = group_started_at
-    group_end_at = row.get("last_observation")
+    group_end_at = row.get(end_key)
     if group_end_at and (end_at is None or group_end_at > end_at):
         end_at = group_end_at
     return started_at, end_at
@@ -193,6 +223,18 @@ def _resolve_row_model(row: asyncpg.Record) -> str | None:
     """Extract the model for a row, or None if missing/not a string."""
     raw_model = row.get("model")
     return raw_model if isinstance(raw_model, str) else None
+
+
+def _row_observation_count(row: asyncpg.Record) -> int:
+    """Number of underlying agent_events rows a grouped row represents.
+
+    Grouped queries project ``COUNT(*) AS observation_count`` so an unpriced
+    group's contribution to ``unpriced_observation_count`` reflects real
+    observations, not one count per model group (issue #788 follow-up).
+    Falls back to 1 when a row doesn't carry the column (e.g. hand-built
+    test fixtures), so a single unpriced group still counts as unpriced.
+    """
+    return int(row.get("observation_count") or 1)
 
 
 def price_grouped_token_usage(
@@ -228,7 +270,7 @@ def price_grouped_token_usage(
         model = _resolve_row_model(row)
         pricing = cost_calculator.resolve_pricing(model)
         if pricing is None or model is None:
-            unpriced_observation_count += 1
+            unpriced_observation_count += _row_observation_count(row)
             continue
         group_cost = pricing.calculate_cost(
             group.input_tokens, group.output_tokens, group.cache_creation, group.cache_read
@@ -250,6 +292,107 @@ def price_grouped_token_usage(
     )
 
 
+@dataclass
+class _RowPricing:
+    """Result of pricing one session_summary row.
+
+    ``cost`` is ``None`` when the row is genuinely unpriceable (unknown
+    model and no ``sdk_cost``) - in that case ``unpriced_count`` carries how
+    many observations that row represents.
+    """
+
+    cost: Decimal | None
+    model: str | None
+    unpriced_count: int
+
+
+def _price_session_summary_row(
+    row: asyncpg.Record, group: _GroupTokens, cost_calculator: CostCalculator
+) -> _RowPricing:
+    """Price one session_summary row: authoritative ``sdk_cost`` first, else per-model calc.
+
+    ``sdk_cost`` (the CLI-reported ``total_cost_usd``) is used verbatim when
+    present. A NULL ``sdk_cost`` is priced from this row's own tokens using
+    this row's own model - never silently dropped from the total the way a
+    flat ``SUM(total_cost_usd)`` would (PostgreSQL excludes NULL rows from
+    SUM) and never priced as if the model were unknown when it is in fact
+    known (issue #788).
+    """
+    model = _resolve_row_model(row)
+    raw_sdk_cost = row.get("sdk_cost")
+    if raw_sdk_cost is not None:
+        return _RowPricing(cost=Decimal(str(raw_sdk_cost)), model=model, unpriced_count=0)
+
+    pricing = cost_calculator.resolve_pricing(model)
+    if pricing is None or model is None:
+        return _RowPricing(cost=None, model=None, unpriced_count=_row_observation_count(row))
+
+    group_cost = pricing.calculate_cost(
+        group.input_tokens, group.output_tokens, group.cache_creation, group.cache_read
+    )
+    return _RowPricing(cost=group_cost, model=model, unpriced_count=0)
+
+
+def price_grouped_session_summary(
+    rows: list[asyncpg.Record], cost_calculator: CostCalculator
+) -> GroupedSessionSummary:
+    """Merge model-grouped session_summary rows into one priced aggregate.
+
+    Each row is one model's session_summary totals (e.g. for one execution).
+    A group whose model really is unknown/missing and has no ``sdk_cost``
+    contributes zero cost and counts toward ``unpriced_observation_count``
+    instead of guessing (issue #788). See ``_price_session_summary_row`` for
+    the per-row pricing rule.
+    """
+    totals = _GroupTokens(0, 0, 0, 0)
+    session_ids: set[str] = set()
+    started_at: datetime | None = None
+    end_at: datetime | None = None
+    total_cost = Decimal("0")
+    cost_by_model: dict[str, Decimal] = {}
+    unpriced_observation_count = 0
+    duration_ms_raw = 0
+    total_turns = 0
+
+    for row in rows:
+        group = _extract_group_tokens(row)
+        totals = _GroupTokens(
+            input_tokens=totals.input_tokens + group.input_tokens,
+            output_tokens=totals.output_tokens + group.output_tokens,
+            cache_creation=totals.cache_creation + group.cache_creation,
+            cache_read=totals.cache_read + group.cache_read,
+        )
+        session_ids.update(row.get("session_ids") or [])
+        started_at, end_at = _extend_time_range(started_at, end_at, row, end_key="completed_at")
+        duration_ms_raw += int(row.get("duration_ms_val") or 0)
+        total_turns += int(row.get("total_turns") or 0)
+
+        priced = _price_session_summary_row(row, group, cost_calculator)
+        if priced.cost is None:
+            unpriced_observation_count += priced.unpriced_count
+            continue
+        total_cost += priced.cost
+        if priced.model is not None:
+            cost_by_model[priced.model] = (
+                cost_by_model.get(priced.model, Decimal("0")) + priced.cost
+            )
+
+    return GroupedSessionSummary(
+        input_tokens=totals.input_tokens,
+        output_tokens=totals.output_tokens,
+        cache_creation=totals.cache_creation,
+        cache_read=totals.cache_read,
+        session_ids=sorted(session_ids),
+        started_at=started_at,
+        end_at=end_at,
+        total_cost=total_cost,
+        cost_by_model=cost_by_model,
+        unpriced_observation_count=unpriced_observation_count,
+        duration_ms_raw=duration_ms_raw,
+        total_turns=total_turns,
+    )
+
+
 class TimescaleExecutionCostQuery:
     """Calculates execution cost directly from TimescaleDB observations.
 
@@ -263,9 +406,9 @@ class TimescaleExecutionCostQuery:
 
     async def _query_session_summaries(
         self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
-    ) -> asyncpg.Record | None:
-        """Query session_summary events for authoritative totals."""
-        return await conn.fetchrow(_SESSION_SUMMARY_QUERY, execution_id, SESSION_SUMMARY)
+    ) -> list[asyncpg.Record]:
+        """Query session_summary events, grouped by model, for authoritative totals."""
+        return await conn.fetch(_SESSION_SUMMARY_QUERY, execution_id, SESSION_SUMMARY)
 
     async def _query_token_usage(
         self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
@@ -273,40 +416,33 @@ class TimescaleExecutionCostQuery:
         """Query token_usage events, grouped by model, as fallback for in-progress executions."""
         return await conn.fetch(_TOKEN_USAGE_FALLBACK_QUERY, execution_id, TOKEN_USAGE)
 
-    def _extract_common_fields(self, row: asyncpg.Record) -> dict[str, Any]:
-        """Extract common token fields shared by both query types."""
-        return {
-            "input_tokens": row["total_input"] or 0,
-            "output_tokens": row["total_output"] or 0,
-            "cache_creation": row.get("cache_creation") or 0,
-            "cache_read": row.get("cache_read") or 0,
-            "session_count": row.get("session_count") or 0,
-            "session_ids": list(row.get("session_ids") or []),
-            "started_at": row.get("started_at"),
-        }
+    def _price_session_summary_groups(self, rows: list[asyncpg.Record]) -> _PricedTokenUsage:
+        """Merge model-grouped session_summary rows into one priced aggregate.
 
-    def _extract_token_data(self, row: asyncpg.Record, from_summary: bool) -> _TokenData:
-        """Extract token counts and metadata from a query row."""
-        common = self._extract_common_fields(row)
-        sdk_cost = Decimal(str(row["sdk_cost"])) if row.get("sdk_cost") is not None else None
-        return _TokenData(
-            **common,
-            end_at=row.get("completed_at" if from_summary else "last_observation"),
-            sdk_cost=sdk_cost if from_summary else None,
-            duration_ms_raw=int(row.get("duration_ms_val") or 0) if from_summary else 0,
-            total_turns=int(row.get("total_turns") or 0) if from_summary else 0,
-            from_summary=from_summary,
+        Delegates to ``price_grouped_session_summary`` (shared with
+        ``ExecutionCostQueryService``) and repackages the result as
+        ``_TokenData`` for this class's internal pipeline.
+        """
+        grouped = price_grouped_session_summary(rows, self._cost_calculator)
+        data = _TokenData(
+            input_tokens=grouped.input_tokens,
+            output_tokens=grouped.output_tokens,
+            cache_creation=grouped.cache_creation,
+            cache_read=grouped.cache_read,
+            session_count=len(grouped.session_ids),
+            session_ids=grouped.session_ids,
+            started_at=grouped.started_at,
+            end_at=grouped.end_at,
+            sdk_cost=None,
+            duration_ms_raw=grouped.duration_ms_raw,
+            total_turns=grouped.total_turns,
+            from_summary=True,
         )
-
-    def _calculate_cost(self, data: _TokenData) -> Decimal:
-        """Calculate total cost from token data, preferring SDK cost."""
-        if data.sdk_cost is not None:
-            return data.sdk_cost
-        return self._cost_calculator.calculate_token_cost(
-            input_tokens=data.input_tokens,
-            output_tokens=data.output_tokens,
-            cache_creation=data.cache_creation,
-            cache_read=data.cache_read,
+        return _PricedTokenUsage(
+            data=data,
+            total_cost=grouped.total_cost,
+            cost_by_model=grouped.cost_by_model,
+            unpriced_observation_count=grouped.unpriced_observation_count,
         )
 
     def _price_token_usage_groups(self, rows: list[asyncpg.Record]) -> _PricedTokenUsage:
@@ -370,31 +506,20 @@ class TimescaleExecutionCostQuery:
             if row["phase_id"] and row["phase_cost"] is not None
         }
 
-    async def _query_cost_by_model(
-        self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
-    ) -> dict[str, Decimal]:
-        """Query per-model cost breakdown from session_summary events."""
-        model_rows = await conn.fetch(_COST_BY_MODEL_QUERY, execution_id, SESSION_SUMMARY)
-        return {
-            row["model"]: Decimal(str(row["model_cost"]))
-            for row in model_rows
-            if row["model"] and row["model_cost"] is not None
-        }
-
     async def _resolve_token_rows(
         self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
     ) -> tuple[list[asyncpg.Record], bool]:
         """Get the best available token data rows and whether they're from session_summary.
 
-        Session_summary rows are already aggregated across all sessions in the
-        execution using the SDK-reported ``total_cost_usd`` (model-correct by
-        construction), so a single row suffices. The token_usage fallback is
-        grouped one row per model (see ``_TOKEN_USAGE_FALLBACK_QUERY``) so each
-        group can be priced with its own model.
+        Session_summary rows are grouped one row per model (see
+        ``_SESSION_SUMMARY_QUERY``) so each group can be priced with its own
+        model and a NULL ``sdk_cost`` in one group never silently drops out
+        of the total. The token_usage fallback is grouped the same way (see
+        ``_TOKEN_USAGE_FALLBACK_QUERY``).
         """
-        summary_row = await self._query_session_summaries(conn, execution_id)
-        if summary_row is not None and summary_row["total_input"] is not None:
-            return [summary_row], True
+        summary_rows = await self._query_session_summaries(conn, execution_id)
+        if summary_rows:
+            return summary_rows, True
         return await self._query_token_usage(conn, execution_id), False
 
     def _build_execution_cost(
@@ -446,20 +571,17 @@ class TimescaleExecutionCostQuery:
             )
 
             if has_summary:
-                data = self._extract_token_data(token_rows[0], from_summary=True)
-                total_cost = self._calculate_cost(data)
-                turn_count = await self._query_turn_count(conn, execution_id, data)
+                priced = self._price_session_summary_groups(token_rows)
                 cost_by_phase = await self._query_cost_by_phase(conn, execution_id)
-                cost_by_model = await self._query_cost_by_model(conn, execution_id)
-                unpriced_observation_count = 0
             else:
                 priced = self._price_token_usage_groups(token_rows)
-                data = priced.data
-                total_cost = priced.total_cost
-                turn_count = await self._query_turn_count(conn, execution_id, data)
                 cost_by_phase = {}
-                cost_by_model = priced.cost_by_model
-                unpriced_observation_count = priced.unpriced_observation_count
+
+            data = priced.data
+            total_cost = priced.total_cost
+            turn_count = await self._query_turn_count(conn, execution_id, data)
+            cost_by_model = priced.cost_by_model
+            unpriced_observation_count = priced.unpriced_observation_count
 
             return self._build_execution_cost(
                 execution_id=execution_id,

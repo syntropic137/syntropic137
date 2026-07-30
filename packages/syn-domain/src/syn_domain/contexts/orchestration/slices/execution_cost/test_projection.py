@@ -469,6 +469,7 @@ class TestExecutionCostQueryServiceBuildFromSummary:
 
         row: dict[str, object] = {
             "execution_id": "exec-s1",
+            "model": "claude-sonnet-4-20250514",
             "total_input": 5000,
             "total_output": 2000,
             "cache_creation": 0,
@@ -481,7 +482,7 @@ class TestExecutionCostQueryServiceBuildFromSummary:
             "started_at": started,
             "completed_at": completed,
         }
-        result = service._build_from_summary(row, tool_counts={}, phase_map={}, model_map={})
+        result = service._build_from_summary("exec-s1", [row], tool_counts={}, phase_map={})
 
         assert result.duration_ms == pytest.approx(300_000.0)  # 5 min = 300,000 ms
 
@@ -499,6 +500,7 @@ class TestExecutionCostQueryServiceBuildFromSummary:
 
         row: dict[str, object] = {
             "execution_id": "exec-s2",
+            "model": "claude-sonnet-4-20250514",
             "total_input": 1000,
             "total_output": 500,
             "cache_creation": 0,
@@ -511,7 +513,7 @@ class TestExecutionCostQueryServiceBuildFromSummary:
             "started_at": started,
             "completed_at": completed,
         }
-        result = service._build_from_summary(row, tool_counts={}, phase_map={}, model_map={})
+        result = service._build_from_summary("exec-s2", [row], tool_counts={}, phase_map={})
 
         # Should use the explicit value, not recompute from timestamps
         assert result.duration_ms == pytest.approx(120_000.0)

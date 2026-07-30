@@ -14,25 +14,29 @@ from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     HeatmapDayBucket,
 )
+from syn_shared.events import GIT_COMMIT, TOKEN_USAGE
 
 # SQL fragment shared between filtered and unfiltered queries.
 # Metrics are derived from the actual event types in agent_events:
 #   sessions   — distinct session_id values active that day
 #   executions — distinct execution_id values active that day
-#   commits    — count of git_commit events
+#   commits    — count of GIT_COMMIT events
 #   tokens     — broken down by input, output, cache_creation, cache_read
-_METRIC_COLUMNS = """
+#
+# Event type literals come from the shared syn_shared.events constants
+# rather than being repeated as magic strings.
+_METRIC_COLUMNS = f"""
     COUNT(DISTINCT session_id) AS sessions,
     COUNT(DISTINCT execution_id) AS executions,
-    COUNT(*) FILTER (WHERE event_type = 'git_commit') AS commits,
+    COUNT(*) FILTER (WHERE event_type = '{GIT_COMMIT}') AS commits,
     COALESCE(SUM(COALESCE((data->>'input_tokens')::bigint, 0))
-        FILTER (WHERE event_type = 'token_usage'), 0) AS input_tokens,
+        FILTER (WHERE event_type = '{TOKEN_USAGE}'), 0) AS input_tokens,
     COALESCE(SUM(COALESCE((data->>'output_tokens')::bigint, 0))
-        FILTER (WHERE event_type = 'token_usage'), 0) AS output_tokens,
+        FILTER (WHERE event_type = '{TOKEN_USAGE}'), 0) AS output_tokens,
     COALESCE(SUM(COALESCE((data->>'cache_creation_tokens')::bigint, 0))
-        FILTER (WHERE event_type = 'token_usage'), 0) AS cache_creation_tokens,
+        FILTER (WHERE event_type = '{TOKEN_USAGE}'), 0) AS cache_creation_tokens,
     COALESCE(SUM(COALESCE((data->>'cache_read_tokens')::bigint, 0))
-        FILTER (WHERE event_type = 'token_usage'), 0) AS cache_read_tokens
+        FILTER (WHERE event_type = '{TOKEN_USAGE}'), 0) AS cache_read_tokens
 """
 
 # Per-day, per-model token totals. A day's activity can span many sessions
@@ -169,7 +173,7 @@ class TimescaleHeatmapQuery:
                 SELECT
                     {_MODEL_TOKEN_COLUMNS}
                 FROM agent_events
-                WHERE event_type = 'token_usage'
+                WHERE event_type = '{TOKEN_USAGE}'
                   AND time >= $1::date
                   AND time < ($2::date + interval '1 day')
                   AND execution_id = ANY($3)
@@ -184,7 +188,7 @@ class TimescaleHeatmapQuery:
             SELECT
                 {_MODEL_TOKEN_COLUMNS}
             FROM agent_events
-            WHERE event_type = 'token_usage'
+            WHERE event_type = '{TOKEN_USAGE}'
               AND time >= $1::date
               AND time < ($2::date + interval '1 day')
             GROUP BY day, model
