@@ -136,6 +136,21 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         # Initialize aggregate
         self._initialize(session_id)
 
+        # Derive root_session_id (#792):
+        # - explicit root always wins, whatever else is set
+        # - a delegated child (parent_session_id set) must NEVER self-default to
+        #   its own id - that would silently produce a malformed tree where a
+        #   child claims to be its own root. Default it to the parent instead;
+        #   a caller that knows the true root of a deeper tree can still pass
+        #   root_session_id explicitly.
+        # - only a genuine top-level session (no parent) defaults to itself
+        if command.root_session_id is not None:
+            root_session_id = command.root_session_id
+        elif command.parent_session_id is not None:
+            root_session_id = command.parent_session_id
+        else:
+            root_session_id = session_id
+
         # Create and apply event
         event = SessionStartedEvent(
             session_id=session_id,
@@ -144,7 +159,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             phase_id=command.phase_id,
             milestone_id=command.milestone_id,
             parent_session_id=command.parent_session_id,
-            root_session_id=command.root_session_id or session_id,
+            root_session_id=root_session_id,
             agent_provider=command.agent_provider,
             agent_model=command.agent_model,
             repos=list(command.repos),
