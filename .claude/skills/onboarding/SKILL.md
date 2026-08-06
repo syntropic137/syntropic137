@@ -188,7 +188,7 @@ After setup, verify these endpoints:
 
 | Service | URL | Expected |
 |---------|-----|----------|
-| Dashboard UI | http://localhost:5173 | Vite React app loads |
+| Dashboard UI | http://localhost:9137 | Vite React app loads, API calls succeed |
 | Pulse UI | http://localhost:5174 | Vite React app loads |
 | Dashboard API | http://localhost:8137/docs | FastAPI Swagger UI |
 | API Health | http://localhost:8137/health | `{"status": "ok"}` |
