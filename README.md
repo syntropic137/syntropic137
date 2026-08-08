@@ -90,7 +90,8 @@ just dev                        # syncs deps, builds containers, seeds data, sta
 
 | Service | URL |
 |---------|-----|
-| Frontend | http://localhost:5173 |
+| Dashboard | http://localhost:9137 |
+| Vite dev server (no API proxy, do not open directly) | http://localhost:5173 |
 | API | http://localhost:8137 |
 | API Docs | http://localhost:8137/docs |
 | MinIO Console | http://localhost:9001 |
