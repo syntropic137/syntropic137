@@ -1,0 +1,369 @@
+<meta charset="utf-8">
+<title>Agent Recipe Architecture — Bill of Lading</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=IBM+Plex+Mono:wght@400;500;600&family=Shantell+Sans:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --steel:#12181d;
+  --deck:#1a2229;
+  --crate:#222c34;
+  --line:#c8d8e4;
+  --line-dim:rgba(200,216,228,.34);
+  --line-faint:rgba(200,216,228,.13);
+  --ink:#e9f2f8;
+  --mute:#9bb0bf;
+  --orange:#ff7a2f;
+  --green:#6ee7a0;
+  --amber:#ffc65c;
+  --red:#ff5f56;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;padding:46px 20px 70px;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  color:var(--ink);
+  background:
+    radial-gradient(1100px 700px at 80% -10%, rgba(255,122,47,.10), transparent 60%),
+    radial-gradient(900px 700px at -10% 110%, rgba(60,120,170,.16), transparent 55%),
+    var(--steel);
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:
+    linear-gradient(var(--line-faint) 1px,transparent 1px),
+    linear-gradient(90deg,var(--line-faint) 1px,transparent 1px);
+  background-size:88px 88px,88px 88px;
+}
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.55;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='linear' slope='0.055'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+.sheet{
+  position:relative;z-index:1;max-width:1180px;margin:0 auto;
+  background:linear-gradient(180deg,rgba(26,34,41,.94),rgba(18,24,29,.96));
+  border:2px solid var(--line-dim);
+  box-shadow:0 40px 90px rgba(0,0,0,.55);
+}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes stamp{0%{opacity:0;transform:rotate(-18deg) scale(2.1)}70%{opacity:1;transform:rotate(-13deg) scale(.94)}100%{opacity:1;transform:rotate(-13deg) scale(1)}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,122,47,.55)}50%{box-shadow:0 0 0 12px rgba(255,122,47,0)}}
+.r{animation:rise .55s both}
+
+/* ---- title block ---- */
+.title{display:grid;grid-template-columns:1fr 300px;border-bottom:2px solid var(--line-dim)}
+.title h1{
+  font-family:"Big Shoulders Display",sans-serif;font-weight:900;
+  font-size:clamp(38px,6vw,74px);line-height:.9;letter-spacing:.01em;
+  margin:0;padding:26px 30px 18px;text-transform:uppercase;
+}
+.title h1 em{font-style:normal;color:var(--orange)}
+.title .sub{padding:0 30px 22px;color:var(--mute);font-size:12.5px;max-width:60ch;line-height:1.6}
+.stampbox{border-left:2px solid var(--line-dim);padding:20px 22px;display:flex;flex-direction:column;gap:9px;justify-content:center}
+.kv{display:flex;justify-content:space-between;gap:12px;font-size:11px}
+.kv span:first-child{color:var(--mute);text-transform:uppercase;letter-spacing:.13em}
+.kv span:last-child{color:var(--ink)}
+
+/* ---- hero ---- */
+.hero{
+  padding:24px 30px;border-bottom:2px solid var(--line-dim);
+  display:flex;align-items:center;gap:26px;flex-wrap:wrap;
+  background:repeating-linear-gradient(135deg,rgba(255,122,47,.07) 0 12px,transparent 12px 26px);
+}
+.hero .big{
+  font-family:"Big Shoulders Display",sans-serif;font-weight:800;
+  font-size:clamp(26px,3.4vw,42px);line-height:1;text-transform:uppercase;
+}
+.hero .big b{color:var(--orange)}
+.hero .note{font-family:"Shantell Sans",cursive;color:var(--amber);font-size:14px;max-width:38ch;line-height:1.5}
+
+/* ---- metrics ---- */
+.metrics{display:grid;grid-template-columns:repeat(6,1fr);border-bottom:2px solid var(--line-dim)}
+.m{padding:18px 16px;border-right:1px solid var(--line-faint)}
+.m:last-child{border-right:0}
+.m .n{font-family:"Big Shoulders Display",sans-serif;font-weight:900;font-size:40px;line-height:.92}
+.m .l{font-size:9.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.13em;margin-top:6px;line-height:1.4}
+.n.o{color:var(--orange)} .n.g{color:var(--green)} .n.a{color:var(--amber)} .n.r{color:var(--red)}
+
+/* ---- body grid ---- */
+.grid{display:grid;grid-template-columns:1.55fr 1fr}
+.rail{padding:26px 30px;border-right:2px solid var(--line-dim)}
+.side{padding:26px 24px;display:flex;flex-direction:column;gap:24px}
+h2{
+  font-family:"Big Shoulders Display",sans-serif;font-weight:800;font-size:20px;
+  text-transform:uppercase;letter-spacing:.06em;margin:0 0 14px;
+  padding-bottom:7px;border-bottom:1px solid var(--line-dim);
+}
+
+/* ---- the stack ---- */
+.layer{
+  position:relative;border:2px solid var(--line-dim);background:var(--crate);
+  padding:15px 18px 16px;margin-bottom:0;
+}
+.layer .tag{
+  position:absolute;top:-1px;right:-1px;font-size:9px;letter-spacing:.14em;
+  text-transform:uppercase;padding:4px 9px;color:var(--steel);font-weight:600;
+}
+.layer h3{
+  font-family:"Big Shoulders Display",sans-serif;font-weight:900;font-size:27px;
+  margin:0 0 3px;text-transform:uppercase;letter-spacing:.02em;
+}
+.layer .who{font-size:10.5px;color:var(--mute);margin-bottom:11px;letter-spacing:.05em}
+.layer .q{font-family:"Shantell Sans",cursive;color:var(--amber);font-size:13px;margin-bottom:10px}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{
+  font-size:10px;padding:3px 8px;border:1px solid var(--line-faint);
+  color:var(--ink);background:rgba(200,216,228,.05);letter-spacing:.03em;
+}
+.chip.no{color:var(--red);border-color:rgba(255,95,86,.4);background:rgba(255,95,86,.07)}
+.chip.prop{color:var(--amber);border:1px dashed rgba(255,198,92,.6);background:rgba(255,198,92,.07)}
+.chip.prop::before{content:"+ ";opacity:.8}
+.banner{
+  padding:11px 30px;border-bottom:2px solid var(--line-dim);
+  background:repeating-linear-gradient(45deg,rgba(255,198,92,.11) 0 10px,transparent 10px 20px);
+  font-size:11px;line-height:1.6;color:var(--ink);
+}
+.banner b{color:var(--amber);letter-spacing:.1em;text-transform:uppercase}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:9px;font-size:10px;color:var(--mute)}
+.legend span{display:flex;align-items:center;gap:6px}
+.sw{width:16px;height:10px;border:1px solid var(--line-faint);background:rgba(200,216,228,.05)}
+.sw.p{border:1px dashed rgba(255,198,92,.6);background:rgba(255,198,92,.07)}
+.sw.x{border-color:rgba(255,95,86,.4);background:rgba(255,95,86,.07)}
+.L1{border-color:rgba(110,231,160,.5)} .L1 .tag{background:var(--green)} .L1 h3{color:var(--green)}
+.L2{border-color:rgba(255,198,92,.5)} .L2 .tag{background:var(--amber)} .L2 h3{color:var(--amber)}
+.L3{border-color:rgba(255,122,47,.55)} .L3 .tag{background:var(--orange)} .L3 h3{color:var(--orange)}
+.edge{
+  display:flex;align-items:center;gap:12px;padding:11px 0 11px 20px;
+  border-left:2px dashed var(--line-dim);margin-left:26px;
+}
+.edge .arrow{font-size:22px;color:var(--orange);line-height:1}
+.edge .txt{font-size:11px;color:var(--mute);line-height:1.55}
+.edge .txt b{color:var(--ink);font-weight:600}
+.oneway{
+  margin-top:16px;padding:12px 15px;border:2px solid var(--orange);
+  background:rgba(255,122,47,.09);font-size:11.5px;line-height:1.6;
+  animation:pulse 3.4s ease-in-out infinite;
+}
+.oneway b{color:var(--orange)}
+
+/* ---- seams ---- */
+.seams{padding:0 30px 28px}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th,td{text-align:left;padding:9px 11px;border:1px solid var(--line-faint);vertical-align:top;line-height:1.5}
+th{
+  font-family:"Big Shoulders Display",sans-serif;font-size:14px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--mute);background:rgba(200,216,228,.045);
+}
+td.k{color:var(--orange);font-weight:600;white-space:nowrap}
+.rule{
+  margin-top:14px;padding:11px 14px;border-left:3px solid var(--green);
+  background:rgba(110,231,160,.07);font-size:11.5px;line-height:1.6;
+}
+.rule b{color:var(--green)}
+
+/* ---- lists ---- */
+ol,ul{margin:0;padding-left:17px}
+li{font-size:11px;line-height:1.65;margin-bottom:7px;color:var(--ink)}
+li b{color:var(--orange)}
+li .d{color:var(--mute)}
+.warn li b{color:var(--red)}
+
+/* ---- stamp ---- */
+.stamp{
+  position:absolute;right:34px;top:230px;z-index:5;
+  border:3px solid var(--red);color:var(--red);padding:8px 16px;
+  font-family:"Big Shoulders Display",sans-serif;font-weight:900;
+  font-size:23px;letter-spacing:.06em;text-transform:uppercase;text-align:center;
+  background:rgba(18,24,29,.6);animation:stamp .5s .95s both;line-height:1;
+}
+.stamp small{display:block;font-size:9px;letter-spacing:.12em;margin-top:4px;font-family:"IBM Plex Mono",monospace;font-weight:400}
+
+/* ---- footer ---- */
+.foot{
+  border-top:2px solid var(--line-dim);padding:15px 30px;
+  display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;
+  font-size:10px;color:var(--mute);letter-spacing:.06em;
+}
+@media(max-width:940px){
+  .grid,.metrics,.title{grid-template-columns:1fr}
+  .metrics{grid-template-columns:repeat(3,1fr)}
+  .rail{border-right:0;border-bottom:2px solid var(--line-dim)}
+  .stampbox{border-left:0;border-top:2px solid var(--line-dim)}
+  .stamp{position:static;margin:18px 30px 0;animation:stamp .5s .95s both}
+  .seams{overflow-x:auto}
+}
+</style>
+
+<div class="sheet">
+
+  <div class="title">
+    <div>
+      <h1 class="r">Agent&nbsp;Recipe<br><em>Architecture</em></h1>
+      <div class="sub r" style="animation-delay:.06s">
+        Three layers, one dependency edge. What an agent <em>is</em>, how one run <em>binds</em>,
+        and how many runs <em>sequence</em>. Drawn to answer a single question:
+        does a RunSpec depend on a recipe?
+      </div>
+    </div>
+    <div class="stampbox r" style="animation-delay:.1s">
+      <div class="kv"><span>Sheet</span><span>ARCH-001</span></div>
+      <div class="kv"><span>Date</span><span>2026-08-08</span></div>
+      <div class="kv"><span>Standard</span><span>EXP-V1-0005</span></div>
+      <div class="kv"><span>APSS main</span><span>4210334</span></div>
+      <div class="kv"><span>Issues</span><span>#125 · #126</span></div>
+      <div class="kv"><span>Drawn by</span><span>Claude</span></div>
+    </div>
+  </div>
+
+  <div class="banner r" style="animation-delay:.12s">
+    <b>Proposed direction — not yet normative.</b>
+    The layer split and the one-way edge are real today. Items marked <em>+dashed</em> in the Recipe layer
+    are the proposal (APSS #125). The standard is <em>inspired by</em> pi.recipes, not compatible with it:
+    semantics differ (enforced tools, harness selection), so a pi recipe migrates under a documented
+    mapping rather than loading as-is. EXP-V1-0005 does not contain these yet.
+    <div class="legend">
+      <span><i class="sw"></i> in the standard today</span>
+      <span><i class="sw p"></i> proposed addition / semantics change</span>
+      <span><i class="sw x"></i> forbidden by the standard</span>
+    </div>
+  </div>
+
+  <div class="hero r" style="animation-delay:.14s">
+    <div class="big">RunSpec <b>&rarr;</b> Recipe. <b>One way.</b></div>
+    <div class="note">
+      The RunSpec holds <b>recipe: PathBuf</b> — a directory path, never an inlined copy.
+      The recipe never points back. That asymmetry is the whole design.
+    </div>
+  </div>
+
+  <div class="metrics">
+    <div class="m r" style="animation-delay:.18s"><div class="n o">3</div><div class="l">Layers</div></div>
+    <div class="m r" style="animation-delay:.22s"><div class="n g">1</div><div class="l">Dependency edge</div></div>
+    <div class="m r" style="animation-delay:.26s"><div class="n a">4</div><div class="l">Binding seams</div></div>
+    <div class="m r" style="animation-delay:.30s"><div class="n r">17/17</div><div class="l">Workflows that can't conform</div></div>
+    <div class="m r" style="animation-delay:.34s"><div class="n r">3/9</div><div class="l">pi dirs encoded</div></div>
+    <div class="m r" style="animation-delay:.38s"><div class="n r">0</div><div class="l">RunSpec files on main</div></div>
+  </div>
+
+  <div class="stamp">Not&nbsp;Conforming<small>17 of 17 workflows · fixture pending</small></div>
+
+  <div class="grid">
+    <div class="rail">
+      <h2 class="r" style="animation-delay:.42s">The Stack</h2>
+
+      <div class="layer L3 r" style="animation-delay:.46s">
+        <div class="tag">Syntropic137</div>
+        <h3>Workflow</h3>
+        <div class="who">syntropic137-marketplace · workflow.yaml</div>
+        <div class="q">“How do many runs sequence, passing artifacts?”</div>
+        <div class="chips">
+          <span class="chip">phases[]</span><span class="chip">order</span>
+          <span class="chip">execution_type</span><span class="chip">input_artifacts</span>
+          <span class="chip">output_artifacts</span><span class="chip">inputs[]</span>
+        </div>
+      </div>
+
+      <div class="edge r" style="animation-delay:.50s">
+        <div class="arrow">&darr;</div>
+        <div class="txt">invokes <b>one RunSpec per phase</b><br>
+          <span style="color:var(--mute)">phase = recipe + runspec; ordering stays up here</span></div>
+      </div>
+
+      <div class="layer L2 r" style="animation-delay:.54s">
+        <div class="tag">agentic-primitives</div>
+        <h3>RunSpec</h3>
+        <div class="who">agentic_isolation · workspace_run.py · run_client.py</div>
+        <div class="q">“How does <em>this one</em> invocation bind?”</div>
+        <div class="chips">
+          <span class="chip" style="border-color:var(--orange);color:var(--orange)">recipe: PathBuf</span>
+          <span class="chip">task</span><span class="chip">credentials</span>
+          <span class="chip">limits</span><span class="chip">observability</span>
+        </div>
+      </div>
+
+      <div class="edge r" style="animation-delay:.58s">
+        <div class="arrow">&darr;</div>
+        <div class="txt">references by <b>directory path</b>, never inlines<br>
+          <span style="color:var(--mute)">then calls load_recipe_dir() — the single parser</span></div>
+      </div>
+
+      <div class="layer L1 r" style="animation-delay:.62s">
+        <div class="tag">APSS Standard</div>
+        <h3>Recipe</h3>
+        <div class="who">EXP-V1-0005 · a directory, committable, portable</div>
+        <div class="q">“What <em>is</em> this agent?”</div>
+        <div class="chips">
+          <span class="chip">agents/*.yaml</span><span class="chip">model.name</span>
+          <span class="chip">skills</span><span class="chip">subagents</span>
+          <span class="chip">SYSTEM.md</span><span class="chip">system_instructions</span>
+          <span class="chip prop">harness</span><span class="chip prop">tools enforced</span>
+          <span class="chip prop">mcp policy</span><span class="chip prop">skill pins</span>
+          <span class="chip prop">evals/</span><span class="chip prop">judges/</span>
+          <span class="chip prop">prompts/</span><span class="chip prop">tools/ dir</span>
+          <span class="chip prop">temperature</span><span class="chip prop">description</span>
+        </div>
+        <div class="chips" style="margin-top:8px">
+          <span class="chip no">✕ task input</span><span class="chip no">✕ credentials</span><span class="chip no">✕ infra config</span>
+        </div>
+      </div>
+
+      <div class="oneway r" style="animation-delay:.66s">
+        <b>The recipe knows nothing above it.</b> That is what makes it shareable —
+        the same directory runs under any RunSpec, in any workflow, on any machine.
+        Inline it into the RunSpec and every property below dies at once.
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="r" style="animation-delay:.70s">
+        <h2>Consumer Flow</h2>
+        <ol>
+          <li><b>Load</b> <span class="d">— call load_recipe_dir(spec.recipe); never re-implement the shape</span></li>
+          <li><b>Resolve entry</b> <span class="d">— default_agent picks harness, model, resolved system prompt</span></li>
+          <li><b>Resolve skills</b> <span class="d">— refs → plugin dirs, order preserved</span></li>
+          <li><b>Run</b> <span class="d">— launch harness against the run's task</span></li>
+        </ol>
+      </div>
+
+      <div class="r warn" style="animation-delay:.74s">
+        <h2>Consumer Must Not</h2>
+        <ul>
+          <li><b>Re-encode</b> the recipe into a parallel schema</li>
+          <li><b>Read</b> credentials or task input from the recipe</li>
+          <li><b>Inline</b> the recipe instead of holding a path
+            <span class="d">— the live Python bug: AgentRunSpec.recipe is an object, not a Path</span></li>
+        </ul>
+      </div>
+
+      <div class="r" style="animation-delay:.78s">
+        <h2>Open Calls</h2>
+        <ul>
+          <li><b>Tool vocabulary</b> <span class="d">— yours [bash, git, read] vs pi [read, write, bash]. Not portable yet.</span></li>
+          <li><b>pi branding</b> <span class="d">— "pi" key and .pi/ dir: alias or rename</span></li>
+          <li><b>Model override</b> <span class="d">— allowed, but evals must record the effective model</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="seams">
+    <h2 class="r" style="animation-delay:.82s">The Four Binding Seams</h2>
+    <table class="r" style="animation-delay:.86s">
+      <tr><th style="width:15%">Seam</th><th style="width:42%">Recipe declares</th><th>RunSpec binds</th></tr>
+      <tr><td class="k">Tools</td><td>the allowlist — an upper bound you can audit statically</td><td>may narrow it further, never widen</td></tr>
+      <tr><td class="k">MCP</td><td>which methods are permitted per server <em>(policy)</em></td><td>endpoint + credentials for those servers <em>(connection)</em></td></tr>
+      <tr><td class="k">Skills</td><td>refs and pins — source_url, version, resolved_sha</td><td>where they got materialized on disk</td></tr>
+      <tr><td class="k">Harness</td><td>the family — claude, codex</td><td>the execution path — interactive vs headless, tmux pane</td></tr>
+    </table>
+    <div class="rule r" style="animation-delay:.90s">
+      <b>Monotonicity rule.</b> A RunSpec MUST NOT grant a tool or MCP method the recipe does not permit.
+      Only then is the recipe's permission set a real ceiling — auditable on its own, without reading a single run.
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>APSS EXP-V1-0005-agent-recipe · docs/03-syntropic137-mapping.md</span>
+    <span>marketplace: 4 plugins · last push 2026-04-20</span>
+    <span>Renumbered 0003 → 0004 → 0005 · see #126</span>
+  </div>
+</div>
