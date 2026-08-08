@@ -4,6 +4,13 @@ packages:
   - apps/syn-cli-node
   - packages/openclaw-plugin
 
+allowBuilds:
+  # esbuild fetches its platform binary in a postinstall script; sharp builds
+  # native image bindings. Both are first-party build steps required for the
+  # dashboard and docs builds to work, so they are explicitly approved.
+  esbuild: true
+  sharp: true
+
 overrides:
   brace-expansion@<1.1.13: '>=1.1.13 <2'
   dompurify@<3.3.2: '>=3.3.2'
