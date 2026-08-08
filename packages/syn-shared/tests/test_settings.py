@@ -78,6 +78,15 @@ class TestSettings:
             assert settings.anthropic_api_key is not None
             assert settings.anthropic_api_key.get_secret_value() == "sk-ant-secret-key"
 
+    def test_codex_auth_uses_canonical_bare_environment_name(self) -> None:
+        """Codex auth loads from CODEX_AUTH_JSON without a workspace prefix."""
+        auth_json = '{"tokens":{"access_token":"secret"}}'
+        with patch.dict(os.environ, {"CODEX_AUTH_JSON": auth_json}, clear=True):
+            settings = Settings(_env_file=None)
+
+        assert settings.codex_auth_json is not None
+        assert settings.codex_auth_json.get_secret_value() == auth_json
+
 
 class TestComputedProperties:
     """Test computed properties."""

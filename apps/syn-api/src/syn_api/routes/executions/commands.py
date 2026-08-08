@@ -419,6 +419,38 @@ async def execute(
 _RESERVED_REPO_INPUT_KEYS: frozenset[str] = frozenset({"repos", "repository"})
 
 
+async def _preflight_repos_or_reject(
+    workflow: WorkflowTemplateAggregate,
+    workflow_id: str,
+    typed_repos: list[RepositoryRef],
+    effective_inputs: dict[str, str],
+    merged: dict[str, str],
+    task: str | None,
+) -> None:
+    """Resolve + preflight-validate repos for a ``requires_repos`` workflow.
+
+    C2 guard: a repos-required workflow with no usable repo used to pass validation
+    (200) then die deep in the BackgroundTask with an ADR-063 boundary error and no
+    session. Reject at the API boundary (422) instead. It has no usable repo when no
+    typed ``repos`` were passed and either nothing resolves, OR the only repo identity
+    is a reserved key that ``_merge_inputs`` injected into ``merged`` (e.g. a
+    ``{{repository}}`` template), which ``ExecuteWorkflowHandler._resolve_repos``
+    rejects (ADR-063). Keyed off ``typed_repos`` so a repo passed via ``repos`` passes.
+    """
+    _check_repo_url_placeholders(workflow, merged)
+    preflight_repos = _get_preflight_repos(typed_repos, effective_inputs, workflow, task)
+    leaked_in_merged = _RESERVED_REPO_INPUT_KEYS & merged.keys()
+    if not typed_repos and (not preflight_repos or leaked_in_merged):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Workflow '{workflow_id}' requires a repository, but none was "
+                "resolved. Pass one via the 'repos' field (ADR-058)."
+            ),
+        )
+    await _validate_all_repos_access(preflight_repos)
+
+
 async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
@@ -472,11 +504,9 @@ async def _validate_execution_request(
     # Anything else surfacing in BackgroundTask is a real infra failure, not a
     # validation gap.
     if workflow.requires_repos:
-        _check_repo_url_placeholders(workflow, merged)
-        preflight_repos = _get_preflight_repos(
-            typed_repos, effective_inputs, workflow, request.task
+        await _preflight_repos_or_reject(
+            workflow, workflow_id, typed_repos, effective_inputs, merged, request.task
         )
-        await _validate_all_repos_access(preflight_repos)
 
     return workflow, effective_inputs, typed_repos
 

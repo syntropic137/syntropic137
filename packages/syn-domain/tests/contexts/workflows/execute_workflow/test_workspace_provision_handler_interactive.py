@@ -28,7 +28,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
 )
 
 
-def _phase(provider: str, agent_id: str = "claude") -> ExecutablePhase:
+def _phase(provider: str, agent_id: str | None = "claude") -> ExecutablePhase:
     return ExecutablePhase(
         phase_id="p1",
         name="Phase 1",
@@ -42,6 +42,22 @@ def _workspace(isolation_type: str) -> MagicMock:
     workspace = MagicMock()
     workspace.isolation_handle.isolation_type = isolation_type
     return workspace
+
+
+class TestProvisionedAgentsAgentIdCoercion:
+    """agent_id now defaults to None (codex-bridge); the interactive boundary
+    must coerce a missing agent_id back to "claude" so pane naming survives."""
+
+    def test_missing_agent_id_coerces_to_claude(self) -> None:
+        # Regression: agent_id=None (the new default) must not leak into the
+        # provisioned-agents tuple as (None,) - it must name the claude pane.
+        assert _provisioned_agents(_phase("claude-interactive", agent_id=None)) == ("claude",)
+
+    def test_explicit_agent_id_preserved(self) -> None:
+        assert _provisioned_agents(_phase("claude-interactive", agent_id="codex")) == ("codex",)
+
+    def test_docker_path_returns_empty(self) -> None:
+        assert _provisioned_agents(_phase("claude", agent_id=None)) == ()
 
 
 class TestIsInteractivePhaseExplicitOnly:

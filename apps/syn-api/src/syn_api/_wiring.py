@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -22,9 +22,13 @@ if TYPE_CHECKING:
     from syn_adapters.storage.claude_plugin_storage.memory import InMemoryClaudePluginStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
     from syn_adapters.storage.repositories import RepositoryAdapter
+    from syn_adapters.storage.skill_storage.memory import InMemorySkillStorage
+    from syn_adapters.storage.skill_storage.minio import MinioSkillStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api.services.claude_plugin_materializer import ClaudePluginMaterializer
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
+    from syn_api.services.skill_materializer import SkillMaterializer
+    from syn_api.services.skill_resolution_service import SkillResolutionService
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
@@ -61,6 +65,10 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection import (
         ClaudePluginLockProjection,
     )
+    from syn_domain.contexts.orchestration.slices.register_skill import RegisterSkillHandler
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockProjection,
+    )
     from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
         ShowClaudePluginHandler,
     )
@@ -86,6 +94,7 @@ from syn_adapters.storage.repositories import (
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
+from syn_shared.agents import AgentProvider
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -177,6 +186,11 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     # through to ``WorkspaceProvisionHandler`` per dispatch.
     claude_plugin_materializer = await get_claude_plugin_materializer()
 
+    # WHY (issue #772): mirrors the claude-plugin materializer above; turns
+    # ResolvedSkill entries on each phase into workspace files, then the
+    # processor threads it through to WorkspaceProvisionHandler per dispatch.
+    skill_materializer = await get_skill_materializer()
+
     return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
         session_repository=get_session_repository(),
@@ -191,10 +205,11 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         observability_writer=event_store,
         controller=get_controller(),
         prompt_builder=_build_workspace_prompt,
-        command_builder=_build_claude_command,
+        command_builder=_build_agent_command,
         todo_projection=ExecutionTodoProjection(store=get_projection_store()),
         interactive_workspace_service=interactive_workspace_service,
         claude_plugin_materializer=claude_plugin_materializer,
+        skill_materializer=skill_materializer,
     )
 
 
@@ -221,6 +236,53 @@ def _build_claude_command(
             cmd.extend(["--allowedTools", tool])
 
     return cmd
+
+
+# Claude CLI model aliases (the AgentConfiguration.model default is "haiku").
+# Codex rejects these ("model not supported when using Codex with a ChatGPT
+# account"), so we must NOT forward a Claude model to `codex exec` - codex uses
+# its own account default instead. TODO(#780): resolve/validate a real codex
+# model for accurate cost labelling on codex phases.
+_CLAUDE_MODEL_ALIASES = frozenset({"haiku", "sonnet", "opus"})
+
+
+def _is_codex_model(model: str | None) -> TypeGuard[str]:
+    """True only for a model id worth forwarding to `codex exec --model`."""
+    if model is None:
+        return False
+    lowered = model.lower()
+    return lowered not in _CLAUDE_MODEL_ALIASES and not lowered.startswith("claude")
+
+
+def _build_codex_command(prompt: str, model: str | None) -> list[str]:
+    """Build the Codex CLI command for agent execution.
+
+    A codex phase inherits the domain default model ("haiku", a Claude alias)
+    unless the YAML sets one. We only forward `--model` when it is a genuine
+    codex/OpenAI model id; otherwise codex selects its ChatGPT-account default.
+    """
+    cmd = [
+        "codex",
+        "exec",
+        "--json",
+        "--sandbox",
+        "danger-full-access",
+        "--skip-git-repo-check",
+    ]
+    if _is_codex_model(model):
+        cmd.extend(["--model", model])
+    cmd.append(prompt)
+    return cmd
+
+
+def _build_agent_command(
+    phase: ExecutablePhase,
+    prompt: str,
+) -> list[str]:
+    """Build the command selected by the phase provider."""
+    if phase.agent_config.provider == AgentProvider.CODEX:
+        return _build_codex_command(prompt, phase.agent_config.model)
+    return _build_claude_command(phase, prompt)
 
 
 def _owner_repo_from_url(url: str | None) -> str:
@@ -745,15 +807,21 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
     WHY (issue #726): bind the resolution service's per-phase resolver so
     ``ExecuteWorkflowHandler`` populates ``ExecutablePhase.claude_plugins``
     with lock-resolved entries before dispatch reaches the processor.
+
+    WHY (issue #772): mirrors the claude plugin wiring for skills -- binds
+    ``SkillResolutionService.resolve_for_phase`` so
+    ``ExecutablePhase.skills`` is populated the same way.
     """
     from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
 
     processor = await get_execution_processor()
     resolution_service = await get_claude_plugin_resolution_service()
+    skill_resolution_service = await get_skill_resolution_service()
     return ExecuteWorkflowHandler(
         processor=processor,
         workflow_repository=get_workflow_repository(),
         phase_plugin_resolver=resolution_service.resolve_for_phase,
+        phase_skill_resolver=skill_resolution_service.resolve_for_phase,
     )
 
 
@@ -1163,3 +1231,112 @@ def reset_claude_plugin_singletons() -> None:
     _show_claude_plugin_handler_singleton = None
     _claude_plugin_resolution_service_singleton = None
     _claude_plugin_materializer_singleton = None
+
+
+# ── Skill wiring (issue #772) ───────────────────────────────────────
+#
+# Mirrors the claude-plugin wiring block above. Skills have no global scope
+# in this plan, so there is no global-registry projection/handler here.
+
+_skill_storage_singleton: MinioSkillStorage | InMemorySkillStorage | None = None
+_register_skill_handler_singleton: RegisterSkillHandler | None = None
+_skill_resolution_service_singleton: SkillResolutionService | None = None
+_skill_materializer_singleton: SkillMaterializer | None = None
+
+
+async def get_skill_storage() -> MinioSkillStorage | InMemorySkillStorage:
+    """Get the configured skill storage adapter (production singleton)."""
+    global _skill_storage_singleton
+    if _skill_storage_singleton is not None:
+        return _skill_storage_singleton
+
+    from syn_shared.settings import get_settings
+
+    if get_settings().uses_in_memory_stores:
+        from syn_adapters.storage.skill_storage.factory import get_test_skill_storage
+
+        _skill_storage_singleton = get_test_skill_storage()
+        return _skill_storage_singleton
+
+    from syn_adapters.storage.skill_storage.factory import get_skill_storage as _prod
+
+    _skill_storage_singleton = await _prod()
+    return _skill_storage_singleton
+
+
+def get_skill_lock_projection() -> SkillLockProjection:
+    """Return the skill_lock projection from the shared registry.
+
+    WHY assert isinstance: the projection manager stores projections keyed by
+    name as ``CheckpointedProjection``; the concrete type is only known at
+    this call site, so an isinstance check keeps every downstream caller
+    fully typed without ``# type: ignore`` (see feedback_no_any_in_plumbing).
+    """
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockProjection,
+    )
+
+    projection = get_projection_manager().get_projection("skill_lock")
+    assert isinstance(projection, SkillLockProjection)
+    return projection
+
+
+async def get_register_skill_handler() -> RegisterSkillHandler:
+    """Return the process-wide ``RegisterSkillHandler`` singleton (issue #772)."""
+    global _register_skill_handler_singleton
+    if _register_skill_handler_singleton is not None:
+        return _register_skill_handler_singleton
+
+    from syn_adapters.storage.repositories import get_skill_registration_repository
+    from syn_domain.contexts.orchestration.slices.register_skill import RegisterSkillHandler
+
+    _register_skill_handler_singleton = RegisterSkillHandler(
+        storage=await get_skill_storage(),
+        repo=get_skill_registration_repository(),
+    )
+    return _register_skill_handler_singleton
+
+
+async def get_skill_resolution_service() -> SkillResolutionService:
+    """Return the process-wide ``SkillResolutionService`` singleton (issue #772)."""
+    global _skill_resolution_service_singleton
+    if _skill_resolution_service_singleton is not None:
+        return _skill_resolution_service_singleton
+
+    from syn_api.services.skill_resolution_service import SkillResolutionService
+
+    _skill_resolution_service_singleton = SkillResolutionService(
+        lock_projection=get_skill_lock_projection(),
+    )
+    return _skill_resolution_service_singleton
+
+
+async def get_skill_materializer() -> SkillMaterializer:
+    """Return the process-wide ``SkillMaterializer`` (issue #772).
+
+    Mirrors ``get_claude_plugin_materializer``: construction is async because
+    the storage singleton is async; the materializer itself is stateless
+    apart from its LRU cache.
+    """
+    global _skill_materializer_singleton
+    if _skill_materializer_singleton is not None:
+        return _skill_materializer_singleton
+
+    from syn_api.services.skill_materializer import SkillMaterializer
+
+    storage = await get_skill_storage()
+    _skill_materializer_singleton = SkillMaterializer(storage=storage)
+    return _skill_materializer_singleton
+
+
+def reset_skill_singletons() -> None:
+    """Reset every skill singleton (test isolation only)."""
+    global _skill_storage_singleton
+    global _register_skill_handler_singleton
+    global _skill_resolution_service_singleton
+    global _skill_materializer_singleton
+
+    _skill_storage_singleton = None
+    _register_skill_handler_singleton = None
+    _skill_resolution_service_singleton = None
+    _skill_materializer_singleton = None

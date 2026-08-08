@@ -4,10 +4,12 @@ packages:
   - apps/syn-cli-node
   - packages/openclaw-plugin
 
+# Build scripts pnpm 11+ requires explicit approval for. Both are standard
+# native-binary installs: esbuild fetches its platform binary (vite/tsx), sharp
+# fetches libvips (syn-docs image pipeline). Left unset, pnpm refuses to run
+# them and `just codegen` fails in any fresh checkout, so the pre-push hook can
+# never pass.
 allowBuilds:
-  # esbuild fetches its platform binary in a postinstall script; sharp builds
-  # native image bindings. Both are first-party build steps required for the
-  # dashboard and docs builds to work, so they are explicitly approved.
   esbuild: true
   sharp: true
 

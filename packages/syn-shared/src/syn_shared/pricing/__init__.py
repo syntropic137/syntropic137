@@ -19,6 +19,13 @@ from decimal import Decimal
 
 _MILLION = Decimal("1_000_000")
 
+# TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
+_GPT_5_6_CODEX_INPUT_PER_MILLION = Decimal("15.0")
+# TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
+_GPT_5_6_CODEX_OUTPUT_PER_MILLION = Decimal("60.0")
+# TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
+_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION = Decimal("1.5")
+
 
 @dataclass(frozen=True)
 class ModelPricing:
@@ -62,6 +69,14 @@ class ModelPricing:
 # ---------------------------------------------------------------------------
 
 MODEL_PRICING_TABLE: dict[str, ModelPricing] = {
+    # --- OpenAI Codex family ---
+    "gpt-5.6": ModelPricing(
+        model_id="gpt-5.6",
+        input_per_million=_GPT_5_6_CODEX_INPUT_PER_MILLION,
+        output_per_million=_GPT_5_6_CODEX_OUTPUT_PER_MILLION,
+        cache_creation_per_million=_GPT_5_6_CODEX_INPUT_PER_MILLION,
+        cache_read_per_million=_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION,
+    ),
     # --- Claude 4.x family ---
     "claude-opus-4-20250514": ModelPricing(
         model_id="claude-opus-4-20250514",
@@ -117,12 +132,28 @@ DEFAULT_MODEL_ID = "claude-sonnet-4-20250514"
 # ``sonnet``/``opus``/``haiku``; resolve them so pricing lookups don't
 # silently fall back to the default.
 MODEL_ALIASES: dict[str, str] = {
+    "codex": "gpt-5.6",
+    "gpt-codex": "gpt-5.6",
     "opus": "claude-opus-4-20250514",
     "sonnet": "claude-sonnet-4-20250514",
     "haiku": "claude-3-5-haiku-20241022",
     "claude-sonnet-4": "claude-sonnet-4-20250514",
     "claude-opus-4": "claude-opus-4-20250514",
 }
+
+
+def resolve_model_pricing(model_id: str) -> ModelPricing | None:
+    """Resolve pricing for a known model without a default fallback."""
+    canonical_model_id = MODEL_ALIASES.get(model_id, model_id)
+    if canonical_model_id in MODEL_PRICING_TABLE:
+        return MODEL_PRICING_TABLE[canonical_model_id]
+
+    for key, pricing in MODEL_PRICING_TABLE.items():
+        family, separator, suffix = key.rpartition("-")
+        if separator and suffix.isdigit() and len(suffix) == 8 and model_id.startswith(family):
+            return pricing
+
+    return None
 
 
 def get_model_pricing(model_id: str) -> ModelPricing:
@@ -140,18 +171,7 @@ def get_model_pricing(model_id: str) -> ModelPricing:
     Returns:
         ModelPricing for the model.
     """
-    if model_id in MODEL_ALIASES:
-        return MODEL_PRICING_TABLE[MODEL_ALIASES[model_id]]
-
-    if model_id in MODEL_PRICING_TABLE:
-        return MODEL_PRICING_TABLE[model_id]
-
-    # Prefix fallback: strip the date suffix and try to match
-    for key, pricing in MODEL_PRICING_TABLE.items():
-        if model_id.startswith(key.rsplit("-", 1)[0]):
-            return pricing
-
-    return MODEL_PRICING_TABLE[DEFAULT_MODEL_ID]
+    return resolve_model_pricing(model_id) or MODEL_PRICING_TABLE[DEFAULT_MODEL_ID]
 
 
 def calculate_cost(
@@ -185,4 +205,5 @@ __all__ = [
     "ModelPricing",
     "calculate_cost",
     "get_model_pricing",
+    "resolve_model_pricing",
 ]

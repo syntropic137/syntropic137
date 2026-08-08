@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
         ClaudePluginRef,
     )
+    from syn_domain.contexts.orchestration._shared.skill_ref import (
+        SkillRef,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         InputDeclaration,
         PhaseDefinition,
@@ -56,6 +59,7 @@ _EVENT_FIELDS = [
     "description",
     "input_declarations",
     "claude_plugins",
+    "skills",
 ]
 
 
@@ -70,7 +74,7 @@ def _normalize_event_data(event: DomainEvent) -> dict[str, Any]:
     for field in _EVENT_FIELDS:
         data.setdefault(
             field,
-            [] if field in ("phases", "input_declarations", "claude_plugins") else None,
+            [] if field in ("phases", "input_declarations", "claude_plugins", "skills") else None,
         )
     return data
 
@@ -85,6 +89,7 @@ _PHASE_UPDATE_FIELDS = [
     "phase_id",
     "prompt_template",
     "model",
+    "provider",
     "timeout_seconds",
     "allowed_tools",
 ]
@@ -111,7 +116,13 @@ def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDe
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         PhaseDefinition,
     )
+    from syn_shared.agents import AgentProvider
 
+    updated_provider = _coalesce(data["provider"], phase.provider)
+    # agent_id only names a tmux pane on the interactive path; if the phase is
+    # (now) headless, drop a stale agent_id so it can't outlive a provider switch
+    # (e.g. claude-interactive+gemini -> codex) and crash AgentConfiguration later.
+    agent_id = phase.agent_id if updated_provider == AgentProvider.CLAUDE_INTERACTIVE else None
     return PhaseDefinition(
         phase_id=phase.phase_id,
         name=phase.name,
@@ -126,6 +137,11 @@ def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDe
         allowed_tools=_coalesce(data["allowed_tools"], list(phase.allowed_tools)),
         argument_hint=phase.argument_hint,
         model=_coalesce(data["model"], phase.model),
+        provider=updated_provider,
+        agent_id=agent_id,
+        allow_delegation=phase.allow_delegation,
+        skills=phase.skills,
+        claude_plugins=phase.claude_plugins,
     )
 
 
@@ -184,6 +200,10 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # part of the aggregate's identity at execute time so the resolver
         # can union them with per-phase refs without re-reading YAML.
         self._claude_plugins: list[ClaudePluginRef] = []
+        # WHY (issue #772): workflow-scope skill refs mirror claude_plugins so
+        # the skill resolution service can union them with per-phase refs at
+        # execute time without re-reading YAML.
+        self._skills: list[SkillRef] = []
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -233,6 +253,15 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         """
         return list(self._claude_plugins)
 
+    @property
+    def skills(self) -> list[SkillRef]:
+        """Get workflow-scope skill refs (issue #772).
+
+        Per-phase refs live on each ``PhaseDefinition.skills``; this list
+        applies to every phase via the skill resolution service union.
+        """
+        return list(self._skills)
+
     # =========================================================================
     # COMMAND HANDLERS - Validate business rules, emit events
     # =========================================================================
@@ -279,6 +308,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             repos=command.repos,
             requires_repos=command.requires_repos,
             claude_plugins=command.claude_plugins,
+            skills=command.skills,
         )
 
         self._apply(event)
@@ -309,6 +339,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             phase_id=command.phase_id,
             prompt_template=command.prompt_template,
             model=command.model,
+            provider=command.provider,
             timeout_seconds=command.timeout_seconds,
             allowed_tools=command.allowed_tools,
         )
@@ -360,6 +391,16 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._claude_plugins = [
             item if isinstance(item, ClaudePluginRef) else ClaudePluginRef.model_validate(item)
             for item in raw_plugins
+        ]
+
+        # WHY (issue #772): mirrors the claude_plugins coercion above; legacy
+        # events have no skills field.
+        from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
+
+        raw_skills = data.get("skills") or []
+        self._skills = [
+            item if isinstance(item, SkillRef) else SkillRef.model_validate(item)
+            for item in raw_skills
         ]
 
     @command_handler("ArchiveWorkflowTemplateCommand")

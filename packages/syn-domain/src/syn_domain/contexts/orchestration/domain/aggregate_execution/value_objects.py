@@ -10,6 +10,10 @@ from typing import Any
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
+from syn_domain.contexts.orchestration._shared.resolved_skill import (
+    ResolvedSkill,  # noqa: TC001 - needed at runtime for dataclass field default
+)
+from syn_shared.agents import AgentProvider
 
 
 class ExecutionStatus(StrEnum):
@@ -55,15 +59,21 @@ class AgentConfiguration:
     Immutable to ensure configuration integrity.
 
     NOTE: 'mock' provider is ONLY valid in test environments (APP_ENVIRONMENT=test).
-    Production/development MUST use 'claude' or 'openai' with valid API keys.
+    Production/development MUST use 'claude', 'claude-interactive', or 'codex'
+    (or 'openai') with valid API keys/auth.
 
     Model Aliases (CLI-compatible, recommended):
         - "sonnet" -> latest Claude Sonnet
         - "opus" -> latest Claude Opus
         - "haiku" -> latest Claude Haiku
+
+    'codex' selects the programmatic codex harness on the same docker path
+    as 'claude' (not the interactive-tmux path). ``agent_id`` is meaningless
+    on that path, so it MUST be ``None`` or ``"codex"`` when
+    ``provider == "codex"`` - see ``__post_init__``.
     """
 
-    provider: str = "claude"  # claude, openai (mock only in tests)
+    provider: str = AgentProvider.CLAUDE  # + claude-interactive, codex, openai (mock in tests)
     # NOTE: Temporarily using Haiku to reduce costs during testing
     model: str = "haiku"  # CLI alias - auto-resolves to latest version
     max_tokens: int = 4096
@@ -71,10 +81,38 @@ class AgentConfiguration:
     timeout_seconds: int = 300
     allowed_tools: tuple[str, ...] = ()  # Tools allowed during execution
     # Multi-agent interactive-tmux: which tmux pane the phase targets.
-    # Valid values: "claude", "codex", "gemini". Defaults to "claude" so
-    # single-agent workflows (PR #765) keep behaving identically. Ignored
-    # by the default claude -p path. See docs/plans/multi-agent-workspaces.md.
-    agent_id: str = "claude"
+    # Valid values: "claude", "codex", "gemini". None means "not selected" -
+    # distinguishable from an explicit "claude" pane choice. The
+    # interactive-tmux boundary (WorkspaceProvisionHandler._provisioned_agents)
+    # coerces None -> "claude" only when it needs to name a pane; the docker
+    # path (provider in {"claude", "codex"}) ignores agent_id entirely.
+    # Ignored by the default claude -p path. See docs/plans/multi-agent-workspaces.md.
+    agent_id: str | None = None
+    # When true, both agent auths are staged so this phase's primary agent may
+    # delegate one-shot to the other CLI. Default false = single-provider isolation.
+    allow_delegation: bool = False
+
+    def __post_init__(self) -> None:
+        """Reject nonsensical provider/agent_id combinations.
+
+        ``provider == "codex"`` selects the programmatic codex harness on
+        the docker path; ``agent_id`` only means something on the
+        interactive-tmux path (which tmux pane to target), so pairing
+        ``codex`` with any agent_id other than ``None``/``"codex"`` is a
+        contradiction we reject at construction time rather than silently
+        misrouting later.
+        """
+        if self.provider == AgentProvider.CODEX and self.agent_id not in (
+            None,
+            AgentProvider.CODEX,
+        ):
+            msg = (
+                f"AgentConfiguration.provider='codex' selects the programmatic "
+                f"codex harness; agent_id must be None or 'codex', got "
+                f"{self.agent_id!r} (agent_id does not select a tmux pane on "
+                "the docker path)."
+            )
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True)
@@ -196,3 +234,9 @@ class ExecutablePhase:
     # this empty; PR2's resolution service populates it from the workflow- and
     # phase-scope ClaudePluginRefs.
     claude_plugins: tuple[ResolvedClaudePlugin, ...] = ()
+
+    # Resolved skills for the workspace materializer (issue #772). Additive
+    # alongside claude_plugins. ExecuteWorkflowHandler._resolve_phase_skills
+    # populates it from the workflow- and phase-scope SkillRefs, with phase
+    # scope winning on identity collision.
+    skills: tuple[ResolvedSkill, ...] = ()

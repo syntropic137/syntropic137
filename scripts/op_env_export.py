@@ -23,6 +23,7 @@ from pathlib import Path
 from syn_shared.settings.constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
+    ENV_CODEX_AUTH_JSON,
     ENV_SYN_PUBLIC_HOSTNAME,
 )
 
@@ -62,6 +63,7 @@ _KEYS = {
     ENV_SYN_PUBLIC_HOSTNAME,
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
+    ENV_CODEX_AUTH_JSON,
     ENV_SYN_API_PASSWORD,
 }
 

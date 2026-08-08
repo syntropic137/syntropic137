@@ -2,6 +2,7 @@ import { clsx } from 'clsx'
 import { GitBranch } from 'lucide-react'
 
 import { Card, CardContent, CardHeader } from '../../components'
+import { providerLabel } from '../../constants/agentProviders'
 import type { PhaseDefinition, PhaseMetrics } from '../../types'
 import { defaultPhaseStyle } from './workflowConstants'
 
@@ -54,7 +55,7 @@ function PhaseCard({
         </p>
       )}
       <div className="mt-2 text-xs text-[var(--color-text-muted)]">
-        {phase.agent_type}
+        {providerLabel(phase.provider ?? phase.agent_type)}
       </div>
       {phaseMetric && (
         <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">

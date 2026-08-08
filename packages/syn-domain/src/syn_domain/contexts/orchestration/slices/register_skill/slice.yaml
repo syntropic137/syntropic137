@@ -1,0 +1,9 @@
+name: register-skill
+type: command
+aggregate: SkillRegistration
+emits:
+  - SkillRegisteredEvent
+projection: SkillLockProjection
+subscribes_to:
+  - SkillRegisteredEvent
+returns: RegisterSkillResult

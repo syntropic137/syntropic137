@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
+from syn_domain.contexts.orchestration._shared.skill_ref import (
+    SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
 
 
 class WorkflowType(StrEnum):
@@ -105,20 +108,36 @@ class PhaseDefinition(BaseModel):
     """Per-phase model override (e.g., 'sonnet', 'opus')."""
 
     provider: str | None = None
-    """Per-phase agent provider override (e.g., 'claude', 'claude-interactive').
+    """Per-phase agent provider override (e.g., 'claude', 'claude-interactive',
+    'codex').
 
     None means the execution default ('claude', the claude -p Docker path).
     'claude-interactive' routes the phase through the interactive-tmux
-    workspace provider. Sourced from the workflow YAML ``agent.provider``
-    field. See docs/plans/multi-agent-workspaces.md.
+    workspace provider. 'codex' routes the phase through the programmatic
+    codex harness on the same Docker path as 'claude' - it does not use
+    ``agent_id`` (that only selects a tmux pane on the interactive path).
+    Sourced from the workflow YAML ``agent.provider`` field. See
+    docs/plans/multi-agent-workspaces.md.
     """
 
     agent_id: str | None = None
     """Which tmux pane the phase targets in a multi-agent interactive-tmux
-    workspace. Valid values: "claude", "codex", "gemini". Defaults to
-    "claude" when omitted. Ignored by the default claude -p path."""
+    workspace. Valid values: "claude", "codex", "gemini". None means
+    "not selected" - the interactive-tmux provisioning boundary coerces
+    this to "claude" only when it needs to name a pane. Ignored by the
+    default claude -p / codex Docker path."""
+
+    allow_delegation: bool = False
+    """When true, both agent auths are staged so the phase's primary agent can
+    delegate one-shot to the other CLI. Headless providers only. Sourced from
+    the workflow YAML ``agent.allow_delegation`` field."""
 
     # Workflow-author-declared plugin refs at phase scope (issue #726). PR1 carries
     # them through the YAML to the domain; PR2's resolution service rewrites them
     # into ResolvedClaudePlugin entries on ExecutablePhase.
     claude_plugins: tuple[ClaudePluginRef, ...] = Field(default_factory=tuple)
+    # Workflow-author-declared skill refs at phase scope (issue #772). Additive
+    # alongside claude_plugins; carried through the YAML to the domain. A
+    # follow-up resolution service rewrites them into ResolvedSkill entries
+    # on ExecutablePhase.
+    skills: tuple[SkillRef, ...] = Field(default_factory=tuple)

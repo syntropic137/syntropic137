@@ -11,6 +11,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionMetrics,
     PhaseResult,
 )
+from syn_shared.agents import AgentProvider, AgentRunner
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -39,6 +40,7 @@ PromptBuilder = Callable[
 ]
 
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
+Runner = AgentRunner
 
 
 class TodoProjection(Protocol):
@@ -95,7 +97,8 @@ class AgentHandlerProtocol(Protocol):
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,
-        agent_id: str = "claude",
+        agent_id: str = AgentProvider.CLAUDE,
+        runner: Runner = AgentRunner.CLAUDE,
     ) -> AgentExecutionResult: ...
 
 

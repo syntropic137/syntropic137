@@ -29,12 +29,17 @@ from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
 )
+from syn_domain.contexts.orchestration._shared.skill_ref import (
+    SkillRef,
+    expand_skill_entry,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
     PhaseDefinition,
     PhaseExecutionType,
     WorkflowClassification,
 )
+from syn_shared.agents import AgentProvider
 
 _SHARED_PREFIX = "shared://"
 
@@ -170,23 +175,67 @@ class AgentYamlDefinition(BaseModel):
 
     Selects which agent provider drives the phase (e.g. ``claude`` for the
     default ``claude -p`` Docker path, ``claude-interactive`` for the
-    interactive-tmux workspace provider), which tmux pane the phase
-    targets, and optionally the model. See
+    interactive-tmux workspace provider, ``codex`` for the programmatic
+    codex harness on the same Docker path as ``claude``), which tmux pane
+    the phase targets, and optionally the model. See
     docs/plans/multi-agent-workspaces.md.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    provider: Literal["claude", "claude-interactive"] | None = None
+    provider: Literal["claude", "claude-interactive", "codex"] | None = None
     """One of: ``claude`` (default; ``claude -p`` path),
-    ``claude-interactive`` (drives the interactive-tmux pane)."""
+    ``claude-interactive`` (drives the interactive-tmux pane),
+    ``codex`` (programmatic codex harness on the ``claude`` Docker path)."""
 
     agent_id: Literal["claude", "codex", "gemini"] | None = None
     """Which tmux pane the phase targets when provider is
-    ``claude-interactive``."""
+    ``claude-interactive``. Meaningless when provider is ``codex``
+    (docker path) - must be omitted or ``"codex"`` there; see
+    ``_validate_provider_agent_combo``."""
 
     model: str | None = None
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
+
+    allow_delegation: bool = False
+    """When true, stage BOTH agent auths in this phase's workspace so the
+    primary agent can shell out one-shot to the other CLI (codex -> ``claude
+    -p`` or claude -> ``codex exec``). Headless providers only. Default false
+    preserves single-provider isolation. See
+    docs/superpowers/plans/2026-07-23-codex-claude-delegation.md."""
+
+    @model_validator(mode="after")
+    def _validate_provider_agent_combo(self) -> AgentYamlDefinition:
+        """Reject a codex provider paired with an unrelated agent_id, and
+        reject delegation on the interactive-tmux path.
+
+        ``provider="codex"`` selects the programmatic codex harness on the
+        docker path; ``agent_id`` only means "which tmux pane" on the
+        ``claude-interactive`` path. Omitted or explicitly ``"codex"`` are
+        the only sensible values here - anything else (e.g. ``"gemini"``)
+        is a contradiction we reject at parse time.
+
+        ``allow_delegation`` is headless-only: the interactive-tmux path has a
+        different image/auth model that this feature does not verify.
+        """
+        if self.provider == AgentProvider.CODEX and self.agent_id not in (
+            None,
+            AgentProvider.CODEX,
+        ):
+            msg = (
+                "agent.provider='codex' selects the programmatic codex harness; "
+                "agent_id must be omitted or 'codex' (it does not select a tmux "
+                "pane here)."
+            )
+            raise ValueError(msg)
+        if self.allow_delegation and self.provider == AgentProvider.CLAUDE_INTERACTIVE:
+            msg = (
+                "agent.allow_delegation is only supported on the headless "
+                "providers ('claude', 'codex'); the interactive-tmux path has a "
+                "different image/auth model. Remove allow_delegation or switch provider."
+            )
+            raise ValueError(msg)
+        return self
 
 
 class PhaseYamlDefinition(BaseModel):
@@ -225,6 +274,20 @@ class PhaseYamlDefinition(BaseModel):
     # Phase-scope claude plugin refs (issue #726). Workflow-scope refs live on
     # WorkflowDefinition. PR1 carries them through; PR2 resolves them.
     claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+    # Phase-scope skill refs (issue #772). Additive alongside claude_plugins.
+    # Workflow-scope refs live on WorkflowDefinition; phase scope wins on
+    # identity collision when the two lists are merged at resolution time.
+    skills: list[SkillRef] = Field(default_factory=list)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _expand_skills(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        expanded: list[SkillRef] = []
+        for entry in value:
+            expanded.extend(expand_skill_entry(entry))
+        return expanded
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
@@ -255,6 +318,7 @@ class PhaseYamlDefinition(BaseModel):
         provider = self.agent.provider if self.agent else None
         agent_id = self.agent.agent_id if self.agent else None
         agent_model = self.agent.model if self.agent else None
+        allow_delegation = self.agent.allow_delegation if self.agent else False
         model = self.model or agent_model
 
         return PhaseDefinition(
@@ -273,7 +337,9 @@ class PhaseYamlDefinition(BaseModel):
             model=model,
             provider=provider,
             agent_id=agent_id,
+            allow_delegation=allow_delegation,
             claude_plugins=tuple(self.claude_plugins),
+            skills=tuple(self.skills),
         )
 
 
@@ -351,6 +417,21 @@ class WorkflowDefinition(BaseModel):
     # Workflow-scope claude plugin refs (issue #726). The Phase 5 resolution
     # service walks both this list and per-phase refs to populate the lock.
     claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+    # Workflow-scope skill refs (issue #772). Additive alongside
+    # claude_plugins. The resolution service walks both this list and
+    # per-phase refs to populate the lock, with phase scope winning on
+    # identity collision.
+    skills: list[SkillRef] = Field(default_factory=list)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _expand_skills(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        expanded: list[SkillRef] = []
+        for entry in value:
+            expanded.extend(expand_skill_entry(entry))
+        return expanded
 
     @field_validator("phases")
     @classmethod

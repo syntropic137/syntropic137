@@ -16,6 +16,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
 )
@@ -25,6 +26,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     WorkspaceMisconfiguredError,
 )
+from syn_shared.agents import AgentProvider
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_ANTHROPIC_BASE_URL,
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
         ResolvedClaudePlugin,
     )
+    from syn_domain.contexts.orchestration._shared.resolved_skill import ResolvedSkill
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
     )
@@ -62,8 +65,59 @@ if TYPE_CHECKING:
             plugins: tuple[ResolvedClaudePlugin, ...],
         ) -> list[tuple[str, bytes]]: ...
 
+    class SkillMaterializerProtocol(Protocol):
+        """Minimal surface the handler needs (issue #772).
+
+        Mirrors ``ClaudePluginMaterializerProtocol``: the concrete
+        implementation (``syn_api.services.skill_materializer.SkillMaterializer``)
+        lives in the application layer, so the domain handler depends only on
+        this structural protocol.
+        """
+
+        async def fetch_for_workspace(
+            self,
+            skills: tuple[ResolvedSkill, ...],
+        ) -> list[tuple[str, bytes]]: ...
+
 
 logger = logging.getLogger(__name__)
+
+# Maps our phase agent_id values onto the vercel skills-cli --agent keys.
+# The skills CLI (pinned 1.5.14 in the workspace images) owns the per-harness
+# install location; we only translate our identifier vocabulary to theirs.
+# Verify against `skills add --help` inside the image whenever the pin bumps.
+_SKILLS_CLI_AGENT_KEYS: dict[str, str] = {
+    "claude": "claude-code",
+    "codex": "codex",
+    "gemini": "gemini-cli",
+}
+
+_SKILL_INSTALL_TIMEOUT_SECONDS = 120
+
+# Baked delegation skills live in the agentic-primitives image under this root
+# (claude-cli manifest plugins.include: delegation). A delegation-enabled phase
+# installs the skill teaching its PRIMARY agent to hand off to the OTHER CLI.
+_DELEGATION_SKILL_ROOT = "/opt/agentic/plugins/delegation/skills"
+_DELEGATION_TARGET_SKILL: dict[str, str] = {
+    AgentProvider.CODEX: "delegating-to-claude-p",  # codex learns to call claude -p
+    AgentProvider.CLAUDE: "delegating-to-codex",  # claude learns to call codex exec
+}
+
+
+def _skills_cli_agent_selector(provider: str, agent_id: str | None) -> str:
+    """Skills-CLI agent-key source for a phase.
+
+    Interactive-tmux phases key by the pane's ``agent_id``; every headless phase
+    keys by ``provider`` (``agent_id`` is meaningless off the interactive path).
+    Keying by ``agent_id`` unconditionally would install skills for the wrong
+    harness when a headless phase carries a stray ``agent_id`` (e.g.
+    ``provider="claude"`` with ``agent_id="codex"``, which YAML validation
+    currently permits): the phase runs ``claude -p`` but skills would target codex.
+    """
+    if provider == AgentProvider.CLAUDE_INTERACTIVE:
+        return agent_id or AgentProvider.CLAUDE
+    return provider
+
 
 # Callable types for dependency injection
 PromptBuilder = Callable[
@@ -89,7 +143,7 @@ def _is_interactive_phase(workspace: ManagedWorkspace, phase: ExecutablePhase) -
     routing broke, proceeding here would silently flip which path runs
     (previously masked by the implicit OR) instead of failing loudly.
     """
-    explicit_interactive = phase.agent_config.provider == "claude-interactive"
+    explicit_interactive = phase.agent_config.provider == AgentProvider.CLAUDE_INTERACTIVE
     workspace_is_interactive_tmux = workspace.isolation_handle.isolation_type == "interactive-tmux"
     if explicit_interactive != workspace_is_interactive_tmux:
         msg = (
@@ -115,9 +169,28 @@ def _provisioned_agents(phase: ExecutablePhase) -> tuple[str, ...]:
     other two agents' credentials. Returns () for the default docker path
     (which ignores agent selection entirely).
     """
-    if phase.agent_config.provider == "claude-interactive":
-        return (phase.agent_config.agent_id,)
+    if phase.agent_config.provider == AgentProvider.CLAUDE_INTERACTIVE:
+        # `agent_id` now defaults to None (codex-bridge: fixes the
+        # provider->agent_id invariant); at the interactive-tmux boundary a
+        # pane MUST be named, so coerce a missing agent_id to "claude" here
+        # (preserving the pre-existing default) rather than at construction.
+        return (phase.agent_config.agent_id or AgentProvider.CLAUDE,)
     return ()
+
+
+def _auth_staging_for(
+    provider: str, allow_delegation: bool, is_interactive: bool
+) -> tuple[bool, bool]:
+    """Return ``(include_codex_auth, needs_claude_env)`` for a phase.
+
+    Delegation opt-in stages BOTH auths so the primary agent can shell out to
+    the other CLI; otherwise auth is scoped to the phase's single provider (the
+    codex ``~/.codex/auth.json`` file for codex phases, the claude env
+    otherwise). Interactive-tmux never uses the claude sidecar env.
+    """
+    include_codex_auth = allow_delegation or provider == AgentProvider.CODEX
+    needs_claude_env = not is_interactive and (allow_delegation or provider != AgentProvider.CODEX)
+    return include_codex_auth, needs_claude_env
 
 
 def _append_claude_plugin_dirs(
@@ -133,6 +206,33 @@ def _append_claude_plugin_dirs(
     for plugin in phase.claude_plugins:
         claude_cmd.append("--plugin-dir")
         claude_cmd.append(f"/workspace/.syn-plugins/{plugin.name}")
+
+
+def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> None:
+    """Reject a phase whose skills contain two different versions of one skill_name.
+
+    WHY (Task 7 review note, issue #772): identity-triple dedup at the
+    workflow/phase merge layer means a workflow-level skill declaration and a
+    phase-level override could legitimately resolve to two different
+    ``resolved_sha`` values for the same ``skill_name``. Both would
+    materialize to the same ``.syn-skills/<skill_name>/`` workspace path,
+    silently clobbering one version with the other on disk. Fail fast
+    instead of letting the last-materialized write win unnoticed.
+    """
+    seen_sha_by_name: dict[str, str] = {}
+    for skill in skills:
+        prior_sha = seen_sha_by_name.get(skill.skill_name)
+        if prior_sha is not None and prior_sha != skill.resolved_sha:
+            raise SkillInstallFailed(
+                skill.skill_name,
+                "n/a",
+                exit_code=-1,
+                stderr=(
+                    f"conflicting versions of skill {skill.skill_name!r}: "
+                    f"{prior_sha!r} vs {skill.resolved_sha!r}"
+                ),
+            )
+        seen_sha_by_name[skill.skill_name] = skill.resolved_sha
 
 
 async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
@@ -276,6 +376,7 @@ class WorkspaceProvisionHandler:
         prompt_builder: PromptBuilder,
         command_builder: CommandBuilder,
         claude_plugin_materializer: ClaudePluginMaterializerProtocol | None = None,
+        skill_materializer: SkillMaterializerProtocol | None = None,
     ) -> None:
         self._workspace_service = workspace_service
         self._prompt_builder = prompt_builder
@@ -286,6 +387,11 @@ class WorkspaceProvisionHandler:
         # materialization branch when the field is empty, so passing None is
         # safe in those cases.
         self._claude_plugin_materializer = claude_plugin_materializer
+        # WHY optional (issue #772): mirrors the plugin materializer above,
+        # but unlike plugins, a phase that declares skills with no
+        # materializer wired is a hard error (see
+        # ``_materialize_and_install_skills``) rather than a silent skip.
+        self._skill_materializer = skill_materializer
 
     async def handle(
         self,
@@ -327,8 +433,19 @@ class WorkspaceProvisionHandler:
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
         workspace = await workspace_cm.__aenter__()
         try:
-            await self._hydrate_workspace(workspace, effective_repos)
+            include_codex_auth, _ = _auth_staging_for(
+                phase.agent_config.provider,
+                phase.agent_config.allow_delegation,
+                is_interactive=False,
+            )
+            await self._hydrate_workspace(
+                workspace,
+                effective_repos,
+                include_codex_auth=include_codex_auth,
+            )
             await self._materialize_claude_plugins(workspace, phase)
+            await self._materialize_and_install_skills(workspace, phase)
+            await self._install_baked_delegation_skill(workspace, phase)
             await self._inject_phase_artifacts(
                 workspace, artifacts, completed_phase_ids or [], phase_outputs or {}, todo
             )
@@ -351,6 +468,8 @@ class WorkspaceProvisionHandler:
         self,
         workspace: ManagedWorkspace,
         effective_repos: list[str],
+        *,
+        include_codex_auth: bool,
     ) -> None:
         """Run setup phase and inject synthetic context files (ADR-058)."""
         from syn_adapters.workspace_backends.service import SetupPhaseSecrets
@@ -358,6 +477,7 @@ class WorkspaceProvisionHandler:
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             require_github=bool(effective_repos),
+            include_codex_auth=include_codex_auth,
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
@@ -417,6 +537,71 @@ class WorkspaceProvisionHandler:
                 workspace.workspace_id,
             )
 
+    async def _materialize_and_install_skills(
+        self,
+        workspace: ManagedWorkspace,
+        phase: ExecutablePhase,
+    ) -> None:
+        """Inject skill trees and install them for the phase's harness (issue #772).
+
+        Unlike the plugin path, this FAILS FAST: a phase that declares skills
+        must get them or must not run. Silent skill-less execution produces
+        confusing agent behavior that is worse than a loud provisioning error.
+        """
+        if not phase.skills:
+            return
+        _check_no_conflicting_skill_versions(phase.skills)
+        if self._skill_materializer is None:
+            msg = (
+                f"phase {phase.phase_id} declares skills but no skill materializer "
+                "is wired; refusing to run the agent without them (issue #772)"
+            )
+            raise RuntimeError(msg)
+        # Resolve the skills-CLI agent key. Interactive-tmux phases key by the
+        # pane's agent_id; headless phases have agent_id=None and key by provider
+        # (claude / codex). Prefer agent_id, fall back to provider so a headless
+        # codex or claude phase resolves too.
+        agent_selector = _skills_cli_agent_selector(
+            phase.agent_config.provider, phase.agent_config.agent_id
+        )
+        agent_key = _SKILLS_CLI_AGENT_KEYS.get(agent_selector)
+        if agent_key is None:
+            raise SkillInstallFailed(
+                phase.skills[0].skill_name,
+                agent_selector,
+                exit_code=-1,
+                stderr=f"no skills-cli agent key for agent {agent_selector!r}",
+            )
+        skill_files = await self._skill_materializer.fetch_for_workspace(phase.skills)
+        if skill_files:
+            await workspace.inject_files(skill_files)
+        for skill in phase.skills:
+            result = await workspace.execute(
+                [
+                    "skills",
+                    "add",
+                    f"/workspace/.syn-skills/{skill.skill_name}",
+                    "--agent",
+                    agent_key,
+                    "-y",
+                ],
+                timeout_seconds=_SKILL_INSTALL_TIMEOUT_SECONDS,
+                working_directory="/workspace",
+            )
+            if result.exit_code != 0:
+                raise SkillInstallFailed(
+                    skill.skill_name,
+                    agent_key,
+                    result.exit_code,
+                    result.stderr or result.stdout or "",
+                )
+        logger.info(
+            "Installed %d skill(s) for agent %s in %s",
+            len(phase.skills),
+            agent_key,
+            workspace.workspace_id,
+        )
+
     async def _inject_phase_artifacts(
         self,
         workspace: ManagedWorkspace,
@@ -461,7 +646,10 @@ class WorkspaceProvisionHandler:
         is_interactive = _is_interactive_phase(workspace, phase)
         claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
         interactive_prompt = prompt if is_interactive else None
-        if not is_interactive:
+        # `--plugin-dir` is a claude-only flag; appending it to a `codex exec`
+        # argv (after the prompt) produces an invalid command, so restrict the
+        # plugin-dir augmentation to the claude headless path.
+        if not is_interactive and phase.agent_config.provider != AgentProvider.CODEX:
             _append_claude_plugin_dirs(claude_cmd, phase)
 
         # Interactive-tmux runs claude as a TUI with OAuth-on-disk;
@@ -470,7 +658,16 @@ class WorkspaceProvisionHandler:
         # through the sidecar. That sidecar is intentionally absent on
         # this path (see _create_interactive_tmux_impl in
         # WorkspaceService). Skip env build for interactive phases.
-        agent_env = {} if is_interactive else await _build_agent_env(workspace, session_id)
+        # Codex authenticates via the injected ~/.codex/auth.json file, NOT the
+        # claude env creds; a codex phase must not receive CLAUDE_CODE_OAUTH_TOKEN /
+        # ANTHROPIC_API_KEY (cross-provider secret exposure), so it gets an empty
+        # agent env like the interactive path.
+        _, needs_claude_env = _auth_staging_for(
+            phase.agent_config.provider,
+            phase.agent_config.allow_delegation,
+            is_interactive=is_interactive,
+        )
+        agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
         assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
             execution_id=todo.execution_id,
@@ -536,6 +733,53 @@ class WorkspaceProvisionHandler:
             "https://github.com/org/repo-b/"   → "repo-b"
         """
         return url.rstrip("/").split("/")[-1].removesuffix(".git")
+
+    @staticmethod
+    async def _install_baked_delegation_skill(
+        workspace: ManagedWorkspace, phase: ExecutablePhase
+    ) -> None:
+        """Install the baked delegation skill for a delegation-enabled phase.
+
+        Rides #772's ``skills add`` seam (harness-agnostic), sourced from the
+        image's baked ``delegation`` plugin instead of a registered/materialized
+        skill - the base-skill (tier 1) surfacing that #772 plan-1 does not yet
+        generalize. ``allow_delegation`` itself only stages both auths (see
+        ``_auth_staging_for``); this teaches the primary agent HOW to hand off to
+        the other CLI. No-op when the phase does not opt in.
+        """
+        cfg = phase.agent_config
+        if not cfg.allow_delegation:
+            return
+        # Install the skill teaching the PRIMARY agent to call the OTHER CLI.
+        skill_name = _DELEGATION_TARGET_SKILL.get(cfg.provider)
+        agent_key = _SKILLS_CLI_AGENT_KEYS.get(
+            _skills_cli_agent_selector(cfg.provider, cfg.agent_id)
+        )
+        if skill_name is None or agent_key is None:
+            # allow_delegation is validated headless-only (claude/codex); defensive.
+            return
+        result = await workspace.execute(
+            [
+                "skills",
+                "add",
+                f"{_DELEGATION_SKILL_ROOT}/{skill_name}",
+                "--agent",
+                agent_key,
+                "-y",
+            ],
+            timeout_seconds=_SKILL_INSTALL_TIMEOUT_SECONDS,
+            working_directory="/workspace",
+        )
+        if result.exit_code != 0:
+            raise SkillInstallFailed(
+                skill_name, agent_key, result.exit_code, result.stderr or result.stdout or ""
+            )
+        logger.info(
+            "Installed baked delegation skill %s for agent %s in %s",
+            skill_name,
+            agent_key,
+            workspace.workspace_id,
+        )
 
     @staticmethod
     def _generate_workspace_context(repos: list[str]) -> str:

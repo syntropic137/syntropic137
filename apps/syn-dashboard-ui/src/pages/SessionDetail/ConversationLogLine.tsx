@@ -75,7 +75,7 @@ export function ConversationLogLine({
         className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-[var(--color-surface)]"
       >
         <span className="font-mono text-xs text-[var(--color-text-muted)] w-8">
-          {line.line_number + 1}
+          {line.line_number}
         </span>
         <span className={clsx('rounded px-2 py-0.5 text-xs font-medium', bgColor, textColor)}>
           {line.event_type || 'unknown'}

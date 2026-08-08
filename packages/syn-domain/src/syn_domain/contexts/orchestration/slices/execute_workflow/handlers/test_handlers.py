@@ -243,6 +243,146 @@ class TestAgentExecutionHandler:
             duration_ms=48000,
         )
 
+    @pytest.mark.anyio
+    async def test_codex_runner_uses_codex_stream_processor_only(self) -> None:
+        """Codex runner selects its parser and preserves the existing stream call."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        collector = AsyncMock()
+        stream_result = StreamResult(
+            line_count=3,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            result_input_tokens=12,
+            result_output_tokens=7,
+        )
+
+        with (
+            patch(
+                "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+            ) as mock_codex_processor,
+            patch(
+                "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.EventStreamProcessor"
+            ) as mock_claude_processor,
+        ):
+            mock_codex_processor.return_value.process_stream = AsyncMock(return_value=stream_result)
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                ),
+                workspace=workspace,
+                agent_env={"CODEX_HOME": "/home/agent/.codex"},
+                claude_cmd=["codex", "exec", "--json", "do work"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=collector,
+                runner="codex",
+            )
+
+        mock_codex_processor.assert_called_once()
+        mock_claude_processor.assert_not_called()
+        workspace.stream.assert_called_once_with(
+            ["codex", "exec", "--json", "do work"],
+            timeout_seconds=300,
+            environment={"CODEX_HOME": "/home/agent/.codex"},
+        )
+        assert result.command.input_tokens == 12
+        assert result.command.output_tokens == 7
+
+    @pytest.mark.anyio
+    async def test_broken_codex_stream_forces_nonzero_exit(self) -> None:
+        """Parser-level stream failure overrides a clean process exit for Codex."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        collector = AsyncMock()
+        stream_result = StreamResult(
+            line_count=1,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            error_reason="missing terminal turn.completed",
+        )
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+        ) as mock_processor:
+            mock_processor.return_value.process_stream = AsyncMock(return_value=stream_result)
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                ),
+                workspace=workspace,
+                agent_env={},
+                claude_cmd=["codex", "exec", "--json", "do work"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=collector,
+                runner="codex",
+            )
+
+        assert result.command.exit_code == 1
+
+    @pytest.mark.anyio
+    async def test_clean_codex_stream_keeps_zero_exit_and_one_summary(self) -> None:
+        """Codex processor owns the sole session summary emission."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        collector = AsyncMock()
+        stream_result = StreamResult(
+            line_count=3,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            result_input_tokens=12,
+            result_output_tokens=7,
+        )
+
+        async def process_stream(*_args: object) -> StreamResult:
+            await collector.record_session_summary(
+                total_cost_usd=0.01,
+                input_tokens=12,
+                output_tokens=7,
+                cache_creation=0,
+                cache_read=0,
+                num_turns=1,
+                duration_ms=25,
+                agent_id=None,
+            )
+            return stream_result
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+        ) as mock_processor:
+            mock_processor.return_value.process_stream = process_stream
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                ),
+                workspace=workspace,
+                agent_env={},
+                claude_cmd=["codex", "exec", "--json", "do work"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=collector,
+                runner="codex",
+            )
+
+        assert result.command.exit_code == 0
+        collector.record_session_summary.assert_awaited_once()
+
     @staticmethod
     def _interactive_workspace(driver: MagicMock) -> MagicMock:
         """Workspace whose isolation adapter exposes provider_handle()."""
@@ -1365,3 +1505,291 @@ class TestWorkspaceProvisionClaudePlugins:
 
         materializer.fetch_for_workspace.assert_not_called()
         assert "--plugin-dir" not in result.claude_cmd
+
+
+# =========================================================================
+# WorkspaceProvisionHandler - skill materialization + install (issue #772)
+# =========================================================================
+
+
+def _make_skill_provision_handler(
+    *,
+    workspace: AsyncMock,
+    skill_materializer: AsyncMock | None,
+) -> tuple[object, AsyncMock]:
+    """Build a WorkspaceProvisionHandler wired for the skill-install branch."""
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        WorkspaceProvisionHandler,
+    )
+
+    workspace_cm = AsyncMock()
+    workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
+    workspace_service = MagicMock()
+    workspace_service.create_workspace.return_value = workspace_cm
+
+    async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
+        return "Do the task"
+
+    def fake_command_builder(_phase: object, prompt: str) -> list[str]:
+        return ["claude", "--print", prompt]
+
+    handler = WorkspaceProvisionHandler(
+        workspace_service=workspace_service,
+        prompt_builder=fake_prompt_builder,
+        command_builder=fake_command_builder,
+        skill_materializer=skill_materializer,
+    )
+    return handler, workspace_cm
+
+
+def _make_resolved_skill(name: str = "code-review", resolved_sha: str = "sha-1") -> object:
+    from syn_domain.contexts.orchestration._shared.resolved_skill import ResolvedSkill
+
+    return ResolvedSkill(
+        skill_name=name,
+        source_url="https://github.com/example/code-review",
+        version="1.0.0",
+        resolved_sha=resolved_sha,
+        tree_storage_prefix=f"prefix/{resolved_sha}",
+    )
+
+
+def _make_skill_phase(
+    *,
+    provider: str = "codex",
+    agent_id: str | None = None,
+    skills: tuple[object, ...],
+) -> object:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        AgentConfiguration,
+        ExecutablePhase,
+    )
+
+    return ExecutablePhase(
+        phase_id="phase-1",
+        name="Phase 1",
+        order=1,
+        description="",
+        agent_config=AgentConfiguration(provider=provider, agent_id=agent_id),
+        prompt_template="Do the task",
+        output_artifact_type="text",
+        skills=skills,
+    )
+
+
+def _make_skill_todo() -> object:
+    from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+
+    return TodoItem(
+        execution_id="exec-1",
+        action=TodoAction.PROVISION_WORKSPACE,
+        phase_id="phase-1",
+    )
+
+
+def test_skills_cli_agent_selector_keys_by_provider_for_headless() -> None:
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        _skills_cli_agent_selector,
+    )
+    from syn_shared.agents import AgentProvider
+
+    # Headless: provider drives the harness; agent_id is ignored.
+    assert _skills_cli_agent_selector(AgentProvider.CLAUDE, None) == AgentProvider.CLAUDE
+    assert _skills_cli_agent_selector(AgentProvider.CODEX, None) == AgentProvider.CODEX
+    # Headless with a stray agent_id: provider still wins (the bug fix).
+    assert _skills_cli_agent_selector(AgentProvider.CLAUDE, "codex") == AgentProvider.CLAUDE
+    # Interactive-tmux: agent_id names the pane.
+    assert _skills_cli_agent_selector(AgentProvider.CLAUDE_INTERACTIVE, "codex") == "codex"
+    assert (
+        _skills_cli_agent_selector(AgentProvider.CLAUDE_INTERACTIVE, None) == AgentProvider.CLAUDE
+    )
+
+
+@pytest.mark.unit
+class TestWorkspaceProvisionSkills:
+    """Verify the #772 skill materialization + install branch of WorkspaceProvisionHandler."""
+
+    @pytest.mark.anyio
+    async def test_skills_installed_for_phase_agent(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
+
+        workspace = AsyncMock()
+        workspace.proxy_url = "http://envoy:10000"
+        workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+        workspace.inject_files = AsyncMock()
+        workspace.workspace_id = "ws-test"
+        workspace.execute = AsyncMock(
+            return_value=ExecutionResult(exit_code=0, success=True, duration_ms=1.0)
+        )
+
+        skill = _make_resolved_skill()
+        materializer = AsyncMock()
+        materializer.fetch_for_workspace = AsyncMock(
+            return_value=[(".syn-skills/code-review/SKILL.md", b"content")],
+        )
+
+        handler, _ = _make_skill_provision_handler(
+            workspace=workspace, skill_materializer=materializer
+        )
+        phase = _make_skill_phase(provider="codex", skills=(skill,))
+        todo = _make_skill_todo()
+
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+            MockSecrets.create = AsyncMock(return_value=MagicMock())
+            await handler.handle(
+                todo=todo,
+                phase=phase,
+                workflow_id="wf-1",
+                session_id="sess-1",
+                repos=[],
+            )
+
+        materializer.fetch_for_workspace.assert_awaited_once_with((skill,))
+        workspace.execute.assert_awaited_with(
+            ["skills", "add", "/workspace/.syn-skills/code-review", "--agent", "codex", "-y"],
+            timeout_seconds=120,
+            working_directory="/workspace",
+        )
+
+    @pytest.mark.anyio
+    async def test_skill_install_failure_raises(self) -> None:
+        from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
+        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
+
+        workspace = AsyncMock()
+        workspace.proxy_url = "http://envoy:10000"
+        workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+        workspace.inject_files = AsyncMock()
+        workspace.workspace_id = "ws-test"
+        workspace.execute = AsyncMock(
+            return_value=ExecutionResult(
+                exit_code=1, success=False, duration_ms=1.0, stdout="", stderr="boom"
+            )
+        )
+
+        skill = _make_resolved_skill()
+        materializer = AsyncMock()
+        materializer.fetch_for_workspace = AsyncMock(return_value=[])
+
+        handler, _ = _make_skill_provision_handler(
+            workspace=workspace, skill_materializer=materializer
+        )
+        phase = _make_skill_phase(provider="codex", skills=(skill,))
+        todo = _make_skill_todo()
+
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+            MockSecrets.create = AsyncMock(return_value=MagicMock())
+            with pytest.raises(SkillInstallFailed, match="code-review"):
+                await handler.handle(
+                    todo=todo,
+                    phase=phase,
+                    workflow_id="wf-1",
+                    session_id="sess-1",
+                    repos=[],
+                )
+
+    @pytest.mark.anyio
+    async def test_skills_declared_but_no_materializer_raises(self) -> None:
+        workspace = AsyncMock()
+        workspace.proxy_url = "http://envoy:10000"
+        workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+        workspace.inject_files = AsyncMock()
+        workspace.workspace_id = "ws-test"
+
+        skill = _make_resolved_skill()
+        handler, _ = _make_skill_provision_handler(workspace=workspace, skill_materializer=None)
+        phase = _make_skill_phase(provider="codex", skills=(skill,))
+        todo = _make_skill_todo()
+
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+            MockSecrets.create = AsyncMock(return_value=MagicMock())
+            with pytest.raises(RuntimeError, match="no skill materializer is wired"):
+                await handler.handle(
+                    todo=todo,
+                    phase=phase,
+                    workflow_id="wf-1",
+                    session_id="sess-1",
+                    repos=[],
+                )
+
+    @pytest.mark.anyio
+    async def test_unknown_agent_id_raises(self) -> None:
+        from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
+
+        workspace = AsyncMock()
+        workspace.proxy_url = "http://envoy:10000"
+        workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+        workspace.inject_files = AsyncMock()
+        workspace.workspace_id = "ws-test"
+        workspace.execute = AsyncMock()
+
+        skill = _make_resolved_skill()
+        materializer = AsyncMock()
+        materializer.fetch_for_workspace = AsyncMock(return_value=[])
+
+        handler, _ = _make_skill_provision_handler(
+            workspace=workspace, skill_materializer=materializer
+        )
+        # An unsupported provider yields no skills-cli agent key (headless keys by provider).
+        phase = _make_skill_phase(provider="mystery", skills=(skill,))
+        todo = _make_skill_todo()
+
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+            MockSecrets.create = AsyncMock(return_value=MagicMock())
+            with pytest.raises(SkillInstallFailed, match="no skills-cli agent key"):
+                await handler.handle(
+                    todo=todo,
+                    phase=phase,
+                    workflow_id="wf-1",
+                    session_id="sess-1",
+                    repos=[],
+                )
+        workspace.execute.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_conflicting_skill_versions_raises(self) -> None:
+        """Task 7 review note: same skill_name with differing resolved_sha must be rejected.
+
+        Identity-triple dedup at the merge layer means a workflow-level and
+        phase-level skill declaration could legitimately reference two
+        different versions of the same skill_name. Both would materialize to
+        the same ``.syn-skills/<skill_name>/`` path, silently clobbering one
+        version with the other. Guard this explicitly rather than let the
+        last-materialized version win unnoticed.
+        """
+        from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
+
+        workspace = AsyncMock()
+        workspace.proxy_url = "http://envoy:10000"
+        workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+        workspace.inject_files = AsyncMock()
+        workspace.workspace_id = "ws-test"
+        workspace.execute = AsyncMock()
+
+        skill_v1 = _make_resolved_skill(name="code-review", resolved_sha="sha-1")
+        skill_v2 = _make_resolved_skill(name="code-review", resolved_sha="sha-2")
+        materializer = AsyncMock()
+        materializer.fetch_for_workspace = AsyncMock(return_value=[])
+
+        handler, _ = _make_skill_provision_handler(
+            workspace=workspace, skill_materializer=materializer
+        )
+        phase = _make_skill_phase(agent_id="codex", skills=(skill_v1, skill_v2))
+        todo = _make_skill_todo()
+
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+            MockSecrets.create = AsyncMock(return_value=MagicMock())
+            with pytest.raises(SkillInstallFailed, match="conflicting versions of skill"):
+                await handler.handle(
+                    todo=todo,
+                    phase=phase,
+                    workflow_id="wf-1",
+                    session_id="sess-1",
+                    repos=[],
+                )
+        materializer.fetch_for_workspace.assert_not_called()
+        workspace.execute.assert_not_awaited()

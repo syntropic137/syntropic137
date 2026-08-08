@@ -36,6 +36,9 @@ from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins.proje
 from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection import (
     ClaudePluginLockProjection,
 )
+from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+    SkillLockProjection,
+)
 from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
     WorkflowPhaseMetricsProjection,
 )
@@ -167,6 +170,8 @@ def build_projection_registry(store: ProjectionStoreProtocol) -> dict[str, Any]:
         # Claude plugin injection (issue #726) - lock + global registry read models
         "claude_plugin_lock": ClaudePluginLockProjection(store),
         "global_claude_plugins": GlobalClaudePluginsProjection(store),
+        # Skill injection (issue #772) - lock read model, mirrors claude_plugin_lock
+        "skill_lock": SkillLockProjection(store),
         # Real-time projection for SSE push (doesn't use store)
         "realtime": get_realtime_projection(),
     }

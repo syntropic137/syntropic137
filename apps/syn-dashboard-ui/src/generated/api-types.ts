@@ -630,6 +630,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Skill Endpoint
+         * @description Register a skill by uploading the cloned tree (issue #772).
+         *
+         *     The CLI clones the source locally and POSTs the tree contents here. The
+         *     API decodes the base64 file contents, computes the sha256 over the
+         *     normalized tree, uploads to storage, and dispatches a
+         *     ``RegisterSkillCommand`` against the existing aggregate. Idempotent on
+         *     re-submission of the same ``(source_url, version, skill_name)``.
+         */
+        post: operations["register_skill_endpoint_skills_registrations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/metrics": {
         parameters: {
             query?: never;
@@ -3054,6 +3080,10 @@ export interface components {
             argument_hint?: string | null;
             /** Model */
             model?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Agent Id */
+            agent_id?: string | null;
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
@@ -3256,6 +3286,33 @@ export interface components {
              * @default api
              */
             created_by: string;
+        };
+        /**
+         * RegisterSkillRequest
+         * @description Request body for ``POST /skills/registrations`` (issue #772).
+         *
+         *     The CLI uploads the entire skill tree inline; the API hashes the
+         *     normalized tree, stores it via the storage port, and persists the
+         *     registration aggregate. Idempotent on existing
+         *     ``(source_url, version, skill_name)``. Unlike claude plugins, there is no
+         *     caller-supplied manifest: the SKILL.md frontmatter at the tree root is the
+         *     manifest.
+         */
+        RegisterSkillRequest: {
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Skill Name
+             * @description Display name override; when omitted the SKILL.md frontmatter's 'name' is used.
+             */
+            skill_name?: string | null;
+            /**
+             * Files
+             * @description Every file in the skill tree (base64-encoded).
+             */
+            files: components["schemas"]["SkillFilePayload"][];
         };
         /**
          * RegisterTriggerRequest
@@ -4048,6 +4105,39 @@ export interface components {
             cache_read_tokens: number;
         };
         /**
+         * SkillFilePayload
+         * @description One file in the uploaded skill tree (``POST /skills/registrations``).
+         *
+         *     Mirrors ``ClaudePluginFileEntry``. ``content_base64`` is the base64-encoded
+         *     byte content; the API decodes it back into raw bytes before hashing and
+         *     uploading.
+         */
+        SkillFilePayload: {
+            /** Rel Path */
+            rel_path: string;
+            /** Content Base64 */
+            content_base64: string;
+        };
+        /**
+         * SkillRegistrationResponse
+         * @description Response payload for ``POST /skills/registrations``.
+         */
+        SkillRegistrationResponse: {
+            /** Skill Name */
+            skill_name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Resolved Sha
+             * @description Content-addressed sha of the normalized tree.
+             */
+            resolved_sha: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+        };
+        /**
          * StateResponse
          * @description Response with execution state.
          */
@@ -4657,6 +4747,8 @@ export interface components {
             prompt_template: string;
             /** Model */
             model?: string | null;
+            /** Provider */
+            provider?: string | null;
             /** Timeout Seconds */
             timeout_seconds?: number | null;
             /** Allowed Tools */
@@ -6109,6 +6201,51 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    register_skill_endpoint_skills_registrations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterSkillRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillRegistrationResponse"];
+                };
+            };
+            /** @description Malformed file payload (bad base64, missing fields) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Skill tree exceeds the size or file-count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Manifest missing, malformed, or unsafe file path in the tree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
