@@ -980,7 +980,7 @@ fitness-check: aps-build check-untyped-dicts
     # Always regenerate topology before checking — never validate against stale data
     just topology-analyze
     @echo "Checking architecture fitness thresholds..."
-    {{_aps_bin}} run fitness validate .
+    {{_aps_bin}} run architecture-fitness validate .
     @echo "✅ Fitness threshold checks passed"
 
 # Check structural & ES invariants (pytest-based, AST analysis)
@@ -1006,7 +1006,7 @@ vsa-validate:
 # --- Topology (APS Code Topology Standard) ---
 
 # Path to APS CLI binary
-_aps_bin := "lib/agent-paradise-standards-system/target/release/aps"
+_aps_bin := "lib/agent-paradise-standards-system/target/release/apss"
 
 # Build APS CLI (cached — only rebuilds when source changes)
 aps-build:
@@ -1020,13 +1020,13 @@ aps-build:
 # Regenerate .topology/ artifacts from current codebase
 topology-analyze: aps-build
     @echo "🔍 Analyzing codebase topology..."
-    {{_aps_bin}} run topology analyze . --output .topology --seed 42
+    {{_aps_bin}} run code-topology analyze . --output .topology --seed 42
     @echo "✅ Topology artifacts generated"
 
 # Generate CodeCity and 3D visualizations
 topology-viz: aps-build
     @echo "🎨 Generating topology visualizations..."
-    {{_aps_bin}} run topology viz .topology --type all --output .topology/viz/
+    {{_aps_bin}} run code-topology viz .topology --type all --output .topology/viz/
     @echo "✅ Visualizations generated in .topology/viz/"
 
 # Full topology regeneration (analyze + visualize)
