@@ -42,7 +42,7 @@ class SessionLifecycleManager:
         execution_id: str,
         phase_id: str,
         agent_provider: str,
-        agent_model: str,
+        agent_model: str | None,
         repos: list[str] | None = None,
     ) -> None:
         self._repo = repository

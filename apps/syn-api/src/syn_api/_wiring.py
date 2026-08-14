@@ -94,7 +94,7 @@ from syn_adapters.storage.repositories import (
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
-from syn_shared.agents import AgentProvider
+from syn_shared.agents import AgentProvider, ModelAlias
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -218,7 +218,20 @@ def _build_claude_command(
     prompt: str,
 ) -> list[str]:
     """Build the Claude CLI command for agent execution."""
+    # `AgentConfiguration.model` is `str | None` because a codex phase can
+    # leave it unset (see syn_shared.agents.DEFAULT_CLAUDE_MODEL).
+    # A claude-provider phase always resolves a concrete model (the domain
+    # default "haiku" when the YAML omits `model:`), so `None` here would
+    # indicate a construction bug elsewhere, not a real "unset" case worth
+    # silently tolerating - fail loudly instead of forwarding `--model None`.
     model = phase.agent_config.model
+    if model is None:
+        msg = (
+            f"Claude phase '{phase.phase_id}' resolved to a None model - "
+            "AgentConfiguration.model should always default to a claude "
+            "alias for provider='claude'."
+        )
+        raise ValueError(msg)
     cmd = [
         "claude",
         "--model",
@@ -243,7 +256,7 @@ def _build_claude_command(
 # account"), so we must NOT forward a Claude model to `codex exec` - codex uses
 # its own account default instead. TODO(#780): resolve/validate a real codex
 # model for accurate cost labelling on codex phases.
-_CLAUDE_MODEL_ALIASES = frozenset({"haiku", "sonnet", "opus"})
+_CLAUDE_MODEL_ALIASES = frozenset(ModelAlias)
 
 
 def _is_codex_model(model: str | None) -> TypeGuard[str]:

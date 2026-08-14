@@ -70,7 +70,7 @@ class ObservabilityCollector:
         execution_id: str,
         phase_id: str,
         workspace_id: str | None,
-        agent_model: str,
+        agent_model: str | None,
     ) -> None:
         self._writer = writer
         self._session_id = session_id

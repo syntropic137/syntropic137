@@ -174,9 +174,10 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     if not (phase_model or phase_provider or phase_agent_id or allow_delegation):
         return AgentConfiguration()
     defaults = AgentConfiguration()
+    resolved_provider = phase_provider or defaults.provider
     return AgentConfiguration(
-        provider=phase_provider or defaults.provider,
-        model=phase_model or defaults.model,
+        provider=resolved_provider,
+        model=phase_model,
         agent_id=phase_agent_id or defaults.agent_id,
         allow_delegation=allow_delegation,
     )

@@ -17,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
+from syn_shared.agents import ModelAlias, ModelId
+
 _MILLION = Decimal("1_000_000")
 
 # TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
@@ -31,7 +33,7 @@ _GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION = Decimal("1.5")
 class ModelPricing:
     """Pricing for an LLM model, in USD per million tokens."""
 
-    model_id: str
+    model_id: ModelId
     input_per_million: Decimal
     output_per_million: Decimal
     cache_creation_per_million: Decimal
@@ -68,55 +70,55 @@ class ModelPricing:
 #   - Cache read:                 0.10x
 # ---------------------------------------------------------------------------
 
-MODEL_PRICING_TABLE: dict[str, ModelPricing] = {
+MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
     # --- OpenAI Codex family ---
-    "gpt-5.6": ModelPricing(
-        model_id="gpt-5.6",
+    ModelId.GPT_5_6: ModelPricing(
+        model_id=ModelId.GPT_5_6,
         input_per_million=_GPT_5_6_CODEX_INPUT_PER_MILLION,
         output_per_million=_GPT_5_6_CODEX_OUTPUT_PER_MILLION,
         cache_creation_per_million=_GPT_5_6_CODEX_INPUT_PER_MILLION,
         cache_read_per_million=_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION,
     ),
     # --- Claude 4.x family ---
-    "claude-opus-4-20250514": ModelPricing(
-        model_id="claude-opus-4-20250514",
+    ModelId.CLAUDE_OPUS_4: ModelPricing(
+        model_id=ModelId.CLAUDE_OPUS_4,
         input_per_million=Decimal("15.00"),
         output_per_million=Decimal("75.00"),
         cache_creation_per_million=Decimal("18.75"),
         cache_read_per_million=Decimal("1.50"),
     ),
-    "claude-sonnet-4-20250514": ModelPricing(
-        model_id="claude-sonnet-4-20250514",
+    ModelId.CLAUDE_SONNET_4: ModelPricing(
+        model_id=ModelId.CLAUDE_SONNET_4,
         input_per_million=Decimal("3.00"),
         output_per_million=Decimal("15.00"),
         cache_creation_per_million=Decimal("3.75"),
         cache_read_per_million=Decimal("0.30"),
     ),
     # --- Claude 3.5 family ---
-    "claude-3-5-sonnet-20241022": ModelPricing(
-        model_id="claude-3-5-sonnet-20241022",
+    ModelId.CLAUDE_SONNET_3_5: ModelPricing(
+        model_id=ModelId.CLAUDE_SONNET_3_5,
         input_per_million=Decimal("3.00"),
         output_per_million=Decimal("15.00"),
         cache_creation_per_million=Decimal("3.75"),
         cache_read_per_million=Decimal("0.30"),
     ),
-    "claude-3-5-haiku-20241022": ModelPricing(
-        model_id="claude-3-5-haiku-20241022",
+    ModelId.CLAUDE_HAIKU_3_5: ModelPricing(
+        model_id=ModelId.CLAUDE_HAIKU_3_5,
         input_per_million=Decimal("1.00"),
         output_per_million=Decimal("5.00"),
         cache_creation_per_million=Decimal("1.25"),
         cache_read_per_million=Decimal("0.10"),
     ),
     # --- Claude 3 family (legacy) ---
-    "claude-3-opus-20240229": ModelPricing(
-        model_id="claude-3-opus-20240229",
+    ModelId.CLAUDE_OPUS_3: ModelPricing(
+        model_id=ModelId.CLAUDE_OPUS_3,
         input_per_million=Decimal("15.00"),
         output_per_million=Decimal("75.00"),
         cache_creation_per_million=Decimal("18.75"),
         cache_read_per_million=Decimal("1.50"),
     ),
-    "claude-3-haiku-20240307": ModelPricing(
-        model_id="claude-3-haiku-20240307",
+    ModelId.CLAUDE_HAIKU_3: ModelPricing(
+        model_id=ModelId.CLAUDE_HAIKU_3,
         input_per_million=Decimal("0.25"),
         output_per_million=Decimal("1.25"),
         cache_creation_per_million=Decimal("0.30"),
@@ -125,28 +127,53 @@ MODEL_PRICING_TABLE: dict[str, ModelPricing] = {
 }
 
 # Default model for cost estimation when model is unknown
-DEFAULT_MODEL_ID = "claude-sonnet-4-20250514"
+DEFAULT_MODEL_ID: ModelId = ModelId.CLAUDE_SONNET_4
 
 # CLI alias → canonical model ID.
 # The workflow YAML and AgentConfiguration use short names like
 # ``sonnet``/``opus``/``haiku``; resolve them so pricing lookups don't
 # silently fall back to the default.
-MODEL_ALIASES: dict[str, str] = {
-    "codex": "gpt-5.6",
-    "gpt-codex": "gpt-5.6",
-    "opus": "claude-opus-4-20250514",
-    "sonnet": "claude-sonnet-4-20250514",
-    "haiku": "claude-3-5-haiku-20241022",
-    "claude-sonnet-4": "claude-sonnet-4-20250514",
-    "claude-opus-4": "claude-opus-4-20250514",
+#
+# NOTE: no "codex" -> "gpt-5.6" alias. "codex" is a provider name
+# (AgentProvider.CODEX), not a model id, and an earlier fix briefly used it
+# as both at once - synthesizing "codex" as the model for a codex phase
+# with no explicit `model:`. That collapsed "provider" and "model unknown"
+# into the same string, which then silently priced unspecified-model codex
+# phases as GPT-5.6 (issue #788 follow-up). A truly unknown model must
+# resolve to no pricing, not a guessed one - see
+# syn_shared.agents.DEFAULT_CLAUDE_MODEL.
+MODEL_ALIASES: dict[str, ModelId] = {
+    "gpt-codex": ModelId.GPT_5_6,
+    ModelAlias.OPUS: ModelId.CLAUDE_OPUS_4,
+    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_4,
+    ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_3_5,
+    # Undated family names the CLI also accepts.
+    "claude-sonnet-4": ModelId.CLAUDE_SONNET_4,
+    "claude-opus-4": ModelId.CLAUDE_OPUS_4,
 }
+
+
+def canonical_model_id(model_id: str) -> ModelId | None:
+    """Map an alias or raw identifier onto a known ``ModelId``, else ``None``.
+
+    Returning ``None`` rather than echoing the input keeps "unknown model"
+    a distinct, typed outcome instead of a plausible-looking string that
+    later reads as a real id (issue #788).
+    """
+    aliased = MODEL_ALIASES.get(model_id)
+    if aliased is not None:
+        return aliased
+    try:
+        return ModelId(model_id)
+    except ValueError:
+        return None
 
 
 def resolve_model_pricing(model_id: str) -> ModelPricing | None:
     """Resolve pricing for a known model without a default fallback."""
-    canonical_model_id = MODEL_ALIASES.get(model_id, model_id)
-    if canonical_model_id in MODEL_PRICING_TABLE:
-        return MODEL_PRICING_TABLE[canonical_model_id]
+    canonical = canonical_model_id(model_id)
+    if canonical is not None:
+        return MODEL_PRICING_TABLE[canonical]
 
     for key, pricing in MODEL_PRICING_TABLE.items():
         family, separator, suffix = key.rpartition("-")

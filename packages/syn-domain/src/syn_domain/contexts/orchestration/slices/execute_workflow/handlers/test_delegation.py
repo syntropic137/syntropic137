@@ -76,6 +76,60 @@ def test_agent_config_carries_allow_delegation() -> None:
     assert cfg.allow_delegation is True
 
 
+# === Issue #788: codex phases must not inherit the claude default model ===
+
+
+def test_codex_phase_without_explicit_model_does_not_default_to_haiku() -> None:
+    """A codex phase that omits `model:` (the common/recommended case, see
+    workflows/examples/codex-demo.yaml) must not silently resolve to the
+    claude "haiku" default - that mispriced every codex phase with claude
+    haiku rates (#788).
+
+    It also must not resolve to a synthesized "codex" model string (the
+    original #788 fix's over-correction): that string then flowed into
+    `codex exec --model codex` (a nonexistent model) and got confidently
+    priced as GPT-5.6 via a pricing alias, despite the real model being
+    unknown. The honest state is `None` - unforced model, unpriced cost.
+    """
+    phase = PhaseDefinition(
+        phase_id="p1",
+        name="p",
+        order=1,
+        prompt_template="x",
+        provider=AgentProvider.CODEX,
+    )
+    cfg = _build_agent_config_from_phase(phase)
+    assert cfg.model != "haiku"
+    assert cfg.model is None
+
+
+def test_claude_phase_without_explicit_model_still_defaults_to_haiku() -> None:
+    """The claude default model is unchanged for claude-provider phases."""
+    phase = PhaseDefinition(
+        phase_id="p1",
+        name="p",
+        order=1,
+        prompt_template="x",
+        provider=AgentProvider.CLAUDE,
+    )
+    cfg = _build_agent_config_from_phase(phase)
+    assert cfg.model == "haiku"
+
+
+def test_codex_phase_explicit_model_override_is_preserved() -> None:
+    """An explicit `model:` on a codex phase still wins over the default."""
+    phase = PhaseDefinition(
+        phase_id="p1",
+        name="p",
+        order=1,
+        prompt_template="x",
+        provider=AgentProvider.CODEX,
+        model="gpt-5.6",
+    )
+    cfg = _build_agent_config_from_phase(phase)
+    assert cfg.model == "gpt-5.6"
+
+
 # === B3: auth staging ===
 
 

@@ -106,6 +106,14 @@ class SessionCost:
     agent_model: str | None = None
     """Primary model used for this session (from CLI result event)."""
 
+    unpriced_observation_count: int = 0
+    """Count of TOKEN_USAGE observations whose model was unknown/missing.
+
+    These contribute zero cost to ``total_cost_usd`` (never priced as a
+    default/guessed model - see issue #788). A non-zero count means the
+    total is incomplete, not confidently wrong.
+    """
+
     # Status
     is_finalized: bool = False
     """Whether the session has completed."""
@@ -146,6 +154,7 @@ class SessionCost:
             cost_by_tool_tokens=_coerce_decimal_dict(data.get("cost_by_tool_tokens")),
             is_finalized=data.get("is_finalized", False),
             agent_model=data.get("agent_model"),
+            unpriced_observation_count=data.get("unpriced_observation_count", 0),
             started_at=_coerce_datetime(data.get("started_at")),
             completed_at=_coerce_datetime(data.get("completed_at")),
         )
@@ -175,6 +184,7 @@ class SessionCost:
             "cost_by_tool_tokens": {k: str(v) for k, v in self.cost_by_tool_tokens.items()},
             "is_finalized": self.is_finalized,
             "agent_model": self.agent_model,
+            "unpriced_observation_count": self.unpriced_observation_count,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }

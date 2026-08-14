@@ -29,7 +29,7 @@ class ConversationRecorder:
         execution_id: str,
         phase_id: str,
         workflow_id: str,
-        model: str,
+        model: str | None,
         input_tokens: int,
         output_tokens: int,
         started_at: datetime,

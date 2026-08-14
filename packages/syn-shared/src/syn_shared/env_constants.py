@@ -12,8 +12,10 @@ Usage:
         ENV_CLAUDE_CODE_OAUTH_TOKEN,
         ENV_ANTHROPIC_API_KEY,
         ENV_CLAUDE_SESSION_ID,
-        MODEL_SONNET,
     )
+
+Model aliases are NOT here - they are not env var names. They live in
+``syn_shared.agents.ModelAlias`` (issue #793).
 """
 
 # ---------------------------------------------------------------------------
@@ -57,15 +59,6 @@ ENV_SYN_WORKSPACE_CONTAINER_DIR = "SYN_WORKSPACE_CONTAINER_DIR"
 ENV_SYN_WORKSPACE_HOST_DIR = "SYN_WORKSPACE_HOST_DIR"
 ENV_SYN_AGENT_NETWORK = "SYN_AGENT_NETWORK"
 
-# ---------------------------------------------------------------------------
-# Model alias constants
-# Short names recognised by ModelRegistry (resolved to full API names via YAML).
-# ---------------------------------------------------------------------------
-
-MODEL_HAIKU = "haiku"
-MODEL_SONNET = "sonnet"
-MODEL_OPUS = "opus"
-
 __all__ = [
     "ENV_ANTHROPIC_API_KEY",
     "ENV_ANTHROPIC_BASE_URL",
@@ -83,7 +76,4 @@ __all__ = [
     "ENV_SYN_AGENT_NETWORK",
     "ENV_SYN_WORKSPACE_CONTAINER_DIR",
     "ENV_SYN_WORKSPACE_HOST_DIR",
-    "MODEL_HAIKU",
-    "MODEL_OPUS",
-    "MODEL_SONNET",
 ]

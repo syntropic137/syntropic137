@@ -54,6 +54,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     InterruptibleWorkspace,
     StreamResult,
 )
+from syn_shared.codex_stream import (
+    CODEX_TOOL_NAME_COMMAND,
+    CODEX_TOOL_NAME_FILE_CHANGE,
+    CodexItemType,
+    CodexStreamType,
+)
 from syn_shared.pricing import resolve_model_pricing
 
 if TYPE_CHECKING:
@@ -67,9 +73,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MAX_PREVIEW_LEN = 500
-
-_TOOL_NAME_COMMAND = "Bash"
-_TOOL_NAME_FILE_CHANGE = "Edit"
 
 
 def _as_int(value: object) -> int:
@@ -235,7 +238,7 @@ class CodexStreamProcessor:
         execution_id: str,
         phase_id: str,
         session_id: str,
-        agent_model: str,
+        agent_model: str | None,
     ) -> None:
         self._tokens = tokens
         self._collector = collector
@@ -320,7 +323,16 @@ class CodexStreamProcessor:
         )
 
     def _estimate_cost(self) -> float | None:
-        """Estimate total cost via the STRICT resolver (never Sonnet default)."""
+        """Estimate total cost via the STRICT resolver (never Sonnet default).
+
+        ``self._agent_model`` is ``None`` when the phase omitted `model:`
+        (codex does not report its own model on the wire, so there is no
+        authoritative id to resolve). Returning ``None`` here - rather than
+        guessing a model to price against - leaves cost unpriced instead of
+        confidently wrong (issue #788 follow-up).
+        """
+        if self._agent_model is None:
+            return None
         pricing = resolve_model_pricing(self._agent_model)
         if pricing is None:
             return None
@@ -367,11 +379,11 @@ class CodexStreamProcessor:
             return
 
         event_type = event.get("type", "")
-        if event_type == "item.started":
+        if event_type == CodexStreamType.ITEM_STARTED:
             await self._handle_item_started(event)
-        elif event_type == "item.completed":
+        elif event_type == CodexStreamType.ITEM_COMPLETED:
             await self._handle_item_completed(event)
-        elif event_type == "turn.completed":
+        elif event_type == CodexStreamType.TURN_COMPLETED:
             await self._handle_turn_completed(event)
         # "thread.started" / "turn.started": no observability call needed.
 
@@ -383,13 +395,13 @@ class CodexStreamProcessor:
         started+completed pair there instead (see ``_handle_item_completed``).
         """
         item = event.get("item")
-        if not isinstance(item, dict) or item.get("type") != "command_execution":
+        if not isinstance(item, dict) or item.get("type") != CodexItemType.COMMAND_EXECUTION:
             return
 
         tool_use_id = str(item.get("id", "unknown"))
         command = str(item.get("command", ""))
         await self._collector.record_tool_started(
-            tool_name=_TOOL_NAME_COMMAND,
+            tool_name=CODEX_TOOL_NAME_COMMAND,
             tool_use_id=tool_use_id,
             input_preview=command[:_MAX_PREVIEW_LEN],
         )
@@ -401,9 +413,9 @@ class CodexStreamProcessor:
             return
 
         item_type = item.get("type")
-        if item_type == "command_execution":
+        if item_type == CodexItemType.COMMAND_EXECUTION:
             await self._handle_command_execution_completed(item)
-        elif item_type == "file_change":
+        elif item_type == CodexItemType.FILE_CHANGE:
             await self._handle_file_change_completed(item)
         # "agent_message" items are conversational text, not a tool op.
 
@@ -425,7 +437,7 @@ class CodexStreamProcessor:
                 exit_code,
             )
         await self._collector.record_tool_completed(
-            tool_name=_TOOL_NAME_COMMAND,
+            tool_name=CODEX_TOOL_NAME_COMMAND,
             tool_use_id=tool_use_id,
             success=success,
             output_preview=output[:_MAX_PREVIEW_LEN] if output else None,
@@ -443,12 +455,12 @@ class CodexStreamProcessor:
         success = item.get("status") != "failed"
 
         await self._collector.record_tool_started(
-            tool_name=_TOOL_NAME_FILE_CHANGE,
+            tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
             tool_use_id=tool_use_id,
             input_preview=preview,
         )
         await self._collector.record_tool_completed(
-            tool_name=_TOOL_NAME_FILE_CHANGE,
+            tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
             tool_use_id=tool_use_id,
             success=success,
             output_preview=preview or None,

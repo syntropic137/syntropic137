@@ -167,7 +167,7 @@ class AgentExecutionHandler:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         session_id: str,
-        agent_model: str,
+        agent_model: str | None,
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         interactive_prompt: str | None = None,
@@ -232,7 +232,7 @@ class AgentExecutionHandler:
         todo: TodoItem,
         workspace: ManagedWorkspace,
         session_id: str,
-        agent_model: str,
+        agent_model: str | None,
         collector: ObservabilityCollector | None,
     ) -> EventStreamProcessor | CodexStreamProcessor:
         """Pick the codex or claude stream processor for a headless phase."""
@@ -270,7 +270,7 @@ class AgentExecutionHandler:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         session_id: str,
-        agent_model: str,
+        agent_model: str | None,
         timeout_seconds: int,
         collector: ObservabilityCollector | None,
         tokens: TokenAccumulator,
