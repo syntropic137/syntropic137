@@ -3,7 +3,17 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Final
+
+UNATTRIBUTED_PHASE_ID: Final[str] = "unattributed"
+"""Bucket for cost that belongs to an execution but to no particular phase.
+
+``agent_events.phase_id`` is nullable, so a session_summary can be recorded
+against an execution without a phase. The execution total counts that spend;
+if the per-phase breakdown silently skipped it, the parts would not add up
+to the whole (issue #812). Naming the bucket keeps the breakdown honest and
+the gap visible instead of invisible.
+"""
 
 
 def _coerce_decimal(value: str | Decimal | int | float | None, default: str = "0") -> Decimal:
@@ -87,7 +97,14 @@ class ExecutionCost:
 
     # Breakdowns
     cost_by_phase: dict[str, Decimal] = field(default_factory=dict)
-    """Cost breakdown by phase."""
+    """Cost breakdown by phase.
+
+    Spend that cannot be attributed to a phase is bucketed under
+    ``UNATTRIBUTED_PHASE_ID`` rather than dropped, so this breakdown always
+    reconciles with ``total_cost_usd`` (issue #812). ``phase_id`` is
+    nullable on ``agent_events``, so phase-less summaries are a real state,
+    not a corruption.
+    """
 
     cost_by_model: dict[str, Decimal] = field(default_factory=dict)
     """Cost breakdown by model."""

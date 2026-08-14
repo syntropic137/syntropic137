@@ -9,11 +9,11 @@ See #532 for why reads and writes were separated.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from decimal import Decimal
 
     import asyncpg
 
@@ -23,6 +23,7 @@ from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query imp
     TimescaleExecutionCostQuery,
     price_grouped_session_summary,
     price_grouped_token_usage,
+    price_phase_rows,
 )
 from syn_shared.events import (
     SESSION_SUMMARY,
@@ -108,17 +109,28 @@ WHERE event_type = $1
 GROUP BY execution_id
 """
 
-# Per-execution, per-phase cost breakdown
+# Per-execution, per-phase cost breakdown.
+#
+# Carries model + token columns and groups on the null-cost flag so each
+# row prices through the same rule as the execution total. A flat
+# SUM(total_cost_usd) GROUP BY phase_id drops phases with no SDK cost
+# (PostgreSQL excludes NULLs from SUM) while the total prices them, so the
+# breakdown sums to less than the total it decomposes (issue #812).
 _COST_BY_PHASE_QUERY = """
 SELECT
     execution_id,
     phase_id,
-    SUM((data->>'total_cost_usd')::numeric) as phase_cost
+    data->>'model' as model,
+    SUM((data->>'total_input_tokens')::int) as total_input,
+    SUM((data->>'total_output_tokens')::int) as total_output,
+    SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
+    SUM((data->>'total_cost_usd')::numeric) as sdk_cost,
+    COUNT(*) as observation_count
 FROM agent_events
 WHERE event_type = $1
-  AND execution_id IS NOT NULL
-  AND phase_id IS NOT NULL
-GROUP BY execution_id, phase_id
+  AND execution_id = ANY($2::text[])
+GROUP BY execution_id, phase_id, data->>'model', ((data->>'total_cost_usd') IS NULL)
 """
 
 
@@ -164,9 +176,7 @@ class ExecutionCostQueryService:
             summary_rows_by_execution = self._group_rows_by_execution(summary_rows)
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
             tool_counts = await self._fetch_tool_counts(conn)
-            phase_map = await self._fetch_breakdown_map(
-                conn, _COST_BY_PHASE_QUERY, "phase_id", "phase_cost"
-            )
+            phase_map = await self._fetch_phase_cost_map(conn, list(summary_rows_by_execution))
 
             results: list[ExecutionCost] = []
             for eid, rows in summary_rows_by_execution.items():
@@ -199,24 +209,35 @@ class ExecutionCostQueryService:
         rows = await conn.fetch(_TOOL_COUNT_BY_EXECUTION_QUERY, TOOL_EXECUTION_COMPLETED)  # type: ignore[union-attr]
         return {row["execution_id"]: row["cnt"] for row in rows}  # type: ignore[index]
 
-    async def _fetch_breakdown_map(
-        self,
-        conn: object,
-        query: str,
-        key_field: str,
-        value_field: str,
+    async def _fetch_phase_cost_map(
+        self, conn: object, execution_ids: list[str]
     ) -> dict[str, dict[str, Decimal]]:
-        """Fetch a per-execution breakdown map (phase or model) from a query."""
-        rows = await conn.fetch(query, SESSION_SUMMARY)  # type: ignore[union-attr]
-        breakdown: dict[str, dict[str, Decimal]] = {}
+        """Fetch per-execution, per-phase costs, priced like the execution total.
+
+        Rows arrive split by (execution, phase, model, priced?) so an
+        unpriced summary keeps its own group and can be priced from its own
+        tokens. Grouping the rows per execution and delegating to
+        ``price_phase_rows`` reuses the exact rule the execution total uses,
+        which is what keeps the two reconcilable (issue #812).
+
+        Bounded to ``execution_ids`` - the executions ``list_all`` actually
+        selected. The finer grouping returns up to two rows per model per
+        phase, so scanning every historical execution to then discard most
+        of them costs real transfer and memory.
+        """
+        if not execution_ids:
+            return {}
+        rows = await conn.fetch(  # type: ignore[union-attr]
+            _COST_BY_PHASE_QUERY, SESSION_SUMMARY, execution_ids
+        )
+        rows_by_execution: dict[str, list[asyncpg.Record]] = {}
         for row in rows:  # type: ignore[union-attr]
             eid = row["execution_id"]  # type: ignore[index]
-            if eid not in breakdown:
-                breakdown[eid] = {}
-            value = row[value_field]  # type: ignore[index]
-            if value is not None:
-                breakdown[eid][row[key_field]] = Decimal(str(value))  # type: ignore[index]
-        return breakdown
+            rows_by_execution.setdefault(eid, []).append(row)
+        return {
+            eid: price_phase_rows(execution_rows, self._cost_calculator)
+            for eid, execution_rows in rows_by_execution.items()
+        }
 
     @staticmethod
     def _resolve_duration(

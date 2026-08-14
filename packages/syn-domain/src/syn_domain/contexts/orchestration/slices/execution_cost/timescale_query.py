@@ -15,12 +15,16 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
     import asyncpg
 
 from syn_domain.contexts.agent_sessions import CostCalculator
-from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
+    UNATTRIBUTED_PHASE_ID,
+    ExecutionCost,
+)
 from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
@@ -102,16 +106,31 @@ FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
 """
 
-# Per-phase cost breakdown from session_summary events
+# Per-phase cost breakdown from session_summary events.
+#
+# Shaped exactly like _SESSION_SUMMARY_QUERY (model + token columns +
+# sdk_cost + observation_count) so each row can go through the SAME
+# per-row pricing as the execution total. A flat SUM(total_cost_usd)
+# GROUP BY phase_id silently drops phases whose summaries have no SDK
+# cost - PostgreSQL excludes NULLs from SUM - even when the model is
+# known and the tokens are priceable. Since the execution total DOES
+# price those rows, the two numbers then disagree on screen: the phase
+# breakdown sums to less than the total it is supposed to decompose
+# (issue #812).
 _COST_BY_PHASE_QUERY = """
 SELECT
     phase_id,
-    SUM((data->>'total_cost_usd')::numeric) as phase_cost
+    data->>'model' as model,
+    SUM((data->>'total_input_tokens')::int) as total_input,
+    SUM((data->>'total_output_tokens')::int) as total_output,
+    SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
+    SUM((data->>'total_cost_usd')::numeric) as sdk_cost,
+    COUNT(*) as observation_count
 FROM agent_events
 WHERE execution_id = $1
   AND event_type = $2
-  AND phase_id IS NOT NULL
-GROUP BY phase_id
+GROUP BY phase_id, data->>'model', ((data->>'total_cost_usd') IS NULL)
 """
 
 
@@ -342,6 +361,38 @@ def _price_session_summary_row(
     return _RowPricing(cost=group_cost, model=model, unpriced_count=0)
 
 
+def price_phase_rows(
+    rows: Sequence[asyncpg.Record], cost_calculator: CostCalculator
+) -> dict[str, Decimal]:
+    """Accumulate per-phase cost from split (phase, model, priced?) groups.
+
+    Uses the same per-row rule as the execution total: authoritative
+    ``sdk_cost`` when present, otherwise this row's own tokens priced with
+    this row's own model. That shared rule is the point - it is what keeps
+    ``sum(cost_by_phase.values())`` reconcilable with ``total_cost_usd``
+    (issue #812).
+
+    A row that is genuinely unpriceable (unknown model, no ``sdk_cost``)
+    contributes nothing rather than a guess, matching
+    ``price_grouped_session_summary``. Its phase can therefore be absent
+    from the result, which is the honest representation of "we cannot say
+    what this phase cost".
+
+    Rows with no ``phase_id`` are bucketed under ``UNATTRIBUTED_PHASE_ID``
+    rather than skipped. The column is nullable and the execution total
+    counts those summaries, so dropping them here would break the very
+    reconciliation this function exists to restore.
+    """
+    costs: dict[str, Decimal] = {}
+    for row in rows:
+        phase_id = row["phase_id"] or UNATTRIBUTED_PHASE_ID
+        priced = _price_session_summary_row(row, _extract_group_tokens(row), cost_calculator)
+        if priced.cost is None:
+            continue
+        costs[phase_id] = costs.get(phase_id, Decimal("0")) + priced.cost
+    return costs
+
+
 def price_grouped_session_summary(
     rows: list[asyncpg.Record], cost_calculator: CostCalculator
 ) -> GroupedSessionSummary:
@@ -509,11 +560,7 @@ class TimescaleExecutionCostQuery:
     ) -> dict[str, Decimal]:
         """Query per-phase cost breakdown from session_summary events."""
         phase_rows = await conn.fetch(_COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY)
-        return {
-            row["phase_id"]: Decimal(str(row["phase_cost"]))
-            for row in phase_rows
-            if row["phase_id"] and row["phase_cost"] is not None
-        }
+        return price_phase_rows(phase_rows, self._cost_calculator)
 
     async def _resolve_token_rows(
         self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
