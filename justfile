@@ -980,7 +980,7 @@ fitness-check: aps-build check-untyped-dicts
     # Always regenerate topology before checking — never validate against stale data
     just topology-analyze
     @echo "Checking architecture fitness thresholds..."
-    {{_aps_bin}} run fitness validate .
+    {{_aps_bin}} run architecture-fitness validate .
     @echo "✅ Fitness threshold checks passed"
 
 # Check structural & ES invariants (pytest-based, AST analysis)
@@ -1005,28 +1005,29 @@ vsa-validate:
 
 # --- Topology (APS Code Topology Standard) ---
 
-# Path to APS CLI binary
-_aps_bin := "lib/agent-paradise-standards-system/target/release/aps"
+# Path to APS CLI binary.
+# `aps-build` compiles the `aps-cli` package, whose [[bin]] target is named
+# `apss-dev` (the monorepo dev binary). The per-project composed CLI that
+# `apss install` produces at .apss/bin/apss is NOT built here - see #807.
+_aps_bin := "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-# Build APS CLI (cached — only rebuilds when source changes)
+# Build APS CLI. Always delegate freshness to cargo - a shell guard keyed on
+# Cargo.lock mtime misses APSS source, manifest, and [[bin]]-name changes, so it
+# happily reuses a binary compiled from a different submodule revision.
 aps-build:
-    @if [ ! -f {{_aps_bin}} ] || [ lib/agent-paradise-standards-system/Cargo.lock -nt {{_aps_bin}} ]; then \
-        echo "🔨 Building APS CLI..."; \
-        cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli; \
-    else \
-        echo "✅ APS CLI already built"; \
-    fi
+    @echo "🔨 Building APS CLI..."
+    cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
 
 # Regenerate .topology/ artifacts from current codebase
 topology-analyze: aps-build
     @echo "🔍 Analyzing codebase topology..."
-    {{_aps_bin}} run topology analyze . --output .topology --seed 42
+    {{_aps_bin}} run code-topology analyze . --output .topology --seed 42
     @echo "✅ Topology artifacts generated"
 
 # Generate CodeCity and 3D visualizations
 topology-viz: aps-build
     @echo "🎨 Generating topology visualizations..."
-    {{_aps_bin}} run topology viz .topology --type all --output .topology/viz/
+    {{_aps_bin}} run code-topology viz .topology --type all --output .topology/viz/
     @echo "✅ Visualizations generated in .topology/viz/"
 
 # Full topology regeneration (analyze + visualize)

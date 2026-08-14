@@ -115,11 +115,20 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
+      # Key the cache on the submodule commit, not Cargo.lock. An APSS bump can
+      # change Rust sources, manifests, or the [[bin]] target name without
+      # touching Cargo.lock, and a Cargo.lock-keyed cache would then restore
+      # binaries built from a different revision. `git rev-parse HEAD:<path>`
+      # reads the gitlink, so any bump invalidates the cache exactly.
+      - name: Resolve APSS submodule commit
+        id: apss-commit
+        run: echo "sha=$(git rev-parse HEAD:lib/agent-paradise-standards-system)" >> "$GITHUB_OUTPUT"
+
       - name: Cache APS CLI binary
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: lib/agent-paradise-standards-system/target/release
-          key: aps-cli-${{ runner.os }}-${{ hashFiles('lib/agent-paradise-standards-system/Cargo.lock') }}
+          key: aps-cli-${{ runner.os }}-${{ steps.apss-commit.outputs.sha }}
 
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
