@@ -1005,8 +1005,11 @@ vsa-validate:
 
 # --- Topology (APS Code Topology Standard) ---
 
-# Path to APS CLI binary
-_aps_bin := "lib/agent-paradise-standards-system/target/release/apss"
+# Path to APS CLI binary.
+# `aps-build` compiles the `aps-cli` package, whose [[bin]] target is named
+# `apss-dev` (the monorepo dev binary). The per-project composed CLI that
+# `apss install` produces at .apss/bin/apss is NOT built here - see #807.
+_aps_bin := "lib/agent-paradise-standards-system/target/release/apss-dev"
 
 # Build APS CLI (cached — only rebuilds when source changes)
 aps-build:
