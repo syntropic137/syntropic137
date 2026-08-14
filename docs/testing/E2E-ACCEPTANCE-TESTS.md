@@ -425,8 +425,8 @@ curl -N http://localhost:8137/api/events/stream
 
 ### F5.1 Application Load
 
-**Given** the frontend dev server is running
-**When** I navigate to http://localhost:5173
+**Given** the dev stack is running
+**When** I navigate to http://localhost:9137
 **Then** the application loads
 
 | # | Acceptance Criteria | Status |
@@ -436,7 +436,7 @@ curl -N http://localhost:8137/api/events/stream
 | 5.1.3 | Default route shows dashboard/home | ⬜ |
 
 **Validation Steps:**
-1. Open http://localhost:5173 in browser
+1. Open http://localhost:9137 in browser (the dev gateway - not the raw Vite server on 5173, which has no API proxy)
 2. Open browser DevTools → Console
 3. Check for errors
 
@@ -1578,7 +1578,7 @@ SYN_API_URL=http://prod:8000 syn control status exec-123
 // Example Playwright test
 test('execution control flow', async ({ page }) => {
   // Start workflow
-  await page.goto('http://localhost:5173/workflows');
+  await page.goto('http://localhost:9137/workflows');
   await page.click('[data-testid="execute-workflow"]');
   
   // Wait for running state

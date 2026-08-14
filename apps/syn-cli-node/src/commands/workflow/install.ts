@@ -110,6 +110,11 @@ export async function installWorkflowsViaApi(
       const data = unwrap(
         await api.POST("/workflows", {
           body: {
+            // Preserve the stable id declared in workflow.yaml. Without it the
+            // server mints a fresh uuid on every install, so `syn workflow run
+            // <yaml-id>` cannot resolve and re-installing the same package
+            // silently piles up duplicates.
+            id: wf.id,
             name: wf.name,
             workflow_type: wf.workflow_type,
             classification: wf.classification ?? "standard",

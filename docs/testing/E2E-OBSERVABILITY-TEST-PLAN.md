@@ -212,7 +212,7 @@ curl -s http://localhost:8137/api/v1/executions/$EXEC_ID/artifacts | jq '.[] | s
 
 ```bash
 # Open dashboard
-open http://localhost:5173/executions/$EXEC_ID
+open http://localhost:9137/executions/$EXEC_ID
 ```
 
 **Manual Validation Checklist:**

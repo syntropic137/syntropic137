@@ -115,11 +115,20 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
+      # Key the cache on the submodule commit, not Cargo.lock. An APSS bump can
+      # change Rust sources, manifests, or the [[bin]] target name without
+      # touching Cargo.lock, and a Cargo.lock-keyed cache would then restore
+      # binaries built from a different revision. `git rev-parse HEAD:<path>`
+      # reads the gitlink, so any bump invalidates the cache exactly.
+      - name: Resolve APSS submodule commit
+        id: apss-commit
+        run: echo "sha=$(git rev-parse HEAD:lib/agent-paradise-standards-system)" >> "$GITHUB_OUTPUT"
+
       - name: Cache APS CLI binary
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: lib/agent-paradise-standards-system/target/release
-          key: aps-cli-${{ runner.os }}-${{ hashFiles('lib/agent-paradise-standards-system/Cargo.lock') }}
+          key: aps-cli-${{ runner.os }}-${{ steps.apss-commit.outputs.sha }}
 
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
@@ -486,7 +495,9 @@ jobs:
               --ignore-vuln PYSEC-2026-142 \
               --ignore-vuln PYSEC-2026-141 \
               --ignore-vuln GHSA-4xgf-cpjx-pc3j \
+              --ignore-vuln PYSEC-2026-3552 \
               -r /dev/stdin
+          # TODO(#805): remove --ignore-vuln PYSEC-2026-3552 once cryptography 50.0.0 resolves through uv (published, but absent from the simple index)
           # TODO(#345): remove --ignore-vuln once pygments releases a fix
           # TODO(#776): remove --ignore-vuln GHSA-4xgf-cpjx-pc3j once pydantic-settings 2.14.2 is on PyPI (secrets_nested_subdir symlink escape; feature unused here)
           # TODO(#634): remove --ignore-vuln once cryptography 46.0.7 is available on PyPI

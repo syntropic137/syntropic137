@@ -208,6 +208,12 @@ class SessionSummary:
     execution_id: str | None = None
     """ID of the workflow execution/run this session belongs to."""
 
+    parent_session_id: str | None = None
+    """Parent session that delegated this sub-agent run (issue #792)."""
+
+    root_session_id: str | None = None
+    """Root of the delegation tree; equals ``id`` for top-level sessions (issue #792)."""
+
     repos: tuple[str, ...] = ()
     """Repository slugs (owner/repo) this session has access to."""
 
@@ -260,6 +266,8 @@ class SessionSummary:
             duration_seconds=data.get("duration_seconds"),
             phase_id=data.get("phase_id"),
             execution_id=data.get("execution_id"),
+            parent_session_id=data.get("parent_session_id"),
+            root_session_id=data.get("root_session_id"),
             repos=tuple(data.get("repos", ())),
             operations=operations,
             # Subagent metrics
@@ -307,6 +315,8 @@ class SessionSummary:
             "duration_seconds": self.duration_seconds,
             "phase_id": self.phase_id,
             "execution_id": self.execution_id,
+            "parent_session_id": self.parent_session_id,
+            "root_session_id": self.root_session_id,
             "repos": list(self.repos),
             "operations": [op.to_dict() for op in self.operations],
             # Subagent metrics
