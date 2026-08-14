@@ -94,3 +94,34 @@ Resolution happens in ``AgentConfiguration.__post_init__`` (both copies), NOT
 in callers - a caller-side default only covers the paths that caller owns,
 which is how the Haiku default survived the first fix.
 """
+
+
+_CLAUDE_ALIASES: frozenset[str] = frozenset(ModelAlias)
+
+
+def resolve_phase_model(provider: str, model: str | None) -> str | None:
+    """Normalise a phase's model for ``provider``, returning the value to store.
+
+    Both ``AgentConfiguration`` copies call this from ``__post_init__`` so the
+    rule lives in exactly one place. Three normalisations, in order:
+
+    1. Blank or whitespace-only means "unset". A workflow with ``model: ""``
+       used to be rescued by a caller-side ``phase_model or default``; without
+       that, an empty string would reach the CLI as ``--model ""``.
+    2. A Claude alias on a CODEX phase is dropped to ``None``. Codex rejects
+       Claude models outright, and keeping one is what prices codex runs as
+       Haiku (issue #788). This also has to run on ALREADY-RESOLVED input:
+       ``dataclasses.replace(claude_config, provider=CODEX)`` re-enters the
+       constructor carrying the resolved ``"haiku"``, which no longer looks
+       like a default to anything downstream.
+    3. An unset model on a non-codex provider gets ``DEFAULT_CLAUDE_MODEL``.
+
+    An explicit non-Claude model is always preserved, so a codex phase that
+    names ``gpt-5.6`` keeps it.
+    """
+    normalised = model.strip() if model is not None else None
+    if not normalised:
+        normalised = None
+    if provider == AgentProvider.CODEX:
+        return None if normalised in _CLAUDE_ALIASES else normalised
+    return normalised if normalised is not None else DEFAULT_CLAUDE_MODEL

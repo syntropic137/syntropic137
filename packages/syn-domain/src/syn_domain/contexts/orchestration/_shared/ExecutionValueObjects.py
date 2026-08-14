@@ -7,7 +7,7 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
 from typing import Any
 
-from syn_shared.agents import DEFAULT_CLAUDE_MODEL, AgentProvider
+from syn_shared.agents import AgentProvider, resolve_phase_model
 
 
 class ExecutionStatus(StrEnum):
@@ -79,8 +79,9 @@ class AgentConfiguration:
         Mirrors ``aggregate_execution.value_objects.AgentConfiguration`` -
         keep both in sync.
         """
-        if self.model is None and self.provider != AgentProvider.CODEX:
-            object.__setattr__(self, "model", DEFAULT_CLAUDE_MODEL)
+        resolved_model = resolve_phase_model(self.provider, self.model)
+        if resolved_model != self.model:
+            object.__setattr__(self, "model", resolved_model)
         if self.provider == AgentProvider.CODEX and self.agent_id not in (
             None,
             AgentProvider.CODEX,
