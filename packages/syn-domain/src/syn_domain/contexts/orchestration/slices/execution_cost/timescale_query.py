@@ -36,6 +36,15 @@ from syn_shared.events import (
 # cost is NULL (PostgreSQL excludes NULLs from SUM) instead of raising or
 # falling back to that row's own token-based price - the same class of
 # bug as issue #788, surviving on the completed-execution summary path.
+#
+# ALSO grouped on `total_cost_usd IS NULL`. Grouping by model alone only
+# separates priced from unpriced rows when they use DIFFERENT models. Two
+# summaries on the SAME model, one with an SDK cost and one without, land
+# in one group whose SUM(total_cost_usd) is non-NULL - so the token
+# fallback below never fires, while the group's token totals include the
+# unpriced row. The result undercounts: tokens from both rows, cost from
+# one. Splitting on the NULL flag gives the unpriced rows their own group,
+# which _price_session_summary_row then prices from its own tokens.
 _SESSION_SUMMARY_QUERY = """
 SELECT
     data->>'model' as model,
@@ -53,7 +62,7 @@ SELECT
     COUNT(*) as observation_count
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
-GROUP BY data->>'model'
+GROUP BY data->>'model', ((data->>'total_cost_usd') IS NULL)
 """
 
 # Fallback: aggregate from individual token_usage events when no

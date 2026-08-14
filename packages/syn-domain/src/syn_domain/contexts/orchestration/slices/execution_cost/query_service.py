@@ -38,6 +38,11 @@ from syn_shared.events import (
 # pricing them as a single model (issue #788). The most-recent-N-executions
 # selection happens in ``recent_executions`` first, so LIMIT still counts
 # executions rather than (execution, model) groups.
+#
+# Also grouped on `total_cost_usd IS NULL` so that two summaries on the
+# SAME model - one SDK-priced, one not - do not merge into a group whose
+# non-NULL cost SUM suppresses the token fallback while still carrying the
+# unpriced row's tokens. See the matching note in ``timescale_query.py``.
 _LIST_ALL_FROM_SUMMARY_QUERY = """
 WITH recent_executions AS (
     SELECT execution_id, MAX(time) as last_time
@@ -66,7 +71,7 @@ SELECT
 FROM agent_events a
 JOIN recent_executions r ON r.execution_id = a.execution_id
 WHERE a.event_type = $1
-GROUP BY a.execution_id, a.data->>'model'
+GROUP BY a.execution_id, a.data->>'model', ((a.data->>'total_cost_usd') IS NULL)
 """
 
 # Fallback: list executions from token_usage (in-progress, no summary yet).

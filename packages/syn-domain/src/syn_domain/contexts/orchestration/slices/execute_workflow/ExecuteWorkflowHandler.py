@@ -22,7 +22,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
     WorkflowNotFoundError,
 )
-from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
@@ -160,42 +159,6 @@ def _resolve_repos_from_template(
     return []
 
 
-def _default_model_for_provider(provider: str, claude_default_model: str | None) -> str | None:
-    """Pick the model to attribute cost/pricing to when a phase omits one.
-
-    ``AgentConfiguration.model`` defaults to a claude alias (``"haiku"``),
-    which is correct when the phase's provider is claude. But codex phases
-    routinely omit ``model`` on purpose (see ``workflows/examples/codex-demo.yaml``):
-    the codex CLI rejects claude-shaped model ids when authenticated via a
-    ChatGPT account, and codex does not report its own model in the
-    ``--json`` stream (verified against
-    ``packages/syn-domain/tests/fixtures/codex/codex_exec_recording.jsonl`` -
-    no ``model`` field on ``thread.started`` or ``turn.completed``). Falling
-    through to the claude default silently priced every unspecified-model
-    codex phase with CLAUDE HAIKU rates (issue #788).
-
-    An earlier fix synthesized ``AgentProvider.CODEX.value`` (``"codex"``)
-    here so the phase would resolve to codex pricing instead of a claude
-    number. That over-corrected: ``"codex"`` then passed as a genuine model
-    id everywhere downstream too -  ``codex exec --model codex`` (a
-    nonexistent model, since ``_is_codex_model`` in ``_wiring.py`` can't
-    tell "unspecified" from "user chose the literal string codex") and
-    ``resolve_model_pricing("codex")`` confidently returned GPT-5.6 pricing
-    for a model we never actually ran. Both are worse than the original bug:
-    a wrong model argument can break the run, and a confidently-wrong price
-    is invisible in a dashboard (an absent price is at least visibly
-    missing).
-
-    So: codex phases with no explicit ``model`` get ``None`` here, not a
-    synthesized string. ``None`` means "run codex model-unforced (its own
-    account default) and leave cost unpriced until the real model is known"
-    - honest absence beats a guessed value in either direction.
-    """
-    if provider == AgentProvider.CODEX:
-        return None
-    return claude_default_model
-
-
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
@@ -214,7 +177,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     resolved_provider = phase_provider or defaults.provider
     return AgentConfiguration(
         provider=resolved_provider,
-        model=phase_model or _default_model_for_provider(resolved_provider, defaults.model),
+        model=phase_model,
         agent_id=phase_agent_id or defaults.agent_id,
         allow_delegation=allow_delegation,
     )

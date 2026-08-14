@@ -205,3 +205,54 @@ class TestTimescaleExecutionCostQueryCompletedSummaryPath:
         }
         assert result.unpriced_observation_count == 0
         assert result.input_tokens == 2_000_000
+
+
+@pytest.mark.unit
+class TestSameModelMixedNullCosts:
+    """Codex review of #795: the model-only GROUP BY left one case unfixed.
+
+    Splitting rows by model separates priced from unpriced summaries only
+    when they use DIFFERENT models. Two summaries on the SAME model - one
+    SDK-priced, one not - collapsed into a single group whose
+    ``SUM(total_cost_usd)`` is non-NULL, so the token fallback never fired
+    even though the group's token totals included the unpriced row. Tokens
+    from both, cost from one: a silent undercount.
+
+    The queries now also group on ``total_cost_usd IS NULL``, so those rows
+    arrive as two groups. These tests pin both halves: the SQL keeps the
+    split, and the Python merge sums the split groups correctly.
+    """
+
+    def test_same_model_priced_and_unpriced_groups_both_count(self) -> None:
+        """Same model, two groups: SDK cost + token-priced cost, not just the SDK one."""
+        rows = [
+            _summary_group_row(_OPUS_MODEL, "session-priced", sdk_cost=Decimal("12.50")),
+            _summary_group_row(_OPUS_MODEL, "session-unpriced", sdk_cost=None),
+        ]
+
+        grouped = price_grouped_session_summary(rows, CostCalculator())
+
+        expected = Decimal("12.50") + _OPUS_COST_1M_1M
+        assert grouped.total_cost == expected
+        assert grouped.cost_by_model == {_OPUS_MODEL: expected}
+        assert grouped.unpriced_observation_count == 0
+        # Tokens from BOTH rows are counted, which is what made the old
+        # behaviour an undercount rather than a simple omission.
+        assert grouped.input_tokens == 2_000_000
+
+    def test_summary_queries_group_on_the_null_cost_flag(self) -> None:
+        """Guard the SQL itself: a model-only GROUP BY reintroduces the undercount.
+
+        The merge above is only correct because the query hands it separate
+        rows for priced and unpriced summaries. That split lives in SQL and
+        cannot be exercised without a database, so assert on the query text.
+        """
+        from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+            _LIST_ALL_FROM_SUMMARY_QUERY,
+        )
+        from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
+            _SESSION_SUMMARY_QUERY,
+        )
+
+        assert "((data->>'total_cost_usd') IS NULL)" in _SESSION_SUMMARY_QUERY
+        assert "((a.data->>'total_cost_usd') IS NULL)" in _LIST_ALL_FROM_SUMMARY_QUERY

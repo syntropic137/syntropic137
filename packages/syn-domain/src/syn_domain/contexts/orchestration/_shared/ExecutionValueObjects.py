@@ -7,7 +7,7 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
 from typing import Any
 
-from syn_shared.agents import AgentProvider
+from syn_shared.agents import DEFAULT_CLAUDE_MODEL, AgentProvider
 
 
 class ExecutionStatus(StrEnum):
@@ -53,12 +53,13 @@ class AgentConfiguration:
     """
 
     provider: str = AgentProvider.CLAUDE  # + claude-interactive, codex, openai (mock in tests)
-    # NOTE: Temporarily using Haiku to reduce costs during testing
-    # None means "no model chosen" - the honest state for a codex phase that
-    # omits `model:` (codex does not report its own model on the wire, so we
-    # must not synthesize a value; see _default_model_for_provider in
-    # ExecuteWorkflowHandler.py, issue #788). Never a sentinel string.
-    model: str | None = "haiku"  # CLI alias - auto-resolves to latest version
+    # Declared default is None = "caller named no model". __post_init__ then
+    # resolves it PER PROVIDER: Claude gets DEFAULT_CLAUDE_MODEL, codex stays
+    # None because codex does not report its own model on the wire and a
+    # synthesized value would price every codex run as Haiku (issue #788).
+    # Resolution lives here, not in a caller, so EVERY construction path gets
+    # it - a caller-side default only covered phases built from YAML.
+    model: str | None = None  # CLI alias - auto-resolves to latest version
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout_seconds: int = 300
@@ -73,11 +74,13 @@ class AgentConfiguration:
     allow_delegation: bool = False
 
     def __post_init__(self) -> None:
-        """Reject nonsensical provider/agent_id combinations.
+        """Resolve the per-provider model default, reject bad provider/agent_id.
 
         Mirrors ``aggregate_execution.value_objects.AgentConfiguration`` -
         keep both in sync.
         """
+        if self.model is None and self.provider != AgentProvider.CODEX:
+            object.__setattr__(self, "model", DEFAULT_CLAUDE_MODEL)
         if self.provider == AgentProvider.CODEX and self.agent_id not in (
             None,
             AgentProvider.CODEX,
