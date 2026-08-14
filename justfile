@@ -1011,14 +1011,12 @@ vsa-validate:
 # `apss install` produces at .apss/bin/apss is NOT built here - see #807.
 _aps_bin := "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-# Build APS CLI (cached — only rebuilds when source changes)
+# Build APS CLI. Always delegate freshness to cargo - a shell guard keyed on
+# Cargo.lock mtime misses APSS source, manifest, and [[bin]]-name changes, so it
+# happily reuses a binary compiled from a different submodule revision.
 aps-build:
-    @if [ ! -f {{_aps_bin}} ] || [ lib/agent-paradise-standards-system/Cargo.lock -nt {{_aps_bin}} ]; then \
-        echo "🔨 Building APS CLI..."; \
-        cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli; \
-    else \
-        echo "✅ APS CLI already built"; \
-    fi
+    @echo "🔨 Building APS CLI..."
+    cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
 
 # Regenerate .topology/ artifacts from current codebase
 topology-analyze: aps-build
