@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from syn_shared.pricing import UnknownModelPricingError
 from syn_tokens.models import WorkflowType
 from syn_tokens.spend import (
     InMemoryBudgetStore,
@@ -74,11 +75,15 @@ class TestCalculateCost:
         expected += Decimal("500") * Decimal("15.00") / Decimal("1000000")
         assert cost == expected
 
-    def test_unknown_model_uses_default(self) -> None:
-        """Should use Sonnet pricing for unknown models."""
-        cost_unknown = calculate_cost(1000, 500, model="unknown-model")
-        cost_sonnet = calculate_cost(1000, 500, model="claude-3-5-sonnet-20241022")
-        assert cost_unknown == cost_sonnet
+    def test_unknown_model_raises_rather_than_substituting(self) -> None:
+        """An unknown model must never be priced as some other model.
+
+        Inverted for ADR-067 D4. This previously asserted that an unknown model
+        silently priced as Sonnet - which meant budget enforcement under-charged
+        any model missing from the table, in the cheap direction.
+        """
+        with pytest.raises(UnknownModelPricingError):
+            calculate_cost(1000, 500, model="unknown-model")
 
 
 class TestSpendTracker:

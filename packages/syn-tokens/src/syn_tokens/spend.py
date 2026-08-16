@@ -17,8 +17,8 @@ from syn_tokens.budget_stores import (  # noqa: F401 - re-export for backwards c
 )
 from syn_tokens.models import DEFAULT_BUDGETS, SpendBudget, WorkflowType
 from syn_tokens.pricing import (  # noqa: F401 - re-export for backwards compat
+    BUDGET_ESTIMATION_MODEL,
     CLAUDE_PRICING,
-    DEFAULT_MODEL,
     calculate_cost,
 )
 from syn_tokens.singletons import (  # noqa: F401 - re-export for backwards compat
@@ -155,7 +155,7 @@ class SpendTracker:
         execution_id: str,
         input_tokens: int,
         output_tokens: int,
-        model: str = DEFAULT_MODEL,
+        model: str = BUDGET_ESTIMATION_MODEL,
     ) -> SpendCheckResult:
         """Check if budget allows a request.
 
@@ -202,7 +202,7 @@ class SpendTracker:
         execution_id: str,
         input_tokens: int,
         output_tokens: int,
-        model: str = DEFAULT_MODEL,
+        model: str = BUDGET_ESTIMATION_MODEL,
     ) -> SpendBudget:
         """Record actual token usage after an API call.
 

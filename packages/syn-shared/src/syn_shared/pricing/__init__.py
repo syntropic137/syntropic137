@@ -3,23 +3,89 @@
 Single source of truth for LLM model pricing across the platform.
 All packages (syn-domain, syn-tokens, syn-adapters) import from here.
 
-Note: These prices are used for real-time cost *estimates* during execution.
-The authoritative final cost comes from the Claude SDK's ``total_cost_usd``
-in the session result event, which overwrites accumulated estimates.
+Cost is computed from THIS table, for every provider. A harness-reported cost
+(the Claude CLI's ``total_cost_usd``) is a cross-check, not the source of
+truth: Anthropic documents it as a client-side estimate from a price table
+bundled at build time and states it must not drive financial decisions.
+Codex reports no cost at all. See ADR-067 (D-1).
 
-To update pricing when Anthropic releases new models or changes rates:
+An unknown model must never be priced by substitution. Every resolver here
+either returns a real rate or says so explicitly - see ``PricedAmount``.
+
+To update pricing when a vendor ships or reprices a model:
 1. Add/update entries in ``MODEL_PRICING_TABLE`` below
 2. Run ``just qa`` to verify all consumers still pass
+
+ADR-067 replaces step 1 with generation from the agentic-primitives model
+registry; until that lands this table is hand-maintained and its rates were
+verified 2026-08-16.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import StrEnum
 
 from syn_shared.agents import ModelAlias, ModelId
 
+logger = logging.getLogger(__name__)
+
 _MILLION = Decimal("1_000_000")
+
+
+class UnknownModelPricingError(LookupError):
+    """Raised when a caller requires a rate and no rate exists for the model."""
+
+
+class PricingStatus(StrEnum):
+    """Why a cost is, or is not, a real number.
+
+    Exists so "we could not price this" can never be mistaken for "this was
+    free". A bare ``Decimal("0")`` return is what let unpriced codex runs
+    render as ``$0.00`` across the API, CLI and dashboard (ADR-067 D3).
+    """
+
+    PRICED = "priced"
+    """Computed from a verified rate for a known model."""
+
+    PLACEHOLDER = "placeholder"
+    """Computed, but from an unconfirmed rate. Treat as an estimate."""
+
+    UNPRICED_UNKNOWN_MODEL = "unpriced_unknown_model"
+    """No model id was recorded, so no rate could be selected."""
+
+    UNPRICED_NO_RATE = "unpriced_no_rate"
+    """A model id was recorded but the table has no rate for it."""
+
+
+@dataclass(frozen=True)
+class PricedAmount:
+    """A cost together with the reason it does or does not exist.
+
+    The only type a cost calculator may return. ``cost`` is ``None`` for every
+    non-priced status, which makes "unpriced" structurally impossible to
+    confuse with zero at any downstream hop.
+    """
+
+    cost: Decimal | None
+    status: PricingStatus
+    model: str | None = None
+
+    @property
+    def is_priced(self) -> bool:
+        """True when ``cost`` is a real number (verified or placeholder rate)."""
+        return self.cost is not None
+
+    @classmethod
+    def unpriced(cls, status: PricingStatus, model: str | None = None) -> PricedAmount:
+        """Build an unpriced amount, guarding against a priced status."""
+        if status in (PricingStatus.PRICED, PricingStatus.PLACEHOLDER):
+            msg = f"{status} is a priced status; use PricedAmount(cost=..., status=...)"
+            raise ValueError(msg)
+        return cls(cost=None, status=status, model=model)
+
 
 # TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
 _GPT_5_6_CODEX_INPUT_PER_MILLION = Decimal("15.0")
@@ -71,7 +137,64 @@ class ModelPricing:
 # ---------------------------------------------------------------------------
 
 MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
-    # --- OpenAI Codex family ---
+    # --- Current generation (ADR-067 phase 0) ---
+    # Verified 2026-08-16 against the vendor pricing pages and cross-checked
+    # against the OpenRouter models API; both agreed on every rate below.
+    # Anthropic cache rates follow the documented multipliers (read 0.10x,
+    # 5-min write 1.25x of base input).
+    ModelId.CLAUDE_OPUS_5: ModelPricing(
+        model_id=ModelId.CLAUDE_OPUS_5,
+        input_per_million=Decimal("5.00"),
+        output_per_million=Decimal("25.00"),
+        cache_creation_per_million=Decimal("6.25"),
+        cache_read_per_million=Decimal("0.50"),
+    ),
+    ModelId.CLAUDE_SONNET_5: ModelPricing(
+        model_id=ModelId.CLAUDE_SONNET_5,
+        input_per_million=Decimal("2.00"),
+        output_per_million=Decimal("10.00"),
+        cache_creation_per_million=Decimal("2.50"),
+        cache_read_per_million=Decimal("0.20"),
+    ),
+    ModelId.CLAUDE_FABLE_5: ModelPricing(
+        model_id=ModelId.CLAUDE_FABLE_5,
+        input_per_million=Decimal("10.00"),
+        output_per_million=Decimal("50.00"),
+        cache_creation_per_million=Decimal("12.50"),
+        cache_read_per_million=Decimal("1.00"),
+    ),
+    ModelId.CLAUDE_HAIKU_4_5: ModelPricing(
+        model_id=ModelId.CLAUDE_HAIKU_4_5,
+        input_per_million=Decimal("1.00"),
+        output_per_million=Decimal("5.00"),
+        cache_creation_per_million=Decimal("1.25"),
+        cache_read_per_million=Decimal("0.10"),
+    ),
+    # The model a ChatGPT-account codex login actually runs. Distinct from the
+    # legacy GPT_5_6 entry below, which codex rejects under that auth mode.
+    ModelId.GPT_5_6_SOL: ModelPricing(
+        model_id=ModelId.GPT_5_6_SOL,
+        input_per_million=Decimal("5.00"),
+        output_per_million=Decimal("30.00"),
+        cache_creation_per_million=Decimal("6.25"),
+        cache_read_per_million=Decimal("0.50"),
+    ),
+    # --- Previous generation (kept: historical sessions reference these) ---
+    ModelId.CLAUDE_OPUS_4_5: ModelPricing(
+        model_id=ModelId.CLAUDE_OPUS_4_5,
+        input_per_million=Decimal("5.00"),
+        output_per_million=Decimal("25.00"),
+        cache_creation_per_million=Decimal("6.25"),
+        cache_read_per_million=Decimal("0.50"),
+    ),
+    ModelId.CLAUDE_SONNET_4_5: ModelPricing(
+        model_id=ModelId.CLAUDE_SONNET_4_5,
+        input_per_million=Decimal("3.00"),
+        output_per_million=Decimal("15.00"),
+        cache_creation_per_million=Decimal("3.75"),
+        cache_read_per_million=Decimal("0.30"),
+    ),
+    # --- OpenAI Codex family (legacy) ---
     ModelId.GPT_5_6: ModelPricing(
         model_id=ModelId.GPT_5_6,
         input_per_million=_GPT_5_6_CODEX_INPUT_PER_MILLION,
@@ -126,8 +249,11 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
     ),
 }
 
-# Default model for cost estimation when model is unknown
-DEFAULT_MODEL_ID: ModelId = ModelId.CLAUDE_SONNET_4
+# Models whose rates are not yet confirmed against the vendor's published
+# pricing. A cost computed from these is real arithmetic on an unverified
+# rate, so it is reported with PricingStatus.PLACEHOLDER rather than PRICED
+# and must not be presented with the same confidence as a verified figure.
+PLACEHOLDER_PRICED_MODELS: frozenset[ModelId] = frozenset({ModelId.GPT_5_6})
 
 # CLI alias → canonical model ID.
 # The workflow YAML and AgentConfiguration use short names like
@@ -142,12 +268,26 @@ DEFAULT_MODEL_ID: ModelId = ModelId.CLAUDE_SONNET_4
 # phases as GPT-5.6 (issue #788 follow-up). A truly unknown model must
 # resolve to no pricing, not a guessed one - see
 # syn_shared.agents.DEFAULT_CLAUDE_MODEL.
+#
+# ADR-067 phase 0: these aliases pointed at superseded models (opus -> Opus 4,
+# sonnet -> Sonnet 4, haiku -> Haiku 3.5) while the CLI resolved them to the
+# current generation. Costs happened to survive because the CLI reports its
+# own total, but every session was ATTRIBUTED to a model two generations old,
+# and any fallback pricing used the wrong rate. Aliases must track whatever
+# the harness currently resolves them to; when a new generation ships, this
+# map moves with it.
 MODEL_ALIASES: dict[str, ModelId] = {
     "gpt-codex": ModelId.GPT_5_6,
-    ModelAlias.OPUS: ModelId.CLAUDE_OPUS_4,
-    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_4,
-    ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_3_5,
-    # Undated family names the CLI also accepts.
+    ModelAlias.OPUS: ModelId.CLAUDE_OPUS_5,
+    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5,
+    ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_4_5,
+    # Undated family names the CLI also accepts. Only ids that DIFFER from a
+    # ModelId value need an entry: canonical_model_id() already falls back to
+    # ModelId(value), so the Claude 5 ids (which are undated) resolve on their
+    # own. Listing them here would also trip the bare-model-literal poka-yoke.
+    "claude-haiku-4-5": ModelId.CLAUDE_HAIKU_4_5,
+    "claude-opus-4-5": ModelId.CLAUDE_OPUS_4_5,
+    "claude-sonnet-4-5": ModelId.CLAUDE_SONNET_4_5,
     "claude-sonnet-4": ModelId.CLAUDE_SONNET_4,
     "claude-opus-4": ModelId.CLAUDE_OPUS_4,
 }
@@ -170,67 +310,130 @@ def canonical_model_id(model_id: str) -> ModelId | None:
 
 
 def resolve_model_pricing(model_id: str) -> ModelPricing | None:
-    """Resolve pricing for a known model without a default fallback."""
+    """Resolve pricing for a known model. Returns ``None`` when unknown.
+
+    Exact resolution only: an alias, or an id present in the table. There is
+    deliberately NO prefix matching.
+
+    A prefix heuristic used to live here, mapping any id that started with a
+    known family and ended in 8 digits onto that family's current rate - so a
+    future snapshot like ``claude-sonnet-4-20991231`` silently priced at
+    today's Sonnet 4 rate, with no signal that the price was inferred rather
+    than looked up. Vendors reprice across snapshots (Opus 4 at $15/$75 versus
+    Opus 4.5 at $5/$25), so guessing by family name is guessing at money
+    (ADR-067 D4).
+    """
     canonical = canonical_model_id(model_id)
     if canonical is not None:
         return MODEL_PRICING_TABLE[canonical]
-
-    for key, pricing in MODEL_PRICING_TABLE.items():
-        family, separator, suffix = key.rpartition("-")
-        if separator and suffix.isdigit() and len(suffix) == 8 and model_id.startswith(family):
-            return pricing
-
     return None
 
 
-def get_model_pricing(model_id: str) -> ModelPricing:
-    """Get pricing for a model, with alias and prefix-match fallback.
+def price_tokens(
+    model: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation: int = 0,
+    cache_read: int = 0,
+    *,
+    context: str = "",
+) -> PricedAmount:
+    """Price token usage, or say why it could not be priced.
 
-    Resolution order:
-    1. CLI alias (``sonnet``, ``opus``, ``haiku``) → canonical ID
-    2. Exact match on model_id
-    3. Prefix match (e.g., ``claude-sonnet-4-`` matches ``claude-sonnet-4-20250514``)
-    4. Default to Sonnet 4 pricing
+    This is the only cost entry point production code should use. It never
+    substitutes a model and never returns a bare zero: an unknown or missing
+    model yields an unpriced ``PricedAmount`` and a WARNING naming the model,
+    so unpriced runs are greppable rather than silently rendered as ``$0.00``.
 
     Args:
-        model_id: The model identifier (e.g., ``claude-sonnet-4-20250514``).
-
-    Returns:
-        ModelPricing for the model.
+        model: Recorded model id or alias. ``None`` when the harness reported
+            no model (codex does not report one on the wire).
+        context: Optional identifier (session id, execution id) for the log
+            line, so an unpriced run can be traced back to its source.
     """
-    return resolve_model_pricing(model_id) or MODEL_PRICING_TABLE[DEFAULT_MODEL_ID]
+    if not model:
+        logger.warning(
+            "unpriced token usage: no model recorded (in=%d out=%d cache_read=%d) %s",
+            input_tokens,
+            output_tokens,
+            cache_read,
+            context,
+        )
+        return PricedAmount.unpriced(PricingStatus.UNPRICED_UNKNOWN_MODEL)
+
+    pricing = resolve_model_pricing(model)
+    if pricing is None:
+        logger.warning(
+            "unpriced token usage: no rate for model %r (in=%d out=%d cache_read=%d) %s",
+            model,
+            input_tokens,
+            output_tokens,
+            cache_read,
+            context,
+        )
+        return PricedAmount.unpriced(PricingStatus.UNPRICED_NO_RATE, model=model)
+
+    cost = pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
+    status = (
+        PricingStatus.PLACEHOLDER
+        if pricing.model_id in PLACEHOLDER_PRICED_MODELS
+        else PricingStatus.PRICED
+    )
+    return PricedAmount(cost=cost, status=status, model=str(pricing.model_id))
+
+
+def require_model_pricing(model_id: str) -> ModelPricing:
+    """Resolve pricing or raise. Use when a caller cannot proceed unpriced.
+
+    Replaces the former ``get_model_pricing``, which fell back to Sonnet 4 for
+    any unknown model - including the empty string - and so priced unknown
+    models confidently and wrongly (ADR-067 D4).
+    """
+    pricing = resolve_model_pricing(model_id)
+    if pricing is None:
+        msg = (
+            f"No pricing for model {model_id!r}. Add it to MODEL_PRICING_TABLE "
+            f"rather than pricing it as a different model."
+        )
+        raise UnknownModelPricingError(msg)
+    return pricing
 
 
 def calculate_cost(
     input_tokens: int,
     output_tokens: int,
-    model: str = DEFAULT_MODEL_ID,
+    model: str,
     cache_creation: int = 0,
     cache_read: int = 0,
 ) -> Decimal:
-    """Calculate cost for token usage using model-specific pricing.
+    """Calculate cost for token usage, raising when the model has no rate.
 
-    Convenience function wrapping ``get_model_pricing().calculate_cost()``.
+    ``model`` is REQUIRED. It previously defaulted to Sonnet 4, which meant a
+    caller that forgot to pass one silently billed at Sonnet rates; the same
+    default made unknown models resolve to a confident, wrong number
+    (ADR-067 D4).
 
-    Args:
-        input_tokens: Number of input tokens.
-        output_tokens: Number of output tokens.
-        model: Claude model name.
-        cache_creation: Cache write tokens (1.25x input rate).
-        cache_read: Cache read tokens (0.1x input rate).
+    Prefer :func:`price_tokens` in production paths - it reports "unpriced"
+    instead of raising, which is usually what an observability pipeline wants.
+    Use this when a caller genuinely cannot proceed without a rate.
 
-    Returns:
-        Cost in USD.
+    Raises:
+        UnknownModelPricingError: If no rate exists for ``model``.
     """
-    pricing = get_model_pricing(model)
+    pricing = require_model_pricing(model)
     return pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
 
 
 __all__ = [
     "MODEL_ALIASES",
     "MODEL_PRICING_TABLE",
+    "PLACEHOLDER_PRICED_MODELS",
     "ModelPricing",
+    "PricedAmount",
+    "PricingStatus",
+    "UnknownModelPricingError",
     "calculate_cost",
-    "get_model_pricing",
+    "price_tokens",
+    "require_model_pricing",
     "resolve_model_pricing",
 ]
