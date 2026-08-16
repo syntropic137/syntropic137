@@ -259,6 +259,27 @@ Two `.env` files with strict separation (no variable appears in both):
 > [!TIP]
 > Both `.env.example` files are extensively commented with descriptions, defaults, and security notes. Reference them directly for all available configuration options.
 
+## Central Session Capture (optional)
+
+Every agent session can be forwarded to a central SeshMagic session store, so transcripts from every workspace land in one queryable corpus no matter which machine ran them. This is what makes learning loops possible across sessions that did not run under Syntropic137.
+
+**Disabled by default.** Leave `SYN_SESSION_STORE_URL` empty and nothing changes: no capture, no extra dependency, no behaviour difference. A self-hosted deployment with no session store runs exactly as it does today.
+
+To enable, set two values:
+
+```bash
+SYN_SESSION_STORE_URL=http://your-store:18090
+SYN_SESSION_STORE_AUTH_TOKEN=op://syntropic137/session-store/write-token   # or plaintext
+```
+
+Sessions are tagged with `execution_id`, `workspace_id`, `workflow_id`, `phase_id`, and `source:syntropic137`, so any row in the store can be joined back to the execution that produced it.
+
+> [!NOTE]
+> This is additive and independent of the two stores Syntropic137 already uses: conversation logs in MinIO and the event stream (tool calls, tokens, cost) in TimescaleDB. Both continue to work unchanged whether or not central capture is enabled.
+
+> [!TIP]
+> The spool inside a workspace container is not persisted. If a container is killed before its final sweep runs, that session is not uploaded. Everything else is captured on normal completion.
+
 ## Secrets (1Password)
 
 1Password integration is optional. Set `APP_ENVIRONMENT` to auto-derive the vault name:
