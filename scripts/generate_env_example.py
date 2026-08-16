@@ -33,6 +33,7 @@ from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
 from syn_shared.settings.infra import InfraSettings  # noqa: E402
+from syn_shared.settings.session_store import SessionStoreSettings  # noqa: E402
 from syn_shared.settings.storage import StorageSettings  # noqa: E402
 from syn_shared.settings.workspace import (  # noqa: E402
     ContainerLoggingSettings,
@@ -387,6 +388,22 @@ def generate_env_example() -> str:
             "OBJECT STORAGE (MinIO / artifacts / claude plugins)",
             prefix="SYN_STORAGE_",
             description="MinIO buckets and credentials. See ADR-012 (artifacts) and issue #726 (claude plugins).",
+        )
+    )
+
+    # Central session store (SYN_SESSION_STORE_* prefix).
+    # OPT-IN, DEFAULT OFF: leaving SYN_SESSION_STORE_URL empty means no
+    # session-store variable is injected into workspace containers at all, so
+    # self-hosters with no SeshMagic instance are unaffected.
+    lines.extend(
+        generate_settings_section(
+            SessionStoreSettings,
+            "CENTRAL SESSION STORE (SeshMagic) - OPT-IN, DEFAULT OFF",
+            prefix="SYN_SESSION_STORE_",
+            description=(
+                "Forward agent sessions to a central SeshMagic store. "
+                "Leave SYN_SESSION_STORE_URL empty to disable entirely (the default)."
+            ),
         )
     )
 

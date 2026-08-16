@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.polling import PollingSettings
+    from syn_shared.settings.session_store import SessionStoreSettings
     from syn_shared.settings.storage import StorageSettings
     from syn_shared.settings.workspace import (
         ContainerLoggingSettings,
@@ -509,6 +510,23 @@ class Settings(BaseSettings):
         from syn_shared.settings.storage import StorageSettings
 
         return StorageSettings()
+
+    # =========================================================================
+    # CENTRAL SESSION STORE (SeshMagic capture) - opt-in, default OFF
+    # =========================================================================
+
+    @property
+    def session_store(self) -> SessionStoreSettings:
+        """Get central session-store settings.
+
+        Returns a SessionStoreSettings instance configured from
+        SYN_SESSION_STORE_* env vars. Disabled unless SYN_SESSION_STORE_URL is
+        set; when disabled, nothing at all is injected into workspace
+        containers.
+        """
+        from syn_shared.settings.session_store import SessionStoreSettings
+
+        return SessionStoreSettings()
 
     # =========================================================================
     # DEVELOPMENT TOOLING

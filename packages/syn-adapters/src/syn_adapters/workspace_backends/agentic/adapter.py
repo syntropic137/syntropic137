@@ -23,6 +23,9 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_from_workspace,
     copy_files_to_workspace,
 )
+from syn_adapters.workspace_backends.agentic.session_store_env import (
+    build_session_store_env,
+)
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
 # definition moved to `syn_adapters.workspace_backends.errors` so other
@@ -45,6 +48,7 @@ if TYPE_CHECKING:
         IsolationConfig,
         IsolationHandle,
     )
+    from syn_shared.settings.session_store import SessionStoreSettings
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,7 @@ class AgenticIsolationAdapter:
         security: SecurityConfig | None = None,
         workspace_container_dir: str | None = None,
         workspace_host_dir: str | None = None,
+        session_store: SessionStoreSettings | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -79,6 +84,9 @@ class AgenticIsolationAdapter:
             security: Security configuration (defaults to production)
             workspace_container_dir: Path inside orchestrator container (for file I/O)
             workspace_host_dir: Path on Docker host (for volume mounts)
+            session_store: Central session-store settings. Defaults to
+                ``get_settings().session_store``, which is DISABLED unless
+                ``SYN_SESSION_STORE_URL`` is configured.
 
         When running inside a container, both paths are needed:
         - container_dir: where this process writes files (/workspaces)
@@ -89,6 +97,16 @@ class AgenticIsolationAdapter:
 
         self._default_image = default_image
         self._security = security or SecurityConfig.production()
+
+        # Central session store (SeshMagic). Resolved from the settings object
+        # rather than os.environ so the credential stays a SecretStr all the way
+        # to the point of injection. Disabled by default — see
+        # `session_store_env.build_session_store_env`.
+        if session_store is None:
+            from syn_shared.settings import get_settings
+
+            session_store = get_settings().session_store
+        self._session_store = session_store
 
         # Get paths from env or args
         container_dir = workspace_container_dir or os.environ.get(
@@ -132,15 +150,49 @@ class AgenticIsolationAdapter:
             IsolationHandle,
         )
 
+        environment = dict(config.environment) if config.environment else {}
+
+        # Central session-store capture (SeshMagic). The capability lives in the
+        # workspace image and activates purely from these variables; Syn137 only
+        # supplies the contract.
+        #
+        # OPT-IN, DEFAULT OFF: when no store URL is configured this returns {},
+        # so a self-hoster with no SeshMagic instance gets a container
+        # environment byte-identical to before this integration existed.
+        #
+        # The contract wins over any caller-supplied value of the same name: the
+        # partition and tags are derived from THIS execution and must not be
+        # spoofable by a phase's environment block.
+        #
+        # SPOOL is container-local (/spool), deliberately NOT a mounted volume.
+        # Tradeoff: if the container is SIGKILLed before finalize runs, that
+        # session is lost. This is not a regression — today nothing is captured
+        # at all. A persistent volume would fix it but drags in volume lifecycle
+        # management that nobody has designed yet, so it is a deliberate
+        # follow-up rather than an omission.
+        environment.update(
+            build_session_store_env(
+                self._session_store,
+                execution_id=config.execution_id,
+                workspace_id=config.workspace_id,
+                workflow_id=config.workflow_id,
+                phase_id=config.phase_id,
+            )
+        )
+
         # Map Syn137 config to agentic_isolation config
         # ISS-43: Network is set on the provider (default_network in __init__),
         # not on WorkspaceConfig. Containers join agent-net to reach the shared
         # Envoy proxy but cannot reach the internet directly.
+        #
+        # NOTE: the session-store write token is in `environment` only. It must
+        # never be copied into `labels` — labels are readable by anyone who can
+        # run `docker inspect`.
         ws_config = WorkspaceConfig(
             provider="docker",
             image=config.image or self._default_image,
             working_dir="/workspace",
-            environment=dict(config.environment) if config.environment else {},
+            environment=environment,
             labels={
                 "syn.execution_id": config.execution_id,
                 "syn.workspace_id": config.workspace_id,
