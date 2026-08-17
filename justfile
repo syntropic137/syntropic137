@@ -418,8 +418,9 @@ dev: _workspace-check
 # so the EXP-04 swarm container (claude / codex / gemini panes), the envoy
 # token-accounting sidecar, and the token-injector come up as a single unit.
 # Prereqs on the host: ~/.claude + ~/.claude.json (other agents are optional;
-# the driver gracefully disables panes whose creds are missing) and a writable
-# /data/tmp/syn-itx for the docker-out-of-docker bind-mount path.
+# the driver gracefully disables panes whose creds are missing). Since #226
+# credential seeding is exec-based (docker exec -i), so no host temp-dir
+# bind-mount path is needed.
 # Bring up dev stack with the interactive-tmux workspace overlay (for #768 e2e)
 dev-interactive: _workspace-check
     #!/usr/bin/env bash
@@ -438,7 +439,6 @@ dev-interactive: _workspace-check
         echo "      Interactive-tmux container will boot but the claude pane will"
         echo "      fail to launch. Run \`claude login\` once, then retry."
     fi
-    mkdir -p /data/tmp/syn-itx
 
     echo "1️⃣ Syncing Python dependencies..."
     uv sync
@@ -967,6 +967,55 @@ check-untyped-dicts:
         print("\nRatchet exceeded! Reduce untyped dicts or lower value in fitness-exceptions.toml.")
         sys.exit(1)
 
+# Ratchet: tests that no CI job selects, and disarmed (xfail) guards.
+# CI runs `pytest -m unit`, so an unmarked test is collected by nothing and can
+# fail on main indefinitely behind a green check. Budgets live in
+# fitness-exceptions.toml [test-markers.*]; both must ratchet to 0.
+# See docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md
+check-test-markers:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 - <<'PY'
+    import re, subprocess, sys, tomllib
+    from pathlib import Path
+
+    cfg = tomllib.loads(Path("fitness-exceptions.toml").read_text()).get("test-markers", {})
+
+    def collected(*args: str) -> int:
+        # No -q: the "N/M tests collected" summary is only emitted without it.
+        out = subprocess.run(
+            ["uv", "run", "pytest", "--collect-only", *args],
+            capture_output=True, text=True,
+        ).stdout
+        m = re.search(r"(\d+)/(\d+) tests collected", out) or re.search(r"(\d+) tests collected", out)
+        if not m:
+            print("  FAIL could not parse pytest collection output"); sys.exit(1)
+        return int(m.group(1))
+
+    total = collected()
+    unmarked = collected("-m", "not unit and not integration and not e2e")
+    xfails = len(re.findall(r"@pytest\.mark\.xfail", "\n".join(
+        p.read_text() for p in Path(".").rglob("test_*.py") if ".venv" not in str(p))))
+
+    failed = False
+    for name, actual in (("unmarked", unmarked), ("xfail", xfails)):
+        entry = cfg.get(name, {})
+        budget, issue = entry.get("value", 0), entry.get("issue", "")
+        if actual > budget:
+            print(f"  FAIL {name}: {actual} (budget {budget}) [{issue}]")
+            failed = True
+        elif budget > 0:
+            print(f"  WARN {name}: {actual}/{budget} - ratchet to 0 [{issue}]")
+        else:
+            print(f"  ok {name}: clean")
+    print(f"  census: {total} tests collected, {unmarked} selected by no CI job")
+
+    if failed:
+        print("\nA test no job runs is not coverage. Mark it, or lower the budget"
+              " in fitness-exceptions.toml only when the count went DOWN.")
+        sys.exit(1)
+    PY
+
 # Run type checker (strict mode)
 typecheck:
     uv run pyright
@@ -976,7 +1025,7 @@ validate-domain-events:
     uv run python scripts/validate_domain_events.py
 
 # Check architecture fitness thresholds (APSS-based, reads .topology/metrics/)
-fitness-check: aps-build check-untyped-dicts
+fitness-check: aps-build check-untyped-dicts check-test-markers
     # Always regenerate topology before checking — never validate against stale data
     just topology-analyze
     @echo "Checking architecture fitness thresholds..."

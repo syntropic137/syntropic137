@@ -95,3 +95,19 @@ issue = "#673"
 path = "packages/syn-shared"
 value = 10
 issue = "#673"
+
+# Test-marker census (justfile: check-test-markers).
+# CI selects tests by marker (`pytest -m unit`), so a test with no marker is
+# collected by no job and can fail on main indefinitely behind a green check.
+# That is exactly what happened on 2026-08-17 - see
+# docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md
+#
+# `unmarked` must ratchet to 0. `xfail` counts disarmed guards: an xfail on a
+# correctness invariant is a disabled alarm, not a known issue.
+[test-markers.unmarked]
+value = 1355
+issue = "#825"
+
+[test-markers.xfail]
+value = 2
+issue = "#444"

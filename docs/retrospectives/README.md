@@ -34,3 +34,4 @@ What was actually wrong, not the symptom.
 | Date | Slug | One-line lesson | Links |
 |------|------|-----------------|-------|
 | 2026-05-01 | envoy-base-image-rot | Recent upstream tag does not imply working apt sources; build locally before bumping a base image. | [entry](2026-05-01-envoy-base-image-rot.md), PR #740 |
+| 2026-08-17 | green-checks-that-check-nothing | Absence of verification looks identical to successful verification. A gate must publish a census and something must assert it. | [entry](2026-08-17-green-checks-that-check-nothing.md), #825, #821 |
