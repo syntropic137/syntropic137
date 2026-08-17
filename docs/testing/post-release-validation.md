@@ -18,12 +18,89 @@ Run this after every release to catch regressions before users hit them.
 > | **Compose file** | `~/.syntropic137/docker-compose.syntropic137.yaml` | `docker/docker-compose.yaml` |
 >
 > They can run side by side without collision. **Results from the dev stack do not
-> validate release quality** — dev images are locally built and may contain uncommitted
+> validate release quality** - dev images are locally built and may contain uncommitted
 > changes.
 
 Designed to be executed by a developer or by Claude Code following the steps sequentially.
 
 **Estimated time:** 15-30 minutes (read-only validation), 30-60 minutes (with workflow execution and trigger round-trips)
+
+---
+
+## Validation Modes
+
+This runbook supports two modes. **Pick one before you start** - they differ in what
+they prove and which stack they target.
+
+| | **Post-release** (default) | **Pre-release** |
+|---|---|---|
+| **Question answered** | "Did the published release work for users?" | "Is `main` safe to cut a release from?" |
+| **Runs after** | A release publishes | Before a version bump / release PR |
+| **Images** | Published `ghcr.io/syntropic137/*` digests | Built locally from the working tree |
+| **Stack** | Selfhost (`syntropic137_selfhost`, port 8137) | On-demand env (ADR-060), port `<slot>8137` |
+| **Setup** | `npx @syntropic137/setup update` (§0) | `just env-up <branch>` (§0-PRE) |
+| **Sections** | All | All except §2 (release artifacts) |
+
+> **Why pre-release mode exists.** `npx @syntropic137/setup update` always pulls the
+> *last published* GHCR digests. On a `main` that is N commits ahead of the last tag,
+> that validates the previous release, not the code you are about to ship. Pre-release
+> mode builds from the working tree instead.
+
+> **Do not use the selfhost overlay for pre-release validation.** It hardcodes
+> `syn137-*` container names, the fixed `syn137_*` volumes, and port 8137, so it
+> cannot run beside a live selfhost stack - using it means destroying the user's
+> running deployment (and its data, since the repo and installed DB secrets differ).
+> The on-demand environment system is isolated by design: per-env container names,
+> per-env volumes, and ports offset by slot × 10000.
+
+### §0-PRE. Stand up a pre-release stack
+
+```bash
+cd <repo root>
+just env-list                    # see existing envs and free slots
+just env-down main               # recycle a stale env of the same name (safe: ephemeral)
+just env-up main                 # allocates a slot, builds from the working tree, starts
+just env-status main             # prints the allocated ports
+```
+
+- [ ] Environment allocated a slot and reports its URLs
+- [ ] All `syn-env-<name>-*` containers healthy
+- [ ] The live selfhost stack on 8137 (if any) is **still running and untouched**
+
+Point the CLI at the on-demand env for every subsequent section:
+
+```bash
+export SYN_API_URL="http://localhost:<gateway-port>/api/v1"
+syn health
+```
+
+- [ ] `syn health` reports healthy against the on-demand env
+
+> **Record the working-tree state.** Pre-release mode validates the working tree, not
+> necessarily clean `main`. Capture `git status --short` and `git rev-parse HEAD` in
+> the report so results are attributable.
+
+### Gate integrity check (pre-release only)
+
+Local gates can silently stop gating. Before trusting a green CI run, confirm the
+tools CI runs are the tools the repo pins.
+
+```bash
+just fitness-check
+just typecheck
+just docs-sync
+just vsa-validate
+vsa --version    # MUST match lib/event-sourcing-platform/vsa workspace version
+```
+
+- [ ] `vsa --version` matches the pinned submodule version, **locally and in CI**
+- [ ] All gates pass, or every failure is triaged in the report
+
+> **Known trap.** `.github/actions/setup-vsa` installs only `if ! command -v vsa`, and
+> its cache `restore-keys` is a loose prefix. A cached older `vsa` binary is restored,
+> the guard short-circuits, and the pinned version never installs - so CI can report
+> success while running a years-old validator. Always compare the version CI *printed*
+> against the pinned one, not just the step's conclusion.
 
 ---
 
@@ -33,21 +110,21 @@ When run by Claude Code, sections can be parallelized via subagents to reduce
 wall-clock time from ~30 minutes to ~10 minutes. The dependency graph:
 
 ```
-Preflight (sequential — reset stack, install CLI, verify health)
+Preflight (sequential - reset stack, install CLI, verify health)
   │
-  ├─ Agent A: Sections 2 + 3 — Release artifacts, webhook/polling mode
-  ├─ Agent B: Section 4 — Core CLI read-only (all command groups)
-  ├─ Agent C: Section 8 — Dashboard UI (browser-qa-agent)
+  ├─ Agent A: Sections 2 + 3 - Release artifacts, webhook/polling mode
+  ├─ Agent B: Section 4 - Core CLI read-only (all command groups)
+  ├─ Agent C: Section 8 - Dashboard UI (browser-qa-agent)
   │   └── All three run in parallel (Batch 1, read-only)
   │
-  ├─ Section 5 — Repo & system management (write ops, sequential)
-  ├─ Section 6 — Workflow lifecycle (sequential, skip execution if no token budget)
-  └─ Section 7 — Trigger lifecycle (sequential, depends on repos + workflows)
+  ├─ Section 5 - Repo & system management (write ops, sequential)
+  ├─ Section 6 - Workflow lifecycle (sequential, skip execution if no token budget)
+  └─ Section 7 - Trigger lifecycle (sequential, depends on repos + workflows)
       └── Batch 2-3: sequential, uses IDs from Batch 1
 ```
 
 **Rules for parallel execution:**
-- Batch 1 agents are fully independent — launch all three in a single message
+- Batch 1 agents are fully independent - launch all three in a single message
 - Batch 2-3 must wait for Batch 1 to complete (need discovered IDs)
 - Dashboard agent should use `sdlc:browser-qa-agent` subagent type
 - Each agent reports `[PASS]`/`[FAIL]`/`[SKIP]` per check
@@ -58,12 +135,12 @@ Preflight (sequential — reset stack, install CLI, verify health)
 ## Prerequisites
 
 - A **private test repo** with the GitHub App installed (for trigger/event tests)
-- `ANTHROPIC_API_KEY` configured (for workflow execution tests — costs real tokens)
+- `ANTHROPIC_API_KEY` configured (for workflow execution tests - costs real tokens)
 - Access to the dashboard at `http://localhost:8137` (or your configured URL)
 
 > **CRITICAL: Test repo policy.**
 >
-> - This runbook MUST always run against the **selfhost stack** — never the dev stack.
+> - This runbook MUST always run against the **selfhost stack** - never the dev stack.
 > - **NEVER run trigger or workflow tests against public `syntropic137/*` repos.**
 >   Use a private sandbox repo (e.g., `NeuralEmpowerment/sandbox_syn-engineer`).
 >   Testing against public repos creates noise in the repo's event history, can
@@ -76,7 +153,7 @@ Preflight (sequential — reset stack, install CLI, verify health)
 ## 0. Reset and Upgrade Selfhost Stack
 
 > **MANDATORY before every validation run.** Don't bother checking what's
-> currently running — tear it down, upgrade, and verify. This ensures clean
+> currently running - tear it down, upgrade, and verify. This ensures clean
 > state, correct GHCR images, and reproducible results every time.
 >
 > `npx @syntropic137/setup update` is the single command that pulls the
@@ -118,7 +195,7 @@ npx @syntropic137/setup update
 docker ps --format "table {{.Image}}\t{{.Status}}\t{{.Names}}" | grep syn137
 ```
 
-- [ ] Images are `ghcr.io/syntropic137/*` (GHCR digests) — **not** `syntropic137_development-*:latest`
+- [ ] Images are `ghcr.io/syntropic137/*` (GHCR digests) - **not** `syntropic137_development-*:latest`
 - [ ] All containers show healthy status
 
 ```bash
@@ -129,7 +206,7 @@ curl -s http://localhost:8137/health
 
 > **Troubleshooting:** If you see `syntropic137_development-*:latest` images,
 > the stack is running locally-built dev images instead of published GHCR images.
-> This means the update didn't work correctly — tear down and re-initialize.
+> This means the update didn't work correctly - tear down and re-initialize.
 
 ### Step 4: Verify clean state
 
@@ -171,7 +248,7 @@ gh api "/repos/$TEST_REPO/installation" --jq '.id' 2>&1 | head -1
 ## 1. Install CLI from npm
 
 > **CRITICAL: Use published artifacts only.** Always install the CLI from npm
-> (`@syntropic137/cli`) — never build from source or use `node dist/syn.js`.
+> (`@syntropic137/cli`) - never build from source or use `node dist/syn.js`.
 > The purpose of this runbook is to validate the **published release artifacts**
 > that users will actually use. Building from source validates your local checkout,
 > not the release.
@@ -274,12 +351,12 @@ curl -s http://localhost:8137/health | jq .
 
 > Source of truth: `packages/syn-domain/.../github/_shared/event_availability.py`
 
-Mark the appropriate sections below as "skip — requires webhook" when running
+Mark the appropriate sections below as "skip - requires webhook" when running
 in polling-only mode.
 
 ---
 
-## 4. Functional Validation — Core CLI (Read-Only)
+## 4. Functional Validation - Core CLI (Read-Only)
 
 > **Fresh stack note:** After a data reset (Section 0), most commands that take
 > `<id>` arguments will have no data. For these commands, verify they return
@@ -400,8 +477,10 @@ syn triggers show <trigger-id>
 syn triggers history <trigger-id>
 ```
 
-- [ ] Trigger rules listed with safety guards (max_fires, cooldown)
-- [ ] `--all` flag shows triggers across all repos
+- [ ] Trigger rules listed with safety guards (`max_attempts`, `cooldown`)
+- [ ] `--all` flag includes **deleted** triggers (cross-repo listing is the default;
+      `--repo` narrows it)
+- [ ] `--status active|paused|deleted` filters correctly
 - [ ] Trigger detail shows event type and conditions
 - [ ] Trigger history shows past firings
 
@@ -494,12 +573,12 @@ syn artifacts content <artifact-id>
 - [ ] Artifact listing works (may be empty on fresh stack)
 - [ ] Artifact detail and content render (if artifacts exist)
 
-> **Note:** `syn artifacts create` is tested in Section 6 after a workflow
-> execution produces artifacts.
+> **Note:** `syn artifacts create` is tested in Section 6 ("Create an artifact
+> manually"), after a workflow execution has produced artifacts to list alongside.
 
 ---
 
-## 5. Functional Validation — Repo & System Management (Write Operations)
+## 5. Functional Validation - Repo & System Management (Write Operations)
 
 ### Register a repository
 
@@ -545,11 +624,11 @@ syn repo unassign <repo-id>
 
 ---
 
-## 6. Functional Validation — Workflow Lifecycle
+## 6. Functional Validation - Workflow Lifecycle
 
 > **COST WARNING: This section runs real workflows that consume Anthropic API tokens.**
 >
-> Running workflow executions is mandatory for a complete validation — without it,
+> Running workflow executions is mandatory for a complete validation - without it,
 > the core product loop (workflow → agent → observability) is untested. However,
 > it costs real money.
 >
@@ -581,7 +660,7 @@ syn workflow validate <path-to-workflow.yaml>
 > this chain has friction, the onboarding story fails. Test this from a clean state
 > (no workflows on the stack) to validate the real first-run experience.
 
-**Clean slate** — delete existing workflows first (if any):
+**Clean slate** - delete existing workflows first (if any):
 
 ```bash
 syn workflow list
@@ -721,6 +800,28 @@ syn artifacts content <artifact-id>
 
 - [ ] Artifacts collected from execution (if workflow produces any)
 - [ ] Content is retrievable
+- [ ] **Only real outputs are collected** - no `.pytest_cache/`, `__pycache__/`, `.git/`
+      or other build/cache directories appear in the list
+- [ ] Binary files are not classified as `type: text`
+
+> A workflow whose agent runs tests will surface this immediately: as of v0.25.4 a run
+> producing 3 real outputs collected 9 artifacts, 6 of them cache junk including binary
+> `.pyc` files typed as `text`.
+
+### Create an artifact manually
+
+```bash
+echo "validation probe" > /tmp/syn-probe.txt
+syn artifacts create --file /tmp/syn-probe.txt --type report
+syn artifacts list
+syn artifacts show <artifact-id>
+syn artifacts content <artifact-id>
+```
+
+- [ ] Artifact created and assigned an ID
+- [ ] Appears in `syn artifacts list`
+- [ ] `content` returns the uploaded bytes
+- [ ] `syn artifacts show <id> --no-content` omits the body
 
 ### Update workflow package
 
@@ -734,13 +835,28 @@ syn workflow update <package-name>
 
 ### Initialize a new workflow from template
 
+> `init` takes an optional `<directory>` positional and scaffolds into it (defaulting
+> to the **current** directory). `--name` sets the workflow name inside the YAML; it
+> does NOT create a directory. `--type` is a free-form label (default `custom`);
+> package shape is selected by the separate `--multi` boolean.
+
 ```bash
-syn workflow init --name test-workflow --type single
-syn workflow validate test-workflow
+syn workflow init ./test-workflow --name test-workflow
+syn workflow validate ./test-workflow
 ```
 
 - [ ] Scaffolds a new workflow YAML file into `./test-workflow/`
 - [ ] Generated file passes `syn workflow validate`
+
+Multi-workflow package variant:
+
+```bash
+syn workflow init ./test-package --name test-package --multi --phases 3
+syn workflow validate ./test-package
+```
+
+- [ ] `--multi` scaffolds a multi-workflow package
+- [ ] `--phases` controls generated phase count
 
 ### Export workflow
 
@@ -763,7 +879,265 @@ syn workflow uninstall <package-name>
 
 ---
 
-## 7. Functional Validation — Trigger Lifecycle & Round-Trip
+## 6.1 Functional Validation - Agent Providers & Codex Harness
+
+> Added for the codex bridge (#779), opt-in codex/claude delegation (#785), per-phase
+> provider selection (#786), and codex transcript rendering (#791).
+
+A phase selects its harness with a per-phase `agent:` block:
+
+```yaml
+phases:
+  - id: implement
+    agent:
+      provider: claude | claude-interactive | codex
+      agent_id: claude | codex | gemini     # only meaningful for claude-interactive
+      model: <model-id>                     # ignored for codex
+      allow_delegation: false
+```
+
+Canonical enum: `AgentProvider` in
+`packages/syn-shared/src/syn_shared/agents.py`.
+
+### Preconditions (codex)
+
+Codex authenticates with a **file-injected `~/.codex/auth.json`** (ChatGPT
+subscription), never an API key in argv or env.
+
+```bash
+# 1. Stage the credential (reads ~/.codex/auth.json, honours CODEX_HOME)
+just codex-auth-clip --dotenv        # writes CODEX_AUTH_JSON= into .env
+
+# 2. The workspace image MUST contain the codex binary
+docker run --rm "${SYN_WORKSPACE_DOCKER_IMAGE:-ghcr.io/agentparadise/agentic-workspace-claude-cli:latest}" codex --version
+
+# 3. Codex needs egress to api.openai.com (the Envoy sidecar is Anthropic-only and
+#    is skipped for codex phases, so codex requires direct/allowlisted egress)
+```
+
+- [ ] `CODEX_AUTH_JSON` is set on the stack
+- [ ] `codex --version` succeeds inside the workspace image
+- [ ] `api.openai.com` is reachable from the agent network
+
+> **Blocker if any fail.** A codex phase with no credential, no binary, or no egress
+> fails at provisioning or produces a broken stream.
+
+### Run a codex workflow (costs tokens)
+
+Two example workflows ship in `workflows/examples/` and are seeded by `just dev` /
+`just selfhost-seed`:
+
+| File | What it proves |
+|---|---|
+| `codex-demo.yaml` | Single codex phase, no repo required. The primary probe. |
+| `codex-delegates-to-claude.yaml` | `provider: codex` + `allow_delegation: true`; proves dual-auth staging and delegation-skill install. |
+
+> `multi-agent-claude-then-codex-markers.yaml` is **not** the codex bridge - it is
+> `provider: claude-interactive` with `agent_id: codex` (a tmux pane). Do not use it
+> to validate this section.
+
+```bash
+syn workflow run <codex-demo-workflow-id>
+syn execution show <execution-id>
+```
+
+- [ ] Execution completes with phase exit 0
+
+> **Exit-0 is load-bearing.** A codex run missing its terminal `turn.completed` event
+> sets `error_reason` and the handler forces exit 1. Exit 0 therefore proves the
+> stream terminated cleanly.
+
+### Verify codex observability
+
+```bash
+syn sessions show <session-id>
+syn events timeline <session-id>
+syn costs session <session-id>
+syn conversations show <session-id>
+uv run python scripts/validate_codex_observability.py --execution <execution-id>
+```
+
+- [ ] Session records `agent_provider = codex`
+- [ ] Timeline shows `Bash` ops (from `command_execution`) and `Edit` ops (from `file_change`)
+- [ ] Token usage non-zero, with `cache_creation == 0` (codex reports no cache-creation)
+- [ ] Exactly **one** session summary is recorded
+- [ ] Cost is priced off `gpt-5.6` (alias of `codex`) - **not** a sonnet/haiku rate
+- [ ] Transcript renders raw codex JSONL: `agent_message` as assistant text, `turn.completed` as `result`
+- [ ] CLI banner noise is absent from the transcript (`Reading additional input from stdin`, `warning: --full-auto is deprecated`)
+- [ ] `validate_codex_observability.py` exits 0
+
+### Codex security assertions
+
+```bash
+# During/after the run, against the workspace container:
+docker exec <workspace> ls -l /root/.codex/auth.json      # expect mode 0600
+docker exec <workspace> ls /workspace/.setup/             # codex-auth.json must be GONE
+docker exec <workspace> env | grep -E 'ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN'
+```
+
+- [ ] `~/.codex/auth.json` is mode 0600
+- [ ] Staged `/workspace/.setup/codex-auth.json` was removed after setup (fail-closed check)
+- [ ] A **pure codex** phase has NO `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` in its env (cross-provider isolation)
+- [ ] No credential appears in container logs or process argv
+
+### Delegation round-trip (optional, costs tokens)
+
+```bash
+syn workflow run <codex-delegates-to-claude-id>
+```
+
+- [ ] Both codex auth **and** claude env are staged when `allow_delegation: true`
+- [ ] The `delegating-to-claude-p` skill is installed into the codex phase
+- [ ] The transcript shows the primary agent actually invoking the other CLI
+      (e.g. `tool_use Bash /usr/local/bin/claude`) and receiving a real answer back
+- [ ] Delegated sub-agent sessions appear linked to the parent via `parent_session_id` (#792)
+
+> **Do not infer credential staging from `docker exec <ws> env`.** Agent credentials are
+> passed per-process via `workspace.stream(..., environment=agent_env)`, not baked into
+> the container environment, so they are correctly invisible to `docker exec`. The valid
+> test is whether the delegated CLI call succeeds.
+
+> **Known gap (as of this revision):** a successful delegation produces exactly **one**
+> session, with `parent_session_id: None`. The delegated call's tokens and cost are
+> folded into the parent session. Assert the session **count** as well as the linkage -
+> a single session for a delegating phase is a failure, not a pass.
+
+### Dashboard - provider surface
+
+- [ ] Session list and detail show an agent badge reading **"Codex"**
+- [ ] A codex session shows **no** workspace-environment badge (shared image, by design)
+- [ ] Workflow phase editor exposes a provider dropdown (Claude / Codex / Claude (interactive))
+- [ ] Selecting **Codex** hides the model field (codex ignores `model`)
+- [ ] Codex transcript lines render, including `log` lines for CLI diagnostics
+
+---
+
+## 6.2 Functional Validation - Skill Injection
+
+> Added for harness-agnostic skill injection (#772 / #774). **Plan 1 of 3** - the CLI
+> surface (`syn skill*`) is Plan 2 and does **not** exist yet.
+
+### Known surface limits (do not treat these as bugs)
+
+- The **only** write surface is `POST /skills/registrations`. There is no list, get,
+  or delete endpoint, and no `syn skill` command.
+- The marketplace does **not** serve skills, and `syn workflow install` does **not**
+  preflight them. A marketplace workflow declaring `skills:` installs cleanly and then
+  fails at execution with `SkillNotRegistered`.
+- `claude_plugins` and `skills` coexist; nothing is deprecated until Plan 3.
+
+### Precondition: the skills CLI must exist in the workspace image
+
+```bash
+docker run --rm "${SYN_WORKSPACE_DOCKER_IMAGE:-ghcr.io/agentparadise/agentic-workspace-claude-cli:latest}" skills --version
+```
+
+- [ ] `skills` CLI present (expected pin: 1.5.14)
+- [ ] `skills add --help` accepts agent keys `claude-code`, `codex`, `gemini-cli`
+
+> If this binary is missing, **every** skills-declaring phase fails at provisioning.
+
+### Register a skill
+
+The API does no git work - the client clones and POSTs the file tree (ADR-066).
+
+```bash
+git clone --depth 1 --branch <tag> https://github.com/anthropics/skills /tmp/sk
+# Build payload: files[] = {rel_path (SKILL.md at root), content_base64}
+curl -sS -X POST "$SYN_API_URL/skills/registrations" \
+  -H 'content-type: application/json' -d @/tmp/payload.json
+```
+
+- [ ] 201 with `skill_name`, `resolved_sha`, `tree_storage_prefix` (`skills/sha256-<hash>`)
+- [ ] Re-POSTing the identical body returns the **same** `resolved_sha` (idempotent)
+- [ ] MinIO contains `skills/sha256-<hash>/manifest.json`
+
+Negative cases:
+
+- [ ] `rel_path: "../evil"` → 422 unsafe-path error code
+- [ ] Malformed base64 → 400
+- [ ] Tree with no `SKILL.md` → 422 manifest-missing
+- [ ] > 10,000 files or > 50 MiB → 413
+
+### Declare skills in a workflow
+
+`skills:` is accepted at **both** workflow scope and phase scope. Phase-scope refs
+merge with workflow-scope refs (deduped by `source_url` + `version` + `name`).
+
+```yaml
+skills:
+  - "anthropics/skills/frontend-design@v1.2.0"   # org/repo/skill-name@version
+  - "https://github.com/acme/tdd-skill@v2.0.0"   # <url>@<version>
+  - source: github.com/acme/skills               # verbose form
+    version: feature/branch-with-slash
+    names: [alpha, beta]
+```
+
+- [ ] `@latest` is rejected
+- [ ] Two-segment `org/repo@ver` (the plugin-era shape) is rejected with a corrective message
+- [ ] Declaring an **unregistered** skill fails with `SkillNotRegistered` rather than running skill-less
+
+> **No repo currently ships a skills-declaring workflow YAML.** Author one for this
+> section; the closest reference is the fixture inside
+> `packages/syn-domain/.../handlers/test_skills_end_to_end.py`.
+
+### Prove the skill actually reached the agent
+
+Staging alone is not proof - `.syn-skills/` is only the drop point; `skills add`
+performs the per-harness install.
+
+```bash
+docker exec <workspace> ls -R /workspace/.syn-skills/<skill-name>
+docker exec <workspace> skills list
+docker logs syn137-api 2>&1 | grep "Installed .* skill"
+```
+
+- [ ] `/workspace/.syn-skills/<name>/SKILL.md` present in the container
+- [ ] `skills list` (or `~/.claude/skills` for claude) shows the skill **installed**
+- [ ] API logged `Installed N skill(s) for agent <key>`
+- [ ] Conflicting versions of the same skill name abort the run (no silent last-wins)
+- [ ] A phase declaring skills with a broken materializer **fails** - it must never run skill-less
+
+---
+
+## 6.3 Functional Validation - Claude Plugin Injection
+
+> Added for workflow-scoped claude plugin injection (#726 / #764). Entire command
+> group was absent from this runbook.
+
+```bash
+syn claude-plugin list                       # platform lock projection (API-backed)
+syn claude-plugin installed                  # local install registry
+syn claude-plugin show <name> <version>
+syn claude-plugin install <ref>
+syn claude-plugin install <ref> --global
+syn claude-plugin global list
+syn claude-plugin global add <name> <version>
+syn claude-plugin global remove <name> <version>
+```
+
+- [ ] `list` returns the platform lock without errors
+- [ ] `installed` reads the local registry
+- [ ] `show` renders plugin metadata
+- [ ] `install` registers a plugin and it appears in `list`
+- [ ] `--global` promotes it; `global list` reflects it
+- [ ] `global remove` demotes it
+
+> **Note:** `syn claude-plugin installed` DOES exist, while `syn workflow installed`
+> was renamed to `syn workflow packages`. Do not confuse them.
+
+### Install preflight
+
+`syn workflow install` resolves any `claude_plugins:` declared in the package YAML
+**before** mutating the API.
+
+- [ ] Installing a package with a valid `claude_plugins:` ref succeeds
+- [ ] A package referencing an unresolvable plugin **aborts the install** cleanly
+      (does not leave a half-created workflow)
+
+---
+
+## 7. Functional Validation - Trigger Lifecycle & Round-Trip
 
 ### Verify event poller is running before testing round-trips
 
@@ -819,8 +1193,8 @@ syn triggers show <trigger-id>
 syn triggers resume <trigger-id>
 ```
 
-- [ ] Trigger paused — shows paused status
-- [ ] Trigger resumed — shows active status
+- [ ] Trigger paused - shows paused status
+- [ ] Trigger resumed - shows active status
 
 ### Polling-based round-trip: PR review → trigger → execution
 
@@ -857,7 +1231,7 @@ syn triggers history <trigger-id>
 - [ ] Trigger fired in response to the review
 - [ ] Correct workflow associated with the trigger
 - [ ] Execution started for the triggered workflow
-- [ ] No duplicate triggers (dedup working — verify with a second poll cycle)
+- [ ] No duplicate triggers (dedup working - verify with a second poll cycle)
 
 6. **Monitor the triggered execution:**
 
@@ -896,7 +1270,7 @@ syn triggers history <trigger-id>
 ### Webhook-based round-trip: self-healing (requires tunnel)
 
 > **Skip if no Cloudflare Tunnel is configured.** The `self-healing` preset uses
-> `check_run.completed` which is webhook-only — not available via the Events API.
+> `check_run.completed` which is webhook-only - not available via the Events API.
 
 1. **Ensure tunnel is active** (check Cloudflare Zero Trust dashboard)
 
@@ -926,8 +1300,12 @@ syn triggers history <trigger-id>
 syn triggers show <trigger-id>
 ```
 
-- [ ] `max_fires` — trigger stops firing after limit reached
-- [ ] `cooldown` — trigger respects cooldown period between fires
+- [ ] `max_attempts` - trigger stops firing after limit reached
+- [ ] `cooldown` - trigger respects cooldown period between fires
+
+> **Partially testable.** `daily_limit` (20) and `debounce_seconds` (0) are hardcoded
+> in the CLI and not exposed as flags, so only `max_attempts` and `cooldown` can be
+> exercised end-to-end.
 
 ### Trigger cleanup
 
@@ -941,7 +1319,7 @@ syn triggers disable-all --repo owner/repo --force
 
 ---
 
-## 8. Functional Validation — Dashboard (Playwright)
+## 8. Functional Validation - Dashboard (Playwright)
 
 > **Use Playwright for automated dashboard validation.** When run by Claude Code,
 > use the `sdlc:browser-qa-agent` subagent type with Playwright MCP tools to
@@ -983,15 +1361,20 @@ Navigate to `http://localhost:8137` via Playwright.
 
 ### Real-time
 
-- [ ] SSE connection active — `GET /api/v1/sse/activity` returns 200 and stays open (check network tab for the persistent SSE request, not a `ws://` WebSocket — the dashboard uses SSE)
+- [ ] SSE connection active - `GET /api/v1/sse/activity` returns 200 and stays open (check network tab for the persistent SSE request, not a `ws://` WebSocket - the dashboard uses SSE)
 - [ ] Dashboard shows green "Live" dot in top-right corner
 - [ ] Live updates appear when new events are recorded
 
 ### Insights
 
-- [ ] Overview page loads with system health
-- [ ] Cost breakdown page renders
-- [ ] Heatmap shows activity over time
+> **As of v0.25.4 these three routes render the same "Coming Soon" placeholder** and are
+> not distinct views. Validate that they load without a crash; do NOT assert on charts
+> until the pages are implemented.
+
+- [ ] `/insights` loads without a crash or error boundary
+- [ ] `/insights/cost` loads without a crash or error boundary
+- [ ] `/insights/heatmap` loads without a crash or error boundary
+- [ ] If these now render real content, update this section and assert on the charts
 
 ---
 
@@ -1004,7 +1387,7 @@ Run this section **after Section 8** (so sessions and executions from Section 6 
 > ```bash
 > claude plugin install syntropic137
 > ```
-> The plugin connects to `http://localhost:8137` by default — the same selfhost stack
+> The plugin connects to `http://localhost:8137` by default - the same selfhost stack
 > used in Sections 0–8.
 
 ### Plugin update (always run first)
@@ -1035,14 +1418,14 @@ claude plugin update syntropic137@syntropic137
 | `/syn-observe <session-id> events` | Returns event timeline for a session from Section 6 |
 
 - [ ] All commands above return results without errors
-- [ ] No commands reference deprecated field names (`window_cost_usd`) or removed subcommands (`syn workflow installed` — renamed to `syn workflow packages`)
+- [ ] No commands reference deprecated field names (`window_cost_usd`) or removed subcommands (`syn workflow installed` - renamed to `syn workflow packages`)
 
 ### Skill validation
 
 Invoke these skills and verify they give correct guidance:
 
-- [ ] **`execution-control` skill**: Walk through pause/resume guidance — references valid CLI flags
-- [ ] **`observability` skill**: Query tool timeline for a session from Section 6 — cost fields use `recent_cost_usd`
+- [ ] **`execution-control` skill**: Walk through pause/resume guidance - references valid CLI flags
+- [ ] **`observability` skill**: Query tool timeline for a session from Section 6 - session output uses server-rendered `*_display` fields (`total_cost_display`, `total_tokens_display`, `agent_model_display`, `duration_display`) per ADR-064, not client-formatted numbers
 - [ ] **`marketplace` skill**: Workflow install/list guidance uses `syn workflow packages` (not `syn workflow installed`) with a note that `syn workflow list` shows the live stack
 
 ### Clean state note
@@ -1053,6 +1436,93 @@ the stack. Clear it before a clean-slate plugin validation:
 ```bash
 rm -f ~/.syntropic137/workflows/installed.json
 ```
+
+---
+
+## 9.5 Validate the Runbook Itself
+
+> **Run this every time.** A validation runbook that has drifted from the code gives
+> false confidence: it passes on commands that no longer matter and never exercises the
+> features most likely to be broken (the new ones). This runbook was 4 months and 71
+> commits stale when this section was added, and was missing every capability shipped
+> in that window.
+
+### Checkout currency check (do this FIRST)
+
+Validating a stale checkout produces confident, wrong findings. A prior pass reported a
+release-blocking cost bug that had already been fixed 5 commits ahead on `origin/main`.
+
+```bash
+git fetch origin
+git status -sb | head -1          # must NOT say "behind"
+git rev-list --count HEAD..origin/main   # must be 0
+```
+
+- [ ] Local `HEAD` is level with `origin/main` (or the divergence is deliberate and recorded)
+- [ ] `git status --short` captured in the report, so results are attributable to a tree state
+
+### Drift check
+
+```bash
+# When was the runbook last updated, and how much has landed since?
+git log -1 --format='%h %ad %s' --date=short -- docs/testing/post-release-validation.md
+git log --oneline $(git log -1 --format=%H -- docs/testing/post-release-validation.md)..HEAD | wc -l
+git log --oneline $(git log -1 --format=%H -- docs/testing/post-release-validation.md)..HEAD \
+  | grep -iE 'feat|BREAKING'
+```
+
+- [ ] Every `feat:` commit since the last runbook update maps to a section here, or is
+      explicitly recorded as out of scope
+- [ ] No section references a command that no longer exists
+
+### Command coverage check
+
+```bash
+# Enumerate the real CLI surface and diff it against what this document exercises
+grep -rn "registerCommand\|name:" apps/syn-cli-node/src/registry.ts | head -60
+```
+
+- [ ] Every command group in `registry.ts` appears in §4 or the feature matrix
+- [ ] Commands referenced here still exist with the same flag signatures
+- [ ] Every slash command in `lib/syntropic137-claude-plugin/commands/` is in §9
+- [ ] Every skill in `lib/syntropic137-claude-plugin/skills/` is in §9
+
+### Schema currency check
+
+Generated schemas drift silently because `just docs-sync` does not cover them.
+
+```bash
+grep -A4 '"provider"' schemas/plugin/workflow.schema.json
+grep -c '"skills"' schemas/plugin/workflow.schema.json
+grep -c 'CODEX_AUTH_JSON' .env.example
+```
+
+- [ ] `provider` enum includes every value in `AgentProvider` (`claude`, `claude-interactive`, `codex`)
+- [ ] `skills` is present in the published workflow schema
+- [ ] Every Pydantic setting has a corresponding `.env.example` entry
+
+### Deployment-parity check
+
+Every credential the product needs must reach the API container in **all** overlays,
+not just dev. This is the class of bug that makes a feature work for the maintainer
+and fail for every user.
+
+```bash
+for f in docker/docker-compose.yaml docker/docker-compose.selfhost.yaml \
+         docker/docker-compose.ondemand.yaml docker/docker-compose.syntropic137.yaml; do
+  echo "== $f"; grep -cE 'ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|CODEX_AUTH_JSON' "$f"
+done
+```
+
+- [ ] Each agent credential appears in the selfhost overlay AND the published bundle,
+      not only in `docker-compose.dev.yaml`
+- [ ] `just gen-compose` regenerated after any overlay change
+
+### After the run
+
+- [ ] Findings folded back into this runbook as new checks (so the same bug cannot
+      pass silently next time)
+- [ ] Steps that failed *as written* corrected in place
 
 ---
 
@@ -1075,7 +1545,7 @@ for closing gaps, planning hotfixes, and tracking launch readiness across versio
 ### What to capture
 
 The report is the primary context artifact for follow-up work. It should be
-**self-contained** — a future Claude Code agent or developer should be able to read
+**self-contained** - a future Claude Code agent or developer should be able to read
 this single file and understand exactly what works, what's broken, what's friction,
 and what to do next.
 
@@ -1107,7 +1577,7 @@ commands pass"). This builds confidence in what's solid.
 Every finding gets a severity, a clear description, root cause, fix suggestion,
 and impact on the user/agent onboarding experience.
 
-### P0 — Critical (blocks core functionality)
+### P0 - Critical (blocks core functionality)
 
 Release-blocking issues. The product cannot deliver its core value with these present.
 Requires a hotfix release.
@@ -1116,7 +1586,7 @@ Requires a hotfix release.
 |---|-------|------------|-----|--------|
 |   |       |            |     |        |
 
-### P1 — High (significant friction or breakage)
+### P1 - High (significant friction or breakage)
 
 Not release-blocking but causes real pain. Should be fixed in the next release.
 
@@ -1124,7 +1594,7 @@ Not release-blocking but causes real pain. Should be fixed in the next release.
 |---|-------|------------|-----|--------|
 |   |       |            |     |        |
 
-### P2 — Medium (UX issues, incorrect behavior)
+### P2 - Medium (UX issues, incorrect behavior)
 
 Works but the experience is wrong or confusing. Fix when convenient.
 
@@ -1132,7 +1602,7 @@ Works but the experience is wrong or confusing. Fix when convenient.
 |---|-------|------------|-----|--------|
 |   |       |            |     |        |
 
-### P3 — Low (cosmetic, minor inconsistencies)
+### P3 - Low (cosmetic, minor inconsistencies)
 
 Polish items. Address in a cleanup pass.
 
@@ -1140,9 +1610,9 @@ Polish items. Address in a cleanup pass.
 |---|-------|------------|-----|--------|
 |   |       |            |     |        |
 
-### Info — Enhancements & Observations
+### Info - Enhancements & Observations
 
-Not bugs — ideas for improvement discovered during validation. Things that would
+Not bugs - ideas for improvement discovered during validation. Things that would
 make the onboarding smoother, the DX better, or the product more self-explanatory.
 
 | # | Title | Description | Value |
@@ -1192,7 +1662,8 @@ Full pass/fail/skip for every command and feature tested.
 | **Workflows**                      |        |       |
 | syn workflow list/show/search      |        |       |
 | syn workflow validate              |        |       |
-| syn workflow install/installed     |        |       |
+| syn workflow install/packages      |        |       |
+| syn workflow create/status         |        |       |
 | syn workflow run                   |        |       |
 | syn workflow update (--dry-run)    |        |       |
 | syn workflow export                |        |       |
@@ -1201,6 +1672,31 @@ Full pass/fail/skip for every command and feature tested.
 | **Marketplace**                    |        |       |
 | syn marketplace list/refresh       |        |       |
 | syn marketplace add/remove         |        |       |
+| **Agent Providers & Codex**        |        |       |
+| codex credential reaches API       |        |       |
+| workspace image has codex binary   |        |       |
+| codex phase runs to exit 0         |        |       |
+| session records provider=codex     |        |       |
+| codex cost priced off gpt-5.6      |        | not haiku |
+| codex transcript renders           |        |       |
+| CLI banner noise filtered          |        |       |
+| codex auth 0600 + staged file gone |        |       |
+| no anthropic creds in codex phase  |        |       |
+| codex->claude delegation           |        | optional |
+| parent_session_id sub-session link |        |       |
+| **Skills**                         |        |       |
+| workspace image has skills CLI     |        |       |
+| POST /skills/registrations         |        |       |
+| registration idempotent (same sha) |        |       |
+| unsafe path / bad base64 rejected  |        |       |
+| workflow YAML `skills:` parsed     |        |       |
+| skill installed in container       |        |       |
+| unregistered skill fails loudly    |        |       |
+| **Claude Plugins**                 |        |       |
+| syn claude-plugin list/installed   |        |       |
+| syn claude-plugin show/install     |        |       |
+| syn claude-plugin global add/rm    |        |       |
+| workflow install plugin preflight  |        |       |
 | **Executions**                     |        |       |
 | syn execution list/show            |        |       |
 | syn execution list --status        |        |       |
@@ -1240,7 +1736,7 @@ Full pass/fail/skip for every command and feature tested.
 | Dashboard loads                    |        |       |
 | Dashboard navigation               |        |       |
 | Session/execution detail views     |        |       |
-| Real-time updates (WebSocket)      |        |       |
+| Real-time updates (SSE)            |        |       |
 | Insights pages                     |        |       |
 
 ## Performance / Reliability Notes
@@ -1296,7 +1792,7 @@ Build only the images that changed. The build uses the base compose file plus th
 selfhost overlay (which adds build args, entrypoints, etc.):
 
 ```bash
-# From docker/ directory — build only the image(s) you need
+# From docker/ directory - build only the image(s) you need
 cd docker
 
 # API (includes domain packages + adapters)
@@ -1355,7 +1851,7 @@ behavior:
 |---------|-----------------|
 | API/domain fix | Section 4 (relevant commands) + Section 6 (workflow lifecycle) |
 | CLI fix | Section 4 (relevant commands) |
-| Gateway/CSP fix | Section 8 (dashboard — check console for CSP violations) |
+| Gateway/CSP fix | Section 8 (dashboard - check console for CSP violations) |
 | Cost calculation fix | Section 4 (`syn costs`, `syn execution show`) |
 | Input validation fix | Section 6 (workflow run with missing inputs) |
 
@@ -1419,7 +1915,7 @@ Once all findings pass re-validation:
 1. Commit, push, and create a PR for all fixes
 2. Merge to `main`
 3. Bump version: `just bump-version <next-patch>`
-4. PR `main` → `release` — triggers the full release pipeline
+4. PR `main` → `release` - triggers the full release pipeline
 5. After release publishes, run `npx @syntropic137/setup update` on the selfhost
    stack to pull the new GHCR images with the fixes baked in
 6. Run a final smoke test (Sections 1-4) against the updated selfhost stack

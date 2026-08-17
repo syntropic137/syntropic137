@@ -64,6 +64,16 @@ class ModelId(StrEnum):
     fallback.
     """
 
+    # --- Current generation (ADR-067 phase 0, verified 2026-08-16) ---
+    CLAUDE_OPUS_5 = "claude-opus-5"
+    CLAUDE_SONNET_5 = "claude-sonnet-5"
+    CLAUDE_FABLE_5 = "claude-fable-5"
+    CLAUDE_HAIKU_4_5 = "claude-haiku-4-5-20251001"
+    GPT_5_6_SOL = "gpt-5.6-sol"
+    # --- Previous generation ---
+    CLAUDE_OPUS_4_5 = "claude-opus-4-5-20251101"
+    CLAUDE_SONNET_4_5 = "claude-sonnet-4-5-20250929"
+    # --- Legacy ---
     GPT_5_6 = "gpt-5.6"
     CLAUDE_OPUS_4 = "claude-opus-4-20250514"
     CLAUDE_SONNET_4 = "claude-sonnet-4-20250514"

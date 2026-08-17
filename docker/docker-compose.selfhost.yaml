@@ -206,6 +206,9 @@ services:
       # Agent credentials (for workspace containers)
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Codex auth.json contents, staged into ~/.codex/auth.json during setup.
+      # Without this a phase with `agent.provider: codex` fails to provision.
+      - CODEX_AUTH_JSON=${CODEX_AUTH_JSON:-}
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
       - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-${PWD}}/workspaces

@@ -43,7 +43,7 @@ export const searchCommand: CommandDef = {
     if (results.length === 0) {
       printDim("No workflows found.");
       if (!query && !category && !tag) {
-        printDim("Add a marketplace first: syn marketplace add syntropic137/workflow-library");
+        printDim("Add a marketplace first: syn marketplace add syntropic137/syntropic137-marketplace");
       }
       return;
     }

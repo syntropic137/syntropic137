@@ -164,25 +164,14 @@ from syn_shared.pricing import (  # noqa: E402
 from syn_shared.pricing import (  # noqa: E402
     ModelPricing as SharedModelPricing,
 )
-from syn_shared.pricing import (  # noqa: E402
-    get_model_pricing as _get_shared_pricing,
-)
 
 DEFAULT_MODEL_PRICING: dict[str, ModelPricing] = {
     k: ModelPricing.from_shared(v) for k, v in _SHARED_TABLE.items()
 }
 
-
-def get_model_pricing(model_id: str) -> ModelPricing:
-    """Get pricing for a model, with fallback to Sonnet pricing.
-
-    Delegates to ``syn_shared.pricing.get_model_pricing()`` and wraps
-    the result in the domain ``ModelPricing`` type.
-
-    Args:
-        model_id: The model identifier.
-
-    Returns:
-        ModelPricing for the model.
-    """
-    return ModelPricing.from_shared(_get_shared_pricing(model_id))
+# NOTE (ADR-067 D4): a domain ``get_model_pricing`` wrapper used to live here,
+# re-exporting the Sonnet-defaulting resolver into the domain layer. It had no
+# production callers and its only effect was to make a silent mispricing
+# primitive importable from one more place. Use
+# ``syn_shared.pricing.price_tokens`` (reports unpriced) or
+# ``require_model_pricing`` (raises) instead.

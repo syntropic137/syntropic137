@@ -7,7 +7,12 @@ import pytest
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import (
     CostCalculator,
 )
-from syn_shared.pricing import MODEL_PRICING_TABLE, get_model_pricing
+from syn_shared.pricing import (
+    MODEL_PRICING_TABLE,
+    UnknownModelPricingError,
+    require_model_pricing,
+    resolve_model_pricing,
+)
 
 
 @pytest.mark.unit
@@ -77,19 +82,26 @@ class TestCostCalculator:
         assert cost == expected
 
     def test_shared_pricing_has_cache_rates(self) -> None:
-        pricing = get_model_pricing("claude-sonnet-4-20250514")
+        pricing = require_model_pricing("claude-sonnet-4-20250514")
         assert pricing.input_per_million == Decimal("3.00")
         assert pricing.output_per_million == Decimal("15.00")
         assert pricing.cache_creation_per_million == Decimal("3.75")
         assert pricing.cache_read_per_million == Decimal("0.30")
 
-    def test_shared_pricing_prefix_fallback(self) -> None:
-        pricing = get_model_pricing("claude-sonnet-4-20260101")
-        assert pricing.model_id == "claude-sonnet-4-20250514"
+    # ADR-067 D4: the two tests that lived here asserted the prefix-match
+    # heuristic and the unknown-model-to-Sonnet fallback. Both are removed:
+    # an unrecognised snapshot is unknown, not "priced like its family", since
+    # vendors reprice across snapshots (Opus 4 $15/$75 vs Opus 4.5 $5/$25).
 
-    def test_shared_pricing_unknown_model_defaults_to_sonnet(self) -> None:
-        pricing = get_model_pricing("unknown-model-123")
-        assert pricing.model_id == "claude-sonnet-4-20250514"
+    def test_unrecognised_snapshot_is_not_priced_by_family(self) -> None:
+        assert resolve_model_pricing("claude-sonnet-4-20260101") is None
+        with pytest.raises(UnknownModelPricingError):
+            require_model_pricing("claude-sonnet-4-20260101")
+
+    def test_unknown_model_is_not_priced_as_sonnet(self) -> None:
+        assert resolve_model_pricing("unknown-model-123") is None
+        with pytest.raises(UnknownModelPricingError):
+            require_model_pricing("unknown-model-123")
 
     def test_all_models_have_cache_pricing(self) -> None:
         for model_id, pricing in MODEL_PRICING_TABLE.items():

@@ -4,6 +4,8 @@ from decimal import Decimal
 
 import pytest
 
+from syn_shared.agents import ModelId
+from syn_shared.pricing import UnknownModelPricingError
 from syn_tokens.models import WorkflowType
 from syn_tokens.spend import (
     InMemoryBudgetStore,
@@ -74,11 +76,15 @@ class TestCalculateCost:
         expected += Decimal("500") * Decimal("15.00") / Decimal("1000000")
         assert cost == expected
 
-    def test_unknown_model_uses_default(self) -> None:
-        """Should use Sonnet pricing for unknown models."""
-        cost_unknown = calculate_cost(1000, 500, model="unknown-model")
-        cost_sonnet = calculate_cost(1000, 500, model="claude-3-5-sonnet-20241022")
-        assert cost_unknown == cost_sonnet
+    def test_unknown_model_raises_rather_than_substituting(self) -> None:
+        """An unknown model must never be priced as some other model.
+
+        Inverted for ADR-067 D4. This previously asserted that an unknown model
+        silently priced as Sonnet - which meant budget enforcement under-charged
+        any model missing from the table, in the cheap direction.
+        """
+        with pytest.raises(UnknownModelPricingError):
+            calculate_cost(1000, 500, model="unknown-model")
 
 
 class TestSpendTracker:
@@ -196,6 +202,7 @@ class TestSpendTracker:
             execution_id="exec-123",
             input_tokens=5_000,
             output_tokens=2_000,
+            model=ModelId.CLAUDE_SONNET_5,
         )
 
         assert budget.used_input_tokens == 5_000
@@ -214,11 +221,13 @@ class TestSpendTracker:
             execution_id="exec-123",
             input_tokens=5_000,
             output_tokens=2_000,
+            model=ModelId.CLAUDE_SONNET_5,
         )
         budget = await spend_tracker.record_usage(
             execution_id="exec-123",
             input_tokens=3_000,
             output_tokens=1_000,
+            model=ModelId.CLAUDE_SONNET_5,
         )
 
         assert budget.used_input_tokens == 8_000
@@ -232,6 +241,7 @@ class TestSpendTracker:
                 execution_id="exec-123",
                 input_tokens=5_000,
                 output_tokens=2_000,
+                model=ModelId.CLAUDE_SONNET_5,
             )
 
     @pytest.mark.asyncio
@@ -259,6 +269,7 @@ class TestSpendTracker:
             execution_id="exec-123",
             input_tokens=80_000,
             output_tokens=40_000,
+            model=ModelId.CLAUDE_SONNET_5,
         )
 
         summary = await spend_tracker.get_usage_summary("exec-123")
@@ -290,6 +301,7 @@ class TestSpendTracker:
             execution_id="exec-123",
             input_tokens=8_500,
             output_tokens=0,
+            model=ModelId.CLAUDE_SONNET_5,
         )
 
         # Should have triggered warning alert
