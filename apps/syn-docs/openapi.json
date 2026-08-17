@@ -6383,6 +6383,11 @@
             "title": "Is Complete",
             "default": false
           },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
+          },
           "started_at": {
             "anyOf": [
               {

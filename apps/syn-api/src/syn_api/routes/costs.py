@@ -88,6 +88,13 @@ class ExecutionCostResponse(BaseModel):
     cost_by_model: dict[str, str] = Field(default_factory=dict)
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
     is_complete: bool = False
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate and so contributed no cost.
+
+    Non-zero means this cost is INCOMPLETE. Clients must render "unpriced"
+    rather than a dollar figure, because a total that silently omits unpriced
+    work is indistinguishable from genuinely cheap work (ADR-067 D5).
+    """
     started_at: str | None = None
     completed_at: str | None = None
 
@@ -246,6 +253,7 @@ async def list_execution_costs(
                     cost_by_model=c.cost_by_model,
                     cost_by_tool=c.cost_by_tool,
                     is_complete=c.is_complete,
+                    unpriced_observation_count=c.unpriced_observation_count,
                     started_at=c.started_at,
                     completed_at=c.completed_at,
                 )
@@ -297,6 +305,7 @@ async def get_execution_cost(
                 cost_by_model=c.cost_by_model,
                 cost_by_tool=c.cost_by_tool,
                 is_complete=c.is_complete,
+                unpriced_observation_count=c.unpriced_observation_count,
                 started_at=c.started_at,
                 completed_at=c.completed_at,
             )
@@ -389,6 +398,7 @@ def _execution_cost_to_api(c: ExecutionCostData) -> ExecutionCostResponse:
         cost_by_model={k: str(v) for k, v in (c.cost_by_model or {}).items()},
         cost_by_tool={k: str(v) for k, v in (c.cost_by_tool or {}).items()},
         is_complete=c.is_complete,
+        unpriced_observation_count=c.unpriced_observation_count,
         started_at=str(c.started_at) if c.started_at else None,
         completed_at=str(c.completed_at) if c.completed_at else None,
     )

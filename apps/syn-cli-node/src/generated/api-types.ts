@@ -2340,6 +2340,11 @@ export interface components {
              * @default false
              */
             is_complete: boolean;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Started At */
             started_at?: string | null;
             /** Completed At */

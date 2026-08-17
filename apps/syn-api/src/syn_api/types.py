@@ -879,6 +879,12 @@ class ExecutionCostData(BaseModel):
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate, so they contributed no cost.
+
+    Non-zero means the reported cost is INCOMPLETE, not that work was free.
+    Surfaced so a client can render "unpriced" rather than "$0.00" (ADR-067 D5).
+    """
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
