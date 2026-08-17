@@ -27,6 +27,12 @@ from syn_api.routes.skills import (
 )
 from syn_api.types import RegisterSkillRequest, SkillFilePayload
 
+# WHY a module-level marker: CI runs only `pytest -m unit` and
+# `pytest -m integration`, so an unmarked test is collected locally and
+# never runs in CI. These use in-memory adapters and no external
+# services, so they are unit tests.
+pytestmark = pytest.mark.unit
+
 
 def _b64(content: bytes) -> str:
     return base64.b64encode(content).decode("ascii")
@@ -336,3 +342,52 @@ async def test_post_registrations_rejects_too_many_files(
     with pytest.raises(HTTPException) as exc_info:
         await register_skill_endpoint(body)
     assert exc_info.value.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_a_hash_version_must_match_the_submitted_content() -> None:
+    """A sha256-<hash> version is a content commitment, not a label.
+
+    Bundled skills are pinned this way, so their identity rests on this
+    holding. Without it, a caller could register arbitrary content under a
+    version naming another tree's hash, and every later install resolving that
+    triple would receive the substituted content.
+    """
+    body = RegisterSkillRequest(
+        source_url="./skills/victim",
+        version="sha256-" + "0" * 64,
+        skill_name="victim",
+        files=_skill_files("victim"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await register_skill_endpoint(body)
+
+    assert exc_info.value.status_code == 422
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    assert detail["error_code"] == "skill_version_hash_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_a_matching_hash_version_registers_normally() -> None:
+    import hashlib
+
+    files = _skill_files("honest")
+    hasher = hashlib.sha256()
+    for payload in sorted(files, key=lambda f: f.rel_path):
+        hasher.update(payload.rel_path.encode("utf-8"))
+        hasher.update(b"\x00")
+        hasher.update(base64.b64decode(payload.content_base64))
+        hasher.update(b"\x00")
+
+    response = await register_skill_endpoint(
+        RegisterSkillRequest(
+            source_url="./skills/honest",
+            version=f"sha256-{hasher.hexdigest()}",
+            skill_name="honest",
+            files=files,
+        )
+    )
+
+    assert response.resolved_sha == hasher.hexdigest()

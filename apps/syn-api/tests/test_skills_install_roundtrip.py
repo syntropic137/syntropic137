@@ -36,6 +36,12 @@ from syn_api._wiring import reset_skill_singletons
 from syn_api.routes.skills import register_skill_endpoint
 from syn_api.types import RegisterSkillRequest, SkillFilePayload
 
+# WHY a module-level marker: CI runs only `pytest -m unit` and
+# `pytest -m integration`, so an unmarked test is collected locally and
+# never runs in CI. These use in-memory adapters and no external
+# services, so they are unit tests.
+pytestmark = pytest.mark.unit
+
 _SOURCE_URL = "https://github.com/example/fixture-plugin"
 _SKILL_NAME = "repo-conventions"
 

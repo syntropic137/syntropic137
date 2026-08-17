@@ -186,7 +186,10 @@ describe("runSkillPreflight", () => {
 
   it("performs NO upload when the content hash is already registered", async () => {
     writeBundledSkill("repo-conventions");
-    mockFetch.mockResolvedValue(jsonResponse({ registered: true, resolved_sha: "sha256-x" }));
+    const { readSkillTree } = await import("../../src/packages/skill-tree.js");
+    const { hashSkillTree } = await import("../../src/packages/skill-ref.js");
+    const sha = hashSkillTree(readSkillTree(path.join(pkg, "skills", "repo-conventions")));
+    mockFetch.mockResolvedValue(jsonResponse({ registered: true, resolved_sha: sha }));
 
     const result = await runSkillPreflight(pkg, [
       workflow({ id: "review", skills: ["./skills/repo-conventions"] }),
@@ -203,5 +206,64 @@ describe("runSkillPreflight", () => {
 
     expect(result).toEqual({ registered: [], skipped: [] });
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("runSkillPreflight safety", () => {
+  it("fails closed when a cache hit's sha does not match the pinned hash", async () => {
+    // WHY this matters: the version segment of a bundled ref IS a content
+    // commitment (sha256-<tree hash>). Trusting `registered: true` alone lets
+    // anything already stored under that triple be injected instead - content
+    // the plugin never declared. The returned sha is what makes the claim
+    // checkable, so it must be checked.
+    writeBundledSkill("repo-conventions");
+    mockFetch.mockResolvedValue(
+      jsonResponse({ registered: true, resolved_sha: "deadbeef" }),
+    );
+
+    await expect(
+      runSkillPreflight(pkg, [workflow({ id: "review", skills: ["./skills/repo-conventions"] })]),
+    ).rejects.toThrow(/hash|sha|mismatch/i);
+  });
+
+  it("accepts a cache hit whose sha matches the pinned hash", async () => {
+    writeBundledSkill("repo-conventions");
+    const { readSkillTree } = await import("../../src/packages/skill-tree.js");
+    const { hashSkillTree } = await import("../../src/packages/skill-ref.js");
+    const sha = hashSkillTree(readSkillTree(path.join(pkg, "skills", "repo-conventions")));
+    mockFetch.mockResolvedValue(jsonResponse({ registered: true, resolved_sha: sha }));
+
+    const result = await runSkillPreflight(pkg, [
+      workflow({ id: "review", skills: ["./skills/repo-conventions"] }),
+    ]);
+
+    expect(result.skipped).toHaveLength(1);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a bundled path that resolves outside the plugin, before any request", async () => {
+    // A malicious marketplace plugin must not be able to make the CLI read and
+    // upload files from the user's machine.
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "outside-"));
+    fs.writeFileSync(path.join(outside, "SKILL.md"), "---\nname: x\ndescription: y\n---\n");
+    const escape = `./${path.relative(pkg, outside)}`;
+
+    await expect(
+      runSkillPreflight(pkg, [workflow({ id: "review", skills: [escape] })]),
+    ).rejects.toThrow();
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("treats a failed lookup as an error, not as a cache miss", async () => {
+    // A 401 or 500 answered as "not registered" would send the CLI on to clone
+    // an attacker-influenced URL and attempt an upload that cannot succeed.
+    writeBundledSkill("repo-conventions");
+    mockFetch.mockResolvedValue(new Response("nope", { status: 500 }));
+
+    await expect(
+      runSkillPreflight(pkg, [workflow({ id: "review", skills: ["./skills/repo-conventions"] })]),
+    ).rejects.toThrow();
   });
 });

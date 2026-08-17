@@ -31,6 +31,12 @@ from syn_api.routes.workflows.commands import (
 )
 from syn_api.types import Ok
 
+# WHY a module-level marker: CI runs only `pytest -m unit` and
+# `pytest -m integration`, so an unmarked test is collected locally and
+# never runs in CI. These use in-memory adapters and no external
+# services, so they are unit tests.
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Shared test-request builder (no TestClient needed — the endpoint reads
 # request.body() and .headers, which Starlette happily serves from a Scope).

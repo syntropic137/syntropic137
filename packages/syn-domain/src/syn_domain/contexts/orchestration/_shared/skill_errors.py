@@ -100,6 +100,29 @@ class SkillInvalidPath(SkillError):
         self.reason = reason
 
 
+class SkillVersionHashMismatch(SkillError):
+    """A ``sha256-<hash>`` version does not match the submitted tree's hash.
+
+    Such a version is a content commitment, not a label: bundled skills are
+    pinned this way, so their identity rests on it holding. Without this check
+    a caller could register arbitrary content under a version naming another
+    tree's hash, and every later install resolving that triple would receive
+    the substituted content (issue #772).
+    """
+
+    error_code = "skill_version_hash_mismatch"
+
+    def __init__(self, source_url: str, declared: str, actual_sha: str) -> None:
+        super().__init__(
+            f"Skill version {declared!r} for {source_url!r} claims a content hash, but the "
+            f"submitted tree hashes to {actual_sha!r}. A 'sha256-<hash>' version must match "
+            "the content it names."
+        )
+        self.source_url = source_url
+        self.declared = declared
+        self.actual_sha = actual_sha
+
+
 class SkillNotRegistered(SkillError):
     """A workflow declared a skill that has no lock entry."""
 

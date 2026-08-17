@@ -10,6 +10,7 @@
  * files, because it must REWRITE bundled refs in those definitions before they
  * are uploaded. See `pinBundledRefsInDefinition`.
  */
+import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { CLIError } from "../framework/errors.js";
@@ -91,8 +92,28 @@ export function collectSkillRefs(workflows: readonly ResolvedWorkflow[]): Parsed
   return [...seen.values()];
 }
 
+/**
+ * Resolve a bundled skill path and prove it stays inside the plugin.
+ *
+ * WHY resolve rather than trust the parsed shape: the directory this returns is
+ * read and uploaded, so a plugin that escaped it could exfiltrate arbitrary
+ * files from the machine running the install. `parseSkillEntry` already rejects
+ * `..` segments, but a symlink inside the plugin points outward without any
+ * `..` appearing in the declared path, so containment is re-proved here against
+ * the real path.
+ */
 function bundledSkillDir(packagePath: string, ref: BundledSkillRef): string {
-  return path.join(packagePath, ref.localPath);
+  const root = fs.realpathSync(path.resolve(packagePath));
+  const candidate = path.resolve(root, ref.localPath);
+
+  const resolved = fs.existsSync(candidate) ? fs.realpathSync(candidate) : candidate;
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    throw new CLIError(
+      `bundled skill '${ref.localPath}' resolves outside the plugin (${resolved}).\n` +
+        "  A plugin may only bundle skills from within itself. No workflows were installed.",
+    );
+  }
+  return resolved;
 }
 
 function readBundledTree(packagePath: string, ref: BundledSkillRef): SkillFilePayload[] {
@@ -145,17 +166,52 @@ export function pinBundledRefsInDefinition(
   }
 }
 
+const HASH_VERSION_PREFIX = "sha256-";
+
+/**
+ * Is this ref already stored, and does the stored content match what we pinned?
+ *
+ * WHY the sha is checked and not just the boolean: for a bundled skill the
+ * version segment IS a content commitment (`sha256-<tree hash>`), but nothing
+ * server-side proves that the tree stored under that triple actually hashes to
+ * it - `RegisterSkillHandler` returns an existing aggregate before hashing the
+ * submitted files. So a registration made under a hash-shaped version with
+ * different content would be silently adopted here, and the workspace would
+ * receive content the plugin never declared. The returned `resolved_sha` is
+ * what makes the commitment checkable, so we check it and fail closed.
+ *
+ * A lookup that errors is an error, never a cache miss: treating a 401 or 500
+ * as "not registered" would send us on to clone a remote and attempt an upload
+ * that cannot succeed.
+ */
 async function isRegistered(ref: ExternalSkillRef): Promise<boolean> {
-  const { data } = await api.GET("/skills/registrations", {
-    params: {
-      query: {
-        source_url: ref.sourceUrl,
-        version: ref.version,
-        skill_name: ref.skillName,
+  const data = unwrap(
+    await api.GET("/skills/registrations", {
+      params: {
+        query: {
+          source_url: ref.sourceUrl,
+          version: ref.version,
+          skill_name: ref.skillName,
+        },
       },
-    },
-  });
-  return Boolean(data?.registered);
+    }),
+    `Failed to look up skill ${ref.skillName}@${ref.version}`,
+  );
+
+  if (!data.registered) return false;
+
+  if (ref.version.startsWith(HASH_VERSION_PREFIX)) {
+    const pinned = ref.version.slice(HASH_VERSION_PREFIX.length);
+    if (data.resolved_sha !== pinned) {
+      throw new CLIError(
+        `skill ${ref.skillName} is registered under ${ref.version} but its stored content ` +
+          `hashes to ${data.resolved_sha ?? "(none)"}.\n` +
+          "  The version pins the content, so this registration does not match what the " +
+          "plugin declares.\n  Refusing to reuse it. No workflows were installed.",
+      );
+    }
+  }
+  return true;
 }
 
 /**
