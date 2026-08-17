@@ -67,7 +67,12 @@ class ExecutionCostResponse(BaseModel):
     execution_id: str
     workflow_id: str | None = None
     session_count: int = 0
-    session_ids: list[str] = Field(default_factory=list)
+    session_ids: list[str] | None = Field(default_factory=list)
+    """Session IDs, or ``null`` when suppressed via ``include_session_ids=false``.
+
+    Nullable so "not requested" is distinguishable from "none exist"; an empty
+    list beside a non-zero ``session_count`` is a contradiction.
+    """
     total_cost_usd: Decimal = Decimal("0")
     token_cost_usd: Decimal = Decimal("0")
     compute_cost_usd: Decimal = Decimal("0")
@@ -272,9 +277,15 @@ async def get_execution_cost(
                 session_count=c.session_count,
                 session_ids=c.session_ids,
                 total_cost_usd=Decimal(str(c.total_cost_usd)),
+                token_cost_usd=Decimal(str(c.token_cost_usd)),
+                compute_cost_usd=Decimal(str(c.compute_cost_usd)),
                 input_tokens=c.input_tokens,
                 output_tokens=c.output_tokens,
                 total_tokens=c.total_tokens,
+                cache_creation_tokens=c.cache_creation_tokens,
+                cache_read_tokens=c.cache_read_tokens,
+                tool_calls=c.tool_calls,
+                turns=c.turns,
                 duration_ms=c.duration_ms,
                 cost_by_phase=c.cost_by_phase,
                 cost_by_model=c.cost_by_model,
@@ -358,9 +369,15 @@ def _execution_cost_to_api(c: ExecutionCostData) -> ExecutionCostResponse:
         session_count=c.session_count,
         session_ids=c.session_ids or [],
         total_cost_usd=Decimal(str(c.total_cost_usd)),
+        token_cost_usd=Decimal(str(c.token_cost_usd)),
+        compute_cost_usd=Decimal(str(c.compute_cost_usd)),
         input_tokens=c.input_tokens,
         output_tokens=c.output_tokens,
         total_tokens=c.total_tokens,
+        cache_creation_tokens=c.cache_creation_tokens,
+        cache_read_tokens=c.cache_read_tokens,
+        tool_calls=c.tool_calls,
+        turns=c.turns,
         duration_ms=c.duration_ms or 0.0,
         cost_by_phase={k: str(v) for k, v in (c.cost_by_phase or {}).items()},
         cost_by_model={k: str(v) for k, v in (c.cost_by_model or {}).items()},
@@ -434,7 +451,7 @@ async def list_execution_costs_endpoint(
 async def get_execution_cost_endpoint(
     execution_id: str,
     include_breakdown: bool = Query(True, description="Include phase/model/tool breakdowns"),
-    include_session_ids: bool = Query(False, description="Include list of session IDs"),
+    include_session_ids: bool = Query(True, description="Include list of session IDs"),
 ) -> ExecutionCostResponse:
     """Get aggregated cost for a workflow execution."""
     from syn_api._wiring import get_projection_mgr
@@ -459,7 +476,10 @@ async def get_execution_cost_endpoint(
         response.cost_by_tool = {}
 
     if not include_session_ids:
-        response.session_ids = []
+        # Suppressed, not empty. `session_ids: []` alongside `session_count: 1`
+        # is a contradiction a client cannot interpret - it reads as "this
+        # execution has no sessions" when it means "you did not ask for them".
+        response.session_ids = None
 
     return response
 

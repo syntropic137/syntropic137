@@ -2316,7 +2316,7 @@
             "schema": {
               "type": "boolean",
               "description": "Include list of session IDs",
-              "default": false,
+              "default": true,
               "title": "Include Session Ids"
             },
             "description": "Include list of session IDs"
@@ -6286,10 +6286,17 @@
             "default": 0
           },
           "session_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Session Ids"
           },
           "total_cost_usd": {

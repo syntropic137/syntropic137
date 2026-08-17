@@ -2267,7 +2267,7 @@ export interface components {
              */
             session_count: number;
             /** Session Ids */
-            session_ids?: string[];
+            session_ids?: string[] | null;
             /**
              * Total Cost Usd
              * @default 0
