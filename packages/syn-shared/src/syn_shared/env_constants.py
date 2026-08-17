@@ -59,7 +59,47 @@ ENV_SYN_WORKSPACE_CONTAINER_DIR = "SYN_WORKSPACE_CONTAINER_DIR"
 ENV_SYN_WORKSPACE_HOST_DIR = "SYN_WORKSPACE_HOST_DIR"
 ENV_SYN_AGENT_NETWORK = "SYN_AGENT_NETWORK"
 
+# ---------------------------------------------------------------------------
+# Session store capability env vars (agentic-primitives workspace image)
+#
+# These are read INSIDE the workspace container by the session-store capability
+# that ships in the agentic-primitives workspace image. Syn137 does not read
+# them; it only writes them into the container environment at provision time.
+#
+# The capability is a complete no-op when AGENTIC_SESSION_STORE_PROVIDER is
+# unset: no init, no doctor, no finalize. That is the self-hostability
+# guarantee — an operator with no SeshMagic instance gets byte-identical
+# behaviour because Syn137 omits the whole block rather than setting "none".
+# ---------------------------------------------------------------------------
+
+ENV_AGENTIC_SESSION_STORE_PROVIDER = "AGENTIC_SESSION_STORE_PROVIDER"
+ENV_AGENTIC_SESSION_STORE_URL = "AGENTIC_SESSION_STORE_URL"
+ENV_AGENTIC_SESSION_STORE_AUTH = "AGENTIC_SESSION_STORE_AUTH"
+ENV_AGENTIC_SESSION_STORE_SPOOL = "AGENTIC_SESSION_STORE_SPOOL"
+ENV_AGENTIC_SESSION_STORE_PARTITION = "AGENTIC_SESSION_STORE_PARTITION"
+ENV_AGENTIC_SESSION_STORE_TAGS = "AGENTIC_SESSION_STORE_TAGS"
+
+#: Every variable in the session-store contract. Used by the workspace adapter
+#: to emit the block and by tests to assert the "not configured" path leaks none
+#: of them. Keep in sync with the six constants above.
+SESSION_STORE_CONTRACT_ENV_VARS: frozenset[str] = frozenset(
+    {
+        ENV_AGENTIC_SESSION_STORE_PROVIDER,
+        ENV_AGENTIC_SESSION_STORE_URL,
+        ENV_AGENTIC_SESSION_STORE_AUTH,
+        ENV_AGENTIC_SESSION_STORE_SPOOL,
+        ENV_AGENTIC_SESSION_STORE_PARTITION,
+        ENV_AGENTIC_SESSION_STORE_TAGS,
+    }
+)
+
 __all__ = [
+    "ENV_AGENTIC_SESSION_STORE_AUTH",
+    "ENV_AGENTIC_SESSION_STORE_PARTITION",
+    "ENV_AGENTIC_SESSION_STORE_PROVIDER",
+    "ENV_AGENTIC_SESSION_STORE_SPOOL",
+    "ENV_AGENTIC_SESSION_STORE_TAGS",
+    "ENV_AGENTIC_SESSION_STORE_URL",
     "ENV_ANTHROPIC_API_KEY",
     "ENV_ANTHROPIC_BASE_URL",
     "ENV_CLAUDE_CODE_ENABLE_TELEMETRY",
@@ -76,4 +116,5 @@ __all__ = [
     "ENV_SYN_AGENT_NETWORK",
     "ENV_SYN_WORKSPACE_CONTAINER_DIR",
     "ENV_SYN_WORKSPACE_HOST_DIR",
+    "SESSION_STORE_CONTRACT_ENV_VARS",
 ]
