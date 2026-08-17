@@ -109,10 +109,10 @@ class WorkspaceImageProvider(StrEnum):
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:0d53e7a1a9476c5c45cbb7b1467adc004347bef4cf9168c013a6bc7caa5c3f07"
+            "sha256:d16a95f5745627b6d154bc7d0c879410b6a2ce61e7cb46118fa3b3bf852f8cb5"
         ),
         WorkspaceImageProvider.INTERACTIVE_TMUX: (
-            "sha256:43247b67a415847b609ec60e035750dd4b965c0ceac593ad1f6abf9ff36549ba"
+            "sha256:e9f87445e430bddc18d24c4dc0683a2a192e76ea9d7712160d55dcbe6136971a"
         ),
     }
 )

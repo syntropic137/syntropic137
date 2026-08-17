@@ -50,7 +50,7 @@ MODULE = "syn_adapters.workspace_backends.image_verification"
 
 PINNED_REF = (
     "ghcr.io/agentparadise/agentic-workspace-claude-cli@sha256:"
-    "0d53e7a1a9476c5c45cbb7b1467adc004347bef4cf9168c013a6bc7caa5c3f07"
+    "d16a95f5745627b6d154bc7d0c879410b6a2ce61e7cb46118fa3b3bf852f8cb5"
 )
 LOCAL_REF = "agentic-workspace-claude-cli:dev"
 LOCAL_IMAGE_ID = "sha256:" + "b" * 64

@@ -32,7 +32,7 @@ VERIFY_MODULE = "syn_adapters.workspace_backends.image_verification"
 
 PINNED_REF = (
     "ghcr.io/agentparadise/agentic-workspace-interactive-tmux@sha256:"
-    "43247b67a415847b609ec60e035750dd4b965c0ceac593ad1f6abf9ff36549ba"
+    "e9f87445e430bddc18d24c4dc0683a2a192e76ea9d7712160d55dcbe6136971a"
 )
 LOCAL_REF = "agentic-workspace-interactive-tmux:dev"
 LOCAL_IMAGE_ID = "sha256:" + "e" * 64
