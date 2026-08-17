@@ -1008,17 +1008,56 @@ docker exec <workspace> env | grep -E 'ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN
 - [ ] A **pure codex** phase has NO `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` in its env (cross-provider isolation)
 - [ ] No credential appears in container logs or process argv
 
-### Delegation round-trip (optional, costs tokens)
+### Delegation matrix - both leaders, both directions (costs tokens)
+
+**Run BOTH.** One direction passing does not imply the other. The two harnesses
+stage credentials differently, delegate through different skills, and emit
+different stream schemas, so claude-leads and codex-leads are genuinely separate
+code paths. A single round-trip has repeatedly passed while its mirror was broken.
+
+Each leader must delegate **twice**: once to a subagent of its own kind, and once
+to the opposite harness. Same-kind delegation is the cheap common case;
+cross-harness is where credential staging and stream parsing actually break.
+
+| Workflow | Leader | Same-harness subagent | Cross-harness subagent |
+|---|---|---|---|
+| `claude-leads-mixed-delegation` | claude | claude (Task subagent) | codex (`codex exec`) |
+| `codex-leads-mixed-delegation` | codex | codex (`codex exec`) | claude (`claude -p`) |
 
 ```bash
-syn workflow run <codex-delegates-to-claude-id>
+syn workflow run claude-leads-mixed-delegation
+syn workflow run codex-leads-mixed-delegation
 ```
 
+Both phases need `allow_delegation: true`; the leader's provider is set by
+`agent.provider` on the phase.
+
+Per run, assert:
+
 - [ ] Both codex auth **and** claude env are staged when `allow_delegation: true`
-- [ ] The `delegating-to-claude-p` skill is installed into the codex phase
-- [ ] The transcript shows the primary agent actually invoking the other CLI
-      (e.g. `tool_use Bash /usr/local/bin/claude`) and receiving a real answer back
-- [ ] Delegated sub-agent sessions appear linked to the parent via `parent_session_id` (#792)
+- [ ] The leader's delegation skill is installed (`delegating-to-claude-p` in a
+      codex phase, `delegating-to-codex` in a claude phase)
+- [ ] The transcript shows the leader actually invoking each subagent
+      (`tool_use Bash /usr/local/bin/claude`, `tool_use Bash .../codex`) and
+      receiving a real answer back - not merely announcing an intent to
+- [ ] **Session count >= 3** for the phase (leader + 2 delegates). One session is
+      a failure, not a pass - see the known gap below
+- [ ] Each delegated session carries `parent_session_id` pointing at the leader (#792)
+- [ ] Every session has its own agent badge, and the badge matches the harness
+      that actually ran (a codex delegate under a claude leader must read "Codex")
+
+Across the pair, assert:
+
+- [ ] Cost is attributed **per session with its own model rate** - the codex
+      delegate priced off `gpt-5.6`, the claude delegate off its claude model.
+      A single blended rate across a mixed execution is a defect
+- [ ] Execution-level total equals the sum of its sessions
+- [ ] `unpriced_observation_count` is 0 for both runs
+
+> **Why the mirror matters.** In a claude-led phase the Envoy sidecar is active
+> (Anthropic-only) and is skipped for codex phases. A codex delegate launched
+> from inside a claude phase therefore needs egress the sidecar does not proxy.
+> That asymmetry is invisible when only the codex-leads direction is tested.
 
 > **Do not infer credential staging from `docker exec <ws> env`.** Agent credentials are
 > passed per-process via `workspace.stream(..., environment=agent_env)`, not baked into
