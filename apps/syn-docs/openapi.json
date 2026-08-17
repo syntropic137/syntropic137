@@ -1894,6 +1894,71 @@
       }
     },
     "/skills/registrations": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Lookup Skill Registration",
+        "description": "Report whether this skill triple is already registered.\n\nWHY a read surface exists: the skills API had only a write endpoint, so a\ncaller could not distinguish an already-stored skill from a new one without\nuploading the whole tree. The returned sha is the cache key.",
+        "operationId": "lookup_skill_registration_skills_registrations_get",
+        "parameters": [
+          {
+            "name": "source_url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Skill source repository URL",
+              "title": "Source Url"
+            },
+            "description": "Skill source repository URL"
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Pinned version (tag, branch, or commit)",
+              "title": "Version"
+            },
+            "description": "Pinned version (tag, branch, or commit)"
+          },
+          {
+            "name": "skill_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Skill name as declared or overridden",
+              "title": "Skill Name"
+            },
+            "description": "Skill name as declared or overridden"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillRegistrationLookupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "skills"
@@ -1902,14 +1967,14 @@
         "description": "Register a skill by uploading the cloned tree (issue #772).\n\nThe CLI clones the source locally and POSTs the tree contents here. The\nAPI decodes the base64 file contents, computes the sha256 over the\nnormalized tree, uploads to storage, and dispatches a\n``RegisterSkillCommand`` against the existing aggregate. Idempotent on\nre-submission of the same ``(source_url, version, skill_name)``.",
         "operationId": "register_skill_endpoint_skills_registrations_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RegisterSkillRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -9960,6 +10025,32 @@
         ],
         "title": "SkillFilePayload",
         "description": "One file in the uploaded skill tree (``POST /skills/registrations``).\n\nMirrors ``ClaudePluginFileEntry``. ``content_base64`` is the base64-encoded\nbyte content; the API decodes it back into raw bytes before hashing and\nuploading."
+      },
+      "SkillRegistrationLookupResponse": {
+        "properties": {
+          "registered": {
+            "type": "boolean",
+            "title": "Registered"
+          },
+          "resolved_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Sha"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "registered"
+        ],
+        "title": "SkillRegistrationLookupResponse",
+        "description": "Whether a (source_url, version, skill_name) triple is already registered.\n\nLets the CLI skip uploading a skill tree it has already stored. The sha is\nthe cache key: identical content always resolves to the same hash, so a hit\nhere means zero network work for the caller."
       },
       "SkillRegistrationResponse": {
         "properties": {

@@ -7,6 +7,9 @@ Endpoints under ``/skills``:
 
 - ``POST /skills/registrations`` - register a new (source, version, name) by
                                     uploading the tree contents.
+- ``GET /skills/registrations``  - report whether a (source, version, name)
+                                    triple is already registered, so a caller
+                                    can skip uploading a tree that is stored.
 
 Mirrors ``routes/claude_plugins.py``. Typed ``SkillError`` subclasses raised
 by the handler map to HTTP 422 via ``skill_error_mapping`` so callers see
@@ -18,15 +21,21 @@ from __future__ import annotations
 import base64
 import binascii
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import (
     ensure_connected,
     get_register_skill_handler,
+    get_skill_lock_projection,
     sync_published_events_to_projections,
 )
 from syn_api.services.skill_error_mapping import http_exception_for_skill_error
-from syn_api.types import RegisterSkillRequest, SkillFilePayload, SkillRegistrationResponse
+from syn_api.types import (
+    RegisterSkillRequest,
+    SkillFilePayload,
+    SkillRegistrationLookupResponse,
+    SkillRegistrationResponse,
+)
 from syn_domain.contexts.orchestration import SkillError
 from syn_domain.contexts.orchestration.ports.SkillStoragePort import SkillFile
 
@@ -79,6 +88,27 @@ def _decode_files(entries: list[SkillFilePayload]) -> list[SkillFile]:
         total_bytes += len(content)
         decoded.append(SkillFile(rel_path=raw.rel_path, content=content))
     return decoded
+
+
+@router.get("/registrations", response_model=SkillRegistrationLookupResponse)
+async def lookup_skill_registration(
+    source_url: str = Query(..., description="Skill source repository URL"),
+    version: str = Query(..., description="Pinned version (tag, branch, or commit)"),
+    skill_name: str = Query(..., description="Skill name as declared or overridden"),
+) -> SkillRegistrationLookupResponse:
+    """Report whether this skill triple is already registered.
+
+    WHY a read surface exists: the skills API had only a write endpoint, so a
+    caller could not distinguish an already-stored skill from a new one without
+    uploading the whole tree. The returned sha is the cache key.
+    """
+    await ensure_connected()
+    entry = await get_skill_lock_projection().get(
+        source_url=source_url, version=version, skill_name=skill_name
+    )
+    if entry is None:
+        return SkillRegistrationLookupResponse(registered=False)
+    return SkillRegistrationLookupResponse(registered=True, resolved_sha=entry.resolved_sha)
 
 
 @router.post(

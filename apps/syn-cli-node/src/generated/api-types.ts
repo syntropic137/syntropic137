@@ -637,7 +637,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Lookup Skill Registration
+         * @description Report whether this skill triple is already registered.
+         *
+         *     WHY a read surface exists: the skills API had only a write endpoint, so a
+         *     caller could not distinguish an already-stored skill from a new one without
+         *     uploading the whole tree. The returned sha is the cache key.
+         */
+        get: operations["lookup_skill_registration_skills_registrations_get"];
         put?: never;
         /**
          * Register Skill Endpoint
@@ -4129,6 +4137,20 @@ export interface components {
             content_base64: string;
         };
         /**
+         * SkillRegistrationLookupResponse
+         * @description Whether a (source_url, version, skill_name) triple is already registered.
+         *
+         *     Lets the CLI skip uploading a skill tree it has already stored. The sha is
+         *     the cache key: identical content always resolves to the same hash, so a hit
+         *     here means zero network work for the caller.
+         */
+        SkillRegistrationLookupResponse: {
+            /** Registered */
+            registered: boolean;
+            /** Resolved Sha */
+            resolved_sha?: string | null;
+        };
+        /**
          * SkillRegistrationResponse
          * @description Response payload for ``POST /skills/registrations``.
          */
@@ -6202,6 +6224,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lookup_skill_registration_skills_registrations_get: {
+        parameters: {
+            query: {
+                /** @description Skill source repository URL */
+                source_url: string;
+                /** @description Pinned version (tag, branch, or commit) */
+                version: string;
+                /** @description Skill name as declared or overridden */
+                skill_name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillRegistrationLookupResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

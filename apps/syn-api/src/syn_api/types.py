@@ -1656,3 +1656,17 @@ class SkillRegistrationResponse(BaseModel):
     version: str
     resolved_sha: str = Field(..., description="Content-addressed sha of the normalized tree.")
     tree_storage_prefix: str
+
+
+class SkillRegistrationLookupResponse(BaseModel):
+    """Whether a (source_url, version, skill_name) triple is already registered.
+
+    Lets the CLI skip uploading a skill tree it has already stored. The sha is
+    the cache key: identical content always resolves to the same hash, so a hit
+    here means zero network work for the caller.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    registered: bool
+    resolved_sha: str | None = None

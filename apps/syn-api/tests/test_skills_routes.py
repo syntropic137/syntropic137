@@ -20,7 +20,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from syn_api._wiring import reset_skill_singletons
-from syn_api.routes.skills import register_skill_endpoint
+from syn_api.routes.skills import lookup_skill_registration, register_skill_endpoint
 from syn_api.types import RegisterSkillRequest, SkillFilePayload
 
 
@@ -88,6 +88,61 @@ async def test_post_registrations_persists_lock_entry() -> None:
     assert response.version == "1.0.0"
     assert response.resolved_sha
     assert response.tree_storage_prefix
+
+
+@pytest.mark.asyncio
+async def test_get_registrations_reports_a_registered_skill_with_its_sha() -> None:
+    """A hit returns the sha, which is what lets a caller skip the upload."""
+    registered = await register_skill_endpoint(
+        RegisterSkillRequest(
+            source_url="https://github.com/example/lookup",
+            version="1.0.0",
+            skill_name="lookup",
+            files=_skill_files("lookup"),
+        )
+    )
+
+    found = await lookup_skill_registration(
+        source_url="https://github.com/example/lookup",
+        version="1.0.0",
+        skill_name="lookup",
+    )
+
+    assert found.registered is True
+    assert found.resolved_sha == registered.resolved_sha
+
+
+@pytest.mark.asyncio
+async def test_get_registrations_reports_an_unknown_triple_as_unregistered() -> None:
+    found = await lookup_skill_registration(
+        source_url="https://github.com/example/never-seen",
+        version="9.9.9",
+        skill_name="never-seen",
+    )
+
+    assert found.registered is False
+    assert found.resolved_sha is None
+
+
+@pytest.mark.asyncio
+async def test_get_registrations_is_version_specific() -> None:
+    """A different pin is a different identity: the cache must not answer for it."""
+    await register_skill_endpoint(
+        RegisterSkillRequest(
+            source_url="https://github.com/example/pinned",
+            version="1.0.0",
+            skill_name="pinned",
+            files=_skill_files("pinned"),
+        )
+    )
+
+    found = await lookup_skill_registration(
+        source_url="https://github.com/example/pinned",
+        version="2.0.0",
+        skill_name="pinned",
+    )
+
+    assert found.registered is False
 
 
 @pytest.mark.asyncio
