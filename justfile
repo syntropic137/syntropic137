@@ -1486,6 +1486,13 @@ gen-env:
 codex-auth-clip *flags:
     uv run python scripts/copy_codex_auth.py {{flags}}
 
+# Write ~/.codex/auth.json straight into the 1Password item the platform reads.
+# Prefer this over codex-auth-clip: pasting a 4KB single-line JSON blob by hand
+# is where the stray newlines come from. Pass a vault name to target selfhost
+# (`just codex-auth-1password syntropic137`); defaults to syn137-dev.
+codex-auth-1password vault="syn137-dev":
+    bash scripts/set_codex_auth_1password.sh {{vault}}
+
 # Generate published Docker Compose (docker-compose.syntropic137.yaml) from base + selfhost
 gen-compose:
     uv run python scripts/generate_published_compose.py
