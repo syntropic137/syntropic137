@@ -105,6 +105,21 @@ async def _register_bundled(body: str) -> tuple[str, str]:
     return version, response.resolved_sha
 
 
+def test_tree_hash_matches_the_cli_implementation() -> None:
+    """The CLI pins bundled skills by hashing the tree; both sides must agree.
+
+    The CLI computes this in ``hashSkillTree`` (skill-ref.ts) and asserts the
+    same constant in ``tests/packages/skill-ref.test.ts``. If the two drift,
+    the version a skill registers under stops describing its content: the
+    install-time cache check never hits, and run-time resolution looks up an
+    identity that was never stored.
+    """
+    assert (
+        _tree_hash([("SKILL.md", b"# hi")])
+        == "1bba9894d50ccaf28bd7e2ace4e4103ffc6667734088ffb87796efd74df15b04"
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_registered_skill_resolves_for_the_phase_that_declares_it() -> None:
     """The install-time identity is the one run-time resolution looks up.
