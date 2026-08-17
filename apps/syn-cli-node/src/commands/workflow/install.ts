@@ -7,7 +7,6 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 import { formatTimestamp } from "../../output/format.js";
@@ -26,6 +25,7 @@ import {
 import { removeTempDir } from "../../packages/git.js";
 import { resolveFromMarketplace } from "../../marketplace/client.js";
 import { runClaudePluginPreflight } from "../../packages/claude-plugin-preflight.js";
+import { postYaml } from "../../client/yaml-upload.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -107,28 +107,23 @@ export async function installWorkflowsViaApi(
     const wf = workflows[i]!;
     process.stdout.write(`  [${i + 1}/${workflows.length}] Creating ${style(wf.name, BOLD)}... `);
     try {
-      const data = unwrap(
-        await api.POST("/workflows", {
-          body: {
-            // Preserve the stable id declared in workflow.yaml. Without it the
-            // server mints a fresh uuid on every install, so `syn workflow run
-            // <yaml-id>` cannot resolve and re-installing the same package
-            // silently piles up duplicates.
-            id: wf.id,
-            name: wf.name,
-            workflow_type: wf.workflow_type,
-            classification: wf.classification ?? "standard",
-            repository_url: wf.repository_url,
-            repository_ref: wf.repository_ref,
-            description: wf.description ?? null,
-            project_name: wf.project_name ?? null,
-            requires_repos: wf.requires_repos,
-            phases: wf.phases,
-            input_declarations: wf.input_declarations,
-          },
-        }),
-        "Failed to create workflow",
-      );
+      // WHY from-yaml rather than a hand-built JSON body: the old body named
+      // each field explicitly, so every key it did not name was silently
+      // dropped on install - `skills:` and `claude_plugins:` among them, and
+      // whatever field is added next. Uploading the resolved definition lets
+      // the server own every YAML semantic (ADR-058 requires_repos inference
+      // included), which is what `syn workflow create --from` already does.
+      //
+      // workflowId preserves the stable id declared in workflow.yaml. Without
+      // it the server mints a fresh uuid on every install, so `syn workflow
+      // run <yaml-id>` cannot resolve and re-installing the same package
+      // silently piles up duplicates.
+      const data = await postYaml(Buffer.from(JSON.stringify(wf.definition), "utf-8"), {
+        name: wf.name,
+        workflowId: wf.id,
+        contentType: "application/json",
+        errorLabel: "workflow install",
+      });
       const wfId = data.id;
       print(`${style("done", GREEN)} (id: ${wfId})`);
       installed.push({ id: wfId, name: wf.name });
