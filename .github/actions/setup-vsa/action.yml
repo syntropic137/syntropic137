@@ -13,6 +13,34 @@ runs:
       with:
         toolchain: stable
 
+    # POKA-YOKE: the cache key pins the exact submodule commit, and there is
+    # deliberately NO `restore-keys` fallback.
+    #
+    # A loose `restore-keys: ${{ runner.os }}-cargo-vsa-` prefix used to live
+    # here. Combined with the presence-check below, it froze CI at vsa
+    # 0.6.1-beta for months while the submodule pin said 0.12.0: a submodule
+    # bump missed the exact key, restore-keys served a stale cache anyway, the
+    # binary already existed so install was skipped, and every green run
+    # re-saved the stale binary. Every rule VSA added in that window never ran,
+    # and 66 architecture violations accumulated behind a passing gate.
+    #
+    # Reusing a cached BINARY across versions is not the same as reusing
+    # downloaded crates. If this cache misses, the correct outcome is a slower
+    # job, not an older tool.
+    - name: Resolve pinned VSA version
+      id: vsa-pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd lib/event-sourcing-platform/vsa
+        version=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+        if [ -z "$version" ]; then
+          echo "::error::could not read the pinned VSA version from vsa/Cargo.toml"
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "Pinned VSA version: $version"
+
     - name: Cache Rust dependencies
       uses: actions/cache@v4
       with:
@@ -22,23 +50,34 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           lib/event-sourcing-platform/vsa/target/
-        key: ${{ runner.os }}-cargo-vsa-${{ hashFiles('lib/event-sourcing-platform/vsa/**/Cargo.lock') }}${{ inputs.cache-key-suffix }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-vsa-
+        key: ${{ runner.os }}-cargo-vsa-${{ steps.vsa-pin.outputs.version }}-${{ hashFiles('lib/event-sourcing-platform/vsa/**/Cargo.lock') }}${{ inputs.cache-key-suffix }}
 
     - name: Install VSA CLI
       shell: bash
+      env:
+        PINNED_VSA_VERSION: ${{ steps.vsa-pin.outputs.version }}
       run: |
-        # Check if VSA is already cached
-        if ! command -v vsa &> /dev/null; then
-          echo "📦 Installing VSA CLI from submodule..."
-          cd lib/event-sourcing-platform/vsa
-          cargo install --path vsa-cli --locked
-          echo "✅ VSA CLI installed successfully"
-        else
-          echo "✅ VSA CLI already available (cached)"
+        set -euo pipefail
+        # Assert the VERSION, never merely that a binary exists. `command -v vsa`
+        # is true for any vsa, including one from a stale cache.
+        installed=""
+        if command -v vsa &> /dev/null; then
+          installed=$(vsa --version | awk '{print $2}')
         fi
 
-        # Verify installation
-        vsa --version
-        echo "VSA_INSTALLED=true" >> $GITHUB_ENV
+        if [ "$installed" != "$PINNED_VSA_VERSION" ]; then
+          echo "Installing VSA CLI ${PINNED_VSA_VERSION} (found: ${installed:-none})"
+          (cd lib/event-sourcing-platform/vsa && cargo install --path vsa-cli --locked --force)
+        else
+          echo "VSA CLI ${PINNED_VSA_VERSION} already present"
+        fi
+
+        # Fail the job if the binary on PATH is still not the pinned version.
+        # Without this the gate can pass while running a different tool.
+        actual=$(vsa --version | awk '{print $2}')
+        if [ "$actual" != "$PINNED_VSA_VERSION" ]; then
+          echo "::error::VSA version mismatch: PATH has '$actual', submodule pins '$PINNED_VSA_VERSION'"
+          exit 1
+        fi
+        echo "✅ VSA CLI $actual matches the pinned version"
+        echo "VSA_INSTALLED=true" >> "$GITHUB_ENV"

@@ -12,7 +12,7 @@ from datetime import datetime  # noqa: TC003  Pydantic needs runtime types
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
-from syn_domain.contexts.orchestration._shared.skill_ref import (
+from syn_domain.contexts.orchestration._shared.event_refs.value_objects import (
     SkillManifest,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
 
