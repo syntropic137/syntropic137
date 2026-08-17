@@ -9,12 +9,15 @@ See ADR-004: Environment Configuration with Pydantic Settings.
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
 
 if TYPE_CHECKING:
     from syn_shared.settings.dev_tooling import DevToolingSettings
@@ -261,6 +264,59 @@ class Settings(BaseSettings):
             "Injected file-only during setup and never passed through argv or logs."
         ),
     )
+
+    @field_validator("codex_auth_json", mode="after")
+    @classmethod
+    def _normalise_codex_auth_json(cls, value: SecretStr | None) -> SecretStr | None:
+        """Repair paste-mangled codex auth, and reject it if it is not JSON.
+
+        This credential is a ~4KB single-line JSON blob that a human moves by
+        hand into a secret store. Editors mangle it in predictable ways, and the
+        result is a credential that LOOKS present and then fails deep inside
+        workspace provisioning - the worst possible failure shape for a secret.
+
+        Observed in the wild (2026-08-17): pasting into a 1Password text field
+        produced CSV quoting - the whole value wrapped in `"` with every inner
+        quote doubled (`""auth_mode""`). Also common: surrounding single quotes
+        carried over from a `.env` line, and stray whitespace or newlines.
+
+        So: normalise the manglings we can recognise, then VALIDATE. An
+        unparseable credential raises here, at settings load, naming the problem
+        - rather than surfacing as an opaque codex provisioning failure with no
+        indication that the secret is the cause.
+        """
+        if value is None:
+            return None
+
+        raw = value.get_secret_value().strip()
+        if not raw:
+            return None
+
+        # Surrounding quotes from a .env line or a quoting editor.
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
+            raw = raw[1:-1]
+            # CSV convention doubles inner quotes when it wraps a value.
+            if '""' in raw:
+                raw = raw.replace('""', '"')
+
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            msg = (
+                f"{ENV_CODEX_AUTH_JSON} is not valid JSON ({exc.msg} at position "
+                f"{exc.pos}). It must be the exact contents of ~/.codex/auth.json "
+                "on a single line. If it was pasted into a secret store, the "
+                "editor may have quote-escaped it; re-copy with "
+                "`just codex-auth-clip` and paste into a password/concealed field."
+            )
+            raise ValueError(msg) from exc
+
+        if not isinstance(parsed, dict):
+            msg = f"{ENV_CODEX_AUTH_JSON} must be a JSON object, got {type(parsed).__name__}"
+            raise ValueError(msg)
+
+        # Re-serialise compactly so downstream always writes a clean auth.json.
+        return SecretStr(json.dumps(parsed, separators=(",", ":")))
 
     default_agent_timeout_seconds: int = Field(
         default=300,
