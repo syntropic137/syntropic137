@@ -263,10 +263,22 @@ def fetch_recorded(base: str, session_id: str, auth: str) -> RecordedEvents:
 
 
 def resolve_session_ids(base: str, execution_id: str, auth: str) -> list[str]:
-    cost = _as_dict(_get_json(f"{base}/api/v1/costs/executions/{execution_id}", auth))
+    # `include_session_ids` defaults to FALSE: the array is unbounded and most
+    # callers do not want it. A client that needs the IDs must ask. Without the
+    # flag the field comes back null and this script cannot resolve anything -
+    # which is exactly how it silently failed before.
+    cost = _as_dict(
+        _get_json(
+            f"{base}/api/v1/costs/executions/{execution_id}?include_session_ids=true",
+            auth,
+        )
+    )
     ids = [s for s in _as_list(cost.get("session_ids")) if isinstance(s, str)]
     if not ids:
-        raise SystemExit(f"error: no sessions found for execution {execution_id}.")
+        raise SystemExit(
+            f"error: no sessions found for execution {execution_id}. "
+            f"(session_count={cost.get('session_count')})"
+        )
     return ids
 
 
