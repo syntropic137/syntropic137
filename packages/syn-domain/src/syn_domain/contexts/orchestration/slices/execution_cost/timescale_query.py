@@ -94,6 +94,35 @@ WHERE execution_id = $1 AND event_type = $2
 GROUP BY data->>'model'
 """
 
+# The true start of an execution: the earliest event of ANY type.
+#
+# started_at previously came from MIN(time) over session_summary rows, but a
+# session_summary fires exactly once, at session END. For a single-session
+# execution that made MIN == MAX, so started_at and completed_at were the same
+# instant and the run appeared to take zero time (while duration_ms, sourced
+# from the summary payload, correctly showed ~60s).
+_EXECUTION_START_QUERY = """
+SELECT MIN(time) as started_at
+FROM agent_events
+WHERE execution_id = $1
+"""
+
+# NOTE (#817): `is_complete` on ExecutionCost is still never assigned, and that
+# is deliberate as of this change.
+#
+# An attempt to derive it here from "every observed session has a summary" was
+# reverted after cross-model review. It is wrong in the phase-transition window:
+# a two-phase execution whose phase 1 has finished and whose phase 2 has not yet
+# emitted an observation has summarised == observed == 1, so it would report
+# complete while still running. It is also wrong for cancellations that return
+# before recording a summary.
+#
+# Execution completion lives in the execution lifecycle (WorkflowCompleted), not
+# in agent_events - a cost read model can only speak for observations it has
+# seen, never for phases that have not started. The dashboard renders this field
+# as a Complete/In Progress badge, so a confidently-wrong value is worse than an
+# unset one. Fixing it properly means reading the lifecycle projection.
+
 _TOOL_COUNT_QUERY = """
 SELECT COUNT(*)
 FROM agent_events
@@ -589,8 +618,13 @@ class TimescaleExecutionCostQuery:
         cost_by_phase: dict[str, Decimal],
         cost_by_model: dict[str, Decimal],
         unpriced_observation_count: int,
+        started_at: datetime | None = None,
     ) -> ExecutionCost:
-        """Construct the ExecutionCost read model from aggregated data."""
+        """Construct the ExecutionCost read model from aggregated data.
+
+        ``started_at`` may be passed explicitly to override the value derived
+        from the aggregation rows - see ``_EXECUTION_START_QUERY``.
+        """
         return ExecutionCost(
             execution_id=execution_id,
             session_count=data.session_count,
@@ -607,7 +641,9 @@ class TimescaleExecutionCostQuery:
             cost_by_phase=cost_by_phase,
             cost_by_model=cost_by_model,
             unpriced_observation_count=unpriced_observation_count,
-            started_at=data.started_at,
+            # is_complete deliberately NOT set here - see the note on
+            # _ALL_SESSIONS_SUMMARISED_QUERY. Tracked in #817.
+            started_at=started_at or data.started_at,
             completed_at=data.end_at,
         )
 
@@ -625,6 +661,7 @@ class TimescaleExecutionCostQuery:
             tool_count = (
                 await conn.fetchval(_TOOL_COUNT_QUERY, execution_id, TOOL_EXECUTION_COMPLETED) or 0
             )
+            execution_started_at = await conn.fetchval(_EXECUTION_START_QUERY, execution_id)
 
             if has_summary:
                 priced = self._price_session_summary_groups(token_rows)
@@ -641,6 +678,7 @@ class TimescaleExecutionCostQuery:
 
             return self._build_execution_cost(
                 execution_id=execution_id,
+                started_at=execution_started_at,
                 data=data,
                 total_cost=total_cost,
                 duration_ms=self._calculate_duration(data),

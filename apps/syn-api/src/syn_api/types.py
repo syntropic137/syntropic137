@@ -848,6 +848,8 @@ class SessionCostData(BaseModel):
     duration_ms: int = 0
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate; non-zero means cost is INCOMPLETE."""
     is_finalized: bool = False
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -861,14 +863,30 @@ class ExecutionCostData(BaseModel):
     session_count: int = 0
     session_ids: list[str] = Field(default_factory=list)
     total_cost_usd: Decimal = Decimal("0")
+    token_cost_usd: Decimal = Decimal("0")
+    compute_cost_usd: Decimal = Decimal("0")
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    # These four were absent from this DTO, so the query service computed them
+    # correctly and the mapping silently dropped them - the response then fell
+    # back to its `= 0` defaults. An execution reported 0 cache reads and 0 tool
+    # calls while its own sessions reported 144,640 and 11.
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    tool_calls: int = 0
+    turns: int = 0
     duration_ms: float = 0.0
     cost_by_phase: dict = Field(default_factory=dict)
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate, so they contributed no cost.
+
+    Non-zero means the reported cost is INCOMPLETE, not that work was free.
+    Surfaced so a client can render "unpriced" rather than "$0.00" (ADR-067 D5).
+    """
     started_at: datetime | None = None
     completed_at: datetime | None = None
 

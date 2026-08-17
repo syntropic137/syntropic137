@@ -163,6 +163,8 @@ def _fake_pool(summary_rows: list[_FakeRow]) -> MagicMock:
     conn = AsyncMock()
     conn.fetch = AsyncMock(side_effect=fetch_side_effect)
     conn.fetchval = AsyncMock(return_value=0)
+    # Completed summary path: every observed session has a session_summary.
+    conn.fetchrow = AsyncMock(return_value={"summarised": 2, "observed": 2})
 
     pool = MagicMock()
     pool.acquire = MagicMock(

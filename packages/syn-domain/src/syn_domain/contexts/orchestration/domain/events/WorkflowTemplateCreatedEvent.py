@@ -6,10 +6,8 @@ from event_sourcing import DomainEvent, event
 from pydantic import Field
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
-from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (  # noqa: TC001
+from syn_domain.contexts.orchestration._shared.event_refs.value_objects import (  # noqa: TC001
     ClaudePluginRef,
-)
-from syn_domain.contexts.orchestration._shared.skill_ref import (  # noqa: TC001
     SkillRef,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001

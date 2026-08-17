@@ -2315,11 +2315,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include list of session IDs",
+              "description": "Include list of session IDs (unbounded; null when omitted)",
               "default": false,
               "title": "Include Session Ids"
             },
-            "description": "Include list of session IDs"
+            "description": "Include list of session IDs (unbounded; null when omitted)"
           }
         ],
         "responses": {
@@ -6286,10 +6286,17 @@
             "default": 0
           },
           "session_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Session Ids"
           },
           "total_cost_usd": {
@@ -6375,6 +6382,11 @@
             "type": "boolean",
             "title": "Is Complete",
             "default": false
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
           },
           "started_at": {
             "anyOf": [
@@ -9333,6 +9345,11 @@
             },
             "type": "object",
             "title": "Cost By Tool Tokens"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
           },
           "is_finalized": {
             "type": "boolean",

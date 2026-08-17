@@ -2267,7 +2267,7 @@ export interface components {
              */
             session_count: number;
             /** Session Ids */
-            session_ids?: string[];
+            session_ids?: string[] | null;
             /**
              * Total Cost Usd
              * @default 0
@@ -2340,6 +2340,11 @@ export interface components {
              * @default false
              */
             is_complete: boolean;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Started At */
             started_at?: string | null;
             /** Completed At */
@@ -3829,6 +3834,11 @@ export interface components {
             cost_by_tool_tokens?: {
                 [key: string]: string;
             };
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /**
              * Is Finalized
              * @default false
@@ -6453,7 +6463,7 @@ export interface operations {
             query?: {
                 /** @description Include phase/model/tool breakdowns */
                 include_breakdown?: boolean;
-                /** @description Include list of session IDs */
+                /** @description Include list of session IDs (unbounded; null when omitted) */
                 include_session_ids?: boolean;
             };
             header?: never;

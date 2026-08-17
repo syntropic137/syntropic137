@@ -495,7 +495,8 @@ export interface ExecutionCost {
 
   // Session tracking
   session_count: number
-  session_ids: string[]
+  /** null when suppressed via include_session_ids=false (default) */
+  session_ids: string[] | null
 
   // Cost totals
   total_cost_usd: number
