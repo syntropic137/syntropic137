@@ -202,24 +202,33 @@ class SpendTracker:
         execution_id: str,
         input_tokens: int,
         output_tokens: int,
-        model: str = BUDGET_ESTIMATION_MODEL,
+        model: str,
     ) -> SpendBudget:
         """Record actual token usage after an API call.
 
         Should be called AFTER a successful API call with
         the actual token counts from the response.
 
+        ``model`` is REQUIRED and must be the model that actually ran. It
+        deliberately has no default: this method records real spend, so
+        falling back to ``BUDGET_ESTIMATION_MODEL`` would silently attribute
+        actual usage to a baseline the caller never used - the same class of
+        silent substitution ADR-067 removes elsewhere. Pre-dispatch estimation
+        (``check_budget``) may use the baseline because the model genuinely is
+        not known yet; recording actuals may not.
+
         Args:
             execution_id: Execution to record usage for
             input_tokens: Actual input tokens used
             output_tokens: Actual output tokens used
-            model: Claude model for cost calculation
+            model: The model that actually ran
 
         Returns:
             Updated SpendBudget
 
         Raises:
             ValueError: If no budget exists for execution
+            UnknownModelPricingError: If ``model`` has no rate in the table
         """
         budget = await self._store.get(execution_id)
 

@@ -353,9 +353,10 @@ def price_tokens(
     """
     if not model:
         logger.warning(
-            "unpriced token usage: no model recorded (in=%d out=%d cache_read=%d) %s",
+            "unpriced token usage: no model recorded (in=%d out=%d cache_creation=%d cache_read=%d) %s",
             input_tokens,
             output_tokens,
+            cache_creation,
             cache_read,
             context,
         )
@@ -364,10 +365,11 @@ def price_tokens(
     pricing = resolve_model_pricing(model)
     if pricing is None:
         logger.warning(
-            "unpriced token usage: no rate for model %r (in=%d out=%d cache_read=%d) %s",
+            "unpriced token usage: no rate for model %r (in=%d out=%d cache_creation=%d cache_read=%d) %s",
             model,
             input_tokens,
             output_tokens,
+            cache_creation,
             cache_read,
             context,
         )

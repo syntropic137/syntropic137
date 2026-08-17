@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from syn_shared.agents import ModelId
 from syn_shared.pricing import UnknownModelPricingError
 from syn_tokens.models import WorkflowType
 from syn_tokens.spend import (
@@ -201,6 +202,7 @@ class TestSpendTracker:
             execution_id="exec-123",
             input_tokens=5_000,
             output_tokens=2_000,
+            model=ModelId.CLAUDE_SONNET_5,
         )
 
         assert budget.used_input_tokens == 5_000
@@ -219,11 +221,13 @@ class TestSpendTracker:
             execution_id="exec-123",
             input_tokens=5_000,
             output_tokens=2_000,
+            model=ModelId.CLAUDE_SONNET_5,
         )
         budget = await spend_tracker.record_usage(
             execution_id="exec-123",
             input_tokens=3_000,
             output_tokens=1_000,
+            model=ModelId.CLAUDE_SONNET_5,
         )
 
         assert budget.used_input_tokens == 8_000
@@ -237,6 +241,7 @@ class TestSpendTracker:
                 execution_id="exec-123",
                 input_tokens=5_000,
                 output_tokens=2_000,
+                model=ModelId.CLAUDE_SONNET_5,
             )
 
     @pytest.mark.asyncio
@@ -264,6 +269,7 @@ class TestSpendTracker:
             execution_id="exec-123",
             input_tokens=80_000,
             output_tokens=40_000,
+            model=ModelId.CLAUDE_SONNET_5,
         )
 
         summary = await spend_tracker.get_usage_summary("exec-123")
@@ -295,6 +301,7 @@ class TestSpendTracker:
             execution_id="exec-123",
             input_tokens=8_500,
             output_tokens=0,
+            model=ModelId.CLAUDE_SONNET_5,
         )
 
         # Should have triggered warning alert
