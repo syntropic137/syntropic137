@@ -48,6 +48,7 @@ class ModelAlias(StrEnum):
     HAIKU = "haiku"
     SONNET = "sonnet"
     OPUS = "opus"
+    FABLE = "fable"
 
 
 class ModelId(StrEnum):

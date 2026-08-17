@@ -1,4 +1,12 @@
-"""Tests for model-aware session cost calculation."""
+"""Tests for model-aware session cost calculation.
+
+Every test here MUST carry ``@pytest.mark.unit``. CI runs ``pytest -m unit``,
+so an unmarked test in this file is collected by a bare ``pytest`` run and by
+nothing else - it can fail on main indefinitely without turning a check red.
+That is exactly what happened: both ``gpt-5.6`` cases below still asserted the
+pre-#816 rates ($15/$60) after that PR corrected them to $5/$30, and stayed
+red on main because no CI job ran them.
+"""
 
 from decimal import Decimal
 from unittest.mock import Mock
@@ -15,13 +23,17 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.test_projection impo
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
 )
+from syn_shared.agents import ModelId
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        ("gpt-5.6", Decimal("75.0")),
-        ("claude-sonnet-4-20250514", Decimal("18.00")),
+        # 1M in + 1M out. gpt-5.6 is an alias of gpt-5.6-sol at $5/$30 (#816
+        # corrected this from an unverified $15/$60 placeholder).
+        (ModelId.GPT_5_6, Decimal("35.00")),
+        (ModelId.CLAUDE_SONNET_4, Decimal("18.00")),
     ],
 )
 @pytest.mark.asyncio
@@ -47,11 +59,14 @@ async def test_projection_prices_token_usage_by_model(model: str, expected: Deci
     assert session_cost.cost_by_model == {model: expected}
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        ("gpt-5.6", Decimal("75.0")),
-        ("claude-sonnet-4-20250514", Decimal("18.00")),
+        # 1M in + 1M out. gpt-5.6 is an alias of gpt-5.6-sol at $5/$30 (#816
+        # corrected this from an unverified $15/$60 placeholder).
+        (ModelId.GPT_5_6, Decimal("35.00")),
+        (ModelId.CLAUDE_SONNET_4, Decimal("18.00")),
     ],
 )
 def test_timescale_cost_calculation_uses_resolved_model(model: str, expected: Decimal) -> None:
