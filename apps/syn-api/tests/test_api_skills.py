@@ -27,3 +27,24 @@ class TestSkillLookupResponse:
 
         assert response.registered is True
         assert response.resolved_sha == "sha256-abc123"
+
+
+@pytest.mark.unit
+class TestSkillStorageStats:
+    def test_reports_counts_and_bytes(self) -> None:
+        """Eviction is not implemented (spec D6), so size must be visible."""
+        from syn_api.types import SkillStorageStatsResponse
+
+        stats = SkillStorageStatsResponse(object_count=42, total_bytes=1_048_576, skill_count=7)
+
+        assert stats.object_count == 42
+        assert stats.total_bytes == 1_048_576
+        assert stats.skill_count == 7
+
+    def test_empty_store_is_all_zeros_not_an_error(self) -> None:
+        from syn_api.types import SkillStorageStatsResponse
+
+        stats = SkillStorageStatsResponse()
+
+        assert (stats.object_count, stats.total_bytes, stats.skill_count) == (0, 0, 0)
+        assert stats.truncated is False

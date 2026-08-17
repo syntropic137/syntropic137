@@ -20,7 +20,11 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from syn_api._wiring import reset_skill_singletons
-from syn_api.routes.skills import lookup_skill_registration, register_skill_endpoint
+from syn_api.routes.skills import (
+    get_skill_storage_stats,
+    lookup_skill_registration,
+    register_skill_endpoint,
+)
 from syn_api.types import RegisterSkillRequest, SkillFilePayload
 
 
@@ -143,6 +147,50 @@ async def test_get_registrations_is_version_specific() -> None:
     )
 
     assert found.registered is False
+
+
+@pytest.mark.asyncio
+async def test_storage_stats_are_zero_before_anything_is_registered() -> None:
+    stats = await get_skill_storage_stats()
+
+    assert (stats.object_count, stats.total_bytes, stats.skill_count) == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_storage_stats_grow_when_a_skill_is_registered() -> None:
+    """Registering must move the numbers; a model-only test cannot show this."""
+    before = await get_skill_storage_stats()
+
+    await register_skill_endpoint(
+        RegisterSkillRequest(
+            source_url="https://github.com/example/sized",
+            version="1.0.0",
+            skill_name="sized",
+            files=_skill_files("sized"),
+        )
+    )
+
+    after = await get_skill_storage_stats()
+    assert after.skill_count == before.skill_count + 1
+    assert after.object_count > before.object_count
+    assert after.total_bytes > before.total_bytes
+
+
+@pytest.mark.asyncio
+async def test_storage_stats_count_trees_not_registrations() -> None:
+    """Two names over identical content share one tree: the store is content-addressed."""
+    for name in ("alias-one", "alias-two"):
+        await register_skill_endpoint(
+            RegisterSkillRequest(
+                source_url="https://github.com/example/shared",
+                version="1.0.0",
+                skill_name=name,
+                files=_skill_files("shared"),
+            )
+        )
+
+    stats = await get_skill_storage_stats()
+    assert stats.skill_count == 1
 
 
 @pytest.mark.asyncio

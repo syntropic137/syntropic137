@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.ports.SkillStoragePort import (
     SkillFile,
+    SkillStorageStats,
     StoredSkillTree,
 )
 
@@ -25,6 +26,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MANIFEST_KEY = "manifest.json"
+
+# Ceiling on a single stats listing. Skill trees are small and few, so this is
+# far above any realistic store; exceeding it sets ``truncated`` rather than
+# silently reporting a partial total as a complete one.
+_STATS_MAX_KEYS = 100_000
+
+
+def _tree_id_from_key(key: str, prefix: str) -> str | None:
+    """Extract the ``sha256-<hash>`` segment from an object key, if present."""
+    head = f"{prefix}/"
+    if not key.startswith(head):
+        return None
+    segment = key[len(head) :].split("/", 1)[0]
+    return segment if segment.startswith("sha256-") else None
 
 
 class SkillStorageError(Exception):
@@ -155,6 +170,38 @@ class MinioSkillStorage:
             return True
         except Exception:
             return False
+
+    async def stats(self) -> SkillStorageStats:
+        """Sum object sizes under the skills prefix (issue #772, spec D6).
+
+        ``skill_count`` counts distinct ``skills/sha256-*`` prefixes, not
+        files, since one skill tree is many objects plus a manifest.
+
+        A truncated listing is reported rather than hidden: the counts would
+        otherwise read as complete totals when they are lower bounds.
+        """
+        result = await self._storage.list_objects(f"{self._prefix}/", max_keys=_STATS_MAX_KEYS)
+
+        trees: set[str] = set()
+        total_bytes = 0
+        for obj in result.objects:
+            total_bytes += obj.size_bytes
+            tree = _tree_id_from_key(obj.key, self._prefix)
+            if tree is not None:
+                trees.add(tree)
+
+        if result.is_truncated:
+            logger.warning(
+                "Skill storage listing truncated at %d objects; stats are lower bounds",
+                _STATS_MAX_KEYS,
+            )
+
+        return SkillStorageStats(
+            object_count=len(result.objects),
+            total_bytes=total_bytes,
+            skill_count=len(trees),
+            truncated=result.is_truncated,
+        )
 
     async def ensure_ready(self) -> None:
         """Ensure the underlying storage backend is ready (bucket exists)."""

@@ -10,6 +10,7 @@ Endpoints under ``/skills``:
 - ``GET /skills/registrations``  - report whether a (source, version, name)
                                     triple is already registered, so a caller
                                     can skip uploading a tree that is stored.
+- ``GET /skills/storage``        - size of the content-addressed skill store.
 
 Mirrors ``routes/claude_plugins.py``. Typed ``SkillError`` subclasses raised
 by the handler map to HTTP 422 via ``skill_error_mapping`` so callers see
@@ -35,6 +36,7 @@ from syn_api.types import (
     SkillFilePayload,
     SkillRegistrationLookupResponse,
     SkillRegistrationResponse,
+    SkillStorageStatsResponse,
 )
 from syn_domain.contexts.orchestration import SkillError
 from syn_domain.contexts.orchestration.ports.SkillStoragePort import SkillFile
@@ -88,6 +90,24 @@ def _decode_files(entries: list[SkillFilePayload]) -> list[SkillFile]:
         total_bytes += len(content)
         decoded.append(SkillFile(rel_path=raw.rel_path, content=content))
     return decoded
+
+
+@router.get("/storage", response_model=SkillStorageStatsResponse)
+async def get_skill_storage_stats() -> SkillStorageStatsResponse:
+    """Report how much space registered skill trees occupy.
+
+    Eviction is deliberately not implemented, so size is made observable
+    rather than assumed small.
+    """
+    from syn_api._wiring import get_skill_storage
+
+    stats = await (await get_skill_storage()).stats()
+    return SkillStorageStatsResponse(
+        object_count=stats.object_count,
+        total_bytes=stats.total_bytes,
+        skill_count=stats.skill_count,
+        truncated=stats.truncated,
+    )
 
 
 @router.get("/registrations", response_model=SkillRegistrationLookupResponse)

@@ -630,6 +630,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Storage Stats
+         * @description Report how much space registered skill trees occupy.
+         *
+         *     Eviction is deliberately not implemented, so size is made observable
+         *     rather than assumed small.
+         */
+        get: operations["get_skill_storage_stats_skills_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/skills/registrations": {
         parameters: {
             query?: never;
@@ -4170,6 +4193,39 @@ export interface components {
             tree_storage_prefix: string;
         };
         /**
+         * SkillStorageStatsResponse
+         * @description Size of the content-addressed skill store.
+         *
+         *     Skill storage grows monotonically: registration is keyed by content hash
+         *     and nothing removes old trees (skills-distribution spec D6, eviction is
+         *     deliberately not implemented). This endpoint exists so that decision stays
+         *     a measured one rather than an assumption.
+         */
+        SkillStorageStatsResponse: {
+            /**
+             * Object Count
+             * @default 0
+             */
+            object_count: number;
+            /**
+             * Total Bytes
+             * @default 0
+             */
+            total_bytes: number;
+            /**
+             * Skill Count
+             * @description Distinct skill trees, not files.
+             * @default 0
+             */
+            skill_count: number;
+            /**
+             * Truncated
+             * @description True if the backend returned a partial listing, so the counts are floors.
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
          * StateResponse
          * @description Response with execution state.
          */
@@ -6232,6 +6288,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_skill_storage_stats_skills_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillStorageStatsResponse"];
                 };
             };
         };
