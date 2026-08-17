@@ -84,7 +84,7 @@ const sessionsCommand: CommandDef = {
       const sid = s.session_id;
       table.addRow(
         sid.length > 12 ? sid.slice(0, 12) + "..." : sid,
-        formatCost(s.total_cost_usd),
+        formatCostWithCoverage(s.total_cost_usd, s.unpriced_observation_count),
         formatTokens(s.total_tokens),
         formatDuration(s.duration_ms),
         String(s.tool_calls),
@@ -106,7 +106,10 @@ const sessionDetailCommand: CommandDef = {
 
     print(style("Session Cost Detail", CYAN));
     print(`  ${style("Session:", BOLD)} ${s.session_id}`);
-    print(`  ${style("Cost:", BOLD)} ${formatCost(s.total_cost_usd)}`);
+    print(`  ${style("Cost:", BOLD)} ${formatCostWithCoverage(s.total_cost_usd, s.unpriced_observation_count)}`);
+    if (s.unpriced_observation_count) {
+      printDim(`  ${s.unpriced_observation_count} observation(s) had no rate for their model, so this total is incomplete.`);
+    }
     print(`  ${style("Tokens:", BOLD)} ${formatTokens(s.total_tokens)} (in: ${formatTokens(s.input_tokens)}, out: ${formatTokens(s.output_tokens)})`);
     if (s.cache_creation_tokens) print(`  ${style("Cache Write:", BOLD)} ${formatTokens(s.cache_creation_tokens)}`);
     if (s.cache_read_tokens) print(`  ${style("Cache Read:", BOLD)}  ${formatTokens(s.cache_read_tokens)}`);

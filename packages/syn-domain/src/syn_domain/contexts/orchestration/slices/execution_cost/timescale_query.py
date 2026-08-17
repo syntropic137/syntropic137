@@ -107,25 +107,21 @@ FROM agent_events
 WHERE execution_id = $1
 """
 
-# Is every session we have observed for this execution finished?
+# NOTE (#817): `is_complete` on ExecutionCost is still never assigned, and that
+# is deliberate as of this change.
 #
-# `is_complete` previously keyed off "did ANY session_summary row exist", which
-# is true as soon as the FIRST phase of a multi-phase workflow finishes - so a
-# two-phase execution with phase 2 still running reported complete. Comparing
-# summarised sessions against observed sessions gets that case right: phase 2's
-# session has token_usage but no summary, so the counts differ.
+# An attempt to derive it here from "every observed session has a summary" was
+# reverted after cross-model review. It is wrong in the phase-transition window:
+# a two-phase execution whose phase 1 has finished and whose phase 2 has not yet
+# emitted an observation has summarised == observed == 1, so it would report
+# complete while still running. It is also wrong for cancellations that return
+# before recording a summary.
 #
-# NOTE this means "every session observed so far has a final cost", NOT "the
-# workflow will start no further phases" - that lives in the execution
-# lifecycle, not in agent_events. A cost read model can only speak for the
-# observations it has.
-_ALL_SESSIONS_SUMMARISED_QUERY = """
-SELECT
-    COUNT(DISTINCT session_id) FILTER (WHERE event_type = $2) as summarised,
-    COUNT(DISTINCT session_id) as observed
-FROM agent_events
-WHERE execution_id = $1
-"""
+# Execution completion lives in the execution lifecycle (WorkflowCompleted), not
+# in agent_events - a cost read model can only speak for observations it has
+# seen, never for phases that have not started. The dashboard renders this field
+# as a Complete/In Progress badge, so a confidently-wrong value is worse than an
+# unset one. Fixing it properly means reading the lifecycle projection.
 
 _TOOL_COUNT_QUERY = """
 SELECT COUNT(*)
@@ -623,17 +619,8 @@ class TimescaleExecutionCostQuery:
         cost_by_model: dict[str, Decimal],
         unpriced_observation_count: int,
         started_at: datetime | None = None,
-        all_sessions_final: bool = False,
     ) -> ExecutionCost:
         """Construct the ExecutionCost read model from aggregated data.
-
-        ``is_complete`` reports whether EVERY session observed for this
-        execution has a final (session_summary) cost. It was previously never
-        assigned anywhere in the codebase, so every execution reported
-        ``is_complete: false`` including finished ones.
-
-        It deliberately does NOT key off "a summary exists", which is true the
-        moment the first phase of a multi-phase workflow ends.
 
         ``started_at`` may be passed explicitly to override the value derived
         from the aggregation rows - see ``_EXECUTION_START_QUERY``.
@@ -654,7 +641,8 @@ class TimescaleExecutionCostQuery:
             cost_by_phase=cost_by_phase,
             cost_by_model=cost_by_model,
             unpriced_observation_count=unpriced_observation_count,
-            is_complete=all_sessions_final,
+            # is_complete deliberately NOT set here - see the note on
+            # _ALL_SESSIONS_SUMMARISED_QUERY. Tracked in #817.
             started_at=started_at or data.started_at,
             completed_at=data.end_at,
         )
@@ -674,12 +662,6 @@ class TimescaleExecutionCostQuery:
                 await conn.fetchval(_TOOL_COUNT_QUERY, execution_id, TOOL_EXECUTION_COMPLETED) or 0
             )
             execution_started_at = await conn.fetchval(_EXECUTION_START_QUERY, execution_id)
-            completion_row = await conn.fetchrow(
-                _ALL_SESSIONS_SUMMARISED_QUERY, execution_id, SESSION_SUMMARY
-            )
-            observed = (completion_row["observed"] if completion_row else 0) or 0
-            summarised = (completion_row["summarised"] if completion_row else 0) or 0
-            all_sessions_final = observed > 0 and summarised == observed
 
             if has_summary:
                 priced = self._price_session_summary_groups(token_rows)
@@ -697,7 +679,6 @@ class TimescaleExecutionCostQuery:
             return self._build_execution_cost(
                 execution_id=execution_id,
                 started_at=execution_started_at,
-                all_sessions_final=all_sessions_final,
                 data=data,
                 total_cost=total_cost,
                 duration_ms=self._calculate_duration(data),

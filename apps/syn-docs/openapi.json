@@ -9346,6 +9346,11 @@
             "type": "object",
             "title": "Cost By Tool Tokens"
           },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
+          },
           "is_finalized": {
             "type": "boolean",
             "title": "Is Finalized",

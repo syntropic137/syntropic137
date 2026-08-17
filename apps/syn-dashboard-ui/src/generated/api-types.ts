@@ -3835,6 +3835,11 @@ export interface components {
                 [key: string]: string;
             };
             /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /**
              * Is Finalized
              * @default false
              */

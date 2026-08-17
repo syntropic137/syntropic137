@@ -56,6 +56,11 @@ class SessionCostResponse(BaseModel):
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
     tokens_by_tool: dict[str, int] = Field(default_factory=dict)
     cost_by_tool_tokens: dict[str, str] = Field(default_factory=dict)
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate and so contributed no cost.
+
+    Non-zero means this cost is INCOMPLETE, not that the work was free.
+    """
     is_finalized: bool = False
     started_at: str | None = None
     completed_at: str | None = None
@@ -158,6 +163,7 @@ async def list_session_costs(
                     duration_ms=int(c.duration_ms),
                     cost_by_model=c.cost_by_model,
                     cost_by_tool=c.cost_by_tool,
+                    unpriced_observation_count=c.unpriced_observation_count,
                     is_finalized=c.is_finalized,
                     started_at=c.started_at,
                     completed_at=c.completed_at,
@@ -207,6 +213,7 @@ async def get_session_cost(
                 duration_ms=int(c.duration_ms),
                 cost_by_model=c.cost_by_model,
                 cost_by_tool=c.cost_by_tool,
+                unpriced_observation_count=c.unpriced_observation_count,
                 is_finalized=c.is_finalized,
                 started_at=c.started_at,
                 completed_at=c.completed_at,
@@ -370,6 +377,7 @@ def _session_cost_to_api(c: SessionCostData) -> SessionCostResponse:
         duration_ms=c.duration_ms,
         cost_by_model={k: str(v) for k, v in (c.cost_by_model or {}).items()},
         cost_by_tool={k: str(v) for k, v in (c.cost_by_tool or {}).items()},
+        unpriced_observation_count=c.unpriced_observation_count,
         is_finalized=c.is_finalized,
         started_at=str(c.started_at) if c.started_at else None,
         completed_at=str(c.completed_at) if c.completed_at else None,

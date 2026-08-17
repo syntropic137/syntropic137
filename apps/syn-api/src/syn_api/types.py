@@ -848,6 +848,8 @@ class SessionCostData(BaseModel):
     duration_ms: int = 0
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate; non-zero means cost is INCOMPLETE."""
     is_finalized: bool = False
     started_at: datetime | None = None
     completed_at: datetime | None = None
