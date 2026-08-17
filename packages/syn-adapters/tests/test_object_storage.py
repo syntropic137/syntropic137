@@ -640,3 +640,32 @@ class TestArtifactBundleStorage:
         assert "workflows/wf-123" in prefix
         assert "sessions/sess-456" in prefix
         assert "bundles/abc" in prefix
+
+
+class _FakeMinioClient:
+    """Records the kwargs MinIO's list_objects was called with."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def list_objects(self, bucket_name: str, **kwargs: object) -> list[object]:
+        self.calls.append({"bucket_name": bucket_name, **kwargs})
+        return []
+
+
+def test_minio_listing_is_recursive_so_nested_objects_are_returned() -> None:
+    """A directory-style listing returns zero-byte prefixes, not objects.
+
+    Every key this codebase stores is nested (e.g.
+    ``skills/sha256-<hash>/files/SKILL.md``). With MinIO's default
+    non-recursive listing, a prefix scan yields one synthetic zero-byte entry
+    per directory, so sizes total zero and counts are wrong - which is exactly
+    what the skill-store size endpoint reported before this was fixed.
+    """
+    from syn_adapters.object_storage.minio_queries import _list_objects_sync
+
+    client = _FakeMinioClient()
+
+    _list_objects_sync(client, "bucket", "skills/", 1000)  # type: ignore[arg-type]
+
+    assert client.calls[0]["recursive"] is True
