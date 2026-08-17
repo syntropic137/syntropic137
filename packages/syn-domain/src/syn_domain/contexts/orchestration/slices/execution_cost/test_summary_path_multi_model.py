@@ -41,7 +41,9 @@ _HAIKU_MODEL = "claude-3-5-haiku-20241022"
 # 1M input + 1M output tokens at Opus rates: $15.00 + $75.00 = $90.00
 _OPUS_COST_1M_1M = Decimal("90.00")
 # 1M input + 1M output tokens at Haiku rates: $1.00 + $5.00 = $6.00
-_HAIKU_COST_1M_1M = Decimal("6.00")
+# Haiku 3.5 is $0.80/$4.00 per 1M (was wrongly carrying Haiku 4.5's
+# $1/$5 until #816). 1M in + 1M out = $4.80.
+_HAIKU_COST_1M_1M = Decimal("4.80")
 
 
 class _FakeRow:

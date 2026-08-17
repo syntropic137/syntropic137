@@ -73,10 +73,35 @@ class PricedAmount:
     status: PricingStatus
     model: str | None = None
 
+    def __post_init__(self) -> None:
+        """Reject states where ``cost`` contradicts ``status``.
+
+        The ``unpriced()`` factory guarded one direction, but direct
+        construction could still produce ``PricedAmount(None, PRICED)`` or
+        ``PricedAmount(Decimal("1"), UNPRICED_NO_RATE)`` - a cost that lies
+        about its own provenance, which is the failure this type exists to
+        prevent. Validating here makes both unrepresentable.
+
+        Note a priced cost of exactly ``0`` is legitimate: a known model that
+        consumed zero tokens really did cost nothing. That is why the invariant
+        keys on null-ness, not on truthiness.
+        """
+        priced = self.status in (PricingStatus.PRICED, PricingStatus.PLACEHOLDER)
+        if priced and self.cost is None:
+            msg = f"status {self.status} requires a cost, got None"
+            raise ValueError(msg)
+        if not priced and self.cost is not None:
+            msg = f"status {self.status} must have cost=None, got {self.cost}"
+            raise ValueError(msg)
+
     @property
     def is_priced(self) -> bool:
-        """True when ``cost`` is a real number (verified or placeholder rate)."""
-        return self.cost is not None
+        """True when this amount carries a real (verified or placeholder) rate.
+
+        Derived from ``status``, not from ``cost``, so a legitimate zero-token
+        cost of ``0`` is still priced.
+        """
+        return self.status in (PricingStatus.PRICED, PricingStatus.PLACEHOLDER)
 
     @classmethod
     def unpriced(cls, status: PricingStatus, model: str | None = None) -> PricedAmount:
@@ -87,12 +112,15 @@ class PricedAmount:
         return cls(cost=None, status=status, model=model)
 
 
-# TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
-_GPT_5_6_CODEX_INPUT_PER_MILLION = Decimal("15.0")
-# TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
-_GPT_5_6_CODEX_OUTPUT_PER_MILLION = Decimal("60.0")
-# TODO(#780): confirm GPT-5.6 codex rate (placeholder estimate until confirmed)
-_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION = Decimal("1.5")
+# `gpt-5.6` is OpenAI's ALIAS for `gpt-5.6-sol`, not a distinct model, so it
+# carries Sol's published rates. Verified 2026-08-16 against the OpenAI pricing
+# page and the OpenRouter models API. The former $15/$60/$1.50 values here were
+# an unverified TODO(#780) placeholder, ~3x and 2x over the real input/output
+# rates - found by cross-model review of #816.
+_GPT_5_6_CODEX_INPUT_PER_MILLION = Decimal("5.00")
+_GPT_5_6_CODEX_OUTPUT_PER_MILLION = Decimal("30.00")
+_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION = Decimal("0.50")
+_GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION = Decimal("6.25")
 
 
 @dataclass(frozen=True)
@@ -199,7 +227,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         model_id=ModelId.GPT_5_6,
         input_per_million=_GPT_5_6_CODEX_INPUT_PER_MILLION,
         output_per_million=_GPT_5_6_CODEX_OUTPUT_PER_MILLION,
-        cache_creation_per_million=_GPT_5_6_CODEX_INPUT_PER_MILLION,
+        cache_creation_per_million=_GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION,
         cache_read_per_million=_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION,
     ),
     # --- Claude 4.x family ---
@@ -227,10 +255,13 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
     ),
     ModelId.CLAUDE_HAIKU_3_5: ModelPricing(
         model_id=ModelId.CLAUDE_HAIKU_3_5,
-        input_per_million=Decimal("1.00"),
-        output_per_million=Decimal("5.00"),
-        cache_creation_per_million=Decimal("1.25"),
-        cache_read_per_million=Decimal("0.10"),
+        # Haiku 3.5 is $0.80/$4.00, NOT Haiku 4.5's $1.00/$5.00. The old row
+        # carried 4.5's rates under 3.5's id (25% over) - found by cross-model
+        # review of #816.
+        input_per_million=Decimal("0.80"),
+        output_per_million=Decimal("4.00"),
+        cache_creation_per_million=Decimal("1.00"),
+        cache_read_per_million=Decimal("0.08"),
     ),
     # --- Claude 3 family (legacy) ---
     ModelId.CLAUDE_OPUS_3: ModelPricing(
@@ -253,7 +284,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
 # pricing. A cost computed from these is real arithmetic on an unverified
 # rate, so it is reported with PricingStatus.PLACEHOLDER rather than PRICED
 # and must not be presented with the same confidence as a verified figure.
-PLACEHOLDER_PRICED_MODELS: frozenset[ModelId] = frozenset({ModelId.GPT_5_6})
+PLACEHOLDER_PRICED_MODELS: frozenset[ModelId] = frozenset()
 
 # CLI alias → canonical model ID.
 # The workflow YAML and AgentConfiguration use short names like

@@ -24,7 +24,9 @@ if TYPE_CHECKING:
 _OPUS_MODEL = "claude-opus-4-20250514"
 _HAIKU_MODEL = "claude-3-5-haiku-20241022"
 _OPUS_COST_1M_1M = Decimal("90.00")
-_HAIKU_COST_1M_1M = Decimal("6.00")
+# Haiku 3.5 is $0.80/$4.00 per 1M (was wrongly carrying Haiku 4.5's
+# $1/$5 until #816). 1M in + 1M out = $4.80.
+_HAIKU_COST_1M_1M = Decimal("4.80")
 
 
 class _FakeRow:
