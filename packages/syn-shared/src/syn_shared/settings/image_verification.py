@@ -47,6 +47,12 @@ AGENTIC_PRIMITIVES_IDENTITY_REGEXP = (
     r"@refs/heads/(main|release)$"
 )
 
+#: Lowest cosign major version accepted by the verifier probe.
+#: v2 introduced ``--certificate-identity-regexp``; v3 is current and keeps it.
+#: Held as a module constant rather than a setting so it cannot be lowered to
+#: zero through the environment, which would defeat the probe it guards.
+MINIMUM_COSIGN_MAJOR = 2
+
 
 class ImageVerificationSettings(BaseSettings):
     """Configuration for verifying workspace image signatures before use.
@@ -108,12 +114,32 @@ class ImageVerificationSettings(BaseSettings):
         ),
     )
 
+    allow_local_images: bool = Field(
+        default=False,
+        description=(
+            "Allow running an image reference that carries no registry host "
+            "(for example 'agentic-workspace-claude-cli:dev'). OFF by default: "
+            "reference syntax is not proof an image is local, because Docker "
+            "pulls 'myorg/image:latest' and 'ubuntu@sha256:...' from Docker Hub "
+            "when they are not already present. When ON, such a reference is "
+            "resolved to the immutable image ID of an image that is ALREADY "
+            "present locally, and that ID is what runs; if the image is not "
+            "present, provisioning fails rather than pulling. This is the "
+            "local-development switch and it is logged at WARNING on every use."
+        ),
+    )
+
     cosign_path: str = Field(
         default="cosign",
         description=(
             "cosign executable, resolved on PATH unless an absolute path is "
-            "given. cosign v2 or later is required: the "
-            "--certificate-identity-regexp flag does not exist in v1."
+            "given. Whatever this selects is probed with 'cosign version' and "
+            "must report a cosign version of at least major "
+            f"{MINIMUM_COSIGN_MAJOR}, so a binary that merely exits zero (such "
+            "as /usr/bin/true) is rejected instead of being recorded as a "
+            "successful verification. Prefer setting this to an absolute, "
+            "deployment-controlled path; leaving it as a bare name means "
+            "verification follows PATH."
         ),
     )
 

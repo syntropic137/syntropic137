@@ -301,6 +301,11 @@ class TestPartitionSafety:
         assert all(segments)
 
 
+async def _passthrough_verify(image_ref: str) -> str:
+    """Stand in for the supply-chain gate, returning the reference unchanged."""
+    return image_ref
+
+
 def _mock_provider() -> MagicMock:
     workspace = MagicMock()
     workspace.id = "ws-123"
@@ -329,10 +334,22 @@ async def _create(
     settings: SessionStoreSettings,
     environment: dict[str, str] | None = None,
 ) -> MagicMock:
-    """Provision through the real adapter against a mocked provider."""
+    """Provision through the real adapter against a mocked provider.
+
+    The image supply-chain gate is stubbed out: these tests are about what
+    lands in the container environment, and `test:latest` is deliberately not a
+    verifiable reference. The gate has its own suite in
+    tests/workspace_backends/test_image_verification.py.
+    """
     adapter = AgenticIsolationAdapter(session_store=settings)
     provider = _mock_provider()
-    with patch.object(adapter, "_provider", provider):
+    with (
+        patch.object(adapter, "_provider", provider),
+        patch(
+            "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+            side_effect=_passthrough_verify,
+        ),
+    ):
         await adapter.create(_config(environment))  # type: ignore[arg-type]
     return provider
 

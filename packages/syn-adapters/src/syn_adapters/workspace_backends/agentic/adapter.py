@@ -33,7 +33,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # Docker-specific module. Existing `from ...agentic.adapter import
 # WorkspaceProvisionError` call sites keep working unchanged.
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
-from syn_adapters.workspace_backends.image_verification import verify_image
+from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
     ENV_SYN_AGENT_NETWORK,
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
@@ -136,21 +136,8 @@ class AgenticIsolationAdapter:
         """Check if Docker is available."""
         return WorkspaceDockerProvider.is_available()
 
-    async def create(self, config: IsolationConfig) -> IsolationHandle:
-        """Create an isolated workspace container.
-
-        Args:
-            config: Isolation configuration from Syn137 domain
-
-        Returns:
-            IsolationHandle for subsequent operations
-        """
-        from agentic_isolation import WorkspaceConfig
-
-        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
-            IsolationHandle,
-        )
-
+    def _build_environment(self, config: IsolationConfig) -> dict[str, str]:
+        """Build the container environment, including the session-store block."""
         # Central session-store capture (SeshMagic). The capability lives in the
         # workspace image and activates purely from these variables; Syn137 only
         # supplies the contract.
@@ -173,7 +160,7 @@ class AgenticIsolationAdapter:
         # at all. A persistent volume would fix it but drags in volume lifecycle
         # management that nobody has designed yet, so it is a deliberate
         # follow-up rather than an omission.
-        environment = apply_session_store_env(
+        return apply_session_store_env(
             config.environment or {},
             self._session_store,
             execution_id=config.execution_id,
@@ -181,6 +168,23 @@ class AgenticIsolationAdapter:
             workflow_id=config.workflow_id,
             phase_id=config.phase_id,
         )
+
+    async def create(self, config: IsolationConfig) -> IsolationHandle:
+        """Create an isolated workspace container.
+
+        Args:
+            config: Isolation configuration from Syn137 domain
+
+        Returns:
+            IsolationHandle for subsequent operations
+        """
+        from agentic_isolation import WorkspaceConfig
+
+        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            IsolationHandle,
+        )
+
+        environment = self._build_environment(config)
 
         # Map Syn137 config to agentic_isolation config
         # ISS-43: Network is set on the provider (default_network in __init__),
@@ -195,9 +199,14 @@ class AgenticIsolationAdapter:
         # Supply-chain gate: verify the cosign signature of the exact image
         # reference we are about to run, before any container exists. Raises
         # ImageVerificationError (a WorkspaceProvisionError) on failure, so an
-        # unverified image never reaches the provider. Local images are skipped
-        # with a warning; see image_verification for the full policy.
-        verify_image(image)
+        # unverified image never reaches the provider.
+        #
+        # The RETURN VALUE is what runs, not `image`. For a digest-pinned
+        # registry reference they are the same string; for an explicitly
+        # permitted local image the return value is that image's immutable
+        # local image ID, so Docker cannot pull or retag something else in
+        # between. See image_verification for the full policy.
+        image = await verify_image_async(image)
 
         ws_config = WorkspaceConfig(
             provider="docker",

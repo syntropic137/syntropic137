@@ -47,12 +47,17 @@ settings, no code change required:
 - ``SYN_WORKSPACE_DOCKER_IMAGE`` overrides the claude-cli image
 - ``SYN_WORKSPACE_INTERACTIVE_TMUX_IMAGE`` overrides the interactive-tmux image
 
-Both accept any reference form. A locally built image (a bare name such as
-``agentic-workspace-claude-cli:dev``) is the supported local-development path:
-it has no registry host, was never signed, and signature verification skips it
-with a warning rather than blocking it. A *remote* reference is required to be
-digest-pinned; a remote tag is rejected, because verifying a tag does not
+Both accept any reference form. A registry reference is required to be
+digest-pinned; a registry tag is rejected, because verifying a tag does not
 establish what will actually be pulled.
+
+A locally built image (a bare name such as ``agentic-workspace-claude-cli:dev``)
+is the supported local-development path, but it is not inferred from the
+reference: it must be turned on with
+``SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=true``, and the image must already exist
+on the Docker host, because a reference with no registry host is otherwise
+pulled from Docker Hub. See
+``syn_adapters.workspace_backends.image_verification`` for the policy.
 """
 
 from __future__ import annotations
@@ -173,5 +178,6 @@ INTERACTIVE_TMUX_WORKSPACE_IMAGE: str = workspace_image_ref(WorkspaceImageProvid
 This provider is published to GHCR by the same agentic-primitives workflow that
 publishes claude-cli, so it is pinned and verified identically. Local
 development against a locally built ``agentic-workspace-interactive-tmux:<tag>``
-still works through ``SYN_WORKSPACE_INTERACTIVE_TMUX_IMAGE``.
+still works through ``SYN_WORKSPACE_INTERACTIVE_TMUX_IMAGE`` together with
+``SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=true``.
 """
