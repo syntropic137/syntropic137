@@ -312,6 +312,7 @@ MODEL_ALIASES: dict[str, ModelId] = {
     ModelAlias.OPUS: ModelId.CLAUDE_OPUS_5,
     ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5,
     ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_4_5,
+    ModelAlias.FABLE: ModelId.CLAUDE_FABLE_5,
     # Undated family names the CLI also accepts. Only ids that DIFFER from a
     # ModelId value need an entry: canonical_model_id() already falls back to
     # ModelId(value), so the Claude 5 ids (which are undated) resolve on their
