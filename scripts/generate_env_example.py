@@ -32,6 +32,9 @@ sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
+from syn_shared.settings.image_verification import (  # noqa: E402
+    ImageVerificationSettings,
+)
 from syn_shared.settings.infra import InfraSettings  # noqa: E402
 from syn_shared.settings.session_store import SessionStoreSettings  # noqa: E402
 from syn_shared.settings.storage import StorageSettings  # noqa: E402
@@ -356,6 +359,19 @@ def generate_env_example() -> str:
             "WORKSPACE ISOLATION (ADR-021)",
             prefix="SYN_WORKSPACE_",
             description="All workspaces are isolated by default. These settings control HOW.",
+        )
+    )
+
+    # Workspace image signature verification (SYN_IMAGE_VERIFY_* prefix).
+    # ON by default and fails closed: a remote workspace image must carry a
+    # valid cosign keyless signature from the agentic-primitives publishing
+    # workflow before a container is created.
+    lines.extend(
+        generate_settings_section(
+            ImageVerificationSettings,
+            "WORKSPACE IMAGE SIGNATURE VERIFICATION (cosign keyless)",
+            prefix="SYN_IMAGE_VERIFY_",
+            description="Verification is ON by default and fails closed. Requires cosign v2 on PATH.",
         )
     )
 

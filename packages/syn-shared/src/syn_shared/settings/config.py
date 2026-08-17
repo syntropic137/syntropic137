@@ -19,6 +19,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 if TYPE_CHECKING:
     from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.github import GitHubAppSettings
+    from syn_shared.settings.image_verification import ImageVerificationSettings
     from syn_shared.settings.polling import PollingSettings
     from syn_shared.settings.session_store import SessionStoreSettings
     from syn_shared.settings.storage import StorageSettings
@@ -527,6 +528,23 @@ class Settings(BaseSettings):
         from syn_shared.settings.session_store import SessionStoreSettings
 
         return SessionStoreSettings()
+
+    # =========================================================================
+    # WORKSPACE IMAGE SIGNATURE VERIFICATION - on by default, fails closed
+    # =========================================================================
+
+    @property
+    def image_verification(self) -> ImageVerificationSettings:
+        """Get workspace image signature verification settings.
+
+        Returns an ImageVerificationSettings instance configured from
+        SYN_IMAGE_VERIFY_* env vars. Enabled by default: a remote workspace
+        image must carry a valid cosign keyless signature from the expected
+        publishing workflow before a container is created.
+        """
+        from syn_shared.settings.image_verification import ImageVerificationSettings
+
+        return ImageVerificationSettings()
 
     # =========================================================================
     # DEVELOPMENT TOOLING

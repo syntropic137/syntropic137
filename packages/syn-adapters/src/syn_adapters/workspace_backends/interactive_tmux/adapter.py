@@ -33,6 +33,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     check_workspace_health,
     copy_files_from_workspace,
 )
+from syn_adapters.workspace_backends.image_verification import verify_image
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -239,6 +240,15 @@ class InteractiveTmuxIsolationAdapter:
         # credentials. Empty `agents` falls back to the provider default.
         if config.agents:
             labels["agents"] = ",".join(config.agents)
+
+        # Supply-chain gate, same policy as the Docker adapter. The image is
+        # not on WorkspaceConfig for this provider (it is supplied via
+        # `default_image=` at construction), so verify the constructor value.
+        # When it is None the provider falls back to its own built-in default,
+        # which this adapter does not know and therefore cannot verify; the
+        # WorkspaceService factory always passes an explicit image.
+        if self._default_image is not None:
+            verify_image(self._default_image)
 
         ws_config = WorkspaceConfig(
             provider="interactive-tmux",

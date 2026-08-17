@@ -33,6 +33,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # Docker-specific module. Existing `from ...agentic.adapter import
 # WorkspaceProvisionError` call sites keep working unchanged.
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.image_verification import verify_image
 from syn_shared.env_constants import (
     ENV_SYN_AGENT_NETWORK,
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
@@ -189,9 +190,18 @@ class AgenticIsolationAdapter:
         # NOTE: the session-store write token is in `environment` only. It must
         # never be copied into `labels` — labels are readable by anyone who can
         # run `docker inspect`.
+        image = config.image or self._default_image
+
+        # Supply-chain gate: verify the cosign signature of the exact image
+        # reference we are about to run, before any container exists. Raises
+        # ImageVerificationError (a WorkspaceProvisionError) on failure, so an
+        # unverified image never reaches the provider. Local images are skipped
+        # with a warning; see image_verification for the full policy.
+        verify_image(image)
+
         ws_config = WorkspaceConfig(
             provider="docker",
-            image=config.image or self._default_image,
+            image=image,
             working_dir="/workspace",
             environment=environment,
             labels={
