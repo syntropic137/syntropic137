@@ -905,8 +905,12 @@ Codex authenticates with a **file-injected `~/.codex/auth.json`** (ChatGPT
 subscription), never an API key in argv or env.
 
 ```bash
-# 1. Stage the credential (reads ~/.codex/auth.json, honours CODEX_HOME)
-just codex-auth-clip --dotenv        # writes CODEX_AUTH_JSON= into .env
+# 1. Stage the credential. Production resolves it from 1Password via
+#    scripts/op_env_export.py; `codex-auth-clip` copies the value so it can be
+#    pasted into the vault item's CODEX_AUTH_JSON field (password/concealed).
+#    Pasting into the root .env works for a quick local check but does NOT
+#    exercise the production path - see the note below.
+just codex-auth-clip                 # copies the raw value to the clipboard
 
 # 2. The workspace image MUST contain the codex binary
 docker run --rm "${SYN_WORKSPACE_DOCKER_IMAGE:-ghcr.io/agentparadise/agentic-workspace-claude-cli:latest}" codex --version
@@ -915,9 +919,33 @@ docker run --rm "${SYN_WORKSPACE_DOCKER_IMAGE:-ghcr.io/agentparadise/agentic-wor
 #    is skipped for codex phases, so codex requires direct/allowlisted egress)
 ```
 
-- [ ] `CODEX_AUTH_JSON` is set on the stack
+- [ ] `CODEX_AUTH_JSON` is set on the stack **and parses as a JSON object**
 - [ ] `codex --version` succeeds inside the workspace image
 - [ ] `api.openai.com` is reachable from the agent network
+
+> **Presence is not enough.** A mangled credential looks identical to a good one
+> at the `[ -n "$CODEX_AUTH_JSON" ]` level, and then fails deep inside workspace
+> provisioning with nothing naming the secret. Assert that it *parses*:
+>
+> ```bash
+> docker exec <api-container> python3 -c \
+>   "import json,os; d=json.loads(os.environ['CODEX_AUTH_JSON']); \
+>    print('auth_mode=', d.get('auth_mode'), 'keys=', len(d))"
+> ```
+>
+> Since ADR-067 the settings layer validates this at load, so a bad value fails
+> fast with a named error - but check it explicitly here, because the whole
+> point of this section is that codex works on a real deployment.
+
+> **Verify the PRODUCTION resolution path, not a hand-staged `.env`.** The
+> credential should arrive via 1Password -> `scripts/op_env_export.py` ->
+> container, which is what a real deployment does. A value pasted into the root
+> `.env` for convenience proves only that the container can read an env var.
+>
+> **Inspect secrets with `op item get ... --format json`, never `--fields
+> --reveal`**: the `--fields` output CSV-quotes values containing quotes and
+> commas, which reads exactly like a corrupted credential and has already caused
+> one false diagnosis.
 
 > **Blocker if any fail.** A codex phase with no credential, no binary, or no egress
 > fails at provisioning or produces a broken stream.
