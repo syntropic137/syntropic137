@@ -24,7 +24,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_to_workspace,
 )
 from syn_adapters.workspace_backends.agentic.session_store_env import (
-    build_session_store_env,
+    apply_session_store_env,
 )
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
@@ -150,19 +150,21 @@ class AgenticIsolationAdapter:
             IsolationHandle,
         )
 
-        environment = dict(config.environment) if config.environment else {}
-
         # Central session-store capture (SeshMagic). The capability lives in the
         # workspace image and activates purely from these variables; Syn137 only
         # supplies the contract.
         #
-        # OPT-IN, DEFAULT OFF: when no store URL is configured this returns {},
-        # so a self-hoster with no SeshMagic instance gets a container
-        # environment byte-identical to before this integration existed.
+        # OPT-IN, DEFAULT OFF: when no store URL is configured this STRIPS the
+        # six reserved AGENTIC_SESSION_STORE_* keys and adds nothing, so a
+        # self-hoster with no SeshMagic instance gets a container environment
+        # byte-identical to before this integration existed — including when a
+        # caller passes those keys itself via `extra_environment`. The opt-in
+        # switch must not be defeatable from the public workspace API.
         #
-        # The contract wins over any caller-supplied value of the same name: the
-        # partition and tags are derived from THIS execution and must not be
-        # spoofable by a phase's environment block.
+        # When enabled the adapter's values win over any caller-supplied value of
+        # the same name: URL, token, partition and tags are derived from host
+        # settings and THIS execution, and must not be redirectable or spoofable
+        # by a phase's environment block.
         #
         # SPOOL is container-local (/spool), deliberately NOT a mounted volume.
         # Tradeoff: if the container is SIGKILLed before finalize runs, that
@@ -170,14 +172,13 @@ class AgenticIsolationAdapter:
         # at all. A persistent volume would fix it but drags in volume lifecycle
         # management that nobody has designed yet, so it is a deliberate
         # follow-up rather than an omission.
-        environment.update(
-            build_session_store_env(
-                self._session_store,
-                execution_id=config.execution_id,
-                workspace_id=config.workspace_id,
-                workflow_id=config.workflow_id,
-                phase_id=config.phase_id,
-            )
+        environment = apply_session_store_env(
+            config.environment or {},
+            self._session_store,
+            execution_id=config.execution_id,
+            workspace_id=config.workspace_id,
+            workflow_id=config.workflow_id,
+            phase_id=config.phase_id,
         )
 
         # Map Syn137 config to agentic_isolation config

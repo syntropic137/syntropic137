@@ -14,6 +14,18 @@ the container (no init, no doctor, no finalize), so a self-hoster with no
 SeshMagic instance sees byte-identical behaviour to having no integration at
 all. That guarantee is the point of this module and is covered by tests.
 
+Reserved keys
+-------------
+The six ``AGENTIC_SESSION_STORE_*`` variables are RESERVED by this adapter. The
+public workspace API accepts arbitrary ``extra_environment`` from callers, so
+without an explicit rule a caller could set ``AGENTIC_SESSION_STORE_PROVIDER``
+itself and switch on in-image capture while the host-side setting is OFF, or
+redirect an enabled capture at a store of its own choosing.
+:func:`apply_session_store_env` therefore strips every reserved key from
+caller-supplied environment first, then layers this module's own values on top
+(when enabled). A stripped key is logged by NAME only — never by value, because
+one of them is the write token.
+
 Partition safety
 ----------------
 The capability HARD-FAILS the workspace if the partition is absolute or
@@ -22,14 +34,23 @@ domain and are normally opaque ids, but they are sanitised here rather than
 trusted: a workflow-supplied id must never be able to take down provisioning or
 escape its partition prefix.
 
+Tag identity
+------------
+Tags are the join key: a store row is matched back to a Syn137 execution by
+them, so a tag value must still EQUAL the identifier it names. Values are
+therefore percent-encoded rather than having their delimiters substituted — see
+:func:`encode_tag_value`.
+
 See ADR-021 (Isolated Workspace Architecture) for the surrounding container
 lifecycle.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING
+from urllib.parse import quote, unquote
 
 from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_AUTH,
@@ -38,10 +59,15 @@ from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_SPOOL,
     ENV_AGENTIC_SESSION_STORE_TAGS,
     ENV_AGENTIC_SESSION_STORE_URL,
+    SESSION_STORE_CONTRACT_ENV_VARS,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from syn_shared.settings.session_store import SessionStoreSettings
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "TAG_EXECUTION_ID",
@@ -49,7 +75,10 @@ __all__ = [
     "TAG_SOURCE",
     "TAG_WORKFLOW_ID",
     "TAG_WORKSPACE_ID",
+    "apply_session_store_env",
     "build_session_store_env",
+    "decode_tag_value",
+    "encode_tag_value",
     "sanitize_partition_segment",
 ]
 
@@ -75,9 +104,11 @@ _DOT_RUN = re.compile(r"\.{2,}")
 #: Placeholder for an identifier that sanitises down to nothing.
 _EMPTY_SEGMENT = "unknown"
 
-#: Tag values are comma-separated ``key:value`` pairs, so both delimiters and
-#: surrounding whitespace must be stripped out of values.
-_UNSAFE_TAG_CHARS = re.compile(r"[,:\s]+")
+#: Percent-encoding leaves these characters untouched. Everything else — the
+#: ``,`` and ``:`` framing delimiters, whitespace, ``%`` itself, non-ASCII — is
+#: escaped, so encoding is injective and ``decode_tag_value`` recovers the
+#: original identifier exactly.
+_TAG_VALUE_SAFE = ""
 
 
 def sanitize_partition_segment(raw: str | None) -> str:
@@ -103,9 +134,33 @@ def sanitize_partition_segment(raw: str | None) -> str:
     return cleaned or _EMPTY_SEGMENT
 
 
-def _sanitize_tag_value(raw: str) -> str:
-    """Strip the ``,`` and ``:`` delimiters (and whitespace) out of a tag value."""
-    return _UNSAFE_TAG_CHARS.sub("_", raw.strip()).strip("_")
+def encode_tag_value(raw: str) -> str:
+    """Percent-encode ``raw`` so it is safe inside the ``key:value`` framing.
+
+    Substituting the delimiters (the previous behaviour) collapsed ``phase:a``,
+    ``phase,a`` and ``phase_a`` onto one tag and stored a value that no longer
+    equalled the real identifier — which breaks the whole point of these tags,
+    namely joining a store row back to the Syn137 execution that produced it.
+
+    Percent-encoding (RFC 3986) is injective and reversible, so the join
+    survives. For every identifier that actually occurs in practice (kebab- or
+    snake-cased slugs, uuid4s, ``exec-<hex>``) encoding is the identity
+    function, so this changes no real tag value; it only stops the pathological
+    ones from lying. Rejection was considered and dropped: ``workflow_id`` and
+    ``phase_id`` come from author-written workflow YAML whose schema constrains
+    only length, never the character set, so a delimiter is *legal* input and
+    failing provisioning over one would be an outage, not a safety measure.
+
+    The store side recovers the identifier with :func:`decode_tag_value` (or any
+    standard percent-decoder).
+    """
+    return quote(raw.strip(), safe=_TAG_VALUE_SAFE)
+
+
+def decode_tag_value(encoded: str) -> str:
+    """Inverse of :func:`encode_tag_value`. Declared here so the round trip is
+    testable and the store-side decoder has one authoritative reference."""
+    return unquote(encoded)
 
 
 def _build_partition(execution_id: str, workspace_id: str) -> str:
@@ -142,7 +197,7 @@ def _build_tags(
     for key, value in pairs:
         if not value:
             continue
-        safe = _sanitize_tag_value(value)
+        safe = encode_tag_value(value)
         if safe:
             rendered.append(f"{key}:{safe}")
     return ",".join(rendered)
@@ -192,3 +247,64 @@ def build_session_store_env(
     env[ENV_AGENTIC_SESSION_STORE_AUTH] = settings.auth_value
 
     return env
+
+
+def apply_session_store_env(
+    caller_environment: Mapping[str, str],
+    settings: SessionStoreSettings,
+    *,
+    execution_id: str,
+    workspace_id: str,
+    workflow_id: str | None = None,
+    phase_id: str | None = None,
+) -> dict[str, str]:
+    """Return ``caller_environment`` with the reserved contract keys enforced.
+
+    This is the ONLY function the adapter should use. It is deliberately not a
+    plain ``environment.update(build_session_store_env(...))`` because that
+    leaves caller-supplied reserved keys in place on the disabled path, which
+    would let any caller of the public workspace API turn on in-image capture by
+    passing ``extra_environment`` — defeating the opt-in switch entirely.
+
+    Behaviour:
+
+    * **Disabled** — every reserved key is removed and nothing is added, so the
+      container environment is byte-identical to having no integration.
+    * **Enabled** — every reserved key is removed and then re-supplied from this
+      execution's own contract, so the adapter's values always win.
+
+    Stripping is chosen over raising: these keys belong to the workspace image's
+    capability namespace, not to Syn137 callers, so there is no legitimate reason
+    for one to be supplied, and failing provisioning on an illegitimate input
+    would turn a hardening measure into an outage (and, on the disabled path,
+    into a way to make a workspace unprovisionable). The removal is surfaced at
+    WARNING so an operator can discover it in logs.
+    """
+    environment = dict(caller_environment)
+
+    reserved_from_caller = sorted(SESSION_STORE_CONTRACT_ENV_VARS & environment.keys())
+    if reserved_from_caller:
+        for key in reserved_from_caller:
+            del environment[key]
+        # Names only. One of these keys carries the write token, so no value from
+        # this set may ever reach a log record.
+        logger.warning(
+            "Ignoring caller-supplied session-store variable(s) %s: these names are "
+            "reserved by the workspace adapter and are set from the host-side "
+            "SYN_SESSION_STORE_* settings only (execution=%s, workspace=%s). "
+            "Values are not logged.",
+            ", ".join(reserved_from_caller),
+            execution_id,
+            workspace_id,
+        )
+
+    environment.update(
+        build_session_store_env(
+            settings,
+            execution_id=execution_id,
+            workspace_id=workspace_id,
+            workflow_id=workflow_id,
+            phase_id=phase_id,
+        )
+    )
+    return environment

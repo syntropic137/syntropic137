@@ -272,7 +272,9 @@ SYN_SESSION_STORE_URL=http://your-store:18090
 SYN_SESSION_STORE_AUTH_TOKEN=op://syntropic137/session-store/write-token   # or plaintext
 ```
 
-Sessions are tagged with `execution_id`, `workspace_id`, `workflow_id`, `phase_id`, and `source:syntropic137`, so any row in the store can be joined back to the execution that produced it.
+Sessions are tagged with `execution_id`, `workspace_id`, `workflow_id`, `phase_id`, and `source:syntropic137`, so any row in the store can be joined back to the execution that produced it. Tag values are percent-encoded, which is a no-op for the slug- and uuid-shaped identifiers that occur in practice but keeps an identifier containing the `,` or `:` framing delimiters recoverable rather than mangled.
+
+The six `AGENTIC_SESSION_STORE_*` variables are reserved by the workspace adapter. They are set from `SYN_SESSION_STORE_*` alone: if a caller supplies one via a phase's environment block it is dropped (with a warning naming the key, never its value), so capture cannot be switched on, redirected, or re-partitioned from workflow input.
 
 > [!NOTE]
 > This is additive and independent of the two stores Syntropic137 already uses: conversation logs in MinIO and the event stream (tool calls, tokens, cost) in TimescaleDB. Both continue to work unchanged whether or not central capture is enabled.
