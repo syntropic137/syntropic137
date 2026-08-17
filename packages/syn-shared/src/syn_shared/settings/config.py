@@ -60,6 +60,12 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",  # Ignore extra env vars
+        # Pydantic embeds the offending INPUT in ValidationError by default
+        # (`input_value='{"tokens":"sk-..."`). Several fields here are secrets,
+        # so a malformed credential would print part of itself into startup
+        # logs. A validator writing a careful message is not enough - the
+        # framework appends the input regardless.
+        hide_input_in_errors=True,
     )
 
     # =========================================================================
@@ -299,8 +305,14 @@ class Settings(BaseSettings):
             if '""' in raw:
                 raw = raw.replace('""', '"')
 
+        def _reject_non_standard(constant: str) -> object:
+            # json accepts NaN/Infinity/-Infinity, which are NOT valid JSON and
+            # which codex would choke on. Reject rather than silently pass them.
+            msg = f"{ENV_CODEX_AUTH_JSON} contains the non-standard JSON literal {constant!r}"
+            raise ValueError(msg)
+
         try:
-            parsed = json.loads(raw)
+            parsed = json.loads(raw, parse_constant=_reject_non_standard)
         except json.JSONDecodeError as exc:
             msg = (
                 f"{ENV_CODEX_AUTH_JSON} is not valid JSON ({exc.msg} at position "
@@ -315,8 +327,15 @@ class Settings(BaseSettings):
             msg = f"{ENV_CODEX_AUTH_JSON} must be a JSON object, got {type(parsed).__name__}"
             raise ValueError(msg)
 
-        # Re-serialise compactly so downstream always writes a clean auth.json.
-        return SecretStr(json.dumps(parsed, separators=(",", ":")))
+        # Return the normalised SOURCE TEXT, not a re-serialisation of `parsed`.
+        #
+        # A json.loads/json.dumps round trip is lossy in ways that matter for a
+        # credential: large integers lose precision through float
+        # (9007199254740993 -> ...992), duplicate keys collapse, unicode
+        # escaping changes, and key order is not guaranteed to be preserved by
+        # every producer. `parsed` exists only to prove the text is a JSON
+        # object; the bytes we hand downstream stay the caller's.
+        return SecretStr(raw)
 
     default_agent_timeout_seconds: int = Field(
         default=300,

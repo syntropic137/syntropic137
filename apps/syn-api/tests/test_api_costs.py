@@ -96,23 +96,51 @@ class TestSessionIdsSuppressionContract:
     cannot interpret: it reads as "no sessions" when it means "you did not ask".
     """
 
-    def test_suppressed_is_null_not_empty_list(self) -> None:
-        from syn_api.routes.costs import _execution_cost_to_api
+    @staticmethod
+    async def _call_endpoint(*, include_session_ids: bool):
+        """Invoke the real endpoint, stubbing only its data dependencies.
 
-        response = _execution_cost_to_api(_execution_cost_data())
-        # Simulate the route's suppression branch.
-        response.session_ids = None
+        Deliberately NOT a simulation of the suppression branch: an earlier
+        version of this test set `response.session_ids = None` itself, so it
+        asserted its own behaviour and would have passed even if the endpoint
+        returned `[]`. Cross-model review caught that.
+        """
+        from unittest.mock import AsyncMock, patch
 
-        assert response.session_ids is None
-        assert response.session_count == 2, (
-            "session_count must stay accurate when IDs are suppressed - the pair "
-            "([] , count=2) is what made this unreadable"
+        from syn_api.routes import costs as costs_module
+        from syn_api.types import Ok
+
+        with (
+            patch.object(
+                costs_module,
+                "get_execution_cost",
+                AsyncMock(return_value=Ok(_execution_cost_data())),
+            ),
+            patch.object(costs_module, "get_projection_mgr", create=True),
+            patch(
+                "syn_api.prefix_resolver.resolve_or_raise",
+                AsyncMock(return_value="exec-test"),
+            ),
+        ):
+            return await costs_module.get_execution_cost_endpoint(
+                execution_id="exec-test",
+                include_breakdown=True,
+                include_session_ids=include_session_ids,
+            )
+
+    @pytest.mark.asyncio
+    async def test_suppressed_is_null_not_empty_list(self) -> None:
+        response = await self._call_endpoint(include_session_ids=False)
+
+        assert response.session_ids is None, (
+            "suppressed must be null; `[]` beside session_count=2 reads as "
+            "'no sessions' when it means 'you did not ask'"
         )
+        assert response.session_count == 2
 
-    def test_requested_returns_the_ids(self) -> None:
-        from syn_api.routes.costs import _execution_cost_to_api
-
-        response = _execution_cost_to_api(_execution_cost_data())
+    @pytest.mark.asyncio
+    async def test_requested_returns_the_ids(self) -> None:
+        response = await self._call_endpoint(include_session_ids=True)
 
         assert response.session_ids == ["sess-a", "sess-b"]
         assert response.session_count == len(response.session_ids)

@@ -905,8 +905,12 @@ Codex authenticates with a **file-injected `~/.codex/auth.json`** (ChatGPT
 subscription), never an API key in argv or env.
 
 ```bash
-# 1. Stage the credential (reads ~/.codex/auth.json, honours CODEX_HOME)
-just codex-auth-clip --dotenv        # writes CODEX_AUTH_JSON= into .env
+# 1. Stage the credential. Production resolves it from 1Password via
+#    scripts/op_env_export.py; `codex-auth-clip` copies the value so it can be
+#    pasted into the vault item's CODEX_AUTH_JSON field (password/concealed).
+#    Pasting into the root .env works for a quick local check but does NOT
+#    exercise the production path - see the note below.
+just codex-auth-clip                 # copies the raw value to the clipboard
 
 # 2. The workspace image MUST contain the codex binary
 docker run --rm "${SYN_WORKSPACE_DOCKER_IMAGE:-ghcr.io/agentparadise/agentic-workspace-claude-cli:latest}" codex --version
