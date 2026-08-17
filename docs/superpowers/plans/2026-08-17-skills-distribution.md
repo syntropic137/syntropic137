@@ -10,6 +10,49 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-17-skills-distribution-design.md` - read it first. It explains why pinned refs are load bearing and why Layer 1 stays baked.
 
+## What changed during implementation
+
+This plan was written before the code was read. Five things were found that it did not
+anticipate; all are resolved in the branch, and the tasks below are kept as authored so
+the difference stays visible.
+
+1. **`RegisterSkillHandler` does not reject a changed hash - it silently serves the old
+   tree.** It computes the stream id from `(source_url, version, skill_name)` and
+   returns an existing aggregate *before* hashing the submitted files. So the open
+   question resolved differently than the plan framed it: a `"bundled"` literal would
+   not conflict, it would quietly resolve to stale content. **Bundled skills are
+   therefore pinned by the sha256 of their file tree**, per spec option 1.
+
+2. **The Python domain never accepted `./skills/foo`.** `SkillRef._parse_string_form`
+   has no relative-path branch, and `workflow_definition.py` expands `skills:` through
+   it at both scopes. Rather than teach the domain a path form, the CLI **rewrites
+   bundled refs into pinned mappings before upload**, in the same place it already
+   resolves `prompt_file:`. The API only ever sees pinned refs.
+
+3. **Install dropped `skills:` entirely.** `installWorkflowsViaApi` hand-built a JSON
+   body for `POST /workflows` naming each field, and `_build_phase_defs` rebuilt
+   `PhaseDefinition` field by field; neither carried `skills` or `claude_plugins`.
+   Registering skills would have been pointless while the refs never reached the stored
+   template. **Install now uploads the resolved definition to `/workflows/from-yaml`**,
+   the path `syn workflow create --from` already used, where the server owns every YAML
+   semantic. The narrow JSON body was the bug and was not widened.
+
+4. **`SkillRegistered` was missing from `manager_event_map.py`.** Its
+   `ClaudePluginRegistered` twin was present. This is **test-mode only**:
+   `sync_published_events_to_projections` is a no-op unless the publisher is
+   `InMemoryEventPublisher`, and production dispatches through the ADR-055 coordinator,
+   which was verified to populate `skill_lock` on a live stack. The cost is that an
+   API-level test cannot observe its own write, so a correct test fails for reasons
+   unrelated to the code under test. Tracked more broadly as #821.
+
+5. **MinIO listing was not recursive**, so `GET /skills/storage` reported zero bytes.
+   Found only by running the end-to-end check against a live stack.
+
+**On test shape:** several tasks below specify tests that construct a response model and
+assert its own fields. Those pass against a completely broken route. They are kept where
+cheap, but every route in this branch also has a test that calls it. Task 3's model-only
+test is what hid finding 4 until a real round-trip test was written.
+
 ## Global Constraints
 
 - **Never hand-edit generated files.** `apps/syn-cli-node/src/generated/api-types.ts` and `apps/syn-dashboard-ui/src/generated/api-types.ts` come from `just codegen`. Run it after any API model change and commit the result.
@@ -459,9 +502,10 @@ async def lookup_skill_registration(
     )
 ```
 
-If `get_skill_lock_query` does not exist yet, add it to `apps/syn-api/src/syn_api/_wiring.py`
-returning the same lock-projection reader that `SkillResolutionService` already uses -
-do not introduce a second read path.
+> **As built:** there is no `get_skill_lock_query`. `get_skill_lock_projection()`
+> already exists at `_wiring.py:1280` and is exactly the reader
+> `SkillResolutionService` uses, so no second read path was introduced. Its method is
+> `.get(source_url, version, skill_name)`, not `.find(...)`.
 
 - [ ] **Step 4: Run test to verify it passes**
 

@@ -1047,12 +1047,18 @@ syn workflow run <codex-delegates-to-claude-id>
 
 ### Known surface limits (do not treat these as bugs)
 
-- The **only** write surface is `POST /skills/registrations`. There is no list, get,
-  or delete endpoint, and no `syn skill` command.
-- The marketplace does **not** serve skills, and `syn workflow install` does **not**
-  preflight them. A marketplace workflow declaring `skills:` installs cleanly and then
-  fails at execution with `SkillNotRegistered`.
+- Write surface is `POST /skills/registrations`. Reads are `GET /skills/registrations`
+  (is this triple registered?) and `GET /skills/storage` (store size). There is still
+  no delete endpoint and no `syn skill` command.
+- The marketplace does **not** serve skills, but `syn workflow install` **does**
+  preflight them: it registers every declared skill before creating any workflow, so a
+  bad ref fails the install rather than the run.
 - `claude_plugins` and `skills` coexist; nothing is deprecated until Plan 3.
+- `syn workflow install` is **not** idempotent for the workflow itself: re-installing a
+  package whose workflow id already exists fails with "Concurrency conflict: expected
+  version 0, got 1". This predates skill distribution and is not caused by it - the
+  skills preflight correctly reports "already registered" first. Use
+  `syn workflow update` to re-install.
 
 ### Precondition: the skills CLI must exist in the workspace image
 
@@ -1105,9 +1111,59 @@ skills:
 - [ ] Two-segment `org/repo@ver` (the plugin-era shape) is rejected with a corrective message
 - [ ] Declaring an **unregistered** skill fails with `SkillNotRegistered` rather than running skill-less
 
-> **No repo currently ships a skills-declaring workflow YAML.** Author one for this
-> section; the closest reference is the fixture inside
-> `packages/syn-domain/.../handlers/test_skills_end_to_end.py`.
+### Fixture plugin (bundled + external skills)
+
+Build this once; the checks below all use it.
+
+```bash
+mkdir -p /tmp/fixture-plugin/skills/repo-conventions /tmp/fixture-plugin/workflows/demo
+cat > /tmp/fixture-plugin/skills/repo-conventions/SKILL.md <<'MD'
+---
+name: repo-conventions
+description: Use when the task touches this repository's layout.
+---
+Prefer small focused modules.
+MD
+cat > /tmp/fixture-plugin/workflows/demo/workflow.yaml <<'YAML'
+id: skills-demo
+name: Skills Demo
+type: research
+classification: simple
+requires_repos: false
+skills:
+  - ./skills/repo-conventions
+phases:
+  - id: demo
+    name: Demo
+    order: 1
+    execution_type: sequential
+    timeout_seconds: 600
+    agent:
+      provider: codex
+      model: gpt-5.6-sol
+    prompt_template: |
+      List the skills available to you, then stop.
+YAML
+```
+
+A **bundled** skill is a path inside the plugin; it has no version of its own, so the
+CLI pins it by the sha256 of its file tree and uploads a definition in which every
+skill ref is explicitly pinned. Editing a bundled skill therefore produces a new
+identity rather than silently resolving to the previously stored tree.
+
+```bash
+syn workflow install /tmp/fixture-plugin
+```
+
+- [ ] Output includes `registered skill repo-conventions@sha256-<hash>`
+- [ ] The workflow is created with its declared id (`skills-demo`), not a fresh uuid
+- [ ] A second `syn workflow install` prints `already registered` and performs **no**
+      upload - this is the caching claim; if it uploads twice, content-addressing is
+      not doing its job. (The workflow-creation step itself will error, see the
+      not-idempotent note above.)
+- [ ] Adding `- anthropics/skills/does-not-exist@v9.9.9` to `skills:` makes the
+      **install** fail and creates no workflow (`syn workflow list` unchanged)
+- [ ] `GET /skills/storage` reports non-zero `object_count` and `total_bytes`
 
 ### Prove the skill actually reached the agent
 
