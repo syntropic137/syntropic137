@@ -6453,7 +6453,7 @@ export interface operations {
             query?: {
                 /** @description Include phase/model/tool breakdowns */
                 include_breakdown?: boolean;
-                /** @description Include list of session IDs */
+                /** @description Include list of session IDs (unbounded; null when omitted) */
                 include_session_ids?: boolean;
             };
             header?: never;

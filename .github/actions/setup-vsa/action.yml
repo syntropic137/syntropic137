@@ -32,14 +32,26 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        cd lib/event-sourcing-platform/vsa
-        version=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+        # Ask Cargo for the RESOLVED package version rather than grepping TOML.
+        # vsa-cli declares `version.workspace = true`, so a grep of its own
+        # manifest returns the literal string "true"; grepping the workspace
+        # root happens to work today but breaks if the layout moves.
+        version=$(cargo metadata --no-deps --format-version 1 \
+          --manifest-path lib/event-sourcing-platform/vsa/Cargo.toml \
+          | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="vsa-cli"))')
         if [ -z "$version" ]; then
-          echo "::error::could not read the pinned VSA version from vsa/Cargo.toml"
+          echo "::error::could not resolve the vsa-cli version via cargo metadata"
           exit 1
         fi
+        # The submodule commit, so a SOURCE-only change with an unchanged
+        # version and lockfile still busts the cache. Without this, editing a
+        # rule without bumping the version restores the previous binary and the
+        # version assertion below happily passes - the same class of bug this
+        # action exists to prevent, one level deeper.
+        sha=$(git rev-parse HEAD:lib/event-sourcing-platform)
         echo "version=$version" >> "$GITHUB_OUTPUT"
-        echo "Pinned VSA version: $version"
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        echo "Pinned VSA version: $version (submodule $sha)"
 
     - name: Cache Rust dependencies
       uses: actions/cache@v4
@@ -50,7 +62,7 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           lib/event-sourcing-platform/vsa/target/
-        key: ${{ runner.os }}-cargo-vsa-${{ steps.vsa-pin.outputs.version }}-${{ hashFiles('lib/event-sourcing-platform/vsa/**/Cargo.lock') }}${{ inputs.cache-key-suffix }}
+        key: ${{ runner.os }}-cargo-vsa-${{ steps.vsa-pin.outputs.version }}-${{ steps.vsa-pin.outputs.sha }}${{ inputs.cache-key-suffix }}
 
     - name: Install VSA CLI
       shell: bash

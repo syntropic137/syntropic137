@@ -85,6 +85,9 @@ def _make_mock_pool() -> MagicMock:
     conn = AsyncMock()
     conn.fetch = AsyncMock(side_effect=fetch_side_effect)
     conn.fetchval = AsyncMock(return_value=0)
+    # In-progress: sessions have token_usage but no session_summary yet, so
+    # is_complete must be False (see _ALL_SESSIONS_SUMMARISED_QUERY).
+    conn.fetchrow = AsyncMock(return_value={"summarised": 0, "observed": 2})
 
     pool = MagicMock()
     pool.acquire = MagicMock(

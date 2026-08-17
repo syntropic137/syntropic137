@@ -67,6 +67,24 @@ projection_allowed_prefixes:
   - "asyncio"
   - "time"
 
+# KNOWN LIMITATION of the whitelist above (issue #817).
+#
+# VSA032 matches import PREFIXES. It does not inspect symbols or follow
+# transitive imports. So `syn_domain.contexts` admits a genuinely impure module
+# that happens to live under an allowed prefix - e.g. a projection could import
+# `syn_domain.contexts.github._shared.github_client` and make HTTP calls while
+# the rule stays green.
+#
+# Enumerating exact pure modules instead was considered and rejected: it would
+# be brittle (every new read model needs a config edit) and it still would not
+# catch a transitive impure dependency, which is the actual risk. The real fix
+# is symbol/transitive analysis in the validator itself.
+#
+# What this configuration DOES buy, and why it is still worth having: adapters,
+# API packages, and clients outside syn_domain remain blocked, and VSA206 below
+# independently catches `syn_adapters` imports from slice code. Treat VSA032 as
+# a coarse filter, not a proof of purity.
+
 # Layer separation enforcement (VSA206)
 # Domain and slice code must not import from adapter/API packages at runtime
 layer_separation:

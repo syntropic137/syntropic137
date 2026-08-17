@@ -2315,11 +2315,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "description": "Include list of session IDs",
-              "default": true,
+              "description": "Include list of session IDs (unbounded; null when omitted)",
+              "default": false,
               "title": "Include Session Ids"
             },
-            "description": "Include list of session IDs"
+            "description": "Include list of session IDs (unbounded; null when omitted)"
           }
         ],
         "responses": {
