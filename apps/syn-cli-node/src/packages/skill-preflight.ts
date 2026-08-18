@@ -26,7 +26,7 @@ import {
   type ExternalSkillRef,
   type ParsedSkillRef,
 } from "./skill-ref.js";
-import { readSkillTree, type SkillFilePayload } from "./skill-tree.js";
+import { readSkillTree, skillDirInClone, type SkillFilePayload } from "./skill-tree.js";
 
 export interface SkillPreflightResult {
   /** Refs that were missing and got registered just now. */
@@ -214,28 +214,6 @@ async function isRegistered(ref: ExternalSkillRef): Promise<boolean> {
   return true;
 }
 
-/**
- * Locate the skill directory inside a freshly cloned repository.
- *
- * A skills repo usually publishes many skills as subdirectories, but a
- * single-skill repo puts SKILL.md at its root.
- */
-function skillDirInClone(cloneDir: string, skillName: string): string {
-  const candidates = [path.join(cloneDir, skillName), path.join(cloneDir, "skills", skillName), cloneDir];
-  for (const candidate of candidates) {
-    try {
-      readSkillTree(candidate);
-      return candidate;
-    } catch {
-      continue;
-    }
-  }
-  throw new CLIError(
-    `cloned source has no skill '${skillName}' (looked for a SKILL.md in ` +
-      `${skillName}/, skills/${skillName}/, and the repository root).\n` +
-      "  No workflows were installed.",
-  );
-}
 
 async function readExternalTree(ref: ExternalSkillRef): Promise<SkillFilePayload[]> {
   const tmpdir = makeTempDir("syn-skill-");

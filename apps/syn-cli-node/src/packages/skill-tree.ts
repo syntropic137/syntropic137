@@ -74,3 +74,34 @@ export function readSkillTree(dir: string): SkillFilePayload[] {
   walk(dir, dir, out, { files: 0, bytes: 0 });
   return out;
 }
+
+/**
+ * Locate the skill directory inside a freshly cloned repository.
+ *
+ * A skills repo usually publishes many skills as subdirectories, but a
+ * single-skill repo puts SKILL.md at its root. Candidates are tried in
+ * most-specific-first order so a repo containing both a `<name>/` directory
+ * and a root SKILL.md resolves to the named one.
+ *
+ * The skill name is already validated as a single safe path segment by
+ * `requireSafeSkillName`, so it cannot escape the clone directory here.
+ */
+export function skillDirInClone(cloneDir: string, skillName: string): string {
+  const candidates = [
+    path.join(cloneDir, skillName),
+    path.join(cloneDir, "skills", skillName),
+    cloneDir,
+  ];
+  for (const candidate of candidates) {
+    try {
+      readSkillTree(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(
+    `cloned source has no skill '${skillName}' (looked for a SKILL.md in ` +
+      `${skillName}/, skills/${skillName}/, and the repository root)`,
+  );
+}

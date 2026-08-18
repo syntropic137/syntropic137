@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { readSkillTree } from "../../src/packages/skill-tree.js";
+import { readSkillTree, skillDirInClone } from "../../src/packages/skill-tree.js";
 
 let dir: string;
 
@@ -75,5 +75,45 @@ describe("readSkillTree limits", () => {
     expect(readSkillTree(dir).map((f) => f.rel_path)).toEqual(["SKILL.md"]);
 
     fs.rmSync(secret, { force: true });
+  });
+});
+
+describe("skillDirInClone", () => {
+  it("prefers a named subdirectory over a root SKILL.md", () => {
+    // A skills repo publishing many skills, which is the common shape. Falling
+    // through to the root here would upload the wrong skill under the right
+    // name - silently, since both are valid trees.
+    fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: root\ndescription: d\n---\n");
+    fs.mkdirSync(path.join(dir, "tdd-workflow"));
+    fs.writeFileSync(
+      path.join(dir, "tdd-workflow", "SKILL.md"),
+      "---\nname: tdd-workflow\ndescription: d\n---\n\nRed, green, refactor.\n",
+    );
+
+    const resolved = skillDirInClone(dir, "tdd-workflow");
+
+    expect(resolved).toBe(path.join(dir, "tdd-workflow"));
+  });
+
+  it("finds a skill nested under skills/", () => {
+    fs.mkdirSync(path.join(dir, "skills", "alpha"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "skills", "alpha", "SKILL.md"),
+      "---\nname: alpha\ndescription: d\n---\n",
+    );
+
+    expect(skillDirInClone(dir, "alpha")).toBe(path.join(dir, "skills", "alpha"));
+  });
+
+  it("falls back to the repository root for a single-skill repo", () => {
+    fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: solo\ndescription: d\n---\n");
+
+    expect(skillDirInClone(dir, "solo")).toBe(dir);
+  });
+
+  it("names every place it looked when the skill is absent", () => {
+    fs.writeFileSync(path.join(dir, "README.md"), "no skill here");
+
+    expect(() => skillDirInClone(dir, "missing")).toThrow(/missing\/.*skills\/missing/s);
   });
 });

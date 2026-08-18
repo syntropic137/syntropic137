@@ -11,6 +11,12 @@ Endpoints under ``/skills``:
                                     triple is already registered, so a caller
                                     can skip uploading a tree that is stored.
 - ``GET /skills/storage``        - size of the content-addressed skill store.
+- ``GET /skills``                - list every registered skill.
+- ``GET /skills/by-name/{name}`` - every registration sharing that name.
+
+Detail lives under ``/by-name/`` so that a skill named "storage" or
+"registrations" is still reachable; a bare ``/{skill_name}`` would reserve
+those names permanently.
 
 Mirrors ``routes/claude_plugins.py``. Typed ``SkillError`` subclasses raised
 by the handler map to HTTP 422 via ``skill_error_mapping`` so callers see
@@ -21,6 +27,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -33,13 +40,21 @@ from syn_api._wiring import (
 from syn_api.services.skill_error_mapping import http_exception_for_skill_error
 from syn_api.types import (
     RegisterSkillRequest,
+    SkillDetailResponse,
     SkillFilePayload,
+    SkillListResponse,
     SkillRegistrationLookupResponse,
     SkillRegistrationResponse,
+    SkillRegistrationSummary,
     SkillStorageStatsResponse,
 )
 from syn_domain.contexts.orchestration import SkillError
 from syn_domain.contexts.orchestration.ports.SkillStoragePort import SkillFile
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockEntry,
+    )
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -51,6 +66,11 @@ MAX_SKILL_TREE_BYTES = 50 * 1024 * 1024
 # WHY: a generous ceiling on file count; real skill trees are a few dozen
 # files at most. Checked before any base64 decoding happens.
 MAX_SKILL_TREE_FILES = 10_000
+
+# Short form of a content hash for narrow table columns. Formatting lives in
+# the API so every client renders it identically (see feedback on display
+# fields belonging server-side).
+_SHA_DISPLAY_CHARS = 12
 
 
 def _decode_files(entries: list[SkillFilePayload]) -> list[SkillFile]:
@@ -90,6 +110,19 @@ def _decode_files(entries: list[SkillFilePayload]) -> list[SkillFile]:
         total_bytes += len(content)
         decoded.append(SkillFile(rel_path=raw.rel_path, content=content))
     return decoded
+
+
+@router.get("", response_model=SkillListResponse)
+async def list_skills() -> SkillListResponse:
+    """List every registered skill (issue #826).
+
+    Reads the ``skill_lock`` projection, the same read model run-time
+    resolution uses, so what this reports is what a run would resolve.
+    """
+    await ensure_connected()
+    entries = await get_skill_lock_projection().list_all()
+    summaries = [_summary_from_entry(e) for e in entries]
+    return SkillListResponse(skills=summaries, total=len(summaries))
 
 
 @router.get("/storage", response_model=SkillStorageStatsResponse)
@@ -171,4 +204,49 @@ async def register_skill_endpoint(
         version=result.version,
         resolved_sha=result.resolved_sha,
         tree_storage_prefix=result.tree_storage_prefix,
+    )
+
+
+def _summary_from_entry(entry: SkillLockEntry) -> SkillRegistrationSummary:
+    return SkillRegistrationSummary(
+        skill_name=entry.skill_name,
+        source_url=entry.source_url,
+        version=entry.version,
+        resolved_sha=entry.resolved_sha,
+        resolved_sha_display=entry.resolved_sha[:_SHA_DISPLAY_CHARS],
+        tree_storage_prefix=entry.tree_storage_prefix,
+        registered_at=entry.registered_at,
+    )
+
+
+# WHY a "/by-name/" segment instead of "/skills/{skill_name}": declaration
+# order alone is not enough. Ordering the literal routes first does stop them
+# being shadowed, but it also RESERVES those names - a skill legitimately
+# called "storage" or "registrations" could then never be fetched, and the
+# domain allows both. A distinct prefix removes the collision entirely rather
+# than trading one silent failure for another.
+@router.get(
+    "/by-name/{skill_name}",
+    response_model=SkillDetailResponse,
+    responses={404: {"description": "No skill registered under that name"}},
+)
+async def get_skill_detail(skill_name: str) -> SkillDetailResponse:
+    """Every registration sharing a skill name (issue #826).
+
+    A name is not unique - the same skill can be pinned at several versions,
+    and two sources can publish the same name - so all matches are returned
+    rather than an arbitrary one.
+    """
+    await ensure_connected()
+    entries = [
+        e for e in await get_skill_lock_projection().list_all() if e.skill_name == skill_name
+    ]
+    if not entries:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No skill registered under the name {skill_name!r}",
+        )
+    return SkillDetailResponse(
+        skill_name=skill_name,
+        registrations=[_summary_from_entry(e) for e in entries],
     )
