@@ -56,6 +56,11 @@ from syn_shared.settings.github import (
     get_github_settings,
     reset_github_settings,
 )
+from syn_shared.settings.image_verification import (
+    AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
+    GITHUB_ACTIONS_OIDC_ISSUER,
+    ImageVerificationSettings,
+)
 from syn_shared.settings.infra import InfraSettings
 from syn_shared.settings.session_store import (
     DEFAULT_SPOOL_DIR,
@@ -84,8 +89,10 @@ from syn_shared.settings.workspace_security import (
 )
 
 __all__ = [
+    "AGENTIC_PRIMITIVES_IDENTITY_REGEXP",
     "DEFAULT_SPOOL_DIR",
     "DEFAULT_WORKSPACE_IMAGE",
+    "GITHUB_ACTIONS_OIDC_ISSUER",
     "INTERACTIVE_TMUX_WORKSPACE_IMAGE",
     "SESHMAGIC_PROVIDER",
     "AppEnvironment",
@@ -95,6 +102,7 @@ __all__ = [
     "GitHubAppSettings",
     "GitIdentityResolver",
     "GitIdentitySettings",
+    "ImageVerificationSettings",
     "InfraSettings",
     "IsolationBackend",
     "SessionStoreSettings",

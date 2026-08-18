@@ -33,6 +33,10 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     check_workspace_health,
     copy_files_from_workspace,
 )
+from syn_adapters.workspace_backends.image_verification import (
+    ImageVerificationError,
+    verify_image_async,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -133,10 +137,27 @@ class InteractiveTmuxIsolationAdapter:
     def __init__(
         self,
         *,
-        default_image: str | None = None,
+        default_image: str,
         startup_timeout_s: float = 45.0,
         strict_startup: bool = True,
     ) -> None:
+        """Initialise the adapter.
+
+        Args:
+            default_image: The workspace image to run. REQUIRED. This provider
+                takes its image only from its own constructor (WorkspaceConfig
+                rejects `image`) and falls back to a built-in default when
+                given None, so an image the verification layer never saw could
+                otherwise be provisioned. The provider is therefore not built
+                here: it is built on first create(), from the reference that
+                verification returned. See `_ensure_provider`.
+            startup_timeout_s: How long the driver waits for the pane to come up.
+            strict_startup: Fail rather than continue if startup checks fail.
+
+        Raises:
+            ImageVerificationError: If `default_image` is missing.
+            InteractiveTmuxUnavailableError: If the provider is not importable.
+        """
         if _InteractiveTmuxProvider is None:
             detail = _IMPORT_ERROR or "InteractiveTmuxProvider missing"
             msg = (
@@ -148,13 +169,28 @@ class InteractiveTmuxIsolationAdapter:
             )
             raise InteractiveTmuxUnavailableError(msg)
 
+        if not default_image:
+            msg = (
+                "InteractiveTmuxIsolationAdapter requires an explicit "
+                "default_image. Without one the underlying provider picks its "
+                "own built-in image, which this adapter never verified and "
+                "cannot name in a failure message. Pass the digest-pinned "
+                "reference from syn_shared.settings.workspace_images "
+                "(INTERACTIVE_TMUX_WORKSPACE_IMAGE), or the value of "
+                "SYN_WORKSPACE_INTERACTIVE_TMUX_IMAGE."
+            )
+            raise ImageVerificationError(msg)
+
         self._default_image = default_image
-        self._provider = _InteractiveTmuxProvider(
-            default_image=default_image,
-            startup_timeout_s=startup_timeout_s,
-            strict_startup=strict_startup,
-        )
+        self._startup_timeout_s = startup_timeout_s
+        self._strict_startup = strict_startup
+        # Built lazily by `_ensure_provider`, from the VERIFIED reference.
+        # Constructing it here would mean the object that decides what to run
+        # exists before anything has checked what it will run.
+        self._provider: Any | None = None
+        self._verified_image: str | None = None
         self._workspaces: dict[str, Any] = {}
+        self._provider_build_lock = threading.Lock()
 
     async def _call_provider(self, coro: Coroutine[Any, Any, _T]) -> _T:
         """Run a provider coroutine on the shared provider loop, awaited from ours.
@@ -194,7 +230,9 @@ class InteractiveTmuxIsolationAdapter:
                 except BaseException:
                     return
                 if workspace is not None:
-                    asyncio.run_coroutine_threadsafe(self._provider.destroy(workspace), loop)
+                    asyncio.run_coroutine_threadsafe(
+                        self._require_provider().destroy(workspace), loop
+                    )
 
             future.add_done_callback(_destroy_if_created)
             raise
@@ -203,6 +241,55 @@ class InteractiveTmuxIsolationAdapter:
     def is_available() -> bool:
         """Check Docker is on PATH and the provider class was importable."""
         return INTERACTIVE_TMUX_AVAILABLE and shutil.which("docker") is not None
+
+    def _require_provider(self) -> Any:  # noqa: ANN401  # provider type is a runtime import
+        """Return the built provider, or raise if nothing has been created yet.
+
+        The provider is built on the first verified create(), so any lifecycle
+        call that reaches this with nothing built is operating on a handle this
+        adapter never issued.
+        """
+        provider = self._provider
+        if provider is None:
+            msg = (
+                "interactive-tmux provider has not been built: no workspace has "
+                "been created through this adapter, so there is nothing to "
+                "operate on."
+            )
+            raise InteractiveTmuxUnavailableError(msg)
+        return provider
+
+    async def _ensure_provider(self) -> Any:  # noqa: ANN401  # provider type is a runtime import
+        """Verify the configured image, then return the provider that runs it.
+
+        Verification is off-loaded to a worker thread by `verify_image_async`:
+        it shells out to cosign, which talks to the registry and the Sigstore
+        transparency log, and blocking the event loop for that would serialise
+        every concurrent provision in the orchestrator behind one cold check.
+
+        A failure propagates, so no provider is built and nothing is
+        provisioned. On the permitted local-image path the returned reference
+        is an immutable image ID, and that is what the provider is given.
+        """
+        provider = self._provider
+        if provider is not None:
+            return provider
+
+        verified_image = await verify_image_async(self._default_image)
+
+        # The lock covers only the assignment. Two concurrent first-provisions
+        # both verify (a cache hit for the second) and then agree on one
+        # provider instance, which matters because the provider owns a
+        # loop-affine asyncio.Lock that must not be duplicated.
+        with self._provider_build_lock:
+            if self._provider is None:
+                self._verified_image = verified_image
+                self._provider = _InteractiveTmuxProvider(
+                    default_image=verified_image,
+                    startup_timeout_s=self._startup_timeout_s,
+                    strict_startup=self._strict_startup,
+                )
+            return self._provider
 
     async def create(self, config: IsolationConfig) -> IsolationHandle:
         """Create an interactive-tmux workspace from a Syn137 isolation config."""
@@ -240,6 +327,11 @@ class InteractiveTmuxIsolationAdapter:
         if config.agents:
             labels["agents"] = ",".join(config.agents)
 
+        # Supply-chain gate. This also builds the provider on first use, from
+        # the reference verification returned, so the provider never exists
+        # holding an image nobody checked.
+        provider = await self._ensure_provider()
+
         ws_config = WorkspaceConfig(
             provider="interactive-tmux",
             working_dir="/workspace",
@@ -252,7 +344,7 @@ class InteractiveTmuxIsolationAdapter:
         # window off this adapter's event loop while satisfying the provider
         # lock's loop affinity (see `_call_provider`). Use the cancellation-
         # safe variant so a cancelled create() cannot orphan a container.
-        workspace_obj = await self._create_on_provider_loop(self._provider.create(ws_config))
+        workspace_obj = await self._create_on_provider_loop(provider.create(ws_config))
         self._workspaces[workspace_obj.id] = workspace_obj
 
         logger.info(
@@ -282,7 +374,7 @@ class InteractiveTmuxIsolationAdapter:
         # Pop only AFTER a successful provider destroy. If destroy raises
         # (e.g. docker timeout), the handle stays in _workspaces so the
         # caller can retry instead of leaking the tmux/Docker resources.
-        await self._call_provider(self._provider.destroy(workspace))
+        await self._call_provider(self._require_provider().destroy(workspace))
         self._workspaces.pop(handle.isolation_id, None)
 
     async def execute(
@@ -315,7 +407,7 @@ class InteractiveTmuxIsolationAdapter:
 
         cmd_str = " ".join(command)
         result = await self._call_provider(
-            self._provider.execute(
+            self._require_provider().execute(
                 workspace,
                 cmd_str,
                 timeout=float(timeout_seconds) if timeout_seconds else None,
@@ -352,7 +444,9 @@ class InteractiveTmuxIsolationAdapter:
             raise FileNotFoundError(f"Interactive-tmux workspace not found: {handle.isolation_id}")
         for relative_path, content in files:
             full_path = f"{base_path.rstrip('/')}/{relative_path}" if relative_path else base_path
-            await self._call_provider(self._provider.write_file(workspace, full_path, content))
+            await self._call_provider(
+                self._require_provider().write_file(workspace, full_path, content)
+            )
 
     async def copy_from(
         self,

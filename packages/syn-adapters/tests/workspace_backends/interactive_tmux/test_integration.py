@@ -60,11 +60,20 @@ def _claude_creds_present() -> bool:
     reason=REASON_NO_IMAGE,
 )
 @pytest.mark.asyncio
-async def test_send_message_round_trip_against_real_container() -> None:
+async def test_send_message_round_trip_against_real_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A single send_message → await_completion → capture_response round."""
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationConfig,
     )
+    from syn_shared.env_constants import ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES
+
+    # This test is gated on the locally built image existing (see the skipif
+    # above), and a locally built image carries no Sigstore signature. Opting
+    # in is exactly the local-development path: the adapter resolves the tag to
+    # the image ID of the image that is already present and runs that.
+    monkeypatch.setenv(ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES, "true")
 
     adapter = InteractiveTmuxIsolationAdapter(
         default_image="agentic-workspace-interactive-tmux:latest",

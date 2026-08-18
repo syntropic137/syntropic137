@@ -60,6 +60,18 @@ ENV_SYN_WORKSPACE_HOST_DIR = "SYN_WORKSPACE_HOST_DIR"
 ENV_SYN_AGENT_NETWORK = "SYN_AGENT_NETWORK"
 
 # ---------------------------------------------------------------------------
+# Workspace image signature verification env vars
+#
+# Backed by ImageVerificationSettings (env_prefix SYN_IMAGE_VERIFY_). Named
+# here because the verification code quotes them in operator-facing error
+# messages, and those strings must not drift from the settings fields.
+# ---------------------------------------------------------------------------
+
+ENV_SYN_IMAGE_VERIFY_ENABLED = "SYN_IMAGE_VERIFY_ENABLED"
+ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES = "SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES"
+ENV_SYN_IMAGE_VERIFY_COSIGN_PATH = "SYN_IMAGE_VERIFY_COSIGN_PATH"
+
+# ---------------------------------------------------------------------------
 # Session store capability env vars (agentic-primitives workspace image)
 #
 # These are read INSIDE the workspace container by the session-store capability
@@ -114,6 +126,9 @@ __all__ = [
     "ENV_GIT_COMMITTER_NAME",
     "ENV_OTEL_EXPORTER_OTLP_ENDPOINT",
     "ENV_SYN_AGENT_NETWORK",
+    "ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES",
+    "ENV_SYN_IMAGE_VERIFY_COSIGN_PATH",
+    "ENV_SYN_IMAGE_VERIFY_ENABLED",
     "ENV_SYN_WORKSPACE_CONTAINER_DIR",
     "ENV_SYN_WORKSPACE_HOST_DIR",
     "SESSION_STORE_CONTRACT_ENV_VARS",
