@@ -1,129 +1,159 @@
-# ADR-065: Workflow-Scoped Claude Plugin Injection
+# ADR-065: Skills as the Workflow Capability Unit
 
-- **Status**: Accepted (amended 2026-05-05; see "Amendment" at the end)
-- **Date**: 2026-05-04
-- **Issue**: [#726](https://github.com/syntropic137/syntropic137/issues/726)
-- **Related**: ADR-020 (Bounded Context Convention), ADR-024 (Workspace Setup Phase), ADR-033 (agentic-primitives `--plugin-dir` injection), [ADR-066](ADR-066-separation-of-concerns.md) (Separation of Concerns - amends the resolution-tier choice in this ADR), [#761](https://github.com/syntropic137/syntropic137/issues/761) (org/system scopes follow-up)
+- **Status**: Accepted (revised 2026-08-17; see "Revision history" at the end)
+- **Date**: 2026-05-04, last revised 2026-08-17
+- **Issue**: [#772](https://github.com/syntropic137/syntropic137/issues/772) (current), [#726](https://github.com/syntropic137/syntropic137/issues/726) (original claude-plugin design)
+- **Related**: ADR-020 (Bounded Context Convention), ADR-024 (Workspace Setup Phase), ADR-033 (agentic-primitives `--plugin-dir` injection), [ADR-066](ADR-066-separation-of-concerns.md) (Separation of Concerns)
 
 ## Context
 
-Today, agents inside a Syntropic137 workspace see only the four Claude Code plugins baked into the base image (`sdlc`, `workspace`, `observability`, `git`). Workflows cannot declare additional plugin dependencies. This blocks the `software-leverage-points` review workflow and every future workflow that wants to ship its own skills, hooks, or commands.
+Agents inside a Syntropic137 workspace need capabilities beyond the base image: repository conventions, review rubrics, workflow-specific instructions. The platform needs a primitive for declaring "this workflow needs these capabilities" in YAML, resolving the references reproducibly, and getting them into each workspace at setup time.
 
-The platform needs a primitive for declaring "this workflow needs these claude plugins" in YAML, resolving the references reproducibly, and materializing the resulting tree into each workspace at setup time. The injection mechanics (`<workspace>/.syn-plugins/<plugin>/` plus `claude --plugin-dir <path>`) were proven against the production base image in a standalone validation experiment before this ADR was written. See `docs/experiments/cycle-004/dogfood-platform-726/validation-experiment/` and `run.sh` (10/10 tests passed, including loading the real-world 20-skill `software-leverage-points` plugin with proper namespacing).
+The original design used **Claude Code plugins** as that unit, injected via `claude --plugin-dir`. That worked, but it is Claude-only by construction: `--plugin-dir` is a Claude CLI flag, the manifest requirement is `.claude-plugin/plugin.json`, and Codex or Gemini phases received nothing. Multi-harness execution made that a dead end.
+
+**Skills** are the replacement: a folder containing `SKILL.md` with YAML frontmatter, per the [vercel-labs/skills](https://github.com/vercel-labs/skills) convention. They are simpler than plugins, natively discovered by both Claude Code and Codex, and backed by a maintained ecosystem that tracks where 70+ harnesses look for them.
 
 ## Decision
 
-### 1. Terminology
+### 1. Two capability layers, split by ownership
 
-Always `claude_plugins` in YAML and `ClaudePlugin*` in code. Never bare `plugin`, which collides with Syntropic's existing "workflow plugin" / marketplace concept.
+| | Platform layer | Workflow layer |
+|---|---|---|
+| Unit | Claude plugins (hooks, commands, guardrails) | Skills |
+| Source | Baked into the workspace image at `/opt/agentic/plugins/` | Declared in workflow YAML |
+| Owner | The platform, as we build it | The workflow author |
+| Changes with | An image rebuild | A workflow edit |
+| Harness | Claude-specific (`--plugin-dir`, ADR-033) | Harness-agnostic |
 
-### 2. Bounded context placement
+The split is by ownership, not by technology. A hook fires on an event; a skill is instructions an agent reads. Observability capture and dangerous-command protection are hooks, so they belong with the harness they steer and version with the image. They are deliberately not workflow-declarable.
 
-The two new aggregates (`ClaudePluginRegistration`, `GlobalClaudePluginRegistry`) live inside the existing `orchestration` bounded context. Per ADR-020, multiple aggregates belong in one context when they share domain language. Claude plugins are workspace inputs, same family as `Workspace`, `Workflow`, and `WorkflowExecution`. No new top-level context.
+**Corollary:** if a platform capability ever needs to change without an image rebuild, that is evidence it is not platform-level and belongs in the workflow layer as an ordinary skill.
 
-### 3. Scopes in v1
+### 2. Terminology
 
-The resolved plugin set for a phase is the union of three scopes:
+`skills:` in YAML, `Skill*` in code. Never bare `plugin`, which collides with Syntropic's marketplace "workflow plugin" concept. The older workflow-scoped `claude_plugins:` field still exists and is unused; its removal is [#828](https://github.com/syntropic137/syntropic137/issues/828).
 
-```
-global  (set via `syn claude-plugin global add`)
-  union workflow.claude_plugins  (workflow YAML)
-  union phase.claude_plugins     (per-phase in workflow YAML)
-```
+### 3. Bounded context placement
 
-Conflict rule: **phase wins over workflow wins over global** (innermost wins). Overrides logged at INFO so they are observable.
+`SkillRegistration` lives in the existing `orchestration` bounded context. Per ADR-020, multiple aggregates belong in one context when they share domain language: skills are workspace inputs, the same family as `Workspace`, `Workflow`, and `WorkflowExecution`. No new top-level context.
 
-Org and system scopes are deferred to [#761](https://github.com/syntropic137/syntropic137/issues/761). They require widening `ExecuteWorkflowCommand` and `WorkflowExecutionStarted` through the dispatch chain. Pure additive when added later, no v1 rework.
+### 4. Scopes
 
-### 4. Reference forms
+`skills:` is accepted at workflow scope and phase scope. Phase scope merges with workflow scope, phase winning on exact identity collision, otherwise additive. Conflicting versions of the same skill name abort the run rather than picking one silently.
 
-`ClaudePluginRef` is a Pydantic value object that accepts three input forms and normalizes all to one shape:
+Skills have no global scope. Anything that should apply everywhere is platform-level and belongs in the image.
 
-- GitHub shorthand: `syntropic137/software-leverage-points@5.0.7`
-- Full git URL: `https://gitlab.com/foo/bar.git@1.2.0`
-- Verbose dict: `{source: ..., version: ..., name: ...}`
+### 5. Reference forms
 
-`@latest` and unpinned references are rejected. Reproducibility wins over ergonomics.
+Three, all normalized to one identity:
 
-### 5. Identity, lock, and storage
+- `org/repo/skill-name@version` - the third segment names the skill folder, because a skills repo commonly publishes several
+- `<url>@<version>` - full URL, name defaults to the URL basename minus `.git`
+- verbose mapping with `source`, `version`, and either `name` or `names: [a, b]`
+- `./path/inside/plugin` - bundled: a skill shipped inside the workflow plugin itself
+
+### 6. Identity, lock, and storage
 
 | Concern | Choice |
 |---|---|
-| Lock key | `(source_url, version, name)` -> `resolved_sha + tree_storage_prefix` (`name` joined later so marketplace repos can register multiple plugins from one source) |
-| Aggregate stream id | `claude-plugin-{sha256(source_url\|version\|name)}` (deterministic) |
-| Singleton aggregate stream id | `global-claude-plugins` |
-| Storage backend | New MinIO bucket `claude-plugins`, content-addressed `sha256-<hash>/...` |
-| First-writer-wins | `ExpectedVersion.NoStream` on first event (pattern from `WorkflowExecutionProcessor.py`) |
+| Lock key | `(source_url, version, skill_name)` -> `resolved_sha + tree_storage_prefix` |
+| Aggregate stream id | `skill-{sha256(source_url\|version\|skill_name)}` (deterministic) |
+| Storage | MinIO, content-addressed at `skills/sha256-<hash>/...` |
+| Tree hash | sha256 over sorted `(rel_path, content)` pairs, each NUL-terminated, ordered by UTF-8 bytes |
+| First-writer-wins | `ExpectedVersion.NoStream` on first event |
 
-The bucket is bootstrapped eagerly at startup via `_init_claude_plugin_storage()`, mirroring `_init_artifact_storage()` (per ADR-012).
+`skill_name` is in the key because a marketplace repo publishes multiple skills at one `(source_url, version)`; keying on the pair alone would collapse them and let the first registration shadow the rest.
 
-### 6. Resolution timing
+The tree hash ordering is specified as UTF-8 bytes rather than "sorted" because the CLI and the API implement it in different languages. JavaScript orders strings by UTF-16 code unit and Python by code point; those disagree for non-BMP filenames, which would produce a different digest per language and silently break both the cache and resolution.
 
-References are resolved (cloned, hashed, uploaded) **at workflow registration time**, not at workspace boot. This is the implicit-fetch contract: `syn workflow install` either fully resolves every plugin into the lock or fails the install. By workspace setup time, resolution is a pure projection read, no network calls.
+### 7. `@latest` is rejected, and this is load-bearing
 
-YAMLs declare semver references for readability. The lock pins the SHA internally. Mixing the two layers gives both readable workflow files and reproducible execution.
+Registration is content-addressed and the hash **is** the cache: a reference resolving to an already-stored hash performs no network work. An unpinned reference cannot be cached honestly, because the same reference may denote different bytes tomorrow.
 
-### 7. PR2 routing primitive
+So pinning is a correctness requirement of the caching design, not a reproducibility nicety. Any change that relaxes it invalidates the cache.
 
-PR1 ships dormant: aggregates, lock projection, CLI commands, and implicit fetch on workflow install all work; the lock fills up; no workspace consumes anything yet. The PR2 hook is a single field on `ExecutablePhase`:
+### 8. Bundled skills are pinned by their tree hash
 
-```python
-claude_plugins: tuple[ResolvedClaudePlugin, ...] = ()
-```
+An external reference carries a version; a path inside a plugin does not. The CLI computes the sha256 of the file tree and rewrites the reference into a pinned one before upload, so the API only ever sees pinned references and the Python domain needs no relative-path form.
 
-Default empty. PR2 reads this field in `WorkspaceProvisionHandler`, materializes each plugin into `<workspace>/.syn-plugins/<plugin>/` via the existing `inject_files()` (`docker cp`) path, and appends one `--plugin-dir /workspace/.syn-plugins/<name>` per resolved plugin to the claude command. No claude-CLI changes required (validated).
+The alternative, a fixed literal such as `"bundled"`, was rejected: `RegisterSkillHandler` returns an existing aggregate *before* hashing submitted files, so an edited skill under a fixed version would silently resolve to the previously stored tree. With the hash in the version, an edit is simply a different registration, which is what it is.
+
+A `sha256-<hash>` version is therefore a content commitment, and the handler enforces it: a submitted tree whose hash disagrees is rejected rather than stored.
+
+### 9. Resolution tier
+
+Git work happens in the CLI, never the API (ADR-066). The CLI clones, walks the tree, and uploads base64 contents to `POST /skills/registrations`; the API validates the manifest, computes the sha, stores, and dispatches the command. No subprocess spawn and no `git` binary in the API image.
+
+### 10. Registration happens at install time
+
+`syn workflow install` collects every declared reference and registers what is missing **before creating any workflow**. A bad or unreachable reference fails the install, not the run.
+
+The alternative was failing at execution, which is the expensive place to discover a typo: the user has already committed to a run.
+
+### 11. Injection is the vercel `skills` CLI, not ours
+
+Resolved trees are materialized to `/workspace/.syn-skills/<skill-name>/`, then the pinned `skills` CLI installs each one for the phase's harness from that local path, offline.
+
+We do not own the harness mapping. Three harnesses today, but the mapping table is the genuinely hard-to-maintain part, and upstream maintains it for 70+ harnesses. Local-path installs keep provisioning deterministic and network-free.
+
+**Staging is not installation.** Files under `.syn-skills/` are the drop point; `skills add` performs the per-harness install. Verification must assert the latter, inside the container.
+
+### 12. Fail loudly, never skill-less
+
+A phase that declares skills and cannot install them fails. Running an agent without capabilities it was told to have produces a plausible-looking result against the wrong setup, which is worse than a clear failure.
 
 ## Consequences
 
 ### Positive
 
-- Reproducible execution via SHA-pinned lock entries; the same workflow definition produces byte-identical plugin trees forever.
-- Simple union resolution: pure function, no I/O, crash-replay safe.
-- No upstream changes needed in `agentic-primitives` or claude-cli; the `--plugin-dir` injection mechanism (ADR-033 in agentic-primitives) is the supported path.
-- SLP-class workflows work end-to-end after PR2 flips the switch.
-- Pure additive feature: dormant until a YAML declares `claude_plugins:` or someone runs `syn claude-plugin global add`.
+- One declaration works across Claude and Codex; the harness mapping is upstream's problem.
+- Caching falls out of content-addressing that already existed.
+- Failure moves from run time to install time.
+- The agent container needs no egress for skills: the platform fetches, the workspace receives files.
+- Bundled skills make a workflow plugin self-contained; installing it needs no out-of-band registration.
 
 ### Negative
 
-- Per-phase granularity is plugin-only. You cannot pick individual skills out of a plugin without authoring a sub-plugin. Acceptable: plugins are the natural unit of distribution in the Claude Code ecosystem.
-- First use of a new `(source_url, version, name)` pays registration latency: clone + hash + per-file MinIO upload. Subsequent uses are projection-read fast.
-- No GC of unreferenced lock entries in v1. Storage is cheap; defer until it grows.
-- Private sources require auth that v1 does not implement. Failures return a clear `auth_required` typed error.
+- The **platform** needs egress to fetch external skills, so a skill cannot be hosted somewhere only the workspace can reach.
+- Skill storage grows without bound until eviction exists. Deliberately not implemented; size is reported instead (`GET /skills/storage`).
+- First use of an unseen skill pays a shallow clone.
+- Skills cannot express hooks or commands. That capability lives only in the platform layer, so a workflow cannot ship a hook.
+- Editing a bundled skill during authoring produces a new registration each time. Honest, but chatty.
 
 ## Alternatives considered
 
-- **New `skills` (or `claude_plugins`) bounded context.** Rejected as premature abstraction. Single aggregate family, shares orchestration's domain language. Splitting later is one rename.
-- **Per-skill resolution rather than per-plugin.** Rejected. Plugins are the natural Claude Code distribution unit and the unit `--plugin-dir` understands. Skill-level resolution would add a layer with no upstream support.
-- **All five scopes (global, org, system, workflow, phase) in v1.** Deferred to [#761](https://github.com/syntropic137/syntropic137/issues/761) to keep PR1 focused. Org and system require dispatch-chain widening; v1 ships the three scopes that need no command-shape changes.
-- **Path A: flat `<workspace>/.claude/skills/` materialization.** Rejected for namespace collision risk and for losing the per-plugin grouping that `--plugin-dir` provides. Path B (real plugin trees plus `--plugin-dir` flags) chosen and validated.
-- **SHA-only YAML refs.** Rejected for readability. Authors write semver in YAML; the platform pins the SHA in the lock.
+- **Keep Claude plugins as the workflow unit.** Rejected: Claude-only by construction, which blocks multi-harness execution. Plugins remain the *platform* unit, where their Claude specificity is fine.
+- **Own the harness mapping ourselves.** Rejected: it is the part that rots. Upstream maintains it for 70+ harnesses and we pin the version.
+- **Tag bundled skills with the plugin's own version.** Rejected: fewer registrations, but a skill could then change content without changing identity, which is the exact failure mode this design avoids elsewhere.
+- **A separate `skills` bounded context.** Rejected as premature. Single aggregate family sharing orchestration's domain language.
+- **Cache eviction in v1.** Deferred. Skill trees are small relative to session logs, and the expected answer is "this is not the thing to worry about" - but measured rather than assumed.
+- **Per-skill granularity out of a plugin.** This is what skills are; the plugin-era limitation is gone.
 
 ## Validation
 
-The injection mechanism was validated end-to-end before any platform code was written. Evidence:
-
-- `docs/experiments/cycle-004/dogfood-platform-726/validation-experiment/run.sh` -- 10/10 tests pass.
-- `validation-experiment/hello-world/` and `goodbye-world/` -- minimal proof plugins exercising single-plugin and multi-plugin loads.
-- Confirmed: `<workspace>/.syn-plugins/<plugin>/.claude-plugin/plugin.json` is the correct on-disk shape; multiple `--plugin-dir` flags coexist; description-matched activation works without forced `/<skill>` invocations; the real-world `software-leverage-points` plugin (20 skills) loaded with the correct `software-leverage-points:<skill>` namespace.
+- `skills list --agent codex` inside a running workspace reports the declared skill installed at `./.agents/skills/<name>`, not merely staged under `.syn-skills/`. This is the check that distinguishes the two.
+- Second install of the same package reports `already registered` and performs no upload, which is the caching claim.
+- An unreachable reference fails the install and creates no workflow.
+- The stored `WorkflowTemplateCreated` payload and the `skill_lock` key carry byte-identical identity triples, so install-time and run-time identity agree.
+- CLI and API tree-hash implementations assert the same constant from both languages.
 
 ## References
 
-- [#726](https://github.com/syntropic137/syntropic137/issues/726) -- this feature
-- [#761](https://github.com/syntropic137/syntropic137/issues/761) -- org/system scopes follow-up
+- [#772](https://github.com/syntropic137/syntropic137/issues/772) -- harness-agnostic skill injection
+- [#726](https://github.com/syntropic137/syntropic137/issues/726) -- the original claude-plugin design this replaces
+- [#828](https://github.com/syntropic137/syntropic137/issues/828) -- removal of the unused `claude_plugins:` field
 - ADR-020 -- Bounded Context and Aggregate Convention
 - ADR-024 -- Workspace setup phase and secret injection
-- ADR-033 (agentic-primitives) -- existing `--plugin-dir` injection mechanism this ADR builds on
-- Plan: `docs/experiments/cycle-004/dogfood-platform-726/plan-local.md`
-- Implementation plan: `~/.claude/plans/steady-soaring-bee.md`
+- ADR-033 (agentic-primitives) -- `--plugin-dir` injection, still how the platform layer loads
+- ADR-066 -- Separation of Concerns; why git work lives in the CLI
+- `docs/superpowers/specs/2026-08-17-skills-distribution-design.md` -- the distribution design
 
-## Amendment (2026-05-05): resolution moved to CLI per ADR-066
+## Revision history
 
-Original wording in the "Resolution timing" and "PR2 routing primitive" sections implied that the API container performs the git clone, sha computation, and MinIO upload during workflow registration ("implicit fetch on workflow install"). That placement was a leakage of heavy I/O into the API tier and was caught during the first end-to-end smoke against the dev stack (the `git` binary was missing from the API image; adding it would have masked the underlying separation-of-concerns violation).
+**2026-08-17 -- skills replace claude plugins as the workflow capability unit.**
+The original ADR made Claude plugins the workflow-declared unit, injected with `--plugin-dir`. That is Claude-only, so Codex and Gemini phases got no capability injection at all, which blocked multi-harness execution. Skills replace it at the workflow layer; Claude plugins remain the platform layer, where their Claude specificity is appropriate and where the hooks live. Also added in this revision: bundled references and their tree-hash pinning, the byte-order specification for cross-language hashing, install-time registration, and the fail-loudly rule.
 
-[ADR-066](ADR-066-separation-of-concerns.md) is the corrective principle and the redesign moved git work to the CLI tier. Concretely:
+**2026-05-05 -- resolution moved from the API to the CLI.**
+The original design had the API container perform the git clone, hash, and upload during workflow registration. That leaked heavy I/O into the API tier and was caught during the first end-to-end smoke against the dev stack: the `git` binary was missing from the API image, and adding it would have masked the underlying violation. [ADR-066](ADR-066-separation-of-concerns.md) is the corrective principle. The lock projection and everything below the resolution tier were unchanged. See `docs/experiments/cycle-004/dogfood-platform-726/redesign-thin-api.md` and `retro-git-in-api.md`.
 
-- The CLI (`syn claude-plugin install <ref>` and `syn workflow install <yaml>` pre-flight) does the `gitClone`, the tree walk, and the base64 packaging.
-- The API exposes a thin `POST /claude-plugins/registrations` endpoint that accepts the pre-built tree as JSON, validates the manifest, computes the SHA, uploads to MinIO, and dispatches the domain command. No subprocess spawn, no `git` binary in the API image.
-- The lock projection still pins by `(source_url, version, name) -> resolved_sha + tree_storage_prefix` and remains the canonical reproducibility primitive. Everything below the resolution tier (aggregates, events, projections, materializer, `--plugin-dir` flag emission) is unchanged.
-
-The amendment does not change any of the locked design decisions in the table above (terminology, bounded context placement, scopes, lock key, conflict rule, materialization path, or rejection of `@latest`). Only the *runtime tier* in which fetch + upload happens moved from the API to the CLI. See `docs/experiments/cycle-004/dogfood-platform-726/redesign-thin-api.md` for the full redesign and `retro-git-in-api.md` for what went wrong and what changed in the agent's process to prevent recurrence.
+**2026-05-04 -- original decision.** Workflow-scoped Claude plugin injection, validated end-to-end before platform code was written (`docs/experiments/cycle-004/dogfood-platform-726/validation-experiment/run.sh`, 10/10 tests passing, including a 20-skill real-world plugin loading with correct namespacing).
