@@ -3,6 +3,18 @@ title: Claude Plugins in Workflows
 description: Declare Claude Code plugins per workflow and per phase so the agent inside each workspace sees exactly the skills it needs.
 ---
 
+<Callout type="warn">
+  **Use [Skills](/docs/guide/skills) instead.** Workflow-declared Claude plugins
+  work only for Claude: `--plugin-dir` is a Claude CLI flag, so a Codex or Gemini
+  phase receives nothing. Skills are the harness-agnostic replacement and are what
+  `syn workflow install` registers automatically.
+
+  This page is kept for reference. The hooks and guardrails you rely on are
+  unaffected either way: those are baked into the workspace image as platform
+  plugins, not declared per workflow. See
+  [the two-layer model](/docs/guide/skills#two-layers-and-why-it-matters).
+</Callout>
+
 Workflows can declare a curated set of Claude Code plugins that the agent
 running each phase should see. The platform fetches the plugin source once,
 content-addresses the result in object storage, and (in a follow-up release)
