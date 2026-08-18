@@ -195,11 +195,14 @@ jobs:
     name: Python Integration Tests
     runs-on: ubuntu-latest
     # Run on: weekly cron, main branch pushes, manual dispatch
-    # Skip on: feature branch PRs (unit tests are sufficient for fast iteration)
+    # Tiering: feature-branch PRs stay fast on unit tests alone; integration
+    # runs on the weekly cron, on main, and - critically - on release PRs, which
+    # are the last chance to catch a regression before it ships.
     if: >-
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'release')
 
     services:
       timescaledb:
@@ -568,10 +571,28 @@ jobs:
             exit 1
           fi
 
-          # Integration tests only required on PRs
-          if [[ "${{ github.event_name }}" == "pull_request" ]] && \
-             [[ "${{ needs.python-integration-tests.result }}" == "failure" ]]; then
+          # Integration tests: whenever they RAN, they must have passed.
+          #
+          # This used to read `event_name == 'pull_request' && result == failure`,
+          # which was the exact inverse of the job's own `if:` - the job never ran
+          # on a PR, so the check could never fire, and on the runs where it DID
+          # execute (weekly cron, main, dispatch) nothing required it. A failing
+          # integration test could not fail any gate. See
+          # docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md
+          #
+          # Keyed on the result, not the trigger: `skipped` is a deliberate tier
+          # choice on feature-branch PRs, `failure` is never acceptable.
+          if [[ "${{ needs.python-integration-tests.result }}" == "failure" ]]; then
             echo "❌ Integration tests failed"
+            exit 1
+          fi
+
+          # A release PR must not ship on unit tests alone. If integration did
+          # not actually run here, that is a misconfiguration, not a pass.
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "release" ]] && \
+             [[ "${{ needs.python-integration-tests.result }}" != "success" ]]; then
+            echo "❌ Release PR requires integration tests to RUN and pass"
+            echo "   (result: ${{ needs.python-integration-tests.result }})"
             exit 1
           fi
 
