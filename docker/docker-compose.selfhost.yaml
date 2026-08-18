@@ -193,8 +193,21 @@ services:
       - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID:-}
       - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME:-}
       - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
-      # 1Password (optional)
+      # 1Password (optional).
+      # op_resolver derives a PER-VAULT token name from APP_ENVIRONMENT
+      # (syn137-beta -> OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA) and falls back to
+      # the generic name. Passing only the generic one meant a beta or staging
+      # stack could not read its own vault, so every vault-only setting silently
+      # stayed at its default. Forward both.
       - OP_SERVICE_ACCOUNT_TOKEN=${OP_SERVICE_ACCOUNT_TOKEN:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYNTROPIC137=${OP_SERVICE_ACCOUNT_TOKEN_SYNTROPIC137:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD:-}
+      # Central session store (opt-in). Normally resolved from the vault above;
+      # these allow a non-1Password deployment to set them directly.
+      - SYN_SESSION_STORE_URL=${SYN_SESSION_STORE_URL:-}
+      - SYN_SESSION_STORE_AUTH_TOKEN=${SYN_SESSION_STORE_AUTH_TOKEN:-}
       # MinIO (artifact storage) — password read from Docker secret in entrypoint
       - SYN_STORAGE_PROVIDER=minio
       - SYN_STORAGE_MINIO_ENDPOINT=minio:9000

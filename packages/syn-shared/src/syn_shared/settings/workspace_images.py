@@ -201,8 +201,20 @@ def workspace_image_ref(
 # Convenience constants (the most common references)
 # ---------------------------------------------------------------------------
 
-DEFAULT_WORKSPACE_IMAGE: str = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
-"""Default workspace image - Claude CLI provider, digest-pinned, from GHCR."""
+DEFAULT_WORKSPACE_IMAGE: str = workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
+"""Default workspace image - omni-agent, digest-pinned, from GHCR.
+
+Omni hosts BOTH harnesses (claude and codex) on the shared ADR-040 capability
+runtime. The claude-cli image happens to carry a codex binary, so codex phases
+ran there before this default moved, but that was a side effect rather than a
+contract: omni's manifest treats an image with one working harness as broken,
+not degraded. Making omni the default is what makes a codex phase a supported
+configuration rather than an accident of how claude-cli was built.
+
+Operators pin a different image with ``SYN_WORKSPACE_DOCKER_IMAGE``. It must be
+a digest reference; a registry tag is rejected, because verifying a tag does not
+establish what will actually be pulled.
+"""
 
 INTERACTIVE_TMUX_WORKSPACE_IMAGE: str = workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)
 """Default interactive-tmux workspace image - digest-pinned, from GHCR.

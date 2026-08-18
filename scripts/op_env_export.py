@@ -26,6 +26,10 @@ from syn_shared.settings.constants import (
     ENV_CODEX_AUTH_JSON,
     ENV_SYN_PUBLIC_HOSTNAME,
 )
+from syn_shared.settings.session_store import (
+    ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_URL,
+)
 
 # infra_config lives in infra/scripts/ - add to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "infra" / "scripts"))
@@ -65,6 +69,11 @@ _KEYS = {
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
     ENV_CODEX_AUTH_JSON,
     ENV_SYN_API_PASSWORD,
+    # Central session store. Without these, `just _env-check` reports session
+    # capture as unconfigured even when the vault holds it, because this script
+    # resolves an allowlist rather than the item's actual fields.
+    ENV_SYN_SESSION_STORE_URL,
+    ENV_SYN_SESSION_STORE_AUTH_TOKEN,
 }
 
 
