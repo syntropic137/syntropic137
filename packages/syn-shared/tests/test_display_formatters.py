@@ -18,6 +18,7 @@ from syn_shared.display import (
 EM_DASH = "\u2014"
 
 
+@pytest.mark.unit
 class TestFormatTokens:
     @pytest.mark.parametrize(
         ("value", "expected"),
