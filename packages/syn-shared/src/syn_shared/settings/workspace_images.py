@@ -86,6 +86,18 @@ class WorkspaceImageProvider(StrEnum):
 
     CLAUDE_CLI = "claude-cli"
     INTERACTIVE_TMUX = "interactive-tmux"
+    OMNI_AGENT = "omni-agent"
+    """Multi-harness image: claude AND codex on the shared ADR-040 runtime.
+
+    The claude-cli image carries a codex binary too, so codex phases run there
+    today. Omni is the image where hosting both harnesses is the contract
+    rather than a side effect - its manifest treats one working harness as a
+    broken image, not a degraded one.
+
+    Not yet published to GHCR. Until the agentic-primitives build workflow
+    ships it, referencing this provider resolves to an image that does not
+    exist, so the default stays CLAUDE_CLI.
+    """
 
 
 # ---------------------------------------------------------------------------
