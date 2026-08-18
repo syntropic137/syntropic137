@@ -75,10 +75,12 @@ class TestOmniIsTheKnownException:
         assert name != "agentic-workspace-omni-agent"
 
     def test_omni_ref_is_fully_qualified(self) -> None:
-        assert (
-            workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
-            == "ghcr.io/agentparadise/omni-agent-workspace:latest"
-        )
+        # Assert the repository, not the whole reference. Refs are digest
+        # pinned, and a digest changes on every release; this test is about
+        # the image NAME being the unprefixed one.
+        ref = workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
+        assert ref.split("@")[0] == "ghcr.io/agentparadise/omni-agent-workspace"
+        assert "@sha256:" in ref
 
 
 @pytest.mark.unit
@@ -86,13 +88,11 @@ class TestDerivedProvidersUnchanged:
     """The override map must not disturb providers that were already correct."""
 
     def test_claude_cli_still_derives(self) -> None:
-        assert (
-            workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
-            == "ghcr.io/agentparadise/agentic-workspace-claude-cli:latest"
-        )
+        ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
+        assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-claude-cli"
+        assert "@sha256:" in ref
 
     def test_interactive_tmux_still_derives(self) -> None:
-        assert (
-            workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)
-            == "ghcr.io/agentparadise/agentic-workspace-interactive-tmux:latest"
-        )
+        ref = workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)
+        assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-interactive-tmux"
+        assert "@sha256:" in ref
