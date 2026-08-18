@@ -221,6 +221,44 @@ class TestWorkspaceImages:
         assert DEFAULT_WORKSPACE_IMAGE.startswith("ghcr.io/")
         assert "agentic-workspace-claude-cli" in DEFAULT_WORKSPACE_IMAGE
 
+    def test_default_image_is_digest_pinned(self) -> None:
+        """The default image must be immutable: a digest, never a tag.
+
+        This is the whole point of the pin. A tag can be repointed by the
+        publisher at any time, so a tag default means every upstream merge
+        silently changes what we run.
+        """
+        from syn_shared.settings.workspace_images import (
+            PINNED_DIGESTS,
+            WorkspaceImageProvider,
+        )
+
+        repository, separator, digest = DEFAULT_WORKSPACE_IMAGE.partition("@")
+        assert separator == "@", f"{DEFAULT_WORKSPACE_IMAGE} is not digest-pinned"
+        assert digest.startswith("sha256:")
+        assert ":" not in repository, "digest reference must not also carry a tag"
+        assert digest == PINNED_DIGESTS[WorkspaceImageProvider.CLAUDE_CLI]
+
+    def test_no_pinned_digest_is_a_tag(self) -> None:
+        """Every pinned digest must be a well-formed sha256 hex digest."""
+        import re
+
+        from syn_shared.settings.workspace_images import PINNED_DIGESTS
+
+        for provider, digest in PINNED_DIGESTS.items():
+            assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest), (
+                f"{provider.value} pin is not a sha256 digest: {digest}"
+            )
+
+    def test_every_provider_has_a_pin(self) -> None:
+        """A provider without a pin would silently fall back to nothing usable."""
+        from syn_shared.settings.workspace_images import (
+            PINNED_DIGESTS,
+            WorkspaceImageProvider,
+        )
+
+        assert set(PINNED_DIGESTS) == set(WorkspaceImageProvider)
+
     def test_workspace_image_ref_builds_correct_ref(self) -> None:
         """workspace_image_ref should build a fully-qualified image reference."""
         from syn_shared.settings.workspace_images import (
@@ -230,6 +268,22 @@ class TestWorkspaceImages:
 
         ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI, "2.1.76")
         assert ref == "ghcr.io/agentparadise/agentic-workspace-claude-cli:2.1.76"
+
+    def test_workspace_image_ref_rejects_tag_and_digest(self) -> None:
+        """Supplying both a tag and a digest is ambiguous, so it is an error."""
+        import pytest
+
+        from syn_shared.settings.workspace_images import (
+            WorkspaceImageProvider,
+            workspace_image_ref,
+        )
+
+        with pytest.raises(ValueError, match="not both"):
+            workspace_image_ref(
+                WorkspaceImageProvider.CLAUDE_CLI,
+                "latest",
+                digest="sha256:" + "0" * 64,
+            )
 
     def test_workspace_image_ref_custom_registry(self) -> None:
         """workspace_image_ref should support custom registry/owner."""
@@ -259,20 +313,24 @@ class TestWorkspaceImages:
             settings = WorkspaceSettings(_env_file=None)
             assert settings.docker_image == "my-registry/custom-image:v1"
 
-    def test_interactive_tmux_image_is_bare_local_tag(self) -> None:
-        """Interactive-tmux image is a bare local tag, not yet GHCR-qualified."""
-        assert not INTERACTIVE_TMUX_WORKSPACE_IMAGE.startswith("ghcr.io/")
-        assert INTERACTIVE_TMUX_WORKSPACE_IMAGE == "agentic-workspace-interactive-tmux:latest"
+    def test_interactive_tmux_image_is_ghcr_digest_pinned(self) -> None:
+        """Interactive-tmux is published to GHCR and pinned exactly like claude-cli.
 
-    def test_interactive_tmux_image_ref_when_published(self) -> None:
-        """workspace_image_ref should build the GHCR-qualified form once published."""
+        It is one of the two providers in the agentic-primitives build matrix
+        (.github/workflows/build-workspace-images.yml), so it is published and
+        signed by the same workflow run.
+        """
         from syn_shared.settings.workspace_images import (
+            PINNED_DIGESTS,
             WorkspaceImageProvider,
-            workspace_image_ref,
         )
 
-        ref = workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)
-        assert ref == "ghcr.io/agentparadise/agentic-workspace-interactive-tmux:latest"
+        assert INTERACTIVE_TMUX_WORKSPACE_IMAGE.startswith(
+            "ghcr.io/agentparadise/agentic-workspace-interactive-tmux@"
+        )
+        assert INTERACTIVE_TMUX_WORKSPACE_IMAGE.endswith(
+            PINNED_DIGESTS[WorkspaceImageProvider.INTERACTIVE_TMUX]
+        )
 
     def test_interactive_tmux_image_matches_settings(self) -> None:
         """WorkspaceSettings.interactive_tmux_image default should match the registry constant."""
