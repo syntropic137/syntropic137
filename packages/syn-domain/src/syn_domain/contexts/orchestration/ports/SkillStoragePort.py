@@ -47,6 +47,26 @@ class StoredSkillTree:
     metadata: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class SkillStorageStats:
+    """How much space registered skill trees occupy.
+
+    Skill storage grows monotonically: registration is content-addressed and
+    nothing removes old trees. Eviction is deliberately not implemented, so
+    this exists to keep that a measured decision rather than an assumption.
+    """
+
+    object_count: int = 0
+    total_bytes: int = 0
+    skill_count: int = 0
+    """Distinct sha256-keyed trees, not files."""
+
+    truncated: bool = False
+    """True if the backend returned a partial listing, so the counts are lower
+    bounds. Reported rather than hidden: a silently capped total reads as a
+    complete one."""
+
+
 @runtime_checkable
 class SkillStoragePort(Protocol):
     """Stores and fetches skill trees in the platform's object storage.
@@ -95,6 +115,10 @@ class SkillStoragePort(Protocol):
         upload would have produced. Exposing it lets the registration handler
         skip a redundant ``upload_tree`` call when ``exists(sha256)`` is True.
         """
+        ...
+
+    async def stats(self) -> SkillStorageStats:
+        """Report object count, total bytes, and distinct tree count."""
         ...
 
     async def ensure_ready(self) -> None:

@@ -12,6 +12,7 @@ import type { CommandGroup } from "./framework/command.js";
 // Command groups (alphabetical)
 import { artifactsGroup } from "./commands/artifacts.js";
 import { claudePluginGroup } from "./commands/claude-plugin/index.js";
+import { skillGroup } from "./commands/skill/index.js";
 import { configGroup } from "./commands/config.js";
 import { controlGroup } from "./commands/control.js";
 import { conversationsGroup } from "./commands/conversations.js";
@@ -54,6 +55,7 @@ export const commandGroups: readonly CommandGroup[] = [
   orgGroup,
   repoGroup,
   sessionsGroup,
+  skillGroup,
   systemGroup,
   triggersGroup,
   watchGroup,

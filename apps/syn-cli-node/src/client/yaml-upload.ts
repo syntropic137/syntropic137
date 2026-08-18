@@ -17,6 +17,16 @@ export type CreateWorkflowResponse = components["schemas"]["CreateWorkflowRespon
 export interface PostYamlOptions {
   name?: string;
   workflowId?: string;
+  /**
+   * Body media type. Defaults to YAML (`create --from` uploads file bytes).
+   *
+   * `workflow install` passes "application/json": it uploads a definition it
+   * resolved and re-serialized rather than the original file, and JSON is a
+   * YAML subset that it can emit without a YAML writer.
+   */
+  contentType?: "application/yaml" | "application/json";
+  /** Label used in the error message, so failures name the command that failed. */
+  errorLabel?: string;
 }
 
 export async function postYaml(
@@ -32,7 +42,7 @@ export async function postYaml(
     method: "POST",
     headers: {
       ...getAuthHeaders(),
-      "Content-Type": "application/yaml",
+      "Content-Type": options.contentType ?? "application/yaml",
     },
     body: new Uint8Array(fileBytes),
   });
@@ -40,7 +50,8 @@ export async function postYaml(
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new CLIError(
-      `workflow create --from failed (${response.status}): ${text || response.statusText}`,
+      `${options.errorLabel ?? "workflow create --from"} failed (${response.status}): ` +
+        `${text || response.statusText}`,
     );
   }
 

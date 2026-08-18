@@ -19,6 +19,23 @@ from syn_adapters.workspace_backends.interactive_tmux import (
 from syn_adapters.workspace_backends.interactive_tmux import adapter as adapter_mod
 
 
+@pytest.fixture(autouse=True)
+def _stub_image_verification() -> object:
+    """Stub the supply-chain gate for the seam tests in this module.
+
+    The adapter verifies its image on the first create(), so without this every
+    test here would shell out to cosign for `img:tag`. The gate's own behaviour
+    is tested for real in test_adapter_image_verification.py, which does not use
+    this fixture.
+    """
+
+    async def _passthrough(image_ref: str) -> str:
+        return image_ref
+
+    with patch.object(adapter_mod, "verify_image_async", side_effect=_passthrough) as stub:
+        yield stub
+
+
 @pytest.mark.asyncio
 async def test_create_delegates_to_provider_and_returns_handle() -> None:
     """create() forwards a WorkspaceConfig to the provider and wraps the result."""
@@ -78,7 +95,7 @@ async def test_create_sets_agents_label_from_config() -> None:
         patch.object(adapter_mod, "_InteractiveTmuxProvider", fake_provider_cls),
         patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
     ):
-        adapter = InteractiveTmuxIsolationAdapter()
+        adapter = InteractiveTmuxIsolationAdapter(default_image="img:tag")
         # With agents -> label set.
         await adapter.create(
             IsolationConfig(execution_id="e", workspace_id="w", image="i", agents=("claude",))
@@ -110,7 +127,7 @@ async def test_create_rejects_environment_injection() -> None:
         patch.object(adapter_mod, "_InteractiveTmuxProvider", MagicMock()),
         patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
     ):
-        adapter = InteractiveTmuxIsolationAdapter()
+        adapter = InteractiveTmuxIsolationAdapter(default_image="img:tag")
         with pytest.raises(InteractiveTmuxUnavailableError, match="environment"):
             await adapter.create(
                 IsolationConfig(
@@ -143,7 +160,7 @@ async def test_destroy_calls_provider_destroy_and_drops_handle() -> None:
         patch.object(adapter_mod, "_InteractiveTmuxProvider", fake_provider_cls),
         patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
     ):
-        adapter = InteractiveTmuxIsolationAdapter()
+        adapter = InteractiveTmuxIsolationAdapter(default_image="img:tag")
         await adapter.create(
             IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
         )
@@ -207,7 +224,7 @@ async def test_create_does_not_block_event_loop() -> None:
         patch.object(adapter_mod, "_InteractiveTmuxProvider", fake_provider_cls),
         patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
     ):
-        adapter = InteractiveTmuxIsolationAdapter()
+        adapter = InteractiveTmuxIsolationAdapter(default_image="img:tag")
         ticker_task = asyncio.ensure_future(_run_ticker(30))
         await adapter.create(
             IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
@@ -245,7 +262,7 @@ async def test_destroy_does_not_block_event_loop() -> None:
         patch.object(adapter_mod, "_InteractiveTmuxProvider", fake_provider_cls),
         patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
     ):
-        adapter = InteractiveTmuxIsolationAdapter()
+        adapter = InteractiveTmuxIsolationAdapter(default_image="img:tag")
         await adapter.create(
             IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
         )
@@ -299,7 +316,7 @@ async def test_destroy_failure_retains_handle_for_retry() -> None:
         patch.object(adapter_mod, "_InteractiveTmuxProvider", fake_provider_cls),
         patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
     ):
-        adapter = InteractiveTmuxIsolationAdapter()
+        adapter = InteractiveTmuxIsolationAdapter(default_image="img:tag")
         await adapter.create(
             IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
         )
@@ -383,7 +400,7 @@ async def test_concurrent_creates_survive_provider_loop_affine_lock() -> None:
         patch.object(adapter_mod, "_InteractiveTmuxProvider", _LockOwningProvider),
         patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
     ):
-        adapter = InteractiveTmuxIsolationAdapter()
+        adapter = InteractiveTmuxIsolationAdapter(default_image="img:tag")
         cfg = IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
         handles = await asyncio.gather(adapter.create(cfg), adapter.create(cfg))
 
@@ -410,7 +427,7 @@ async def test_create_destroy_create_cycle_does_not_rebind_lock() -> None:
         patch.object(adapter_mod, "_InteractiveTmuxProvider", _LockOwningProvider),
         patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
     ):
-        adapter = InteractiveTmuxIsolationAdapter()
+        adapter = InteractiveTmuxIsolationAdapter(default_image="img:tag")
         cfg = IsolationConfig(execution_id="e", workspace_id="w", image="i", environment={})
         # Round 1: concurrent creates bind the lock (contention), then destroy
         # both so the adapter's workspace set drains to empty.
@@ -441,7 +458,7 @@ def test_constructor_raises_when_provider_missing() -> None:
         ),
         pytest.raises(InteractiveTmuxUnavailableError) as exc,
     ):
-        InteractiveTmuxIsolationAdapter()
+        InteractiveTmuxIsolationAdapter(default_image="img:tag")
     assert "agentic-primitives" in str(exc.value)
     assert "agentprims-lab" in str(exc.value)
 
@@ -455,7 +472,7 @@ def test_provider_handle_returns_none_for_unknown_handle() -> None:
         patch.object(adapter_mod, "_InteractiveTmuxProvider", MagicMock()),
         patch.object(adapter_mod, "INTERACTIVE_TMUX_AVAILABLE", True),
     ):
-        adapter = InteractiveTmuxIsolationAdapter()
+        adapter = InteractiveTmuxIsolationAdapter(default_image="img:tag")
         result = adapter.provider_handle(
             IsolationHandle(
                 isolation_id="missing",

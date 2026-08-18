@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from syn_shared.settings.workspace_images import (
+    PINNED_DIGESTS,
     WorkspaceImageProvider,
     workspace_image_name,
     workspace_image_ref,
@@ -74,11 +75,10 @@ class TestOmniIsTheKnownException:
         assert name == "omni-agent-workspace"
         assert name != "agentic-workspace-omni-agent"
 
-    def test_omni_ref_is_fully_qualified(self) -> None:
-        assert (
-            workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
-            == "ghcr.io/agentparadise/omni-agent-workspace:latest"
-        )
+    def test_omni_ref_is_fully_qualified_and_digest_pinned(self) -> None:
+        ref = workspace_image_ref(WorkspaceImageProvider.OMNI_AGENT)
+        assert ref.startswith("ghcr.io/agentparadise/omni-agent-workspace@sha256:")
+        assert ":latest" not in ref
 
 
 @pytest.mark.unit
@@ -86,13 +86,33 @@ class TestDerivedProvidersUnchanged:
     """The override map must not disturb providers that were already correct."""
 
     def test_claude_cli_still_derives(self) -> None:
-        assert (
-            workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
-            == "ghcr.io/agentparadise/agentic-workspace-claude-cli:latest"
-        )
+        ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
+        assert ref.startswith("ghcr.io/agentparadise/agentic-workspace-claude-cli@sha256:")
 
     def test_interactive_tmux_still_derives(self) -> None:
-        assert (
-            workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)
-            == "ghcr.io/agentparadise/agentic-workspace-interactive-tmux:latest"
+        ref = workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)
+        assert ref.startswith("ghcr.io/agentparadise/agentic-workspace-interactive-tmux@sha256:")
+
+
+@pytest.mark.unit
+class TestEveryProviderIsPinned:
+    """A provider without a digest pin is a KeyError at workspace provision time.
+
+    ``workspace_image_ref`` subscripts PINNED_DIGESTS directly, so adding an
+    enum member without a matching pin does not fail here - it fails far away,
+    when a workspace is being created. This test moves that failure to the
+    place that can fix it.
+    """
+
+    def test_all_providers_have_a_pinned_digest(self) -> None:
+        missing = [p.value for p in WorkspaceImageProvider if p not in PINNED_DIGESTS]
+        assert not missing, (
+            f"providers with no PINNED_DIGESTS entry: {missing}. "
+            f"Resolve the multi-arch index digest with `docker buildx imagetools "
+            f"inspect` and add it, or workspace provision raises KeyError."
         )
+
+    def test_every_provider_resolves_to_a_digest_reference(self) -> None:
+        for provider in WorkspaceImageProvider:
+            ref = workspace_image_ref(provider)
+            assert "@sha256:" in ref, f"{provider.value} is not digest-pinned: {ref}"

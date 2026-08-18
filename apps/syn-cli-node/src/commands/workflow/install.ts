@@ -7,7 +7,6 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 import { formatTimestamp } from "../../output/format.js";
@@ -26,6 +25,8 @@ import {
 import { removeTempDir } from "../../packages/git.js";
 import { resolveFromMarketplace } from "../../marketplace/client.js";
 import { runClaudePluginPreflight } from "../../packages/claude-plugin-preflight.js";
+import { postYaml } from "../../client/yaml-upload.js";
+import { runSkillPreflight } from "../../packages/skill-preflight.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -107,34 +108,44 @@ export async function installWorkflowsViaApi(
     const wf = workflows[i]!;
     process.stdout.write(`  [${i + 1}/${workflows.length}] Creating ${style(wf.name, BOLD)}... `);
     try {
-      const data = unwrap(
-        await api.POST("/workflows", {
-          body: {
-            // Preserve the stable id declared in workflow.yaml. Without it the
-            // server mints a fresh uuid on every install, so `syn workflow run
-            // <yaml-id>` cannot resolve and re-installing the same package
-            // silently piles up duplicates.
-            id: wf.id,
-            name: wf.name,
-            workflow_type: wf.workflow_type,
-            classification: wf.classification ?? "standard",
-            repository_url: wf.repository_url,
-            repository_ref: wf.repository_ref,
-            description: wf.description ?? null,
-            project_name: wf.project_name ?? null,
-            requires_repos: wf.requires_repos,
-            phases: wf.phases,
-            input_declarations: wf.input_declarations,
-          },
-        }),
-        "Failed to create workflow",
-      );
+      // WHY from-yaml rather than a hand-built JSON body: the old body named
+      // each field explicitly, so every key it did not name was silently
+      // dropped on install - `skills:` and `claude_plugins:` among them, and
+      // whatever field is added next. Uploading the resolved definition lets
+      // the server own every YAML semantic (ADR-058 requires_repos inference
+      // included), which is what `syn workflow create --from` already does.
+      //
+      // workflowId preserves the stable id declared in workflow.yaml. Without
+      // it the server mints a fresh uuid on every install, so `syn workflow
+      // run <yaml-id>` cannot resolve and re-installing the same package
+      // silently piles up duplicates.
+      const data = await postYaml(Buffer.from(JSON.stringify(wf.definition), "utf-8"), {
+        name: wf.name,
+        workflowId: wf.id,
+        contentType: "application/json",
+        errorLabel: "workflow install",
+      });
       const wfId = data.id;
       print(`${style("done", GREEN)} (id: ${wfId})`);
       installed.push({ id: wfId, name: wf.name });
     } catch (err) {
       print(style("failed", "\x1b[31m"));
       if (err instanceof Error) printError(err.message);
+      // WHY rethrow rather than collect and continue: swallowing this left the
+      // package half-installed while the command still printed
+      // "Installed N workflow(s)" and recorded the install, so a user had no
+      // signal that a workflow they asked for is missing. The workflows
+      // created before this point still exist - install is not transactional
+      // server-side - so the message says so rather than implying a clean
+      // rollback.
+      throw new CLIError(
+        `Failed to create workflow '${wf.name}' (${i + 1} of ${workflows.length}).\n` +
+          (installed.length > 0
+            ? `  ${installed.length} workflow(s) were already created and remain installed: ` +
+              `${installed.map((w) => w.name).join(", ")}.\n` +
+              "  Fix the error and re-run to finish, or remove them with `syn workflow delete`."
+            : "  No workflows were installed."),
+      );
     }
   }
   return installed;
@@ -209,6 +220,13 @@ export const installCommand: CommandDef = {
       // resolve them BEFORE we mutate the API. This keeps install atomic
       // from the user's perspective without requiring the API to do git work.
       await runClaudePluginPreflight(packagePath);
+
+      // WHY here: same reasoning as the claude-plugin preflight above. A
+      // workflow declaring `skills:` used to install cleanly and then fail at
+      // execution with SkillNotRegistered, after the user had committed to a
+      // run. This also pins bundled refs in the definitions about to be
+      // uploaded, so both preflights must precede installWorkflowsViaApi.
+      await runSkillPreflight(packagePath, workflows);
 
       const installedRefs = await installWorkflowsViaApi(workflows);
 

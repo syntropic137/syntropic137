@@ -630,6 +630,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Skills
+         * @description List every registered skill (issue #826).
+         *
+         *     Reads the ``skill_lock`` projection, the same read model run-time
+         *     resolution uses, so what this reports is what a run would resolve.
+         */
+        get: operations["list_skills_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Storage Stats
+         * @description Report how much space registered skill trees occupy.
+         *
+         *     Eviction is deliberately not implemented, so size is made observable
+         *     rather than assumed small.
+         */
+        get: operations["get_skill_storage_stats_skills_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/skills/registrations": {
         parameters: {
             query?: never;
@@ -637,7 +683,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Lookup Skill Registration
+         * @description Report whether this skill triple is already registered.
+         *
+         *     WHY a read surface exists: the skills API had only a write endpoint, so a
+         *     caller could not distinguish an already-stored skill from a new one without
+         *     uploading the whole tree. The returned sha is the cache key.
+         */
+        get: operations["lookup_skill_registration_skills_registrations_get"];
         put?: never;
         /**
          * Register Skill Endpoint
@@ -650,6 +704,30 @@ export interface paths {
          *     re-submission of the same ``(source_url, version, skill_name)``.
          */
         post: operations["register_skill_endpoint_skills_registrations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/by-name/{skill_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Detail
+         * @description Every registration sharing a skill name (issue #826).
+         *
+         *     A name is not unique - the same skill can be pinned at several versions,
+         *     and two sources can publish the same name - so all matches are returned
+         *     rather than an arbitrary one.
+         */
+        get: operations["get_skill_detail_skills_by_name__skill_name__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4115,6 +4193,20 @@ export interface components {
             cache_read_tokens: number;
         };
         /**
+         * SkillDetailResponse
+         * @description Every registration sharing one skill name.
+         *
+         *     A name is not unique: the same skill can be pinned at several versions, and
+         *     two sources can publish the same name. All of them are returned so the
+         *     caller can tell which pin a workflow actually resolves to.
+         */
+        SkillDetailResponse: {
+            /** Skill Name */
+            skill_name: string;
+            /** Registrations */
+            registrations?: components["schemas"]["SkillRegistrationSummary"][];
+        };
+        /**
          * SkillFilePayload
          * @description One file in the uploaded skill tree (``POST /skills/registrations``).
          *
@@ -4127,6 +4219,33 @@ export interface components {
             rel_path: string;
             /** Content Base64 */
             content_base64: string;
+        };
+        /**
+         * SkillListResponse
+         * @description Every registered skill.
+         */
+        SkillListResponse: {
+            /** Skills */
+            skills?: components["schemas"]["SkillRegistrationSummary"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * SkillRegistrationLookupResponse
+         * @description Whether a (source_url, version, skill_name) triple is already registered.
+         *
+         *     Lets the CLI skip uploading a skill tree it has already stored. The sha is
+         *     the cache key: identical content always resolves to the same hash, so a hit
+         *     here means zero network work for the caller.
+         */
+        SkillRegistrationLookupResponse: {
+            /** Registered */
+            registered: boolean;
+            /** Resolved Sha */
+            resolved_sha?: string | null;
         };
         /**
          * SkillRegistrationResponse
@@ -4146,6 +4265,73 @@ export interface components {
             resolved_sha: string;
             /** Tree Storage Prefix */
             tree_storage_prefix: string;
+        };
+        /**
+         * SkillRegistrationSummary
+         * @description One registered skill, as the lock projection holds it.
+         *
+         *     Carries the full identity triple plus the content hash, because that is
+         *     exactly what makes a ``SkillNotRegistered`` failure actionable: the caller
+         *     can see which of the three fields does not match what a workflow declared.
+         */
+        SkillRegistrationSummary: {
+            /** Skill Name */
+            skill_name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Resolved Sha
+             * @description Content-addressed sha of the normalized tree.
+             */
+            resolved_sha: string;
+            /**
+             * Resolved Sha Display
+             * @description First 12 characters of resolved_sha, for display in narrow columns.
+             */
+            resolved_sha_display: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+            /**
+             * Registered At
+             * Format: date-time
+             * @description UTC; clients format for their locale.
+             */
+            registered_at: string;
+        };
+        /**
+         * SkillStorageStatsResponse
+         * @description Size of the content-addressed skill store.
+         *
+         *     Skill storage grows monotonically: registration is keyed by content hash
+         *     and nothing removes old trees (skills-distribution spec D6, eviction is
+         *     deliberately not implemented). This endpoint exists so that decision stays
+         *     a measured one rather than an assumption.
+         */
+        SkillStorageStatsResponse: {
+            /**
+             * Object Count
+             * @default 0
+             */
+            object_count: number;
+            /**
+             * Total Bytes
+             * @default 0
+             */
+            total_bytes: number;
+            /**
+             * Skill Count
+             * @description Distinct skill trees, not files.
+             * @default 0
+             */
+            skill_count: number;
+            /**
+             * Truncated
+             * @description True if the backend returned a partial listing, so the counts are floors.
+             * @default false
+             */
+            truncated: boolean;
         };
         /**
          * StateResponse
@@ -6214,6 +6400,82 @@ export interface operations {
             };
         };
     };
+    list_skills_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillListResponse"];
+                };
+            };
+        };
+    };
+    get_skill_storage_stats_skills_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillStorageStatsResponse"];
+                };
+            };
+        };
+    };
+    lookup_skill_registration_skills_registrations_get: {
+        parameters: {
+            query: {
+                /** @description Skill source repository URL */
+                source_url: string;
+                /** @description Pinned version (tag, branch, or commit) */
+                version: string;
+                /** @description Skill name as declared or overridden */
+                skill_name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillRegistrationLookupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     register_skill_endpoint_skills_registrations_post: {
         parameters: {
             query?: never;
@@ -6256,6 +6518,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_skill_detail_skills_by_name__skill_name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetailResponse"];
+                };
+            };
+            /** @description No skill registered under that name */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

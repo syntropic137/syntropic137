@@ -1893,7 +1893,116 @@
         }
       }
     },
+    "/skills": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "List Skills",
+        "description": "List every registered skill (issue #826).\n\nReads the ``skill_lock`` projection, the same read model run-time\nresolution uses, so what this reports is what a run would resolve.",
+        "operationId": "list_skills_skills_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/skills/storage": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Get Skill Storage Stats",
+        "description": "Report how much space registered skill trees occupy.\n\nEviction is deliberately not implemented, so size is made observable\nrather than assumed small.",
+        "operationId": "get_skill_storage_stats_skills_storage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillStorageStatsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/skills/registrations": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Lookup Skill Registration",
+        "description": "Report whether this skill triple is already registered.\n\nWHY a read surface exists: the skills API had only a write endpoint, so a\ncaller could not distinguish an already-stored skill from a new one without\nuploading the whole tree. The returned sha is the cache key.",
+        "operationId": "lookup_skill_registration_skills_registrations_get",
+        "parameters": [
+          {
+            "name": "source_url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Skill source repository URL",
+              "title": "Source Url"
+            },
+            "description": "Skill source repository URL"
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Pinned version (tag, branch, or commit)",
+              "title": "Version"
+            },
+            "description": "Pinned version (tag, branch, or commit)"
+          },
+          {
+            "name": "skill_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Skill name as declared or overridden",
+              "title": "Skill Name"
+            },
+            "description": "Skill name as declared or overridden"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillRegistrationLookupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "skills"
@@ -1902,14 +2011,14 @@
         "description": "Register a skill by uploading the cloned tree (issue #772).\n\nThe CLI clones the source locally and POSTs the tree contents here. The\nAPI decodes the base64 file contents, computes the sha256 over the\nnormalized tree, uploads to storage, and dispatches a\n``RegisterSkillCommand`` against the existing aggregate. Idempotent on\nre-submission of the same ``(source_url, version, skill_name)``.",
         "operationId": "register_skill_endpoint_skills_registrations_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RegisterSkillRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -1930,6 +2039,52 @@
           },
           "422": {
             "description": "Manifest missing, malformed, or unsafe file path in the tree"
+          }
+        }
+      }
+    },
+    "/skills/by-name/{skill_name}": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Get Skill Detail",
+        "description": "Every registration sharing a skill name (issue #826).\n\nA name is not unique - the same skill can be pinned at several versions,\nand two sources can publish the same name - so all matches are returned\nrather than an arbitrary one.",
+        "operationId": "get_skill_detail_skills_by_name__skill_name__get",
+        "parameters": [
+          {
+            "name": "skill_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No skill registered under that name"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
         }
       }
@@ -9938,6 +10093,28 @@
         "title": "SessionTokenMetrics",
         "description": "Token usage metrics for a session."
       },
+      "SkillDetailResponse": {
+        "properties": {
+          "skill_name": {
+            "type": "string",
+            "title": "Skill Name"
+          },
+          "registrations": {
+            "items": {
+              "$ref": "#/components/schemas/SkillRegistrationSummary"
+            },
+            "type": "array",
+            "title": "Registrations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "skill_name"
+        ],
+        "title": "SkillDetailResponse",
+        "description": "Every registration sharing one skill name.\n\nA name is not unique: the same skill can be pinned at several versions, and\ntwo sources can publish the same name. All of them are returned so the\ncaller can tell which pin a workflow actually resolves to."
+      },
       "SkillFilePayload": {
         "properties": {
           "rel_path": {
@@ -9960,6 +10137,52 @@
         ],
         "title": "SkillFilePayload",
         "description": "One file in the uploaded skill tree (``POST /skills/registrations``).\n\nMirrors ``ClaudePluginFileEntry``. ``content_base64`` is the base64-encoded\nbyte content; the API decodes it back into raw bytes before hashing and\nuploading."
+      },
+      "SkillListResponse": {
+        "properties": {
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillRegistrationSummary"
+            },
+            "type": "array",
+            "title": "Skills"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SkillListResponse",
+        "description": "Every registered skill."
+      },
+      "SkillRegistrationLookupResponse": {
+        "properties": {
+          "registered": {
+            "type": "boolean",
+            "title": "Registered"
+          },
+          "resolved_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Sha"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "registered"
+        ],
+        "title": "SkillRegistrationLookupResponse",
+        "description": "Whether a (source_url, version, skill_name) triple is already registered.\n\nLets the CLI skip uploading a skill tree it has already stored. The sha is\nthe cache key: identical content always resolves to the same hash, so a hit\nhere means zero network work for the caller."
       },
       "SkillRegistrationResponse": {
         "properties": {
@@ -9996,6 +10219,85 @@
         ],
         "title": "SkillRegistrationResponse",
         "description": "Response payload for ``POST /skills/registrations``."
+      },
+      "SkillRegistrationSummary": {
+        "properties": {
+          "skill_name": {
+            "type": "string",
+            "title": "Skill Name"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "resolved_sha": {
+            "type": "string",
+            "title": "Resolved Sha",
+            "description": "Content-addressed sha of the normalized tree."
+          },
+          "resolved_sha_display": {
+            "type": "string",
+            "title": "Resolved Sha Display",
+            "description": "First 12 characters of resolved_sha, for display in narrow columns."
+          },
+          "tree_storage_prefix": {
+            "type": "string",
+            "title": "Tree Storage Prefix"
+          },
+          "registered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Registered At",
+            "description": "UTC; clients format for their locale."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "skill_name",
+          "source_url",
+          "version",
+          "resolved_sha",
+          "resolved_sha_display",
+          "tree_storage_prefix",
+          "registered_at"
+        ],
+        "title": "SkillRegistrationSummary",
+        "description": "One registered skill, as the lock projection holds it.\n\nCarries the full identity triple plus the content hash, because that is\nexactly what makes a ``SkillNotRegistered`` failure actionable: the caller\ncan see which of the three fields does not match what a workflow declared."
+      },
+      "SkillStorageStatsResponse": {
+        "properties": {
+          "object_count": {
+            "type": "integer",
+            "title": "Object Count",
+            "default": 0
+          },
+          "total_bytes": {
+            "type": "integer",
+            "title": "Total Bytes",
+            "default": 0
+          },
+          "skill_count": {
+            "type": "integer",
+            "title": "Skill Count",
+            "description": "Distinct skill trees, not files.",
+            "default": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "True if the backend returned a partial listing, so the counts are floors.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SkillStorageStatsResponse",
+        "description": "Size of the content-addressed skill store.\n\nSkill storage grows monotonically: registration is keyed by content hash\nand nothing removes old trees (skills-distribution spec D6, eviction is\ndeliberately not implemented). This endpoint exists so that decision stays\na measured one rather than an assumption."
       },
       "StateResponse": {
         "properties": {

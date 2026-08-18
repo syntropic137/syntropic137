@@ -11,6 +11,7 @@ Two layers of coverage:
 
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,12 @@ from syn_api.routes.workflows.commands import (
     create_workflow_from_yaml_endpoint,
 )
 from syn_api.types import Ok
+
+# WHY a module-level marker: CI runs only `pytest -m unit` and
+# `pytest -m integration`, so an unmarked test is collected locally and
+# never runs in CI. These use in-memory adapters and no external
+# services, so they are unit tests.
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Shared test-request builder (no TestClient needed — the endpoint reads
@@ -231,10 +238,36 @@ async def test_service_rejects_malformed_yaml() -> None:
 
 
 async def test_endpoint_rejects_wrong_content_type() -> None:
-    request = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/json")
+    request = _make_request(body=WITH_REPO_YAML.encode(), content_type="text/plain")
     with pytest.raises(HTTPException) as exc_info:
         await create_workflow_from_yaml_endpoint(request)
     assert exc_info.value.status_code == 415
+
+
+async def test_endpoint_accepts_a_json_body_because_json_is_a_yaml_subset() -> None:
+    """`syn workflow install` uploads the resolved definition as JSON.
+
+    The CLI parses each plugin's workflow.yaml, resolves prompt_file refs
+    against the package directory, and uploads the resulting document. It has
+    no YAML emitter (and hand-rolling one around arbitrary prompt bodies is
+    exactly where emitters go wrong), so it serializes with JSON.stringify.
+    Every JSON document is a valid YAML document, and the parser here is
+    yaml.safe_load, so this costs the endpoint nothing.
+    """
+    body = json.dumps(
+        {
+            "id": "json-body-test",
+            "name": "JSON Body",
+            "type": "research",
+            "phases": [{"id": "one", "name": "One", "order": 1, "prompt_template": "Do it."}],
+        }
+    ).encode()
+
+    request = _make_request(body=body, content_type="application/json")
+    response = await create_workflow_from_yaml_endpoint(request, workflow_id="json-body-test")
+
+    assert response.status == "created"
+    assert response.name == "JSON Body"
 
 
 async def test_endpoint_rejects_missing_content_type() -> None:

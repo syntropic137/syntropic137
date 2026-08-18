@@ -197,7 +197,12 @@ function loadWorkflowYamlFromPath(
 
   const repository = data["repository"] as Record<string, unknown> | undefined;
 
+  // The full document with resolved phases. Everything below this line is a
+  // lossy projection of it; this is what actually gets uploaded.
+  const definition: Record<string, unknown> = { ...data, phases: resolvedPhases };
+
   return {
+    definition,
     id: String(data["id"] ?? ""),
     name: String(data["name"] ?? ""),
     workflow_type: String(data["type"] ?? data["workflow_type"] ?? "custom"),
@@ -338,7 +343,16 @@ function resolveStandaloneYaml(
     const data = parseYaml(content) as Record<string, unknown>;
     const baseName = path.basename(f, path.extname(f));
 
+    // Resolve prompt_file against the package dir for the same reason the
+    // multi-workflow path does: the server has no base_dir and rejects an
+    // unresolved ref, and this document is uploaded verbatim.
+    const rawPhases = Array.isArray(data["phases"]) ? data["phases"] : [];
+    const resolvedPhases = rawPhases.map((phase) =>
+      resolvePhase(phase as Record<string, unknown>, pkgPath),
+    ) as Record<string, unknown>[];
+
     return {
+      definition: { ...data, phases: resolvedPhases },
       id: String(data["id"] ?? baseName),
       name: String(data["name"] ?? baseName),
       workflow_type: String(data["type"] ?? data["workflow_type"] ?? "custom"),
@@ -348,9 +362,7 @@ function resolveStandaloneYaml(
       description: data["description"] ? String(data["description"]) : null,
       project_name: data["project_name"] ? String(data["project_name"]) : null,
       requires_repos: inferRequiresRepos(data),
-      phases: Array.isArray(data["phases"])
-        ? (data["phases"] as Record<string, unknown>[])
-        : [],
+      phases: resolvedPhases,
       input_declarations: [],
       source_path: source,
     };

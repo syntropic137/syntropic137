@@ -1,0 +1,209 @@
+---
+title: Skills in Workflows
+description: Declare the skills a phase needs, bundled in your plugin or pinned to a repository, and have them registered and injected automatically.
+---
+
+A skill is a folder containing a `SKILL.md` file with YAML frontmatter, following
+the [vercel-labs/skills](https://github.com/vercel-labs/skills) convention. It is
+the unit of capability a workflow declares for the agent running a phase.
+
+Skills are harness-agnostic. The same declaration works whether a phase runs
+Claude or Codex, because the pinned `skills` CLI inside the workspace knows where
+each harness looks.
+
+## Two layers, and why it matters
+
+Capability in a Syntropic137 workspace comes from two places. Knowing which is
+which saves confusion later.
+
+| | Platform layer | Workflow layer |
+|---|---|---|
+| **What** | Hooks, commands, guardrails | Skills |
+| **Where it lives** | Baked into the workspace image at `/opt/agentic/plugins/` | Declared in your workflow YAML |
+| **Who owns it** | Us, as we build the platform | You, the workflow author |
+| **Changes when** | The image is rebuilt | You edit a workflow |
+| **Harness** | Claude-specific (`--plugin-dir`) | Any harness |
+
+The platform layer carries things skills cannot express. A hook fires on an
+event; a skill is instructions an agent reads. Observability capture and
+dangerous-command guardrails are hooks, so they ship with the image and version
+with the harness they steer. You do not declare them, and you cannot break them
+from a workflow.
+
+Everything on this page is the workflow layer.
+
+<Callout type="info">
+  If a capability ever needs to change without an image rebuild, that is a signal
+  it is not platform-level and belongs here as an ordinary workflow skill.
+</Callout>
+
+## Declaring skills
+
+`skills:` is accepted at workflow scope and at phase scope. Workflow scope
+applies to every phase; phase scope is additive on top of it.
+
+```yaml
+id: review-workflow
+name: Review Workflow
+type: review
+
+skills:
+  - ./skills/repo-conventions                  # bundled in this plugin
+  - anthropics/skills/frontend-design@v1.2.0   # pinned external ref
+
+phases:
+  - id: review
+    name: Review
+    order: 1
+    skills:
+      - acme/skills/tdd-workflow@v2.0.0        # only this phase
+```
+
+When the same skill is declared at both scopes, the phase-scope entry wins. There
+is no silent last-one-wins across different versions: two conflicting versions of
+the same skill name abort the run rather than picking one.
+
+## The three reference forms
+
+**Bundled** - a path inside your plugin, relative to its root:
+
+```yaml
+skills:
+  - ./skills/repo-conventions
+```
+
+**Shorthand** - `org/repo/skill-name@version`. The third segment names the skill
+folder inside the repository, which matters because a skills repo usually
+publishes several:
+
+```yaml
+skills:
+  - anthropics/skills/frontend-design@v1.2.0
+```
+
+**Verbose** - for full URLs, several skills from one source, or a version
+containing a slash:
+
+```yaml
+skills:
+  - source: github.com/acme/agent-skills
+    version: feature/new-review-flow
+    names: [code-review, tdd-workflow]
+```
+
+## Pinning is required
+
+`@latest` is rejected. This is not style enforcement.
+
+Registration is content-addressed: a skill is stored under the sha256 of its file
+tree, and that hash is the cache. A reference that resolves to an
+already-registered hash does no network work at all, which is what makes repeated
+installs fast. An unpinned reference cannot be cached honestly, because the same
+reference may mean different bytes tomorrow.
+
+So pinning is what makes the cache sound, not merely what makes runs reproducible.
+
+### How bundled skills get a version
+
+An external reference carries its own version. A bundled path does not, so the
+CLI pins it by the sha256 of its file tree and rewrites the reference before
+uploading.
+
+The practical consequence: **editing a bundled skill produces a new
+registration.** That is exactly true, and it is deliberate. A fixed label would
+mean an edited skill silently resolved to the previously stored copy, which is
+the failure this design exists to avoid.
+
+## Installing
+
+`syn workflow install` registers every declared skill before creating any
+workflow:
+
+```bash
+syn workflow install ./my-plugin
+```
+
+```
+Resolving 1 skill(s)...
+  registered skill repo-conventions@sha256-87701f89...
+  [1/1] Creating Skills Demo... done (id: skills-demo)
+```
+
+Run it again and the hash is already stored, so nothing uploads:
+
+```
+  skill repo-conventions@sha256-87701f89... already registered
+```
+
+A bad or unreachable reference fails the **install**, and no workflow is created.
+That is the point of doing this at install time: a typo surfaces before you have
+committed to a run, not in the middle of one.
+
+<Callout type="warn">
+  Installing a package whose workflow id already exists currently fails with a
+  concurrency error. See
+  [#822](https://github.com/syntropic137/syntropic137/issues/822). Skills are
+  unaffected: the preflight reports them as already registered first.
+</Callout>
+
+## Inspecting what is registered
+
+```bash
+syn skill list                  # everything registered
+syn skill show repo-conventions # every version of one name
+syn skill add ./path/to/skill   # register without a workflow install
+```
+
+`list` and `show` take `--json` for scripting and agent consumption.
+
+`show` returns every registration sharing a name, because a name is not unique:
+the same skill can be pinned at several versions, and two sources can publish the
+same name. Seeing all of them is how you tell which pin a workflow resolves to.
+
+## What happens at run time
+
+1. The phase's skills are resolved against the lock: workflow scope merged with
+   phase scope, keyed by `(source_url, version, skill_name)`.
+2. Each resolved tree is materialized into the workspace at
+   `/workspace/.syn-skills/<skill-name>/`.
+3. During setup, the pinned `skills` CLI installs each one for that phase's
+   harness, offline, from the local path.
+
+Step 3 is the one that matters. Files under `.syn-skills/` are staged, not
+installed. You can confirm the difference inside a running workspace:
+
+```bash
+docker exec <workspace> skills list --agent codex
+```
+
+```
+Project Skills
+
+repo-conventions  ./.agents/skills/repo-conventions  Agents: Codex
+```
+
+A phase that declares skills but cannot install them **fails** rather than
+running without them. Silently proceeding would produce a plausible-looking run
+against the wrong capabilities, which is worse than a clear failure.
+
+## Storage
+
+Skill storage is content-addressed and grows monotonically. Eviction is
+deliberately not implemented, so size is reported rather than assumed small:
+
+```bash
+curl "$SYN_API_URL/skills/storage"
+```
+
+```json
+{"object_count": 2, "total_bytes": 302, "skill_count": 1, "truncated": false}
+```
+
+`skill_count` counts distinct trees, not registrations, so two names over
+identical content correctly report as one stored tree.
+
+## Reference
+
+- [ADR-065](https://github.com/syntropic137/syntropic137/blob/main/docs/adrs/ADR-065-claude-plugin-injection.md) - the decision record and its rationale
+- [#772](https://github.com/syntropic137/syntropic137/issues/772) - the specification
+- [Claude Plugins](/docs/guide/claude-plugins) - the older, Claude-only workflow-declared mechanism that skills replace

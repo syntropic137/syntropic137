@@ -1656,3 +1656,82 @@ class SkillRegistrationResponse(BaseModel):
     version: str
     resolved_sha: str = Field(..., description="Content-addressed sha of the normalized tree.")
     tree_storage_prefix: str
+
+
+class SkillRegistrationLookupResponse(BaseModel):
+    """Whether a (source_url, version, skill_name) triple is already registered.
+
+    Lets the CLI skip uploading a skill tree it has already stored. The sha is
+    the cache key: identical content always resolves to the same hash, so a hit
+    here means zero network work for the caller.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    registered: bool
+    resolved_sha: str | None = None
+
+
+class SkillRegistrationSummary(BaseModel):
+    """One registered skill, as the lock projection holds it.
+
+    Carries the full identity triple plus the content hash, because that is
+    exactly what makes a ``SkillNotRegistered`` failure actionable: the caller
+    can see which of the three fields does not match what a workflow declared.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skill_name: str
+    source_url: str
+    version: str
+    resolved_sha: str = Field(..., description="Content-addressed sha of the normalized tree.")
+    resolved_sha_display: str = Field(
+        ...,
+        description="First 12 characters of resolved_sha, for display in narrow columns.",
+    )
+    tree_storage_prefix: str
+    registered_at: datetime = Field(..., description="UTC; clients format for their locale.")
+
+
+class SkillListResponse(BaseModel):
+    """Every registered skill."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skills: list[SkillRegistrationSummary] = Field(default_factory=list)
+    total: int = 0
+
+
+class SkillDetailResponse(BaseModel):
+    """Every registration sharing one skill name.
+
+    A name is not unique: the same skill can be pinned at several versions, and
+    two sources can publish the same name. All of them are returned so the
+    caller can tell which pin a workflow actually resolves to.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skill_name: str
+    registrations: list[SkillRegistrationSummary] = Field(default_factory=list)
+
+
+class SkillStorageStatsResponse(BaseModel):
+    """Size of the content-addressed skill store.
+
+    Skill storage grows monotonically: registration is keyed by content hash
+    and nothing removes old trees (skills-distribution spec D6, eviction is
+    deliberately not implemented). This endpoint exists so that decision stays
+    a measured one rather than an assumption.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    object_count: int = 0
+    total_bytes: int = 0
+    skill_count: int = Field(default=0, description="Distinct skill trees, not files.")
+    truncated: bool = Field(
+        default=False,
+        description="True if the backend returned a partial listing, so the counts are floors.",
+    )
