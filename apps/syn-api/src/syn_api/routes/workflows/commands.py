@@ -571,6 +571,14 @@ _ACCEPTED_YAML_CONTENT_TYPES = frozenset(
         "application/x-yaml",
         "text/yaml",
         "text/x-yaml",
+        # WHY json: every JSON document is a valid YAML document, and the
+        # parser below is yaml.safe_load either way. `syn workflow install`
+        # uploads a RESOLVED definition (prompt_file refs already inlined
+        # against the package directory), which it must serialize itself; it
+        # has no YAML emitter, and hand-rolling one around arbitrary prompt
+        # bodies is where emitters get subtly wrong. Accepting JSON costs this
+        # endpoint nothing and keeps the CLI dependency-free.
+        "application/json",
     }
 )
 _MAX_YAML_BYTES = 1 * 1024 * 1024  # 1 MiB; workflow definitions are small

@@ -60,4 +60,14 @@ export interface ResolvedWorkflow {
   requires_repos: boolean;
   input_declarations: Record<string, unknown>[];
   source_path: string;
+  /**
+   * The whole workflow document, with `prompt_file:` refs already resolved.
+   *
+   * WHY this exists alongside the named fields above: install uploads this to
+   * `/workflows/from-yaml`, where the server owns every YAML semantic. The
+   * named fields are a lossy projection kept for local preview and the
+   * install registry - anything the projection does not name (skills,
+   * claude_plugins, and whatever is added next) survives only here.
+   */
+  definition: Record<string, unknown>;
 }

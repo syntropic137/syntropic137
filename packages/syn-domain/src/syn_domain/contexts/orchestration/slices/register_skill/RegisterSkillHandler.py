@@ -39,6 +39,7 @@ from syn_domain.contexts.orchestration._shared.skill_errors import (
     SkillInvalidPath,
     SkillManifestInvalid,
     SkillManifestMissing,
+    SkillVersionHashMismatch,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_skill_registration.SkillRegistrationAggregate import (
     SkillRegistrationAggregate,
@@ -119,12 +120,22 @@ class RegisterSkillHandler:
             source_url, version, effective_name
         )
 
+        sha = _compute_tree_sha(files)
+
+        # WHY before the idempotency short-circuit: a ``sha256-<hash>`` version
+        # is a content commitment, not just a label. Nothing else enforces it,
+        # so without this check a caller could register arbitrary content under
+        # a version naming someone else's tree hash, and every later install
+        # resolving that triple would silently receive the substituted content.
+        # Bundled skills are pinned exactly this way, so this is the guarantee
+        # their identity rests on.
+        _reject_hash_version_mismatch(version, sha, source_url)
+
         # Fast path: the aggregate already exists. Idempotent re-register.
         existing = await self._repo.get_by_id(stream_id)
         if existing is not None:
             return _result_from_aggregate(existing)
 
-        sha = _compute_tree_sha(files)
         tree_prefix = await self._ensure_tree_uploaded(sha, files)
 
         command = RegisterSkillCommand(
@@ -245,6 +256,18 @@ def _resolve_effective_name(
     frontmatter_name = _name_from_frontmatter(frontmatter)
     default_name = explicit_name if explicit_name else frontmatter_name
     return default_name or _basename_from_url(source_url)
+
+
+_HASH_VERSION_PREFIX = "sha256-"
+
+
+def _reject_hash_version_mismatch(version: str, actual_sha: str, source_url: str) -> None:
+    """Enforce that a ``sha256-<hash>`` version names the content it carries."""
+    if not version.startswith(_HASH_VERSION_PREFIX):
+        return
+    declared = version[len(_HASH_VERSION_PREFIX) :]
+    if declared != actual_sha:
+        raise SkillVersionHashMismatch(source_url, version, actual_sha)
 
 
 def _compute_tree_sha(files: list[SkillFile]) -> str:

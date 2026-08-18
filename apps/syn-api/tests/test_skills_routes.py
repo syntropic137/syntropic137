@@ -20,8 +20,18 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from syn_api._wiring import reset_skill_singletons
-from syn_api.routes.skills import register_skill_endpoint
+from syn_api.routes.skills import (
+    get_skill_storage_stats,
+    lookup_skill_registration,
+    register_skill_endpoint,
+)
 from syn_api.types import RegisterSkillRequest, SkillFilePayload
+
+# WHY a module-level marker: CI runs only `pytest -m unit` and
+# `pytest -m integration`, so an unmarked test is collected locally and
+# never runs in CI. These use in-memory adapters and no external
+# services, so they are unit tests.
+pytestmark = pytest.mark.unit
 
 
 def _b64(content: bytes) -> str:
@@ -88,6 +98,105 @@ async def test_post_registrations_persists_lock_entry() -> None:
     assert response.version == "1.0.0"
     assert response.resolved_sha
     assert response.tree_storage_prefix
+
+
+@pytest.mark.asyncio
+async def test_get_registrations_reports_a_registered_skill_with_its_sha() -> None:
+    """A hit returns the sha, which is what lets a caller skip the upload."""
+    registered = await register_skill_endpoint(
+        RegisterSkillRequest(
+            source_url="https://github.com/example/lookup",
+            version="1.0.0",
+            skill_name="lookup",
+            files=_skill_files("lookup"),
+        )
+    )
+
+    found = await lookup_skill_registration(
+        source_url="https://github.com/example/lookup",
+        version="1.0.0",
+        skill_name="lookup",
+    )
+
+    assert found.registered is True
+    assert found.resolved_sha == registered.resolved_sha
+
+
+@pytest.mark.asyncio
+async def test_get_registrations_reports_an_unknown_triple_as_unregistered() -> None:
+    found = await lookup_skill_registration(
+        source_url="https://github.com/example/never-seen",
+        version="9.9.9",
+        skill_name="never-seen",
+    )
+
+    assert found.registered is False
+    assert found.resolved_sha is None
+
+
+@pytest.mark.asyncio
+async def test_get_registrations_is_version_specific() -> None:
+    """A different pin is a different identity: the cache must not answer for it."""
+    await register_skill_endpoint(
+        RegisterSkillRequest(
+            source_url="https://github.com/example/pinned",
+            version="1.0.0",
+            skill_name="pinned",
+            files=_skill_files("pinned"),
+        )
+    )
+
+    found = await lookup_skill_registration(
+        source_url="https://github.com/example/pinned",
+        version="2.0.0",
+        skill_name="pinned",
+    )
+
+    assert found.registered is False
+
+
+@pytest.mark.asyncio
+async def test_storage_stats_are_zero_before_anything_is_registered() -> None:
+    stats = await get_skill_storage_stats()
+
+    assert (stats.object_count, stats.total_bytes, stats.skill_count) == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_storage_stats_grow_when_a_skill_is_registered() -> None:
+    """Registering must move the numbers; a model-only test cannot show this."""
+    before = await get_skill_storage_stats()
+
+    await register_skill_endpoint(
+        RegisterSkillRequest(
+            source_url="https://github.com/example/sized",
+            version="1.0.0",
+            skill_name="sized",
+            files=_skill_files("sized"),
+        )
+    )
+
+    after = await get_skill_storage_stats()
+    assert after.skill_count == before.skill_count + 1
+    assert after.object_count > before.object_count
+    assert after.total_bytes > before.total_bytes
+
+
+@pytest.mark.asyncio
+async def test_storage_stats_count_trees_not_registrations() -> None:
+    """Two names over identical content share one tree: the store is content-addressed."""
+    for name in ("alias-one", "alias-two"):
+        await register_skill_endpoint(
+            RegisterSkillRequest(
+                source_url="https://github.com/example/shared",
+                version="1.0.0",
+                skill_name=name,
+                files=_skill_files("shared"),
+            )
+        )
+
+    stats = await get_skill_storage_stats()
+    assert stats.skill_count == 1
 
 
 @pytest.mark.asyncio
@@ -233,3 +342,52 @@ async def test_post_registrations_rejects_too_many_files(
     with pytest.raises(HTTPException) as exc_info:
         await register_skill_endpoint(body)
     assert exc_info.value.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_a_hash_version_must_match_the_submitted_content() -> None:
+    """A sha256-<hash> version is a content commitment, not a label.
+
+    Bundled skills are pinned this way, so their identity rests on this
+    holding. Without it, a caller could register arbitrary content under a
+    version naming another tree's hash, and every later install resolving that
+    triple would receive the substituted content.
+    """
+    body = RegisterSkillRequest(
+        source_url="./skills/victim",
+        version="sha256-" + "0" * 64,
+        skill_name="victim",
+        files=_skill_files("victim"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await register_skill_endpoint(body)
+
+    assert exc_info.value.status_code == 422
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    assert detail["error_code"] == "skill_version_hash_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_a_matching_hash_version_registers_normally() -> None:
+    import hashlib
+
+    files = _skill_files("honest")
+    hasher = hashlib.sha256()
+    for payload in sorted(files, key=lambda f: f.rel_path):
+        hasher.update(payload.rel_path.encode("utf-8"))
+        hasher.update(b"\x00")
+        hasher.update(base64.b64decode(payload.content_base64))
+        hasher.update(b"\x00")
+
+    response = await register_skill_endpoint(
+        RegisterSkillRequest(
+            source_url="./skills/honest",
+            version=f"sha256-{hasher.hexdigest()}",
+            skill_name="honest",
+            files=files,
+        )
+    )
+
+    assert response.resolved_sha == hasher.hexdigest()

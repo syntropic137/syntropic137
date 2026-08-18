@@ -5,6 +5,7 @@ from __future__ import annotations
 from syn_adapters.in_memory import InMemoryAdapter
 from syn_domain.contexts.orchestration.ports.SkillStoragePort import (
     SkillFile,
+    SkillStorageStats,
     StoredSkillTree,
 )
 
@@ -54,6 +55,14 @@ class InMemorySkillStorage(InMemoryAdapter):
     def prefix_for(self, sha256: str) -> str:
         """Return the in-memory pseudo-prefix matching ``upload_tree`` (issue #772)."""
         return f"memory://skills/sha256-{sha256}"
+
+    async def stats(self) -> SkillStorageStats:
+        """Count stored trees and their bytes (issue #772, spec D6)."""
+        return SkillStorageStats(
+            object_count=sum(len(files) for files in self._trees.values()),
+            total_bytes=sum(len(f.content) for files in self._trees.values() for f in files),
+            skill_count=len(self._trees),
+        )
 
     async def ensure_ready(self) -> None:
         return None

@@ -229,6 +229,13 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "GlobalClaudePluginRemoved": [
         ("global_claude_plugins", "on_global_claude_plugin_removed"),
     ],
+    # Skill injection (issue #772). Without this entry the skill_lock read
+    # model is never updated on the synchronous path, so a skill registers
+    # into the event store and then reads back as unregistered - which breaks
+    # both the install-time cache check and run-time resolution.
+    "SkillRegistered": [
+        ("skill_lock", "on_skill_registered"),
+    ],
 }
 
 

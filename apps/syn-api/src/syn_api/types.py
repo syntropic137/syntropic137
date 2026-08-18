@@ -1656,3 +1656,37 @@ class SkillRegistrationResponse(BaseModel):
     version: str
     resolved_sha: str = Field(..., description="Content-addressed sha of the normalized tree.")
     tree_storage_prefix: str
+
+
+class SkillRegistrationLookupResponse(BaseModel):
+    """Whether a (source_url, version, skill_name) triple is already registered.
+
+    Lets the CLI skip uploading a skill tree it has already stored. The sha is
+    the cache key: identical content always resolves to the same hash, so a hit
+    here means zero network work for the caller.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    registered: bool
+    resolved_sha: str | None = None
+
+
+class SkillStorageStatsResponse(BaseModel):
+    """Size of the content-addressed skill store.
+
+    Skill storage grows monotonically: registration is keyed by content hash
+    and nothing removes old trees (skills-distribution spec D6, eviction is
+    deliberately not implemented). This endpoint exists so that decision stays
+    a measured one rather than an assumption.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    object_count: int = 0
+    total_bytes: int = 0
+    skill_count: int = Field(default=0, description="Distinct skill trees, not files.")
+    truncated: bool = Field(
+        default=False,
+        description="True if the backend returned a partial listing, so the counts are floors.",
+    )
