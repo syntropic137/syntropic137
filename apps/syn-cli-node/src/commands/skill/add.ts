@@ -21,7 +21,11 @@ import {
   pinBundledRef,
   type ExternalSkillRef,
 } from "../../packages/skill-ref.js";
-import { readSkillTree, type SkillFilePayload } from "../../packages/skill-tree.js";
+import {
+  readSkillTree,
+  skillDirInClone,
+  type SkillFilePayload,
+} from "../../packages/skill-tree.js";
 
 export const addCommand: CommandDef = {
   name: "add",
@@ -108,25 +112,6 @@ function isLocalDir(raw: string): boolean {
   }
 }
 
-function skillDirInClone(cloneDir: string, skillName: string): string {
-  const candidates = [
-    path.join(cloneDir, skillName),
-    path.join(cloneDir, "skills", skillName),
-    cloneDir,
-  ];
-  for (const candidate of candidates) {
-    try {
-      readSkillTree(candidate);
-      return candidate;
-    } catch {
-      continue;
-    }
-  }
-  throw new CLIError(
-    `cloned source has no skill '${skillName}' (looked for a SKILL.md in ` +
-      `${skillName}/, skills/${skillName}/, and the repository root)`,
-  );
-}
 
 async function isRegistered(ref: ExternalSkillRef): Promise<boolean> {
   const data = unwrap(

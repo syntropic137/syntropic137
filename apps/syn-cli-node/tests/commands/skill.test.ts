@@ -150,4 +150,20 @@ describe("syn skill add", () => {
   it("requires a ref", async () => {
     await expect(addCommand.handler({ positionals: [], values: {} })).rejects.toThrow(CLIError);
   });
+
+  it("skips the upload entirely when the content hash is already registered", async () => {
+    fs.writeFileSync(
+      path.join(dir, "SKILL.md"),
+      "---\nname: local-skill\ndescription: Use locally.\n---\n\nBody.\n",
+    );
+    mockFetch.mockResolvedValue(jsonResponse({ registered: true, resolved_sha: "abc123" }));
+
+    await addCommand.handler({ positionals: [dir], values: {} });
+
+    // One lookup, no POST: the content hash is the cache.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(stdout()).toMatch(/already registered/i);
+  });
+
 });
+
