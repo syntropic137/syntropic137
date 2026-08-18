@@ -2043,14 +2043,14 @@
         }
       }
     },
-    "/skills/{skill_name}": {
+    "/skills/by-name/{skill_name}": {
       "get": {
         "tags": [
           "skills"
         ],
         "summary": "Get Skill Detail",
         "description": "Every registration sharing a skill name (issue #826).\n\nA name is not unique - the same skill can be pinned at several versions,\nand two sources can publish the same name - so all matches are returned\nrather than an arbitrary one.",
-        "operationId": "get_skill_detail_skills__skill_name__get",
+        "operationId": "get_skill_detail_skills_by_name__skill_name__get",
         "parameters": [
           {
             "name": "skill_name",

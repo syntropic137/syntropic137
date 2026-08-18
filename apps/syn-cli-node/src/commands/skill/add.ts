@@ -44,13 +44,18 @@ export const addCommand: CommandDef = {
       throw new CLIError("Missing argument", 1);
     }
 
-    const { ref, files } = await resolveRef(raw);
+    // Identity BEFORE content, so a remote skill that is already registered
+    // costs one lookup and no clone. A bundled ref is the exception: its
+    // version IS its tree hash, so its files must be read to know what it is.
+    const identity = await resolveIdentity(raw);
 
-    const registered = await isRegistered(ref);
-    if (registered) {
-      printDim(`  skill ${ref.skillName}@${ref.version} already registered`);
+    if (await isRegistered(identity.ref)) {
+      printDim(`  skill ${identity.ref.skillName}@${identity.ref.version} already registered`);
       return;
     }
+
+    const ref = identity.ref;
+    const files = identity.files ?? (await fetchRemoteTree(ref));
 
     const result = unwrap(
       await api.POST("/skills/registrations", {
@@ -70,19 +75,33 @@ export const addCommand: CommandDef = {
 };
 
 /**
- * Turn a CLI argument into a pinned ref plus its file tree.
+ * Determine a skill's identity from a CLI argument.
  *
- * A local directory is treated as a bundled skill: it has no version of its
- * own, so it is pinned by the sha256 of its tree, exactly as a plugin-bundled
- * skill is during `syn workflow install`.
+ * A local directory is a bundled skill: it has no version of its own, so it is
+ * pinned by the sha256 of its tree, exactly as `syn workflow install` pins one.
+ * That requires reading the files, so they come back too. A remote ref carries
+ * its own version, so its identity is known without any network work.
  */
-async function resolveRef(
+async function resolveIdentity(
   raw: string,
-): Promise<{ ref: ExternalSkillRef; files: SkillFilePayload[] }> {
+): Promise<{ ref: ExternalSkillRef; files?: SkillFilePayload[] }> {
   if (isLocalDir(raw)) {
-    const dir = path.resolve(raw);
-    const files = readSkillTree(dir);
-    const parsed = parseSkillEntry(`./${path.basename(dir)}`)[0]!;
+    // WHY the reference is used verbatim rather than reduced to a basename:
+    // the bundled source_url IS part of the identity triple that run-time
+    // resolution looks up, and a workflow declaring `./skills/foo` pins
+    // exactly that string. Registering `./foo` instead would store an identity
+    // no workflow can ever resolve, which makes this command worse than
+    // useless - it reports success and the run still fails.
+    if (!raw.startsWith("./") && !raw.startsWith("../")) {
+      throw new CLIError(
+        `local skill path must be relative, as a workflow would declare it: ${raw}\n` +
+          "  A workflow pins the path it declares (for example './skills/foo'), and that\n" +
+          "  exact string is part of the skill's identity. An absolute path cannot be\n" +
+          "  matched to a workflow declaration, so registering one would be unusable.",
+      );
+    }
+    const files = readSkillTree(path.resolve(raw));
+    const parsed = parseSkillEntry(raw)[0]!;
     if (parsed.kind !== "bundled") {
       throw new CLIError(`expected a bundled ref for a local path: ${raw}`);
     }
@@ -93,12 +112,23 @@ async function resolveRef(
   if (parsed.kind === "bundled") {
     throw new CLIError(`no such directory: ${raw}`);
   }
+  return { ref: parsed };
+}
 
+/** Clone a pinned remote ref and read the skill tree out of it. */
+async function fetchRemoteTree(parsed: ExternalSkillRef): Promise<SkillFilePayload[]> {
   const tmpdir = makeTempDir("syn-skill-");
   try {
     print(`Cloning ${style(parsed.sourceUrl, CYAN)}@${parsed.version}...`);
     await gitClone(parsed.sourceUrl, parsed.version, tmpdir);
-    return { ref: parsed, files: readSkillTree(skillDirInClone(tmpdir, parsed.skillName)) };
+    try {
+      return readSkillTree(skillDirInClone(tmpdir, parsed.skillName));
+    } catch (err) {
+      // The shared locator throws a plain Error; without this the CLI reports
+      // "Unexpected error" and exit code 2 for what is an ordinary, actionable
+      // user mistake (wrong skill name for that repo).
+      throw new CLIError(err instanceof Error ? err.message : String(err));
+    }
   } finally {
     removeTempDir(tmpdir);
   }

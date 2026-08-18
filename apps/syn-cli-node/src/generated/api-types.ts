@@ -710,7 +710,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/skills/{skill_name}": {
+    "/skills/by-name/{skill_name}": {
         parameters: {
             query?: never;
             header?: never;
@@ -725,7 +725,7 @@ export interface paths {
          *     and two sources can publish the same name - so all matches are returned
          *     rather than an arbitrary one.
          */
-        get: operations["get_skill_detail_skills__skill_name__get"];
+        get: operations["get_skill_detail_skills_by_name__skill_name__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6521,7 +6521,7 @@ export interface operations {
             };
         };
     };
-    get_skill_detail_skills__skill_name__get: {
+    get_skill_detail_skills_by_name__skill_name__get: {
         parameters: {
             query?: never;
             header?: never;

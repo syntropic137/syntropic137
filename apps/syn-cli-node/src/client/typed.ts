@@ -30,8 +30,24 @@ export function createTypedClient() {
 export const api = createTypedClient();
 
 /** Extract data from a typed API response, throwing CLIError on failure.
- *  Handles 204 No Content (data=undefined, error=undefined) gracefully. */
-export function unwrap<T>(result: { data?: T; error?: unknown }, context: string): T {
+ *
+ *  Handles 204 No Content (data=undefined, error=undefined) gracefully.
+ *
+ *  WHY `response.ok` is checked and not just `error`: openapi-fetch represents
+ *  an EMPTY error body as `{error: undefined}`, so a 500 with no body used to
+ *  slip through here and be returned as data. Callers then printed success and
+ *  crashed later reading a field off undefined, reporting an unrelated
+ *  TypeError instead of the actual server failure.
+ */
+export function unwrap<T>(
+  result: { data?: T; error?: unknown; response?: Response },
+  context: string,
+): T {
+  if (result.response && !result.response.ok && !result.error) {
+    throw new CLIError(
+      `${context}: request failed with ${result.response.status} ${result.response.statusText}`.trim(),
+    );
+  }
   if (result.error) {
     const detail = typeof result.error === "object" && result.error !== null && "detail" in result.error
       ? String((result.error as { detail: unknown }).detail)
