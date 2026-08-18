@@ -116,10 +116,38 @@ describe("installWorkflowsViaApi", () => {
   it("reports a failed workflow instead of claiming it installed", async () => {
     mockFetch.mockResolvedValue(new Response("boom", { status: 400 }));
 
-    const installed = await installWorkflowsViaApi([
-      workflow({ id: "demo", name: "Demo", phases: [] }),
-    ]);
+    await expect(
+      installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })]),
+    ).rejects.toThrow(/No workflows were installed/);
+  });
+});
 
-    expect(installed).toEqual([]);
+describe("installWorkflowsViaApi partial failure", () => {
+  it("fails loudly instead of reporting a half-installed package as success", async () => {
+    // Previously the error was swallowed, the second workflow silently never
+    // existed, and the command still printed "Installed 1 workflow(s)".
+    mockFetch
+      .mockResolvedValueOnce(created())
+      .mockResolvedValueOnce(new Response("bad yaml", { status: 400 }));
+
+    await expect(
+      installWorkflowsViaApi([
+        workflow({ id: "one", name: "One", phases: [] }),
+        workflow({ id: "two", name: "Two", phases: [] }),
+      ]),
+    ).rejects.toThrow(/Failed to create workflow/);
+  });
+
+  it("names the workflows that were already created, since install is not transactional", async () => {
+    mockFetch
+      .mockResolvedValueOnce(created())
+      .mockResolvedValueOnce(new Response("bad", { status: 400 }));
+
+    await expect(
+      installWorkflowsViaApi([
+        workflow({ id: "one", name: "One", phases: [] }),
+        workflow({ id: "two", name: "Two", phases: [] }),
+      ]),
+    ).rejects.toThrow(/remain installed/);
   });
 });

@@ -131,6 +131,21 @@ export async function installWorkflowsViaApi(
     } catch (err) {
       print(style("failed", "\x1b[31m"));
       if (err instanceof Error) printError(err.message);
+      // WHY rethrow rather than collect and continue: swallowing this left the
+      // package half-installed while the command still printed
+      // "Installed N workflow(s)" and recorded the install, so a user had no
+      // signal that a workflow they asked for is missing. The workflows
+      // created before this point still exist - install is not transactional
+      // server-side - so the message says so rather than implying a clean
+      // rollback.
+      throw new CLIError(
+        `Failed to create workflow '${wf.name}' (${i + 1} of ${workflows.length}).\n` +
+          (installed.length > 0
+            ? `  ${installed.length} workflow(s) were already created and remain installed: ` +
+              `${installed.map((w) => w.name).join(", ")}.\n` +
+              "  Fix the error and re-run to finish, or remove them with `syn workflow delete`."
+            : "  No workflows were installed."),
+      );
     }
   }
   return installed;
