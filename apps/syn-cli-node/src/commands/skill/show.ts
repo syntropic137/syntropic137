@@ -32,7 +32,7 @@ export const showCommand: CommandDef = {
     }
 
     const data = unwrap<SkillDetail>(
-      await api.GET("/skills/{skill_name}", { params: { path: { skill_name: name } } }),
+      await api.GET("/skills/by-name/{skill_name}", { params: { path: { skill_name: name } } }),
       `Show skill ${name}`,
     );
 

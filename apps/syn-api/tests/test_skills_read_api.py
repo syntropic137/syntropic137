@@ -26,7 +26,6 @@ from fastapi import HTTPException
 from syn_api._wiring import reset_skill_singletons
 from syn_api.routes.skills import (
     get_skill_detail,
-    get_skill_storage_stats,
     list_skills,
     register_skill_endpoint,
 )
@@ -141,13 +140,54 @@ async def test_detail_for_an_unknown_name_is_404_not_an_empty_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_storage_route_is_not_shadowed_by_the_detail_route() -> None:
-    """`/skills/storage` must not be captured by `/skills/{skill_name}`.
+async def test_a_skill_named_storage_is_still_reachable() -> None:
+    """Detail lives under /by-name/ so literal route names stay usable.
 
-    FastAPI matches routes in declaration order, so a `{skill_name}` route
-    declared before the literal ones would swallow them and return a 404 for a
-    skill named "storage" instead of the stats.
+    A bare `/skills/{skill_name}` would reserve every literal sibling route:
+    ordering the literals first stops them being shadowed, but then a skill
+    legitimately called "storage" or "registrations" could never be fetched.
+    The domain allows both names.
     """
-    stats = await get_skill_storage_stats()
+    await _register("storage")
+    await _register("registrations")
 
-    assert stats.object_count == 0
+    for reserved in ("storage", "registrations"):
+        detail = await get_skill_detail(reserved)
+        assert detail.skill_name == reserved
+        assert len(detail.registrations) == 1
+
+
+@pytest.mark.asyncio
+async def test_routing_reaches_the_right_handler_for_reserved_names() -> None:
+    """Exercise real FastAPI routing, not the handler functions directly.
+
+    Calling the handlers in-process proves nothing about path matching: it
+    passes regardless of declaration order or path shape. This mounts the
+    router and drives it over HTTP, which is the only way the previous
+    "not shadowed" assertion could have meant anything.
+    """
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from syn_api.routes.skills import router
+
+    await _register("storage")
+
+    app = FastAPI()
+    app.include_router(router)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        detail = await client.get("/skills/by-name/storage")
+        stats = await client.get("/skills/storage")
+        listing = await client.get("/skills")
+
+    assert detail.status_code == 200
+    assert detail.json()["skill_name"] == "storage"
+
+    # The literal route still resolves to the stats handler, not to a skill.
+    assert stats.status_code == 200
+    assert "object_count" in stats.json()
+
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 1

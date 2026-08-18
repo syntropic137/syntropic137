@@ -111,13 +111,90 @@ describe("syn skill show", () => {
 });
 
 describe("syn skill add", () => {
+  let plugin: string;
   let dir: string;
+  let cwd: string;
 
   beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "skilladd-"));
+    // Run from inside a plugin, the way a real invocation does: bundled refs
+    // are relative to the plugin root and must stay within it.
+    plugin = fs.mkdtempSync(path.join(os.tmpdir(), "skilladd-"));
+    dir = path.join(plugin, "skills", "local-skill");
+    fs.mkdirSync(dir, { recursive: true });
+    cwd = process.cwd();
+    process.chdir(plugin);
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    process.chdir(cwd);
+    fs.rmSync(plugin, { recursive: true, force: true });
+  });
+
+  it("registers under the SAME identity a workflow declaring that path would", async () => {
+    // THE point of this command. The bundled source_url is part of the identity
+    // triple run-time resolution looks up, and a workflow declaring
+    // `./skills/foo` pins exactly that string. Registering `./foo` instead
+    // would store an identity no workflow can resolve: the command would report
+    // success and the run would still fail with SkillNotRegistered.
+    const plugin = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-"));
+    const skillDir = path.join(plugin, "skills", "repo-conventions");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: repo-conventions\ndescription: Use here.\n---\n\nBody.\n",
+    );
+
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ registered: false }))
+      .mockResolvedValueOnce(jsonResponse({ skill_name: "repo-conventions", resolved_sha: "x" }, 201));
+
+    const cwd = process.cwd();
+    try {
+      process.chdir(plugin);
+      await addCommand.handler({ positionals: ["./skills/repo-conventions"], values: {} });
+    } finally {
+      process.chdir(cwd);
+    }
+
+    const body = JSON.parse(await (mockFetch.mock.calls[1]![0] as Request).text());
+
+    // Exactly what pinBundledRefsInDefinition writes into the uploaded workflow.
+    const { readSkillTree } = await import("../../src/packages/skill-tree.js");
+    const { hashSkillTree } = await import("../../src/packages/skill-ref.js");
+    const expectedVersion = `sha256-${hashSkillTree(readSkillTree(skillDir))}`;
+
+    expect(body.source_url).toBe("./skills/repo-conventions");
+    expect(body.skill_name).toBe("repo-conventions");
+    expect(body.version).toBe(expectedVersion);
+
+    fs.rmSync(plugin, { recursive: true, force: true });
+  });
+
+  it("refuses an absolute path, which cannot be matched to a workflow declaration", async () => {
+    fs.writeFileSync(
+      path.join(dir, "SKILL.md"),
+      "---\nname: local-skill\ndescription: Use locally.\n---\n\nBody.\n",
+    );
+
+    await expect(addCommand.handler({ positionals: [dir], values: {} })).rejects.toThrow(
+      /must be relative/i,
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("reports an empty-body server error instead of printing success", async () => {
+    // openapi-fetch represents an empty error body as {error: undefined}, so an
+    // empty 500 used to pass through unwrap as data: the command printed
+    // "Registered" and then crashed on an unrelated TypeError.
+    fs.writeFileSync(
+      path.join(dir, "SKILL.md"),
+      "---\nname: local-skill\ndescription: Use locally.\n---\n\nBody.\n",
+    );
+    mockFetch.mockResolvedValue(new Response(null, { status: 500 }));
+
+    await expect(
+      addCommand.handler({ positionals: ["./skills/local-skill"], values: {} }),
+    ).rejects.toThrow(/500/);
+    expect(stdout()).not.toMatch(/Registered/);
   });
 
   it("registers a local skill directory, pinned by its content hash", async () => {
@@ -133,7 +210,10 @@ describe("syn skill add", () => {
       jsonResponse({ skill_name: "local-skill", resolved_sha: "deadbeef" }, 201),
     );
 
-    await addCommand.handler({ positionals: [dir], values: {} });
+    await addCommand.handler({
+      positionals: ["./skills/local-skill"],
+      values: {},
+    });
 
     const postArg = mockFetch.mock.calls[1]![0];
     const url = postArg instanceof Request ? postArg.url : String(postArg);
@@ -158,7 +238,10 @@ describe("syn skill add", () => {
     );
     mockFetch.mockResolvedValue(jsonResponse({ registered: true, resolved_sha: "abc123" }));
 
-    await addCommand.handler({ positionals: [dir], values: {} });
+    await addCommand.handler({
+      positionals: ["./skills/local-skill"],
+      values: {},
+    });
 
     // One lookup, no POST: the content hash is the cache.
     expect(mockFetch).toHaveBeenCalledTimes(1);

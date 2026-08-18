@@ -630,6 +630,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Skills
+         * @description List every registered skill (issue #826).
+         *
+         *     Reads the ``skill_lock`` projection, the same read model run-time
+         *     resolution uses, so what this reports is what a run would resolve.
+         */
+        get: operations["list_skills_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/skills/storage": {
         parameters: {
             query?: never;
@@ -681,6 +704,30 @@ export interface paths {
          *     re-submission of the same ``(source_url, version, skill_name)``.
          */
         post: operations["register_skill_endpoint_skills_registrations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/by-name/{skill_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Detail
+         * @description Every registration sharing a skill name (issue #826).
+         *
+         *     A name is not unique - the same skill can be pinned at several versions,
+         *     and two sources can publish the same name - so all matches are returned
+         *     rather than an arbitrary one.
+         */
+        get: operations["get_skill_detail_skills_by_name__skill_name__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4146,6 +4193,20 @@ export interface components {
             cache_read_tokens: number;
         };
         /**
+         * SkillDetailResponse
+         * @description Every registration sharing one skill name.
+         *
+         *     A name is not unique: the same skill can be pinned at several versions, and
+         *     two sources can publish the same name. All of them are returned so the
+         *     caller can tell which pin a workflow actually resolves to.
+         */
+        SkillDetailResponse: {
+            /** Skill Name */
+            skill_name: string;
+            /** Registrations */
+            registrations?: components["schemas"]["SkillRegistrationSummary"][];
+        };
+        /**
          * SkillFilePayload
          * @description One file in the uploaded skill tree (``POST /skills/registrations``).
          *
@@ -4158,6 +4219,19 @@ export interface components {
             rel_path: string;
             /** Content Base64 */
             content_base64: string;
+        };
+        /**
+         * SkillListResponse
+         * @description Every registered skill.
+         */
+        SkillListResponse: {
+            /** Skills */
+            skills?: components["schemas"]["SkillRegistrationSummary"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
         };
         /**
          * SkillRegistrationLookupResponse
@@ -4191,6 +4265,40 @@ export interface components {
             resolved_sha: string;
             /** Tree Storage Prefix */
             tree_storage_prefix: string;
+        };
+        /**
+         * SkillRegistrationSummary
+         * @description One registered skill, as the lock projection holds it.
+         *
+         *     Carries the full identity triple plus the content hash, because that is
+         *     exactly what makes a ``SkillNotRegistered`` failure actionable: the caller
+         *     can see which of the three fields does not match what a workflow declared.
+         */
+        SkillRegistrationSummary: {
+            /** Skill Name */
+            skill_name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Resolved Sha
+             * @description Content-addressed sha of the normalized tree.
+             */
+            resolved_sha: string;
+            /**
+             * Resolved Sha Display
+             * @description First 12 characters of resolved_sha, for display in narrow columns.
+             */
+            resolved_sha_display: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+            /**
+             * Registered At
+             * Format: date-time
+             * @description UTC; clients format for their locale.
+             */
+            registered_at: string;
         };
         /**
          * SkillStorageStatsResponse
@@ -6292,6 +6400,26 @@ export interface operations {
             };
         };
     };
+    list_skills_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillListResponse"];
+                };
+            };
+        };
+    };
     get_skill_storage_stats_skills_storage_get: {
         parameters: {
             query?: never;
@@ -6390,6 +6518,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_skill_detail_skills_by_name__skill_name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetailResponse"];
+                };
+            };
+            /** @description No skill registered under that name */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

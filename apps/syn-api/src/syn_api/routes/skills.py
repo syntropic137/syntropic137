@@ -12,10 +12,11 @@ Endpoints under ``/skills``:
                                     can skip uploading a tree that is stored.
 - ``GET /skills/storage``        - size of the content-addressed skill store.
 - ``GET /skills``                - list every registered skill.
-- ``GET /skills/{skill_name}``   - every registration sharing that name.
+- ``GET /skills/by-name/{name}`` - every registration sharing that name.
 
-Route order matters: ``/{skill_name}`` is declared last so it cannot shadow
-the literal paths above it.
+Detail lives under ``/by-name/`` so that a skill named "storage" or
+"registrations" is still reachable; a bare ``/{skill_name}`` would reserve
+those names permanently.
 
 Mirrors ``routes/claude_plugins.py``. Typed ``SkillError`` subclasses raised
 by the handler map to HTTP 422 via ``skill_error_mapping`` so callers see
@@ -218,11 +219,14 @@ def _summary_from_entry(entry: SkillLockEntry) -> SkillRegistrationSummary:
     )
 
 
-# WHY this route is declared LAST: FastAPI matches in declaration order, so a
-# path parameter registered before "/storage" and "/registrations" would
-# swallow them. Keep any new literal /skills/... route above this one.
+# WHY a "/by-name/" segment instead of "/skills/{skill_name}": declaration
+# order alone is not enough. Ordering the literal routes first does stop them
+# being shadowed, but it also RESERVES those names - a skill legitimately
+# called "storage" or "registrations" could then never be fetched, and the
+# domain allows both. A distinct prefix removes the collision entirely rather
+# than trading one silent failure for another.
 @router.get(
-    "/{skill_name}",
+    "/by-name/{skill_name}",
     response_model=SkillDetailResponse,
     responses={404: {"description": "No skill registered under that name"}},
 )
