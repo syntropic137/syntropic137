@@ -1,0 +1,60 @@
+---
+title: syn skill
+description: "Inspect and register agent skills"
+---
+
+Inspect and register agent skills
+
+## `syn skill add`
+
+Register a skill from a local path or a pinned remote ref
+
+```bash
+syn skill add <ref>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `ref` | `text` | Yes | Local path, or org/repo/skill@version, or &lt;url&gt;@&lt;version&gt; |
+
+---
+
+## `syn skill list`
+
+List every registered skill
+
+```bash
+syn skill list [options]
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--json` | `boolean` | `false` | Emit raw JSON |
+
+---
+
+## `syn skill show`
+
+Show every registration of a skill name
+
+```bash
+syn skill show <name> [options]
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `name` | `text` | Yes | Skill name |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--json` | `boolean` | `false` | Emit raw JSON |
+
+---

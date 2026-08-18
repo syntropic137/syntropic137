@@ -1672,6 +1672,51 @@ class SkillRegistrationLookupResponse(BaseModel):
     resolved_sha: str | None = None
 
 
+class SkillRegistrationSummary(BaseModel):
+    """One registered skill, as the lock projection holds it.
+
+    Carries the full identity triple plus the content hash, because that is
+    exactly what makes a ``SkillNotRegistered`` failure actionable: the caller
+    can see which of the three fields does not match what a workflow declared.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skill_name: str
+    source_url: str
+    version: str
+    resolved_sha: str = Field(..., description="Content-addressed sha of the normalized tree.")
+    resolved_sha_display: str = Field(
+        ...,
+        description="First 12 characters of resolved_sha, for display in narrow columns.",
+    )
+    tree_storage_prefix: str
+    registered_at: datetime = Field(..., description="UTC; clients format for their locale.")
+
+
+class SkillListResponse(BaseModel):
+    """Every registered skill."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skills: list[SkillRegistrationSummary] = Field(default_factory=list)
+    total: int = 0
+
+
+class SkillDetailResponse(BaseModel):
+    """Every registration sharing one skill name.
+
+    A name is not unique: the same skill can be pinned at several versions, and
+    two sources can publish the same name. All of them are returned so the
+    caller can tell which pin a workflow actually resolves to.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skill_name: str
+    registrations: list[SkillRegistrationSummary] = Field(default_factory=list)
+
+
 class SkillStorageStatsResponse(BaseModel):
     """Size of the content-addressed skill store.
 
