@@ -94,10 +94,25 @@ class WorkspaceImageProvider(StrEnum):
     rather than a side effect - its manifest treats one working harness as a
     broken image, not a degraded one.
 
-    Not yet published to GHCR. Until the agentic-primitives build workflow
-    ships it, referencing this provider resolves to an image that does not
-    exist, so the default stays CLAUDE_CLI.
+    Published as ``omni-agent-workspace``, NOT ``agentic-workspace-omni-agent``
+    - see IMAGE_NAME_OVERRIDES.
     """
+
+
+# Most providers publish as ``<IMAGE_PREFIX>-<provider>``. omni-agent does not:
+# agentic-primitives takes its repository name from ``image.tag`` in the
+# provider manifest, which reads ``omni-agent-workspace``, and its build matrix
+# publishes under exactly that. Deriving the name would silently produce
+# ``agentic-workspace-omni-agent``, which does not exist - the workspace would
+# fail to pull at provision time, far from this file.
+IMAGE_NAME_OVERRIDES: dict[WorkspaceImageProvider, str] = {
+    WorkspaceImageProvider.OMNI_AGENT: "omni-agent-workspace",
+}
+
+
+def workspace_image_name(provider: WorkspaceImageProvider) -> str:
+    """Repository name (no registry, owner, or tag) for a provider image."""
+    return IMAGE_NAME_OVERRIDES.get(provider, f"{IMAGE_PREFIX}-{provider.value}")
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +184,9 @@ def workspace_image_ref(
         msg = "workspace_image_ref accepts tag or digest, not both"
         raise ValueError(msg)
 
-    repository = f"{registry}/{owner}/{IMAGE_PREFIX}-{provider.value}"
+    # workspace_image_name, not f"{IMAGE_PREFIX}-{provider.value}": omni-agent
+    # publishes as `omni-agent-workspace`, so the prefix pattern is wrong for it.
+    repository = f"{registry}/{owner}/{workspace_image_name(provider)}"
 
     if tag is not None:
         return f"{repository}:{tag}"
