@@ -18,6 +18,30 @@ that belongs in the exporter CLI substandard. Until it exists, this parser is
 the seam, and it is written to degrade honestly: anything it cannot classify
 becomes UNKNOWN rather than a guess, because a wrong "captured" is worse than an
 admitted "not sure".
+
+THE STREAM IS UNTRUSTED, and that bounds what this can promise
+-------------------------------------------------------------
+The agent and the finalizer write to the same container stderr, and the agent is
+a language model that can be induced to print anything. So a line that LOOKS
+like a finalizer verdict is not proof that the finalizer produced it: an agent
+that prints the success line verbatim would be believed.
+
+Three things follow, and they are the design rather than caveats:
+
+1. Patterns are anchored to a full-line grammar, so incidental prose that merely
+   mentions the phrase does not match. This raises the bar from "accidental" to
+   "deliberate", which is worth doing and is not a security boundary.
+2. Nothing captured from the stream is ever persisted. Reasons are built from
+   fixed templates and whitelisted numeric fields, so a credential printed on
+   the stream cannot be lifted into a stored record.
+3. Counters are read ONLY from the selected verdict line, never from the stream
+   at large, so an earlier unrelated `accepted=999` cannot displace the truth.
+
+The real fix is a channel the agent cannot write to: the finalizer should write
+its result to a file under the host-backed workspace directory, which Syn137
+already collects. Then this parser becomes a fallback for old images rather than
+the source of truth. Tracked as the follow-up to this module, and the reason
+`CaptureState.UNKNOWN` exists rather than defaulting to optimism.
 """
 
 from __future__ import annotations
@@ -37,15 +61,33 @@ __all__ = [
 #: stderr belongs to the agent or the entrypoint and is not ours to interpret.
 _PREFIX = "[finalize] session-store"
 
-_RE_COMPLETE = re.compile(r"upload complete")
-_RE_TIMEOUT = re.compile(r"upload TIMED OUT after (\d+)s")
-_RE_FAILED = re.compile(r"upload FAILED \(rc=(\d+)\)")
-_RE_INCOMPLETE = re.compile(r"sweep INCOMPLETE \(([^)]*)\)")
-_RE_UNPARSEABLE = re.compile(r"produced no parseable summary line")
+# Anchored to the START of the finalizer's own line. `\[finalize\] session-store`
+# must begin the message, so prose that merely quotes the phrase mid-sentence
+# does not match. See the trust note above for what this does and does not buy.
+_LINE = r"^\[finalize\] session-store "
+
+_RE_COMPLETE = re.compile(_LINE + r"upload complete \(")
+_RE_TIMEOUT = re.compile(_LINE + r"upload TIMED OUT after (\d+)s")
+_RE_FAILED = re.compile(_LINE + r"upload FAILED \(rc=(\d+)\)")
+_RE_INCOMPLETE = re.compile(_LINE + r"sweep INCOMPLETE \(")
+_RE_UNPARSEABLE = re.compile(_LINE + r"sweep produced no parseable summary line")
 
 #: Counters the exporter prints on its summary line. Declared here so the names
 #: this side reads are spelled once.
-_COUNTERS = ("discovered", "skipped_unchanged", "uploaded", "accepted", "duplicate", "failed")
+# All eight the exporter's summary line carries (finalize.sh:448). `rejected`
+# and `skipped_oversize` were missing, which are the two that distinguish "the
+# store refused it" from "we never sent it" - exactly the counters an operator
+# needs when something did not land.
+_COUNTERS = (
+    "discovered",
+    "skipped_unchanged",
+    "uploaded",
+    "accepted",
+    "duplicate",
+    "rejected",
+    "skipped_oversize",
+    "failed",
+)
 
 
 class CaptureState(StrEnum):
@@ -112,13 +154,76 @@ class CaptureOutcome(BaseModel):
         return self.state in (CaptureState.FAILED, CaptureState.INCOMPLETE, CaptureState.UNKNOWN)
 
 
-def _counters_from(text: str) -> dict[str, int]:
+def _counters_from(verdict_line: str) -> dict[str, int]:
+    """Whitelisted ``name=<digits>`` pairs, from the VERDICT LINE only.
+
+    Deliberately not from the stream at large. Searching everything meant an
+    unrelated earlier ``accepted=999`` anywhere in the agent's output would be
+    taken as the truth, because the first match won. Only the line that produced
+    the verdict can describe that verdict.
+
+    Values are ints by construction: the pattern admits digits and the result is
+    parsed, so nothing from the stream is stored as text.
+    """
     found: dict[str, int] = {}
     for name in _COUNTERS:
-        m = re.search(rf"\b{name}=(\d+)", text)
+        m = re.search(rf"\b{name}=(\d+)\b", verdict_line)
         if m:
             found[name] = int(m.group(1))
     return found
+
+
+def _classify(line: str) -> CaptureOutcome | None:
+    """One finalizer line to an outcome, or None if it is not a verdict.
+
+    Split out from parse_capture_status so neither function carries both the
+    line-selection policy and the whole verdict decision table; together they
+    exceeded the cyclomatic budget.
+    """
+    counters = _counters_from(line)
+
+    if _RE_COMPLETE.search(line):
+        return CaptureOutcome(state=CaptureState.CAPTURED, counters=counters)
+
+    if m := _RE_TIMEOUT.search(line):
+        return CaptureOutcome(
+            state=CaptureState.FAILED,
+            reason=f"upload timed out after {m.group(1)}s",
+            counters=counters,
+        )
+
+    if m := _RE_FAILED.search(line):
+        return CaptureOutcome(
+            state=CaptureState.FAILED,
+            reason=f"exporter exited {m.group(1)}",
+            counters=counters,
+        )
+
+    if _RE_INCOMPLETE.search(line):
+        # The reason is REBUILT from whitelisted numeric fields, never copied
+        # from the line. The finalizer puts free text in those parentheses, and
+        # this field is persisted and displayed: an exporter build that printed
+        # an auth header would otherwise have it lifted into a durable record.
+        blocking = {
+            k: v
+            for k, v in counters.items()
+            if k in ("failed", "rejected", "skipped_oversize") and v
+        }
+        detail = ", ".join(f"{k}={v}" for k, v in sorted(blocking.items()))
+        return CaptureOutcome(
+            state=CaptureState.INCOMPLETE,
+            reason=f"sweep incomplete ({detail})" if detail else "sweep incomplete",
+            counters=counters,
+        )
+
+    if _RE_UNPARSEABLE.search(line):
+        return CaptureOutcome(
+            state=CaptureState.UNKNOWN,
+            reason="the exporter produced no parseable summary line",
+            counters=counters,
+        )
+
+    return None
 
 
 def parse_capture_status(container_stderr: str, *, store_enabled: bool) -> CaptureOutcome:
@@ -143,38 +248,15 @@ def parse_capture_status(container_stderr: str, *, store_enabled: bool) -> Captu
             ),
         )
 
-    counters = _counters_from(container_stderr)
     # Last line wins: the finalizer's terminal verdict is its final word.
     for line in reversed(lines):
-        if _RE_COMPLETE.search(line):
-            return CaptureOutcome(state=CaptureState.CAPTURED, counters=counters)
-        if m := _RE_TIMEOUT.search(line):
-            return CaptureOutcome(
-                state=CaptureState.FAILED,
-                reason=f"upload timed out after {m.group(1)}s",
-                counters=counters,
-            )
-        if m := _RE_FAILED.search(line):
-            return CaptureOutcome(
-                state=CaptureState.FAILED,
-                reason=f"exporter exited {m.group(1)}",
-                counters=counters,
-            )
-        if m := _RE_INCOMPLETE.search(line):
-            return CaptureOutcome(
-                state=CaptureState.INCOMPLETE,
-                reason=f"sweep incomplete: {m.group(1).strip()}",
-                counters=counters,
-            )
-        if _RE_UNPARSEABLE.search(line):
-            return CaptureOutcome(
-                state=CaptureState.UNKNOWN,
-                reason="the exporter produced no parseable summary line",
-                counters=counters,
-            )
+        if outcome := _classify(line):
+            return outcome
 
+    # Lines carrying the prefix but no recognised verdict. Counters are left
+    # empty on purpose: without a verdict line to read them from, any number on
+    # the stream is unattributed, and an unattributed count is worse than none.
     return CaptureOutcome(
         state=CaptureState.UNKNOWN,
         reason="the finalizer reported, but in a form this parser does not recognise",
-        counters=counters,
     )
