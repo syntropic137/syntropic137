@@ -56,6 +56,15 @@ class ObservationType(StrEnum):
     ERROR = "error"  # Error occurred
     CANCELLED = "cancelled"  # Execution cancelled
 
+    # Session capture (ADR-004 s13). Lane 2 telemetry, never domain state:
+    # whether a transcript reached the central store has no bearing on whether
+    # the workflow succeeded, and must never be allowed to acquire one.
+    #
+    # It is recorded because capture is deliberately FAIL-OPEN - a store outage
+    # must not stop a workflow - and fail-open without a record is just silent
+    # data loss. This is the record.
+    SESSION_CAPTURE = "session_capture"
+
 
 @event("AgentObservation", "v1")
 class AgentObservationEvent(DomainEvent):

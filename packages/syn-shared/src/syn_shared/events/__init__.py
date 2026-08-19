@@ -110,6 +110,12 @@ EventType = Literal[
     "system_notification",
     "user_prompt_submitted",
     "otlp_log",
+    # Session capture (Lane 2 telemetry). Produced by Syn137 itself rather than
+    # by an agent hook, from the workspace finalizer's report. It lives here for
+    # the same reason as everything above: VALID_EVENT_TYPES gates the write
+    # path, so a type the domain knows about and this Literal does not is a
+    # write that fails validation at the point of recording.
+    "session_capture",
 ]
 
 # Runtime validation set (auto-generated from Literal)
