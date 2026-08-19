@@ -913,7 +913,14 @@ subscription), never an API key in argv or env.
 just codex-auth-clip                 # copies the raw value to the clipboard
 
 # 2. The workspace image MUST contain the codex binary
-docker run --rm "${SYN_WORKSPACE_DOCKER_IMAGE:-ghcr.io/agentparadise/agentic-workspace-claude-cli:latest}" codex --version
+# Resolve the image the stack ACTUALLY defaults to, rather than hardcoding one.
+# A hardcoded fallback here silently validates a different image than the stack
+# runs: the default moved from claude-cli to omni-agent, and a tag fallback is
+# also rejected by image verification (registry refs must be digest-pinned).
+WS_IMAGE="${SYN_WORKSPACE_DOCKER_IMAGE:-$(uv run python -c \
+  'from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE; print(DEFAULT_WORKSPACE_IMAGE)')}"
+echo "validating against: $WS_IMAGE"
+docker run --rm "$WS_IMAGE" codex --version
 
 # 3. Codex needs egress to api.openai.com (the Envoy sidecar is Anthropic-only and
 #    is skipped for codex phases, so codex requires direct/allowlisted egress)
@@ -1102,7 +1109,14 @@ Across the pair, assert:
 ### Precondition: the skills CLI must exist in the workspace image
 
 ```bash
-docker run --rm "${SYN_WORKSPACE_DOCKER_IMAGE:-ghcr.io/agentparadise/agentic-workspace-claude-cli:latest}" skills --version
+# Resolve the image the stack ACTUALLY defaults to, rather than hardcoding one.
+# A hardcoded fallback here silently validates a different image than the stack
+# runs: the default moved from claude-cli to omni-agent, and a tag fallback is
+# also rejected by image verification (registry refs must be digest-pinned).
+WS_IMAGE="${SYN_WORKSPACE_DOCKER_IMAGE:-$(uv run python -c \
+  'from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE; print(DEFAULT_WORKSPACE_IMAGE)')}"
+echo "validating against: $WS_IMAGE"
+docker run --rm "$WS_IMAGE" skills --version
 ```
 
 - [ ] `skills` CLI present (expected pin: 1.5.14)

@@ -1492,6 +1492,8 @@ codegen: docs-cli-gen
     cd apps/syn-cli-node && pnpm run generate:types
     @echo "📄 Generating Dashboard TypeScript types..."
     cd apps/syn-dashboard-ui && pnpm run generate:types
+    @echo "📄 Exporting plugin JSON schemas..."
+    uv run python scripts/export_plugin_schemas.py
     @echo "✅ All generated artifacts up to date"
 
 # Build docs site (codegen + Next.js build, for deployment)
@@ -1542,6 +1544,12 @@ gen-compose:
 # Check published compose is up to date (CI mode -- fails if stale)
 check-compose:
     uv run python scripts/generate_published_compose.py --check
+
+# Plugin JSON schemas must match the Pydantic models. These are what third-party
+# plugin authors validate against, so drift ships a schema that rejects features
+# the release actually supports.
+check-plugin-schemas:
+    uv run python scripts/export_plugin_schemas.py --check
 
 # Validate all Docker Compose overlay combinations parse correctly
 check-compose-overlays:

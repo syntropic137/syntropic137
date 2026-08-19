@@ -4,14 +4,15 @@
   "$defs": {
     "AgentYamlDefinition": {
       "additionalProperties": false,
-      "description": "Per-phase ``agent`` block as parsed from YAML.\n\nSelects which agent provider drives the phase (e.g. ``claude`` for the\ndefault ``claude -p`` Docker path, ``claude-interactive`` for the\ninteractive-tmux workspace provider), which tmux pane the phase\ntargets, and optionally the model. See\ndocs/plans/multi-agent-workspaces.md.",
+      "description": "Per-phase ``agent`` block as parsed from YAML.\n\nSelects which agent provider drives the phase (e.g. ``claude`` for the\ndefault ``claude -p`` Docker path, ``claude-interactive`` for the\ninteractive-tmux workspace provider, ``codex`` for the programmatic\ncodex harness on the same Docker path as ``claude``), which tmux pane\nthe phase targets, and optionally the model. See\ndocs/plans/multi-agent-workspaces.md.",
       "properties": {
         "provider": {
           "anyOf": [
             {
               "enum": [
                 "claude",
-                "claude-interactive"
+                "claude-interactive",
+                "codex"
               ],
               "type": "string"
             },
@@ -50,6 +51,11 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "allow_delegation": {
+          "default": false,
+          "title": "Allow Delegation",
+          "type": "boolean"
         }
       },
       "title": "AgentYamlDefinition",
@@ -306,6 +312,13 @@
           },
           "title": "Claude Plugins",
           "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/SkillRef"
+          },
+          "title": "Skills",
+          "type": "array"
         }
       },
       "required": [
@@ -335,6 +348,66 @@
       ],
       "title": "RepositoryConfig",
       "type": "object"
+    },
+    "SkillRef": {
+      "anyOf": [
+        {
+          "description": "Shorthand form: 'org/repo/skill-name@version' or '<url>@<version>'. '@latest' is rejected.",
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "source"
+              ]
+            },
+            {
+              "required": [
+                "source_url"
+              ]
+            }
+          ],
+          "description": "Verbose mapping form: 'source' (or 'source_url') plus 'version', with an optional 'name' override or 'names' list to expand into multiple refs.",
+          "properties": {
+            "source": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_url": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "version": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "names": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "name_overridden": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A workflow-declared reference to an agent skill (issue #772).\n\nCompared and hashed by ``(source_url, version, skill_name)`` to match\nthe lock projection key. A repo publishing many skills produces one\nref (and one lock entry) per declared skill.",
+      "title": "SkillRef"
     },
     "WorkflowClassification": {
       "description": "Classification of workflow complexity.",
@@ -438,6 +511,13 @@
         "$ref": "#/$defs/ClaudePluginRef"
       },
       "title": "Claude Plugins",
+      "type": "array"
+    },
+    "skills": {
+      "items": {
+        "$ref": "#/$defs/SkillRef"
+      },
+      "title": "Skills",
       "type": "array"
     }
   },

@@ -145,6 +145,9 @@ jobs:
       - name: Compose overlay validation
         run: just check-compose-overlays
 
+      - name: Check plugin schemas are in sync
+        run: just check-plugin-schemas
+
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
   #############################################################################
