@@ -691,6 +691,43 @@ workspace-versions:
     @echo "📦 Workspace image versions:"
     @docker images agentic-workspace-claude-cli | head -20
 
+# Smoke-test the image every deployment ACTUALLY pulls.
+#
+# workspace-build and _workspace-check above build and validate a LOCAL
+# claude-cli image for the dev inner loop. That is not the default: the default
+# is DEFAULT_WORKSPACE_IMAGE, a signed GHCR digest, and until this recipe
+# existed nothing local or in CI ever ran it. Preflight could be green while the
+# pinned image was missing, unsigned, or unable to start a harness - and the
+# failure would surface at workspace provision, far from the pin.
+#
+# Both harnesses are required, not just one: omni's contract is that it hosts
+# claude AND codex, and its manifest treats a single working harness as broken
+# rather than degraded.
+check-default-workspace-image:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IMAGE="$(uv run python -c 'from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE; print(DEFAULT_WORKSPACE_IMAGE)')"
+    echo "🔎 Default workspace image: $IMAGE"
+    docker pull --quiet "$IMAGE" >/dev/null
+    FAILED=0
+    for probe in claude codex skills; do
+        if OUT=$(docker run --rm --entrypoint "$probe" "$IMAGE" --version 2>&1); then
+            echo "  ✅ $probe: $OUT"
+        else
+            echo "  ❌ $probe: FAILED"
+            echo "$OUT" | sed 's/^/       /'
+            FAILED=1
+        fi
+    done
+    if [ "$FAILED" -ne 0 ]; then
+        echo ""
+        echo "The pinned default workspace image cannot run a required harness."
+        echo "Fix the pin in packages/syn-shared/src/syn_shared/settings/workspace_images.py"
+        echo "or the upstream image, before releasing."
+        exit 1
+    fi
+    echo "✅ Default workspace image runs claude, codex, and skills"
+
 # --- Testing ---
 
 # Run all tests

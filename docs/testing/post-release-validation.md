@@ -1106,6 +1106,20 @@ Across the pair, assert:
   skills preflight correctly reports "already registered" first. Use
   `syn workflow update` to re-install.
 
+### Precondition: the default workspace image runs both harnesses
+
+Run this FIRST. It resolves `DEFAULT_WORKSPACE_IMAGE`, pulls it, and probes every
+harness the platform depends on. Until this recipe existed, nothing local or in
+CI ever executed the pinned default, so preflight could be green while the image
+every deployment pulls was unable to start an agent.
+
+```bash
+just check-default-workspace-image
+```
+
+- [ ] claude, codex, and skills all report a version
+- [ ] the image reported is the digest in `workspace_images.py`, not a tag
+
 ### Precondition: the skills CLI must exist in the workspace image
 
 ```bash
