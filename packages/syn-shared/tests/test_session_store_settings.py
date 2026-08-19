@@ -41,6 +41,7 @@ _SEARCH_ROOTS = (
 _DEFINING_FILE = _REPO_ROOT / "packages" / "syn-shared" / "src" / "syn_shared" / "env_constants.py"
 
 
+@pytest.mark.unit
 class TestDefaultsOff:
     """Opt-in: no configuration means no session capture."""
 

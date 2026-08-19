@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
+import pytest
+
 from syn_shared.settings.constants import (
     DEFAULT_DEV_API_URL,
     DEFAULT_SELFHOST_API_URL,
@@ -21,6 +23,7 @@ from syn_shared.settings.dev_tooling import DevToolingSettings, get_dev_api_url
 from syn_shared.settings.infra import InfraSettings
 
 
+@pytest.mark.unit
 class TestGetDevApiUrl:
     """get_dev_api_url() is the single entry point for dev tool API URLs."""
 
@@ -45,6 +48,7 @@ class TestGetDevApiUrl:
         assert settings.api_url == DEFAULT_DEV_API_URL
 
 
+@pytest.mark.unit
 class TestPortConstants:
     """Port constants must stay in sync with the stack topology."""
 
@@ -57,6 +61,7 @@ class TestPortConstants:
         assert f":{SELFHOST_GATEWAY_PORT}" in DEFAULT_SELFHOST_API_URL
 
 
+@pytest.mark.unit
 class TestSynPublicHostname:
     """SYN_PUBLIC_HOSTNAME replaced SYN_DOMAIN - guard the rename."""
 

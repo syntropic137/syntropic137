@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from syn_shared.settings.workspace_images import (
+    PINNED_DIGESTS,
     WorkspaceImageProvider,
     workspace_image_name,
     workspace_image_ref,
@@ -96,3 +97,27 @@ class TestDerivedProvidersUnchanged:
         ref = workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)
         assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-interactive-tmux"
         assert "@sha256:" in ref
+
+
+@pytest.mark.unit
+class TestEveryProviderIsPinned:
+    """A provider without a digest pin is a KeyError at workspace provision time.
+
+    ``workspace_image_ref`` subscripts PINNED_DIGESTS directly, so adding an
+    enum member without a matching pin does not fail here - it fails far away,
+    when a workspace is being created. This test moves that failure to the
+    place that can fix it.
+    """
+
+    def test_all_providers_have_a_pinned_digest(self) -> None:
+        missing = [p.value for p in WorkspaceImageProvider if p not in PINNED_DIGESTS]
+        assert not missing, (
+            f"providers with no PINNED_DIGESTS entry: {missing}. "
+            f"Resolve the multi-arch index digest with `docker buildx imagetools "
+            f"inspect` and add it, or workspace provision raises KeyError."
+        )
+
+    def test_every_provider_resolves_to_a_digest_reference(self) -> None:
+        for provider in WorkspaceImageProvider:
+            ref = workspace_image_ref(provider)
+            assert "@sha256:" in ref, f"{provider.value} is not digest-pinned: {ref}"

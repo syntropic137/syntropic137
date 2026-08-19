@@ -21,7 +21,10 @@ To fix a failure:
     3. Add the constant to __all__
 """
 
+import pytest
 
+
+@pytest.mark.unit
 class TestEventTypeConsistency:
     """Verify event type registries are in sync across packages."""
 

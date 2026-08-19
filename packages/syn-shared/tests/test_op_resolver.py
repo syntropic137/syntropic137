@@ -27,6 +27,7 @@ def clear_resolver_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestVaultNameForEnv:
     def test_development(self) -> None:
         assert vault_name_for_env("development") == "syn137-dev"

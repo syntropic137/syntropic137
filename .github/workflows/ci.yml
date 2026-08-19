@@ -145,6 +145,12 @@ jobs:
       - name: Compose overlay validation
         run: just check-compose-overlays
 
+      - name: Check plugin schemas are in sync
+        run: just check-plugin-schemas
+
+      - name: Check .env.example is in sync
+        run: just check-env-example
+
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
   #############################################################################
@@ -422,6 +428,73 @@ jobs:
           echo "✅ All submodules properly initialized"
 
   #############################################################################
+  # DEFAULT WORKSPACE IMAGE - execute the image every deployment actually pulls
+  #
+  # The rest of CI never runs it. workspace-build/_workspace-check build a LOCAL
+  # claude-cli image for the dev loop, and e2e-container builds claude-cli too,
+  # so after the default moved to omni nothing executed the pinned digest.
+  #
+  # This probes THROUGH /opt/agentic/entrypoint.sh rather than around it: an
+  # entrypoint regression reaching a published image is the documented incident
+  # that motivated digest pinning, and --entrypoint <bin> would sail past it.
+  #
+  # Pulls a multi-GB image, so it is path-filtered to changes that can alter
+  # which image is pulled. It is in ci-success's needs list, so when it runs it
+  # blocks.
+  #############################################################################
+
+  default-workspace-image:
+    name: Default Workspace Image
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the path filter below diffs against the base ref, and a
+      # shallow clone has no merge base with it. The first version of this job
+      # used the default depth, the diff failed with "no merge base", the else
+      # branch ran, and the job reported "pin cannot have changed" and passed -
+      # a false green in the gate written to catch false greens.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
+          # The recipe resolves the pin by importing syn_shared, and this repo's
+          # uv workspace has editable members inside lib/agentic-primitives, so
+          # `uv run` cannot resolve the environment without them.
+          submodules: true
+
+      - name: Check whether the pinned default could have changed
+        id: filter
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --quiet origin "${{ github.base_ref }}"
+          # FAIL CLOSED. If the diff cannot be computed we do not know whether
+          # the pin moved, and "we do not know" must mean run the check, not
+          # skip it. Only a diff that succeeds AND matches nothing may skip.
+          if ! CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" 2>&1); then
+            echo "::warning::Could not diff against origin/${{ github.base_ref }} ($CHANGED). Running the check rather than assuming the pin is unchanged."
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if echo "$CHANGED" | grep -qE 'workspace_images\.py|justfile|\.github/workflows/ci\.yml'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Pin provably unchanged in this diff; skipping the image pull."
+          fi
+
+      - name: Install uv
+        if: steps.filter.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install just
+        if: steps.filter.outputs.run == 'true'
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+
+      - name: Probe the pinned default image through its entrypoint
+        if: steps.filter.outputs.run == 'true'
+        run: just check-default-workspace-image
+
+  #############################################################################
   # OSV VULNERABILITY SCAN - Supply chain security (ISS-259)
   #
   # Google's OSV Scanner checks all lock files against the OSV database
@@ -550,6 +623,7 @@ jobs:
       - cli-node
       - docs-site
       - submodule-check
+      - default-workspace-image
       - osv-scan
       - pip-audit
       - dependency-review

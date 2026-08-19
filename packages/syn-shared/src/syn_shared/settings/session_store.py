@@ -27,6 +27,12 @@ from __future__ import annotations
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+#: Host-side environment variable names, declared once so tooling that has to
+#: name them (the 1Password exporter, env checks) does not re-spell them as
+#: literals. The prefix below and these names must stay in step.
+ENV_SYN_SESSION_STORE_URL = "SYN_SESSION_STORE_URL"
+ENV_SYN_SESSION_STORE_AUTH_TOKEN = "SYN_SESSION_STORE_AUTH_TOKEN"
+
 #: Provider identifier understood by the capability inside the workspace image.
 SESHMAGIC_PROVIDER = "seshmagic"
 

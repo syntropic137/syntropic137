@@ -105,7 +105,7 @@ issue = "#673"
 # `unmarked` must ratchet to 0. `xfail` counts disarmed guards: an xfail on a
 # correctness invariant is a disabled alarm, not a known issue.
 [test-markers.unmarked]
-value = 1355
+value = 1329
 issue = "#825"
 
 [test-markers.xfail]

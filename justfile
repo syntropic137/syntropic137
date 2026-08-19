@@ -691,6 +691,51 @@ workspace-versions:
     @echo "📦 Workspace image versions:"
     @docker images agentic-workspace-claude-cli | head -20
 
+# Smoke-test the image every deployment ACTUALLY pulls.
+#
+# workspace-build and _workspace-check above build and validate a LOCAL
+# claude-cli image for the dev inner loop. That is not the default: the default
+# is DEFAULT_WORKSPACE_IMAGE, a signed GHCR digest, and until this recipe
+# existed nothing local or in CI ever ran it. Preflight could be green while the
+# pinned image was missing, unsigned, or unable to start a harness - and the
+# failure would surface at workspace provision, far from the pin.
+#
+# Both harnesses are required, not just one: omni's contract is that it hosts
+# claude AND codex, and its manifest treats a single working harness as broken
+# rather than degraded.
+check-default-workspace-image:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IMAGE="$(uv run python -c 'from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE; print(DEFAULT_WORKSPACE_IMAGE)')"
+    echo "🔎 Default workspace image: $IMAGE"
+    docker pull --quiet "$IMAGE" >/dev/null
+    FAILED=0
+    # Probe THROUGH the image's entrypoint, not around it. `--entrypoint <bin>`
+    # would prove the binaries exist while bypassing /opt/agentic/entrypoint.sh,
+    # which is what configures the workspace and launches the command - and an
+    # entrypoint regression reaching :latest is the documented incident that
+    # motivated digest pinning in the first place. A check that cannot catch the
+    # regression it exists for is worse than no check.
+    for probe in claude codex skills; do
+        if OUT=$(docker run --rm "$IMAGE" "$probe" --version 2>&1); then
+            # The entrypoint logs plugin discovery before handing off, so the
+            # version is the LAST line, not the whole output.
+            echo "  ✅ $probe: $(echo "$OUT" | tail -1)"
+        else
+            echo "  ❌ $probe: FAILED"
+            echo "$OUT" | sed 's/^/       /'
+            FAILED=1
+        fi
+    done
+    if [ "$FAILED" -ne 0 ]; then
+        echo ""
+        echo "The pinned default workspace image cannot run a required harness."
+        echo "Fix the pin in packages/syn-shared/src/syn_shared/settings/workspace_images.py"
+        echo "or the upstream image, before releasing."
+        exit 1
+    fi
+    echo "✅ Default workspace image runs claude, codex, and skills"
+
 # --- Testing ---
 
 # Run all tests
@@ -1492,6 +1537,8 @@ codegen: docs-cli-gen
     cd apps/syn-cli-node && pnpm run generate:types
     @echo "📄 Generating Dashboard TypeScript types..."
     cd apps/syn-dashboard-ui && pnpm run generate:types
+    @echo "📄 Exporting plugin JSON schemas..."
+    uv run python scripts/export_plugin_schemas.py
     @echo "✅ All generated artifacts up to date"
 
 # Build docs site (codegen + Next.js build, for deployment)
@@ -1542,6 +1589,28 @@ gen-compose:
 # Check published compose is up to date (CI mode -- fails if stale)
 check-compose:
     uv run python scripts/generate_published_compose.py --check
+
+# Plugin JSON schemas must match the Pydantic models. These are what third-party
+# plugin authors validate against, so drift ships a schema that rejects features
+# the release actually supports.
+check-plugin-schemas:
+    uv run python scripts/export_plugin_schemas.py --check
+
+# .env.example is generated from the Settings classes. Drift means the file
+# operators copy documents values the code no longer uses - which is how a stale
+# workspace image digest shipped in it while the pin had already moved.
+check-env-example:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    uv run python scripts/generate_env_example.py >/dev/null
+    if git diff --quiet .env.example infra/.env.example; then
+        echo "OK: .env.example is up to date"
+    else
+        echo "ERROR: .env.example is out of sync with the Settings classes"
+        echo "Run: just gen-env"
+        git diff --stat .env.example infra/.env.example
+        exit 1
+    fi
 
 # Validate all Docker Compose overlay combinations parse correctly
 check-compose-overlays:
