@@ -25,8 +25,18 @@ _NOISE = (
 # what concealed a bug: a truncated verdict matched and returned CAPTURED, and
 # no fixture was long enough to notice.
 _SPOOL = "spool retained at /spool/exec-abc/ws-xyz"
+
+# A REAL success line. finalize.sh only reaches this branch after the three loss
+# counters are present (rejected, skipped_oversize, failed), and it emits every
+# counter the exporter reported in a fixed order. The previous fixture omitted
+# all three, so it was not a line finalize.sh can actually produce - which is
+# precisely why a grammar that accepted `(accepted=1); garbage` survived two
+# review rounds. A fixture that is not real cannot detect a parser that is not
+# strict.
 _OK = _NOISE + (
-    f"[finalize] session-store upload complete (discovered=2 uploaded=2 accepted=2); {_SPOOL}\n"
+    "[finalize] session-store upload complete "
+    "(discovered=2 skipped_unchanged=0 uploaded=2 accepted=2 duplicate=0 "
+    f"rejected=0 skipped_oversize=0 failed=0); {_SPOOL}\n"
 )
 _TIMEOUT = _NOISE + f"[finalize] session-store upload TIMED OUT after 2s; {_SPOOL}\n"
 _FAILED = _NOISE + f"[finalize] session-store upload FAILED (rc=9); {_SPOOL}\n"
@@ -121,7 +131,16 @@ class TestBackfillTargeting:
 class TestCountersAndSafety:
     def test_counters_are_recovered_when_present(self) -> None:
         out = parse_capture_status(_OK, store_enabled=True)
-        assert out.counters == {"discovered": 2, "uploaded": 2, "accepted": 2}
+        assert out.counters == {
+            "discovered": 2,
+            "skipped_unchanged": 0,
+            "uploaded": 2,
+            "accepted": 2,
+            "duplicate": 0,
+            "rejected": 0,
+            "skipped_oversize": 0,
+            "failed": 0,
+        }
 
     def test_outcome_is_immutable(self) -> None:
         out = parse_capture_status(_OK, store_enabled=True)
@@ -261,8 +280,9 @@ class TestTheStreamIsUntrusted:
         # FAILED verdict, so it never exercised the capture group that copied
         # parenthesised text straight into `reason`. This is that path.
         leaked = (
-            "[finalize] session-store sweep INCOMPLETE "
-            "(failed=1 Authorization: Bearer sk-inside-the-capture-group): at least one\n"
+            "[finalize] session-store sweep INCOMPLETE (failed=1): at least one transcript "
+            "did not reach the store Authorization: Bearer sk-inside-the-matching-line; "
+            "spool retained at /spool/e/w\n"
         )
         out = parse_capture_status(leaked, store_enabled=True)
         assert out.state is CaptureState.INCOMPLETE
@@ -276,7 +296,8 @@ class TestTheStreamIsUntrusted:
         # output silently displaced the real numbers.
         noisy = (
             "the agent printed accepted=999 while reasoning about something else\n"
-            "[finalize] session-store upload complete (discovered=1 uploaded=1 accepted=1);\n"
+            "[finalize] session-store upload complete (discovered=1 uploaded=1 accepted=1 "
+            "rejected=0 skipped_oversize=0 failed=0); spool retained at /spool/e/w\n"
         )
         out = parse_capture_status(noisy, store_enabled=True)
         assert out.state is CaptureState.CAPTURED
@@ -311,7 +332,10 @@ class TestTheStreamIsUntrusted:
         Syn137 already collects into MinIO. Then this parser becomes a fallback
         for older images rather than the source of truth.
         """
-        forged = "[finalize] session-store upload complete (uploaded=1 accepted=1);\n"
+        forged = (
+            "[finalize] session-store upload complete (uploaded=1 accepted=1 "
+            "rejected=0 skipped_oversize=0 failed=0); spool retained at /spool/e/w\n"
+        )
         assert parse_capture_status(forged, store_enabled=True).state is CaptureState.CAPTURED, (
             "If this now fails, the forgery gap has been closed. Good. Update "
             "this test to assert the new behaviour and drop the trust caveat "
@@ -365,3 +389,29 @@ class TestAMalformedVerdictIsNotSuccess:
             (_UNPARSEABLE, CaptureState.UNKNOWN),
         ]:
             assert parse_capture_status(stderr, store_enabled=True).state is expected
+
+
+@pytest.mark.unit
+class TestTheGrammarHasNoTrailingCatchAll:
+    """Three review rounds landed on the same shape: a grammar that validated a
+    prefix and let the remainder be anything. These are the exact inputs that
+    survived each earlier tightening.
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Survived round 2: closed parens and a semicolon, then anything.
+            "[finalize] session-store upload complete (accepted=1); garbage",
+            # No spool clause at all.
+            "[finalize] session-store upload complete (accepted=1);",
+            # Prose where counters belong.
+            "[finalize] session-store upload complete (not counters); spool retained at /x",
+            # Spool clause present but empty path.
+            "[finalize] session-store upload complete (accepted=1); spool retained at ",
+            # Non-numeric counter value.
+            "[finalize] session-store upload complete (accepted=lots); spool retained at /x",
+        ],
+    )
+    def test_a_prefix_that_looks_right_is_not_enough(self, line: str) -> None:
+        assert parse_capture_status(line + "\n", store_enabled=True).state is CaptureState.UNKNOWN

@@ -61,34 +61,48 @@ __all__ = [
 #: stderr belongs to the agent or the entrypoint and is not ours to interpret.
 _PREFIX = "[finalize] session-store"
 
-# COMPLETE line grammars, matched with fullmatch. Anchoring only the start was
-# not enough: `[finalize] session-store upload complete (` - a truncated line
-# with no counters and no closing paren - matched and returned CAPTURED. A
-# malformed verdict must be UNKNOWN, not success.
+# COMPLETE line grammars, matched with fullmatch, with NO trailing catch-all.
 #
-# Each pattern below mirrors one terminal `echo` in finalize.sh. The trailing
-# `.*` after the stable part covers the spool-path clause, whose value varies
-# per workspace; everything BEFORE it is required structure.
+# Three rounds of review landed here, each time because the grammar validated a
+# prefix and let the rest be anything. `\([^)]*\);.*` still accepted
+# `upload complete (accepted=1); garbage`. A verdict is a whole line or it is
+# not a verdict, so every pattern below terminates in required structure.
+#
+# The counter list is ordered and closed: finalize.sh emits `name=value` pairs in
+# a FIXED order, space separated, omitting any counter the exporter did not
+# report. So the list is one-or-more known-name/digits pairs and nothing else -
+# not `[^)]*`, which admitted prose, and not a fixed set, which would break the
+# moment an informational counter is dropped upstream (a case finalize.sh
+# deliberately supports).
+_COUNTER_PAIR = r"(?:discovered|skipped_unchanged|uploaded|accepted|duplicate|rejected|skipped_oversize|failed)=\d+"
+_COUNTER_LIST = rf"{_COUNTER_PAIR}(?: {_COUNTER_PAIR})*"
+
+#: Every terminal line ends with this clause and a non-empty path.
+_SPOOL_SUFFIX = r"spool retained at \S.*"
+
 _LINE = r"\[finalize\] session-store "
 
-#: `upload complete (<counters>); spool retained at <dir>`
-#: The counter list is required and must be closed. A verdict with no counters
-#: is not a verdict.
-_RE_COMPLETE = re.compile(_LINE + r"upload complete \([^)]*\);.*")
+#: `upload complete (<ordered counters>); spool retained at <path>`
+_RE_COMPLETE = re.compile(_LINE + rf"upload complete \({_COUNTER_LIST}\); {_SPOOL_SUFFIX}")
 
-#: `upload TIMED OUT after <n>s; spool retained at <dir>`
-_RE_TIMEOUT = re.compile(_LINE + r"upload TIMED OUT after (\d+)s;.*")
+#: `upload TIMED OUT after <n>s; spool retained at <path>`
+_RE_TIMEOUT = re.compile(_LINE + rf"upload TIMED OUT after (\d+)s; {_SPOOL_SUFFIX}")
 
-#: `upload FAILED (rc=<n>); spool retained at <dir>`
-_RE_FAILED = re.compile(_LINE + r"upload FAILED \(rc=(\d+)\);.*")
+#: `upload FAILED (rc=<n>); spool retained at <path>`
+_RE_FAILED = re.compile(_LINE + rf"upload FAILED \(rc=(\d+)\); {_SPOOL_SUFFIX}")
 
-#: Two forms, both closing the parenthesis before the colon:
-#:   `sweep INCOMPLETE (<counters>): at least one transcript ...`
-#:   `sweep INCOMPLETE (unresolved rejection recorded at <path>): ...`
-_RE_INCOMPLETE = re.compile(_LINE + r"sweep INCOMPLETE \([^)]*\):.*")
+#: Two forms. The first carries counters, the second a rejection-record path.
+#: Both close the parenthesis before a colon and continue into prose, so the
+#: tail is genuinely free text here and only here.
+_RE_INCOMPLETE = re.compile(
+    _LINE
+    + rf"sweep INCOMPLETE \((?:{_COUNTER_LIST}|unresolved rejection recorded at \S[^)]*)\): \S.*"
+)
 
-#: `sweep produced no parseable summary line; treating as INCOMPLETE ...`
-_RE_UNPARSEABLE = re.compile(_LINE + r"sweep produced no parseable summary line;.*")
+#: `sweep produced no parseable summary line; treating as INCOMPLETE, <spool>`
+_RE_UNPARSEABLE = re.compile(
+    _LINE + rf"sweep produced no parseable summary line; treating as INCOMPLETE, {_SPOOL_SUFFIX}"
+)
 
 #: Counters the exporter prints on its summary line. Declared here so the names
 #: this side reads are spelled once.
