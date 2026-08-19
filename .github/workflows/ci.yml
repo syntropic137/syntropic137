@@ -148,6 +148,9 @@ jobs:
       - name: Check plugin schemas are in sync
         run: just check-plugin-schemas
 
+      - name: Check .env.example is in sync
+        run: just check-env-example
+
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
   #############################################################################

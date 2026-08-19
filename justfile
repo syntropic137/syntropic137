@@ -1551,6 +1551,22 @@ check-compose:
 check-plugin-schemas:
     uv run python scripts/export_plugin_schemas.py --check
 
+# .env.example is generated from the Settings classes. Drift means the file
+# operators copy documents values the code no longer uses - which is how a stale
+# workspace image digest shipped in it while the pin had already moved.
+check-env-example:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    uv run python scripts/generate_env_example.py >/dev/null
+    if git diff --quiet .env.example infra/.env.example; then
+        echo "OK: .env.example is up to date"
+    else
+        echo "ERROR: .env.example is out of sync with the Settings classes"
+        echo "Run: just gen-env"
+        git diff --stat .env.example infra/.env.example
+        exit 1
+    fi
+
 # Validate all Docker Compose overlay combinations parse correctly
 check-compose-overlays:
     bash scripts/check_compose_overlays.sh
