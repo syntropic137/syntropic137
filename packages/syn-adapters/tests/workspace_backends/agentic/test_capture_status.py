@@ -159,3 +159,66 @@ class TestCaptureIsTelemetryNotDomainState:
             data = out.model_dump(mode="json")
             assert data["state"] == out.state.value
             assert set(data) == {"state", "reason", "counters"}
+
+
+@pytest.mark.unit
+class TestTheWritePathAcceptsWhatTheDomainProduces:
+    """An ObservationType the write path rejects is a recording that raises.
+
+    The existing event-type consistency test checks agentic_events (the hook
+    producer) against syn_shared. It does NOT check syn-domain's ObservationType,
+    which is a separate producer, so SESSION_CAPTURE was added to the domain enum
+    and silently absent from VALID_EVENT_TYPES - accepted by the type checker,
+    rejected at the moment of writing.
+
+    That failure is worse here than elsewhere: capture is fail-open, and an
+    exception on the recording path would fail an execution over a telemetry
+    write, reversing the policy by accident.
+    """
+
+    def test_session_capture_is_accepted_by_the_write_path(self) -> None:
+        from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+            ObservationType,
+        )
+        from syn_shared.events import is_valid_event_type
+
+        assert is_valid_event_type(ObservationType.SESSION_CAPTURE.value)
+
+    #: ObservationType values the write path would reject TODAY. Pre-existing,
+    #: and latent rather than live: four have no production caller at all and
+    #: PROGRESS has one. Pinned as a ratchet rather than fixed here, because
+    #: adding five types to the write-path Literal on the way past is a change
+    #: to what the collector accepts, and that deserves its own reasoning rather
+    #: than riding along in a capture-indicator PR.
+    KNOWN_UNWRITABLE = frozenset(
+        {"cancelled", "completed", "execution_stopped", "progress", "started"}
+    )
+
+    def test_no_new_observation_type_is_unwritable(self) -> None:
+        # The general form, as a ratchet. A NEW ObservationType added without a
+        # matching EventType entry fails here rather than at the first write
+        # attempt, which is the failure this class was written after making.
+        from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+            ObservationType,
+        )
+        from syn_shared.events import VALID_EVENT_TYPES
+
+        unwritable = {t.value for t in ObservationType if t.value not in VALID_EVENT_TYPES}
+        new = sorted(unwritable - self.KNOWN_UNWRITABLE)
+        assert not new, (
+            f"ObservationType value(s) the write path would reject: {new}. "
+            f"Add them to syn_shared.events.EventType, or a record_observation "
+            f"call with one will raise at the moment of writing."
+        )
+
+    def test_the_ratchet_shrinks_and_never_grows(self) -> None:
+        # If someone fixes one of the known five, this fails and tells them to
+        # tighten the pin. A ratchet that only ever gets looser is a comment.
+        from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+            ObservationType,
+        )
+        from syn_shared.events import VALID_EVENT_TYPES
+
+        unwritable = {t.value for t in ObservationType if t.value not in VALID_EVENT_TYPES}
+        fixed = sorted(self.KNOWN_UNWRITABLE - unwritable)
+        assert not fixed, f"these are writable now; remove them from KNOWN_UNWRITABLE: {fixed}"
