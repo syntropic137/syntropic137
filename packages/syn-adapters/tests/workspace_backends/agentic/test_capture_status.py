@@ -20,14 +20,29 @@ from syn_adapters.workspace_backends.agentic.capture_status import (
 _NOISE = (
     "[entrypoint] Discovered plugin: delegation\n[entrypoint] Discovered plugin: observability\n"
 )
-_OK = _NOISE + "[finalize] session-store upload complete (discovered=2 uploaded=2 accepted=2);\n"
-_TIMEOUT = _NOISE + "[finalize] session-store upload TIMED OUT after 2s; spool retained\n"
-_FAILED = _NOISE + "[finalize] session-store upload FAILED (rc=9); spool retained\n"
-_INCOMPLETE = (
-    _NOISE + "[finalize] session-store sweep INCOMPLETE (failed=1): at least one transcript\n"
+# COMPLETE lines, reproducing each terminal `echo` in finalize.sh including the
+# spool clause. The previous fixtures were shortened fragments, which is exactly
+# what concealed a bug: a truncated verdict matched and returned CAPTURED, and
+# no fixture was long enough to notice.
+_SPOOL = "spool retained at /spool/exec-abc/ws-xyz"
+_OK = _NOISE + (
+    f"[finalize] session-store upload complete (discovered=2 uploaded=2 accepted=2); {_SPOOL}\n"
 )
-_UNPARSEABLE = (
-    _NOISE + "[finalize] session-store sweep produced no parseable summary line; treating\n"
+_TIMEOUT = _NOISE + f"[finalize] session-store upload TIMED OUT after 2s; {_SPOOL}\n"
+_FAILED = _NOISE + f"[finalize] session-store upload FAILED (rc=9); {_SPOOL}\n"
+_INCOMPLETE = _NOISE + (
+    "[finalize] session-store sweep INCOMPLETE (failed=1): at least one transcript "
+    f"did not reach the store; {_SPOOL}\n"
+)
+#: The second INCOMPLETE form, which carries a path rather than counters.
+_INCOMPLETE_REJECTION = _NOISE + (
+    "[finalize] session-store sweep INCOMPLETE (unresolved rejection recorded at "
+    "/spool/.sweep-rejected): this sweep's counters are clean, but the store REFUSED "
+    "at least one transcript on an earlier sweep\n"
+)
+_UNPARSEABLE = _NOISE + (
+    "[finalize] session-store sweep produced no parseable summary line; "
+    f"treating as INCOMPLETE, {_SPOOL}\n"
 )
 
 
@@ -302,3 +317,51 @@ class TestTheStreamIsUntrusted:
             "this test to assert the new behaviour and drop the trust caveat "
             "from capture_status.py's module docstring."
         )
+
+
+@pytest.mark.unit
+class TestAMalformedVerdictIsNotSuccess:
+    """A truncated or malformed line must be UNKNOWN, never CAPTURED.
+
+    Anchoring only the START of the line was not enough. These exact inputs
+    returned CAPTURED before the grammars required full structure, and no
+    fixture caught it because every fixture was a shortened fragment rather than
+    a complete finalizer line.
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "[finalize] session-store upload complete (",
+            "[finalize] session-store upload complete (this is not a verdict",
+            "[finalize] session-store upload complete",
+            "[finalize] session-store upload TIMED OUT after",
+            "[finalize] session-store upload FAILED (rc=)",
+            "[finalize] session-store sweep INCOMPLETE (unclosed",
+        ],
+    )
+    def test_truncated_or_malformed_verdicts_are_unknown(self, line: str) -> None:
+        assert parse_capture_status(line + "\n", store_enabled=True).state is CaptureState.UNKNOWN
+
+    def test_the_rejection_form_of_incomplete_is_recognised(self) -> None:
+        # finalize.sh emits TWO INCOMPLETE shapes. The second carries a path
+        # instead of counters, and a grammar written against only the first
+        # would silently downgrade a real verdict to UNKNOWN.
+        out = parse_capture_status(_INCOMPLETE_REJECTION, store_enabled=True)
+        assert out.state is CaptureState.INCOMPLETE
+        # No path is lifted into the stored reason.
+        assert "/spool/.sweep-rejected" not in (out.reason or "")
+
+    def test_every_real_terminal_line_still_classifies(self) -> None:
+        # The regression guard for tightening the grammar: making it stricter
+        # could turn real verdicts into UNKNOWN, which is worse than the bug it
+        # fixes because it fails in the safe-looking direction.
+        for stderr, expected in [
+            (_OK, CaptureState.CAPTURED),
+            (_TIMEOUT, CaptureState.FAILED),
+            (_FAILED, CaptureState.FAILED),
+            (_INCOMPLETE, CaptureState.INCOMPLETE),
+            (_INCOMPLETE_REJECTION, CaptureState.INCOMPLETE),
+            (_UNPARSEABLE, CaptureState.UNKNOWN),
+        ]:
+            assert parse_capture_status(stderr, store_enabled=True).state is expected

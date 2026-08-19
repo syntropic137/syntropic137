@@ -61,16 +61,34 @@ __all__ = [
 #: stderr belongs to the agent or the entrypoint and is not ours to interpret.
 _PREFIX = "[finalize] session-store"
 
-# Anchored to the START of the finalizer's own line. `\[finalize\] session-store`
-# must begin the message, so prose that merely quotes the phrase mid-sentence
-# does not match. See the trust note above for what this does and does not buy.
-_LINE = r"^\[finalize\] session-store "
+# COMPLETE line grammars, matched with fullmatch. Anchoring only the start was
+# not enough: `[finalize] session-store upload complete (` - a truncated line
+# with no counters and no closing paren - matched and returned CAPTURED. A
+# malformed verdict must be UNKNOWN, not success.
+#
+# Each pattern below mirrors one terminal `echo` in finalize.sh. The trailing
+# `.*` after the stable part covers the spool-path clause, whose value varies
+# per workspace; everything BEFORE it is required structure.
+_LINE = r"\[finalize\] session-store "
 
-_RE_COMPLETE = re.compile(_LINE + r"upload complete \(")
-_RE_TIMEOUT = re.compile(_LINE + r"upload TIMED OUT after (\d+)s")
-_RE_FAILED = re.compile(_LINE + r"upload FAILED \(rc=(\d+)\)")
-_RE_INCOMPLETE = re.compile(_LINE + r"sweep INCOMPLETE \(")
-_RE_UNPARSEABLE = re.compile(_LINE + r"sweep produced no parseable summary line")
+#: `upload complete (<counters>); spool retained at <dir>`
+#: The counter list is required and must be closed. A verdict with no counters
+#: is not a verdict.
+_RE_COMPLETE = re.compile(_LINE + r"upload complete \([^)]*\);.*")
+
+#: `upload TIMED OUT after <n>s; spool retained at <dir>`
+_RE_TIMEOUT = re.compile(_LINE + r"upload TIMED OUT after (\d+)s;.*")
+
+#: `upload FAILED (rc=<n>); spool retained at <dir>`
+_RE_FAILED = re.compile(_LINE + r"upload FAILED \(rc=(\d+)\);.*")
+
+#: Two forms, both closing the parenthesis before the colon:
+#:   `sweep INCOMPLETE (<counters>): at least one transcript ...`
+#:   `sweep INCOMPLETE (unresolved rejection recorded at <path>): ...`
+_RE_INCOMPLETE = re.compile(_LINE + r"sweep INCOMPLETE \([^)]*\):.*")
+
+#: `sweep produced no parseable summary line; treating as INCOMPLETE ...`
+_RE_UNPARSEABLE = re.compile(_LINE + r"sweep produced no parseable summary line;.*")
 
 #: Counters the exporter prints on its summary line. Declared here so the names
 #: this side reads are spelled once.
@@ -182,24 +200,24 @@ def _classify(line: str) -> CaptureOutcome | None:
     """
     counters = _counters_from(line)
 
-    if _RE_COMPLETE.search(line):
+    if _RE_COMPLETE.fullmatch(line):
         return CaptureOutcome(state=CaptureState.CAPTURED, counters=counters)
 
-    if m := _RE_TIMEOUT.search(line):
+    if m := _RE_TIMEOUT.fullmatch(line):
         return CaptureOutcome(
             state=CaptureState.FAILED,
             reason=f"upload timed out after {m.group(1)}s",
             counters=counters,
         )
 
-    if m := _RE_FAILED.search(line):
+    if m := _RE_FAILED.fullmatch(line):
         return CaptureOutcome(
             state=CaptureState.FAILED,
             reason=f"exporter exited {m.group(1)}",
             counters=counters,
         )
 
-    if _RE_INCOMPLETE.search(line):
+    if _RE_INCOMPLETE.fullmatch(line):
         # The reason is REBUILT from whitelisted numeric fields, never copied
         # from the line. The finalizer puts free text in those parentheses, and
         # this field is persisted and displayed: an exporter build that printed
@@ -216,7 +234,7 @@ def _classify(line: str) -> CaptureOutcome | None:
             counters=counters,
         )
 
-    if _RE_UNPARSEABLE.search(line):
+    if _RE_UNPARSEABLE.fullmatch(line):
         return CaptureOutcome(
             state=CaptureState.UNKNOWN,
             reason="the exporter produced no parseable summary line",
