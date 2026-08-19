@@ -72,6 +72,44 @@ needs a durable artifact. The candidates are the existing artifact storage
 (MinIO, which already receives per-execution artifacts) or a host-side spool.
 **Deciding that source is now the first design task of Phase 3, not Phase 5.**
 
+## Durable spool: DECIDED - host-backed `/workspace`, collected to MinIO
+
+The open question was where transcripts live so they survive a container that
+dies before uploading. The answer is that the durable path already exists and
+the spool simply is not on it.
+
+- `/workspace` is a **host bind mount** (`providers/docker.py`,
+  `-v {workspace_dir}:/workspace:rw`). Anything written there outlives the
+  container by construction.
+- `/spool` is tmpfs (as of agentic-primitives #345) and is RAM-backed, so it
+  dies with the container. That fix made the capability FUNCTION; it did not
+  make it durable, and was never claimed to.
+- Syntropic137 already collects `artifacts/output/**` out of `/workspace` into
+  MinIO via `ArtifactCollector.collect_from_workspace`. That is the existing
+  machinery, already wired, already tested.
+
+**Decision:** transcripts land under the host-backed workspace directory, and
+Syntropic137 collects them into MinIO alongside artifacts. Backfill then reads
+from MinIO and POSTs to the store - a script, not a new subsystem, which is what
+the user asked for.
+
+Consequences worth stating:
+
+1. **No new storage system.** No host spool directory to quota, own, or garbage
+   collect; no new volume lifecycle. This was the main cost of the alternative.
+2. **Ordering matters.** `destroy()` deletes the host workspace directory
+   (`providers/docker.py`, `shutil.rmtree`). Collection must happen before
+   destroy - which it already does in the normal flow - and the reaper must not
+   force-remove a workspace whose transcripts have not been collected.
+3. **The prune hazard is gone.** An earlier agentic-primitives design rejected
+   `/workspace` as a spool location because the capability's prune could escape
+   its partition (`SPOOL=/workspace PARTITION=repos` -> `rm -rf /workspace/repos`).
+   That prune was REMOVED in AP #303 precisely because it caused data loss, so
+   the objection no longer applies. Do not reintroduce a prune.
+4. **This is what makes fail-open safe.** A store outage now costs a delayed
+   upload rather than a lost session, because the transcript is in MinIO
+   regardless of whether the in-container upload succeeded.
+
 ## Why it does not work today
 
 Seven independent defects. Each one alone is sufficient to prevent a single
