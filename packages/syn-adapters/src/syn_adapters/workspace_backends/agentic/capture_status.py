@@ -268,7 +268,11 @@ def parse_capture_status(container_stderr: str, *, store_enabled: bool) -> Captu
 
     # Last line wins: the finalizer's terminal verdict is its final word.
     for line in reversed(lines):
-        if outcome := _classify(line):
+        # `is not None`, not truthiness: a CaptureOutcome is never falsy today,
+        # but relying on that makes the loop silently depend on the model never
+        # gaining __bool__ or __len__. Say what is meant.
+        outcome = _classify(line)
+        if outcome is not None:
             return outcome
 
     # Lines carrying the prefix but no recognised verdict. Counters are left
