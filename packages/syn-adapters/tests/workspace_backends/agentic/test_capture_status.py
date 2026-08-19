@@ -125,3 +125,37 @@ class TestCountersAndSafety:
         out = parse_capture_status(leaked, store_enabled=True)
         assert "sk-super-secret-value" not in (out.reason or "")
         assert "sk-super-secret-value" not in str(out.counters)
+
+
+@pytest.mark.unit
+class TestCaptureIsTelemetryNotDomainState:
+    """Capture belongs on Lane 2 (observability), never Lane 1 (event sourcing).
+
+    Whether a transcript reached the central store has no bearing on whether the
+    workflow succeeded, and must never acquire one. If a failed upload could
+    fail an execution, the fail-open policy would be silently reversed by the
+    back door.
+    """
+
+    def test_there_is_an_observation_type_for_it(self) -> None:
+        from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+            ObservationType,
+        )
+
+        assert ObservationType.SESSION_CAPTURE.value == "session_capture"
+
+    def test_every_state_is_representable_as_observation_data(self) -> None:
+        # The outcome has to survive the trip through record_observation, which
+        # takes a plain dict. A state that cannot round-trip would be recorded
+        # as something else, and a wrong record is worse than none.
+        for stderr, enabled in [
+            (_OK, True),
+            (_FAILED, True),
+            (_INCOMPLETE, True),
+            (_UNPARSEABLE, True),
+            ("", False),
+        ]:
+            out = parse_capture_status(stderr, store_enabled=enabled)
+            data = out.model_dump(mode="json")
+            assert data["state"] == out.state.value
+            assert set(data) == {"state", "reason", "counters"}
