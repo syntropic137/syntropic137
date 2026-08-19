@@ -140,6 +140,27 @@ class SessionStoreSettings(BaseSettings):
         return bool(self.url and self.url.strip())
 
     @property
+    def is_unauthenticated(self) -> bool:
+        """True when a store URL is set but no write token is.
+
+        This is a LEGITIMATE configuration - an open store on a trusted network
+        is a real deployment - so it is deliberately not an error and does not
+        disable capture.
+
+        It is surfaced because it is also the shape of the most common
+        misconfiguration, and the failure mode is silent: the capability's
+        preflight probes an UNAUTHENTICATED health endpoint, so every check
+        passes, the workspace starts normally, and the write is rejected with
+        401 only at finalize - where the exporter's diagnostic is deliberately
+        suppressed to avoid leaking the credential. The operator sees a bare
+        failure count with no cause.
+
+        Callers should warn on this at startup. It must never silently disable
+        capture for an operator who deliberately configured an open store.
+        """
+        return self.is_enabled and not self.auth_value
+
+    @property
     def auth_value(self) -> str:
         """The write token as a plain string, or empty when unset.
 

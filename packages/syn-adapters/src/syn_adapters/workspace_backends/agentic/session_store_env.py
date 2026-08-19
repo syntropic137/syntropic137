@@ -70,6 +70,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "TAG_DEPLOYMENT",
     "TAG_EXECUTION_ID",
     "TAG_PHASE_ID",
     "TAG_SOURCE",
@@ -90,10 +91,36 @@ TAG_EXECUTION_ID = "execution_id"
 TAG_WORKSPACE_ID = "workspace_id"
 TAG_WORKFLOW_ID = "workflow_id"
 TAG_PHASE_ID = "phase_id"
+TAG_DEPLOYMENT = "deployment"
 
 #: Value of the ``source`` tag. Lets the store distinguish Syn137-originated
 #: sessions from sessions captured by any other agentic-primitives consumer.
 SOURCE_SYNTROPIC137 = "syntropic137"
+
+#: Separator in the ``<app>__<tier>`` deployment convention (APS-V1-0004
+#: ``origin.deployment``). Double underscore because app names and hostnames
+#: routinely contain hyphens and dots but not ``__``, so a consumer can split
+#: on the FIRST occurrence without ambiguity.
+DEPLOYMENT_SEPARATOR = "__"
+
+
+def deployment_identity(app_environment: str) -> str:
+    """``syntropic137__<app_environment>`` - which deployment produced a session.
+
+    This is deliberately NOT the same question as the envelope's
+    ``origin.environment``, which is the CLASS of runtime (``container``,
+    ``workflow``, ``local``, ``vps``) and is set by the capability. Every
+    Syn137 workspace reports the same class, so without a deployment identity a
+    multi-tier install is unattributable: dev, beta and prod are indistinguishable
+    in the corpus.
+
+    The tier is the raw ``AppEnvironment`` value (``development``, ``beta``,
+    ``production``, ``selfhost``), not an abbreviation. A mapping table like
+    ``development -> dev`` is a second source of truth that drifts from the enum
+    the rest of the platform switches on, and buys nothing but four characters.
+    """
+    return f"{SOURCE_SYNTROPIC137}{DEPLOYMENT_SEPARATOR}{app_environment}"
+
 
 #: Substituted for any character that is not safe in a single path segment.
 _UNSAFE_SEGMENT_CHARS = re.compile(r"[^A-Za-z0-9._-]")
@@ -179,6 +206,7 @@ def _build_tags(
     workspace_id: str,
     workflow_id: str | None,
     phase_id: str | None,
+    deployment: str | None,
 ) -> str:
     """Comma-separated ``key:value`` tags that join a store row to an execution.
 
@@ -191,6 +219,7 @@ def _build_tags(
         (TAG_WORKSPACE_ID, workspace_id),
         (TAG_WORKFLOW_ID, workflow_id),
         (TAG_PHASE_ID, phase_id),
+        (TAG_DEPLOYMENT, deployment),
     ]
 
     rendered: list[str] = []
@@ -210,6 +239,7 @@ def build_session_store_env(
     workspace_id: str,
     workflow_id: str | None = None,
     phase_id: str | None = None,
+    deployment: str | None = None,
 ) -> dict[str, str]:
     """Return the session-store variables for one workspace container.
 
@@ -238,6 +268,7 @@ def build_session_store_env(
             workspace_id=workspace_id,
             workflow_id=workflow_id,
             phase_id=phase_id,
+            deployment=deployment,
         ),
     }
 
@@ -257,6 +288,7 @@ def apply_session_store_env(
     workspace_id: str,
     workflow_id: str | None = None,
     phase_id: str | None = None,
+    deployment: str | None = None,
 ) -> dict[str, str]:
     """Return ``caller_environment`` with the reserved contract keys enforced.
 
@@ -298,6 +330,25 @@ def apply_session_store_env(
             workspace_id,
         )
 
+    # A store URL with no write token is a legitimate deployment (an open store
+    # on a trusted network), so this warns rather than refusing. But it is also
+    # the shape of the most common misconfiguration, and its failure mode is
+    # silent: the capability's preflight probes an UNAUTHENTICATED health
+    # endpoint, so every check passes and the workspace starts normally, while
+    # the write is rejected 401 at finalize with the exporter's diagnostic
+    # deliberately suppressed to avoid leaking the credential. The operator is
+    # left with a bare failure count and no cause. Say it once, here, loudly.
+    if settings.is_unauthenticated:
+        logger.warning(
+            "Session store is configured WITHOUT a write token "
+            "(SYN_SESSION_STORE_AUTH_TOKEN is unset). If the store requires "
+            "authentication, every session from this workspace will be rejected "
+            "at upload and the failure will not name a cause "
+            "(execution=%s, workspace=%s).",
+            execution_id,
+            workspace_id,
+        )
+
     environment.update(
         build_session_store_env(
             settings,
@@ -305,6 +356,7 @@ def apply_session_store_env(
             workspace_id=workspace_id,
             workflow_id=workflow_id,
             phase_id=phase_id,
+            deployment=deployment,
         )
     )
     return environment

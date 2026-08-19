@@ -16,9 +16,11 @@ from pydantic import SecretStr
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
 from syn_adapters.workspace_backends.agentic.session_store_env import (
+    DEPLOYMENT_SEPARATOR,
     apply_session_store_env,
     build_session_store_env,
     decode_tag_value,
+    deployment_identity,
     encode_tag_value,
     sanitize_partition_segment,
 )
@@ -372,6 +374,11 @@ class TestAdapterIntegration:
             "workspace_id": "ws-xyz",
             "workflow_id": "wf-1",
             "phase_id": "phase-1",
+            # Which deployment produced this session. Only the adapter path
+            # resolves this, from APP_ENVIRONMENT - which is "test" here. The
+            # direct build_session_store_env test above passes no deployment
+            # and correctly gets no tag.
+            "deployment": "syntropic137__test",
         }
         # Pre-existing environment is preserved.
         assert ws_config.environment["EXISTING_VAR"] == "kept"
@@ -523,3 +530,26 @@ class TestSecretHandling:
         assert STORE_TOKEN not in repr(settings)
         assert STORE_TOKEN not in str(settings)
         assert STORE_TOKEN not in str(settings.auth_token)
+
+
+@pytest.mark.unit
+class TestDeploymentIdentity:
+    """`origin.environment` is the runtime CLASS; this is WHICH deployment.
+
+    Every Syn137 workspace reports the same class, so without this a multi-tier
+    install is unattributable in the corpus.
+    """
+
+    def test_uses_the_app_env_double_underscore_convention(self) -> None:
+        assert deployment_identity("beta") == "syntropic137__beta"
+
+    def test_tier_is_the_raw_app_environment_value_not_an_abbreviation(self) -> None:
+        # AppEnvironment.DEVELOPMENT serialises as "development". A
+        # development -> dev mapping would be a second source of truth that
+        # drifts from the enum the rest of the platform switches on.
+        assert deployment_identity("development") == "syntropic137__development"
+
+    def test_splitting_on_the_first_separator_recovers_app_and_tier(self) -> None:
+        app, _, tier = deployment_identity("production").partition(DEPLOYMENT_SEPARATOR)
+        assert app == "syntropic137"
+        assert tier == "production"

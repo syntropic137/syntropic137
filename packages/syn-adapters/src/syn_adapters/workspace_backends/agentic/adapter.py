@@ -25,6 +25,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
 )
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     apply_session_store_env,
+    deployment_identity,
 )
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
@@ -167,7 +168,24 @@ class AgenticIsolationAdapter:
             workspace_id=config.workspace_id,
             workflow_id=config.workflow_id,
             phase_id=config.phase_id,
+            # Which Syn137 deployment produced this session. Without it every
+            # workspace across dev, beta and prod is indistinguishable in the
+            # corpus: the envelope's own origin.environment is the runtime
+            # CLASS, which is the same value for all of them.
+            deployment=self._deployment_identity(),
         )
+
+    @staticmethod
+    def _deployment_identity() -> str:
+        """``syntropic137__<app_environment>`` for this deployment.
+
+        Imported locally, matching how session-store settings are resolved above:
+        syn_shared settings resolve 1Password at first construction, so importing
+        at module scope would make that a side effect of importing the adapter.
+        """
+        from syn_shared.settings import get_settings
+
+        return deployment_identity(str(get_settings().app_environment))
 
     async def create(self, config: IsolationConfig) -> IsolationHandle:
         """Create an isolated workspace container.

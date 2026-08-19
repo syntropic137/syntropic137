@@ -146,3 +146,28 @@ class TestNoScatteredEnvNameLiterals:
     def test_contract_set_matches_the_six_constants(self) -> None:
         assert len(SESSION_STORE_CONTRACT_ENV_VARS) == 6
         assert all(n.startswith("AGENTIC_SESSION_STORE_") for n in SESSION_STORE_CONTRACT_ENV_VARS)
+
+
+@pytest.mark.unit
+class TestUnauthenticatedIsSurfacedNotRefused:
+    """A URL with no token is legitimate, and also the common mistake.
+
+    It must stay enabled - refusing would break an open store on a trusted
+    network - but it must be detectable, because its failure mode is a 401 at
+    finalize with the diagnostic suppressed.
+    """
+
+    def test_url_without_token_stays_enabled(self) -> None:
+        s = SessionStoreSettings(url="https://store.example.com", auth_token=None)
+        assert s.is_enabled
+        assert s.is_unauthenticated
+
+    def test_url_with_token_is_not_flagged(self) -> None:
+        s = SessionStoreSettings(url="https://store.example.com", auth_token=SecretStr("t"))
+        assert s.is_enabled
+        assert not s.is_unauthenticated
+
+    def test_disabled_store_is_never_flagged(self) -> None:
+        s = SessionStoreSettings(url=None)
+        assert not s.is_enabled
+        assert not s.is_unauthenticated
