@@ -298,6 +298,25 @@ def apply_session_store_env(
             workspace_id,
         )
 
+    # A store URL with no write token is a legitimate deployment (an open store
+    # on a trusted network), so this warns rather than refusing. But it is also
+    # the shape of the most common misconfiguration, and its failure mode is
+    # silent: the capability's preflight probes an UNAUTHENTICATED health
+    # endpoint, so every check passes and the workspace starts normally, while
+    # the write is rejected 401 at finalize with the exporter's diagnostic
+    # deliberately suppressed to avoid leaking the credential. The operator is
+    # left with a bare failure count and no cause. Say it once, here, loudly.
+    if settings.is_unauthenticated:
+        logger.warning(
+            "Session store is configured WITHOUT a write token "
+            "(SYN_SESSION_STORE_AUTH_TOKEN is unset). If the store requires "
+            "authentication, every session from this workspace will be rejected "
+            "at upload and the failure will not name a cause "
+            "(execution=%s, workspace=%s).",
+            execution_id,
+            workspace_id,
+        )
+
     environment.update(
         build_session_store_env(
             settings,

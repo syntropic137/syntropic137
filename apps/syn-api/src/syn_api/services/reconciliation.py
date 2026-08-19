@@ -64,6 +64,37 @@ async def _docker_rm(filter_arg: str, label: str) -> None:
             return
 
         logger.warning("Stopping %d orphaned %s container(s): %s", len(ids), label, ids)
+
+        # `docker stop` BEFORE `rm -f`, and the log line above is why this
+        # matters. It has always said "Stopping"; the command was `rm -f`, which
+        # SIGKILLs. Any capability finalizer - session capture in particular -
+        # never ran, so a completed agent run could lose its transcript while
+        # the operator's log reported a clean stop.
+        #
+        # A bounded stop gives the entrypoint's finalizers their signal path.
+        # -t 5 matches the normal destroy path in agentic-primitives; failures
+        # here are deliberately ignored because `rm -f` below is the backstop
+        # and reaping must not be blockable by a container that will not stop.
+        stop_first = await asyncio.create_subprocess_exec(
+            "docker",
+            "stop",
+            "-t",
+            "5",
+            *ids,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            await asyncio.wait_for(stop_first.wait(), timeout=20)
+        except TimeoutError:
+            stop_first.kill()
+            await stop_first.wait()
+            logger.warning(
+                "docker stop timed out for %s container(s); forcing removal, "
+                "any pending session capture in them is lost",
+                label,
+            )
+
         stop_proc = await asyncio.create_subprocess_exec(
             "docker",
             "rm",
