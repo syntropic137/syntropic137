@@ -447,20 +447,35 @@ jobs:
     name: Default Workspace Image
     runs-on: ubuntu-latest
     steps:
+      # Full history: the path filter below diffs against the base ref, and a
+      # shallow clone has no merge base with it. The first version of this job
+      # used the default depth, the diff failed with "no merge base", the else
+      # branch ran, and the job reported "pin cannot have changed" and passed -
+      # a false green in the gate written to catch false greens.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
 
       - name: Check whether the pinned default could have changed
         id: filter
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           git fetch --quiet origin "${{ github.base_ref }}"
-          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -qE 'workspace_images\.py|justfile|\.github/workflows/ci\.yml'; then
+          # FAIL CLOSED. If the diff cannot be computed we do not know whether
+          # the pin moved, and "we do not know" must mean run the check, not
+          # skip it. Only a diff that succeeds AND matches nothing may skip.
+          if ! CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" 2>&1); then
+            echo "::warning::Could not diff against origin/${{ github.base_ref }} ($CHANGED). Running the check rather than assuming the pin is unchanged."
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if echo "$CHANGED" | grep -qE 'workspace_images\.py|justfile|\.github/workflows/ci\.yml'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Pin cannot have changed; skipping the image pull."
+            echo "Pin provably unchanged in this diff; skipping the image pull."
           fi
 
       - name: Install uv
