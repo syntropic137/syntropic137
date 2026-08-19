@@ -455,6 +455,10 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           fetch-depth: 0
+          # The recipe resolves the pin by importing syn_shared, and this repo's
+          # uv workspace has editable members inside lib/agentic-primitives, so
+          # `uv run` cannot resolve the environment without them.
+          submodules: true
 
       - name: Check whether the pinned default could have changed
         id: filter
