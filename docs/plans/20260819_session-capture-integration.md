@@ -89,9 +89,26 @@ depends on `apss-v1-0004-session-capture` plus third-party crates and **nothing
 else in the SeshMagic workspace**. No dependency on the envelope crate, the
 server crate, or any private type. Extraction is a move, not a refactor.
 
-**2.1 Move the crate to its OWN public AgentParadise repo.** Suggested name
-`session-capture-exporter` (not "seshmagic-*"): the rename is the point, since a
-workspace image cannot depend on a binary named for one vendor's product.
+**2.1 Move the crate to its OWN public AgentParadise repo:
+`agentic-session-exporter`.** The rename is the point, not incidental: a
+workspace image cannot depend on a binary named for one vendor's product. The
+name also matches the existing family - `agentic-primitives`, `agentic-memory`,
+`agentic-isolation`, `agentic-events`, `agentic-logging`.
+
+**One adjacency to keep straight, because the names are one word apart.**
+agentic-primitives already ships `lib/python/agentic_session_store`. These are
+different things and neither should absorb the other:
+
+| | `agentic_session_store` (in agentic-primitives) | `agentic-session-exporter` (new repo) |
+|---|---|---|
+| What | The `AGENTIC_SESSION_STORE_*` contract types and the five-check doctor | The binary that reads transcripts and POSTs envelopes |
+| Where it runs | In-image, at workspace preflight | In-image at finalize, AND on laptops and VPSes |
+| Language | Python | Rust |
+| Profile | none - it validates the environment | implements the standard's Exporter profile |
+
+The doctor CHECKS that an exporter is present and healthy; the exporter DOES the
+capture. G3 exists precisely because those two sides had no shared contract, so
+keeping the distinction sharp in naming and docs is part of the fix.
 
 Its own repo rather than a directory inside agentic-primitives, for three
 reasons that all point the same way:
