@@ -1,7 +1,8 @@
 # Plan: make session capture work in Syntropic137 workspaces
 
 **Date:** 2026-08-19
-**Status:** draft, pending codex review
+**Status:** v1 reviewed NO-GO by codex; v2 in revision
+**Availability policy:** DECIDED - see below
 **Goal:** a Syntropic137 workflow phase produces an agent session that lands in
 the central store, attributable to its deployment tier, with no vendor coupling
 in the workspace image.
@@ -25,6 +26,89 @@ depends on a vendor-neutral binary that implements a public contract.
 This is the ordinary observability split (Sentry SDKs / sentry.io; Datadog agent /
 Datadog backend). The client is public because users run it on their own machines
 and will want to read it. The store is the product.
+
+## Availability policy (user decision, 2026-08-19)
+
+**Capture MUST NOT block agent execution.** A store outage, a DNS failure, or an
+expired token must never stop a workflow from running. Uptime of the platform is
+not to be coupled to uptime of the session store.
+
+This overrides the review's recommendation to add an authenticated
+write-readiness check to the fail-closed preflight. The reasoning behind that
+recommendation is still valid and is answered differently below, not ignored.
+
+Three consequences, and they are the design, not caveats:
+
+**1. The session-store doctor checks become NON-FATAL.** Today every capability
+doctor failure hard-fails the workspace before agent work starts
+(`workspace/entrypoint.sh:420`). For this capability that is the wrong trade:
+it converts "we cannot record what happened" into "nothing happens at all".
+The capability needs a degraded mode, which the entrypoint's current
+all-or-nothing contract does not express. Note this is a change to the ADR-040
+capability contract, not just to one adapter, and it is the single largest
+correction from v1.
+
+**2. A clear indicator is REQUIRED, because fail-open without one is silent data
+loss.** This is the part that makes fail-open safe rather than negligent. The
+platform must be able to answer, per execution: was capture attempted, did it
+succeed, and if not why. Concretely:
+- doctor outcome recorded as an observability event, not only as a container log
+  line, and surfaced on the session/execution view
+- finalize result parsed into structured counts (discovered / uploaded /
+  accepted / rejected / failed) rather than reconstructed from stderr text
+- a visible state per execution: `captured`, `pending`, `failed`, `disabled`
+- the failure reason carried through, without leaking the credential
+
+**3. Backfill is a first-class requirement, not a recovery afterthought.** Since
+a run can complete with its capture unsent, there must be a supported path to
+send it later. A manual script is acceptable for v1 - the user explicitly said
+so - but it must exist before capture is enabled anywhere real, and it must be
+able to reach the transcripts of a workflow that has already finished.
+
+That last clause is the hard part and it interacts with G7: if the spool is
+tmpfs and dies with the container, there is nothing left to backfill FROM. So
+fail-open does not remove the durability requirement, it sharpens it. Backfill
+needs a durable artifact. The candidates are the existing artifact storage
+(MinIO, which already receives per-execution artifacts) or a host-side spool.
+**Deciding that source is now the first design task of Phase 3, not Phase 5.**
+
+## Durable spool: DECIDED - host-backed `/workspace`, collected to MinIO
+
+The open question was where transcripts live so they survive a container that
+dies before uploading. The answer is that the durable path already exists and
+the spool simply is not on it.
+
+- `/workspace` is a **host bind mount** (`providers/docker.py`,
+  `-v {workspace_dir}:/workspace:rw`). Anything written there outlives the
+  container by construction.
+- `/spool` is tmpfs (as of agentic-primitives #345) and is RAM-backed, so it
+  dies with the container. That fix made the capability FUNCTION; it did not
+  make it durable, and was never claimed to.
+- Syntropic137 already collects `artifacts/output/**` out of `/workspace` into
+  MinIO via `ArtifactCollector.collect_from_workspace`. That is the existing
+  machinery, already wired, already tested.
+
+**Decision:** transcripts land under the host-backed workspace directory, and
+Syntropic137 collects them into MinIO alongside artifacts. Backfill then reads
+from MinIO and POSTs to the store - a script, not a new subsystem, which is what
+the user asked for.
+
+Consequences worth stating:
+
+1. **No new storage system.** No host spool directory to quota, own, or garbage
+   collect; no new volume lifecycle. This was the main cost of the alternative.
+2. **Ordering matters.** `destroy()` deletes the host workspace directory
+   (`providers/docker.py`, `shutil.rmtree`). Collection must happen before
+   destroy - which it already does in the normal flow - and the reaper must not
+   force-remove a workspace whose transcripts have not been collected.
+3. **The prune hazard is gone.** An earlier agentic-primitives design rejected
+   `/workspace` as a spool location because the capability's prune could escape
+   its partition (`SPOOL=/workspace PARTITION=repos` -> `rm -rf /workspace/repos`).
+   That prune was REMOVED in AP #303 precisely because it caused data loss, so
+   the objection no longer applies. Do not reintroduce a prune.
+4. **This is what makes fail-open safe.** A store outage now costs a delayed
+   upload rather than a lost session, because the transcript is in MinIO
+   regardless of whether the in-container upload succeeded.
 
 ## Why it does not work today
 
