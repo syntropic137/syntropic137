@@ -710,9 +710,17 @@ check-default-workspace-image:
     echo "🔎 Default workspace image: $IMAGE"
     docker pull --quiet "$IMAGE" >/dev/null
     FAILED=0
+    # Probe THROUGH the image's entrypoint, not around it. `--entrypoint <bin>`
+    # would prove the binaries exist while bypassing /opt/agentic/entrypoint.sh,
+    # which is what configures the workspace and launches the command - and an
+    # entrypoint regression reaching :latest is the documented incident that
+    # motivated digest pinning in the first place. A check that cannot catch the
+    # regression it exists for is worse than no check.
     for probe in claude codex skills; do
-        if OUT=$(docker run --rm --entrypoint "$probe" "$IMAGE" --version 2>&1); then
-            echo "  ✅ $probe: $OUT"
+        if OUT=$(docker run --rm "$IMAGE" "$probe" --version 2>&1); then
+            # The entrypoint logs plugin discovery before handing off, so the
+            # version is the LAST line, not the whole output.
+            echo "  ✅ $probe: $(echo "$OUT" | tail -1)"
         else
             echo "  ❌ $probe: FAILED"
             echo "$OUT" | sed 's/^/       /'
