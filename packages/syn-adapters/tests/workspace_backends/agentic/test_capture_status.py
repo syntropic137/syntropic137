@@ -445,13 +445,41 @@ class TestNewFinalizerVerdicts:
         )
         assert parse_capture_status(line, store_enabled=True).state is CaptureState.INCOMPLETE
 
-    def test_a_complete_line_carrying_unconfirmed_zero_still_reads_captured(self) -> None:
+    def test_a_complete_line_may_not_carry_unconfirmed_at_all(self) -> None:
+        # An earlier version of this test asserted the opposite, and was
+        # asserting fiction: finalize.sh reconstructs the COMPLETE line from
+        # its own counter list, which has never included `unconfirmed`.
+        #
+        # Worse, admitting it there turned `upload complete (unconfirmed=1)`
+        # into CAPTURED with needs_backfill False. A false success is the one
+        # outcome this module exists to prevent, so the complete grammar stays
+        # narrow and a line like this reads as UNKNOWN.
         line = (
             "[finalize] session-store upload complete (discovered=1 skipped_unchanged=0 "
-            "uploaded=1 accepted=1 duplicate=0 rejected=0 skipped_oversize=0 failed=0 "
-            "unconfirmed=0); spool retained at /spool/p"
+            "uploaded=1 accepted=0 duplicate=0 rejected=0 skipped_oversize=0 failed=0 "
+            "unconfirmed=1); spool retained at /spool/p"
         )
-        assert parse_capture_status(line, store_enabled=True).state is CaptureState.CAPTURED
+        outcome = parse_capture_status(line, store_enabled=True)
+        assert outcome.state is CaptureState.UNKNOWN
+        assert outcome.needs_backfill, "an unreadable verdict must still be re-sent"
+
+    def test_an_unrecognised_rc_reads_unknown(self) -> None:
+        # The finalizer emits exactly rc=3. A different code means something
+        # this parser has not been taught, and must not be quietly accepted.
+        line = (
+            "[finalize] session-store sweep INCOMPLETE "
+            f"(exporter reported an incomplete sweep (rc=9)): {self._TAIL}"
+        )
+        assert parse_capture_status(line, store_enabled=True).state is CaptureState.UNKNOWN
+
+    def test_the_unconfirmed_detail_survives_into_the_reason(self) -> None:
+        # Collapsing to a bare "sweep incomplete" tells an operator nothing
+        # about WHICH failure it was.
+        line = f"[finalize] session-store sweep INCOMPLETE (unconfirmed=2): {self._TAIL}"
+        outcome = parse_capture_status(line, store_enabled=True)
+        assert outcome.state is CaptureState.INCOMPLETE
+        assert "unconfirmed=2" in outcome.reason, outcome.reason
+        assert outcome.needs_backfill
 
     def test_an_unknown_counter_name_still_does_not_match(self) -> None:
         # The list stays CLOSED. Widening it to accept any name would let prose

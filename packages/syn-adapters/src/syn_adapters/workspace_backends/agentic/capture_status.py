@@ -81,10 +81,22 @@ _PREFIX = "[finalize] session-store"
 # line simply stops matching and the sweep is recorded as UNKNOWN, so a
 # genuinely INCOMPLETE capture is reported as one nobody could read. Any counter
 # name added to finalize.sh has to be added here in the same change.
-_COUNTER_PAIR = (
+#: Names finalize.sh reconstructs onto a COMPLETE line. Deliberately WITHOUT
+#: `unconfirmed`: that counter can only be nonzero on a sweep the finalizer
+#: reports as INCOMPLETE, so a complete line carrying it is not a line the
+#: producer can emit. Accepting it here would turn
+#: `upload complete (unconfirmed=1)` into CAPTURED with needs_backfill False -
+#: a false success, which is the failure this whole module exists to prevent.
+_COMPLETE_PAIR = (
     r"(?:discovered|skipped_unchanged|uploaded|accepted|duplicate|rejected"
-    r"|skipped_oversize|failed|unconfirmed)=\d+"
+    r"|skipped_oversize|failed)=\d+"
 )
+_COMPLETE_LIST = rf"{_COMPLETE_PAIR}(?: {_COMPLETE_PAIR})*"
+
+#: Names that can appear as an INCOMPLETE reason. A superset: every complete
+#: name, plus `unconfirmed`, which the exporter added for envelopes it SENT
+#: and the store never acknowledged.
+_COUNTER_PAIR = rf"(?:{_COMPLETE_PAIR}|unconfirmed=\d+)"
 _COUNTER_LIST = rf"{_COUNTER_PAIR}(?: {_COUNTER_PAIR})*"
 
 #: Every terminal line ends with this clause and a non-empty path.
@@ -93,7 +105,7 @@ _SPOOL_SUFFIX = r"spool retained at \S.*"
 _LINE = r"\[finalize\] session-store "
 
 #: `upload complete (<ordered counters>); spool retained at <path>`
-_RE_COMPLETE = re.compile(_LINE + rf"upload complete \({_COUNTER_LIST}\); {_SPOOL_SUFFIX}")
+_RE_COMPLETE = re.compile(_LINE + rf"upload complete \({_COMPLETE_LIST}\); {_SPOOL_SUFFIX}")
 
 #: `upload TIMED OUT after <n>s; spool retained at <path>`
 _RE_TIMEOUT = re.compile(_LINE + rf"upload TIMED OUT after (\d+)s; {_SPOOL_SUFFIX}")
@@ -108,7 +120,10 @@ _RE_FAILED = re.compile(_LINE + rf"upload FAILED \(rc=(\d+)\); {_SPOOL_SUFFIX}")
 #: knows about explains the loss. finalize.sh emits it as
 #: `exporter reported an incomplete sweep (rc=3)`, so the reason itself
 #: contains parentheses and cannot be matched with `[^)]*`.
-_RC_REASON = r"exporter reported an incomplete sweep \(rc=\d+\)"
+#: Exactly rc=3, not \d+. The finalizer emits only 3 here, and a closed
+#: grammar is the point: a different code means something this parser has not
+#: been taught, which must read as UNKNOWN rather than be quietly accepted.
+_RC_REASON = r"exporter reported an incomplete sweep \(rc=3\)"
 
 _RE_INCOMPLETE = re.compile(
     _LINE
@@ -136,6 +151,11 @@ _COUNTERS = (
     "rejected",
     "skipped_oversize",
     "failed",
+    # Added by the exporter alongside exit 3: envelopes SENT for which the
+    # store returned no matching outcome. Listed so the detail survives into
+    # the outcome instead of the reason collapsing to a bare "sweep
+    # incomplete", which tells an operator nothing about which failure it was.
+    "unconfirmed",
 )
 
 
@@ -256,7 +276,7 @@ def _classify(line: str) -> CaptureOutcome | None:
         blocking = {
             k: v
             for k, v in counters.items()
-            if k in ("failed", "rejected", "skipped_oversize") and v
+            if k in ("failed", "rejected", "skipped_oversize", "unconfirmed") and v
         }
         detail = ", ".join(f"{k}={v}" for k, v in sorted(blocking.items()))
         return CaptureOutcome(
