@@ -139,6 +139,25 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # interactive-tmux built by the same workflow run matrix; it is published to
 #                  GHCR (it is one of the two providers in the build matrix of
 #                  agentic-primitives .github/workflows/build-workspace-images.yml).
+# omni-agent       built from agentic-primitives 1bc7253. Verified on
+#                  2026-08-20 by running OUT OF THIS DIGEST: the baked
+#                  exporter reports "apss-session-exporter 0.3.0", and the
+#                  session-store finalizer both understands the exporter's new
+#                  exit 3 and parses its new `unconfirmed` counter.
+#
+#                  v0.3.0 is the release that stops recording a REFUSED
+#                  transcript as sent. Before it, the uploader marked every
+#                  item in a successful batch as done, rejections included, so
+#                  the next sweep skipped the refused transcript as
+#                  skipped_unchanged and reported success. One transient
+#                  rejection became permanent silent absence from the store.
+#
+#                  The image carries both halves deliberately: an exporter
+#                  emitting exit 3 alongside a finalizer that would otherwise
+#                  read it as a total upload failure would report every partial
+#                  capture as a failed one.
+#
+#                  Previous pin, for the record:
 # omni-agent       built from agentic-primitives 066e977, the first omni image
 #                  carrying agentic-session-exporter v0.2.1. Verified on
 #                  2026-08-19 by running the binary OUT OF THIS DIGEST:
@@ -168,7 +187,7 @@ PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
             "sha256:222c0ec72ebf786c8a37dec359e14326c9efbb7ec57a523da7227ba7531c43a4"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:fb1a719e71f251fbc6cbee4025e89a4dee1fbb9217503f3bc511817eea6ee92c"
+            "sha256:c447f0cb9905791499de29fba4f848cbb1e6829cf2400d82437fe8f4fc6c5948"
         ),
     }
 )
