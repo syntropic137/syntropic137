@@ -142,6 +142,7 @@ testpaths = [
     "packages/syn-adapters/tests",
     "packages/syn-adapters/src",  # co-located tests, same convention as syn-domain/src
     "packages/syn-shared/tests",
+    "packages/syn-shared/src",  # co-located tests, same convention
     "scripts/workflows",
     "infra/scripts/tests",
 ]
