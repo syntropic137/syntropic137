@@ -30,6 +30,11 @@ from syn_api.services.credentials import validate_credentials
 from syn_api.services.reconciliation import cleanup_orphaned_containers, reconcile_orphaned_sessions
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import Err, LifecycleError, Ok, Result
+from syn_shared.settings.session_store import (
+    ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_URL,
+    SessionStoreSettings,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -181,6 +186,14 @@ async def startup(
     if not skip_validation and not settings.uses_in_memory_stores:
         validate_credentials(_state.degraded_reasons)
 
+    try:
+        _log_session_capture_posture(settings.session_store, settings.app_environment)
+    except Exception:
+        # Diagnostics must never become a startup prerequisite. No exception
+        # object and no exc_info: a settings error can echo its input, and the
+        # input here may be the write token.
+        logger.warning("Could not determine session capture posture at startup.")
+
     if settings.is_test:
         return Ok({"mode": "full"})
 
@@ -259,6 +272,69 @@ async def health_check() -> Result[dict, LifecycleError]:
 
 
 # ── Private helpers ─────────────────────────────────────────────────
+
+
+def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
+    """Say once, at startup, how session capture is CONFIGURED.
+
+    Configuration only. Nothing here contacts the store, so this reports what
+    was asked for, not what works - a reachable store, a valid token and a
+    writable spool are all still unproven at this point. The wording says
+    "configured" for that reason; claiming capture is working and being wrong
+    would make this line worse than silence.
+
+    Capture is a per-workspace concern, so its posture was previously only
+    observable after a workflow ran: the unauthenticated warning fired at
+    provisioning, and an operator who never started one saw nothing.
+
+    NO PART OF THE STORE URL IS LOGGED. Not the raw value, and not a
+    sanitised scheme/host/port either: every one of those components is
+    operator-supplied, so a token pasted into the host, the scheme, or a
+    numeric port would land in the record. An invariant with a "unless the
+    operator did something odd" clause is not an invariant, and this one has
+    to hold absolutely because the alternative is a credential in a log
+    aggregator.
+
+    What identifies the destination instead is the DEPLOYMENT, which is
+    derived from AppEnvironment and cannot contain a secret. Two stores that
+    differ only by URL path are therefore indistinguishable here; that needs an
+    explicitly non-secret label, tracked in #849.
+    """
+    from syn_adapters.workspace_backends.agentic.session_store_env import (
+        deployment_identity,
+    )
+
+    if not store.is_enabled:
+        logger.info(
+            "Session capture is OFF (no %s configured). Workflows run "
+            "normally; no transcripts are exported.",
+            ENV_SYN_SESSION_STORE_URL,
+        )
+        return
+
+    deployment = deployment_identity(app_environment)
+
+    if store.is_unauthenticated:
+        logger.warning(
+            "Session capture is configured for %s (%s is set) but there is NO "
+            "write token (%s). If the store requires authentication this fails "
+            "at finalize with 401, AFTER the workspace has run, and the "
+            "exporter suppresses the cause to avoid leaking the credential. "
+            "Set the token, or ignore this if the store is deliberately open.",
+            deployment,
+            ENV_SYN_SESSION_STORE_URL,
+            ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+        )
+        return
+
+    logger.info(
+        "Session capture is configured for %s (%s and a write token are set). "
+        "Not yet verified: the next workflow is the first runtime check, so "
+        "confirm its capture outcome - only CAPTURED proves the store was "
+        "actually reachable and writable.",
+        deployment,
+        ENV_SYN_SESSION_STORE_URL,
+    )
 
 
 async def _init_event_store() -> Result[None, LifecycleError]:
