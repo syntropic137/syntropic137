@@ -13,16 +13,24 @@ import logging
 
 import pytest
 
+from syn_adapters.workspace_backends.agentic.session_store_env import (
+    deployment_identity,
+)
 from syn_api.services.lifecycle import _log_session_capture_posture
+from syn_shared.settings.config import AppEnvironment
 from syn_shared.settings.session_store import SessionStoreSettings
 
 STORE = "https://sessions.example.com"
 TOKEN = "super-secret-write-token"
 
 
-def _posture(caplog: pytest.LogCaptureFixture, **kw: object) -> list[logging.LogRecord]:
+def _posture(
+    caplog: pytest.LogCaptureFixture,
+    app_environment: str = AppEnvironment.DEVELOPMENT,
+    **kw: object,
+) -> list[logging.LogRecord]:
     with caplog.at_level(logging.INFO):
-        _log_session_capture_posture(SessionStoreSettings(**kw), "dev")  # type: ignore[arg-type]
+        _log_session_capture_posture(SessionStoreSettings(**kw), app_environment)  # type: ignore[arg-type]
     return list(caplog.records)
 
 
@@ -42,9 +50,14 @@ class TestCapturePosture:
 
         message = record.getMessage()
         assert record.levelno == logging.INFO
-        # The deployment identity is the whole point of the line: it is what
-        # makes a session attributable to an environment rather than to a host.
-        assert "syntropic137__dev" in message
+        # Compared against what the ADAPTER actually stamps, not against a
+        # literal. An earlier version asserted "syntropic137__dev", which is
+        # not a value any deployment produces (the real one is
+        # "syntropic137__development"): it proved the formatting and would
+        # have stayed green while the posture line named a deployment no
+        # session was ever tagged with. A confidently wrong posture is worse
+        # than no posture.
+        assert deployment_identity(str(AppEnvironment.DEVELOPMENT)) in message
         assert STORE in message
 
     @pytest.mark.unit
@@ -64,3 +77,21 @@ class TestCapturePosture:
         for record in records:
             assert TOKEN not in record.getMessage()
             assert TOKEN not in str(record.args)
+
+
+class TestPostureMatchesWhatIsActuallyStamped:
+    """The posture line must name the deployment sessions really carry.
+
+    The adapter derives it independently, so the two can drift. If they do,
+    an operator reads one identity at startup and finds another on the
+    sessions - which is worse than silence, because it looks authoritative.
+    """
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("environment", list(AppEnvironment))
+    def test_every_environment_agrees_with_the_adapter(
+        self, caplog: pytest.LogCaptureFixture, environment: AppEnvironment
+    ) -> None:
+        (record,) = _posture(caplog, environment, url=STORE, auth_token=TOKEN)
+
+        assert deployment_identity(str(environment)) in record.getMessage()
