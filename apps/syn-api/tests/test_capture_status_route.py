@@ -212,6 +212,26 @@ class TestTheBiasIsTowardsReportingWork:
         assert entry.agent_session_ids == ["sess-codex", "sess-claude"]
 
     @pytest.mark.unit
+    @pytest.mark.parametrize("stored", [[], ["x"]], ids=["empty", "populated"])
+    def test_a_schema_1_row_never_yields_agent_sessions(self, stored: object) -> None:
+        """The field did not exist at schema 1.
+
+        A schema 1 payload carrying the key did not get it from a writer of
+        ours, so interpreting it under schema 2 semantics would mean trusting a
+        shape nobody declared.
+        """
+        entry = _to_entry(_row(schema_version=1, agent_session_ids=stored))
+
+        assert entry is not None
+        assert entry.agent_session_ids is None
+
+    @pytest.mark.unit
+    def test_a_schema_2_row_keeps_the_empty_list_distinct(self) -> None:
+        """At schema 2 the field means something, including when it is empty."""
+        assert _to_entry(_row(schema_version=2, agent_session_ids=[])).agent_session_ids == []
+        assert _to_entry(_row(schema_version=2, agent_session_ids=["x"])).agent_session_ids == ["x"]
+
+    @pytest.mark.unit
     def test_unreported_agent_sessions_are_null_not_empty(self) -> None:
         """A verdict from an older exporter cannot answer the question.
 

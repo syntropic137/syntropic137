@@ -64,6 +64,79 @@ class TestExpectationsComeFromTheSameSettings:
 
 
 @pytest.mark.unit
+class TestThePhaseToAgentSessionMapping:
+    """A phase is host-owned; the agent sessions inside it are many.
+
+    These assert the RECORDED payload, not the in-memory verdict. A mutation
+    check found the gap: deleting the writer's assignment entirely left every
+    other test green, because the parser tests inspect AuthoritativeCapture and
+    the route tests build the payload by hand. Nothing connected the two.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("ids", "expected"),
+        [
+            (None, None),
+            ((), []),
+            (("a",), ["a"]),
+            (("a", "b"), ["a", "b"]),
+        ],
+        ids=["not-reported", "confirmed-none", "one", "many"],
+    )
+    async def test_the_recorded_payload_carries_the_agent_sessions(
+        self, ids: tuple[str, ...] | None, expected: list[str] | None
+    ) -> None:
+        writer = _Writer()
+        outcome = AuthoritativeCapture(
+            state=CaptureState.CAPTURED,
+            store_url="http://store:8799",
+            agent_session_ids=ids,
+        )
+
+        await record_capture_outcome(
+            writer,
+            outcome,
+            session_id="s-1",
+            expectations=None,
+            partition="e-1/w-1",
+            execution_id="e-1",
+            phase_id="p-1",
+        )
+
+        data = writer.calls[0]["data"]
+        assert data["schema_version"] == 2
+        assert data["agent_session_ids"] == expected
+
+    @pytest.mark.asyncio
+    async def test_the_payload_survives_a_json_round_trip_into_an_entry(self) -> None:
+        """The recorded row is JSON in a store, not a Python object in memory.
+
+        None and [] are the pair most likely to collapse across that boundary,
+        and they are exactly the two that must not.
+        """
+        import json
+
+        from syn_api.routes.capture import _agent_session_ids
+
+        for ids, expected in ((None, None), ((), []), (("a", "b"), ["a", "b"])):
+            writer = _Writer()
+            await record_capture_outcome(
+                writer,
+                AuthoritativeCapture(
+                    state=CaptureState.CAPTURED,
+                    store_url="http://store:8799",
+                    agent_session_ids=ids,
+                ),
+                session_id="s-1",
+                expectations=None,
+                partition="e-1/w-1",
+            )
+            stored = json.loads(json.dumps(writer.calls[0]["data"]))
+            assert _agent_session_ids(stored) == expected
+
+
+@pytest.mark.unit
 class TestRecordingIsLaneTwo:
     @pytest.mark.asyncio
     async def test_a_verdict_is_written_with_its_identity(self) -> None:
