@@ -8,11 +8,21 @@ See ADR-056: Workspace Tooling Architecture
 
 Why digests and not tags
 ------------------------
-Tags are mutable in OCI by design. agentic-primitives republishes
-``:latest`` on every push to its main branch, so a tag-pinned reference means
-every merge there silently changes what Syntropic137 runs. That is not a
-hypothetical: on 2026-08-16 a regression in the workspace entrypoint reached
-``:latest`` and any deployment pulling in that window picked it up.
+Tags are mutable in OCI by design, so a tag-pinned reference means an upstream
+publish silently changes what Syntropic137 runs. That is not a hypothetical: on
+2026-08-16 a regression in the workspace entrypoint reached a mutable tag and
+any deployment pulling in that window picked it up.
+
+Which upstream tag moves when is itself a trap, and it differs per branch.
+agentic-primitives publishes ``:edge`` and the commit SHA from ``main``, and
+moves ``:latest`` only from its ``release`` branch. So ``:latest`` is not
+"the newest image" - it can be considerably OLDER than what main has built.
+On 2026-08-19 ``:latest`` for omni-agent still resolved to an image carrying
+agentic-session-exporter v0.1.1, which wrote an out-of-spec
+``origin.environment``, while main had already built v0.2.1. A digest taken
+from ``:latest`` that day would have pinned the defect.
+
+Take digests from the upstream build run, never from a mutable tag.
 
 A digest is the only immutable reference. The registry cannot repoint it,
 because the digest *is* the content hash of the image index.
@@ -129,6 +139,22 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # interactive-tmux built by the same workflow run matrix; it is published to
 #                  GHCR (it is one of the two providers in the build matrix of
 #                  agentic-primitives .github/workflows/build-workspace-images.yml).
+# omni-agent       built from agentic-primitives 066e977, the first omni image
+#                  carrying agentic-session-exporter v0.2.1. Verified on
+#                  2026-08-19 by running the binary OUT OF THIS DIGEST:
+#                  reports "apss-session-exporter 0.2.1", and
+#                  SESSION_STORE_ORIGIN_ENV=laptop is refused with
+#                  InvalidEnvironment("laptop") rather than written into every
+#                  envelope. The previous pin shipped v0.1.1, which defaulted
+#                  origin.environment to "laptop" - not one of the four classes
+#                  APS-V1-0004 4.2.1 defines - so sessions captured with the
+#                  default were out of spec on a REQUIRED field.
+#
+#                  Do NOT resolve omni-agent through :latest. The build matrix
+#                  pushes :edge and the commit SHA from main, and :latest moves
+#                  only on a release, so :latest currently resolves to an OLDER
+#                  image than this pin. Take digests from the build run, not
+#                  from a mutable tag.
 #
 # Bump procedure: see the module docstring.
 # ---------------------------------------------------------------------------
@@ -142,7 +168,7 @@ PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
             "sha256:222c0ec72ebf786c8a37dec359e14326c9efbb7ec57a523da7227ba7531c43a4"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:f73353adfe99fbab00e0d754543d686f5e57e6c30fddbaebdeeff97b644d53e6"
+            "sha256:fb1a719e71f251fbc6cbee4025e89a4dee1fbb9217503f3bc511817eea6ee92c"
         ),
     }
 )
