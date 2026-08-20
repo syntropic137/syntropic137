@@ -7,6 +7,11 @@ import pytest
 from syn_tokens.models import SpendBudget, WorkflowType
 from syn_tokens.threshold import ThresholdMonitor
 
+# Marked at module scope: this file sat outside pytest testpaths, so no CI
+# job collected it and nothing here needed a marker. Collected now, an
+# unmarked test is one no job runs - which the census gate refuses.
+pytestmark = pytest.mark.unit
+
 
 def _budget(
     input_used: int = 0,

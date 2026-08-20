@@ -15,6 +15,11 @@ from syn_shared.pricing import (
     resolve_model_pricing,
 )
 
+# Marked at module scope: this file was never COLLECTED before the
+# testpaths change in this commit, so nothing here had a reason to carry a
+# marker. Unmarked now means collected but run by no CI job.
+pytestmark = pytest.mark.unit
+
 
 def test_gpt_5_6_resolves_to_codex_pricing() -> None:
     """`gpt-5.6` is OpenAI's alias for `gpt-5.6-sol` and carries Sol's rates."""

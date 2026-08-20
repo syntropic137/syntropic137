@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from scripts.validate_codex_observability import ExpectedEvents, derive_expected
 
 _FIXTURE = (
     Path(__file__).resolve().parents[1]
     / "packages/syn-domain/tests/fixtures/codex/codex_exec_recording.jsonl"
 )
+
+
+# Marked at module scope: this file sat outside pytest testpaths, so no CI
+# job collected it and nothing here needed a marker. Collected now, an
+# unmarked test is one no job runs - which the census gate refuses.
+pytestmark = pytest.mark.unit
 
 
 def _fixture_lines() -> list[str]:
