@@ -157,6 +157,20 @@ class TestTheBiasIsTowardsReportingWork:
         assert entry.needs_backfill is True
 
     @pytest.mark.unit
+    @pytest.mark.parametrize("lookalike", [True, 1.0, "1", None])
+    def test_a_version_that_is_not_an_integer_is_unknown(self, lookalike: object) -> None:
+        """True == 1 and 1.0 == 1, so membership alone would admit them.
+
+        The stored payload is written by another process, so the reader cannot
+        assume the writer's type discipline held.
+        """
+        entry = _to_entry(_row(schema_version=lookalike))
+
+        assert entry is not None
+        assert entry.state == "unknown"
+        assert entry.needs_backfill is True
+
+    @pytest.mark.unit
     def test_the_exporter_result_version_is_not_this_version(self) -> None:
         """These are two version namespaces, not one.
 

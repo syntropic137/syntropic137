@@ -117,7 +117,19 @@ def _state_of(payload: Mapping[str, object]) -> CaptureState:
     Guessing in any of these cases risks recording "safely stored" about a
     transcript nobody has.
     """
-    if payload.get("schema_version") not in SUPPORTED_OBSERVATION_SCHEMA_VERSIONS:
+    version = payload.get("schema_version")
+    # `type(...) is int` for the same reason the exporter-result gate does it:
+    # Python equality makes True == 1 and 1.0 == 1, and bool subclasses int, so
+    # a stored payload declaring `"schema_version": true` would clear a plain
+    # membership test and be read as schema 1. This blob is written by another
+    # process, as the module docstring says, so the reader cannot assume the
+    # writer's type discipline held.
+    #
+    # Duplicated rather than shared with capture_result deliberately. The two
+    # gates guard SEPARATE contracts that must be able to move independently,
+    # and importing across them is exactly how the previous coupling bug
+    # happened. One repeated predicate is cheaper than that coupling.
+    if type(version) is not int or version not in SUPPORTED_OBSERVATION_SCHEMA_VERSIONS:
         return CaptureState.UNKNOWN
 
     raw = _text(payload.get("state"))
