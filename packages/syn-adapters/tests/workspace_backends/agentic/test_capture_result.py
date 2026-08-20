@@ -80,23 +80,47 @@ _UNREACHABLE = json.dumps(
 )
 
 
+def _parse(
+    stdout: str,
+    exit_code: int,
+    *,
+    store_enabled: bool = True,
+    expected_store_url: str | None = None,
+    expected_deployment: str | None = None,
+):
+    """Call the parser with expectations spelled out.
+
+    The production signature has no defaults for the two expectation arguments,
+    deliberately: a caller that omits them would get the permissive behaviour
+    by forgetting. Tests that do not care state None explicitly through this
+    helper, so the omission stays visible at the one place it is decided.
+    """
+    return parse_capture_result(
+        stdout,
+        exit_code,
+        store_enabled=store_enabled,
+        expected_store_url=expected_store_url,
+        expected_deployment=expected_deployment,
+    )
+
+
 @pytest.mark.unit
 class TestTheThreeRealOutcomes:
     def test_a_clean_sweep_is_captured(self) -> None:
-        out = parse_capture_result(_CLEAN, 0, store_enabled=True)
+        out = _parse(_CLEAN, 0, store_enabled=True)
         assert out.state is CaptureState.CAPTURED
         assert not out.needs_backfill
         assert out.origin_deployment == "syntropic137__dev"
         assert out.store_url == "http://host.docker.internal:8799"
 
     def test_a_rejected_sweep_is_incomplete_and_names_the_loss(self) -> None:
-        out = parse_capture_result(_REJECTED, 3, store_enabled=True)
+        out = _parse(_REJECTED, 3, store_enabled=True)
         assert out.state is CaptureState.INCOMPLETE
         assert out.needs_backfill
         assert "rejected=1" in (out.reason or "")
 
     def test_an_unreachable_store_is_failed_and_carries_the_error(self) -> None:
-        out = parse_capture_result(_UNREACHABLE, 1, store_enabled=True)
+        out = _parse(_UNREACHABLE, 1, store_enabled=True)
         assert out.state is CaptureState.FAILED
         assert out.needs_backfill
         assert "not reachable" in (out.reason or "")
@@ -105,7 +129,7 @@ class TestTheThreeRealOutcomes:
 @pytest.mark.unit
 class TestTheVerdictIsNeverGuessed:
     def test_a_disabled_store_is_not_a_failure(self) -> None:
-        out = parse_capture_result("", 0, store_enabled=False)
+        out = _parse("", 0, store_enabled=False)
         assert out.state is CaptureState.DISABLED
         assert not out.needs_backfill
 
@@ -116,16 +140,14 @@ class TestTheVerdictIsNeverGuessed:
         doc = json.dumps(
             {"schema_version": SUPPORTED_SCHEMA_VERSION + 1, "captured_everything": True}
         )
-        out = parse_capture_result(doc, 0, store_enabled=True)
+        out = _parse(doc, 0, store_enabled=True)
         assert out.state is CaptureState.UNKNOWN
         assert out.needs_backfill
 
     def test_no_document_is_not_success(self) -> None:
         # An exporter older than --json exits 0 and prints a prose line. That
         # is a misconfiguration, not a capture, and must never read as one.
-        out = parse_capture_result(
-            "run: discovered=1 uploaded=1 accepted=1 failed=0", 0, store_enabled=True
-        )
+        out = _parse("run: discovered=1 uploaded=1 accepted=1 failed=0", 0, store_enabled=True)
         assert out.state is CaptureState.UNKNOWN
         assert out.needs_backfill
         assert "predate" in (out.reason or "")
@@ -134,18 +156,18 @@ class TestTheVerdictIsNeverGuessed:
         # Both come from the same process. If they disagree, something is wrong
         # with the exporter or the invocation, and preferring whichever says
         # what we want is exactly how a false verdict gets recorded.
-        out = parse_capture_result(_CLEAN, 3, store_enabled=True)
+        out = _parse(_CLEAN, 3, store_enabled=True)
         assert out.state is CaptureState.UNKNOWN
         assert "contradicts" in (out.reason or "")
 
     def test_a_usage_error_is_our_bug_not_the_stores(self) -> None:
-        out = parse_capture_result("", 2, store_enabled=True)
+        out = _parse("", 2, store_enabled=True)
         assert out.state is CaptureState.UNKNOWN
         assert "arguments" in (out.reason or "")
 
     def test_a_missing_captured_everything_is_unknown(self) -> None:
         doc = json.dumps({"schema_version": 1, "counters": {"failed": 0}})
-        out = parse_capture_result(doc, 0, store_enabled=True)
+        out = _parse(doc, 0, store_enabled=True)
         assert out.state is CaptureState.UNKNOWN
 
 
@@ -154,7 +176,7 @@ class TestParsingIsDefensive:
     def test_leading_noise_does_not_break_the_verdict(self) -> None:
         # A wrapper prepending output is a realistic accident. Being strict
         # about it would turn a cosmetic problem into an unreadable verdict.
-        out = parse_capture_result(f"some wrapper noise\n{_CLEAN}", 0, store_enabled=True)
+        out = _parse(f"some wrapper noise\n{_CLEAN}", 0, store_enabled=True)
         assert out.state is CaptureState.CAPTURED
 
     def test_non_integer_counters_are_dropped_not_coerced(self) -> None:
@@ -165,11 +187,11 @@ class TestParsingIsDefensive:
                 "counters": {"uploaded": 1, "accepted": "one", "failed": True},
             }
         )
-        out = parse_capture_result(doc, 0, store_enabled=True)
+        out = _parse(doc, 0, store_enabled=True)
         assert out.counters == {"uploaded": 1}, out.counters
 
     def test_garbage_is_unknown_rather_than_an_exception(self) -> None:
-        out = parse_capture_result("{not json at all", 0, store_enabled=True)
+        out = _parse("{not json at all", 0, store_enabled=True)
         assert out.state is CaptureState.UNKNOWN
 
 
@@ -198,7 +220,7 @@ class TestSuccessIsHardToReachByAccident:
     def test_success_against_the_wrong_store_is_not_captured(self) -> None:
         # The counters cannot tell a right store from a wrong one, and neither
         # can the exit code. Only the caller knows where it meant them to go.
-        out = parse_capture_result(
+        out = _parse(
             _CLEAN,
             0,
             store_enabled=True,
@@ -209,15 +231,13 @@ class TestSuccessIsHardToReachByAccident:
         assert "not the configured" in (out.reason or "")
 
     def test_success_tagged_for_another_deployment_is_not_captured(self) -> None:
-        out = parse_capture_result(
-            _CLEAN, 0, store_enabled=True, expected_deployment="syntropic137__prod"
-        )
+        out = _parse(_CLEAN, 0, store_enabled=True, expected_deployment="syntropic137__prod")
         assert out.state is CaptureState.UNKNOWN
         assert "not this deployment" in (out.reason or "")
 
     def test_matching_expectations_still_reads_captured(self) -> None:
         # The checks must not make CAPTURED unreachable.
-        out = parse_capture_result(
+        out = _parse(
             _CLEAN,
             0,
             store_enabled=True,
@@ -238,7 +258,7 @@ class TestSuccessIsHardToReachByAccident:
                 "counters": {"discovered": 1, "uploaded": 1, "rejected": 1},
             }
         )
-        out = parse_capture_result(doc, 0, store_enabled=True)
+        out = _parse(doc, 0, store_enabled=True)
         assert out.state is CaptureState.UNKNOWN
         assert out.needs_backfill
         assert "rejected=1" in (out.reason or "")
@@ -254,7 +274,7 @@ class TestSuccessIsHardToReachByAccident:
                 "counters": {"discovered": 0, "uploaded": 0, "accepted": 0},
             }
         )
-        out = parse_capture_result(doc, 0, store_enabled=True)
+        out = _parse(doc, 0, store_enabled=True)
         assert out.state is CaptureState.CAPTURED
         assert not out.needs_backfill
         assert "discovered=0" in (out.reason or "")
@@ -263,7 +283,7 @@ class TestSuccessIsHardToReachByAccident:
 @pytest.mark.unit
 class TestConfigurationFailure:
     def test_a_config_error_is_failed_and_carries_no_invented_destination(self) -> None:
-        out = parse_capture_result(_CONFIG_ERROR, 1, store_enabled=True)
+        out = _parse(_CONFIG_ERROR, 1, store_enabled=True)
         assert out.state is CaptureState.FAILED
         assert out.needs_backfill
         assert "SESSION_STORE_URL" in (out.reason or "")

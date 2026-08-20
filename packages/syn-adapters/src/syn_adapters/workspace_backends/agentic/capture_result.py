@@ -94,8 +94,8 @@ def parse_capture_result(
     exit_code: int,
     *,
     store_enabled: bool,
-    expected_store_url: str | None = None,
-    expected_deployment: str | None = None,
+    expected_store_url: str | None,
+    expected_deployment: str | None,
 ) -> AuthoritativeCapture:
     """Interpret one host-invoked exporter run.
 
@@ -110,6 +110,12 @@ def parse_capture_result(
     result be read at all", and every one of them returns a verdict that is NOT
     a success, so nothing below them has to re-check whether it is looking at
     something trustworthy.
+
+    `expected_store_url` and `expected_deployment` have NO DEFAULT on purpose,
+    though None is a permitted value. A caller that omits them would otherwise
+    get the permissive behaviour by forgetting, and "the safe path depends on
+    remembering something" is the shape of defect this module exists to remove.
+    Passing None is a decision a reader can see; omitting the argument is not.
     """
     document = _load_document(stdout)
     refusal = _refuse_unreadable(document, exit_code, store_enabled=store_enabled)
