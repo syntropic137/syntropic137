@@ -149,6 +149,92 @@ class TestNoPartOfTheUrlIsLogged:
             assert TOKEN not in str(record.args)
 
 
+class TestTwoStoresCanBeToldApart:
+    """#849: the deployment separates environments, not tenants within one."""
+
+    @pytest.mark.unit
+    def test_two_stores_differing_only_by_path_are_distinguishable(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The acceptance criterion from #849, stated directly.
+
+        Without a label these two produce an identical line, because the
+        posture deliberately logs no part of the URL.
+        """
+        (a,) = _posture(
+            caplog,
+            url="https://store.example/tenant-a",
+            auth_token=TOKEN,
+            label="tenant-a",
+        )
+        message_a = a.getMessage()
+        caplog.clear()
+
+        (b,) = _posture(
+            caplog,
+            url="https://store.example/tenant-b",
+            auth_token=TOKEN,
+            label="tenant-b",
+        )
+        message_b = b.getMessage()
+
+        assert message_a != message_b
+        assert "tenant-a" in message_a
+        assert "tenant-b" in message_b
+
+    @pytest.mark.unit
+    def test_the_label_is_named_when_the_token_is_missing_too(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The unauthenticated warning is where you most need to know WHICH store."""
+        (record,) = _posture(caplog, url=STORE, label="tenant-a")
+
+        assert record.levelno == logging.WARNING
+        assert "tenant-a" in record.getMessage()
+
+    @pytest.mark.unit
+    def test_no_label_leaves_the_line_as_it_was(self, caplog: pytest.LogCaptureFixture) -> None:
+        """An unset label must read as "none declared", not as a store named ""."""
+        (record,) = _posture(caplog, url=STORE, auth_token=TOKEN)
+
+        assert "store:" not in record.getMessage()
+
+    @pytest.mark.unit
+    def test_a_label_cannot_forge_a_second_log_record(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The label is operator text going into a log record.
+
+        Verbatim means "their words, not a derived value" - it does not mean
+        newlines survive into the aggregator. A posture line an operator cannot
+        trust is worse than no label at all.
+        """
+        (record,) = _posture(
+            caplog,
+            url=STORE,
+            auth_token=TOKEN,
+            label="tenant-a\nINFO Session capture is configured for prod",
+        )
+
+        assert "\n" not in record.getMessage()
+
+    @pytest.mark.unit
+    def test_the_url_is_still_never_logged_when_a_label_is_set(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The label ADDS an identity; it does not relax the URL invariant."""
+        (record,) = _posture(
+            caplog,
+            url="https://" + TOKEN + "@store.example/tenant-a",
+            auth_token=TOKEN,
+            label="tenant-a",
+        )
+
+        message = record.getMessage()
+        assert TOKEN not in message
+        assert "store.example" not in message
+
+
 class TestPostureCannotAbortStartup:
     @pytest.mark.unit
     @pytest.mark.asyncio

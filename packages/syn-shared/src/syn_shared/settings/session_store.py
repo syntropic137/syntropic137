@@ -32,6 +32,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 #: literals. The prefix below and these names must stay in step.
 ENV_SYN_SESSION_STORE_URL = "SYN_SESSION_STORE_URL"
 ENV_SYN_SESSION_STORE_AUTH_TOKEN = "SYN_SESSION_STORE_AUTH_TOKEN"
+ENV_SYN_SESSION_STORE_LABEL = "SYN_SESSION_STORE_LABEL"
 
 #: Provider identifier understood by the capability inside the workspace image.
 SESHMAGIC_PROVIDER = "seshmagic"
@@ -40,6 +41,10 @@ SESHMAGIC_PROVIDER = "seshmagic"
 #: uploading. Deliberately NOT a mounted volume for this first integration —
 #: see the note in the workspace adapter for the durability tradeoff.
 DEFAULT_SPOOL_DIR = "/spool"
+
+#: Upper bound on the logged store label. Long enough for a tenant or cluster
+#: name, short enough that a pasted blob cannot flood the posture line.
+_MAX_LABEL_CHARS = 64
 
 
 class SessionStoreSettings(BaseSettings):
@@ -80,6 +85,21 @@ class SessionStoreSettings(BaseSettings):
             "Write token for the session store. Handled as a credential: never "
             "logged, never included in exception messages, never written to "
             "container labels. Only used when SYN_SESSION_STORE_URL is set."
+        ),
+    )
+
+    label: str = Field(
+        default="",
+        description=(
+            "Short non-secret name for the store this deployment writes to, "
+            "logged verbatim in the startup posture line. Set it when more than "
+            "one store is reachable from the same environment. The posture line "
+            "deliberately logs NO part of SYN_SESSION_STORE_URL, because every "
+            "part of a URL is operator-supplied and could carry a credential, "
+            "so two stores differing only by path are otherwise "
+            "indistinguishable. Declared non-secret by the operator rather than "
+            "derived from a value that might not be. Do NOT put a token, a "
+            "password or a full URL here. Example: tenant-a"
         ),
     )
 
@@ -159,6 +179,24 @@ class SessionStoreSettings(BaseSettings):
         capture for an operator who deliberately configured an open store.
         """
         return self.is_enabled and not self.auth_value
+
+    @property
+    def display_label(self) -> str:
+        """The operator's label, safe to interpolate into a log record.
+
+        "Verbatim" in the sense that matters: the operator's own text, never a
+        value derived from the URL. But this string reaches a log record, and a
+        label containing a newline could forge a second one - so control
+        characters are dropped and the length is bounded. A posture line an
+        operator cannot trust is worse than no label at all.
+
+        Empty when unset, which reads as "this deployment did not declare one"
+        rather than as a store named "".
+        """
+        cleaned = "".join(ch for ch in self.label.strip() if ch.isprintable() and ch != "\x7f")
+        if len(cleaned) > _MAX_LABEL_CHARS:
+            return cleaned[:_MAX_LABEL_CHARS] + "..."
+        return cleaned
 
     @property
     def auth_value(self) -> str:
