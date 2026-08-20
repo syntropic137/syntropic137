@@ -415,3 +415,46 @@ class TestTheGrammarHasNoTrailingCatchAll:
     )
     def test_a_prefix_that_looks_right_is_not_enough(self, line: str) -> None:
         assert parse_capture_status(line + "\n", store_enabled=True).state is CaptureState.UNKNOWN
+
+
+@pytest.mark.unit
+class TestNewFinalizerVerdicts:
+    """Grammars must track finalize.sh, which gained two INCOMPLETE forms.
+
+    A counter name missing from the grammar does not fail loudly. The line
+    simply stops matching, the sweep is recorded as UNKNOWN, and a capture we
+    KNOW was incomplete is reported as one nobody could read. That is the
+    failure mode these pin.
+    """
+
+    _TAIL = "at least one transcript did not reach the store; spool retained at /spool/p"
+
+    def test_unconfirmed_counter_is_understood(self) -> None:
+        # The exporter added `unconfirmed`: envelopes it SENT for which the
+        # store returned no matching outcome, neither accepted nor rejected.
+        line = f"[finalize] session-store sweep INCOMPLETE (unconfirmed=1): {self._TAIL}"
+        assert parse_capture_status(line, store_enabled=True).state is CaptureState.INCOMPLETE
+
+    def test_the_exporters_own_verdict_is_understood(self) -> None:
+        # finalize.sh falls back to the exit status when no counter it parses
+        # explains the loss. The reason contains parentheses, so it cannot be
+        # matched with the [^)]* form used for the rejection-record variant.
+        line = (
+            "[finalize] session-store sweep INCOMPLETE "
+            f"(exporter reported an incomplete sweep (rc=3)): {self._TAIL}"
+        )
+        assert parse_capture_status(line, store_enabled=True).state is CaptureState.INCOMPLETE
+
+    def test_a_complete_line_carrying_unconfirmed_zero_still_reads_captured(self) -> None:
+        line = (
+            "[finalize] session-store upload complete (discovered=1 skipped_unchanged=0 "
+            "uploaded=1 accepted=1 duplicate=0 rejected=0 skipped_oversize=0 failed=0 "
+            "unconfirmed=0); spool retained at /spool/p"
+        )
+        assert parse_capture_status(line, store_enabled=True).state is CaptureState.CAPTURED
+
+    def test_an_unknown_counter_name_still_does_not_match(self) -> None:
+        # The list stays CLOSED. Widening it to accept any name would let prose
+        # through, which is what three earlier review rounds removed.
+        line = f"[finalize] session-store sweep INCOMPLETE (invented=1): {self._TAIL}"
+        assert parse_capture_status(line, store_enabled=True).state is CaptureState.UNKNOWN

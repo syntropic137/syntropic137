@@ -74,7 +74,17 @@ _PREFIX = "[finalize] session-store"
 # not `[^)]*`, which admitted prose, and not a fixed set, which would break the
 # moment an informational counter is dropped upstream (a case finalize.sh
 # deliberately supports).
-_COUNTER_PAIR = r"(?:discovered|skipped_unchanged|uploaded|accepted|duplicate|rejected|skipped_oversize|failed)=\d+"
+#
+# `unconfirmed` is in the list because the exporter added it: envelopes it SENT
+# for which the store returned no matching outcome, neither accepted nor
+# rejected. A name missing here does not fail loudly, which is the trap - the
+# line simply stops matching and the sweep is recorded as UNKNOWN, so a
+# genuinely INCOMPLETE capture is reported as one nobody could read. Any counter
+# name added to finalize.sh has to be added here in the same change.
+_COUNTER_PAIR = (
+    r"(?:discovered|skipped_unchanged|uploaded|accepted|duplicate|rejected"
+    r"|skipped_oversize|failed|unconfirmed)=\d+"
+)
 _COUNTER_LIST = rf"{_COUNTER_PAIR}(?: {_COUNTER_PAIR})*"
 
 #: Every terminal line ends with this clause and a non-empty path.
@@ -94,9 +104,16 @@ _RE_FAILED = re.compile(_LINE + rf"upload FAILED \(rc=(\d+)\); {_SPOOL_SUFFIX}")
 #: Two forms. The first carries counters, the second a rejection-record path.
 #: Both close the parenthesis before a colon and continue into prose, so the
 #: tail is genuinely free text here and only here.
+#: A third form: the exporter's own exit status, when no counter this side
+#: knows about explains the loss. finalize.sh emits it as
+#: `exporter reported an incomplete sweep (rc=3)`, so the reason itself
+#: contains parentheses and cannot be matched with `[^)]*`.
+_RC_REASON = r"exporter reported an incomplete sweep \(rc=\d+\)"
+
 _RE_INCOMPLETE = re.compile(
     _LINE
-    + rf"sweep INCOMPLETE \((?:{_COUNTER_LIST}|unresolved rejection recorded at \S[^)]*)\): \S.*"
+    + rf"sweep INCOMPLETE \((?:{_COUNTER_LIST}|{_RC_REASON}"
+    + r"|unresolved rejection recorded at \S[^)]*)\): \S.*"
 )
 
 #: `sweep produced no parseable summary line; treating as INCOMPLETE, <spool>`
