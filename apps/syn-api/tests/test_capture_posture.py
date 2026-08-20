@@ -152,20 +152,40 @@ class TestNoPartOfTheUrlIsLogged:
 class TestTwoStoresCanBeToldApart:
     """#849: the deployment separates environments, not tenants within one."""
 
+    # Sentinels chosen so NO url component can be mistaken for the label. An
+    # earlier version of these tests used label="tenant-a" against the path
+    # /tenant-a, so a posture line that logged the URL PATH looked identical to
+    # one that logged the label - and a codex mutation that appended
+    # `store.url.rsplit("/")[-1]` to the destination passed the entire suite,
+    # including the test named "the url is still never logged".
+    URL_HOST = "url-host-sentinel.example"
+    URL_PATH = "url-path-sentinel"
+    URL_WITH_PARTS = f"https://{URL_HOST}/{URL_PATH}"
+    LABEL = "declared-label"
+
+    def _assert_no_url_component(self, record: logging.LogRecord) -> None:
+        """No part of the URL, by any route, including the unformatted args."""
+        haystacks = (record.getMessage(), str(record.args))
+        for haystack in haystacks:
+            assert self.URL_HOST not in haystack
+            assert self.URL_PATH not in haystack
+            assert TOKEN not in haystack
+            assert "https://" not in haystack
+
     @pytest.mark.unit
     def test_two_stores_differing_only_by_path_are_distinguishable(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """The acceptance criterion from #849, stated directly.
 
-        Without a label these two produce an identical line, because the
-        posture deliberately logs no part of the URL.
+        Labels are unrelated to the paths, so this cannot be satisfied by
+        logging the path.
         """
         (a,) = _posture(
             caplog,
             url="https://store.example/tenant-a",
             auth_token=TOKEN,
-            label="tenant-a",
+            label="alpha",
         )
         message_a = a.getMessage()
         caplog.clear()
@@ -174,65 +194,82 @@ class TestTwoStoresCanBeToldApart:
             caplog,
             url="https://store.example/tenant-b",
             auth_token=TOKEN,
-            label="tenant-b",
+            label="bravo",
         )
         message_b = b.getMessage()
 
         assert message_a != message_b
-        assert "tenant-a" in message_a
-        assert "tenant-b" in message_b
+        assert "alpha" in message_a
+        assert "bravo" in message_b
+        for message in (message_a, message_b):
+            assert "tenant-a" not in message
+            assert "tenant-b" not in message
 
     @pytest.mark.unit
-    def test_the_label_is_named_when_the_token_is_missing_too(
+    def test_no_url_component_is_logged_on_the_authenticated_path(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """The unauthenticated warning is where you most need to know WHICH store."""
-        (record,) = _posture(caplog, url=STORE, label="tenant-a")
+        (record,) = _posture(caplog, url=self.URL_WITH_PARTS, auth_token=TOKEN, label=self.LABEL)
+
+        assert self.LABEL in record.getMessage()
+        self._assert_no_url_component(record)
+
+    @pytest.mark.unit
+    def test_no_url_component_is_logged_on_the_unauthenticated_path(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The warning branch needs the same guarantee as the healthy one."""
+        (record,) = _posture(caplog, url=self.URL_WITH_PARTS, label=self.LABEL)
 
         assert record.levelno == logging.WARNING
-        assert "tenant-a" in record.getMessage()
+        assert self.LABEL in record.getMessage()
+        self._assert_no_url_component(record)
 
     @pytest.mark.unit
     def test_no_label_leaves_the_line_as_it_was(self, caplog: pytest.LogCaptureFixture) -> None:
-        """An unset label must read as "none declared", not as a store named ""."""
+        """An unset label must read as "none declared", not a store named ""."""
         (record,) = _posture(caplog, url=STORE, auth_token=TOKEN)
 
         assert "store:" not in record.getMessage()
 
     @pytest.mark.unit
-    def test_a_label_cannot_forge_a_second_log_record(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """The label is operator text going into a log record.
+    def test_capture_off_names_no_label(self, caplog: pytest.LogCaptureFixture) -> None:
+        """With no store there is no destination to identify."""
+        (record,) = _posture(caplog, url=None, label=self.LABEL)
 
-        Verbatim means "their words, not a derived value" - it does not mean
-        newlines survive into the aggregator. A posture line an operator cannot
-        trust is worse than no label at all.
-        """
-        (record,) = _posture(
-            caplog,
-            url=STORE,
-            auth_token=TOKEN,
-            label="tenant-a\nINFO Session capture is configured for prod",
-        )
-
-        assert "\n" not in record.getMessage()
+        assert self.LABEL not in record.getMessage()
 
     @pytest.mark.unit
-    def test_the_url_is_still_never_logged_when_a_label_is_set(
-        self, caplog: pytest.LogCaptureFixture
+    @pytest.mark.parametrize(
+        "unusable",
+        [
+            "tenant-a\nINFO Session capture is configured for prod",
+            "tenant\u2013a",
+            "z" * 65,
+            "https://url-host-sentinel.example/url-path-sentinel",
+            TOKEN + "!",
+        ],
+        ids=["newline", "homoglyph-dash", "too-long", "a-pasted-url", "a-pasted-token"],
+    )
+    def test_an_unusable_label_is_ignored_and_never_echoed(
+        self, caplog: pytest.LogCaptureFixture, unusable: str
     ) -> None:
-        """The label ADDS an identity; it does not relax the URL invariant."""
-        (record,) = _posture(
-            caplog,
-            url="https://" + TOKEN + "@store.example/tenant-a",
-            auth_token=TOKEN,
-            label="tenant-a",
-        )
+        """Rejected, and the rejected text is not repeated anywhere.
 
-        message = record.getMessage()
-        assert TOKEN not in message
-        assert "store.example" not in message
+        Whatever was set is probably not what the operator believed they set,
+        so echoing it is how a mis-pasted secret reaches the log this line
+        exists to keep clean.
+        """
+        records = _posture(caplog, url=STORE, auth_token=TOKEN, label=unusable)
+
+        warnings = [r for r in records if r.levelno == logging.WARNING]
+        assert warnings, "an unusable label must be reported"
+
+        for record in records:
+            haystacks = (record.getMessage(), str(record.args))
+            for haystack in haystacks:
+                assert unusable not in haystack
+                assert "\n" not in haystack
 
 
 class TestPostureCannotAbortStartup:

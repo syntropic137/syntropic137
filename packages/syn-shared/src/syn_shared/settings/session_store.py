@@ -24,6 +24,8 @@ Usage:
 
 from __future__ import annotations
 
+import re
+
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -42,9 +44,19 @@ SESHMAGIC_PROVIDER = "seshmagic"
 #: see the note in the workspace adapter for the durability tradeoff.
 DEFAULT_SPOOL_DIR = "/spool"
 
-#: Upper bound on the logged store label. Long enough for a tenant or cluster
-#: name, short enough that a pasted blob cannot flood the posture line.
-_MAX_LABEL_CHARS = 64
+#: What a store label is allowed to be: ASCII letters, digits, dot, underscore
+#: and hyphen, 1 to 64 characters.
+#:
+#: Narrow on purpose. This string exists so an operator can TRUST which store a
+#: posture line names, and the threats to that are not only control characters.
+#: Printable Unicode carries homoglyphs, combining marks and variation
+#: selectors, so a label can render as one store while being another. Rejecting
+#: anything outside a plain identifier removes that class entirely, and the
+#: length bound stops a pasted blob flooding the line.
+#:
+#: Enforced by REJECTION, not truncation. Truncating would mean the logged text
+#: is not the configured value, which is the opposite of what this field is for.
+_LABEL_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 class SessionStoreSettings(BaseSettings):
@@ -182,21 +194,34 @@ class SessionStoreSettings(BaseSettings):
 
     @property
     def display_label(self) -> str:
-        """The operator's label, safe to interpolate into a log record.
+        """The operator's label if it is a usable identifier, otherwise empty.
 
         "Verbatim" in the sense that matters: the operator's own text, never a
-        value derived from the URL. But this string reaches a log record, and a
-        label containing a newline could forge a second one - so control
-        characters are dropped and the length is bounded. A posture line an
-        operator cannot trust is worse than no label at all.
+        value derived from the URL. It does NOT mean any string reaches the log.
+        A label containing a newline could forge a second posture record, and
+        one built from homoglyphs or combining marks can render as a store it is
+        not - and a posture line an operator cannot trust is worse than no label
+        at all.
 
-        Empty when unset, which reads as "this deployment did not declare one"
-        rather than as a store named "".
+        Anything outside `_LABEL_PATTERN` yields "", the same as unset. The
+        invalid text is deliberately NOT echoed: whatever it is, it is probably
+        not what the operator believed they set, and echoing it is how a
+        mis-pasted secret reaches the log this field exists to keep clean.
+        `has_unusable_label` lets a caller report the problem without repeating
+        the value.
         """
-        cleaned = "".join(ch for ch in self.label.strip() if ch.isprintable() and ch != "\x7f")
-        if len(cleaned) > _MAX_LABEL_CHARS:
-            return cleaned[:_MAX_LABEL_CHARS] + "..."
-        return cleaned
+        candidate = self.label.strip()
+        return candidate if _LABEL_PATTERN.fullmatch(candidate) else ""
+
+    @property
+    def has_unusable_label(self) -> bool:
+        """True when a label was configured but cannot be used.
+
+        Distinguishes "none declared" from "one was declared and it is not
+        usable". Both are `""` through `display_label`, but the second is a
+        misconfiguration worth reporting - without repeating the value.
+        """
+        return bool(self.label.strip()) and not self.display_label
 
     @property
     def auth_value(self) -> str:

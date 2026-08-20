@@ -32,6 +32,7 @@ from syn_api.services.seeding import seed_offline_data
 from syn_api.types import Err, LifecycleError, Ok, Result
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
     SessionStoreSettings,
 )
@@ -319,6 +320,19 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
     deployment = deployment_identity(app_environment)
     label = store.display_label
     destination = f"{deployment} (store: {label})" if label else deployment
+
+    if store.has_unusable_label:
+        # Value-free on purpose. Whatever was set is probably not what the
+        # operator believed they set, and echoing it here is exactly how a
+        # mis-pasted URL or token reaches the log this line exists to keep
+        # clean.
+        logger.warning(
+            "%s is set to something that is not a usable label (ASCII letters, "
+            "digits, dot, underscore and hyphen, up to 64 characters). It is "
+            "being ignored and is not repeated here in case it is not what you "
+            "meant to set. Capture is unaffected.",
+            ENV_SYN_SESSION_STORE_LABEL,
+        )
 
     if store.is_unauthenticated:
         logger.warning(
