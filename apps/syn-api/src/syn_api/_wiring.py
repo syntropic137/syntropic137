@@ -863,8 +863,23 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
     handler = await get_execute_workflow_handler()
     from syn_shared.settings import get_settings
+    from syn_shared.settings.polling import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 
     max_concurrent = get_settings().polling.max_concurrent_dispatches
+    if max_concurrent > 1:
+        # Loud, because the failure it warns about is silent. Concurrent
+        # executions share the processor instance that holds their per-run
+        # state, so one can read another's inputs and finish successfully
+        # against the wrong target (#865). A destroyed container is obvious;
+        # a plausible result built from someone else's inputs is not.
+        logger.warning(
+            "%s is %d. Concurrent workflow executions are NOT yet isolated "
+            "from each other (#865): they can read each other's inputs and "
+            "one execution's cancellation tears down the others' containers. "
+            "Set it to 1 until that is fixed.",
+            ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
+            max_concurrent,
+        )
     return BackgroundWorkflowDispatcher(handler, max_concurrent=max_concurrent)
 
 
