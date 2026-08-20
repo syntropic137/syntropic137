@@ -53,10 +53,54 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-#: The standard-anchored binary name, matching what agentic-primitives resolves
-#: first. `--json` is the supported machine interface; the prose line the
-#: finalizer prints is explicitly not a contract.
-EXPORTER_PROBE_COMMAND: Final = ["apss-session-exporter", "--json"]
+#: Where the workspace image keeps its capability adapters.
+CAPABILITY_ROOT: Final = "/opt/agentic/capabilities/session-store"
+
+#: Provider directory names to try, most current first.
+#:
+#: `apss` is the vendor-neutral name; `seshmagic` is the legacy alias kept as a
+#: symlink beside it. Both are tried because an image pinned by digest may
+#: predate the rename - the omni image running today has only `seshmagic` - and
+#: a probe that assumed either name alone would report a capture failure on
+#: every phase of the images it could not match.
+CAPABILITY_PROVIDER_DIRS: Final = ("apss", "seshmagic")
+
+#: Exit status the wrapper uses when it finds no capability to source.
+#: Distinct from the exporter's own codes so it cannot be read as a verdict.
+EXIT_NO_CAPABILITY: Final = 4
+
+#: The probe runs the exporter THROUGH the capability's own init.sh.
+#:
+#: WHY, and this is the whole point of the wrapper: a fresh `docker exec`
+#: inherits the container's configured AGENTIC_SESSION_STORE_* variables but
+#: NOT what init.sh exported into PID 1. The exporter reads neither - it reads
+#: the translated SESSION_STORE_* names that init.sh produces. Invoking the
+#: binary directly therefore judged an exporter that had never been configured,
+#: which returned "missing required env var SESSION_STORE_URL" and made every
+#: phase report FAILED and request a backfill, forever (#852).
+#:
+#: init.sh is re-entrant: sourcing it from a fresh exec restores the URL, the
+#: token, the tags and the deployment, verified against the pinned image.
+#:
+#: EXPORTER_STATE_FILE IS SET AFTER THE SOURCE, DELIBERATELY. init.sh exports
+#: its own, inside the agent-writable spool. Letting that win would undo the
+#: reason the host chooses this path at all - see PROBE_STATE_FILE below.
+_PROBE_SCRIPT: Final = f"""
+for d in {" ".join(CAPABILITY_PROVIDER_DIRS)}; do
+  init="{CAPABILITY_ROOT}/$d/init.sh"
+  if [ -f "$init" ]; then
+    . "$init" >/dev/null 2>&1 || true
+    EXPORTER_STATE_FILE="$SYN_PROBE_STATE_FILE" exec apss-session-exporter --json
+  fi
+done
+exit {EXIT_NO_CAPABILITY}
+"""
+
+#: BASH, not sh. /bin/sh in the workspace image is dash, and init.sh is
+#: bash-specific: under dash it dies with `Syntax error: "(" unexpected` before
+#: exporting anything. The probe then produced NO output at all and no verdict,
+#: which is the quietest possible way for this to fail.
+EXPORTER_PROBE_COMMAND: Final = ["bash", "-c", _PROBE_SCRIPT]
 
 #: Where the probe points the exporter's state file.
 #:
@@ -131,7 +175,11 @@ async def probe_capture(
         result = await execute(
             EXPORTER_PROBE_COMMAND,
             timeout_seconds=timeout_seconds,
-            environment={"EXPORTER_STATE_FILE": PROBE_STATE_FILE},
+            # Passed under our own name, not EXPORTER_STATE_FILE: init.sh
+            # exports that one itself, and whichever assignment ran last would
+            # win. The wrapper applies this AFTER sourcing, so the host value
+            # is the one the exporter sees.
+            environment={"SYN_PROBE_STATE_FILE": PROBE_STATE_FILE},
         )
 
         if result.timed_out:
@@ -143,6 +191,20 @@ async def probe_capture(
             return AuthoritativeCapture(
                 state=CaptureState.FAILED,
                 reason=f"capture probe timed out after {timeout_seconds}s",
+            )
+
+        if result.exit_code == EXIT_NO_CAPABILITY:
+            # The image has no session-store adapter to source. UNKNOWN, not
+            # DISABLED: a store IS configured for this workspace, so the
+            # transcripts were expected to go somewhere. Calling it DISABLED
+            # would close the case on sessions nobody has, and CAPTURED would
+            # be a lie. UNKNOWN asks for the backfill and says why.
+            return AuthoritativeCapture(
+                state=CaptureState.UNKNOWN,
+                reason=(
+                    "no session-store capability found in this workspace image; "
+                    "the probe could not reproduce the finalizer's environment"
+                ),
             )
 
         return parse_capture_result(result.stdout, result.exit_code, expectations=expectations)

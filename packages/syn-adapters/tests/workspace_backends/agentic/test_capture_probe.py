@@ -74,8 +74,11 @@ class TestItAsksTheRightQuestion:
 
         await probe_capture(_exec, expectations=_EXPECT)
         assert seen == [EXPORTER_PROBE_COMMAND]
-        # The prose line the finalizer prints is not a contract; --json is.
-        assert "--json" in seen[0]
+        # --json is now inside the wrapper script rather than a separate argv
+        # element: the probe runs the exporter THROUGH the capability's init.sh
+        # so it inherits the translated SESSION_STORE_* environment (#852). The
+        # prose line the finalizer prints is still not a contract; --json is.
+        assert "--json" in seen[0][-1]
 
     @pytest.mark.asyncio
     async def test_a_clean_probe_is_captured(self) -> None:
@@ -206,7 +209,12 @@ class TestItDoesNotTrustAgentWritableState:
 
         await probe_capture(_exec, expectations=_EXPECT)
         assert seen and seen[0] is not None
-        assert seen[0]["EXPORTER_STATE_FILE"] == PROBE_STATE_FILE
+        # Passed under OUR name, not EXPORTER_STATE_FILE. init.sh exports that
+        # one itself, pointing into the agent-writable spool, and whichever
+        # assignment ran last would win. The wrapper applies the host value
+        # after sourcing, which is what keeps this guarantee (#852).
+        assert seen[0]["SYN_PROBE_STATE_FILE"] == PROBE_STATE_FILE
+        assert "EXPORTER_STATE_FILE" not in seen[0]
 
     @pytest.mark.asyncio
     async def test_the_probe_state_file_is_outside_the_agent_writable_spool(self) -> None:
