@@ -106,6 +106,60 @@ _CLEAN_V2 = json.dumps(
         "sessions": ["11111111-2222-3333-4444-555555555555"],
     }
 )
+# The other three v2 shapes the exporter really emits, captured the same way.
+# One success document only proves the additive claim for success; schema 2 is
+# about to ship, so the failure shapes need the same evidence.
+#
+# Note both error documents omit `sessions` ENTIRELY rather than sending an
+# empty array. The parser must not require the field, and these hold it to that.
+
+# Store rejected the envelope. exit 3.
+_INCOMPLETE_V2 = json.dumps(
+    {
+        "schema_version": 2,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "store_url": "http://127.0.0.1:8798",
+        "origin": {"environment": "local", "deployment": None},
+        "counters": {
+            "discovered": 1,
+            "skipped_unchanged": 0,
+            "uploaded": 1,
+            "accepted": 0,
+            "duplicate": 0,
+            "rejected": 1,
+            "skipped_oversize": 0,
+            "failed": 0,
+            "unconfirmed": 0,
+        },
+        "sessions": [],
+    }
+)
+
+# Store unreachable. exit 1, counters absent, no `sessions` key.
+_UNREACHABLE_V2 = json.dumps(
+    {
+        "schema_version": 2,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "error": ("store is not reachable at http://127.0.0.1:8799 (is it up? is the URL right?)"),
+        "store_url": "http://127.0.0.1:8799",
+        "origin": {"environment": "local", "deployment": None},
+    }
+)
+
+# Could not even load configuration. exit 1, store_url and origin null.
+_CONFIG_ERROR_V2 = json.dumps(
+    {
+        "schema_version": 2,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "error": "missing required env var SESSION_STORE_URL",
+        "store_url": None,
+        "origin": None,
+    }
+)
+
 _CLEAN_V2_EXPECT = CaptureExpectations(
     store_url="http://127.0.0.1:8797", deployment=None, expect_sessions=True
 )
@@ -195,8 +249,12 @@ class TestTheVerdictIsNeverGuessed:
         # of this test used a bare {schema_version, captured_everything} dict,
         # which is refused on several other grounds - it would have stayed green
         # with the version gate deleted outright.
+        # LITERAL versions, not a loop over the production constant. Iterating
+        # the constant makes the test agree with whatever the constant says, so
+        # accidentally widening it to {1, 2, 3} would move the rejection
+        # boundary too and the suite would bless the widening.
         base = json.loads(_CLEAN_V2)
-        for version in sorted(SUPPORTED_SCHEMA_VERSIONS):
+        for version in (1, 2):
             doc = json.dumps({**base, "schema_version": version})
             out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
             assert out.state is CaptureState.CAPTURED, (
@@ -204,11 +262,52 @@ class TestTheVerdictIsNeverGuessed:
                 f"{out.state}: {out.reason}"
             )
 
-    def test_a_version_beyond_the_supported_set_is_refused(self) -> None:
-        # The same complete document, one version past what this build knows.
-        # This is the test that fails if the gate is deleted.
+    @pytest.mark.parametrize(
+        ("document", "exit_code"),
+        [
+            (_CLEAN_V2, 0),
+            (_INCOMPLETE_V2, 3),
+            (_UNREACHABLE_V2, 1),
+            (_CONFIG_ERROR_V2, 1),
+        ],
+        ids=["success", "incomplete", "unreachable", "config-error"],
+    )
+    def test_every_real_v2_shape_reads_the_same_as_its_v1_twin(
+        self, document: str, exit_code: int
+    ) -> None:
+        """The additive claim, tested across all four documents the exporter emits.
+
+        Asserts EQUIVALENCE rather than a hand-written expected state: the same
+        document is parsed twice, differing only in `schema_version`, and both
+        readings must agree. That is exactly what "purely additive" means, and
+        it cannot be satisfied by inventing the answer the parser happens to
+        give - which is how the earlier version-gate tests passed for the wrong
+        reason.
+
+        Both are parsed under identical expectations, so any other mismatch
+        affects the two sides equally and cancels out of the comparison.
+        """
+        as_v1 = json.dumps({**json.loads(document), "schema_version": 1})
+
+        v2 = _parse(document, exit_code, expectations=_CLEAN_V2_EXPECT)
+        v1 = _parse(as_v1, exit_code, expectations=_CLEAN_V2_EXPECT)
+
+        assert v2.state is v1.state
+        assert v2.needs_backfill == v1.needs_backfill
+        assert v2.reason == v1.reason
+
+    def test_the_supported_set_is_exactly_what_this_build_claims(self) -> None:
+        # Pins the contract itself. Widening the set is then a deliberate edit
+        # to this line, not something that happens quietly in a refactor.
+        assert frozenset({1, 2}) == SUPPORTED_SCHEMA_VERSIONS
+
+    @pytest.mark.parametrize("version", [-1, 0, 3, 99])
+    def test_an_integer_version_outside_the_set_is_refused(self, version: int) -> None:
+        # Includes 0 and a negative, which a range check (`>= 1`, or worse
+        # `<= max`) would let through. The gate is exact membership and these
+        # hold it to that.
         base = json.loads(_CLEAN_V2)
-        doc = json.dumps({**base, "schema_version": max(SUPPORTED_SCHEMA_VERSIONS) + 1})
+        doc = json.dumps({**base, "schema_version": version})
         out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
         assert out.state is CaptureState.UNKNOWN
         assert out.needs_backfill

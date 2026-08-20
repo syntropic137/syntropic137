@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SESSION_CAPTURE_OBSERVATION",
+    "SUPPORTED_OBSERVATION_SCHEMA_VERSIONS",
     "CaptureObservationData",
     "ObservationWriter",
     "build_expectations",
@@ -59,7 +60,15 @@ _PAYLOAD_SCHEMA_VERSION: Final = 1
 #: widened this gate to accept a recorded shape nothing defines or writes.
 #: Reading either number as the other is exactly the misreading these fields
 #: exist to prevent.
-SUPPORTED_OBSERVATION_SCHEMA_VERSIONS: Final = frozenset({_PAYLOAD_SCHEMA_VERSION})
+#: Declared as a LITERAL, not derived from _PAYLOAD_SCHEMA_VERSION. The two say
+#: different things: that one is what this build WRITES, this one is what it can
+#: READ. Deriving the reader from the writer means an incompatible writer bump
+#: silently makes the reader accept the new shape and stop accepting the old
+#: one, with no compatibility decision taken anywhere - which is the same class
+#: of silent widening that coupling this gate to the exporter's constant caused.
+#: When the payload version moves, this set is edited deliberately, or not
+#: at all.
+SUPPORTED_OBSERVATION_SCHEMA_VERSIONS: Final = frozenset({1})
 
 #: Telemetry gets a short, bounded slice of teardown. The write is already
 #: failure-tolerant, but a hung connection pool would otherwise block a phase
