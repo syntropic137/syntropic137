@@ -243,58 +243,63 @@ class TestCaptureStatusEndpoint:
         assert result.entries == []
 
 
-class TestReasonCannotCarryAStoreUrl:
-    """The exporter interpolates the store URL into its mismatch verdict.
+class TestTheDiagnosisTextIsNotExposed:
+    """Withheld rather than sanitised, because sanitising it lost.
 
-    capture_result quotes both the reported and the configured store in one
-    sentence. That URL is operator-supplied and can carry the write token in
-    its userinfo, query, or host - the same reasoning that stopped the startup
-    posture line logging any part of it.
+    The exporter interpolates the store URL into its reason, and that URL can
+    carry the write token. A regex that redacted URLs out of the text was
+    bypassed four ways - `//secret@host` missed entirely, `https://user:
+    secret@host` redacted only the prefix and left the credential, a bare
+    `token=...` untouched, and trailing punctuation eaten off the sentences it
+    did match. Every fix would have been another guess about the boundaries of
+    untrusted free text.
     """
 
     TOKEN = "super-secret-write-token"
 
     @pytest.mark.unit
     @pytest.mark.parametrize(
-        "url",
+        "reason",
         [
-            "https://{token}@sessions.example.com",
-            "https://sessions.example.com?write_token={token}",
-            "https://{token}",
-            "{token}://sessions.example.com",
+            "exporter reported success against 'https://{token}@host', not configured",
+            "store unreachable at //{token}@example.com/path",
+            "auth failed for https://user: {token}@example.com/path",
+            "rejected with token={token}",
+            "see https://example.com/{token}),",
         ],
     )
-    def test_a_credential_bearing_url_never_reaches_the_response(self, url: str) -> None:
-        reason = (
-            f"exporter reported success against {url.format(token=self.TOKEN)!r}, "
-            "not the configured store"
-        )
-
-        entry = _to_entry(_row(state="failed", reason=reason))
+    def test_no_reason_text_reaches_the_response(self, reason: str) -> None:
+        entry = _to_entry(_row(state="failed", reason=reason.format(token=self.TOKEN)))
 
         assert entry is not None
-        assert entry.reason is not None
-        assert self.TOKEN not in entry.reason
+        # The field does not exist on the response at all, so there is no
+        # sanitiser left to bypass.
+        assert not hasattr(entry, "reason")
+        assert self.TOKEN not in entry.model_dump_json()
+
+
+class TestAContradictoryCapturedRowIsNotTrusted:
+    """A stored row claiming success while counting losses contradicts itself.
+
+    The current producer cannot emit it - capture_result refuses the same
+    contradiction - but this read path must not TRUST that. A semantically
+    impossible row is the one whose success claim is worth least.
+    """
 
     @pytest.mark.unit
-    def test_the_diagnosis_survives_the_scrub(self) -> None:
-        """Redaction must not reduce the reason to noise."""
-        entry = _to_entry(
-            _row(
-                state="failed",
-                reason="exporter reported success against 'https://other.example', "
-                "not the configured 'https://sessions.example.com'",
-            )
-        )
+    @pytest.mark.parametrize("counter", ["rejected", "skipped_oversize", "failed", "unconfirmed"])
+    def test_a_captured_row_counting_losses_is_downgraded(self, counter: str) -> None:
+        entry = _to_entry(_row(state="captured", counters={counter: 1}))
 
         assert entry is not None
-        assert entry.reason is not None
-        assert "reported success against" in entry.reason
-        assert "not the configured" in entry.reason
+        assert entry.state == "unknown"
+        assert entry.needs_backfill is True
 
     @pytest.mark.unit
-    def test_a_reason_without_a_url_is_untouched(self) -> None:
-        entry = _to_entry(_row(state="failed", reason="missing required env var SESSION_STORE_URL"))
+    def test_a_clean_captured_row_stays_settled(self) -> None:
+        """The guard must not condemn every success."""
+        entry = _to_entry(_row(state="captured", counters={"discovered": 3, "sent": 3}))
 
         assert entry is not None
-        assert entry.reason == "missing required env var SESSION_STORE_URL"
+        assert entry.state == "captured"
+        assert entry.needs_backfill is False

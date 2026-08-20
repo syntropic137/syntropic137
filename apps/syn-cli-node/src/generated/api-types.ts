@@ -1933,8 +1933,6 @@ export interface components {
             state: string;
             /** Needs Backfill */
             needs_backfill: boolean;
-            /** Reason */
-            reason?: string | null;
             /** Partition */
             partition?: string | null;
             /** Expected Deployment */

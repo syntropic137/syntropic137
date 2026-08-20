@@ -1458,7 +1458,6 @@ class CaptureStatusEntry(BaseModel):
     trusted asks for a retry. A re-sent transcript is a no-op (the store dedups
     on content hash); a skipped one is lost permanently.
     """
-    reason: str | None = None
 
     partition: str | None = None
     """The spool partition this execution wrote to: what a retry needs to find

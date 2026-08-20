@@ -5538,17 +5538,6 @@
             "type": "boolean",
             "title": "Needs Backfill"
           },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
           "partition": {
             "anyOf": [
               {

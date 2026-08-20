@@ -22,7 +22,6 @@ anything unreadable here reads as UNKNOWN and counts as needing backfill.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
@@ -31,6 +30,7 @@ from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
 )
 from syn_adapters.workspace_backends.agentic.capture_result import (
+    LOSS_COUNTERS,
     SUPPORTED_SCHEMA_VERSION,
 )
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
@@ -45,6 +45,24 @@ router = APIRouter(prefix="/capture", tags=["capture"])
 
 #: Bounded so a caller cannot ask for the whole event store by accident.
 MAX_LIMIT = 500
+
+#: WHY THE DIAGNOSIS TEXT IS NOT IN THIS RESPONSE.
+#:
+#: The exporter builds its reason by interpolating the store URL - capture_result
+#: quotes both the reported and the configured one - and that URL is
+#: operator-supplied, so it can carry the write token. An earlier version tried
+#: to redact URLs out of the text with a regex. That is boundary-guessing on
+#: untrusted free text, and it lost: `//secret@host` was missed entirely,
+#: `https://user: secret@host` had its prefix redacted and the credential left
+#: behind, and the pattern ate trailing punctuation off the sentences it did
+#: match. Each fix would have been another guess.
+#:
+#: So the field is withheld rather than sanitised. A work-list needs to say
+#: WHICH sessions are missing and where to find them; the prose belongs in the
+#: logs and the stored observation, where an operator already looks and no new
+#: distribution surface is created. If it comes back it should be a structured
+#: reason_code with controlled details, not free text.
+_REASON_WITHHELD = None
 
 #: Only these close the case. Everything else - including a state this build
 #: does not recognise - is work.
@@ -62,30 +80,6 @@ def _text(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-#: Any URL-shaped run, however it is quoted or punctuated around.
-_URL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"<>]+")
-
-_REDACTED = "<redacted url>"
-
-
-def _scrubbed(reason: str | None) -> str | None:
-    """Reason text with URLs removed.
-
-    The exporter builds these messages by interpolating the store URL - see
-    capture_result's mismatch verdict, which quotes both the reported and the
-    configured one. That URL is operator-supplied and can carry the write token
-    in its userinfo, query or even its host, which is exactly why the startup
-    posture line logs no part of it either.
-
-    The rest of the sentence is what an operator needs ("exporter reported
-    success against a different store"), and it survives. The destination is
-    already identified by the deployment fields, which cannot contain a secret.
-    """
-    if reason is None:
-        return None
-    return _URL.sub(_REDACTED, reason)
-
-
 def _parsed_time(value: object) -> datetime | None:
     """The query adapter hands back an ISO string, not a datetime."""
     from datetime import datetime as _dt
@@ -97,6 +91,14 @@ def _parsed_time(value: object) -> datetime | None:
         return _dt.fromisoformat(text)
     except ValueError:
         return None
+
+
+def _counted_loss(payload: Mapping[str, object]) -> bool:
+    """True when the counters say sessions were seen but not stored."""
+    counters = payload.get("counters")
+    if not isinstance(counters, dict):
+        return False
+    return any(isinstance(counters.get(name), int) and counters[name] > 0 for name in LOSS_COUNTERS)
 
 
 def _state_of(payload: Mapping[str, object]) -> CaptureState:
@@ -146,6 +148,13 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
     raw_payload = event.get("data")
     payload: Mapping[str, object] = raw_payload if isinstance(raw_payload, dict) else {}
     state = _state_of(payload)
+    if state is CaptureState.CAPTURED and _counted_loss(payload):
+        # A stored row claiming success while counting losses contradicts
+        # itself. The current producer cannot emit that - capture_result
+        # refuses it - but this read path must not TRUST that, because a
+        # semantically impossible row is exactly the one whose success claim
+        # is worth least.
+        state = CaptureState.UNKNOWN
 
     return CaptureStatusEntry(
         session_id=session_id,
@@ -158,7 +167,6 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
         # disagreed with its own state - through version skew or a partial
         # write - would otherwise be trusted to close a case it cannot close.
         needs_backfill=state not in _SETTLED,
-        reason=_scrubbed(_text(payload.get("reason"))),
         partition=_text(payload.get("partition")),
         expected_deployment=_text(payload.get("expected_deployment")),
         origin_deployment=_text(payload.get("origin_deployment")),

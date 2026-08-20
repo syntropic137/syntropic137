@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 
 __all__ = [
+    "LOSS_COUNTERS",
     "SUPPORTED_SCHEMA_VERSION",
     "AuthoritativeCapture",
     "CaptureExpectations",
@@ -285,7 +286,7 @@ def _verdict(
         )
         return AuthoritativeCapture(state=state, reason=reason, **fields)  # type: ignore[arg-type]
 
-    lost = {k: v for k, v in counters.items() if k in _LOSS_COUNTERS and v}
+    lost = {k: v for k, v in counters.items() if k in LOSS_COUNTERS and v}
     detail = ", ".join(f"{k}={v}" for k, v in sorted(lost.items()))
     return AuthoritativeCapture(
         state=CaptureState.INCOMPLETE,
@@ -366,7 +367,7 @@ def _doubt_about_success(
     # cheap: it costs nothing today and fails closed if the producer ever gains
     # a bug or this parser drifts from it. capture_status.py already refuses
     # the same contradiction on its own path.
-    contradicting = {k: v for k, v in counters.items() if k in _LOSS_COUNTERS and v}
+    contradicting = {k: v for k, v in counters.items() if k in LOSS_COUNTERS and v}
     if contradicting:
         named = ", ".join(f"{k}={v}" for k, v in sorted(contradicting.items()))
         return f"exporter claimed success while counting {named}"
@@ -376,7 +377,7 @@ def _doubt_about_success(
 
 #: Counters whose nonzero value means a session the sweep SAW is not in the
 #: store. Mirrors the exporter's own definition of captured_everything.
-_LOSS_COUNTERS: Final = ("rejected", "skipped_oversize", "failed", "unconfirmed")
+LOSS_COUNTERS: Final = ("rejected", "skipped_oversize", "failed", "unconfirmed")
 
 
 def _load_document(stdout: str) -> Mapping[str, object] | None:
