@@ -65,9 +65,21 @@ CAPABILITY_ROOT: Final = "/opt/agentic/capabilities/session-store"
 #: every phase of the images it could not match.
 CAPABILITY_PROVIDER_DIRS: Final = ("apss", "seshmagic")
 
-#: Exit status the wrapper uses when it finds no capability to source.
-#: Distinct from the exporter's own codes so it cannot be read as a verdict.
+#: Exit status the wrapper uses when the capability is missing but the exporter
+#: is NOT. Distinct from the exporter's own codes so it cannot be read as a
+#: verdict.
 EXIT_NO_CAPABILITY: Final = 4
+
+#: What a shell returns for "command not found", and what the probe returned
+#: before this wrapper existed when an image carried no exporter at all.
+#:
+#: The wrapper re-raises it deliberately. An image with neither the capability
+#: nor the binary has no capture to do - interactive-tmux is exactly that - and
+#: that reads as DISABLED. Letting the missing capability alone decide would
+#: have made those images report UNKNOWN, which requests a backfill for
+#: transcripts that never could have existed: the same false alarm this whole
+#: change removes, reintroduced for a different backend.
+EXIT_COMMAND_NOT_FOUND: Final = 127
 
 #: The probe runs the exporter THROUGH the capability's own init.sh.
 #:
@@ -93,6 +105,11 @@ for d in {" ".join(CAPABILITY_PROVIDER_DIRS)}; do
     EXPORTER_STATE_FILE="$SYN_PROBE_STATE_FILE" exec apss-session-exporter --json
   fi
 done
+
+# No capability was found. Distinguish "this image does no capture at all"
+# from "the capability is missing but the exporter is here", because only the
+# second is a fault worth a backfill.
+command -v apss-session-exporter >/dev/null 2>&1 || exit {EXIT_COMMAND_NOT_FOUND}
 exit {EXIT_NO_CAPABILITY}
 """
 

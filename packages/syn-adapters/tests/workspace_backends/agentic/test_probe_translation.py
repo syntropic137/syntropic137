@@ -24,6 +24,7 @@ import pytest
 
 from syn_adapters.workspace_backends.agentic.capture_probe import (
     CAPABILITY_PROVIDER_DIRS,
+    EXIT_COMMAND_NOT_FOUND,
     EXIT_NO_CAPABILITY,
     EXPORTER_PROBE_COMMAND,
     PROBE_STATE_FILE,
@@ -136,3 +137,47 @@ class TestTheStateFileIsPassedUnderOurOwnName:
         await probe_capture(_capture_env, expectations=EXPECTATIONS)
 
         assert seen == {"SYN_PROBE_STATE_FILE": PROBE_STATE_FILE}
+
+
+class TestAnImageThatDoesNoCaptureAtAll:
+    """Verified against the pinned interactive-tmux image, which has NEITHER
+    the capability directory nor the exporter binary:
+
+        CAPABILITY ABSENT
+        EXPORTER ABSENT
+        wrapper exit = 127
+
+    Before this wrapper, the probe ran the binary directly and got 127 from the
+    shell, which reads as DISABLED. Letting a missing CAPABILITY alone decide
+    would have made those images report UNKNOWN instead - requesting a backfill
+    for transcripts that could never have existed. That is the same false alarm
+    this change removes for the agentic backend, reintroduced for a different
+    one, and it would have been my own regression.
+    """
+
+    @pytest.mark.unit
+    def test_the_wrapper_re_raises_command_not_found(self) -> None:
+        script = SCRIPT
+        guard = script.index("command -v apss-session-exporter")
+        assert guard < script.index(f"exit {EXIT_NO_CAPABILITY}")
+        assert f"exit {EXIT_COMMAND_NOT_FOUND}" in script
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_no_exporter_is_disabled_not_unknown(self) -> None:
+        """DISABLED does not request a backfill; UNKNOWN does."""
+
+        async def _no_exporter(
+            _command: list[str], *, timeout_seconds: int, environment=None
+        ) -> ExecutionResult:
+            return ExecutionResult(
+                exit_code=EXIT_COMMAND_NOT_FOUND,
+                success=False,
+                duration_ms=1.0,
+                stdout="",
+            )
+
+        outcome = await probe_capture(_no_exporter, expectations=EXPECTATIONS)
+
+        assert outcome.state is CaptureState.DISABLED
+        assert not outcome.needs_backfill
