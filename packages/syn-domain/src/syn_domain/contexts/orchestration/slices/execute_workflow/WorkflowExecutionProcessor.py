@@ -510,6 +510,17 @@ class WorkflowExecutionProcessor:
         """
         shared_cms = {id(cm) for _, cm in self._shared_workspaces.values()}
         for _pid, workspace_cm in list(self._active_workspace_cms.items()):
+            # Probe on the way out of a CANCEL or a FAILURE too. A phase that
+            # never reached _finalize_phase still ran an agent, and a failed
+            # run is the one whose transcript is most worth having. Shared
+            # workspaces are probed here as well, before the skip below hands
+            # their teardown to _cleanup_shared_workspace.
+            await capture_phase_session(
+                self._session_capture,
+                self._active_workspaces.get(_pid),
+                session_id=self._phase_session_ids.get(_pid, ""),
+                phase_id=_pid,
+            )
             if id(workspace_cm) in shared_cms:
                 continue
             try:
@@ -517,6 +528,7 @@ class WorkflowExecutionProcessor:
             except Exception:
                 logger.exception("Error cleaning up workspace during %s", context)
         self._active_workspace_cms.clear()
+        self._phase_session_ids.clear()
 
     async def _cleanup_shared_workspace(self, execution_id: str) -> None:
         """Tear down the shared workspace at execution end. Idempotent."""

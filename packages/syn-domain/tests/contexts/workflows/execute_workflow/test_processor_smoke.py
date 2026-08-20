@@ -114,7 +114,10 @@ def _noop_command_builder(phase: ExecutablePhase, prompt: str) -> list[str]:
     return ["echo", "smoke-test-agent"]
 
 
-def _make_processor(agent_handler: FakeAgentExecutionHandler) -> WorkflowExecutionProcessor:
+def _make_processor(
+    agent_handler: FakeAgentExecutionHandler,
+    session_capture: object | None = None,
+) -> WorkflowExecutionProcessor:
     """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies."""
     todo_store = InMemoryProjectionStore()
     todo_projection = ExecutionTodoProjection(store=todo_store)
@@ -133,6 +136,7 @@ def _make_processor(agent_handler: FakeAgentExecutionHandler) -> WorkflowExecuti
         command_builder=_noop_command_builder,
         todo_projection=todo_projection,
         agent_handler=agent_handler,
+        session_capture=session_capture,  # type: ignore[arg-type]
     )
 
 

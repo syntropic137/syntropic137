@@ -18,6 +18,9 @@ import pytest
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
+from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+
+from .test_processor_smoke import _make_processor
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.agentic.capture_probe import (
@@ -140,3 +143,69 @@ class TestCaptureRunsBeforeTeardown:
         await _finalize(_processor(None, _Workspace(log), _WorkspaceCm(log)))
 
         assert log == ["teardown"]
+
+
+class TestCaptureOnCancelAndFailure:
+    """A phase that never finalized still ran an agent.
+
+    Cancel and failure tear workspaces down through
+    _close_phase_workspace_cms, which bypasses _finalize_phase entirely. Before
+    this was covered, every cancelled or failed execution destroyed its spool
+    unprobed - losing exactly the transcripts most worth reading.
+    """
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_cancelled_phase_is_probed_before_teardown(self) -> None:
+        log: list[str] = []
+        capture = _Capture(log)
+        p = _processor(capture, _Workspace(log), _WorkspaceCm(log))
+
+        await p._close_phase_workspace_cms("cancel")  # pyright: ignore[reportPrivateUsage]
+
+        assert log == ["capture", "exec", "teardown"]
+        assert capture.seen["session_id"] == "s-1"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_shared_workspace_is_probed_even_though_teardown_defers(
+        self,
+    ) -> None:
+        """Shared containers skip teardown here, but must not skip the probe."""
+        log: list[str] = []
+        capture = _Capture(log)
+        cm = _WorkspaceCm(log)
+        p = _processor(capture, _Workspace(log), cm)
+        p._shared_workspaces = {"e-1": ("w-1", cm)}  # type: ignore[attr-defined]
+
+        await p._close_phase_workspace_cms("failure")  # pyright: ignore[reportPrivateUsage]
+
+        # Probed, and deliberately NOT torn down: _cleanup_shared_workspace
+        # owns that, and double-exiting would destroy the container twice.
+        assert log == ["capture", "exec"]
+
+
+class TestTheRealConstructorSetsWhatFinalizeReads:
+    """The ordering tests above bypass __init__, so they cannot see this.
+
+    They populate the attributes directly, which means they stay green if the
+    constructor stops setting one - and the failure in production would be an
+    AttributeError inside teardown, or capture silently never running. Asserted
+    against the REAL constructor for that reason.
+    """
+
+    @pytest.mark.unit
+    def test_capture_state_is_initialised(self) -> None:
+        p = _make_processor(FakeAgentExecutionHandler())
+
+        # Defaults to off: a processor built without a capture service must
+        # still finalize phases rather than raise.
+        assert p._session_capture is None  # pyright: ignore[reportPrivateUsage]
+        assert p._phase_session_ids == {}  # pyright: ignore[reportPrivateUsage]
+
+    @pytest.mark.unit
+    def test_an_injected_service_is_kept(self) -> None:
+        capture = _Capture([])
+        p = _make_processor(FakeAgentExecutionHandler(), session_capture=capture)
+
+        assert p._session_capture is capture  # pyright: ignore[reportPrivateUsage]
