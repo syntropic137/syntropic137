@@ -76,7 +76,6 @@ class TestItRecordsWhatItFound:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
-            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.CAPTURED
         assert len(writer.calls) == 1
@@ -103,7 +102,6 @@ class TestItRecordsWhatItFound:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
-            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.DISABLED
         assert writer.calls == []
@@ -124,7 +122,6 @@ class TestNothingHereCanFailAPhase:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
-            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.UNKNOWN
         assert outcome.needs_backfill
@@ -141,7 +138,6 @@ class TestNothingHereCanFailAPhase:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
-            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.CAPTURED
 
@@ -154,7 +150,6 @@ class TestNothingHereCanFailAPhase:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
-            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.CAPTURED
 
@@ -173,7 +168,6 @@ class TestNothingHereCanFailAPhase:
                 workspace_id="w-1",
                 phase_id="p-1",
                 expect_sessions=True,
-                capture_provisioned=True,
             )
 
 
@@ -198,7 +192,6 @@ class TestExpectSessionsReachesTheVerdict:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
-            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.UNKNOWN
         assert outcome.needs_backfill
@@ -208,30 +201,64 @@ class TestExpectSessionsReachesTheVerdict:
 class TestUnprovisionedWorkspacesAreNotProbed:
     """A configured store is not the same as a workspace that received one.
 
-    Only the agentic backend injects the session-store environment.
-    interactive-tmux, docker and the recording backends do not. Probing one of
-    those runs an exporter with no store configured and records perpetual
-    UNKNOWN with a partition nothing ever wrote to: an indicator that cries
-    wolf on every run of that backend, and therefore stops being read.
+    Only the agentic backend injects the session-store environment, and only
+    images carrying the exporter can act on it. That is derived by ASKING the
+    workspace, never by trusting a caller-supplied flag.
     """
 
     @pytest.mark.asyncio
-    async def test_an_unprovisioned_workspace_is_disabled_not_unknown(self) -> None:
+    async def test_a_provisioning_failure_is_failed_and_asks_for_backfill(self) -> None:
+        """An exporter that IS present but unconfigured is a real failure.
+
+        This document is copied from a real run of the pinned omni image with
+        no SESSION_STORE_URL in its environment, so the shape under test is the
+        one the binary actually emits rather than one invented to pass.
+        """
         writer = _Writer()
 
-        async def _must_not_run(*_a: object, **_k: object) -> ExecutionResult:
-            raise AssertionError("must not probe a workspace without the capability")
+        unconfigured = _ok_exec(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "scs_version": "1.0",
+                    "captured_everything": False,
+                    "error": "missing required env var SESSION_STORE_URL",
+                    "store_url": None,
+                    "origin": None,
+                }
+            ),
+            exit_code=1,
+        )
 
         outcome = await _service(writer).capture_and_record(
-            _must_not_run,
+            unconfigured,
             session_id="s-1",
             execution_id="e-1",
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
-            capture_provisioned=False,
         )
-        # DISABLED, not UNKNOWN: nothing is missing, capture was never set up.
+        # FAILED, not DISABLED. The binary is baked in, so this workspace was
+        # meant to capture and its injection broke. Calling that "off" would
+        # silently discard transcripts that really are sitting in the spool.
+        # Absence of the capability is detected by the binary being ABSENT,
+        # which is the test below, not by an unconfigured one being present.
+        assert outcome.state is CaptureState.FAILED
+        assert outcome.needs_backfill
+        assert len(writer.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_an_image_without_the_exporter_is_disabled(self) -> None:
+        """127 is the shell reporting that the binary is not there."""
+        writer = _Writer()
+
+        outcome = await _service(writer).capture_and_record(
+            _ok_exec("", exit_code=127),
+            session_id="s-1",
+            execution_id="e-1",
+            workspace_id="w-1",
+            phase_id="p-1",
+            expect_sessions=True,
+        )
         assert outcome.state is CaptureState.DISABLED
         assert not outcome.needs_backfill
-        assert writer.calls == []

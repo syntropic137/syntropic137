@@ -55,6 +55,9 @@ _EXIT_CAPTURED: Final = 0
 _EXIT_COULD_NOT_RUN: Final = 1
 _EXIT_USAGE: Final = 2
 _EXIT_INCOMPLETE: Final = 3
+# POSIX shells report "command not found" as 127. The exporter cannot emit
+# this itself, because it is what happens when the exporter is not there.
+_EXIT_NO_BINARY: Final = 127
 
 
 class CaptureExpectations(BaseModel):
@@ -195,6 +198,16 @@ def _refuse_unreadable(
     if exit_code == _EXIT_USAGE:
         # The host built the command line, so this is our bug, not the store's.
         return _unknown(f"exporter rejected its arguments (exit {exit_code})")
+
+    if exit_code == _EXIT_NO_BINARY and document is None:
+        # This image has no exporter baked in, so capture was never possible
+        # here. That is a fact about the workspace, not a failure of one: the
+        # non-agentic backends run images that never carried the binary.
+        # UNKNOWN would ask for a backfill of transcripts that cannot exist.
+        return AuthoritativeCapture(
+            state=CaptureState.DISABLED,
+            reason="no session exporter in this workspace image",
+        )
 
     if document is None:
         # The exit code alone is not enough: exit 0 without a document means the
