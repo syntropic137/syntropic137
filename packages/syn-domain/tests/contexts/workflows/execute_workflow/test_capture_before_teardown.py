@@ -11,6 +11,7 @@ both halves.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
@@ -209,3 +210,37 @@ class TestTheRealConstructorSetsWhatFinalizeReads:
         p = _make_processor(FakeAgentExecutionHandler(), session_capture=capture)
 
         assert p._session_capture is capture  # pyright: ignore[reportPrivateUsage]
+
+
+class TestCaptureCannotFailAPhase:
+    """Fail-open is the contract, so it is asserted rather than assumed."""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_raising_capture_still_tears_the_workspace_down(self) -> None:
+        log: list[str] = []
+
+        class _Exploding:
+            async def capture_and_record(self, *_a: object, **_k: object) -> None:
+                log.append("boom")
+                raise RuntimeError("capture is broken")
+
+        await _finalize(_processor(_Exploding(), _Workspace(log), _WorkspaceCm(log)))
+
+        # Teardown still happened. A leaked container is a worse outcome than
+        # a missing observation, and an hour of agent work must not be lost
+        # to a broken telemetry path.
+        assert log == ["boom", "teardown"]
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_cancellation_is_not_swallowed(self) -> None:
+        """Absorbing CancelledError here would hang shutdown."""
+        log: list[str] = []
+
+        class _Cancelled:
+            async def capture_and_record(self, *_a: object, **_k: object) -> None:
+                raise asyncio.CancelledError
+
+        with pytest.raises(asyncio.CancelledError):
+            await _finalize(_processor(_Cancelled(), _Workspace(log), _WorkspaceCm(log)))

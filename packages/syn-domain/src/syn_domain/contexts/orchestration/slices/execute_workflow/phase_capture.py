@@ -59,6 +59,27 @@ async def capture_phase_session(
         )
         return
 
+    # The service absorbs its own operational failures, so this catches what
+    # it cannot: a programming error in the capture path, or an adapter that
+    # raises before the service's own guard runs. Either would otherwise
+    # propagate into teardown and fail a phase whose agent work succeeded,
+    # which is the one outcome capture must never cause.
+    #
+    # Exception, not BaseException: cancellation MUST keep propagating, or a
+    # shutdown hangs waiting on a probe.
+    try:
+        await _record(capture, workspace, session_id=session_id, phase_id=phase_id)
+    except Exception:
+        logger.exception("Session capture failed for phase %s; continuing with teardown", phase_id)
+
+
+async def _record(
+    capture: SessionCapturePort,
+    workspace: ManagedWorkspace,
+    *,
+    session_id: str,
+    phase_id: str,
+) -> None:
     await capture.capture_and_record(
         workspace.execute,
         session_id=session_id,
