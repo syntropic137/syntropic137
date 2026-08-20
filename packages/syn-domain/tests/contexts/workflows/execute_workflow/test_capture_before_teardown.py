@@ -169,10 +169,15 @@ class TestCaptureOnCancelAndFailure:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_a_shared_workspace_is_probed_even_though_teardown_defers(
-        self,
-    ) -> None:
-        """Shared containers skip teardown here, but must not skip the probe."""
+    async def test_a_shared_workspace_is_not_probed_per_phase(self) -> None:
+        """A shared container cannot answer a per-phase question honestly.
+
+        The exporter sweeps a workspace partition, not a session. On a
+        container reused across phases, phase 2's probe would find phase 1's
+        transcript, satisfy expect_sessions and record phase 2 as CAPTURED
+        having captured nothing - the one verdict that suppresses a backfill.
+        Tracked in #847; needs a session selector on the exporter.
+        """
         log: list[str] = []
         capture = _Capture(log)
         cm = _WorkspaceCm(log)
@@ -181,9 +186,9 @@ class TestCaptureOnCancelAndFailure:
 
         await p._close_phase_workspace_cms("failure")  # pyright: ignore[reportPrivateUsage]
 
-        # Probed, and deliberately NOT torn down: _cleanup_shared_workspace
-        # owns that, and double-exiting would destroy the container twice.
-        assert log == ["capture", "exec"]
+        # Neither probed nor torn down: _cleanup_shared_workspace owns the
+        # teardown, and double-exiting would destroy the container twice.
+        assert log == []
 
 
 class TestTheRealConstructorSetsWhatFinalizeReads:

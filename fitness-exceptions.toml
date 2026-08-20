@@ -54,8 +54,8 @@ issue = "#768"  # interactive-tmux cancel-polling loop; landed via fix/interacti
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 863
-issue = "#768"  # grew absorbing 769's _DispatchContext + shared-workspace exactly-once cleanup, the stale-COLLECT_ARTIFACTS skip guard, the codex-review phase-aware interactive-tmux gate / followup repos threading, #772's skill_materializer wiring, and the session-capture probe hook (the probe body lives in phase_capture.py; what remains here is the port, the per-phase session id, and the calls that must sit before teardown on both the finalize path and the cancel/failure path); split scheduled with the interactive-tmux post-launch polish
+value = 877
+issue = "#768"  # grew absorbing 769's _DispatchContext + shared-workspace exactly-once cleanup, the stale-COLLECT_ARTIFACTS skip guard, the codex-review phase-aware interactive-tmux gate / followup repos threading, #772's skill_materializer wiring, and the session-capture probe hook (the probe body lives in phase_capture.py; what remains here is the port, the per-phase session id, and the calls that must sit before teardown on both the finalize path and the cancel/failure path, plus the #847 shared-workspace exclusion); split scheduled with the interactive-tmux post-launch polish
 
 [max-loc-file."apps.syn-api.src.syn_api._wiring"]
 value = 1200

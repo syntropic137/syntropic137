@@ -510,19 +510,20 @@ class WorkflowExecutionProcessor:
         """
         shared_cms = {id(cm) for _, cm in self._shared_workspaces.values()}
         for _pid, workspace_cm in list(self._active_workspace_cms.items()):
+            if id(workspace_cm) in shared_cms:
+                # NOT probed. See _finalize_phase for why a shared container
+                # cannot answer a per-phase capture question honestly.
+                continue
+
             # Probe on the way out of a CANCEL or a FAILURE too. A phase that
             # never reached _finalize_phase still ran an agent, and a failed
-            # run is the one whose transcript is most worth having. Shared
-            # workspaces are probed here as well, before the skip below hands
-            # their teardown to _cleanup_shared_workspace.
+            # run is the one whose transcript is most worth having.
             await capture_phase_session(
                 self._session_capture,
                 self._active_workspaces.get(_pid),
                 session_id=self._phase_session_ids.get(_pid, ""),
                 phase_id=_pid,
             )
-            if id(workspace_cm) in shared_cms:
-                continue
             try:
                 await workspace_cm.__aexit__(None, None, None)
             except Exception:
@@ -951,13 +952,26 @@ class WorkflowExecutionProcessor:
         # Cleanup happens once at execution end (complete / fail / cancel).
         is_shared = any(cm is workspace_cm for _, cm in self._shared_workspaces.values())
 
-        # BEFORE any teardown, and before the shared-workspace early return:
-        # once the container is gone so is the spool, and a later probe cannot
-        # tell "stored" from "lost forever". Shared workspaces are probed too,
-        # because a sweep is per-session and each phase is its own session.
-        await capture_phase_session(
-            self._session_capture, workspace, session_id=session_id, phase_id=phase_id
-        )
+        # BEFORE teardown: once the container is gone so is the spool, and a
+        # later probe cannot tell "stored" from "lost forever".
+        #
+        # SHARED workspaces are deliberately NOT probed (#847). The exporter
+        # sweeps a whole workspace partition, not one session, so on a
+        # container reused across phases the probe for phase 2 would discover
+        # phase 1's transcript, satisfy expect_sessions and record phase 2 as
+        # CAPTURED having captured nothing. A false CAPTURED is the worst
+        # verdict available: it is the one state that suppresses a backfill.
+        # Answering this properly needs a session selector on the exporter,
+        # which is a contract change, not a call-site fix. Nothing is lost
+        # today because the shared backend is interactive-tmux, whose image
+        # carries no exporter at all.
+        if not is_shared:
+            await capture_phase_session(
+                self._session_capture,
+                workspace,
+                session_id=session_id,
+                phase_id=phase_id,
+            )
 
         if workspace_cm is not None and not is_shared:
             await workspace_cm.__aexit__(None, None, None)
