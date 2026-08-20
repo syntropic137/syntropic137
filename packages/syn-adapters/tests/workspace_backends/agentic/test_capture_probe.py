@@ -74,8 +74,13 @@ class TestItAsksTheRightQuestion:
 
         await probe_capture(_exec, expectations=_EXPECT)
         assert seen == [EXPORTER_PROBE_COMMAND]
-        # The prose line the finalizer prints is not a contract; --json is.
-        assert "--json" in seen[0]
+        # --json is inside the wrapper script rather than a separate argv
+        # element: the probe TRANSLATES the capability contract itself and
+        # invokes the exporter by absolute path (#852). It deliberately does
+        # not source init.sh - /opt/agentic is agent-owned, so sourcing it
+        # would let the audited process configure its own audit. The prose
+        # line the finalizer prints is still not a contract; --json is.
+        assert "--json" in seen[0][-1]
 
     @pytest.mark.asyncio
     async def test_a_clean_probe_is_captured(self) -> None:
@@ -206,7 +211,13 @@ class TestItDoesNotTrustAgentWritableState:
 
         await probe_capture(_exec, expectations=_EXPECT)
         assert seen and seen[0] is not None
-        assert seen[0]["EXPORTER_STATE_FILE"] == PROBE_STATE_FILE
+        # Passed under OUR name; the wrapper is what sets EXPORTER_STATE_FILE
+        # from it. Worth being exact about what this buys: the path is
+        # host-SELECTED, not host-OWNED - /tmp is a writable tmpfs, so the
+        # agent can create or symlink that file. What makes its contents
+        # unable to forge a verdict is --ignore-state, not the location.
+        assert seen[0]["SYN_PROBE_STATE_FILE"] == PROBE_STATE_FILE
+        assert "EXPORTER_STATE_FILE" not in seen[0]
 
     @pytest.mark.asyncio
     async def test_the_probe_state_file_is_outside_the_agent_writable_spool(self) -> None:

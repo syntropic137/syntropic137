@@ -53,10 +53,73 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-#: The standard-anchored binary name, matching what agentic-primitives resolves
-#: first. `--json` is the supported machine interface; the prose line the
-#: finalizer prints is explicitly not a contract.
-EXPORTER_PROBE_COMMAND: Final = ["apss-session-exporter", "--json"]
+#: The exporter, by ABSOLUTE PATH.
+#:
+#: Resolving it through PATH was forgeable. /opt/agentic is agent-owned in the
+#: workspace image, so the agent can edit the capability's init.sh to prepend a
+#: directory of its own and have a fake exporter answer the audit. The binary
+#: itself is root-owned 0755, so naming its path is what makes the program
+#: producing the verdict the one the host intended.
+EXPORTER_BIN: Final = "/usr/local/bin/apss-session-exporter"
+
+#: Exit status when the workspace carries no session-store contract at all.
+EXIT_NO_CAPABILITY: Final = 4
+
+#: What a shell returns for "command not found", reused here for "the exporter
+#: is not in this image". Kept because an image with no exporter reads as
+#: DISABLED: there is no capture to audit, so a backfill would chase
+#: transcripts that could never have existed.
+EXIT_COMMAND_NOT_FOUND: Final = 127
+
+#: The probe translates the capability contract ITSELF rather than sourcing the
+#: adapter's init.sh.
+#:
+#: WHY, and this is the whole reason the wrapper exists in this shape: an audit
+#: must not be configured by the party it audits. /opt/agentic is agent-owned,
+#: so init.sh is agent-writable, and sourcing it hands the agent control of the
+#: audit's environment. A PATH prepended with a fake exporter is the obvious
+#: attack; the quieter one is SESSION_STORE_URL pointed at a sink the agent
+#: controls, where the REAL exporter uploads faithfully and returns a clean
+#: sweep for transcripts the store never saw.
+#:
+#: Every value below comes from the container's own configured environment,
+#: which is set by the host at create time and is not writable from inside.
+#: The mapping mirrors init.sh exactly - seven variables, verified against the
+#: adapter in the pinned image. It is duplication, and the alternative is
+#: trusting code the audited process can rewrite.
+#:
+#: The token is read from the container's environment rather than passed on the
+#: command line, so it never appears in the host's argv.
+_PROBE_SCRIPT: Final = f"""
+BIN={EXPORTER_BIN}
+[ -x "$BIN" ] || exit {EXIT_COMMAND_NOT_FOUND}
+[ -n "${{AGENTIC_SESSION_STORE_URL:-}}" ] || exit {EXIT_NO_CAPABILITY}
+
+SPOOL="${{AGENTIC_SESSION_STORE_SPOOL:-/spool}}"
+PARTITION="${{AGENTIC_SESSION_STORE_PARTITION:-${{HOSTNAME}}}}"
+PART_DIR="$SPOOL/$PARTITION"
+
+export SESSION_STORE_URL="$AGENTIC_SESSION_STORE_URL"
+export CLAUDE_PROJECTS_ROOT="$PART_DIR/claude"
+export CODEX_SESSIONS_ROOT="$PART_DIR/codex"
+export EXPORTER_STATE_FILE="$SYN_PROBE_STATE_FILE"
+
+if [ -n "${{AGENTIC_SESSION_STORE_AUTH:-}}" ]; then
+  export SESSIONS_WRITE_TOKEN="$AGENTIC_SESSION_STORE_AUTH"
+fi
+if [ -n "${{AGENTIC_SESSION_STORE_TAGS:-}}" ]; then
+  export SESSION_STORE_TAGS="$AGENTIC_SESSION_STORE_TAGS"
+fi
+if [ -n "${{AGENTIC_SESSION_STORE_DEPLOYMENT:-}}" ]; then
+  export SESSION_STORE_ORIGIN_DEPLOYMENT="$AGENTIC_SESSION_STORE_DEPLOYMENT"
+fi
+
+exec "$BIN" --ignore-state --json
+"""
+
+#: Plain sh: the script is POSIX and authored here, so it no longer depends on
+#: the adapter's bash-only init.sh.
+EXPORTER_PROBE_COMMAND: Final = ["sh", "-c", _PROBE_SCRIPT]
 
 #: Where the probe points the exporter's state file.
 #:
@@ -74,6 +137,12 @@ EXPORTER_PROBE_COMMAND: Final = ["apss-session-exporter", "--json"]
 #: re-evaluates every transcript rather than trusting a claim about them; the
 #: store deduplicates on content hash, so re-sending an already-stored session
 #: is a no-op rather than a duplicate.
+#: NOTE ON WHAT THIS DOES AND DOES NOT BUY. The path is host-SELECTED,
+#: not host-owned: /tmp is a writable tmpfs, so the agent can create or
+#: symlink this file. What stops its contents forging a verdict is
+#: --ignore-state, which makes the exporter not read state at all. The
+#: separate path remains worthwhile - it keeps the audit from disturbing
+#: the capability's own state - but it is not a trust boundary.
 PROBE_STATE_FILE: Final = "/tmp/.apss-probe-state.json"
 
 #: A probe that outlives this is not worth waiting for. Teardown is already
@@ -131,7 +200,11 @@ async def probe_capture(
         result = await execute(
             EXPORTER_PROBE_COMMAND,
             timeout_seconds=timeout_seconds,
-            environment={"EXPORTER_STATE_FILE": PROBE_STATE_FILE},
+            # Passed under our own name, not EXPORTER_STATE_FILE: init.sh
+            # exports that one itself, and whichever assignment ran last would
+            # win. The wrapper applies this AFTER sourcing, so the host value
+            # is the one the exporter sees.
+            environment={"SYN_PROBE_STATE_FILE": PROBE_STATE_FILE},
         )
 
         if result.timed_out:
@@ -143,6 +216,20 @@ async def probe_capture(
             return AuthoritativeCapture(
                 state=CaptureState.FAILED,
                 reason=f"capture probe timed out after {timeout_seconds}s",
+            )
+
+        if result.exit_code == EXIT_NO_CAPABILITY:
+            # The image has no session-store adapter to source. UNKNOWN, not
+            # DISABLED: a store IS configured for this workspace, so the
+            # transcripts were expected to go somewhere. Calling it DISABLED
+            # would close the case on sessions nobody has, and CAPTURED would
+            # be a lie. UNKNOWN asks for the backfill and says why.
+            return AuthoritativeCapture(
+                state=CaptureState.UNKNOWN,
+                reason=(
+                    "no session-store capability found in this workspace image; "
+                    "the probe could not reproduce the finalizer's environment"
+                ),
             )
 
         return parse_capture_result(result.stdout, result.exit_code, expectations=expectations)
