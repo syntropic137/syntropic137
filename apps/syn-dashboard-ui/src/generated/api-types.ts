@@ -754,6 +754,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/capture/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Capture Status
+         * @description Recorded session-capture verdicts, newest first.
+         */
+        get: operations["get_capture_status_capture_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/observability/sessions/{session_id}/tools": {
         parameters: {
             query?: never;
@@ -1888,6 +1908,70 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * CaptureStatusEntry
+         * @description One recorded session-capture verdict.
+         *
+         *     Mirrors the observation the workspace adapter writes on the observability
+         *     lane. The observed fields are None exactly when something went wrong, which
+         *     is when a backfill needs them most - so the expected values are carried
+         *     alongside rather than in place of them.
+         */
+        CaptureStatusEntry: {
+            /** Session Id */
+            session_id: string;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Recorded At */
+            recorded_at?: string | null;
+            /** State */
+            state: string;
+            /** Needs Backfill */
+            needs_backfill: boolean;
+            /** Partition */
+            partition?: string | null;
+            /** Expected Deployment */
+            expected_deployment?: string | null;
+            /** Origin Deployment */
+            origin_deployment?: string | null;
+        };
+        /**
+         * CaptureStatusResponse
+         * @description Recorded capture verdicts, newest first.
+         */
+        CaptureStatusResponse: {
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Needs Backfill Count
+             * @default 0
+             */
+            needs_backfill_count: number;
+            /**
+             * Unattributable Count
+             * @default 0
+             */
+            unattributable_count: number;
+            /**
+             * Scanned
+             * @default 0
+             */
+            scanned: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Entries */
+            entries?: components["schemas"]["CaptureStatusEntry"][];
         };
         /**
          * ClaudePluginFileEntry
@@ -6578,6 +6662,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_capture_status_capture_status_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Return only sessions whose transcripts did not reach the store. */
+                needs_backfill?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureStatusResponse"];
                 };
             };
             /** @description Validation Error */

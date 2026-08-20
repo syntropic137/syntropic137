@@ -2141,6 +2141,64 @@
         }
       }
     },
+    "/capture/status": {
+      "get": {
+        "tags": [
+          "capture"
+        ],
+        "summary": "Get Capture Status",
+        "description": "Recorded session-capture verdicts, newest first.",
+        "operationId": "get_capture_status_capture_status_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "needs_backfill",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Return only sessions whose transcripts did not reach the store.",
+              "default": false,
+              "title": "Needs Backfill"
+            },
+            "description": "Return only sessions whose transcripts did not reach the store."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/observability/sessions/{session_id}/tools": {
       "get": {
         "tags": [
@@ -5420,6 +5478,147 @@
         "type": "object",
         "title": "CancelRequest",
         "description": "Request to cancel an execution."
+      },
+      "CaptureStatusEntry": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Id"
+          },
+          "phase_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "recorded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded At"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "needs_backfill": {
+            "type": "boolean",
+            "title": "Needs Backfill"
+          },
+          "partition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partition"
+          },
+          "expected_deployment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Deployment"
+          },
+          "origin_deployment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Deployment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "state",
+          "needs_backfill"
+        ],
+        "title": "CaptureStatusEntry",
+        "description": "One recorded session-capture verdict.\n\nMirrors the observation the workspace adapter writes on the observability\nlane. The observed fields are None exactly when something went wrong, which\nis when a backfill needs them most - so the expected values are carried\nalongside rather than in place of them."
+      },
+      "CaptureStatusResponse": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "needs_backfill_count": {
+            "type": "integer",
+            "title": "Needs Backfill Count",
+            "default": 0
+          },
+          "unattributable_count": {
+            "type": "integer",
+            "title": "Unattributable Count",
+            "default": 0
+          },
+          "scanned": {
+            "type": "integer",
+            "title": "Scanned",
+            "default": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureStatusEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "title": "CaptureStatusResponse",
+        "description": "Recorded capture verdicts, newest first."
       },
       "ClaudePluginFileEntry": {
         "properties": {
@@ -11956,6 +12155,10 @@
     {
       "name": "artifacts",
       "description": "Create, upload, and retrieve artifacts produced by agent sessions"
+    },
+    {
+      "name": "capture",
+      "description": ""
     },
     {
       "name": "claude-plugins",

@@ -1429,6 +1429,73 @@ class ToolTimelineResponse(BaseModel):
     executions: list[ToolTimelineEntry] = Field(default_factory=list)
 
 
+class CaptureStatusEntry(BaseModel):
+    """One recorded session-capture verdict.
+
+    Mirrors the observation the workspace adapter writes on the observability
+    lane. The observed fields are None exactly when something went wrong, which
+    is when a backfill needs them most - so the expected values are carried
+    alongside rather than in place of them.
+    """
+
+    session_id: str
+    execution_id: str | None = None
+    phase_id: str | None = None
+    workspace_id: str | None = None
+    recorded_at: datetime | None = None
+
+    state: str
+    """captured, incomplete, failed, unknown or disabled.
+
+    Lowercase, matching the recorded CaptureState values. Anything this build
+    cannot recognise is reported as "unknown" rather than echoed back.
+    """
+
+    needs_backfill: bool
+    """Derived from the state, never read from the stored flag.
+
+    True for anything except a settled verdict, so a state that cannot be
+    trusted asks for a retry. A re-sent transcript is a no-op (the store dedups
+    on content hash); a skipped one is lost permanently.
+    """
+
+    partition: str | None = None
+    """The spool partition this execution wrote to: what a retry needs to find
+    the transcripts again."""
+
+    expected_deployment: str | None = None
+    origin_deployment: str | None = None
+
+
+class CaptureStatusResponse(BaseModel):
+    """Recorded capture verdicts, newest first."""
+
+    total: int = 0
+    """How many entries this response contains, after any filter."""
+
+    needs_backfill_count: int = 0
+    """How many of the scanned verdicts need a backfill, before any filter."""
+
+    unattributable_count: int = 0
+    """Scanned verdicts with no session id, which cannot be acted on.
+
+    Reported rather than dropped: a response that omitted them could read as
+    all-clear while a failure sat unattributable in the store.
+    """
+
+    scanned: int = 0
+    """How many stored verdicts were examined to build this response."""
+
+    truncated: bool = False
+    """True when the scan filled its limit, so older verdicts may exist.
+
+    The limit is applied by the database BEFORE the needs_backfill filter, so
+    an empty backlog on a truncated scan does NOT mean there is no backlog.
+    """
+
+    entries: list[CaptureStatusEntry] = Field(default_factory=list)
+
+
 class SessionTokenMetrics(BaseModel):
     """Token usage metrics for a session."""
 
