@@ -124,8 +124,18 @@ def _agent_session_ids(payload: Mapping[str, object]) -> list[str] | None:
     Non-strings are dropped rather than coerced. This payload was written by
     another process, possibly an older one, so its shape is not guaranteed.
     """
+    # BOTH predicates. `_AGENT_SESSIONS_SINCE` says when the field was
+    # introduced; the supported set says which shapes this build understands at
+    # all. Without the second, an unsupported future schema (3, 999) would have
+    # its `agent_session_ids` trusted while `_state_of` refuses to interpret the
+    # very same payload - the reader disagreeing with itself about whether it
+    # understands the document.
     version = payload.get("schema_version")
-    if type(version) is not int or version < _AGENT_SESSIONS_SINCE:
+    if (
+        type(version) is not int
+        or version not in SUPPORTED_OBSERVATION_SCHEMA_VERSIONS
+        or version < _AGENT_SESSIONS_SINCE
+    ):
         return None
     raw = payload.get("agent_session_ids")
     if not isinstance(raw, list):

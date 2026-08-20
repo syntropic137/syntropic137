@@ -295,6 +295,12 @@ class TestTheVerdictIsNeverGuessed:
         assert v2.state is v1.state
         assert v2.needs_backfill == v1.needs_backfill
         assert v2.reason == v1.reason
+        # The v1 twin still CARRIES `sessions`, because only the version was
+        # changed. Reading it anyway would be interpreting a schema 2 field
+        # under schema 1, so the twin must report None while the original
+        # reports whatever it confirmed. Asserting only state/backfill/reason
+        # let a version-unaware parser pass this test unchanged.
+        assert v1.agent_session_ids is None
 
     def test_a_phase_can_carry_many_agent_session_ids(self) -> None:
         """One phase, several agent sessions - the shape delegation produces.
@@ -337,6 +343,20 @@ class TestTheVerdictIsNeverGuessed:
         base = json.loads(_CLEAN_V2)
         empty = json.dumps({**base, "sessions": []})
         assert _parse(empty, 0, expectations=_CLEAN_V2_EXPECT).agent_session_ids == ()
+
+    @pytest.mark.parametrize("version", [1, 0, -1])
+    def test_sessions_are_not_read_below_the_schema_that_introduced_them(
+        self, version: int
+    ) -> None:
+        """A document carrying `sessions` at a version that never had it.
+
+        It did not come from an exporter of ours, so interpreting it under
+        schema 2 semantics would mean trusting a shape nobody declared.
+        """
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "schema_version": version, "sessions": ["x"]})
+
+        assert _parse(doc, 0, expectations=_CLEAN_V2_EXPECT).agent_session_ids is None
 
     def test_a_session_id_that_is_not_a_string_is_dropped(self) -> None:
         """This came off the wire; a non-string id is a shape we do not know."""

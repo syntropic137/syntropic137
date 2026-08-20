@@ -63,6 +63,10 @@ __all__ = [
 #: must NOT be added here without the code to handle it.
 SUPPORTED_SCHEMA_VERSIONS: Final = frozenset({1, 2})
 
+#: The result schema that introduced the `sessions` array. Below this the field
+#: did not exist, so its presence is not something this build should interpret.
+_SESSIONS_SINCE: Final = 2
+
 #: Exit codes the exporter defines. Named rather than inlined so the mapping
 #: below reads as the contract it implements.
 _EXIT_CAPTURED: Final = 0
@@ -457,6 +461,14 @@ def _agent_session_ids(document: Mapping[str, object]) -> tuple[str, ...] | None
     Non-strings are discarded rather than coerced: this came off the wire, and
     a session id that is not a string is a shape we do not understand.
     """
+    # VERSION-GATED, like the reader on the other side of this contract.
+    # `sessions` arrived at result schema 2, so a schema 1 document carrying the
+    # key did not get it from an exporter of ours, and interpreting it under
+    # schema 2 semantics would mean trusting a shape nobody declared. Fixing
+    # this only in the route reader would have left the same hole upstream.
+    version = document.get("schema_version")
+    if type(version) is not int or version < _SESSIONS_SINCE:
+        return None
     raw = document.get("sessions")
     if not isinstance(raw, list):
         return None

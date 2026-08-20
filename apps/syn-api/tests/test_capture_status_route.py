@@ -212,6 +212,23 @@ class TestTheBiasIsTowardsReportingWork:
         assert entry.agent_session_ids == ["sess-codex", "sess-claude"]
 
     @pytest.mark.unit
+    @pytest.mark.parametrize("version", [0, 3, 999], ids=["zero", "next", "far-future"])
+    @pytest.mark.parametrize("stored", [[], ["x"]], ids=["empty", "populated"])
+    def test_an_unsupported_schema_never_yields_agent_sessions(
+        self, version: int, stored: object
+    ) -> None:
+        """A version this build does not understand is not partially trusted.
+
+        `_state_of` already refuses to interpret these payloads. Reading their
+        `agent_session_ids` anyway would have the reader disagreeing with
+        itself about whether it understands the document.
+        """
+        entry = _to_entry(_row(schema_version=version, agent_session_ids=stored))
+
+        assert entry is not None
+        assert entry.agent_session_ids is None
+
+    @pytest.mark.unit
     @pytest.mark.parametrize("stored", [[], ["x"]], ids=["empty", "populated"])
     def test_a_schema_1_row_never_yields_agent_sessions(self, stored: object) -> None:
         """The field did not exist at schema 1.
