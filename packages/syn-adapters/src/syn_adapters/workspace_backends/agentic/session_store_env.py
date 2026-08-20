@@ -77,6 +77,7 @@ __all__ = [
     "TAG_WORKFLOW_ID",
     "TAG_WORKSPACE_ID",
     "apply_session_store_env",
+    "build_partition",
     "build_session_store_env",
     "decode_tag_value",
     "encode_tag_value",
@@ -190,8 +191,13 @@ def decode_tag_value(encoded: str) -> str:
     return unquote(encoded)
 
 
-def _build_partition(execution_id: str, workspace_id: str) -> str:
-    """Relative ``<execution_id>/<workspace_id>`` partition path."""
+def build_partition(execution_id: str, workspace_id: str) -> str:
+    """Relative ``<execution_id>/<workspace_id>`` partition path.
+
+    Public because the capture verdict records it too: a backfill pass needs
+    the identity the transcripts were spooled under, and deriving it a second
+    time somewhere else is how two spellings of the same thing drift apart.
+    """
     return "/".join(
         (
             sanitize_partition_segment(execution_id),
@@ -262,7 +268,7 @@ def build_session_store_env(
         ENV_AGENTIC_SESSION_STORE_PROVIDER: settings.provider,
         ENV_AGENTIC_SESSION_STORE_URL: url.strip(),
         ENV_AGENTIC_SESSION_STORE_SPOOL: settings.spool_dir,
-        ENV_AGENTIC_SESSION_STORE_PARTITION: _build_partition(execution_id, workspace_id),
+        ENV_AGENTIC_SESSION_STORE_PARTITION: build_partition(execution_id, workspace_id),
         ENV_AGENTIC_SESSION_STORE_TAGS: _build_tags(
             execution_id=execution_id,
             workspace_id=workspace_id,
