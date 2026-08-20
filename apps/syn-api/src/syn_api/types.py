@@ -1466,6 +1466,23 @@ class CaptureStatusEntry(BaseModel):
     expected_deployment: str | None = None
     origin_deployment: str | None = None
 
+    agent_session_ids: list[str] | None = None
+    """The agent-native session ids the store confirmed for this phase.
+
+    A phase has MANY. `session_id` above is the uuid4 syn137 assigns per phase
+    run; these are the ids the AGENTS chose for themselves, and one phase yields
+    several whenever it delegates - a codex phase handing work to claude, a
+    subagent, a resumed thread. The host never passes its id to the agent, so
+    the two namespaces are disjoint and this field is the only thing relating
+    them.
+
+    Use it to fetch a phase's transcripts from the session store, which keys on
+    the agent-native id.
+
+    null means the exporter did not report them (its result schema predates the
+    `sessions` array), which is NOT the same as [] meaning it confirmed none.
+    """
+
 
 class CaptureStatusResponse(BaseModel):
     """Recorded capture verdicts, newest first."""

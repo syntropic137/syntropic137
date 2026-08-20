@@ -296,6 +296,57 @@ class TestTheVerdictIsNeverGuessed:
         assert v2.needs_backfill == v1.needs_backfill
         assert v2.reason == v1.reason
 
+    def test_a_phase_can_carry_many_agent_session_ids(self) -> None:
+        """One phase, several agent sessions - the shape delegation produces.
+
+        A codex phase that hands work to claude, a subagent, or a resumed
+        thread all leave separate transcripts under the same partition, and the
+        sweep confirms each. syn137's own session id is a per-phase uuid4 the
+        agent never sees, so this list is the ONLY relation between the host's
+        identity for a phase and the ids the agents chose.
+        """
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "sessions": ["sess-codex", "sess-claude", "sess-sub"]})
+
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+
+        assert out.agent_session_ids == ("sess-codex", "sess-claude", "sess-sub")
+
+    def test_a_repeated_id_is_one_session(self) -> None:
+        """The exporter reports a multiset, one entry per confirmed ENVELOPE.
+
+        That multiplicity is meaningful there, because two envelopes can share
+        an id while differing in content. Here the question is which SESSIONS
+        the phase produced, so repeats collapse and order is kept.
+        """
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "sessions": ["a", "b", "a"]})
+
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+
+        assert out.agent_session_ids == ("a", "b")
+
+    def test_no_sessions_array_is_not_an_empty_one(self) -> None:
+        """A schema 1 exporter cannot answer; that is not "confirmed nothing".
+
+        None and () must stay distinguishable or a version skew reads as loss.
+        """
+        v1_doc = _CLEAN
+        assert _parse(v1_doc, 0).agent_session_ids is None
+
+        base = json.loads(_CLEAN_V2)
+        empty = json.dumps({**base, "sessions": []})
+        assert _parse(empty, 0, expectations=_CLEAN_V2_EXPECT).agent_session_ids == ()
+
+    def test_a_session_id_that_is_not_a_string_is_dropped(self) -> None:
+        """This came off the wire; a non-string id is a shape we do not know."""
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "sessions": ["ok", 7, None, "", "fine"]})
+
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+
+        assert out.agent_session_ids == ("ok", "fine")
+
     def test_the_supported_set_is_exactly_what_this_build_claims(self) -> None:
         # Pins the contract itself. Widening the set is then a deliberate edit
         # to this line, not something that happens quietly in a refactor.

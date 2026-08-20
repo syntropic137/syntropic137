@@ -45,7 +45,10 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 #: Bumped on any incompatible change to the recorded payload.
-_PAYLOAD_SCHEMA_VERSION: Final = 1
+#:
+#: 2 added `agent_session_ids`, the agent-native session ids the store
+#: confirmed for this phase.
+_PAYLOAD_SCHEMA_VERSION: Final = 2
 
 #: The recorded-payload versions a reader can interpret.
 #:
@@ -68,7 +71,7 @@ _PAYLOAD_SCHEMA_VERSION: Final = 1
 #: of silent widening that coupling this gate to the exporter's constant caused.
 #: When the payload version moves, this set is edited deliberately, or not
 #: at all.
-SUPPORTED_OBSERVATION_SCHEMA_VERSIONS: Final = frozenset({1})
+SUPPORTED_OBSERVATION_SCHEMA_VERSIONS: Final = frozenset({1, 2})
 
 #: Telemetry gets a short, bounded slice of teardown. The write is already
 #: failure-tolerant, but a hung connection pool would otherwise block a phase
@@ -108,6 +111,24 @@ class CaptureObservationData(BaseModel):
     origin_environment: str | None
     origin_deployment: str | None
     counters: dict[str, int] = Field(default_factory=dict)
+
+    agent_session_ids: list[str] | None = None
+    """The AGENT-NATIVE session ids the store confirmed for this phase.
+
+    A phase has MANY. syn137's own `session_id` is a uuid4 the host assigns per
+    phase run; these are the ids the agents chose for themselves, and one phase
+    produces several whenever it delegates - a codex phase handing work to
+    claude, a subagent, a resumed thread. The host never gives its id to the
+    agent, so the two are disjoint namespaces and this is the only place they
+    are related to each other.
+
+    None means the exporter did not report them (result schema 1), which is NOT
+    the same as the empty list meaning it confirmed none. A reader that
+    conflates them turns a version skew into a reported loss.
+
+    `list` rather than `tuple` because this is serialized to JSON, where the
+    distinction does not survive; the in-memory verdict keeps the tuple.
+    """
 
     # EXPECTED: what the host meant. Recorded separately because the observed
     # fields are missing or wrong in exactly the failures worth retrying, and a
@@ -221,6 +242,9 @@ async def record_capture_outcome(
         origin_environment=outcome.origin_environment,
         origin_deployment=outcome.origin_deployment,
         counters=dict(outcome.counters),
+        agent_session_ids=(
+            list(outcome.agent_session_ids) if outcome.agent_session_ids is not None else None
+        ),
         expected_store_url=expectations.store_url if expectations else None,
         expected_deployment=expectations.deployment if expectations else None,
         expected_sessions=expectations.expect_sessions if expectations else None,

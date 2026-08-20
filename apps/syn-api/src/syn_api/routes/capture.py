@@ -101,6 +101,22 @@ def _counted_loss(payload: Mapping[str, object]) -> bool:
     return any(isinstance(counters.get(name), int) and counters[name] > 0 for name in LOSS_COUNTERS)
 
 
+def _agent_session_ids(payload: Mapping[str, object]) -> list[str] | None:
+    """The recorded agent-native session ids, or None when none were recorded.
+
+    Absent and empty stay apart: None is "the exporter that produced this
+    verdict could not tell us", [] is "it looked and confirmed none". Reading
+    the first as the second turns a version skew into a reported loss.
+
+    Non-strings are dropped rather than coerced. This payload was written by
+    another process, possibly an older one, so its shape is not guaranteed.
+    """
+    raw = payload.get("agent_session_ids")
+    if not isinstance(raw, list):
+        return None
+    return [item for item in raw if isinstance(item, str) and item]
+
+
 def _state_of(payload: Mapping[str, object]) -> CaptureState:
     """The recorded verdict, or UNKNOWN if it cannot be trusted.
 
@@ -184,6 +200,7 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
         partition=_text(payload.get("partition")),
         expected_deployment=_text(payload.get("expected_deployment")),
         origin_deployment=_text(payload.get("origin_deployment")),
+        agent_session_ids=_agent_session_ids(payload),
     )
 
 

@@ -1939,6 +1939,8 @@ export interface components {
             expected_deployment?: string | null;
             /** Origin Deployment */
             origin_deployment?: string | null;
+            /** Agent Session Ids */
+            agent_session_ids?: string[] | null;
         };
         /**
          * CaptureStatusResponse

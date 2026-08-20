@@ -5570,6 +5570,20 @@
               }
             ],
             "title": "Origin Deployment"
+          },
+          "agent_session_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Session Ids"
           }
         },
         "type": "object",
