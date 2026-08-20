@@ -191,6 +191,26 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     # processor threads it through to WorkspaceProvisionHandler per dispatch.
     skill_materializer = await get_skill_materializer()
 
+    # Session capture (APS-V1-0004). Off unless a store URL is configured, and
+    # off is the DEFAULT: no deployment gains a dependency on a store it never
+    # asked for. When on, the processor probes each workspace before teardown
+    # and records the verdict on the observability lane.
+    #
+    # `event_store` is the same recorder the rest of Lane 2 writes through, so
+    # the capture indicator lands beside the telemetry it explains rather than
+    # in a store of its own.
+    from syn_adapters.workspace_backends.agentic.session_capture_service import (
+        SessionCaptureService,
+    )
+    from syn_shared.settings import get_settings
+
+    _settings = get_settings()
+    session_capture = SessionCaptureService(
+        _settings.session_store,
+        _settings.app_environment,
+        event_store,
+    )
+
     return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
         session_repository=get_session_repository(),
@@ -210,6 +230,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         interactive_workspace_service=interactive_workspace_service,
         claude_plugin_materializer=claude_plugin_materializer,
         skill_materializer=skill_materializer,
+        session_capture=session_capture,
     )
 
 
