@@ -1957,6 +1957,21 @@ export interface components {
              * @default 0
              */
             needs_backfill_count: number;
+            /**
+             * Unattributable Count
+             * @default 0
+             */
+            unattributable_count: number;
+            /**
+             * Scanned
+             * @default 0
+             */
+            scanned: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
             /** Entries */
             entries?: components["schemas"]["CaptureStatusEntry"][];
         };

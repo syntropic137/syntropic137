@@ -1445,9 +1445,19 @@ class CaptureStatusEntry(BaseModel):
     recorded_at: datetime | None = None
 
     state: str
-    """CAPTURED, FAILED, UNKNOWN or DISABLED."""
+    """captured, incomplete, failed, unknown or disabled.
+
+    Lowercase, matching the recorded CaptureState values. Anything this build
+    cannot recognise is reported as "unknown" rather than echoed back.
+    """
 
     needs_backfill: bool
+    """Derived from the state, never read from the stored flag.
+
+    True for anything except a settled verdict, so a state that cannot be
+    trusted asks for a retry. A re-sent transcript is a no-op (the store dedups
+    on content hash); a skipped one is lost permanently.
+    """
     reason: str | None = None
 
     partition: str | None = None
@@ -1462,7 +1472,28 @@ class CaptureStatusResponse(BaseModel):
     """Recorded capture verdicts, newest first."""
 
     total: int = 0
+    """How many entries this response contains, after any filter."""
+
     needs_backfill_count: int = 0
+    """How many of the scanned verdicts need a backfill, before any filter."""
+
+    unattributable_count: int = 0
+    """Scanned verdicts with no session id, which cannot be acted on.
+
+    Reported rather than dropped: a response that omitted them could read as
+    all-clear while a failure sat unattributable in the store.
+    """
+
+    scanned: int = 0
+    """How many stored verdicts were examined to build this response."""
+
+    truncated: bool = False
+    """True when the scan filled its limit, so older verdicts may exist.
+
+    The limit is applied by the database BEFORE the needs_backfill filter, so
+    an empty backlog on a truncated scan does NOT mean there is no backlog.
+    """
+
     entries: list[CaptureStatusEntry] = Field(default_factory=list)
 
 

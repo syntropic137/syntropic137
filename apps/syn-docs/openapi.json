@@ -5604,6 +5604,21 @@
             "title": "Needs Backfill Count",
             "default": 0
           },
+          "unattributable_count": {
+            "type": "integer",
+            "title": "Unattributable Count",
+            "default": 0
+          },
+          "scanned": {
+            "type": "integer",
+            "title": "Scanned",
+            "default": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
           "entries": {
             "items": {
               "$ref": "#/components/schemas/CaptureStatusEntry"
