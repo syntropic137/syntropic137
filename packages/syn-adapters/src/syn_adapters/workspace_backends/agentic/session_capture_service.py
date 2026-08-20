@@ -30,6 +30,7 @@ from syn_adapters.workspace_backends.agentic.capture_observation import (
     record_capture_outcome,
 )
 from syn_adapters.workspace_backends.agentic.capture_probe import probe_capture
+from syn_adapters.workspace_backends.agentic.capture_result import AuthoritativeCapture
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_store_env import build_partition
 
@@ -38,9 +39,6 @@ if TYPE_CHECKING:
         ObservationWriter,
     )
     from syn_adapters.workspace_backends.agentic.capture_probe import WorkspaceExecutor
-    from syn_adapters.workspace_backends.agentic.capture_result import (
-        AuthoritativeCapture,
-    )
     from syn_shared.settings.session_store import SessionStoreSettings
 
 __all__ = ["SessionCapturePort", "SessionCaptureService"]
@@ -60,6 +58,7 @@ class SessionCapturePort(Protocol):
         workspace_id: str,
         phase_id: str,
         expect_sessions: bool,
+        capture_provisioned: bool,
     ) -> AuthoritativeCapture: ...
 
 
@@ -85,6 +84,7 @@ class SessionCaptureService:
         workspace_id: str,
         phase_id: str,
         expect_sessions: bool,
+        capture_provisioned: bool,
     ) -> AuthoritativeCapture:
         """Ask the exporter, interpret the answer, record it.
 
@@ -96,6 +96,23 @@ class SessionCaptureService:
         way. The return value is deliberately not an error channel: a capture
         that did not happen is telemetry, not a phase failure.
         """
+        # A configured store is NOT the same as a workspace that received one.
+        # Only the agentic backend injects the session-store environment;
+        # interactive-tmux, docker and the recording backends do not. Probing
+        # one of those would run an exporter with no store configured and
+        # record perpetual UNKNOWN with a partition nothing ever wrote to,
+        # which is an indicator that cries wolf on every run of that backend
+        # and therefore stops being read at all.
+        #
+        # The caller states this because only provisioning knows it. Global
+        # settings describe intent; this describes what actually happened to
+        # THIS workspace.
+        if not capture_provisioned:
+            return AuthoritativeCapture(
+                state=CaptureState.DISABLED,
+                reason="session capture is not provisioned for this workspace",
+            )
+
         expectations = build_expectations(
             self._settings, self._app_environment, expect_sessions=expect_sessions
         )

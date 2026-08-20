@@ -76,6 +76,7 @@ class TestItRecordsWhatItFound:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
+            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.CAPTURED
         assert len(writer.calls) == 1
@@ -102,6 +103,7 @@ class TestItRecordsWhatItFound:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
+            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.DISABLED
         assert writer.calls == []
@@ -122,6 +124,7 @@ class TestNothingHereCanFailAPhase:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
+            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.UNKNOWN
         assert outcome.needs_backfill
@@ -138,6 +141,7 @@ class TestNothingHereCanFailAPhase:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
+            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.CAPTURED
 
@@ -150,6 +154,7 @@ class TestNothingHereCanFailAPhase:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
+            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.CAPTURED
 
@@ -168,6 +173,7 @@ class TestNothingHereCanFailAPhase:
                 workspace_id="w-1",
                 phase_id="p-1",
                 expect_sessions=True,
+                capture_provisioned=True,
             )
 
 
@@ -192,6 +198,40 @@ class TestExpectSessionsReachesTheVerdict:
             workspace_id="w-1",
             phase_id="p-1",
             expect_sessions=True,
+            capture_provisioned=True,
         )
         assert outcome.state is CaptureState.UNKNOWN
         assert outcome.needs_backfill
+
+
+@pytest.mark.unit
+class TestUnprovisionedWorkspacesAreNotProbed:
+    """A configured store is not the same as a workspace that received one.
+
+    Only the agentic backend injects the session-store environment.
+    interactive-tmux, docker and the recording backends do not. Probing one of
+    those runs an exporter with no store configured and records perpetual
+    UNKNOWN with a partition nothing ever wrote to: an indicator that cries
+    wolf on every run of that backend, and therefore stops being read.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_unprovisioned_workspace_is_disabled_not_unknown(self) -> None:
+        writer = _Writer()
+
+        async def _must_not_run(*_a: object, **_k: object) -> ExecutionResult:
+            raise AssertionError("must not probe a workspace without the capability")
+
+        outcome = await _service(writer).capture_and_record(
+            _must_not_run,
+            session_id="s-1",
+            execution_id="e-1",
+            workspace_id="w-1",
+            phase_id="p-1",
+            expect_sessions=True,
+            capture_provisioned=False,
+        )
+        # DISABLED, not UNKNOWN: nothing is missing, capture was never set up.
+        assert outcome.state is CaptureState.DISABLED
+        assert not outcome.needs_backfill
+        assert writer.calls == []
