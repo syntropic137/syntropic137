@@ -17,6 +17,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
     deployment_identity,
 )
 from syn_api.services.lifecycle import _log_session_capture_posture
+from syn_api.types import Err
 from syn_shared.settings.config import AppEnvironment
 from syn_shared.settings.session_store import SessionStoreSettings
 
@@ -95,3 +96,75 @@ class TestPostureMatchesWhatIsActuallyStamped:
         (record,) = _posture(caplog, environment, url=STORE, auth_token=TOKEN)
 
         assert deployment_identity(str(environment)) in record.getMessage()
+
+
+class TestTheTokenCannotEscapeThroughTheUrl:
+    """The store URL is operator-supplied and can carry the credential itself.
+
+    The original test used an innocuous URL and only checked the dedicated
+    auth_token field, so it proved nothing about this path. A URL like
+    https://token@host or https://host?write_token=... would have been logged
+    verbatim, into both the rendered message and record.args.
+    """
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "url",
+        [
+            f"https://{TOKEN}@sessions.example.com",
+            f"https://user:{TOKEN}@sessions.example.com",
+            f"https://sessions.example.com?write_token={TOKEN}",
+            f"https://sessions.example.com/{TOKEN}/ingest",
+            f"https://sessions.example.com#{TOKEN}",
+        ],
+    )
+    def test_a_credential_in_the_url_never_reaches_a_record(
+        self, caplog: pytest.LogCaptureFixture, url: str
+    ) -> None:
+        records = _posture(caplog, url=url)
+
+        assert records, "posture must still be reported for an odd URL"
+        for record in records:
+            assert TOKEN not in record.getMessage()
+            assert TOKEN not in str(record.args)
+
+    @pytest.mark.unit
+    def test_the_host_still_survives_sanitising(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Stripping must not make the line useless."""
+        (record,) = _posture(caplog, url=f"https://{TOKEN}@sessions.example.com:8443/ingest")
+
+        message = record.getMessage()
+        assert "sessions.example.com:8443" in message
+        assert TOKEN not in message
+
+    @pytest.mark.unit
+    def test_an_unparseable_url_is_not_echoed_back(self, caplog: pytest.LogCaptureFixture) -> None:
+        """The malformed case is the likeliest to be a pasted credential."""
+        (record,) = _posture(caplog, url=TOKEN)
+
+        assert TOKEN not in record.getMessage()
+
+
+class TestPostureCannotAbortStartup:
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_failing_posture_does_not_stop_the_api(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Diagnostics must never become a startup prerequisite."""
+        import syn_api.services.lifecycle as lifecycle
+
+        def _boom(*_a: object, **_k: object) -> None:
+            raise RuntimeError(f"settings exploded and echoed {TOKEN}")
+
+        monkeypatch.setattr(lifecycle, "_log_session_capture_posture", _boom)
+
+        with caplog.at_level(logging.WARNING):
+            result = await lifecycle.startup(skip_validation=True)
+
+        assert not isinstance(result, Err)
+        # The exception is deliberately NOT attached: a settings error can echo
+        # its own input, and the input here may be the token.
+        for record in caplog.records:
+            assert TOKEN not in record.getMessage()
+            assert record.exc_info is None
