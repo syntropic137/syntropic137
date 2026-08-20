@@ -74,7 +74,29 @@ _PREFIX = "[finalize] session-store"
 # not `[^)]*`, which admitted prose, and not a fixed set, which would break the
 # moment an informational counter is dropped upstream (a case finalize.sh
 # deliberately supports).
-_COUNTER_PAIR = r"(?:discovered|skipped_unchanged|uploaded|accepted|duplicate|rejected|skipped_oversize|failed)=\d+"
+#
+# `unconfirmed` is in the list because the exporter added it: envelopes it SENT
+# for which the store returned no matching outcome, neither accepted nor
+# rejected. A name missing here does not fail loudly, which is the trap - the
+# line simply stops matching and the sweep is recorded as UNKNOWN, so a
+# genuinely INCOMPLETE capture is reported as one nobody could read. Any counter
+# name added to finalize.sh has to be added here in the same change.
+#: Names finalize.sh reconstructs onto a COMPLETE line. Deliberately WITHOUT
+#: `unconfirmed`: that counter can only be nonzero on a sweep the finalizer
+#: reports as INCOMPLETE, so a complete line carrying it is not a line the
+#: producer can emit. Accepting it here would turn
+#: `upload complete (unconfirmed=1)` into CAPTURED with needs_backfill False -
+#: a false success, which is the failure this whole module exists to prevent.
+_COMPLETE_PAIR = (
+    r"(?:discovered|skipped_unchanged|uploaded|accepted|duplicate|rejected"
+    r"|skipped_oversize|failed)=\d+"
+)
+_COMPLETE_LIST = rf"{_COMPLETE_PAIR}(?: {_COMPLETE_PAIR})*"
+
+#: Names that can appear as an INCOMPLETE reason. A superset: every complete
+#: name, plus `unconfirmed`, which the exporter added for envelopes it SENT
+#: and the store never acknowledged.
+_COUNTER_PAIR = rf"(?:{_COMPLETE_PAIR}|unconfirmed=\d+)"
 _COUNTER_LIST = rf"{_COUNTER_PAIR}(?: {_COUNTER_PAIR})*"
 
 #: Every terminal line ends with this clause and a non-empty path.
@@ -83,7 +105,7 @@ _SPOOL_SUFFIX = r"spool retained at \S.*"
 _LINE = r"\[finalize\] session-store "
 
 #: `upload complete (<ordered counters>); spool retained at <path>`
-_RE_COMPLETE = re.compile(_LINE + rf"upload complete \({_COUNTER_LIST}\); {_SPOOL_SUFFIX}")
+_RE_COMPLETE = re.compile(_LINE + rf"upload complete \({_COMPLETE_LIST}\); {_SPOOL_SUFFIX}")
 
 #: `upload TIMED OUT after <n>s; spool retained at <path>`
 _RE_TIMEOUT = re.compile(_LINE + rf"upload TIMED OUT after (\d+)s; {_SPOOL_SUFFIX}")
@@ -94,9 +116,19 @@ _RE_FAILED = re.compile(_LINE + rf"upload FAILED \(rc=(\d+)\); {_SPOOL_SUFFIX}")
 #: Two forms. The first carries counters, the second a rejection-record path.
 #: Both close the parenthesis before a colon and continue into prose, so the
 #: tail is genuinely free text here and only here.
+#: A third form: the exporter's own exit status, when no counter this side
+#: knows about explains the loss. finalize.sh emits it as
+#: `exporter reported an incomplete sweep (rc=3)`, so the reason itself
+#: contains parentheses and cannot be matched with `[^)]*`.
+#: Exactly rc=3, not \d+. The finalizer emits only 3 here, and a closed
+#: grammar is the point: a different code means something this parser has not
+#: been taught, which must read as UNKNOWN rather than be quietly accepted.
+_RC_REASON = r"exporter reported an incomplete sweep \(rc=3\)"
+
 _RE_INCOMPLETE = re.compile(
     _LINE
-    + rf"sweep INCOMPLETE \((?:{_COUNTER_LIST}|unresolved rejection recorded at \S[^)]*)\): \S.*"
+    + rf"sweep INCOMPLETE \((?:{_COUNTER_LIST}|{_RC_REASON}"
+    + r"|unresolved rejection recorded at \S[^)]*)\): \S.*"
 )
 
 #: `sweep produced no parseable summary line; treating as INCOMPLETE, <spool>`
@@ -119,7 +151,17 @@ _COUNTERS = (
     "rejected",
     "skipped_oversize",
     "failed",
+    # Added by the exporter alongside exit 3: envelopes SENT for which the
+    # store returned no matching outcome. Listed so the detail survives into
+    # the outcome instead of the reason collapsing to a bare "sweep
+    # incomplete", which tells an operator nothing about which failure it was.
+    "unconfirmed",
 )
+
+#: Counters whose nonzero value means a session the sweep SAW is not in the
+#: store. Spelled once: the INCOMPLETE path uses it to build its reason, and
+#: the COMPLETE path uses it to refuse a verdict that contradicts itself.
+_BLOCKING_COUNTERS = ("failed", "rejected", "skipped_oversize", "unconfirmed")
 
 
 class CaptureState(StrEnum):
@@ -215,6 +257,27 @@ def _classify(line: str) -> CaptureOutcome | None:
     counters = _counters_from(line)
 
     if _RE_COMPLETE.fullmatch(line):
+        # A COMPLETE line that carries a nonzero loss counter contradicts
+        # itself, and CAPTURED is the one verdict that must never be wrong:
+        # it is the only state that does NOT set needs_backfill, so it decides
+        # a session is safe to stop worrying about.
+        #
+        # finalize.sh cannot produce `upload complete (rejected=1)` today. That
+        # is exactly why this check is cheap and worth having: if it ever does,
+        # through a bug or a change nobody propagated here, the honest answer
+        # is "this parser does not understand what it was told", not a
+        # confident success. Grammar drift between the two repos has already
+        # happened once in this file's short life.
+        contradicting = {k: v for k, v in counters.items() if k in _BLOCKING_COUNTERS and v}
+        if contradicting:
+            return CaptureOutcome(
+                state=CaptureState.UNKNOWN,
+                reason=(
+                    "finalizer reported a complete upload while counting "
+                    + ", ".join(f"{k}={v}" for k, v in sorted(contradicting.items()))
+                ),
+                counters=counters,
+            )
         return CaptureOutcome(state=CaptureState.CAPTURED, counters=counters)
 
     if m := _RE_TIMEOUT.fullmatch(line):
@@ -236,11 +299,7 @@ def _classify(line: str) -> CaptureOutcome | None:
         # from the line. The finalizer puts free text in those parentheses, and
         # this field is persisted and displayed: an exporter build that printed
         # an auth header would otherwise have it lifted into a durable record.
-        blocking = {
-            k: v
-            for k, v in counters.items()
-            if k in ("failed", "rejected", "skipped_oversize") and v
-        }
+        blocking = {k: v for k, v in counters.items() if k in _BLOCKING_COUNTERS and v}
         detail = ", ".join(f"{k}={v}" for k, v in sorted(blocking.items()))
         return CaptureOutcome(
             state=CaptureState.INCOMPLETE,
