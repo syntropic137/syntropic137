@@ -27,8 +27,32 @@ _EXCLUDED = {
     # Architectural fitness checks run as their own suite via
     # `just fitness-invariants`, deliberately outside the normal run.
     "ci/fitness",
-    # Submodules carry their own test configuration and CI.
-    "lib",
+    # Git submodules: their own repositories, their own CI. Listed
+    # INDIVIDUALLY and not as "lib", because lib also holds ordinary tracked
+    # content. Excluding the whole directory hid 34 tests in lib/ui-feedback -
+    # this guard institutionalising the very gap it exists to find.
+    "lib/agent-paradise-standards-system",
+    "lib/agentic-primitives",
+    "lib/event-sourcing-platform",
+    "lib/syntropic137-claude-plugin",
+    # KNOWN GAPS, each with an issue. Listed rather than silently uncovered:
+    # an exclusion someone has to read is not the same as a directory nobody
+    # knows about.
+    #
+    # lib/ui-feedback (#856): a separate application with its own
+    # dependencies. Wiring it into the root suite is its own change, not a
+    # side effect of a testpaths fix.
+    "lib/ui-feedback",
+    # syn_tests/integration (#857): adding it regresses the integration gate.
+    # The tests guard on `collector_url`, but the fixture DEFAULTS that to a
+    # non-empty localhost URL, so they do not skip in CI - they fail against a
+    # collector that was never started, and the job runs with -x.
+    "syn_tests/integration",
+    # scripts (#858): the 12 pytest files there sit beside three executable
+    # e2e_*_test.py programs. `python_files` matches those too, so collecting
+    # the directory imports them - mutating sys.path and reconfiguring root
+    # logging at import time.
+    "scripts",
 }
 
 _IGNORED_PARTS = {
