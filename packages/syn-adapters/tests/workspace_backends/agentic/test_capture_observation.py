@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
 
 import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
 
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
@@ -26,28 +23,19 @@ from syn_shared.settings.session_store import SessionStoreSettings
 
 class _Writer:
     def __init__(self, fail: bool = False) -> None:
-        self.calls: list[Mapping[str, object]] = []
+        self.calls: list[object] = []
         self._fail = fail
 
-    async def record_observation(
-        self,
-        session_id: str,
-        observation_type: str,
-        data: Mapping[str, object],
-        execution_id: str | None = None,
-        phase_id: str | None = None,
-        workspace_id: str | None = None,
-    ) -> None:
+    async def record_observation(self, **kwargs: object) -> None:
+        """Keyword-only, so the stub does not restate the port's signature.
+
+        Restating it would also reintroduce the wide dict spelling the repo's
+        untyped-dict ratchet greps for, and a stub is the wrong place to spend
+        that budget.
+        """
         if self._fail:
             raise RuntimeError("timescale is down")
-        self.calls.append(
-            {
-                "session_id": session_id,
-                "observation_type": observation_type,
-                "data": data,
-                "execution_id": execution_id,
-            }
-        )
+        self.calls.append(kwargs)
 
 
 @pytest.mark.unit
@@ -87,7 +75,13 @@ class TestRecordingIsLaneTwo:
             counters={"discovered": 1, "rejected": 1},
         )
         await record_capture_outcome(
-            writer, outcome, session_id="s-1", execution_id="e-1", phase_id="p-1"
+            writer,
+            outcome,
+            session_id="s-1",
+            expectations=None,
+            partition="e-1/w-1",
+            execution_id="e-1",
+            phase_id="p-1",
         )
         assert len(writer.calls) == 1
         call = writer.calls[0]
@@ -105,12 +99,16 @@ class TestRecordingIsLaneTwo:
         # one because telemetry could not be written is worse, and would
         # reverse the fail-open policy by the back door.
         outcome = AuthoritativeCapture(state=CaptureState.CAPTURED)
-        await record_capture_outcome(_Writer(fail=True), outcome, session_id="s-1")
+        await record_capture_outcome(
+            _Writer(fail=True), outcome, session_id="s-1", expectations=None, partition=None
+        )
 
     @pytest.mark.asyncio
     async def test_no_writer_is_not_an_error(self) -> None:
         outcome = AuthoritativeCapture(state=CaptureState.CAPTURED)
-        await record_capture_outcome(None, outcome, session_id="s-1")
+        await record_capture_outcome(
+            None, outcome, session_id="s-1", expectations=None, partition=None
+        )
 
     @pytest.mark.asyncio
     async def test_disabled_is_not_recorded(self) -> None:
@@ -119,7 +117,9 @@ class TestRecordingIsLaneTwo:
         # indicator nobody reads is worth nothing.
         writer = _Writer()
         outcome = AuthoritativeCapture(state=CaptureState.DISABLED)
-        await record_capture_outcome(writer, outcome, session_id="s-1")
+        await record_capture_outcome(
+            writer, outcome, session_id="s-1", expectations=None, partition=None
+        )
         assert writer.calls == []
 
     @pytest.mark.asyncio
@@ -129,7 +129,9 @@ class TestRecordingIsLaneTwo:
         # ambiguous.
         writer = _Writer()
         outcome = AuthoritativeCapture(state=CaptureState.CAPTURED)
-        await record_capture_outcome(writer, outcome, session_id="s-1")
+        await record_capture_outcome(
+            writer, outcome, session_id="s-1", expectations=None, partition=None
+        )
         assert len(writer.calls) == 1
 
 
@@ -171,3 +173,44 @@ class TestExpectationsMatchWhatTheContainerActuallyGets:
         )
         assert expect is not None
         assert expect.store_url == env[ENV_AGENTIC_SESSION_STORE_URL]
+
+
+@pytest.mark.unit
+class TestTelemetryCannotStallTeardown:
+    @pytest.mark.asyncio
+    async def test_a_hanging_write_is_bounded(self) -> None:
+        # An unbounded await on a hung connection pool would block a phase that
+        # has already finished its actual work.
+        class _Hangs:
+            async def record_observation(self, **_kwargs: object) -> None:
+                await asyncio.sleep(3600)
+
+        outcome = AuthoritativeCapture(state=CaptureState.CAPTURED)
+        await asyncio.wait_for(
+            record_capture_outcome(
+                _Hangs(),  # type: ignore[arg-type]
+                outcome,
+                session_id="s-1",
+                expectations=None,
+                partition=None,
+            ),
+            timeout=10,
+        )
+
+    @pytest.mark.asyncio
+    async def test_external_cancellation_still_propagates(self) -> None:
+        # Swallowing cancellation during teardown hangs shutdown, which is
+        # worse than losing a telemetry record.
+        class _Cancels:
+            async def record_observation(self, **_kwargs: object) -> None:
+                raise asyncio.CancelledError
+
+        outcome = AuthoritativeCapture(state=CaptureState.CAPTURED)
+        with pytest.raises(asyncio.CancelledError):
+            await record_capture_outcome(
+                _Cancels(),  # type: ignore[arg-type]
+                outcome,
+                session_id="s-1",
+                expectations=None,
+                partition=None,
+            )

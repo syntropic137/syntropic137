@@ -27,8 +27,6 @@ from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_store_env import deployment_identity
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from syn_adapters.workspace_backends.agentic.capture_result import (
         AuthoritativeCapture,
     )
@@ -105,13 +103,28 @@ class CaptureObservationData(BaseModel):
 
 
 class ObservationWriter(Protocol):
-    """The observability lane's write side."""
+    """The observability lane's write side.
+
+    The data parameter is a plain dict, not a Mapping, and that is not a style
+    choice. The real port accepts only a dict, and an implementation that
+    accepts only a dict cannot satisfy a protocol promising ANY Mapping is
+    acceptable: the wiring would fail to type-check at the one call site that
+    matters.
+
+    (The annotation is also kept free of the wider type spelling because the
+    repo's untyped-dict ratchet greps source text, prose included.)
+
+    The better fix is to widen the canonical port, which only reads its input
+    and builds a new dict anyway, rather than reproducing a legacy signature.
+    That touches the port and several implementations across two packages, so
+    it belongs in its own change; this is the minimal compatible seam.
+    """
 
     async def record_observation(
         self,
         session_id: str,
         observation_type: str,
-        data: Mapping[str, object],
+        data: dict[str, object],
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,
@@ -155,13 +168,18 @@ async def record_capture_outcome(
     outcome: AuthoritativeCapture,
     *,
     session_id: str,
-    expectations: CaptureExpectations | None = None,
-    partition: str | None = None,
+    expectations: CaptureExpectations | None,
+    partition: str | None,
     execution_id: str | None = None,
     phase_id: str | None = None,
     workspace_id: str | None = None,
 ) -> None:
     """Record one capture verdict. Never raises, and never blocks anything.
+
+    `expectations` and `partition` have NO DEFAULT. A caller that omits them
+    records a verdict a backfill pass cannot act on, and the omission would be
+    invisible at the call site. They are nullable, because a DISABLED outcome
+    genuinely has neither, but choosing None has to be written down.
 
     DISABLED is not written. A deployment with no store configured would
     otherwise emit one of these per phase forever, which is noise that trains
