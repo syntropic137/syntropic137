@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 from typing import TYPE_CHECKING
 
 from agentic_isolation import (
@@ -317,8 +318,20 @@ class AgenticIsolationAdapter:
                 stderr="Workspace not found",
             )
 
-        # Join command list into shell command
-        cmd_str = " ".join(command)
+        # QUOTED join, not a bare one. The provider hands the result to
+        # `sh -c`, so every element has to survive as its own argument.
+        #
+        # `" ".join(...)` silently reassociated them. ["sh", "-c", "test -e X"]
+        # became `sh -c test -e X`, which runs `test` with NO operands and
+        # therefore always exits 1. The staged-codex-credential check in
+        # setup_phase.py is exactly that shape: it reads "credential gone" on
+        # every run and its fail-closed branch could never execute. Proven in a
+        # container - `sh -c test -e /tmp/exists` exits 1 for a file that
+        # exists, `sh -c 'test -e /tmp/exists'` exits 0.
+        #
+        # shlex.join is identical for simple argv (no metacharacters, nothing
+        # to quote) and only differs where the old behaviour was wrong.
+        cmd_str = shlex.join(command)
 
         result = await self._provider.execute(
             workspace,  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
