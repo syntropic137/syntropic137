@@ -8,11 +8,21 @@ See ADR-056: Workspace Tooling Architecture
 
 Why digests and not tags
 ------------------------
-Tags are mutable in OCI by design. agentic-primitives republishes
-``:latest`` on every push to its main branch, so a tag-pinned reference means
-every merge there silently changes what Syntropic137 runs. That is not a
-hypothetical: on 2026-08-16 a regression in the workspace entrypoint reached
-``:latest`` and any deployment pulling in that window picked it up.
+Tags are mutable in OCI by design, so a tag-pinned reference means an upstream
+publish silently changes what Syntropic137 runs. That is not a hypothetical: on
+2026-08-16 a regression in the workspace entrypoint reached a mutable tag and
+any deployment pulling in that window picked it up.
+
+Which upstream tag moves when is itself a trap, and it differs per branch.
+agentic-primitives publishes ``:edge`` and the commit SHA from ``main``, and
+moves ``:latest`` only from its ``release`` branch. So ``:latest`` is not
+"the newest image" - it can be considerably OLDER than what main has built.
+On 2026-08-19 ``:latest`` for omni-agent still resolved to an image carrying
+agentic-session-exporter v0.1.1, which wrote an out-of-spec
+``origin.environment``, while main had already built v0.2.1. A digest taken
+from ``:latest`` that day would have pinned the defect.
+
+Take digests from the upstream build run, never from a mutable tag.
 
 A digest is the only immutable reference. The registry cannot repoint it,
 because the digest *is* the content hash of the image index.
