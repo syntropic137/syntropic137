@@ -16,6 +16,11 @@ from syn_adapters.workspace_backends.agentic.capture_observation import (
 )
 from syn_adapters.workspace_backends.agentic.capture_result import AuthoritativeCapture
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
+from syn_adapters.workspace_backends.agentic.session_store_env import (
+    ENV_AGENTIC_SESSION_STORE_URL,
+    build_session_store_env,
+    deployment_identity,
+)
 from syn_shared.settings.session_store import SessionStoreSettings
 
 
@@ -126,3 +131,43 @@ class TestRecordingIsLaneTwo:
         outcome = AuthoritativeCapture(state=CaptureState.CAPTURED)
         await record_capture_outcome(writer, outcome, session_id="s-1")
         assert len(writer.calls) == 1
+
+
+@pytest.mark.unit
+class TestExpectationsMatchWhatTheContainerActuallyGets:
+    """The two sides must agree VALUE for value, not merely come from one source.
+
+    build_expectations derives the destination from settings, and
+    session_store_env injects it into the container. If those derivations
+    differ at all, every verdict compares unequal and reads UNKNOWN: an
+    indicator uniformly broken while appearing to work.
+
+    A whitespace-padded URL is the concrete case. The settings validator
+    rejects a whitespace-ONLY value but does not trim a valid one, and the
+    injector applies .strip(). Without the same call here, the two disagree
+    forever.
+    """
+
+    def test_a_padded_url_still_matches_what_is_injected(self) -> None:
+        settings = SessionStoreSettings(url="  http://store:8799  ")
+        expect = build_expectations(settings, "dev", expect_sessions=True)
+        env = build_session_store_env(
+            settings,
+            execution_id="e-1",
+            workspace_id="w-1",
+            deployment=deployment_identity("dev"),
+        )
+        assert expect is not None
+        assert expect.store_url == env[ENV_AGENTIC_SESSION_STORE_URL]
+
+    def test_the_ordinary_case_matches_too(self) -> None:
+        settings = SessionStoreSettings(url="http://store:8799")
+        expect = build_expectations(settings, "dev", expect_sessions=True)
+        env = build_session_store_env(
+            settings,
+            execution_id="e-1",
+            workspace_id="w-1",
+            deployment=deployment_identity("dev"),
+        )
+        assert expect is not None
+        assert expect.store_url == env[ENV_AGENTIC_SESSION_STORE_URL]
