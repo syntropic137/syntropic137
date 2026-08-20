@@ -233,7 +233,13 @@ def _refuse_unreadable(
         )
 
     version = document.get("schema_version")
-    if version not in SUPPORTED_SCHEMA_VERSIONS:
+    # `type(...) is int` rather than isinstance or bare membership, because
+    # Python equality makes lookalikes pass: True == 1 and 2.0 == 2, so a
+    # document declaring `"schema_version": true` would clear a plain `in`
+    # check. bool is also a subclass of int, so isinstance would let it
+    # through. A version that is not literally an integer is a shape this
+    # build has no reason to trust.
+    if type(version) is not int or version not in SUPPORTED_SCHEMA_VERSIONS:
         known = ", ".join(str(v) for v in sorted(SUPPORTED_SCHEMA_VERSIONS))
         return _unknown(
             f"exporter result schema_version {version!r} is not one of "

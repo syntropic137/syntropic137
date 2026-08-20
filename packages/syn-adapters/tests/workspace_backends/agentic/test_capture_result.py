@@ -190,17 +190,42 @@ class TestTheVerdictIsNeverGuessed:
         # version the exporter legitimately emits turns ordinary rollout skew
         # into a total capture outage, because a document that will not parse is
         # indistinguishable here from a capture that did not happen.
-        # Asserts the VERSION GATE specifically, by its reason rather than by
-        # the final state: a bare document is rejected for several other
-        # reasons too, and a test that just looked at the state would pass
-        # while the version gate was broken.
+        # Uses a COMPLETE, success-producing document and varies ONLY the
+        # version, so the gate is the sole thing under test. An earlier version
+        # of this test used a bare {schema_version, captured_everything} dict,
+        # which is refused on several other grounds - it would have stayed green
+        # with the version gate deleted outright.
+        base = json.loads(_CLEAN_V2)
         for version in sorted(SUPPORTED_SCHEMA_VERSIONS):
-            doc = json.dumps({"schema_version": version, "captured_everything": True})
-            out = _parse(doc, 0)
-            assert "schema_version" not in (out.reason or ""), (
-                f"schema_version {version} is declared supported but was "
-                f"refused for its version: {out.reason}"
+            doc = json.dumps({**base, "schema_version": version})
+            out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+            assert out.state is CaptureState.CAPTURED, (
+                f"schema_version {version} is declared supported but produced "
+                f"{out.state}: {out.reason}"
             )
+
+    def test_a_version_beyond_the_supported_set_is_refused(self) -> None:
+        # The same complete document, one version past what this build knows.
+        # This is the test that fails if the gate is deleted.
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "schema_version": max(SUPPORTED_SCHEMA_VERSIONS) + 1})
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "schema_version" in (out.reason or "")
+
+    @pytest.mark.parametrize("lookalike", [True, False, 1.0, 2.0, "1", "2", None])
+    def test_a_version_that_is_not_an_integer_is_refused(self, lookalike: object) -> None:
+        # Python equality makes lookalikes pass a plain membership test: True
+        # equals 1 and 2.0 equals 2, and bool subclasses int, so isinstance
+        # would admit it too. A declared version that is not literally an
+        # integer is a shape this build has no reason to trust.
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "schema_version": lookalike})
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "schema_version" in (out.reason or "")
 
     def test_a_version_2_sessions_array_does_not_disturb_the_version_1_reading(
         self,

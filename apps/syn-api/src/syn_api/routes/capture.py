@@ -28,10 +28,10 @@ from fastapi import APIRouter, HTTPException, Query
 
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
+    SUPPORTED_OBSERVATION_SCHEMA_VERSIONS,
 )
 from syn_adapters.workspace_backends.agentic.capture_result import (
     LOSS_COUNTERS,
-    SUPPORTED_SCHEMA_VERSIONS,
 )
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_api._wiring import get_event_store
@@ -106,8 +106,10 @@ def _state_of(payload: Mapping[str, object]) -> CaptureState:
 
     Three ways to end up UNKNOWN, all deliberate:
 
-    * the payload schema is a version this build does not understand, so its
-      fields may not mean what they are named;
+    * the RECORDED PAYLOAD schema is a version this build does not understand,
+      so its fields may not mean what they are named. This is the observation
+      schema, not the exporter's result schema: the two version independently
+      and must not be validated against each other's constant;
     * the state is missing;
     * the state is a value this build does not recognise, which is the same
       situation as a version skew but without the version to warn us.
@@ -115,7 +117,7 @@ def _state_of(payload: Mapping[str, object]) -> CaptureState:
     Guessing in any of these cases risks recording "safely stored" about a
     transcript nobody has.
     """
-    if payload.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
+    if payload.get("schema_version") not in SUPPORTED_OBSERVATION_SCHEMA_VERSIONS:
         return CaptureState.UNKNOWN
 
     raw = _text(payload.get("state"))
