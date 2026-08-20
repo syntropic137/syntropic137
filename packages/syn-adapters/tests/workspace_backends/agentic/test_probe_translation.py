@@ -23,9 +23,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_adapters.workspace_backends.agentic.capture_probe import (
-    CAPABILITY_PROVIDER_DIRS,
     EXIT_COMMAND_NOT_FOUND,
     EXIT_NO_CAPABILITY,
+    EXPORTER_BIN,
     EXPORTER_PROBE_COMMAND,
     PROBE_STATE_FILE,
     probe_capture,
@@ -50,68 +50,71 @@ EXPECTATIONS = CaptureExpectations(
 
 class TestTheProbeCommand:
     @pytest.mark.unit
-    def test_it_runs_under_bash_not_sh(self) -> None:
-        """/bin/sh in the workspace image is dash, and init.sh is bash-specific.
+    def test_it_names_the_exporter_by_absolute_path(self) -> None:
+        """PATH resolution was forgeable.
 
-        Under dash it dies with `Syntax error: "(" unexpected` before exporting
-        anything, and the probe then emits NO output and no verdict at all -
-        the quietest possible failure. Found by running it, not by reading it.
+        /opt/agentic is agent-owned in the workspace image, so the agent can
+        replace the capability's init.sh and prepend a directory holding a fake
+        exporter. Demonstrated against the pinned image: after replacing
+        init.sh, `command -v apss-session-exporter` resolved to /tmp/evil and
+        the probe returned captured_everything=true for a store it never
+        contacted. The binary itself is root-owned 0755, so naming its path is
+        what makes the audited program the one the host intended.
         """
-        assert EXPORTER_PROBE_COMMAND[0] == "bash"
+        assert EXPORTER_BIN == "/usr/local/bin/apss-session-exporter"
+        assert f"BIN={EXPORTER_BIN}" in SCRIPT
+        assert 'exec "$BIN"' in SCRIPT
 
     @pytest.mark.unit
-    def test_it_sources_the_capability_before_running_the_exporter(self) -> None:
-        assert SCRIPT.index('. "$init"') < SCRIPT.index("apss-session-exporter")
+    def test_it_does_not_source_agent_writable_code(self) -> None:
+        """An audit must not be configured by the party it audits.
+
+        Sourcing init.sh handed the agent the audit's environment. The loud
+        attack is a PATH prepend; the quiet one is SESSION_STORE_URL pointed at
+        a sink the agent controls, where the REAL exporter uploads faithfully
+        and returns a clean sweep for transcripts the store never saw.
+        """
+        assert "init.sh" not in SCRIPT
+        assert ". " not in SCRIPT.replace("...", "")
 
     @pytest.mark.unit
-    def test_the_host_state_file_is_applied_after_the_source(self) -> None:
-        """init.sh exports its OWN EXPORTER_STATE_FILE, into the agent-writable
-        spool. Whichever assignment runs last wins, so ordering is the whole
-        security property: an agent that can write the in-spool state file can
-        fake `skipped_unchanged` and make a lost transcript read as captured.
-        """
-        assert SCRIPT.index('. "$init"') < SCRIPT.index("EXPORTER_STATE_FILE=")
+    def test_it_translates_the_contract_itself(self) -> None:
+        """Mirrors the seven exports the adapter performs, verified against the
+        adapter in the pinned image. Duplication, deliberately: the alternative
+        is trusting code the audited process can rewrite."""
+        for produced in (
+            "SESSION_STORE_URL",
+            "SESSIONS_WRITE_TOKEN",
+            "SESSION_STORE_TAGS",
+            "SESSION_STORE_ORIGIN_DEPLOYMENT",
+            "CLAUDE_PROJECTS_ROOT",
+            "CODEX_SESSIONS_ROOT",
+            "EXPORTER_STATE_FILE",
+        ):
+            assert produced in SCRIPT, f"{produced} is not translated"
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("provider_dir", CAPABILITY_PROVIDER_DIRS)
-    def test_both_provider_names_are_tried(self, provider_dir: str) -> None:
-        """`apss` is the current name; `seshmagic` is the legacy alias.
-
-        The omni image running today has only `seshmagic`, so a probe that
-        assumed the new name would report a capture failure on every phase of
-        the only image in production.
-        """
-        assert provider_dir in SCRIPT
+    def test_the_deployment_is_carried_through(self) -> None:
+        """Without it every workspace reports environment=container and the
+        store cannot tell dev from production."""
+        assert 'SESSION_STORE_ORIGIN_DEPLOYMENT="$AGENTIC_SESSION_STORE_DEPLOYMENT"' in SCRIPT
 
     @pytest.mark.unit
     def test_it_tells_the_exporter_to_ignore_state(self) -> None:
-        """The state file is agent-writable, so its CONTENTS are not ours.
+        """The state file is agent-writable, so its contents are not ours.
 
-        Choosing the path from host code never made it trustworthy: /tmp is a
-        writable tmpfs, and the exporter runs as the SAME uid as the agent it
-        audits, so no location is writable by one and not the other. A forged
-        "already sent" entry could make a transcript that never reached the
-        store report as skipped_unchanged, which reads as a clean sweep.
-        Not reading it is the only available move.
-
-        Verified against the pinned image, twice in a row:
-
-            run 1  discovered=1 uploaded=1 skipped_unchanged=0
-            run 2  discovered=1 uploaded=1 skipped_unchanged=0
-
-        A second run would normally report skipped_unchanged=1.
+        Verified against the pinned image, twice in a row: run 1 and run 2 both
+        reported skipped_unchanged=0, where a second sweep would normally
+        report 1.
         """
         assert "--ignore-state" in SCRIPT
 
     @pytest.mark.unit
     def test_the_token_is_not_placed_on_the_command_line(self) -> None:
-        """It arrives as the container's own AGENTIC_SESSION_STORE_AUTH.
-
-        Passing it via `docker exec -e` would put the credential in the HOST
-        process argv, readable by anyone who can list processes.
-        """
-        assert "AUTH" not in SCRIPT
-        assert "TOKEN" not in SCRIPT
+        """It is read from the container's own environment, so it never
+        appears in the HOST's argv where anyone listing processes sees it."""
+        assert 'SESSIONS_WRITE_TOKEN="$AGENTIC_SESSION_STORE_AUTH"' in SCRIPT
+        assert "tok" not in SCRIPT
 
 
 class TestMissingCapability:
@@ -176,11 +179,18 @@ class TestAnImageThatDoesNoCaptureAtAll:
     """
 
     @pytest.mark.unit
-    def test_the_wrapper_re_raises_command_not_found(self) -> None:
+    def test_a_missing_binary_is_reported_before_anything_else(self) -> None:
+        """127 first, so an image with no exporter reads as DISABLED.
+
+        UNKNOWN would ask for a backfill of transcripts that could never have
+        existed - interactive-tmux images carry neither the capability nor the
+        binary.
+        """
         script = SCRIPT
-        guard = script.index("command -v apss-session-exporter")
-        assert guard < script.index(f"exit {EXIT_NO_CAPABILITY}")
-        assert f"exit {EXIT_COMMAND_NOT_FOUND}" in script
+        assert script.index(f"exit {EXIT_COMMAND_NOT_FOUND}") < script.index(
+            f"exit {EXIT_NO_CAPABILITY}"
+        )
+        assert '[ -x "$BIN" ]' in script
 
     @pytest.mark.unit
     @pytest.mark.asyncio

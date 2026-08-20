@@ -53,89 +53,73 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-#: Where the workspace image keeps its capability adapters.
-CAPABILITY_ROOT: Final = "/opt/agentic/capabilities/session-store"
-
-#: Provider directory names to try, most current first.
+#: The exporter, by ABSOLUTE PATH.
 #:
-#: `apss` is the vendor-neutral name; `seshmagic` is the legacy alias kept as a
-#: symlink beside it. Both are tried because an image pinned by digest may
-#: predate the rename - the omni image running today has only `seshmagic` - and
-#: a probe that assumed either name alone would report a capture failure on
-#: every phase of the images it could not match.
-CAPABILITY_PROVIDER_DIRS: Final = ("apss", "seshmagic")
+#: Resolving it through PATH was forgeable. /opt/agentic is agent-owned in the
+#: workspace image, so the agent can edit the capability's init.sh to prepend a
+#: directory of its own and have a fake exporter answer the audit. The binary
+#: itself is root-owned 0755, so naming its path is what makes the program
+#: producing the verdict the one the host intended.
+EXPORTER_BIN: Final = "/usr/local/bin/apss-session-exporter"
 
-#: Exit status the wrapper uses when the capability is missing but the exporter
-#: is NOT. Distinct from the exporter's own codes so it cannot be read as a
-#: verdict.
+#: Exit status when the workspace carries no session-store contract at all.
 EXIT_NO_CAPABILITY: Final = 4
 
-#: What a shell returns for "command not found", and what the probe returned
-#: before this wrapper existed when an image carried no exporter at all.
-#:
-#: The wrapper re-raises it deliberately. An image with neither the capability
-#: nor the binary has no capture to do - interactive-tmux is exactly that - and
-#: that reads as DISABLED. Letting the missing capability alone decide would
-#: have made those images report UNKNOWN, which requests a backfill for
-#: transcripts that never could have existed: the same false alarm this whole
-#: change removes, reintroduced for a different backend.
+#: What a shell returns for "command not found", reused here for "the exporter
+#: is not in this image". Kept because an image with no exporter reads as
+#: DISABLED: there is no capture to audit, so a backfill would chase
+#: transcripts that could never have existed.
 EXIT_COMMAND_NOT_FOUND: Final = 127
 
-#: The probe runs the exporter THROUGH the capability's own init.sh.
+#: The probe translates the capability contract ITSELF rather than sourcing the
+#: adapter's init.sh.
 #:
-#: WHY, and this is the whole point of the wrapper: a fresh `docker exec`
-#: inherits the container's configured AGENTIC_SESSION_STORE_* variables but
-#: NOT what init.sh exported into PID 1. The exporter reads neither - it reads
-#: the translated SESSION_STORE_* names that init.sh produces. Invoking the
-#: binary directly therefore judged an exporter that had never been configured,
-#: which returned "missing required env var SESSION_STORE_URL" and made every
-#: phase report FAILED and request a backfill, forever (#852).
+#: WHY, and this is the whole reason the wrapper exists in this shape: an audit
+#: must not be configured by the party it audits. /opt/agentic is agent-owned,
+#: so init.sh is agent-writable, and sourcing it hands the agent control of the
+#: audit's environment. A PATH prepended with a fake exporter is the obvious
+#: attack; the quieter one is SESSION_STORE_URL pointed at a sink the agent
+#: controls, where the REAL exporter uploads faithfully and returns a clean
+#: sweep for transcripts the store never saw.
 #:
-#: init.sh is re-entrant: sourcing it from a fresh exec restores the URL, the
-#: token, the tags and the deployment, verified against the pinned image.
+#: Every value below comes from the container's own configured environment,
+#: which is set by the host at create time and is not writable from inside.
+#: The mapping mirrors init.sh exactly - seven variables, verified against the
+#: adapter in the pinned image. It is duplication, and the alternative is
+#: trusting code the audited process can rewrite.
 #:
-#: EXPORTER_STATE_FILE IS SET AFTER THE SOURCE, DELIBERATELY. init.sh exports
-#: its own, inside the agent-writable spool. Letting that win would undo the
-#: reason the host chooses this path at all - see PROBE_STATE_FILE below.
-#:
-#: --ignore-state IS THE ACTUAL FIX, and the state file above is now only a
-#: fallback position. Choosing a path from host code never made its CONTENTS
-#: host-controlled: /tmp is a writable tmpfs the agent can write, so a forged
-#: "already sent" entry could make a transcript that never reached the store
-#: report as skipped_unchanged, which reads as a clean sweep. The file could
-#: not be protected either - the exporter runs as the SAME uid as the agent it
-#: is auditing, so no location is writable by one and not the other.
-#:
-#: So the exporter is told not to read state at all (v0.4.0). Every discovered
-#: session is re-sent; the store deduplicates on (session_id, content_hash),
-#: so the cost is a request rather than a duplicate row.
-#:
-#: REQUIRES AN IMAGE PINNED AT OR AFTER omni carrying exporter v0.4.0. An
-#: older binary rejects the flag with exit 2, which parse_capture_result reads
-#: as UNKNOWN and turns into a backfill request on every phase. That is why
-#: this change and the workspace_images digest bump are one commit.
+#: The token is read from the container's environment rather than passed on the
+#: command line, so it never appears in the host's argv.
 _PROBE_SCRIPT: Final = f"""
-for d in {" ".join(CAPABILITY_PROVIDER_DIRS)}; do
-  init="{CAPABILITY_ROOT}/$d/init.sh"
-  if [ -f "$init" ]; then
-    . "$init" >/dev/null 2>&1 || true
-    EXPORTER_STATE_FILE="$SYN_PROBE_STATE_FILE" exec apss-session-exporter \
-      --ignore-state --json
-  fi
-done
+BIN={EXPORTER_BIN}
+[ -x "$BIN" ] || exit {EXIT_COMMAND_NOT_FOUND}
+[ -n "${{AGENTIC_SESSION_STORE_URL:-}}" ] || exit {EXIT_NO_CAPABILITY}
 
-# No capability was found. Distinguish "this image does no capture at all"
-# from "the capability is missing but the exporter is here", because only the
-# second is a fault worth a backfill.
-command -v apss-session-exporter >/dev/null 2>&1 || exit {EXIT_COMMAND_NOT_FOUND}
-exit {EXIT_NO_CAPABILITY}
+SPOOL="${{AGENTIC_SESSION_STORE_SPOOL:-/spool}}"
+PARTITION="${{AGENTIC_SESSION_STORE_PARTITION:-$(hostname)}}"
+PART_DIR="$SPOOL/$PARTITION"
+
+export SESSION_STORE_URL="$AGENTIC_SESSION_STORE_URL"
+export CLAUDE_PROJECTS_ROOT="$PART_DIR/claude"
+export CODEX_SESSIONS_ROOT="$PART_DIR/codex"
+export EXPORTER_STATE_FILE="$SYN_PROBE_STATE_FILE"
+
+if [ -n "${{AGENTIC_SESSION_STORE_AUTH:-}}" ]; then
+  export SESSIONS_WRITE_TOKEN="$AGENTIC_SESSION_STORE_AUTH"
+fi
+if [ -n "${{AGENTIC_SESSION_STORE_TAGS:-}}" ]; then
+  export SESSION_STORE_TAGS="$AGENTIC_SESSION_STORE_TAGS"
+fi
+if [ -n "${{AGENTIC_SESSION_STORE_DEPLOYMENT:-}}" ]; then
+  export SESSION_STORE_ORIGIN_DEPLOYMENT="$AGENTIC_SESSION_STORE_DEPLOYMENT"
+fi
+
+exec "$BIN" --ignore-state --json
 """
 
-#: BASH, not sh. /bin/sh in the workspace image is dash, and init.sh is
-#: bash-specific: under dash it dies with `Syntax error: "(" unexpected` before
-#: exporting anything. The probe then produced NO output at all and no verdict,
-#: which is the quietest possible way for this to fail.
-EXPORTER_PROBE_COMMAND: Final = ["bash", "-c", _PROBE_SCRIPT]
+#: Plain sh: the script is POSIX and authored here, so it no longer depends on
+#: the adapter's bash-only init.sh.
+EXPORTER_PROBE_COMMAND: Final = ["sh", "-c", _PROBE_SCRIPT]
 
 #: Where the probe points the exporter's state file.
 #:
