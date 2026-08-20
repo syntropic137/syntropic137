@@ -18,6 +18,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from syn_adapters.workspace_backends.agentic.session_store_env import (
+    deployment_identity,
+)
 from syn_api._wiring import (
     disconnect,
     ensure_connected,
@@ -30,6 +33,11 @@ from syn_api.services.credentials import validate_credentials
 from syn_api.services.reconciliation import cleanup_orphaned_containers, reconcile_orphaned_sessions
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import Err, LifecycleError, Ok, Result
+from syn_shared.settings.session_store import (
+    ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_URL,
+    SessionStoreSettings,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -181,6 +189,8 @@ async def startup(
     if not skip_validation and not settings.uses_in_memory_stores:
         validate_credentials(_state.degraded_reasons)
 
+    _log_session_capture_posture(settings.session_store, settings.app_environment)
+
     if settings.is_test:
         return Ok({"mode": "full"})
 
@@ -259,6 +269,49 @@ async def health_check() -> Result[dict, LifecycleError]:
 
 
 # ── Private helpers ─────────────────────────────────────────────────
+
+
+def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
+    """Say once, at startup, whether session capture is on and where it points.
+
+    Capture is per-workspace, so until now its posture was only observable
+    after a workflow ran: the unauthenticated warning fired at provisioning,
+    and an operator who never started a workflow saw nothing at all.
+
+    The unauthenticated case is a WARNING rather than a refusal because an open
+    store on a trusted network is a real deployment. It is also the shape of
+    the most common misconfiguration, and that one fails silently: the
+    capability preflight probes an UNAUTHENTICATED health endpoint, so every
+    check passes, the workspace starts, and the write is rejected with 401 at
+    finalize - where the diagnostic is suppressed to avoid leaking the
+    credential. The operator is left with a failure count and no cause.
+
+    The URL is logged; the token never is, not even its length.
+    """
+    if not store.is_enabled:
+        logger.info(
+            "Session capture is OFF (no %s configured). Workflows run "
+            "normally; no transcripts are exported.",
+            ENV_SYN_SESSION_STORE_URL,
+        )
+        return
+
+    deployment = deployment_identity(app_environment)
+
+    if store.is_unauthenticated:
+        logger.warning(
+            "Session capture is ON for %s -> %s but NO write token is set (%s). "
+            "If the store requires authentication this fails at finalize with "
+            "401, AFTER the workspace has run, and the exporter suppresses the "
+            "cause to avoid leaking the credential. Set the token, or ignore "
+            "this if the store is deliberately open.",
+            deployment,
+            store.url,
+            ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+        )
+        return
+
+    logger.info("Session capture is ON for %s -> %s (authenticated).", deployment, store.url)
 
 
 async def _init_event_store() -> Result[None, LifecycleError]:
