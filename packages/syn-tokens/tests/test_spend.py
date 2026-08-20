@@ -14,6 +14,11 @@ from syn_tokens.spend import (
     reset_spend_tracker,
 )
 
+# Marked at module scope: this file sat outside pytest testpaths, so no CI
+# job collected it and nothing here needed a marker. Collected now, an
+# unmarked test is one no job runs - which the census gate refuses.
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def budget_store() -> InMemoryBudgetStore:

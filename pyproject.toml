@@ -143,7 +143,9 @@ testpaths = [
     "packages/syn-adapters/src",  # co-located tests, same convention as syn-domain/src
     "packages/syn-shared/tests",
     "packages/syn-shared/src",  # co-located tests, same convention
-    "scripts/workflows",
+    "packages/syn-tokens/tests",
+    "scripts",  # includes scripts/workflows
+    "syn_tests/integration",  # ADR-038 root-level E2E
     "infra/scripts/tests",
 ]
 pythonpath = [
@@ -152,7 +154,9 @@ pythonpath = [
     "packages/syn-domain/src",
     "packages/syn-adapters/src",
     "packages/syn-shared/src",
-    "scripts/workflows",
+    "packages/syn-tokens/tests",
+    "scripts",  # includes scripts/workflows
+    "syn_tests/integration",  # ADR-038 root-level E2E
     ".",  # infra/scripts importable from repo root
 ]
 python_files = ["test_*.py", "*_test.py"]
