@@ -96,7 +96,7 @@ BIN={EXPORTER_BIN}
 [ -n "${{AGENTIC_SESSION_STORE_URL:-}}" ] || exit {EXIT_NO_CAPABILITY}
 
 SPOOL="${{AGENTIC_SESSION_STORE_SPOOL:-/spool}}"
-PARTITION="${{AGENTIC_SESSION_STORE_PARTITION:-$(hostname)}}"
+PARTITION="${{AGENTIC_SESSION_STORE_PARTITION:-${{HOSTNAME}}}}"
 PART_DIR="$SPOOL/$PARTITION"
 
 export SESSION_STORE_URL="$AGENTIC_SESSION_STORE_URL"
@@ -137,6 +137,12 @@ EXPORTER_PROBE_COMMAND: Final = ["sh", "-c", _PROBE_SCRIPT]
 #: re-evaluates every transcript rather than trusting a claim about them; the
 #: store deduplicates on content hash, so re-sending an already-stored session
 #: is a no-op rather than a duplicate.
+#: NOTE ON WHAT THIS DOES AND DOES NOT BUY. The path is host-SELECTED,
+#: not host-owned: /tmp is a writable tmpfs, so the agent can create or
+#: symlink this file. What stops its contents forging a verdict is
+#: --ignore-state, which makes the exporter not read state at all. The
+#: separate path remains worthwhile - it keeps the audit from disturbing
+#: the capability's own state - but it is not a trust boundary.
 PROBE_STATE_FILE: Final = "/tmp/.apss-probe-state.json"
 
 #: A probe that outlives this is not worth waiting for. Teardown is already

@@ -74,10 +74,12 @@ class TestItAsksTheRightQuestion:
 
         await probe_capture(_exec, expectations=_EXPECT)
         assert seen == [EXPORTER_PROBE_COMMAND]
-        # --json is now inside the wrapper script rather than a separate argv
-        # element: the probe runs the exporter THROUGH the capability's init.sh
-        # so it inherits the translated SESSION_STORE_* environment (#852). The
-        # prose line the finalizer prints is still not a contract; --json is.
+        # --json is inside the wrapper script rather than a separate argv
+        # element: the probe TRANSLATES the capability contract itself and
+        # invokes the exporter by absolute path (#852). It deliberately does
+        # not source init.sh - /opt/agentic is agent-owned, so sourcing it
+        # would let the audited process configure its own audit. The prose
+        # line the finalizer prints is still not a contract; --json is.
         assert "--json" in seen[0][-1]
 
     @pytest.mark.asyncio
@@ -209,10 +211,11 @@ class TestItDoesNotTrustAgentWritableState:
 
         await probe_capture(_exec, expectations=_EXPECT)
         assert seen and seen[0] is not None
-        # Passed under OUR name, not EXPORTER_STATE_FILE. init.sh exports that
-        # one itself, pointing into the agent-writable spool, and whichever
-        # assignment ran last would win. The wrapper applies the host value
-        # after sourcing, which is what keeps this guarantee (#852).
+        # Passed under OUR name; the wrapper is what sets EXPORTER_STATE_FILE
+        # from it. Worth being exact about what this buys: the path is
+        # host-SELECTED, not host-OWNED - /tmp is a writable tmpfs, so the
+        # agent can create or symlink that file. What makes its contents
+        # unable to forge a verdict is --ignore-state, not the location.
         assert seen[0]["SYN_PROBE_STATE_FILE"] == PROBE_STATE_FILE
         assert "EXPORTER_STATE_FILE" not in seen[0]
 
