@@ -20,7 +20,6 @@ provider's own shape against the pinned image:
 
 from __future__ import annotations
 
-import inspect
 import shlex
 
 import pytest
@@ -136,13 +135,41 @@ class TestTheAdapterQuotesWhatItSends:
 
 
 class TestBothBackendsAgree:
-    """Same port, same contract - the behaviour must not depend on backend."""
+    """Same port, same contract - behaviour must not depend on the backend.
+
+    An earlier version asserted this by grepping the module source, which
+    proves a string is present rather than that the adapter behaves. Driven
+    through the real adapter instead.
+    """
 
     @pytest.mark.unit
-    def test_the_interactive_tmux_adapter_quotes_too(self) -> None:
-        from syn_adapters.workspace_backends.interactive_tmux import adapter as tmux
+    @pytest.mark.asyncio
+    async def test_the_interactive_tmux_adapter_quotes_too(self) -> None:
+        from syn_adapters.workspace_backends.interactive_tmux.adapter import (
+            InteractiveTmuxIsolationAdapter,
+        )
 
-        body = inspect.getsource(tmux)
+        adapter = object.__new__(InteractiveTmuxIsolationAdapter)
+        spy = _SpyProvider()
+        adapter._provider = spy  # type: ignore[attr-defined]
+        adapter._workspaces = {"ws-1": object()}  # type: ignore[attr-defined]
 
-        assert "shlex.join(command)" in body
-        assert '" ".join(command)' not in body
+        # _call_provider exists to pin provider calls to one loop; here the
+        # spy has no loop affinity, so awaiting directly is equivalent and
+        # keeps the test to the property under examination.
+        async def _direct(coro):  # type: ignore[no-untyped-def]
+            return await coro
+
+        adapter._call_provider = _direct  # type: ignore[attr-defined]
+
+        class _Handle:
+            isolation_id = "ws-1"
+
+        await adapter.execute(_Handle(), ["sh", "-c", f"test -e {CODEX_AUTH}"])  # type: ignore[arg-type]
+
+        assert spy.commands, "the tmux adapter never reached the provider"
+        assert shlex.split(spy.commands[-1]) == [
+            "sh",
+            "-c",
+            f"test -e {CODEX_AUTH}",
+        ]

@@ -86,8 +86,18 @@ class TestTheProbeDistinguishesAbsentFromUnverifiable:
 class TestTheGuardFailsClosed:
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_an_absent_credential_returns_quietly(self) -> None:
-        await _assert_codex_credential_removed(_Workspace([_absent()]))
+    async def test_removal_runs_even_when_the_probe_says_absent(self) -> None:
+        """ABSENT from the probe is not proof.
+
+        `[ -e PATH ]` is false both when the path is gone and when it cannot be
+        inspected - an untraversable parent answers "no" indistinguishably.
+        The removal is what separates those, so it runs unconditionally.
+        """
+        ws = _Workspace([_absent(), _Result(0, ""), _absent()])
+
+        await _assert_codex_credential_removed(ws)
+
+        assert any(call[0] == "rm" for call in ws.calls)
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -98,7 +108,21 @@ class TestTheGuardFailsClosed:
 
         # probe, rm, re-probe
         assert len(ws.calls) == 3
-        assert ws.calls[1][0] == "rm"
+        assert ws.calls[1][:3] == ["rm", "-f", "--"]
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_failed_removal_raises(self) -> None:
+        """The exit status of `rm -f` is the authority.
+
+        It returns 0 for a path already gone, and nonzero only when it could
+        not act - permission denied, an untraversable parent - which is exactly
+        the case the probe misreports as absent. Previously unchecked.
+        """
+        ws = _Workspace([_absent(), _Result(1, ""), _absent()])
+
+        with pytest.raises(RuntimeError, match="unable to remove"):
+            await _assert_codex_credential_removed(ws)
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -130,3 +154,20 @@ class TestTheGuardFailsClosed:
         await _assert_codex_credential_removed(ws)
 
         assert any(call[0] == "rm" for call in ws.calls)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "output",
+        ["NOT_STAGED_CREDENTIAL_ABSENT", "STAGED_CREDENTIAL_ABSENT_MAYBE", "x ABSENT"],
+    )
+    async def test_lookalike_output_is_not_accepted_as_absent(self, output: str) -> None:
+        """The match is exact on the final line, not a suffix.
+
+        `endswith` would have accepted "NOT_STAGED_CREDENTIAL_ABSENT", which
+        contradicts the rule that output we cannot recognise is UNVERIFIABLE.
+        """
+        ws = _Workspace([_absent(), _Result(0, ""), _Result(0, output)])
+
+        with pytest.raises(RuntimeError, match="unable to confirm removal"):
+            await _assert_codex_credential_removed(ws)

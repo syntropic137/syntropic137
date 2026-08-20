@@ -159,11 +159,11 @@ _CODEX_STAGED_AUTH = "/workspace/.setup/codex-auth.json"
 
 
 class _CredentialState(StrEnum):
-    """What the probe actually established, kept distinct from how it failed.
+    """What the probe established, kept distinct from how it failed.
 
-    ABSENT and "could not tell" MUST NOT share a channel. They did: the check
+    ABSENT and "could not tell" MUST NOT share a channel. They did: the guard
     read `exit_code != 0` as "gone", which also swallowed a timeout, a provider
-    error, and a missing workspace - every way of failing to look became
+    error and a missing workspace - every way of failing to look became
     evidence of absence.
     """
 
@@ -172,17 +172,22 @@ class _CredentialState(StrEnum):
     UNVERIFIABLE = "unverifiable"
 
 
-#: Printed by the probe so presence is proven by OUTPUT, not only by a status
-#: that several unrelated failures can also produce.
+#: Reported on stdout so presence is proven by OUTPUT, not by a status that
+#: several unrelated failures also produce.
 _PRESENT_MARKER = "STAGED_CREDENTIAL_PRESENT"
 _ABSENT_MARKER = "STAGED_CREDENTIAL_ABSENT"
 
 
 async def _staged_credential_state(ws: ManagedWorkspace) -> _CredentialState:
-    """Ask whether the staged credential exists, and admit when we cannot tell.
+    """Advisory: does the staged credential appear to exist?
 
-    The probe always exits 0 and reports its answer on stdout, so a nonzero
-    status means the PROBE failed rather than that the file is gone.
+    ADVISORY, not authoritative, and the distinction matters. `[ -e PATH ]` is
+    false both when the path is absent AND when it cannot be inspected - a
+    directory whose traversal is denied answers "no" indistinguishably from an
+    empty one. So a report of ABSENT is not proof of absence. What proves it is
+    the removal below, whose exit status separates "gone" from "could not touch
+    it". This exists to say something useful in the log, and to catch a
+    credential that is still readable.
     """
     probe = await ws.execute(
         [
@@ -204,17 +209,20 @@ async def _staged_credential_state(ws: ManagedWorkspace) -> _CredentialState:
         )
         return _CredentialState.UNVERIFIABLE
 
-    output = (probe.stdout or "").strip()
-    if output.endswith(_ABSENT_MARKER):
+    # EXACT match on the last line, not endswith: `endswith` would accept
+    # "NOT_STAGED_CREDENTIAL_ABSENT", which contradicts the rule that output we
+    # do not recognise is UNVERIFIABLE.
+    lines = (probe.stdout or "").strip().splitlines()
+    last = lines[-1].strip() if lines else ""
+    if last == _ABSENT_MARKER:
         return _CredentialState.ABSENT
-    if output.endswith(_PRESENT_MARKER):
+    if last == _PRESENT_MARKER:
         return _CredentialState.PRESENT
 
-    # A zero exit with output we do not recognise is not an answer.
     logger.error(
         "SECURITY: unrecognised staged-credential probe output (workspace=%s): %r",
         ws.workspace_id,
-        output,
+        last,
     )
     return _CredentialState.UNVERIFIABLE
 
@@ -223,24 +231,37 @@ async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
     """Guarantee no staged codex credential lingers under /workspace, or raise.
 
     ``clear_secrets`` removes /workspace/.setup, but if that cleanup failed the
-    staged ``codex-auth.json`` could remain readable by the agent. Check,
-    force-remove, and RE-VERIFY. If the credential still exists we FAIL CLOSED
-    (raise) so a lingering secret is never silently reported as "cleared".
-    """
-    if await _staged_credential_state(ws) is _CredentialState.ABSENT:
-        return
+    staged ``codex-auth.json`` could remain readable by the agent.
 
-    logger.error(
-        "SECURITY: staged codex credential still present under /workspace after "
-        "cleanup (workspace=%s); force-removing",
-        ws.workspace_id,
-    )
-    await ws.execute(["rm", "-f", _CODEX_STAGED_AUTH], timeout_seconds=5)
+    FAILS CLOSED. The removal runs unconditionally and its exit status is the
+    authority: `rm -f` returns 0 for a path that is already gone and nonzero
+    when it cannot act - permission denied, an untraversable parent - which is
+    exactly the case a `[ -e ]` probe reports as "absent". Removing without
+    asking first costs one exec and removes a whole class of false clearance.
+    """
+    if await _staged_credential_state(ws) is _CredentialState.PRESENT:
+        logger.error(
+            "SECURITY: staged codex credential still present under /workspace "
+            "after cleanup (workspace=%s); force-removing",
+            ws.workspace_id,
+        )
+
+    removal = await ws.execute(["rm", "-f", "--", _CODEX_STAGED_AUTH], timeout_seconds=5)
+    if removal.exit_code != 0:
+        # Previously unchecked. Without this, a removal that could not run left
+        # the credential in place and the guard went on to trust a recheck that
+        # cannot distinguish absence from inaccessibility.
+        msg = (
+            f"SECURITY: unable to remove staged codex credential "
+            f"{_CODEX_STAGED_AUTH} (workspace={ws.workspace_id}, "
+            f"exit={removal.exit_code})"
+        )
+        raise RuntimeError(msg)
 
     if await _staged_credential_state(ws) is not _CredentialState.ABSENT:
-        # Not `is PRESENT`: an UNVERIFIABLE recheck raises too. A probe that
-        # timed out has not shown the credential is gone, and treating that as
-        # success is the same fail-open this function exists to prevent.
+        # Not `is PRESENT`: an UNVERIFIABLE recheck has not shown the
+        # credential is gone, and accepting it is the same fail-open this
+        # function exists to prevent.
         msg = (
             f"SECURITY: unable to confirm removal of staged codex credential "
             f"{_CODEX_STAGED_AUTH} (workspace={ws.workspace_id})"

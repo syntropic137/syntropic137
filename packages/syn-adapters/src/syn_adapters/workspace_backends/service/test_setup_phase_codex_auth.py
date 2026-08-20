@@ -29,18 +29,31 @@ def _workspace() -> MagicMock:
 def _execute_side_effect(default_exit: int = 0, *, staged_present: bool = False):
     """AsyncMock side_effect for ws.execute.
 
-    The fail-closed ``test -e <staged codex auth>`` check reports the file GONE
-    (exit 1) by default (the setup script relocated + removed it); pass
-    ``staged_present=True`` to simulate a cleanup that could not remove it. All
-    other commands return ``default_exit``.
+    The staged-credential probe now answers on STDOUT and always exits 0, so a
+    nonzero status means the PROBE failed rather than that the file is gone.
+    This double reported the old protocol - exit 1, empty stdout - which the
+    guard would now read as UNVERIFIABLE and refuse. Updated rather than
+    loosened: a shared double that lies about the contract is how a guard gets
+    certified while broken, which is exactly what happened here.
+
+    Reports the credential GONE by default (the setup script relocated and
+    removed it); pass ``staged_present=True`` to simulate a cleanup that could
+    not remove it.
     """
 
     def _run(cmd: list[str], **_kwargs: object) -> ExecutionResult:
         joined = " ".join(cmd)
-        if "test -e" in joined and "codex-auth.json" in joined:
-            exit_code = 0 if staged_present else 1
-        else:
-            exit_code = default_exit
+        if "codex-auth.json" in joined and "STAGED_CREDENTIAL" in joined:
+            marker = "STAGED_CREDENTIAL_PRESENT" if staged_present else "STAGED_CREDENTIAL_ABSENT"
+            return ExecutionResult(
+                exit_code=0, success=True, duration_ms=1, stdout=marker, stderr=""
+            )
+        if "codex-auth.json" in joined and joined.startswith("rm "):
+            # Removal itself succeeds. `staged_present` models a credential
+            # that survives it, which is what the recheck then catches - not a
+            # container where `rm` cannot run.
+            return ExecutionResult(exit_code=0, success=True, duration_ms=1, stdout="", stderr="")
+        exit_code = default_exit
         return ExecutionResult(
             exit_code=exit_code,
             success=exit_code == 0,
@@ -116,13 +129,11 @@ async def test_run_setup_phase_injects_codex_auth_as_file() -> None:
 @pytest.mark.anyio
 async def test_cleanup_runs_when_setup_fails() -> None:
     workspace = _workspace()
-    workspace.execute.return_value = ExecutionResult(
-        exit_code=7,
-        success=False,
-        duration_ms=1,
-        stdout="",
-        stderr="failed",
-    )
+    # The SETUP SCRIPT fails; the staged-credential cleanup still works. A
+    # blanket "every command returns 7" also made the credential removal fail,
+    # which now raises fail-closed and is a different scenario from the one
+    # this test is about.
+    workspace.execute.side_effect = _execute_side_effect(default_exit=7)
     secrets = SetupPhaseSecrets.for_testing(codex_auth_json='{"a":1}')
     cleanup = AsyncMock()
 
@@ -174,7 +185,10 @@ async def test_lingering_codex_credential_fails_closed() -> None:
             "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
             new=AsyncMock(),
         ),
-        pytest.raises(RuntimeError, match="unable to remove staged codex credential"),
+        # Wording changed with the fail-closed rework: removal now has its own
+        # error ("unable to remove"), and this is the case where removal
+        # reported success but the credential is still visible afterwards.
+        pytest.raises(RuntimeError, match="unable to confirm removal"),
     ):
         await run_setup_phase(workspace, secrets)
 
