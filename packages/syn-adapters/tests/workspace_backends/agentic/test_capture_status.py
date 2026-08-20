@@ -463,6 +463,39 @@ class TestNewFinalizerVerdicts:
         assert outcome.state is CaptureState.UNKNOWN
         assert outcome.needs_backfill, "an unreadable verdict must still be re-sent"
 
+    def test_a_complete_line_that_contradicts_itself_is_not_captured(self) -> None:
+        # CAPTURED is the only verdict that does NOT set needs_backfill, so it
+        # is the one that decides a session is safe to stop worrying about. A
+        # complete line carrying a nonzero loss counter contradicts itself, and
+        # the honest answer is that this parser does not understand what it was
+        # told.
+        for counter in ("rejected", "failed", "skipped_oversize"):
+            others = " ".join(
+                f"{name}=0"
+                for name in ("rejected", "skipped_oversize", "failed")
+                if name != counter
+            )
+            line = (
+                "[finalize] session-store upload complete (discovered=1 "
+                f"skipped_unchanged=0 uploaded=1 accepted=0 duplicate=0 {others} "
+                f"{counter}=1); spool retained at /spool/p"
+            )
+            outcome = parse_capture_status(line, store_enabled=True)
+            assert outcome.state is CaptureState.UNKNOWN, f"{counter}: {outcome.state}"
+            assert outcome.needs_backfill, counter
+            assert counter in (outcome.reason or ""), outcome.reason
+
+    def test_a_genuinely_clean_complete_line_is_still_captured(self) -> None:
+        # The contradiction check must not make CAPTURED unreachable.
+        line = (
+            "[finalize] session-store upload complete (discovered=1 skipped_unchanged=0 "
+            "uploaded=1 accepted=1 duplicate=0 rejected=0 skipped_oversize=0 failed=0); "
+            "spool retained at /spool/p"
+        )
+        outcome = parse_capture_status(line, store_enabled=True)
+        assert outcome.state is CaptureState.CAPTURED
+        assert not outcome.needs_backfill
+
     def test_an_unrecognised_rc_reads_unknown(self) -> None:
         # The finalizer emits exactly rc=3. A different code means something
         # this parser has not been taught, and must not be quietly accepted.

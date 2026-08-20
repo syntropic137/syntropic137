@@ -158,6 +158,11 @@ _COUNTERS = (
     "unconfirmed",
 )
 
+#: Counters whose nonzero value means a session the sweep SAW is not in the
+#: store. Spelled once: the INCOMPLETE path uses it to build its reason, and
+#: the COMPLETE path uses it to refuse a verdict that contradicts itself.
+_BLOCKING_COUNTERS = ("failed", "rejected", "skipped_oversize", "unconfirmed")
+
 
 class CaptureState(StrEnum):
     """What happened to this execution's sessions.
@@ -252,6 +257,27 @@ def _classify(line: str) -> CaptureOutcome | None:
     counters = _counters_from(line)
 
     if _RE_COMPLETE.fullmatch(line):
+        # A COMPLETE line that carries a nonzero loss counter contradicts
+        # itself, and CAPTURED is the one verdict that must never be wrong:
+        # it is the only state that does NOT set needs_backfill, so it decides
+        # a session is safe to stop worrying about.
+        #
+        # finalize.sh cannot produce `upload complete (rejected=1)` today. That
+        # is exactly why this check is cheap and worth having: if it ever does,
+        # through a bug or a change nobody propagated here, the honest answer
+        # is "this parser does not understand what it was told", not a
+        # confident success. Grammar drift between the two repos has already
+        # happened once in this file's short life.
+        contradicting = {k: v for k, v in counters.items() if k in _BLOCKING_COUNTERS and v}
+        if contradicting:
+            return CaptureOutcome(
+                state=CaptureState.UNKNOWN,
+                reason=(
+                    "finalizer reported a complete upload while counting "
+                    + ", ".join(f"{k}={v}" for k, v in sorted(contradicting.items()))
+                ),
+                counters=counters,
+            )
         return CaptureOutcome(state=CaptureState.CAPTURED, counters=counters)
 
     if m := _RE_TIMEOUT.fullmatch(line):
@@ -273,11 +299,7 @@ def _classify(line: str) -> CaptureOutcome | None:
         # from the line. The finalizer puts free text in those parentheses, and
         # this field is persisted and displayed: an exporter build that printed
         # an auth header would otherwise have it lifted into a durable record.
-        blocking = {
-            k: v
-            for k, v in counters.items()
-            if k in ("failed", "rejected", "skipped_oversize", "unconfirmed") and v
-        }
+        blocking = {k: v for k, v in counters.items() if k in _BLOCKING_COUNTERS and v}
         detail = ", ".join(f"{k}={v}" for k, v in sorted(blocking.items()))
         return CaptureOutcome(
             state=CaptureState.INCOMPLETE,
