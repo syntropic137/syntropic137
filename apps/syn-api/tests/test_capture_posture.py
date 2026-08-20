@@ -16,7 +16,7 @@ import pytest
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     deployment_identity,
 )
-from syn_api.services.lifecycle import _log_session_capture_posture
+from syn_api.services.lifecycle import _log_session_capture_posture, _safe_endpoint
 from syn_api.types import Err
 from syn_shared.settings.config import AppEnvironment
 from syn_shared.settings.session_store import SessionStoreSettings
@@ -168,3 +168,38 @@ class TestPostureCannotAbortStartup:
         for record in caplog.records:
             assert TOKEN not in record.getMessage()
             assert record.exc_info is None
+
+
+class TestSafeEndpointEdgeCases:
+    """Found by probing the function rather than by reasoning about it.
+
+    Both of these escaped the first version and neither was a leak - they were
+    ways to lose the diagnostic, or to print something an operator cannot read
+    back.
+    """
+
+    @pytest.mark.unit
+    def test_an_out_of_range_port_does_not_raise(self) -> None:
+        """urlsplit defers parsing to .port, which THROWS.
+
+        Uncaught, a typo'd port escaped _safe_endpoint, was swallowed by the
+        startup guard, and downgraded the whole posture line to "could not
+        determine" - a trivial mistake costing the entire diagnostic.
+        """
+        assert _safe_endpoint("https://ex.com:99999") == "<unparseable store url>"
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("https://[::1]:8443/x", "https://[::1]:8443"),
+            ("https://[2001:db8::1]", "https://[2001:db8::1]"),
+        ],
+    )
+    def test_ipv6_keeps_its_brackets(self, url: str, expected: str) -> None:
+        """Without them "https://::1:8443" cannot be read back as host+port."""
+        assert _safe_endpoint(url) == expected
+
+    @pytest.mark.unit
+    def test_userinfo_and_path_are_dropped_but_the_port_survives(self) -> None:
+        assert _safe_endpoint("https://tok@ex.com:8443/ingest") == "https://ex.com:8443"

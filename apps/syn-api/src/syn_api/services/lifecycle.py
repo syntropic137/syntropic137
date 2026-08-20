@@ -289,15 +289,28 @@ def _safe_endpoint(url: str) -> str:
     """
     from urllib.parse import urlsplit
 
-    parts = urlsplit(url)
-    if not parts.hostname:
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+        # .port PARSES, and raises ValueError when the port is out of range.
+        # An operator typo would otherwise escape this function, be caught by
+        # the startup guard, and silently downgrade the posture line to
+        # "could not determine" - losing the diagnostic to a trivial mistake.
+        port = parts.port
+    except ValueError:
+        return "<unparseable store url>"
+
+    if not host:
         # Unparseable, so nothing can be shown safely. Do NOT fall back to the
         # raw value: that is exactly the case most likely to be malformed
         # because a credential was pasted into it.
         return "<unparseable store url>"
 
-    port = f":{parts.port}" if parts.port else ""
-    return f"{parts.scheme}://{parts.hostname}{port}"
+    # An IPv6 literal keeps its brackets, or the result is ambiguous:
+    # "https://::1:8443" cannot be read back as host plus port.
+    rendered_host = f"[{host}]" if ":" in host else host
+    suffix = f":{port}" if port else ""
+    return f"{parts.scheme}://{rendered_host}{suffix}"
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
