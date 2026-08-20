@@ -269,6 +269,35 @@ class TestTheStoreLabel:
         s = SessionStoreSettings(url="https://s", label="z" * 200)
         assert s.display_label == ""
 
+    def test_the_alphabet_is_exactly_the_declared_one(self) -> None:
+        """Every printable ASCII code point, checked against the contract.
+
+        Sampling a few bad characters does not pin the grammar: adding `:` to
+        the pattern, or swapping it for `\\w` (which admits non-ASCII letters),
+        left the earlier tests entirely green.
+        """
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        for code_point in range(0x21, 0x7F):
+            ch = chr(code_point)
+            label = SessionStoreSettings(url="https://s", label=ch).display_label
+            if ch in allowed:
+                assert label == ch, f"{ch!r} should be allowed"
+            else:
+                assert label == "", f"{ch!r} should be refused"
+
+    @pytest.mark.parametrize("raw", ["caf\u00e9", "\u79df\u6237", "\u00fcber"])
+    def test_ordinary_non_ascii_letters_are_refused_too(self, raw: str) -> None:
+        """Not a control or formatting hazard - just not ASCII.
+
+        Pins the identifier as ASCII rather than "printable and unambiguous",
+        which is what a `\\w`-based pattern would silently become.
+        """
+        assert SessionStoreSettings(url="https://s", label=raw).display_label == ""
+
+    def test_the_length_boundary_is_exact(self) -> None:
+        assert SessionStoreSettings(url="https://s", label="z" * 64).display_label
+        assert not SessionStoreSettings(url="https://s", label="z" * 65).display_label
+
     def test_unset_is_not_the_same_as_unusable(self) -> None:
         """Both yield "", but only one is a misconfiguration worth reporting."""
         unset = SessionStoreSettings(url="https://s")

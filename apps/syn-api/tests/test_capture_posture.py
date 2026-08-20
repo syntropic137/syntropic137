@@ -158,19 +158,35 @@ class TestTwoStoresCanBeToldApart:
     # one that logged the label - and a codex mutation that appended
     # `store.url.rsplit("/")[-1]` to the destination passed the entire suite,
     # including the test named "the url is still never logged".
-    URL_HOST = "url-host-sentinel.example"
-    URL_PATH = "url-path-sentinel"
-    URL_WITH_PARTS = f"https://{URL_HOST}/{URL_PATH}"
+    # EVERY component gets its own sentinel, including the scheme. A first
+    # version used a conventional https URL with only host and path sentinels,
+    # and codex pointed out that a label-conditional mutation leaking the query,
+    # userinfo, port or fragment would still pass - and that asserting
+    # "https://" checks the scheme as a literal rather than as a value.
+    URL_COMPONENTS = (
+        "url-scheme",
+        "url-user",
+        "url-password",
+        "url-host.example",
+        "43127",
+        "url-path",
+        "url-query",
+        "url-fragment",
+    )
+    URL_WITH_PARTS = (
+        "url-scheme://url-user:url-password@url-host.example:43127/url-path?url-query#url-fragment"
+    )
     LABEL = "declared-label"
 
     def _assert_no_url_component(self, record: logging.LogRecord) -> None:
         """No part of the URL, by any route, including the unformatted args."""
-        haystacks = (record.getMessage(), str(record.args))
+        haystacks = (record.getMessage(), str(record.args), str(record.exc_info))
         for haystack in haystacks:
-            assert self.URL_HOST not in haystack
-            assert self.URL_PATH not in haystack
+            for component in self.URL_COMPONENTS:
+                assert component not in haystack, (
+                    f"URL component {component!r} reached a log record"
+                )
             assert TOKEN not in haystack
-            assert "https://" not in haystack
 
     @pytest.mark.unit
     def test_two_stores_differing_only_by_path_are_distinguishable(
@@ -251,8 +267,9 @@ class TestTwoStoresCanBeToldApart:
         ],
         ids=["newline", "homoglyph-dash", "too-long", "a-pasted-url", "a-pasted-token"],
     )
+    @pytest.mark.parametrize("authenticated", [True, False], ids=["with-token", "no-token"])
     def test_an_unusable_label_is_ignored_and_never_echoed(
-        self, caplog: pytest.LogCaptureFixture, unusable: str
+        self, caplog: pytest.LogCaptureFixture, unusable: str, authenticated: bool
     ) -> None:
         """Rejected, and the rejected text is not repeated anywhere.
 
@@ -260,7 +277,15 @@ class TestTwoStoresCanBeToldApart:
         so echoing it is how a mis-pasted secret reaches the log this line
         exists to keep clean.
         """
-        records = _posture(caplog, url=STORE, auth_token=TOKEN, label=unusable)
+        # Both branches: an earlier version only exercised the authenticated
+        # one, so a mutation echoing store.label in the UNAUTHENTICATED warning
+        # would have stayed green.
+        records = _posture(
+            caplog,
+            url=STORE,
+            auth_token=TOKEN if authenticated else None,
+            label=unusable,
+        )
 
         warnings = [r for r in records if r.levelno == logging.WARNING]
         assert warnings, "an unusable label must be reported"
