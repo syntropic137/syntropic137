@@ -40,6 +40,7 @@ from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 __all__ = [
     "SUPPORTED_SCHEMA_VERSION",
     "AuthoritativeCapture",
+    "CaptureExpectations",
     "parse_capture_result",
 ]
 
@@ -54,6 +55,37 @@ _EXIT_CAPTURED: Final = 0
 _EXIT_COULD_NOT_RUN: Final = 1
 _EXIT_USAGE: Final = 2
 _EXIT_INCOMPLETE: Final = 3
+
+
+class CaptureExpectations(BaseModel):
+    """Where the caller meant this execution's sessions to go.
+
+    Exists because "success" is not a property of the counters alone. An
+    exporter that swept cleanly against the WRONG store reports numbers
+    identical to one that swept cleanly against the right one, and neither the
+    exit code nor the document can tell them apart. Only the caller knows the
+    intended destination, so it has to say.
+
+    Both fields are REQUIRED, and neither has an "unchecked" mode. An earlier
+    version made them optional and let None mean "skip validation", which
+    quietly conflated two different statements: `deployment=None` could not
+    distinguish "I expect no deployment tag" from "do not look". An API whose
+    purpose is an authoritative verdict should not have a way to be asked for
+    one and silently answer a weaker question.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    store_url: str
+    """The store this execution was configured to write to."""
+
+    deployment: str | None
+    """The deployment tag expected on the envelope, or None to expect NONE.
+
+    None is a positive assertion, not an opt-out: it means the caller expects
+    the exporter to have produced no deployment tag, and a tag appearing is a
+    mismatch worth surfacing.
+    """
 
 
 class AuthoritativeCapture(BaseModel):
@@ -93,9 +125,7 @@ def parse_capture_result(
     stdout: str,
     exit_code: int,
     *,
-    store_enabled: bool,
-    expected_store_url: str | None,
-    expected_deployment: str | None,
+    expectations: CaptureExpectations | None,
 ) -> AuthoritativeCapture:
     """Interpret one host-invoked exporter run.
 
@@ -111,39 +141,36 @@ def parse_capture_result(
     a success, so nothing below them has to re-check whether it is looking at
     something trustworthy.
 
-    `expected_store_url` and `expected_deployment` have NO DEFAULT on purpose,
-    though None is a permitted value. A caller that omits them would otherwise
-    get the permissive behaviour by forgetting, and "the safe path depends on
-    remembering something" is the shape of defect this module exists to remove.
-    Passing None is a decision a reader can see; omitting the argument is not.
+    `expectations` is None exactly when no store is configured. Tying the two
+    together removes a state that should never have been representable: a store
+    enabled with nobody knowing where it points. There is no default, so a
+    caller cannot get the permissive behaviour by forgetting, and no "unchecked"
+    mode, so it cannot get it by asking for one either.
     """
     document = _load_document(stdout)
-    refusal = _refuse_unreadable(document, exit_code, store_enabled=store_enabled)
+    refusal = _refuse_unreadable(document, exit_code, expectations=expectations)
     if refusal is not None:
         return refusal
 
     # _refuse_unreadable returns non-None for every document it rejects,
     # including None itself, so anything reaching here is a readable mapping.
-    return _verdict(
-        document or {},
-        exit_code,
-        expected_store_url=expected_store_url,
-        expected_deployment=expected_deployment,
-    )
+    # expectations is non-None here: _refuse_unreadable returns DISABLED for
+    # the None case before anything else runs.
+    return _verdict(document or {}, exit_code, expectations=expectations)
 
 
 def _refuse_unreadable(
     document: Mapping[str, object] | None,
     exit_code: int,
     *,
-    store_enabled: bool,
+    expectations: CaptureExpectations | None,
 ) -> AuthoritativeCapture | None:
     """Everything that makes a result unreadable, or trivially not a capture.
 
     Returns None when the document is worth interpreting. Never returns
     CAPTURED: a guard that could report success would defeat its own purpose.
     """
-    if not store_enabled:
+    if expectations is None:
         return AuthoritativeCapture(
             state=CaptureState.DISABLED, reason="no session store configured"
         )
@@ -181,8 +208,7 @@ def _verdict(
     document: Mapping[str, object],
     exit_code: int,
     *,
-    expected_store_url: str | None,
-    expected_deployment: str | None,
+    expectations: CaptureExpectations,
 ) -> AuthoritativeCapture:
     """Turn a readable document plus its exit code into a verdict."""
     counters = _counters(document)
@@ -225,8 +251,7 @@ def _verdict(
             counters,
             store_url=store_url,
             origin_deployment=origin_deployment,
-            expected_store_url=expected_store_url,
-            expected_deployment=expected_deployment,
+            expectations=expectations,
         )
         return AuthoritativeCapture(state=state, reason=reason, **fields)  # type: ignore[arg-type]
 
@@ -244,20 +269,23 @@ def _judge_claimed_success(
     *,
     store_url: str | None,
     origin_deployment: str | None,
-    expected_store_url: str | None,
-    expected_deployment: str | None,
+    expectations: CaptureExpectations,
 ) -> tuple[CaptureState, str | None]:
     """Decide whether a claimed success may be recorded as one."""
     doubt = _doubt_about_success(
         counters,
         store_url=store_url,
         origin_deployment=origin_deployment,
-        expected_store_url=expected_store_url,
-        expected_deployment=expected_deployment,
+        expectations=expectations,
     )
     if doubt is not None:
         return CaptureState.UNKNOWN, doubt
-    if counters.get("discovered") == 0:
+    discovered = counters.get("discovered")
+    if discovered is None:
+        # Without it the document cannot say what the sweep even saw, so
+        # "everything reached the store" is a claim about an unknown set.
+        return CaptureState.UNKNOWN, "exporter result has no discovered count"
+    if discovered == 0:
         # Not a failure, but "sessions are in the store" is not true of it
         # either. Recorded so a caller that expected a session can notice,
         # rather than flattened into an indistinguishable success.
@@ -270,8 +298,7 @@ def _doubt_about_success(
     *,
     store_url: str | None,
     origin_deployment: str | None,
-    expected_store_url: str | None,
-    expected_deployment: str | None,
+    expectations: CaptureExpectations,
 ) -> str | None:
     """Reasons a claimed success should not be recorded as one.
 
@@ -283,15 +310,15 @@ def _doubt_about_success(
     # to one that succeeded against the right one. The counters cannot tell
     # them apart, and neither can the exit code; only the caller knows where it
     # meant the sessions to go.
-    if expected_store_url is not None and store_url != expected_store_url:
+    if store_url != expectations.store_url:
         return (
             f"exporter reported success against {store_url!r}, "
-            f"not the configured {expected_store_url!r}"
+            f"not the configured {expectations.store_url!r}"
         )
-    if expected_deployment is not None and origin_deployment != expected_deployment:
+    if origin_deployment != expectations.deployment:
         return (
             f"exporter reported success tagged {origin_deployment!r}, "
-            f"not this deployment {expected_deployment!r}"
+            f"not the expected {expectations.deployment!r}"
         )
 
     # A document claiming success while counting a loss contradicts itself. The
