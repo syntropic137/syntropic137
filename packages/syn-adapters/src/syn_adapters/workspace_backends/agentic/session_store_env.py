@@ -16,7 +16,8 @@ all. That guarantee is the point of this module and is covered by tests.
 
 Reserved keys
 -------------
-The six ``AGENTIC_SESSION_STORE_*`` variables are RESERVED by this adapter. The
+The ``AGENTIC_SESSION_STORE_*`` variables are RESERVED by this adapter (seven
+names, of which DEPLOYMENT is emitted only when known). The
 public workspace API accepts arbitrary ``extra_environment`` from callers, so
 without an explicit rule a caller could set ``AGENTIC_SESSION_STORE_PROVIDER``
 itself and switch on in-image capture while the host-side setting is OFF, or
@@ -54,6 +55,7 @@ from urllib.parse import quote, unquote
 
 from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_AUTH,
+    ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
     ENV_AGENTIC_SESSION_STORE_PARTITION,
     ENV_AGENTIC_SESSION_STORE_PROVIDER,
     ENV_AGENTIC_SESSION_STORE_SPOOL,
@@ -277,6 +279,18 @@ def build_session_store_env(
             deployment=deployment,
         ),
     }
+
+    # Its OWN variable, not just a tag. The exporter stamps origin.deployment
+    # from SESSION_STORE_ORIGIN_DEPLOYMENT, which the capability adapter maps
+    # from this one; it does not read tags for origin. Sending the deployment
+    # only as a tag - which is what this did - means every captured session
+    # arrives with origin.deployment null while syn137's own indicator records
+    # the deployment it MEANT to send and looks entirely healthy.
+    #
+    # It stays in the tags as well: tags are what the store filters on, and
+    # dropping it there would trade one gap for another.
+    if deployment:
+        env[ENV_AGENTIC_SESSION_STORE_DEPLOYMENT] = deployment
 
     # AUTH is always emitted when the store is on, even if the operator runs an
     # unauthenticated store: the capability treats an empty token as "no auth

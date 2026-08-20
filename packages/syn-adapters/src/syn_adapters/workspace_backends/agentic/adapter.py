@@ -144,7 +144,7 @@ class AgenticIsolationAdapter:
         # supplies the contract.
         #
         # OPT-IN, DEFAULT OFF: when no store URL is configured this STRIPS the
-        # six reserved AGENTIC_SESSION_STORE_* keys and adds nothing, so a
+        # reserved AGENTIC_SESSION_STORE_* keys and adds nothing, so a
         # self-hoster with no SeshMagic instance gets a container environment
         # byte-identical to before this integration existed — including when a
         # caller passes those keys itself via `extra_environment`. The opt-in

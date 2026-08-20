@@ -19,7 +19,16 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
-from syn_shared.env_constants import SESSION_STORE_CONTRACT_ENV_VARS
+from syn_shared.env_constants import (
+    ENV_AGENTIC_SESSION_STORE_AUTH,
+    ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
+    ENV_AGENTIC_SESSION_STORE_PARTITION,
+    ENV_AGENTIC_SESSION_STORE_PROVIDER,
+    ENV_AGENTIC_SESSION_STORE_SPOOL,
+    ENV_AGENTIC_SESSION_STORE_TAGS,
+    ENV_AGENTIC_SESSION_STORE_URL,
+    SESSION_STORE_CONTRACT_ENV_VARS,
+)
 from syn_shared.settings.config import Settings
 from syn_shared.settings.session_store import (
     DEFAULT_SPOOL_DIR,
@@ -143,8 +152,27 @@ class TestNoScatteredEnvNameLiterals:
             "not bare literals:\n  " + "\n  ".join(offenders)
         )
 
-    def test_contract_set_matches_the_six_constants(self) -> None:
-        assert len(SESSION_STORE_CONTRACT_ENV_VARS) == 6
+    def test_the_contract_set_is_exactly_the_declared_constants(self) -> None:
+        """Pinned by NAME, not by count.
+
+        The count was 6 and is now 7 (DEPLOYMENT). A bare length assertion
+        makes every addition look like a break while catching nothing about
+        WHICH variable was added, so it is spelled out instead.
+        """
+        assert (
+            frozenset(
+                {
+                    ENV_AGENTIC_SESSION_STORE_PROVIDER,
+                    ENV_AGENTIC_SESSION_STORE_URL,
+                    ENV_AGENTIC_SESSION_STORE_AUTH,
+                    ENV_AGENTIC_SESSION_STORE_SPOOL,
+                    ENV_AGENTIC_SESSION_STORE_PARTITION,
+                    ENV_AGENTIC_SESSION_STORE_TAGS,
+                    ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
+                }
+            )
+            == SESSION_STORE_CONTRACT_ENV_VARS
+        )
         assert all(n.startswith("AGENTIC_SESSION_STORE_") for n in SESSION_STORE_CONTRACT_ENV_VARS)
 
 
