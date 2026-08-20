@@ -84,6 +84,26 @@ class TestTheProbeCommand:
         assert provider_dir in SCRIPT
 
     @pytest.mark.unit
+    def test_it_tells_the_exporter_to_ignore_state(self) -> None:
+        """The state file is agent-writable, so its CONTENTS are not ours.
+
+        Choosing the path from host code never made it trustworthy: /tmp is a
+        writable tmpfs, and the exporter runs as the SAME uid as the agent it
+        audits, so no location is writable by one and not the other. A forged
+        "already sent" entry could make a transcript that never reached the
+        store report as skipped_unchanged, which reads as a clean sweep.
+        Not reading it is the only available move.
+
+        Verified against the pinned image, twice in a row:
+
+            run 1  discovered=1 uploaded=1 skipped_unchanged=0
+            run 2  discovered=1 uploaded=1 skipped_unchanged=0
+
+        A second run would normally report skipped_unchanged=1.
+        """
+        assert "--ignore-state" in SCRIPT
+
+    @pytest.mark.unit
     def test_the_token_is_not_placed_on_the_command_line(self) -> None:
         """It arrives as the container's own AGENTIC_SESSION_STORE_AUTH.
 

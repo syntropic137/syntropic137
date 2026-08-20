@@ -97,12 +97,30 @@ EXIT_COMMAND_NOT_FOUND: Final = 127
 #: EXPORTER_STATE_FILE IS SET AFTER THE SOURCE, DELIBERATELY. init.sh exports
 #: its own, inside the agent-writable spool. Letting that win would undo the
 #: reason the host chooses this path at all - see PROBE_STATE_FILE below.
+#:
+#: --ignore-state IS THE ACTUAL FIX, and the state file above is now only a
+#: fallback position. Choosing a path from host code never made its CONTENTS
+#: host-controlled: /tmp is a writable tmpfs the agent can write, so a forged
+#: "already sent" entry could make a transcript that never reached the store
+#: report as skipped_unchanged, which reads as a clean sweep. The file could
+#: not be protected either - the exporter runs as the SAME uid as the agent it
+#: is auditing, so no location is writable by one and not the other.
+#:
+#: So the exporter is told not to read state at all (v0.4.0). Every discovered
+#: session is re-sent; the store deduplicates on (session_id, content_hash),
+#: so the cost is a request rather than a duplicate row.
+#:
+#: REQUIRES AN IMAGE PINNED AT OR AFTER omni carrying exporter v0.4.0. An
+#: older binary rejects the flag with exit 2, which parse_capture_result reads
+#: as UNKNOWN and turns into a backfill request on every phase. That is why
+#: this change and the workspace_images digest bump are one commit.
 _PROBE_SCRIPT: Final = f"""
 for d in {" ".join(CAPABILITY_PROVIDER_DIRS)}; do
   init="{CAPABILITY_ROOT}/$d/init.sh"
   if [ -f "$init" ]; then
     . "$init" >/dev/null 2>&1 || true
-    EXPORTER_STATE_FILE="$SYN_PROBE_STATE_FILE" exec apss-session-exporter --json
+    EXPORTER_STATE_FILE="$SYN_PROBE_STATE_FILE" exec apss-session-exporter \
+      --ignore-state --json
   fi
 done
 
