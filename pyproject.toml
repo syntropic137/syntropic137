@@ -140,6 +140,7 @@ testpaths = [
     "packages/syn-domain/tests",
     "packages/syn-domain/src",  # VSA co-located tests
     "packages/syn-adapters/tests",
+    "packages/syn-adapters/src",  # co-located tests, same convention as syn-domain/src
     "packages/syn-shared/tests",
     "scripts/workflows",
     "infra/scripts/tests",

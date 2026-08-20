@@ -24,6 +24,13 @@ from syn_tokens.vending import InMemoryTokenStore, TokenVendingService
 # =============================================================================
 
 
+# Marked at module scope: these files were never COLLECTED before the
+# testpaths change in this commit, so nothing here had a reason to carry a
+# marker. Unmarked now means collected but run by no CI job, which the
+# census gate correctly refuses.
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture
 def token_service() -> TokenVendingService:
     """Create in-memory token vending service."""
