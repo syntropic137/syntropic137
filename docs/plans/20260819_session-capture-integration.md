@@ -1,7 +1,14 @@
 # Plan: make session capture work in Syntropic137 workspaces
 
 **Date:** 2026-08-19
-**Status:** v1 reviewed NO-GO by codex; v2 in revision
+**Status:** v3 merged (#837), which cleared the four blockers codex returned
+NO-GO on. Phases 1 to 4 are implemented: the standard carries `origin.deployment`,
+the exporter is extracted and published as `apss-session-exporter`, the workspace
+images bake it under a vendor-neutral name, and syn137 injects the contract and
+records a host-verified capture verdict. NOT yet implemented: the archive
+destination and ordered teardown decided below - the integration spools
+container-local at `/spool` as an interim, so a transcript still dies with its
+container (#861).
 **Availability policy:** DECIDED - see below
 **Goal:** a Syntropic137 workflow phase produces an agent session that lands in
 the central store, attributable to its deployment tier, with no vendor coupling
