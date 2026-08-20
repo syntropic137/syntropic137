@@ -11,6 +11,14 @@ RUNNING: once it is stopped there is nothing to exec into, and once it is
 removed the spool is gone with it. That is why this belongs at the
 `while_running` point of a staged teardown rather than anywhere convenient.
 
+WHAT THIS STILL CANNOT PROVE. The probe verifies that the exporter ran, where
+it sent things, and that it lost nothing it SAW. It cannot verify that what the
+exporter saw is everything that existed. An agent that deletes one of its two
+transcripts leaves a sweep reporting `discovered=1` with no losses, which is
+honest and incomplete. Closing that needs a host-known set of expected session
+identities to compare against, which the host does not currently have. Tracked
+rather than papered over: `expect_sessions` closes total deletion only.
+
 FAILING TO ASK IS NOT A FAILURE OF THE RUN. Capture is fail-open by policy: a
 transcript that did not reach the store must never turn an hour of successful
 agent work into a failed phase. So nothing here raises. Every path returns a
@@ -36,7 +44,12 @@ from syn_adapters.workspace_backends.agentic.capture_result import (
 )
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 
-__all__ = ["EXPORTER_PROBE_COMMAND", "WorkspaceExecutor", "probe_capture"]
+__all__ = [
+    "EXPORTER_PROBE_COMMAND",
+    "PROBE_STATE_FILE",
+    "WorkspaceExecutor",
+    "probe_capture",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +57,24 @@ logger = logging.getLogger(__name__)
 #: first. `--json` is the supported machine interface; the prose line the
 #: finalizer prints is explicitly not a contract.
 EXPORTER_PROBE_COMMAND: Final = ["apss-session-exporter", "--json"]
+
+#: Where the probe points the exporter's state file.
+#:
+#: NOT the capability's own state file, which lives under the agent-writable
+#: spool. That file records which transcripts the exporter believes it has
+#: already sent, and `skipped_unchanged` is derived from it. An agent that
+#: marks an unstored transcript as current makes an honest exporter report
+#: `discovered=1 skipped_unchanged=1` with every loss counter at zero, which
+#: reads as a clean sweep. The host chooses who runs the exporter, but that is
+#: worth nothing if the evidence it reads is writable by the thing being
+#: audited.
+#:
+#: A path under /tmp, which the security profile mounts as its own tmpfs, is
+#: outside the spool the agent owns. Starting from empty means the probe
+#: re-evaluates every transcript rather than trusting a claim about them; the
+#: store deduplicates on content hash, so re-sending an already-stored session
+#: is a no-op rather than a duplicate.
+PROBE_STATE_FILE: Final = "/tmp/.apss-probe-state.json"
 
 #: A probe that outlives this is not worth waiting for. Teardown is already
 #: bounded by the caller, and a hung exporter must not extend it: the spool is
@@ -62,7 +93,13 @@ class WorkspaceExecutor(Protocol):
     execution: silent, permanent, and self-concealing.
     """
 
-    async def __call__(self, command: list[str], *, timeout_seconds: int) -> ExecutionResult: ...
+    async def __call__(
+        self,
+        command: list[str],
+        *,
+        timeout_seconds: int,
+        environment: dict[str, str] | None = None,
+    ) -> ExecutionResult: ...
 
 
 async def probe_capture(
@@ -91,7 +128,11 @@ async def probe_capture(
         )
 
     try:
-        result = await execute(EXPORTER_PROBE_COMMAND, timeout_seconds=timeout_seconds)
+        result = await execute(
+            EXPORTER_PROBE_COMMAND,
+            timeout_seconds=timeout_seconds,
+            environment={"EXPORTER_STATE_FILE": PROBE_STATE_FILE},
+        )
 
         if result.timed_out:
             # The exporter did not finish, so whatever it managed to print is
