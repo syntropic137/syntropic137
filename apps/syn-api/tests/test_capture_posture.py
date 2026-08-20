@@ -1,10 +1,10 @@
-"""Startup must say whether session capture is on, and where it points.
+"""Startup must say whether session capture is configured, and for which deployment.
 
 Capture is a per-workspace concern, so before this its posture was only
 observable after a workflow ran. An operator who configured a store and never
-started a workflow saw nothing - and the most common misconfiguration (URL set,
-token missing) fails at finalize with a suppressed diagnostic, so it produced a
-failure count with no cause.
+started one saw nothing - and the most common misconfiguration (URL set, token
+missing) fails at finalize with a suppressed diagnostic, producing a failure
+count with no cause.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import pytest
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     deployment_identity,
 )
-from syn_api.services.lifecycle import _log_session_capture_posture, _safe_endpoint
+from syn_api.services.lifecycle import _log_session_capture_posture
 from syn_api.types import Err
 from syn_shared.settings.config import AppEnvironment
 from syn_shared.settings.session_store import SessionStoreSettings
@@ -51,15 +51,12 @@ class TestCapturePosture:
 
         message = record.getMessage()
         assert record.levelno == logging.INFO
-        # Compared against what the ADAPTER actually stamps, not against a
-        # literal. An earlier version asserted "syntropic137__dev", which is
-        # not a value any deployment produces (the real one is
-        # "syntropic137__development"): it proved the formatting and would
-        # have stayed green while the posture line named a deployment no
-        # session was ever tagged with. A confidently wrong posture is worse
-        # than no posture.
+        # Compared against what the ADAPTER stamps, not a literal. An earlier
+        # version asserted "syntropic137__dev", a value no deployment produces
+        # (the real one is "syntropic137__development"). It proved the string
+        # formatting and would have stayed green while the posture line named
+        # a deployment no session was ever tagged with.
         assert deployment_identity(str(AppEnvironment.DEVELOPMENT)) in message
-        assert STORE in message
 
     @pytest.mark.unit
     def test_a_url_without_a_token_warns(self, caplog: pytest.LogCaptureFixture) -> None:
@@ -71,21 +68,19 @@ class TestCapturePosture:
         assert "401" in record.getMessage()
 
     @pytest.mark.unit
-    def test_the_token_is_never_logged(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Not the value, and not its length either."""
-        records = _posture(caplog, url=STORE, auth_token=TOKEN)
+    def test_only_captured_is_described_as_proof(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A workflow can finish UNKNOWN or FAILED, which proves nothing."""
+        (record,) = _posture(caplog, url=STORE, auth_token=TOKEN)
 
-        for record in records:
-            assert TOKEN not in record.getMessage()
-            assert TOKEN not in str(record.args)
+        assert "CAPTURED" in record.getMessage()
 
 
 class TestPostureMatchesWhatIsActuallyStamped:
     """The posture line must name the deployment sessions really carry.
 
-    The adapter derives it independently, so the two can drift. If they do,
-    an operator reads one identity at startup and finds another on the
-    sessions - which is worse than silence, because it looks authoritative.
+    The adapter derives it independently, so the two can drift. If they do, an
+    operator reads one identity at startup and finds another on the sessions -
+    worse than silence, because it looks authoritative.
     """
 
     @pytest.mark.unit
@@ -98,13 +93,14 @@ class TestPostureMatchesWhatIsActuallyStamped:
         assert deployment_identity(str(environment)) in record.getMessage()
 
 
-class TestTheTokenCannotEscapeThroughTheUrl:
-    """The store URL is operator-supplied and can carry the credential itself.
+class TestNoPartOfTheUrlIsLogged:
+    """The invariant is absolute, so it is tested against hostile URLs.
 
-    The original test used an innocuous URL and only checked the dedicated
-    auth_token field, so it proved nothing about this path. A URL like
-    https://token@host or https://host?write_token=... would have been logged
-    verbatim, into both the rendered message and record.args.
+    An earlier version logged a sanitised scheme://host:port, reasoning that
+    those components are not secret. They are operator-supplied: a token pasted
+    as the hostname, used as the scheme, or a numeric token as the port all
+    land in the record. An invariant with an "unless" clause is not one, and
+    this must hold absolutely because the failure lands in a log aggregator.
     """
 
     @pytest.mark.unit
@@ -116,33 +112,41 @@ class TestTheTokenCannotEscapeThroughTheUrl:
             f"https://sessions.example.com?write_token={TOKEN}",
             f"https://sessions.example.com/{TOKEN}/ingest",
             f"https://sessions.example.com#{TOKEN}",
+            # The cases the sanitised scheme/host/port version still leaked:
+            f"https://{TOKEN}",
+            f"{TOKEN}://sessions.example.com",
+            f"https://[{TOKEN}]",
+            TOKEN,
         ],
     )
-    def test_a_credential_in_the_url_never_reaches_a_record(
+    def test_no_url_shaped_value_reaches_a_record(
         self, caplog: pytest.LogCaptureFixture, url: str
     ) -> None:
         records = _posture(caplog, url=url)
 
-        assert records, "posture must still be reported for an odd URL"
+        assert records, "posture must still be reported for a hostile URL"
         for record in records:
             assert TOKEN not in record.getMessage()
             assert TOKEN not in str(record.args)
+            assert url not in record.getMessage()
 
     @pytest.mark.unit
-    def test_the_host_still_survives_sanitising(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Stripping must not make the line useless."""
-        (record,) = _posture(caplog, url=f"https://{TOKEN}@sessions.example.com:8443/ingest")
+    def test_the_deployment_still_identifies_the_destination(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Dropping the URL must not leave the line contentless."""
+        (record,) = _posture(caplog, url=STORE, auth_token=TOKEN)
 
         message = record.getMessage()
-        assert "sessions.example.com:8443" in message
-        assert TOKEN not in message
+        assert deployment_identity(str(AppEnvironment.DEVELOPMENT)) in message
+        assert "SYN_SESSION_STORE_URL" in message
 
     @pytest.mark.unit
-    def test_an_unparseable_url_is_not_echoed_back(self, caplog: pytest.LogCaptureFixture) -> None:
-        """The malformed case is the likeliest to be a pasted credential."""
-        (record,) = _posture(caplog, url=TOKEN)
-
-        assert TOKEN not in record.getMessage()
+    def test_the_token_is_never_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Not the value, and not its length either."""
+        for record in _posture(caplog, url=STORE, auth_token=TOKEN):
+            assert TOKEN not in record.getMessage()
+            assert TOKEN not in str(record.args)
 
 
 class TestPostureCannotAbortStartup:
@@ -168,38 +172,3 @@ class TestPostureCannotAbortStartup:
         for record in caplog.records:
             assert TOKEN not in record.getMessage()
             assert record.exc_info is None
-
-
-class TestSafeEndpointEdgeCases:
-    """Found by probing the function rather than by reasoning about it.
-
-    Both of these escaped the first version and neither was a leak - they were
-    ways to lose the diagnostic, or to print something an operator cannot read
-    back.
-    """
-
-    @pytest.mark.unit
-    def test_an_out_of_range_port_does_not_raise(self) -> None:
-        """urlsplit defers parsing to .port, which THROWS.
-
-        Uncaught, a typo'd port escaped _safe_endpoint, was swallowed by the
-        startup guard, and downgraded the whole posture line to "could not
-        determine" - a trivial mistake costing the entire diagnostic.
-        """
-        assert _safe_endpoint("https://ex.com:99999") == "<unparseable store url>"
-
-    @pytest.mark.unit
-    @pytest.mark.parametrize(
-        ("url", "expected"),
-        [
-            ("https://[::1]:8443/x", "https://[::1]:8443"),
-            ("https://[2001:db8::1]", "https://[2001:db8::1]"),
-        ],
-    )
-    def test_ipv6_keeps_its_brackets(self, url: str, expected: str) -> None:
-        """Without them "https://::1:8443" cannot be read back as host+port."""
-        assert _safe_endpoint(url) == expected
-
-    @pytest.mark.unit
-    def test_userinfo_and_path_are_dropped_but_the_port_survives(self) -> None:
-        assert _safe_endpoint("https://tok@ex.com:8443/ingest") == "https://ex.com:8443"

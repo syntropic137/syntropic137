@@ -274,45 +274,6 @@ async def health_check() -> Result[dict, LifecycleError]:
 # ── Private helpers ─────────────────────────────────────────────────
 
 
-def _safe_endpoint(url: str) -> str:
-    """Scheme, host and port only. Never userinfo, path, query or fragment.
-
-    The store URL is operator-supplied and the model accepts any string, so it
-    can itself carry the credential - ``https://token@host`` and
-    ``https://host?write_token=...`` both appear in the wild. Logging it
-    verbatim would leak the token in the rendered message AND in
-    ``record.args``, defeating every other precaution here.
-
-    Rebuilt from parsed components rather than pattern-stripped: a blocklist
-    fails open on the shape nobody thought of, while a rebuild can only emit
-    the parts named here.
-    """
-    from urllib.parse import urlsplit
-
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname
-        # .port PARSES, and raises ValueError when the port is out of range.
-        # An operator typo would otherwise escape this function, be caught by
-        # the startup guard, and silently downgrade the posture line to
-        # "could not determine" - losing the diagnostic to a trivial mistake.
-        port = parts.port
-    except ValueError:
-        return "<unparseable store url>"
-
-    if not host:
-        # Unparseable, so nothing can be shown safely. Do NOT fall back to the
-        # raw value: that is exactly the case most likely to be malformed
-        # because a credential was pasted into it.
-        return "<unparseable store url>"
-
-    # An IPv6 literal keeps its brackets, or the result is ambiguous:
-    # "https://::1:8443" cannot be read back as host plus port.
-    rendered_host = f"[{host}]" if ":" in host else host
-    suffix = f":{port}" if port else ""
-    return f"{parts.scheme}://{rendered_host}{suffix}"
-
-
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
     """Say once, at startup, how session capture is CONFIGURED.
 
@@ -326,8 +287,18 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
     observable after a workflow ran: the unauthenticated warning fired at
     provisioning, and an operator who never started one saw nothing.
 
-    The token is never logged. Neither is the raw URL, which can carry the
-    token itself - see :func:`_safe_endpoint`.
+    NO PART OF THE STORE URL IS LOGGED. Not the raw value, and not a
+    sanitised scheme/host/port either: every one of those components is
+    operator-supplied, so a token pasted into the host, the scheme, or a
+    numeric port would land in the record. An invariant with a "unless the
+    operator did something odd" clause is not an invariant, and this one has
+    to hold absolutely because the alternative is a credential in a log
+    aggregator.
+
+    What identifies the destination instead is the DEPLOYMENT, which is
+    derived from AppEnvironment and cannot contain a secret. Two stores that
+    differ only by URL path are therefore indistinguishable here; that needs an
+    explicitly non-secret label, tracked in #849.
     """
     from syn_adapters.workspace_backends.agentic.session_store_env import (
         deployment_identity,
@@ -342,26 +313,27 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
         return
 
     deployment = deployment_identity(app_environment)
-    endpoint = _safe_endpoint(store.url or "")
 
     if store.is_unauthenticated:
         logger.warning(
-            "Session capture is configured for %s -> %s with NO write token "
-            "(%s). If the store requires authentication this fails at finalize "
-            "with 401, AFTER the workspace has run, and the exporter "
-            "suppresses the cause to avoid leaking the credential. Set the "
-            "token, or ignore this if the store is deliberately open.",
+            "Session capture is configured for %s (%s is set) but there is NO "
+            "write token (%s). If the store requires authentication this fails "
+            "at finalize with 401, AFTER the workspace has run, and the "
+            "exporter suppresses the cause to avoid leaking the credential. "
+            "Set the token, or ignore this if the store is deliberately open.",
             deployment,
-            endpoint,
+            ENV_SYN_SESSION_STORE_URL,
             ENV_SYN_SESSION_STORE_AUTH_TOKEN,
         )
         return
 
     logger.info(
-        "Session capture is configured for %s -> %s, with a write token. "
-        "Not yet verified: the first workflow proves reachability.",
+        "Session capture is configured for %s (%s and a write token are set). "
+        "Not yet verified: the next workflow is the first runtime check, so "
+        "confirm its capture outcome - only CAPTURED proves the store was "
+        "actually reachable and writable.",
         deployment,
-        endpoint,
+        ENV_SYN_SESSION_STORE_URL,
     )
 
 
