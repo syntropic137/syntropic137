@@ -22,8 +22,12 @@ best.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
-from typing import Final
+from typing import TYPE_CHECKING, Final, Protocol
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
 
 from syn_adapters.workspace_backends.agentic.capture_result import (
     AuthoritativeCapture,
@@ -31,11 +35,8 @@ from syn_adapters.workspace_backends.agentic.capture_result import (
     parse_capture_result,
 )
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
-    ExecutionResult,
-)
 
-__all__ = ["EXPORTER_PROBE_COMMAND", "probe_capture"]
+__all__ = ["EXPORTER_PROBE_COMMAND", "WorkspaceExecutor", "probe_capture"]
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +50,23 @@ EXPORTER_PROBE_COMMAND: Final = ["apss-session-exporter", "--json"]
 #: retained either way, so a missed probe costs a delayed verdict, not data.
 _PROBE_TIMEOUT_SECONDS: Final = 30
 
-#: Executes a command in the workspace and returns its result.
-Executor = Callable[[list[str], int], Awaitable[ExecutionResult]]
+
+class WorkspaceExecutor(Protocol):
+    """Runs a command in the still-running workspace.
+
+    Keyword-only `timeout_seconds`, matching the signature the real caller has
+    (`execute(handle, command, *, timeout_seconds=...)`). An earlier version
+    took it positionally. That type-checked fine here and would have raised
+    TypeError at the one call site that matters, where the guard below would
+    have swallowed it into UNKNOWN and scheduled a backfill on every single
+    execution: silent, permanent, and self-concealing.
+    """
+
+    async def __call__(self, command: list[str], *, timeout_seconds: int) -> ExecutionResult: ...
 
 
 async def probe_capture(
-    execute: Executor,
+    execute: WorkspaceExecutor,
     *,
     expectations: CaptureExpectations | None,
     timeout_seconds: int = _PROBE_TIMEOUT_SECONDS,
@@ -68,9 +80,10 @@ async def probe_capture(
             no store is configured.
         timeout_seconds: Bound on the probe itself.
 
-    Never raises. A probe that cannot answer returns a state that needs
-    backfill, because "we could not find out" and "it is safely stored" must
-    never be the same value.
+    Does not raise for operational capture errors: a probe that cannot answer
+    returns a state that needs backfill, because "we could not find out" and
+    "it is safely stored" must never be the same value. CancelledError
+    propagates, because swallowing cancellation during teardown hangs shutdown.
     """
     if expectations is None:
         return AuthoritativeCapture(
@@ -78,23 +91,32 @@ async def probe_capture(
         )
 
     try:
-        result = await execute(EXPORTER_PROBE_COMMAND, timeout_seconds)
+        result = await execute(EXPORTER_PROBE_COMMAND, timeout_seconds=timeout_seconds)
+
+        if result.timed_out:
+            # The exporter did not finish, so whatever it managed to print is
+            # not a verdict. FAILED rather than UNKNOWN because a timeout is a
+            # known failure to complete, which is what CaptureState.FAILED
+            # documents. Both request backfill, so this records the truth
+            # rather than changing the recovery.
+            return AuthoritativeCapture(
+                state=CaptureState.FAILED,
+                reason=f"capture probe timed out after {timeout_seconds}s",
+            )
+
+        return parse_capture_result(result.stdout, result.exit_code, expectations=expectations)
     except Exception as exc:
-        # Deliberately broad. This runs during teardown of a phase that may
-        # have succeeded, and no exporter problem is worth converting that into
-        # a failure. The verdict records that we could not ask.
+        # Deliberately broad, and deliberately wrapping the PARSE as well as
+        # the call: a malformed result must not escape either. This runs during
+        # teardown of a phase that may have SUCCEEDED, and no exporter problem
+        # is worth converting that into a failure.
+        #
+        # CancelledError is a BaseException and is NOT caught here, on purpose.
+        # Swallowing cancellation during teardown hangs shutdown, which is
+        # worse than losing a verdict, and it matches what the isolation
+        # provider's logs() does for the same reason.
         logger.warning("session-capture probe could not run: %s", exc)
         return AuthoritativeCapture(
             state=CaptureState.UNKNOWN,
             reason=f"capture probe could not run: {exc}",
         )
-
-    if result.timed_out:
-        # Distinct from a failed sweep: the exporter may well have stored
-        # everything and simply not finished reporting within the bound.
-        return AuthoritativeCapture(
-            state=CaptureState.UNKNOWN,
-            reason=f"capture probe timed out after {timeout_seconds}s",
-        )
-
-    return parse_capture_result(result.stdout, result.exit_code, expectations=expectations)

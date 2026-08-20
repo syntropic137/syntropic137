@@ -87,6 +87,22 @@ class CaptureExpectations(BaseModel):
     mismatch worth surfacing.
     """
 
+    expect_sessions: bool
+    """Whether this execution should have produced at least one session.
+
+    Closes a hole that destination checks cannot: the workspace spool is
+    writable by the agent, so an agent can DELETE its own transcripts before
+    the host probe runs. The exporter then truthfully reports a clean sweep
+    that discovered nothing, and without this flag that reads as CAPTURED with
+    no backfill. Destroying the evidence beats forging it, and no amount of
+    checking WHERE the sessions went helps when the answer is honestly "there
+    were none".
+
+    So the caller states whether it expected any. An agent phase that ran sets
+    this True, and a sweep discovering zero then reads UNKNOWN rather than
+    success.
+    """
+
 
 class AuthoritativeCapture(BaseModel):
     """A capture verdict obtained over a channel the agent cannot write to."""
@@ -287,9 +303,18 @@ def _judge_claimed_success(
         # "everything reached the store" is a claim about an unknown set.
         return CaptureState.UNKNOWN, "exporter result has no discovered count"
     if discovered == 0:
-        # Not a failure, but "sessions are in the store" is not true of it
-        # either. Recorded so a caller that expected a session can notice,
-        # rather than flattened into an indistinguishable success.
+        if expectations.expect_sessions:
+            # The caller expected a session and the sweep found none. Either
+            # the transcript roots are wrong or something removed them; the
+            # spool is agent-writable, so the second is reachable on purpose.
+            # Either way this is not a capture.
+            return (
+                CaptureState.UNKNOWN,
+                "expected at least one session, but the sweep discovered none",
+            )
+        # Nothing was expected and nothing was found, which is a clean no-op.
+        # Still recorded rather than flattened, so it stays distinguishable
+        # from a sweep that actually stored something.
         return CaptureState.CAPTURED, "nothing to capture (discovered=0)"
     return CaptureState.CAPTURED, None
 

@@ -23,7 +23,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     ExecutionResult,
 )
 
-_EXPECT = CaptureExpectations(store_url="http://store:8799", deployment="syntropic137__dev")
+_EXPECT = CaptureExpectations(
+    store_url="http://store:8799", deployment="syntropic137__dev", expect_sessions=True
+)
 
 _CLEAN = json.dumps(
     {
@@ -63,7 +65,7 @@ class TestItAsksTheRightQuestion:
     async def test_it_runs_the_standard_anchored_binary_with_json(self) -> None:
         seen: list[list[str]] = []
 
-        async def _exec(argv: list[str], _timeout: int) -> ExecutionResult:
+        async def _exec(argv: list[str], *, timeout_seconds: int) -> ExecutionResult:
             seen.append(argv)
             return _result(_CLEAN, 0)
 
@@ -74,7 +76,7 @@ class TestItAsksTheRightQuestion:
 
     @pytest.mark.asyncio
     async def test_a_clean_probe_is_captured(self) -> None:
-        async def _exec(_argv: list[str], _timeout: int) -> ExecutionResult:
+        async def _exec(_argv: list[str], *, timeout_seconds: int) -> ExecutionResult:
             return _result(_CLEAN, 0)
 
         out = await probe_capture(_exec, expectations=_EXPECT)
@@ -83,7 +85,7 @@ class TestItAsksTheRightQuestion:
 
     @pytest.mark.asyncio
     async def test_no_store_means_nothing_to_ask(self) -> None:
-        async def _exec(_argv: list[str], _timeout: int) -> ExecutionResult:
+        async def _exec(_argv: list[str], *, timeout_seconds: int) -> ExecutionResult:
             raise AssertionError("must not run the exporter with no store configured")
 
         out = await probe_capture(_exec, expectations=None)
@@ -97,7 +99,7 @@ class TestNotKnowingIsNeverSuccess:
     async def test_an_exec_that_raises_does_not_propagate(self) -> None:
         # This runs during teardown of a phase that may have SUCCEEDED. No
         # exporter problem is worth converting that into a failure.
-        async def _exec(_argv: list[str], _timeout: int) -> ExecutionResult:
+        async def _exec(_argv: list[str], *, timeout_seconds: int) -> ExecutionResult:
             raise RuntimeError("container already gone")
 
         out = await probe_capture(_exec, expectations=_EXPECT)
@@ -106,14 +108,15 @@ class TestNotKnowingIsNeverSuccess:
         assert "could not run" in (out.reason or "")
 
     @pytest.mark.asyncio
-    async def test_a_timeout_is_unknown_not_failed(self) -> None:
-        # Distinct from a failed sweep: the exporter may well have stored
-        # everything and simply not finished reporting inside the bound.
-        async def _exec(_argv: list[str], _timeout: int) -> ExecutionResult:
+    async def test_a_timeout_is_failed(self) -> None:
+        # CaptureState.FAILED documents timeout explicitly. Both FAILED and
+        # UNKNOWN request backfill, so this is about recording what actually
+        # happened rather than changing the recovery.
+        async def _exec(_argv: list[str], *, timeout_seconds: int) -> ExecutionResult:
             return _result("", 0, timed_out=True)
 
         out = await probe_capture(_exec, expectations=_EXPECT, timeout_seconds=5)
-        assert out.state is CaptureState.UNKNOWN
+        assert out.state is CaptureState.FAILED
         assert out.needs_backfill
         assert "timed out" in (out.reason or "")
 
@@ -121,22 +124,24 @@ class TestNotKnowingIsNeverSuccess:
     async def test_a_timed_out_probe_is_not_read_as_a_clean_sweep(self) -> None:
         # The nastiest shape: a document that WOULD read as success, on a run
         # that did not finish. The timeout has to win.
-        async def _exec(_argv: list[str], _timeout: int) -> ExecutionResult:
+        async def _exec(_argv: list[str], *, timeout_seconds: int) -> ExecutionResult:
             return _result(_CLEAN, 0, timed_out=True)
 
         out = await probe_capture(_exec, expectations=_EXPECT)
-        assert out.state is CaptureState.UNKNOWN
+        assert out.state is CaptureState.FAILED
         assert out.needs_backfill
 
     @pytest.mark.asyncio
     async def test_a_probe_against_the_wrong_store_is_not_captured(self) -> None:
-        async def _exec(_argv: list[str], _timeout: int) -> ExecutionResult:
+        async def _exec(_argv: list[str], *, timeout_seconds: int) -> ExecutionResult:
             return _result(_CLEAN, 0)
 
         out = await probe_capture(
             _exec,
             expectations=CaptureExpectations(
-                store_url="http://somewhere-else:9999", deployment="syntropic137__dev"
+                store_url="http://somewhere-else:9999",
+                deployment="syntropic137__dev",
+                expect_sessions=True,
             ),
         )
         assert out.state is CaptureState.UNKNOWN
@@ -152,8 +157,8 @@ class TestTheBoundIsHonoured:
         # a delayed verdict rather than data.
         seen: list[int] = []
 
-        async def _exec(_argv: list[str], timeout: int) -> ExecutionResult:
-            seen.append(timeout)
+        async def _exec(_argv: list[str], *, timeout_seconds: int) -> ExecutionResult:
+            seen.append(timeout_seconds)
             return _result(_CLEAN, 0)
 
         await probe_capture(_exec, expectations=_EXPECT, timeout_seconds=7)
