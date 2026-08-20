@@ -14,6 +14,11 @@ from syn_tokens.models import (
     WorkflowType,
 )
 
+# Marked at module scope: this file sat outside pytest testpaths, so no CI
+# job collected it and nothing here needed a marker. Collected now, an
+# unmarked test is one no job runs - which the census gate refuses.
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestTokenScope:

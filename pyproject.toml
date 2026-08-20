@@ -140,7 +140,10 @@ testpaths = [
     "packages/syn-domain/tests",
     "packages/syn-domain/src",  # VSA co-located tests
     "packages/syn-adapters/tests",
+    "packages/syn-adapters/src",  # co-located tests, same convention as syn-domain/src
     "packages/syn-shared/tests",
+    "packages/syn-shared/src",  # co-located tests, same convention
+    "packages/syn-tokens/tests",
     "scripts/workflows",
     "infra/scripts/tests",
 ]
@@ -150,6 +153,7 @@ pythonpath = [
     "packages/syn-domain/src",
     "packages/syn-adapters/src",
     "packages/syn-shared/src",
+    "packages/syn-tokens/tests",
     "scripts/workflows",
     ".",  # infra/scripts importable from repo root
 ]

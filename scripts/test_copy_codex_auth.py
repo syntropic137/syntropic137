@@ -14,6 +14,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+# Marked at module scope: this file sat outside pytest testpaths, so no CI
+# job collected it and nothing here needed a marker. Collected now, an
+# unmarked test is one no job runs - which the census gate refuses.
+pytestmark = pytest.mark.unit
+
+
 def _write(tmp_path: Path, content: str) -> Path:
     path = tmp_path / "auth.json"
     path.write_text(content, encoding="utf-8")

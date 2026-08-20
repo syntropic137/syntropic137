@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import shutil
 import threading
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -405,7 +406,13 @@ class InteractiveTmuxIsolationAdapter:
                 stderr="Workspace not found",
             )
 
-        cmd_str = " ".join(command)
+        # Quoted, for the same reason as the agentic adapter: this provider
+        # also runs the string through `sh -c`, so a bare join reassociates
+        # argv and silently changes the program. Fixed here TOO rather than
+        # only where a broken guard happened to be noticed - both implement the
+        # same IsolationBackendPort argv contract, and leaving one bare makes
+        # the behaviour depend on which backend a phase landed on.
+        cmd_str = shlex.join(command)
         result = await self._call_provider(
             self._require_provider().execute(
                 workspace,
