@@ -72,43 +72,153 @@ needs a durable artifact. The candidates are the existing artifact storage
 (MinIO, which already receives per-execution artifacts) or a host-side spool.
 **Deciding that source is now the first design task of Phase 3, not Phase 5.**
 
-## Durable spool: DECIDED - host-backed `/workspace`, collected to MinIO
+## Durable spool: SUPERSEDED - see "Archive destination" below
 
-The open question was where transcripts live so they survive a container that
-dies before uploading. The answer is that the durable path already exists and
-the spool simply is not on it.
+An earlier revision decided transcripts land on host-backed `/workspace` and
+are collected to MinIO "by the existing machinery, already wired, already
+tested". The premise was wrong: that machinery collects `artifacts/output/**`
+and nothing else, which is the agent's DELIVERABLE directory. The corrected
+decision is in the next section. This heading is kept only so a reader who saw
+the old text knows it was replaced rather than forgotten.
 
-- `/workspace` is a **host bind mount** (`providers/docker.py`,
-  `-v {workspace_dir}:/workspace:rw`). Anything written there outlives the
-  container by construction.
-- `/spool` is tmpfs (as of agentic-primitives #345) and is RAM-backed, so it
-  dies with the container. That fix made the capability FUNCTION; it did not
-  make it durable, and was never claimed to.
-- Syntropic137 already collects `artifacts/output/**` out of `/workspace` into
-  MinIO via `ArtifactCollector.collect_from_workspace`. That is the existing
-  machinery, already wired, already tested.
+## Archive destination: a PRIVATE collector, not the deliverable path
 
-**Decision:** transcripts land under the host-backed workspace directory, and
-Syntropic137 collects them into MinIO alongside artifacts. Backfill then reads
-from MinIO and POSTs to the store - a script, not a new subsystem, which is what
-the user asked for.
+The "DECIDED" section above said transcripts land under host-backed
+`/workspace` and are collected to MinIO by the existing machinery. A codex
+review showed that "the existing machinery" is the wrong machinery, because the
+only collected path is `artifacts/output/**` - the agent's DELIVERABLE
+directory, which `workspace_prompt.py` explicitly tells the agent is its output
+location.
 
-Consequences worth stating:
+Three options were considered. Spooling under `artifacts/output/` is REJECTED:
+it would publish agent transcripts as workflow deliverables, expose them through
+the artifact APIs to anyone who can read outputs, and - worst - a transcript
+could become the `first_content` injected into the next phase, feeding a
+conversation log back into the agent as if it were work product.
 
-1. **No new storage system.** No host spool directory to quota, own, or garbage
-   collect; no new volume lifecycle. This was the main cost of the alternative.
-2. **Ordering matters.** `destroy()` deletes the host workspace directory
-   (`providers/docker.py`, `shutil.rmtree`). Collection must happen before
-   destroy - which it already does in the normal flow - and the reaper must not
-   force-remove a workspace whose transcripts have not been collected.
-3. **The prune hazard is gone.** An earlier agentic-primitives design rejected
-   `/workspace` as a spool location because the capability's prune could escape
-   its partition (`SPOOL=/workspace PARTITION=repos` -> `rm -rf /workspace/repos`).
-   That prune was REMOVED in AP #303 precisely because it caused data loss, so
-   the objection no longer applies. Do not reintroduce a prune.
-4. **This is what makes fail-open safe.** A store outage now costs a delayed
-   upload rather than a lost session, because the transcript is in MinIO
-   regardless of whether the in-container upload succeeded.
+Spooling elsewhere under `/workspace` without collection is also REJECTED:
+`destroy()` deletes the host workspace directory with `shutil.rmtree`, so the
+data survives the container and then dies minutes later, which is durability
+theatre.
+
+**Decision: a separate INTERNAL collector.**
+
+- Spool at `/workspace/.syn/session-capture/<partition>/`.
+- Upload raw bytes to a private MinIO prefix, distinct from the artifact bucket.
+- Record a manifest: execution and workspace IDs, object keys, content hashes,
+  capture state, backfill state.
+- Do NOT create artifact aggregates, do NOT return these as phase artifacts, do
+  NOT list them as deliverables, and do NOT let them reach `first_content`.
+- Transcripts are more sensitive than deliverables, so retention, access
+  control, and deletion rules are part of this work rather than a follow-up.
+
+**The "no new lifecycle" claim was too strong.** If archival fails, destroying
+the workspace still destroys the only copy. Teardown therefore has to become
+ordered rather than combined:
+
+```
+agent execution ends            (container still RUNNING)
+  -> host invokes the exporter via docker exec, captures its JSON + exit status
+  -> archive the private spool from the host-backed workspace directory
+  -> confirm the archive is durable
+  -> stop the container
+  -> remove the container
+  -> delete the host workspace directory
+```
+
+**The exporter invocation comes FIRST, while the container is still running.**
+An earlier draft of this sequence put "stop / finalize" first, which is not
+implementable alongside the host-controlled verdict above: once the container
+is stopped there is nothing left to `docker exec` into, so the authoritative
+result could not be obtained at all. Finalize-on-stop stays as the fail-safe
+for paths that skip the ordered teardown; it is not the primary mechanism.
+
+This requires real plumbing that does not exist yet, and the plan must fund it
+rather than assume it:
+
+- `WorkspaceProvider` exposes only a combined `destroy()`. The Docker
+  implementation folds host-directory deletion into it, and `_cleanup_container`
+  folds stop and remove together. Both need splitting, which means a new port
+  method, an adapter change, and a processor change.
+- **Every exit path must follow this order, not just the happy one.** Today they
+  do not:
+  - normal completion destroys via the workspace context manager in
+    `WorkflowExecutionProcessor`
+  - failure and cancellation close that context manager immediately
+  - interactive cancellation removes the container inside `driver.stop()`
+    before the processor regains control
+  - startup reconciliation stops and force-removes orphans with no archive step
+
+  A sequence honoured on the happy path only would lose transcripts on exactly
+  the runs most worth keeping.
+
+### Storage policy, because naming a concern is not designing it
+
+An earlier revision listed retention, access control and deletion as "part of
+this work" without saying what they are. That is the same defect as deferring
+them, so the decisions are recorded here.
+
+- **A separate BUCKET, not a prefix in the artifact bucket.** A prefix shares
+  the artifact bucket's credentials and policy, which is precisely what must
+  not be shared: anything that can read deliverables would be able to read
+  transcripts.
+- **Credentials.** The collector writes with its own key. No API identity that
+  serves deliverables gets read access to this bucket.
+- **Manifest.** Written to Postgres, not to the bucket, and written AFTER the
+  object upload succeeds. It records execution id, workspace id, object key,
+  content hash, capture state and backfill state. Manifest-after-object means a
+  crash leaves an orphan object rather than a manifest row pointing at nothing.
+- **Confirm durable** means: object upload returned success AND a HEAD returns
+  the expected content hash. Not "the PUT did not raise".
+- **Archival failure.** The workspace directory is RETAINED and the manifest
+  records the failure, so the next attempt has a source. Retention is bounded
+  by a deadline and a total-size quota; when either is exceeded the oldest
+  unarchived workspace is dropped and that drop is logged as data loss, not
+  silently. Unbounded retention is how a disk fills and takes the orchestrator
+  with it.
+- **Crash recovery.** On startup, workspaces on disk with no successful
+  manifest row are candidates for archival before removal. This is what lets
+  the reaper participate in the ordered teardown rather than bypassing it.
+- **Reaper identity.** The reaper must be able to map a surviving workspace
+  directory to its execution id. If it cannot, it cannot archive, so the
+  directory naming has to carry that identity.
+- **Retention and deletion.** Transcripts expire on a defined schedule, and
+  deleting an execution deletes its transcripts and manifest rows. A retention
+  policy that cannot be enforced by deletion is a statement of intent, not a
+  policy.
+
+## The capture verdict must come from the host, not from container stdout
+
+`ObservationType.SESSION_CAPTURE` and a defensive parser both exist, but nothing
+calls `parse_capture_status`, so no observation is ever written. The obvious fix
+is to read the finalizer's line out of the container's output, and
+`SupportsWorkspaceLogs` (agentic-primitives #355) makes that mechanically
+possible.
+
+**It is not sufficient, and the reason is trust.** The agent and the finalizer
+run as the SAME Unix user in the omni image. Anything the agent can print, it
+can forge - including a convincing `upload complete (uploaded=1)` line. The
+parser's own header already admits the stream is untrusted. Moving to a status
+file inside `/workspace` does not fix it either: that path is agent-writable, so
+the agent can pre-create or overwrite the file.
+
+So a `captured` state derived from container output is unverified by
+construction, and recording it as authoritative would make the indicator worse
+than absent: it would assert a session was stored when it may not have been.
+
+**Required shape:**
+
+- After agent execution ends, the HOST invokes the exporter as a distinct,
+  host-controlled operation.
+- The host captures that invocation's versioned JSON result and its real process
+  exit status - a channel the agent has no handle on.
+- The host writes the `SESSION_CAPTURE` observation from that result.
+- Where practical, verify against the store by execution and deployment tag,
+  which is the only fully independent confirmation.
+
+Container-log parsing stays as a diagnostic fallback. It may produce `UNKNOWN`
+or an explicitly unverified outcome; it may never be the sole basis for
+`CAPTURED`.
 
 ## Why it does not work today
 
@@ -122,11 +232,13 @@ session reaching the store. Verified against running code, not inferred.
 | G3 | Doctor probes the exporter with `--version`, which it does not implement; it ignores unknown flags and runs a full capture sweep, so preflight "passes" by performing a real upload | AP or exporter | small |
 | G4 | No exporter binary in the image, and no mechanism to deliver one | AP + new repo | design |
 | G5 | Store host does not resolve inside the container | syn137 config | one-line |
-| G6 | Enabling with a URL but no token silently loses every session (`is_enabled` gates on URL alone; `/healthz` is unauthenticated but writes 401) | syn137 | small |
+| G6 | Enabling with a URL but no token silently loses every session WHEN THE STORE REQUIRES AUTH (`is_enabled` gates on URL alone; `/healthz` is unauthenticated but writes 401). An unauthenticated store is legitimate, so this warns rather than rejects - see 4.3 | syn137 | small |
 | G8 | No deployment identity reaches the store; every session lands as `"laptop"` with an ephemeral container ID as host | AP + syn137 | small |
 
-(G7, spool durability, and G9, credential exposure, are deliberately out of scope
-for first light. See "Explicitly deferred".)
+(G9, credential exposure, is deliberately out of scope for first light. G7,
+spool durability, is NOT: it gates real enablement, because backfill has
+nothing to read from without it. See "Archive destination" and the Phase 4.5
+gate.)
 
 ## Phase 1: the standard defines the contract (APSS)
 
@@ -279,11 +391,22 @@ rather than at provision.
 existing `AppEnvironment` StrEnum, which already drives the agent network name
 and vault selection. No new configuration surface.
 
-**4.3 Refuse URL-without-token (G6).** `SessionStoreSettings.is_enabled` gates on
-URL alone and deliberately excludes the token. With a URL and no token every
-doctor check passes, the workspace starts, and finalize reports a bare
-`failed=1` with the diagnostic suppressed by design. Add a model validator that
-rejects the combination at startup rather than losing sessions silently.
+**4.3 Surface URL-without-token (G6). ADJUDICATED: warn, do not refuse.**
+`SessionStoreSettings.is_enabled` gates on URL alone and deliberately excludes
+the token. With a URL and no token every doctor check passes, the workspace
+starts, and finalize reports a bare `failed=1` with the diagnostic suppressed by
+design.
+
+This plan originally said to REJECT that combination at startup. Shipped
+behaviour warns instead, and the warning is correct: an unauthenticated store on
+a trusted network is a legitimate deployment, and refusing would invert the
+fail-open policy for operators who chose it deliberately. Refusing would also
+mean a store that later ADDS auth turns a warning into a hard startup failure
+for every deployment that had been working.
+
+What makes warning sufficient is that it is loud and it names the consequence at
+the point of injection, rather than leaving an operator with a bare failure
+count. See `session_store_env.py`. Do not "fix" this back to a rejection.
 
 **4.4 Network path (G5).** The store must be reachable from the workspace
 container. Note the egress framing in the docs is wrong and should be corrected:
@@ -320,13 +443,24 @@ understood and acceptable (see G7 below).
 
 ## Explicitly deferred, with reasons
 
-- **G7 spool durability.** The spool is tmpfs-backed and dies with the container;
-  finalize gets roughly a 2-second budget on the `docker stop` path. Worse,
-  `reconciliation.py` reaps orphans with `docker rm -f` and no stop first, so any
-  workspace reaped there loses its sessions unconditionally. **The `docker stop`
-  one-liner in the reaper should be fixed now** (it is a one-line change and
-  prevents unconditional loss); durable spool storage across container lifetimes
-  is a design task and should not gate first light.
+- **G7 spool durability. NO LONGER DEFERRED - see "Durable spool: DECIDED".**
+  This entry previously said durable storage "should not gate first light",
+  which contradicted the requirement earlier in this document that backfill
+  exist before capture is enabled anywhere real. A codex review flagged the
+  contradiction. Resolution, in favour of the stricter reading:
+
+  Backfill needs something to read FROM. The spool is tmpfs and dies with the
+  container, so today there is nothing. Fail-open does not soften that, it
+  sharpens it: a policy of tolerating failed uploads is only safe if the
+  transcript still exists afterwards. So durable archive plus a backfill path
+  gate REAL enablement (any deployment whose sessions we care about), while a
+  throwaway dev stack may still run without them.
+
+  The `docker stop` fix in the reaper has landed and prevents unconditional
+  loss on the orphan path. It is necessary and not sufficient: the reaper still
+  removes containers without archiving the host-backed spool, so orphan
+  recovery archives nothing. That is tracked with the archival work below, not
+  separately.
 - **G9 credential exposure.** The write token is a container env var, and the
   entrypoint's withhold mechanism is a no-op under Syntropic137's `docker exec`
   execution model, so the agent can read it. This is the same class as the
@@ -340,8 +474,32 @@ understood and acceptable (see G7 below).
 ```
 Phase 1 (APSS substandard) ──┐
                              ├──> Phase 3 (AP) ──> Phase 4 (syn137) ──> Phase 5
-Phase 2 (extract+publish) ───┘
+Phase 2 (extract+publish) ───┘                                            │
+                                                                          v
+                                              Phase 4.5 (durable archive + backfill)
+                                                          │
+                                                          v
+                                              real enablement (beta, prod)
 ```
+
+**Phase 4.5 is a GATE, not a follow-up.** Phases 1 through 5 deliver capture
+that works; 4.5 delivers capture that is safe to leave on. Dev may run on the
+strength of 1-5 alone, because a lost transcript there costs nothing. Beta and
+prod may not, because without a durable archive a store outage is permanent
+loss rather than a delayed upload - which is the entire premise fail-open was
+adopted under.
+
+Phase 4.5 contains, and none of it exists today:
+
+1. Split `destroy()` into stop / remove / delete-workspace across the port, the
+   Docker adapter, and the processor.
+2. Route the spool to `/workspace/.syn/session-capture/<partition>/`.
+3. The private collector, its bucket, and the manifest.
+4. Host-invoked exporter producing the authoritative verdict, wired to the
+   `SESSION_CAPTURE` observation.
+5. Ordered teardown honoured on ALL exit paths: normal, failure, cancellation,
+   interactive stop, and the startup reaper.
+6. The backfill script, reading the manifest and re-POSTing to the store.
 
 Phases 1 and 2 are parallel. Phase 3.1 (G1/G2) is parallel with everything and
 should start immediately: it is small, it blocks all execution rather than just
