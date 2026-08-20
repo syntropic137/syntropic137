@@ -17,6 +17,7 @@ See ADR-024: Secure Token Architecture
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from syn_shared.env_constants import (
@@ -157,6 +158,67 @@ async def run_setup_phase(
 _CODEX_STAGED_AUTH = "/workspace/.setup/codex-auth.json"
 
 
+class _CredentialState(StrEnum):
+    """What the probe actually established, kept distinct from how it failed.
+
+    ABSENT and "could not tell" MUST NOT share a channel. They did: the check
+    read `exit_code != 0` as "gone", which also swallowed a timeout, a provider
+    error, and a missing workspace - every way of failing to look became
+    evidence of absence.
+    """
+
+    PRESENT = "present"
+    ABSENT = "absent"
+    UNVERIFIABLE = "unverifiable"
+
+
+#: Printed by the probe so presence is proven by OUTPUT, not only by a status
+#: that several unrelated failures can also produce.
+_PRESENT_MARKER = "STAGED_CREDENTIAL_PRESENT"
+_ABSENT_MARKER = "STAGED_CREDENTIAL_ABSENT"
+
+
+async def _staged_credential_state(ws: ManagedWorkspace) -> _CredentialState:
+    """Ask whether the staged credential exists, and admit when we cannot tell.
+
+    The probe always exits 0 and reports its answer on stdout, so a nonzero
+    status means the PROBE failed rather than that the file is gone.
+    """
+    probe = await ws.execute(
+        [
+            "sh",
+            "-c",
+            f"if [ -e {_CODEX_STAGED_AUTH} ]; then echo {_PRESENT_MARKER}; "
+            f"else echo {_ABSENT_MARKER}; fi",
+        ],
+        timeout_seconds=5,
+    )
+
+    if probe.exit_code != 0:
+        logger.error(
+            "SECURITY: could not determine whether a staged codex credential "
+            "remains (workspace=%s, exit=%s): %s",
+            ws.workspace_id,
+            probe.exit_code,
+            probe.stderr,
+        )
+        return _CredentialState.UNVERIFIABLE
+
+    output = (probe.stdout or "").strip()
+    if output.endswith(_ABSENT_MARKER):
+        return _CredentialState.ABSENT
+    if output.endswith(_PRESENT_MARKER):
+        return _CredentialState.PRESENT
+
+    # A zero exit with output we do not recognise is not an answer.
+    logger.error(
+        "SECURITY: unrecognised staged-credential probe output (workspace=%s): %r",
+        ws.workspace_id,
+        output,
+    )
+    return _CredentialState.UNVERIFIABLE
+
+
 async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
     """Guarantee no staged codex credential lingers under /workspace, or raise.
 
@@ -165,9 +227,7 @@ async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
     force-remove, and RE-VERIFY. If the credential still exists we FAIL CLOSED
     (raise) so a lingering secret is never silently reported as "cleared".
     """
-    # `test -e <path>`: exit 0 == present, nonzero == gone.
-    present = await ws.execute(["sh", "-c", f"test -e {_CODEX_STAGED_AUTH}"], timeout_seconds=5)
-    if present.exit_code != 0:
+    if await _staged_credential_state(ws) is _CredentialState.ABSENT:
         return
 
     logger.error(
@@ -177,11 +237,13 @@ async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
     )
     await ws.execute(["rm", "-f", _CODEX_STAGED_AUTH], timeout_seconds=5)
 
-    recheck = await ws.execute(["sh", "-c", f"test -e {_CODEX_STAGED_AUTH}"], timeout_seconds=5)
-    if recheck.exit_code == 0:
+    if await _staged_credential_state(ws) is not _CredentialState.ABSENT:
+        # Not `is PRESENT`: an UNVERIFIABLE recheck raises too. A probe that
+        # timed out has not shown the credential is gone, and treating that as
+        # success is the same fail-open this function exists to prevent.
         msg = (
-            f"SECURITY: unable to remove staged codex credential {_CODEX_STAGED_AUTH} "
-            f"(workspace={ws.workspace_id})"
+            f"SECURITY: unable to confirm removal of staged codex credential "
+            f"{_CODEX_STAGED_AUTH} (workspace={ws.workspace_id})"
         )
         raise RuntimeError(msg)
 
