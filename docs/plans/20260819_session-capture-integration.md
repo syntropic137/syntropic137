@@ -110,6 +110,86 @@ Consequences worth stating:
    upload rather than a lost session, because the transcript is in MinIO
    regardless of whether the in-container upload succeeded.
 
+## Archive destination: a PRIVATE collector, not the deliverable path
+
+The "DECIDED" section above said transcripts land under host-backed
+`/workspace` and are collected to MinIO by the existing machinery. A codex
+review showed that "the existing machinery" is the wrong machinery, because the
+only collected path is `artifacts/output/**` - the agent's DELIVERABLE
+directory, which `workspace_prompt.py` explicitly tells the agent is its output
+location.
+
+Three options were considered. Spooling under `artifacts/output/` is REJECTED:
+it would publish agent transcripts as workflow deliverables, expose them through
+the artifact APIs to anyone who can read outputs, and - worst - a transcript
+could become the `first_content` injected into the next phase, feeding a
+conversation log back into the agent as if it were work product.
+
+Spooling elsewhere under `/workspace` without collection is also REJECTED:
+`destroy()` deletes the host workspace directory with `shutil.rmtree`, so the
+data survives the container and then dies minutes later, which is durability
+theatre.
+
+**Decision: a separate INTERNAL collector.**
+
+- Spool at `/workspace/.syn/session-capture/<partition>/`.
+- Upload raw bytes to a private MinIO prefix, distinct from the artifact bucket.
+- Record a manifest: execution and workspace IDs, object keys, content hashes,
+  capture state, backfill state.
+- Do NOT create artifact aggregates, do NOT return these as phase artifacts, do
+  NOT list them as deliverables, and do NOT let them reach `first_content`.
+- Transcripts are more sensitive than deliverables, so retention, access
+  control, and deletion rules are part of this work rather than a follow-up.
+
+**The "no new lifecycle" claim was too strong.** If archival fails, destroying
+the workspace still destroys the only copy. Teardown therefore has to become
+ordered rather than combined:
+
+```
+stop / finalize
+  -> read authoritative status
+  -> archive the private spool
+  -> confirm the archive is durable
+  -> remove the container
+  -> delete the host workspace
+```
+
+That requires splitting today's combined `destroy()`, and requires the reaper to
+follow the same order rather than removing containers outright.
+
+## The capture verdict must come from the host, not from container stdout
+
+`ObservationType.SESSION_CAPTURE` and a defensive parser both exist, but nothing
+calls `parse_capture_status`, so no observation is ever written. The obvious fix
+is to read the finalizer's line out of the container's output, and
+`SupportsWorkspaceLogs` (agentic-primitives #355) makes that mechanically
+possible.
+
+**It is not sufficient, and the reason is trust.** The agent and the finalizer
+run as the SAME Unix user in the omni image. Anything the agent can print, it
+can forge - including a convincing `upload complete (uploaded=1)` line. The
+parser's own header already admits the stream is untrusted. Moving to a status
+file inside `/workspace` does not fix it either: that path is agent-writable, so
+the agent can pre-create or overwrite the file.
+
+So a `captured` state derived from container output is unverified by
+construction, and recording it as authoritative would make the indicator worse
+than absent: it would assert a session was stored when it may not have been.
+
+**Required shape:**
+
+- After agent execution ends, the HOST invokes the exporter as a distinct,
+  host-controlled operation.
+- The host captures that invocation's versioned JSON result and its real process
+  exit status - a channel the agent has no handle on.
+- The host writes the `SESSION_CAPTURE` observation from that result.
+- Where practical, verify against the store by execution and deployment tag,
+  which is the only fully independent confirmation.
+
+Container-log parsing stays as a diagnostic fallback. It may produce `UNKNOWN`
+or an explicitly unverified outcome; it may never be the sole basis for
+`CAPTURED`.
+
 ## Why it does not work today
 
 Seven independent defects. Each one alone is sufficient to prevent a single
@@ -279,11 +359,22 @@ rather than at provision.
 existing `AppEnvironment` StrEnum, which already drives the agent network name
 and vault selection. No new configuration surface.
 
-**4.3 Refuse URL-without-token (G6).** `SessionStoreSettings.is_enabled` gates on
-URL alone and deliberately excludes the token. With a URL and no token every
-doctor check passes, the workspace starts, and finalize reports a bare
-`failed=1` with the diagnostic suppressed by design. Add a model validator that
-rejects the combination at startup rather than losing sessions silently.
+**4.3 Surface URL-without-token (G6). ADJUDICATED: warn, do not refuse.**
+`SessionStoreSettings.is_enabled` gates on URL alone and deliberately excludes
+the token. With a URL and no token every doctor check passes, the workspace
+starts, and finalize reports a bare `failed=1` with the diagnostic suppressed by
+design.
+
+This plan originally said to REJECT that combination at startup. Shipped
+behaviour warns instead, and the warning is correct: an unauthenticated store on
+a trusted network is a legitimate deployment, and refusing would invert the
+fail-open policy for operators who chose it deliberately. Refusing would also
+mean a store that later ADDS auth turns a warning into a hard startup failure
+for every deployment that had been working.
+
+What makes warning sufficient is that it is loud and it names the consequence at
+the point of injection, rather than leaving an operator with a bare failure
+count. See `session_store_env.py`. Do not "fix" this back to a rejection.
 
 **4.4 Network path (G5).** The store must be reachable from the workspace
 container. Note the egress framing in the docs is wrong and should be corrected:
@@ -320,13 +411,24 @@ understood and acceptable (see G7 below).
 
 ## Explicitly deferred, with reasons
 
-- **G7 spool durability.** The spool is tmpfs-backed and dies with the container;
-  finalize gets roughly a 2-second budget on the `docker stop` path. Worse,
-  `reconciliation.py` reaps orphans with `docker rm -f` and no stop first, so any
-  workspace reaped there loses its sessions unconditionally. **The `docker stop`
-  one-liner in the reaper should be fixed now** (it is a one-line change and
-  prevents unconditional loss); durable spool storage across container lifetimes
-  is a design task and should not gate first light.
+- **G7 spool durability. NO LONGER DEFERRED - see "Durable spool: DECIDED".**
+  This entry previously said durable storage "should not gate first light",
+  which contradicted the requirement earlier in this document that backfill
+  exist before capture is enabled anywhere real. A codex review flagged the
+  contradiction. Resolution, in favour of the stricter reading:
+
+  Backfill needs something to read FROM. The spool is tmpfs and dies with the
+  container, so today there is nothing. Fail-open does not soften that, it
+  sharpens it: a policy of tolerating failed uploads is only safe if the
+  transcript still exists afterwards. So durable archive plus a backfill path
+  gate REAL enablement (any deployment whose sessions we care about), while a
+  throwaway dev stack may still run without them.
+
+  The `docker stop` fix in the reaper has landed and prevents unconditional
+  loss on the orphan path. It is necessary and not sufficient: the reaper still
+  removes containers without archiving the host-backed spool, so orphan
+  recovery archives nothing. That is tracked with the archival work below, not
+  separately.
 - **G9 credential exposure.** The write token is a container env var, and the
   entrypoint's withhold mechanism is a no-op under Syntropic137's `docker exec`
   execution model, so the agent can read it. This is the same class as the
