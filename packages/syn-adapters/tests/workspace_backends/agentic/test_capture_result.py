@@ -84,11 +84,15 @@ _UNREACHABLE = json.dumps(
 #: What the fixtures above were actually produced against. Spelled once so a
 #: test that means to assert a MISMATCH has to say so explicitly.
 _CLEAN_EXPECT = CaptureExpectations(
-    store_url="http://host.docker.internal:8799", deployment="syntropic137__dev"
+    store_url="http://host.docker.internal:8799",
+    deployment="syntropic137__dev",
+    expect_sessions=True,
 )
-_REJECTED_EXPECT = CaptureExpectations(store_url="http://127.0.0.1:8793", deployment=None)
+_REJECTED_EXPECT = CaptureExpectations(
+    store_url="http://127.0.0.1:8793", deployment=None, expect_sessions=True
+)
 _UNREACHABLE_EXPECT = CaptureExpectations(
-    store_url="http://127.0.0.1:1", deployment="syntropic137__dev"
+    store_url="http://127.0.0.1:1", deployment="syntropic137__dev", expect_sessions=True
 )
 
 
@@ -230,7 +234,9 @@ class TestSuccessIsHardToReachByAccident:
             _CLEAN,
             0,
             expectations=CaptureExpectations(
-                store_url="http://the-real-store:8799", deployment="syntropic137__dev"
+                store_url="http://the-real-store:8799",
+                deployment="syntropic137__dev",
+                expect_sessions=True,
             ),
         )
         assert out.state is CaptureState.UNKNOWN
@@ -244,6 +250,7 @@ class TestSuccessIsHardToReachByAccident:
             expectations=CaptureExpectations(
                 store_url="http://host.docker.internal:8799",
                 deployment="syntropic137__prod",
+                expect_sessions=True,
             ),
         )
         assert out.state is CaptureState.UNKNOWN
@@ -309,7 +316,7 @@ class TestSuccessIsHardToReachByAccident:
         assert out.needs_backfill
         assert "rejected=1" in (out.reason or "")
 
-    def test_a_zero_discovery_sweep_says_so(self) -> None:
+    def test_a_zero_discovery_sweep_says_so_when_none_were_expected(self) -> None:
         # A sweep that found nothing is not a failure, but "sessions are in the
         # store" is not true of it either. The distinction is recorded rather
         # than flattened, so a caller that expected a session can notice.
@@ -322,10 +329,35 @@ class TestSuccessIsHardToReachByAccident:
                 "counters": {"discovered": 0, "uploaded": 0, "accepted": 0},
             }
         )
-        out = _parse(doc, 0)
+        out = _parse(
+            doc,
+            0,
+            expectations=CaptureExpectations(
+                store_url="http://host.docker.internal:8799",
+                deployment="syntropic137__dev",
+                expect_sessions=False,
+            ),
+        )
         assert out.state is CaptureState.CAPTURED
         assert not out.needs_backfill
         assert "discovered=0" in (out.reason or "")
+
+    def test_a_zero_discovery_sweep_is_unknown_when_a_session_was_expected(self) -> None:
+        # The agent-writable spool means "found nothing" can be something
+        # having been removed rather than nothing having happened.
+        doc = json.dumps(
+            {
+                "schema_version": 1,
+                "captured_everything": True,
+                "store_url": "http://host.docker.internal:8799",
+                "origin": {"environment": "container", "deployment": "syntropic137__dev"},
+                "counters": {"discovered": 0, "uploaded": 0, "accepted": 0},
+            }
+        )
+        out = _parse(doc, 0)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "discovered none" in (out.reason or "")
 
 
 @pytest.mark.unit
