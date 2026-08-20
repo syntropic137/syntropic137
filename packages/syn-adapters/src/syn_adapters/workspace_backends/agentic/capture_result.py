@@ -94,6 +94,8 @@ def parse_capture_result(
     exit_code: int,
     *,
     store_enabled: bool,
+    expected_store_url: str | None = None,
+    expected_deployment: str | None = None,
 ) -> AuthoritativeCapture:
     """Interpret one host-invoked exporter run.
 
@@ -116,7 +118,12 @@ def parse_capture_result(
 
     # _refuse_unreadable returns non-None for every document it rejects,
     # including None itself, so anything reaching here is a readable mapping.
-    return _verdict(document or {}, exit_code)
+    return _verdict(
+        document or {},
+        exit_code,
+        expected_store_url=expected_store_url,
+        expected_deployment=expected_deployment,
+    )
 
 
 def _refuse_unreadable(
@@ -164,17 +171,25 @@ def _refuse_unreadable(
     return None
 
 
-def _verdict(document: Mapping[str, object], exit_code: int) -> AuthoritativeCapture:
+def _verdict(
+    document: Mapping[str, object],
+    exit_code: int,
+    *,
+    expected_store_url: str | None,
+    expected_deployment: str | None,
+) -> AuthoritativeCapture:
     """Turn a readable document plus its exit code into a verdict."""
     counters = _counters(document)
     raw_origin = document.get("origin")
     origin: Mapping[str, object] = raw_origin if isinstance(raw_origin, Mapping) else {}
     captured_everything = bool(document.get("captured_everything"))
 
+    store_url = _text(document.get("store_url"))
+    origin_deployment = _text(origin.get("deployment"))
     fields = {
-        "store_url": _text(document.get("store_url")),
+        "store_url": store_url,
         "origin_environment": _text(origin.get("environment")),
-        "origin_deployment": _text(origin.get("deployment")),
+        "origin_deployment": origin_deployment,
         "counters": counters,
     }
 
@@ -200,7 +215,14 @@ def _verdict(document: Mapping[str, object], exit_code: int) -> AuthoritativeCap
         )
 
     if captured_everything:
-        return AuthoritativeCapture(state=CaptureState.CAPTURED, **fields)  # type: ignore[arg-type]
+        state, reason = _judge_claimed_success(
+            counters,
+            store_url=store_url,
+            origin_deployment=origin_deployment,
+            expected_store_url=expected_store_url,
+            expected_deployment=expected_deployment,
+        )
+        return AuthoritativeCapture(state=state, reason=reason, **fields)  # type: ignore[arg-type]
 
     lost = {k: v for k, v in counters.items() if k in _LOSS_COUNTERS and v}
     detail = ", ".join(f"{k}={v}" for k, v in sorted(lost.items()))
@@ -209,6 +231,75 @@ def _verdict(document: Mapping[str, object], exit_code: int) -> AuthoritativeCap
         reason=f"sweep incomplete ({detail})" if detail else "sweep incomplete",
         **fields,  # type: ignore[arg-type]
     )
+
+
+def _judge_claimed_success(
+    counters: Mapping[str, int],
+    *,
+    store_url: str | None,
+    origin_deployment: str | None,
+    expected_store_url: str | None,
+    expected_deployment: str | None,
+) -> tuple[CaptureState, str | None]:
+    """Decide whether a claimed success may be recorded as one."""
+    doubt = _doubt_about_success(
+        counters,
+        store_url=store_url,
+        origin_deployment=origin_deployment,
+        expected_store_url=expected_store_url,
+        expected_deployment=expected_deployment,
+    )
+    if doubt is not None:
+        return CaptureState.UNKNOWN, doubt
+    if counters.get("discovered") == 0:
+        # Not a failure, but "sessions are in the store" is not true of it
+        # either. Recorded so a caller that expected a session can notice,
+        # rather than flattened into an indistinguishable success.
+        return CaptureState.CAPTURED, "nothing to capture (discovered=0)"
+    return CaptureState.CAPTURED, None
+
+
+def _doubt_about_success(
+    counters: Mapping[str, int],
+    *,
+    store_url: str | None,
+    origin_deployment: str | None,
+    expected_store_url: str | None,
+    expected_deployment: str | None,
+) -> str | None:
+    """Reasons a claimed success should not be recorded as one.
+
+    CAPTURED is the only state that does NOT set needs_backfill, so it is the
+    verdict that decides a session is safe to stop worrying about. Everything
+    here exists to make that decision harder to reach by accident.
+    """
+    # A sweep that succeeded against the WRONG store reports numbers identical
+    # to one that succeeded against the right one. The counters cannot tell
+    # them apart, and neither can the exit code; only the caller knows where it
+    # meant the sessions to go.
+    if expected_store_url is not None and store_url != expected_store_url:
+        return (
+            f"exporter reported success against {store_url!r}, "
+            f"not the configured {expected_store_url!r}"
+        )
+    if expected_deployment is not None and origin_deployment != expected_deployment:
+        return (
+            f"exporter reported success tagged {origin_deployment!r}, "
+            f"not this deployment {expected_deployment!r}"
+        )
+
+    # A document claiming success while counting a loss contradicts itself. The
+    # v0.3.0 producer cannot emit this, because it derives both the exit code
+    # and the boolean FROM these counters. That is exactly why the check is
+    # cheap: it costs nothing today and fails closed if the producer ever gains
+    # a bug or this parser drifts from it. capture_status.py already refuses
+    # the same contradiction on its own path.
+    contradicting = {k: v for k, v in counters.items() if k in _LOSS_COUNTERS and v}
+    if contradicting:
+        named = ", ".join(f"{k}={v}" for k, v in sorted(contradicting.items()))
+        return f"exporter claimed success while counting {named}"
+
+    return None
 
 
 #: Counters whose nonzero value means a session the sweep SAW is not in the

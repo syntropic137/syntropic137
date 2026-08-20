@@ -171,3 +171,103 @@ class TestParsingIsDefensive:
     def test_garbage_is_unknown_rather_than_an_exception(self) -> None:
         out = parse_capture_result("{not json at all", 0, store_enabled=True)
         assert out.state is CaptureState.UNKNOWN
+
+
+# What the exporter emits when it cannot even load its configuration: the same
+# envelope, with store_url and origin explicitly null rather than invented.
+_CONFIG_ERROR = json.dumps(
+    {
+        "schema_version": 1,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "error": "SESSION_STORE_URL is not set",
+        "store_url": None,
+        "origin": None,
+    }
+)
+
+
+@pytest.mark.unit
+class TestSuccessIsHardToReachByAccident:
+    """CAPTURED is the only state that does not set needs_backfill.
+
+    It is the verdict that decides a session is safe to stop worrying about, so
+    every check here exists to make reaching it by accident harder.
+    """
+
+    def test_success_against_the_wrong_store_is_not_captured(self) -> None:
+        # The counters cannot tell a right store from a wrong one, and neither
+        # can the exit code. Only the caller knows where it meant them to go.
+        out = parse_capture_result(
+            _CLEAN,
+            0,
+            store_enabled=True,
+            expected_store_url="http://the-real-store:8799",
+        )
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "not the configured" in (out.reason or "")
+
+    def test_success_tagged_for_another_deployment_is_not_captured(self) -> None:
+        out = parse_capture_result(
+            _CLEAN, 0, store_enabled=True, expected_deployment="syntropic137__prod"
+        )
+        assert out.state is CaptureState.UNKNOWN
+        assert "not this deployment" in (out.reason or "")
+
+    def test_matching_expectations_still_reads_captured(self) -> None:
+        # The checks must not make CAPTURED unreachable.
+        out = parse_capture_result(
+            _CLEAN,
+            0,
+            store_enabled=True,
+            expected_store_url="http://host.docker.internal:8799",
+            expected_deployment="syntropic137__dev",
+        )
+        assert out.state is CaptureState.CAPTURED
+        assert not out.needs_backfill
+
+    def test_a_document_that_contradicts_itself_is_not_captured(self) -> None:
+        # v0.3.0 cannot emit this: it derives both the exit code and the
+        # boolean FROM these counters. The check costs nothing today and fails
+        # closed if the producer gains a bug or this parser drifts from it.
+        doc = json.dumps(
+            {
+                "schema_version": 1,
+                "captured_everything": True,
+                "counters": {"discovered": 1, "uploaded": 1, "rejected": 1},
+            }
+        )
+        out = parse_capture_result(doc, 0, store_enabled=True)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "rejected=1" in (out.reason or "")
+
+    def test_a_zero_discovery_sweep_says_so(self) -> None:
+        # A sweep that found nothing is not a failure, but "sessions are in the
+        # store" is not true of it either. The distinction is recorded rather
+        # than flattened, so a caller that expected a session can notice.
+        doc = json.dumps(
+            {
+                "schema_version": 1,
+                "captured_everything": True,
+                "counters": {"discovered": 0, "uploaded": 0, "accepted": 0},
+            }
+        )
+        out = parse_capture_result(doc, 0, store_enabled=True)
+        assert out.state is CaptureState.CAPTURED
+        assert not out.needs_backfill
+        assert "discovered=0" in (out.reason or "")
+
+
+@pytest.mark.unit
+class TestConfigurationFailure:
+    def test_a_config_error_is_failed_and_carries_no_invented_destination(self) -> None:
+        out = parse_capture_result(_CONFIG_ERROR, 1, store_enabled=True)
+        assert out.state is CaptureState.FAILED
+        assert out.needs_backfill
+        assert "SESSION_STORE_URL" in (out.reason or "")
+        # null rather than "" - an absent destination must not read as a
+        # configured-but-blank one.
+        assert out.store_url is None
+        assert out.origin_environment is None
