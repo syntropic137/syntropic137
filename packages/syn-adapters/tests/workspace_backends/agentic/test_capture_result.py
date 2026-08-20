@@ -18,7 +18,7 @@ import json
 import pytest
 
 from syn_adapters.workspace_backends.agentic.capture_result import (
-    SUPPORTED_SCHEMA_VERSION,
+    SUPPORTED_SCHEMA_VERSIONS,
     CaptureExpectations,
     parse_capture_result,
 )
@@ -80,6 +80,35 @@ _UNREACHABLE = json.dumps(
     }
 )
 
+
+# Captured from a REAL run of the v2 exporter (branch feat/confirmed-session-ids)
+# against a live receiver that accepted the envelope. This is the document the
+# `sessions` array was added in: note it sits after `counters`, and that every
+# field version 1 defined is unchanged, which is what makes v2 additive.
+_CLEAN_V2 = json.dumps(
+    {
+        "schema_version": 2,
+        "scs_version": "1.0",
+        "captured_everything": True,
+        "store_url": "http://127.0.0.1:8797",
+        "origin": {"environment": "local", "deployment": None},
+        "counters": {
+            "discovered": 1,
+            "skipped_unchanged": 0,
+            "uploaded": 1,
+            "accepted": 1,
+            "duplicate": 0,
+            "rejected": 0,
+            "skipped_oversize": 0,
+            "failed": 0,
+            "unconfirmed": 0,
+        },
+        "sessions": ["11111111-2222-3333-4444-555555555555"],
+    }
+)
+_CLEAN_V2_EXPECT = CaptureExpectations(
+    store_url="http://127.0.0.1:8797", deployment=None, expect_sessions=True
+)
 
 #: What the fixtures above were actually produced against. Spelled once so a
 #: test that means to assert a MISMATCH has to say so explicitly.
@@ -146,11 +175,45 @@ class TestTheVerdictIsNeverGuessed:
         # consumer can refuse rather than misread. Guessing would mean reading
         # a field that may have changed meaning.
         doc = json.dumps(
-            {"schema_version": SUPPORTED_SCHEMA_VERSION + 1, "captured_everything": True}
+            {
+                "schema_version": max(SUPPORTED_SCHEMA_VERSIONS) + 1,
+                "captured_everything": True,
+            }
         )
         out = _parse(doc, 0)
         assert out.state is CaptureState.UNKNOWN
         assert out.needs_backfill
+
+    def test_every_supported_schema_version_is_read_not_refused(self) -> None:
+        # The two ends of this contract deploy independently: the exporter ships
+        # inside the workspace image, syn137 ships on the host. Refusing a
+        # version the exporter legitimately emits turns ordinary rollout skew
+        # into a total capture outage, because a document that will not parse is
+        # indistinguishable here from a capture that did not happen.
+        # Asserts the VERSION GATE specifically, by its reason rather than by
+        # the final state: a bare document is rejected for several other
+        # reasons too, and a test that just looked at the state would pass
+        # while the version gate was broken.
+        for version in sorted(SUPPORTED_SCHEMA_VERSIONS):
+            doc = json.dumps({"schema_version": version, "captured_everything": True})
+            out = _parse(doc, 0)
+            assert "schema_version" not in (out.reason or ""), (
+                f"schema_version {version} is declared supported but was "
+                f"refused for its version: {out.reason}"
+            )
+
+    def test_a_version_2_sessions_array_does_not_disturb_the_version_1_reading(
+        self,
+    ) -> None:
+        # Version 2 is purely additive, which is the whole reason it can be
+        # accepted before there is code here to interpret it. The extra field
+        # must be ignored, not mistaken for a counter or read as a failure.
+        #
+        # This is the rollout-order guarantee in test form: an image carrying
+        # the v2 exporter can land while the host still reads it with v1 rules.
+        out = _parse(_CLEAN_V2, 0, expectations=_CLEAN_V2_EXPECT)
+        assert out.state is CaptureState.CAPTURED
+        assert not out.needs_backfill
 
     def test_no_document_is_not_success(self) -> None:
         # An exporter older than --json exits 0 and prints a prose line. That

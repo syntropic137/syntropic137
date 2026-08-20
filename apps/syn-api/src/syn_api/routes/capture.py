@@ -31,7 +31,7 @@ from syn_adapters.workspace_backends.agentic.capture_observation import (
 )
 from syn_adapters.workspace_backends.agentic.capture_result import (
     LOSS_COUNTERS,
-    SUPPORTED_SCHEMA_VERSION,
+    SUPPORTED_SCHEMA_VERSIONS,
 )
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_api._wiring import get_event_store
@@ -115,7 +115,7 @@ def _state_of(payload: Mapping[str, object]) -> CaptureState:
     Guessing in any of these cases risks recording "safely stored" about a
     transcript nobody has.
     """
-    if payload.get("schema_version") != SUPPORTED_SCHEMA_VERSION:
+    if payload.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
         return CaptureState.UNKNOWN
 
     raw = _text(payload.get("state"))
