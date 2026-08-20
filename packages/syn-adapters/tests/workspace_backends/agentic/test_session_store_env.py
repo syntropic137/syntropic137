@@ -26,6 +26,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 )
 from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_AUTH,
+    ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
     ENV_AGENTIC_SESSION_STORE_PARTITION,
     ENV_AGENTIC_SESSION_STORE_PROVIDER,
     ENV_AGENTIC_SESSION_STORE_SPOOL,
@@ -104,13 +105,33 @@ class TestDisabled:
 class TestEnabled:
     """Store configured: the full six-variable contract is supplied."""
 
-    def test_all_six_variables_present(self) -> None:
+    def test_every_required_variable_is_present(self) -> None:
+        """DEPLOYMENT is reserved but OPTIONAL, so this is a subset check.
+
+        It is in the contract set because a caller must not be able to supply
+        it - the set is the reserved-names list used for stripping - but it is
+        only emitted when this execution knows which deployment it belongs to.
+        Emitting it empty would tell the store "deployment: nothing" rather
+        than "deployment: unknown".
+        """
         env = build_session_store_env(
             _enabled_settings(),
             execution_id="exec-abc",
             workspace_id="ws-xyz",
             workflow_id="wf-1",
             phase_id="phase-1",
+        )
+        assert set(env) <= set(SESSION_STORE_CONTRACT_ENV_VARS)
+        assert set(env) == set(SESSION_STORE_CONTRACT_ENV_VARS) - {
+            ENV_AGENTIC_SESSION_STORE_DEPLOYMENT
+        }
+
+    def test_the_deployment_variable_appears_when_supplied(self) -> None:
+        env = build_session_store_env(
+            _enabled_settings(),
+            execution_id="exec-abc",
+            workspace_id="ws-xyz",
+            deployment="syntropic137__development",
         )
         assert set(env) == set(SESSION_STORE_CONTRACT_ENV_VARS)
 

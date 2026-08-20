@@ -91,9 +91,18 @@ ENV_AGENTIC_SESSION_STORE_SPOOL = "AGENTIC_SESSION_STORE_SPOOL"
 ENV_AGENTIC_SESSION_STORE_PARTITION = "AGENTIC_SESSION_STORE_PARTITION"
 ENV_AGENTIC_SESSION_STORE_TAGS = "AGENTIC_SESSION_STORE_TAGS"
 
+#: WHICH deployment produced a session (APS-V1-0004 ``origin.deployment``).
+#:
+#: Its own variable, and NOT a tag. The capability adapter maps this one onto
+#: the exporter's SESSION_STORE_ORIGIN_DEPLOYMENT, which is what stamps
+#: ``origin.deployment`` on the envelope. Tags are free-form metadata the
+#: exporter does not read for origin, so a deployment sent as a tag arrives at
+#: the store as ``origin.deployment: null`` while everything else looks healthy.
+ENV_AGENTIC_SESSION_STORE_DEPLOYMENT = "AGENTIC_SESSION_STORE_DEPLOYMENT"
+
 #: Every variable in the session-store contract. Used by the workspace adapter
 #: to emit the block and by tests to assert the "not configured" path leaks none
-#: of them. Keep in sync with the six constants above.
+#: of them. Keep in sync with the constants above.
 SESSION_STORE_CONTRACT_ENV_VARS: frozenset[str] = frozenset(
     {
         ENV_AGENTIC_SESSION_STORE_PROVIDER,
@@ -102,11 +111,13 @@ SESSION_STORE_CONTRACT_ENV_VARS: frozenset[str] = frozenset(
         ENV_AGENTIC_SESSION_STORE_SPOOL,
         ENV_AGENTIC_SESSION_STORE_PARTITION,
         ENV_AGENTIC_SESSION_STORE_TAGS,
+        ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
     }
 )
 
 __all__ = [
     "ENV_AGENTIC_SESSION_STORE_AUTH",
+    "ENV_AGENTIC_SESSION_STORE_DEPLOYMENT",
     "ENV_AGENTIC_SESSION_STORE_PARTITION",
     "ENV_AGENTIC_SESSION_STORE_PROVIDER",
     "ENV_AGENTIC_SESSION_STORE_SPOOL",
