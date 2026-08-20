@@ -1,6 +1,7 @@
 """API routers."""
 
 from syn_api.routes.artifacts import router as artifacts_router
+from syn_api.routes.capture import router as capture_router
 from syn_api.routes.claude_plugins import router as claude_plugins_router
 from syn_api.routes.conversations import router as conversations_router
 from syn_api.routes.costs import router as costs_router
@@ -22,6 +23,7 @@ from syn_api.routes.workflows import router as workflows_router
 
 __all__ = [
     "artifacts_router",
+    "capture_router",
     "claude_plugins_router",
     "conversations_router",
     "costs_router",

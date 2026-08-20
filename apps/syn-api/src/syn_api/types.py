@@ -1429,6 +1429,43 @@ class ToolTimelineResponse(BaseModel):
     executions: list[ToolTimelineEntry] = Field(default_factory=list)
 
 
+class CaptureStatusEntry(BaseModel):
+    """One recorded session-capture verdict.
+
+    Mirrors the observation the workspace adapter writes on the observability
+    lane. The observed fields are None exactly when something went wrong, which
+    is when a backfill needs them most - so the expected values are carried
+    alongside rather than in place of them.
+    """
+
+    session_id: str
+    execution_id: str | None = None
+    phase_id: str | None = None
+    workspace_id: str | None = None
+    recorded_at: datetime | None = None
+
+    state: str
+    """CAPTURED, FAILED, UNKNOWN or DISABLED."""
+
+    needs_backfill: bool
+    reason: str | None = None
+
+    partition: str | None = None
+    """The spool partition this execution wrote to: what a retry needs to find
+    the transcripts again."""
+
+    expected_deployment: str | None = None
+    origin_deployment: str | None = None
+
+
+class CaptureStatusResponse(BaseModel):
+    """Recorded capture verdicts, newest first."""
+
+    total: int = 0
+    needs_backfill_count: int = 0
+    entries: list[CaptureStatusEntry] = Field(default_factory=list)
+
+
 class SessionTokenMetrics(BaseModel):
     """Token usage metrics for a session."""
 
