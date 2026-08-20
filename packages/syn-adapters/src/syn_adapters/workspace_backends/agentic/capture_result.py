@@ -147,34 +147,35 @@ def parse_capture_result(
     caller cannot get the permissive behaviour by forgetting, and no "unchecked"
     mode, so it cannot get it by asking for one either.
     """
+    # Handled here rather than inside the guard pass so the narrowing is
+    # visible to a reader AND to the type checker. An earlier version left it
+    # to _refuse_unreadable and carried a comment asserting the value could not
+    # be None afterwards, which is the kind of claim that survives the change
+    # that makes it false. pyright refused it, correctly.
+    if expectations is None:
+        return AuthoritativeCapture(
+            state=CaptureState.DISABLED, reason="no session store configured"
+        )
+
     document = _load_document(stdout)
-    refusal = _refuse_unreadable(document, exit_code, expectations=expectations)
+    refusal = _refuse_unreadable(document, exit_code)
     if refusal is not None:
         return refusal
 
     # _refuse_unreadable returns non-None for every document it rejects,
     # including None itself, so anything reaching here is a readable mapping.
-    # expectations is non-None here: _refuse_unreadable returns DISABLED for
-    # the None case before anything else runs.
     return _verdict(document or {}, exit_code, expectations=expectations)
 
 
 def _refuse_unreadable(
     document: Mapping[str, object] | None,
     exit_code: int,
-    *,
-    expectations: CaptureExpectations | None,
 ) -> AuthoritativeCapture | None:
     """Everything that makes a result unreadable, or trivially not a capture.
 
     Returns None when the document is worth interpreting. Never returns
     CAPTURED: a guard that could report success would defeat its own purpose.
     """
-    if expectations is None:
-        return AuthoritativeCapture(
-            state=CaptureState.DISABLED, reason="no session store configured"
-        )
-
     if exit_code == _EXIT_USAGE:
         # The host built the command line, so this is our bug, not the store's.
         return _unknown(f"exporter rejected its arguments (exit {exit_code})")
