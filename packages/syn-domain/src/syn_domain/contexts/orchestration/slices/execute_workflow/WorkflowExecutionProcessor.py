@@ -48,6 +48,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
 from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
     ObservabilityCollector,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture import (
+    capture_phase_session,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import (
     PhaseResultBuilder,
 )
@@ -72,6 +75,9 @@ if TYPE_CHECKING:
 
     from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
+    from syn_adapters.workspace_backends.agentic.session_capture_service import (
+        SessionCapturePort,
+    )
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
@@ -133,6 +139,7 @@ class WorkflowExecutionProcessor:
         interactive_workspace_service: WorkspaceService | None = None,
         claude_plugin_materializer: ClaudePluginMaterializerProtocol | None = None,
         skill_materializer: SkillMaterializerProtocol | None = None,
+        session_capture: SessionCapturePort | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -159,6 +166,9 @@ class WorkflowExecutionProcessor:
         self._claude_plugin_materializer = claude_plugin_materializer
         # WHY (#772): mirrors claude_plugin_materializer above but for skills; handler hard-fails (no silent skip) on unmatched skills
         self._skill_materializer = skill_materializer
+        # None means capture is OFF, not broken: a deployment with no store
+        # configured must behave identically to one from before this existed.
+        self._session_capture = session_capture
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         # Per-phase prompt set out-of-band when provider="claude-interactive"
@@ -168,6 +178,8 @@ class WorkflowExecutionProcessor:
         self._active_envs: dict[str, dict[str, str]] = {}
         self._active_cmds: dict[str, list[str]] = {}
         self._session_managers: dict[str, SessionLifecycleManager] = {}
+        # Per-phase so _finalize_phase can attribute the capture.
+        self._phase_session_ids: dict[str, str] = {}
         self._phase_tokens: dict[str, TokenAccumulator] = {}
         self._phase_auth_tokens: dict[
             str, tuple[int, int, int, int]
@@ -499,12 +511,25 @@ class WorkflowExecutionProcessor:
         shared_cms = {id(cm) for _, cm in self._shared_workspaces.values()}
         for _pid, workspace_cm in list(self._active_workspace_cms.items()):
             if id(workspace_cm) in shared_cms:
+                # NOT probed. See _finalize_phase for why a shared container
+                # cannot answer a per-phase capture question honestly.
                 continue
+
+            # Probe on the way out of a CANCEL or a FAILURE too. A phase that
+            # never reached _finalize_phase still ran an agent, and a failed
+            # run is the one whose transcript is most worth having.
+            await capture_phase_session(
+                self._session_capture,
+                self._active_workspaces.get(_pid),
+                session_id=self._phase_session_ids.get(_pid, ""),
+                phase_id=_pid,
+            )
             try:
                 await workspace_cm.__aexit__(None, None, None)
             except Exception:
                 logger.exception("Error cleaning up workspace during %s", context)
         self._active_workspace_cms.clear()
+        self._phase_session_ids.clear()
 
     async def _cleanup_shared_workspace(self, execution_id: str) -> None:
         """Tear down the shared workspace at execution end. Idempotent."""
@@ -687,6 +712,7 @@ class WorkflowExecutionProcessor:
         claude_cmd = self._active_cmds[todo.phase_id]
         interactive_prompt = self._active_prompts.get(todo.phase_id)
         session_id = todo.session_id or ""
+        self._phase_session_ids[todo.phase_id] = session_id
         workflow_id = aggregate.workflow_id or ""
         timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
         is_codex = phase.agent_config.provider == AgentProvider.CODEX
@@ -915,7 +941,8 @@ class WorkflowExecutionProcessor:
                 source="processor",
             )
 
-        self._active_workspaces.pop(phase_id, None)
+        workspace = self._active_workspaces.pop(phase_id, None)
+        session_id = self._phase_session_ids.pop(phase_id, "")
         self._active_envs.pop(phase_id, None)
         self._active_cmds.pop(phase_id, None)
         self._active_prompts.pop(phase_id, None)
@@ -924,6 +951,28 @@ class WorkflowExecutionProcessor:
         # execution (interactive-tmux backend), DON'T tear it down here.
         # Cleanup happens once at execution end (complete / fail / cancel).
         is_shared = any(cm is workspace_cm for _, cm in self._shared_workspaces.values())
+
+        # BEFORE teardown: once the container is gone so is the spool, and a
+        # later probe cannot tell "stored" from "lost forever".
+        #
+        # SHARED workspaces are deliberately NOT probed (#847). The exporter
+        # sweeps a whole workspace partition, not one session, so on a
+        # container reused across phases the probe for phase 2 would discover
+        # phase 1's transcript, satisfy expect_sessions and record phase 2 as
+        # CAPTURED having captured nothing. A false CAPTURED is the worst
+        # verdict available: it is the one state that suppresses a backfill.
+        # Answering this properly needs a session selector on the exporter,
+        # which is a contract change, not a call-site fix. Nothing is lost
+        # today because the shared backend is interactive-tmux, whose image
+        # carries no exporter at all.
+        if not is_shared:
+            await capture_phase_session(
+                self._session_capture,
+                workspace,
+                session_id=session_id,
+                phase_id=phase_id,
+            )
+
         if workspace_cm is not None and not is_shared:
             await workspace_cm.__aexit__(None, None, None)
 
