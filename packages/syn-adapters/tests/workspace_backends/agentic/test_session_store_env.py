@@ -103,7 +103,7 @@ class TestDisabled:
 
 
 class TestEnabled:
-    """Store configured: the full six-variable contract is supplied."""
+    """Store configured: the full contract is supplied."""
 
     def test_every_required_variable_is_present(self) -> None:
         """DEPLOYMENT is reserved but OPTIONAL, so this is a subset check.
@@ -457,7 +457,7 @@ HOSTILE_ENV: dict[str, str] = {
 
 
 class TestReservedKeys:
-    """The six contract variables are RESERVED — the adapter owns them.
+    """The contract variables are RESERVED — the adapter owns them.
 
     The public workspace path accepts arbitrary ``extra_environment``, so
     without this the opt-in switch is defeatable by any caller.

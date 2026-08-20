@@ -16,7 +16,8 @@ all. That guarantee is the point of this module and is covered by tests.
 
 Reserved keys
 -------------
-The six ``AGENTIC_SESSION_STORE_*`` variables are RESERVED by this adapter. The
+The ``AGENTIC_SESSION_STORE_*`` variables are RESERVED by this adapter (seven
+names, of which DEPLOYMENT is emitted only when known). The
 public workspace API accepts arbitrary ``extra_environment`` from callers, so
 without an explicit rule a caller could set ``AGENTIC_SESSION_STORE_PROVIDER``
 itself and switch on in-image capture while the host-side setting is OFF, or
