@@ -9,6 +9,13 @@
 # See: ADR-034 - Test Infrastructure Architecture
 # See: ADR-060 - On-Demand Environment Creation
 
+# Project name, overriding the base compose default of
+# `syntropic137_${APP_ENVIRONMENT:-development}`. Without this an unset
+# APP_ENVIRONMENT gave a selfhost stack containers and volumes namespaced
+# `syntropic137_development` while its API reported `selfhost` and its agent
+# network was `syntropic137_selfhost_agent-net` - three names for one stack.
+name: syntropic137_${APP_ENVIRONMENT:-selfhost}
+
 services:
   # ===========================================================================
   # DATABASE
