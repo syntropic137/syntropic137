@@ -188,6 +188,154 @@ class TestOnePostureCannotSuppressTheOther:
         )
 
 
+class TestTwoStoresCanBeToldApart:
+    """#849: the deployment separates environments, not tenants within one."""
+
+    # Sentinels chosen so NO url component can be mistaken for the label. An
+    # earlier version of these tests used label="tenant-a" against the path
+    # /tenant-a, so a posture line that logged the URL PATH looked identical to
+    # one that logged the label - and a codex mutation that appended
+    # `store.url.rsplit("/")[-1]` to the destination passed the entire suite,
+    # including the test named "the url is still never logged".
+    # EVERY component gets its own sentinel, including the scheme. A first
+    # version used a conventional https URL with only host and path sentinels,
+    # and codex pointed out that a label-conditional mutation leaking the query,
+    # userinfo, port or fragment would still pass - and that asserting
+    # "https://" checks the scheme as a literal rather than as a value.
+    URL_COMPONENTS = (
+        "url-scheme",
+        "url-user",
+        "url-password",
+        "url-host.example",
+        "43127",
+        "url-path",
+        "url-query",
+        "url-fragment",
+    )
+    URL_WITH_PARTS = (
+        "url-scheme://url-user:url-password@url-host.example:43127/url-path?url-query#url-fragment"
+    )
+    LABEL = "declared-label"
+
+    def _assert_no_url_component(self, record: logging.LogRecord) -> None:
+        """No part of the URL, by any route, including the unformatted args."""
+        haystacks = (record.getMessage(), str(record.args), str(record.exc_info))
+        for haystack in haystacks:
+            for component in self.URL_COMPONENTS:
+                assert component not in haystack, (
+                    f"URL component {component!r} reached a log record"
+                )
+            assert TOKEN not in haystack
+
+    @pytest.mark.unit
+    def test_two_stores_differing_only_by_path_are_distinguishable(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The acceptance criterion from #849, stated directly.
+
+        Labels are unrelated to the paths, so this cannot be satisfied by
+        logging the path.
+        """
+        (a,) = _posture(
+            caplog,
+            url="https://store.example/tenant-a",
+            auth_token=TOKEN,
+            label="alpha",
+        )
+        message_a = a.getMessage()
+        caplog.clear()
+
+        (b,) = _posture(
+            caplog,
+            url="https://store.example/tenant-b",
+            auth_token=TOKEN,
+            label="bravo",
+        )
+        message_b = b.getMessage()
+
+        assert message_a != message_b
+        assert "alpha" in message_a
+        assert "bravo" in message_b
+        for message in (message_a, message_b):
+            assert "tenant-a" not in message
+            assert "tenant-b" not in message
+
+    @pytest.mark.unit
+    def test_no_url_component_is_logged_on_the_authenticated_path(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        (record,) = _posture(caplog, url=self.URL_WITH_PARTS, auth_token=TOKEN, label=self.LABEL)
+
+        assert self.LABEL in record.getMessage()
+        self._assert_no_url_component(record)
+
+    @pytest.mark.unit
+    def test_no_url_component_is_logged_on_the_unauthenticated_path(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The warning branch needs the same guarantee as the healthy one."""
+        (record,) = _posture(caplog, url=self.URL_WITH_PARTS, label=self.LABEL)
+
+        assert record.levelno == logging.WARNING
+        assert self.LABEL in record.getMessage()
+        self._assert_no_url_component(record)
+
+    @pytest.mark.unit
+    def test_no_label_leaves_the_line_as_it_was(self, caplog: pytest.LogCaptureFixture) -> None:
+        """An unset label must read as "none declared", not a store named ""."""
+        (record,) = _posture(caplog, url=STORE, auth_token=TOKEN)
+
+        assert "store:" not in record.getMessage()
+
+    @pytest.mark.unit
+    def test_capture_off_names_no_label(self, caplog: pytest.LogCaptureFixture) -> None:
+        """With no store there is no destination to identify."""
+        (record,) = _posture(caplog, url=None, label=self.LABEL)
+
+        assert self.LABEL not in record.getMessage()
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "unusable",
+        [
+            "tenant-a\nINFO Session capture is configured for prod",
+            "tenant\u2013a",
+            "z" * 65,
+            "https://url-host-sentinel.example/url-path-sentinel",
+            TOKEN + "!",
+        ],
+        ids=["newline", "homoglyph-dash", "too-long", "a-pasted-url", "a-pasted-token"],
+    )
+    @pytest.mark.parametrize("authenticated", [True, False], ids=["with-token", "no-token"])
+    def test_an_unusable_label_is_ignored_and_never_echoed(
+        self, caplog: pytest.LogCaptureFixture, unusable: str, authenticated: bool
+    ) -> None:
+        """Rejected, and the rejected text is not repeated anywhere.
+
+        Whatever was set is probably not what the operator believed they set,
+        so echoing it is how a mis-pasted secret reaches the log this line
+        exists to keep clean.
+        """
+        # Both branches: an earlier version only exercised the authenticated
+        # one, so a mutation echoing store.label in the UNAUTHENTICATED warning
+        # would have stayed green.
+        records = _posture(
+            caplog,
+            url=STORE,
+            auth_token=TOKEN if authenticated else None,
+            label=unusable,
+        )
+
+        warnings = [r for r in records if r.levelno == logging.WARNING]
+        assert warnings, "an unusable label must be reported"
+
+        for record in records:
+            haystacks = (record.getMessage(), str(record.args))
+            for haystack in haystacks:
+                assert unusable not in haystack
+                assert "\n" not in haystack
+
+
 class TestPostureCannotAbortStartup:
     @pytest.mark.unit
     @pytest.mark.asyncio

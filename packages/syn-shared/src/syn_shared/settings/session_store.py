@@ -24,6 +24,8 @@ Usage:
 
 from __future__ import annotations
 
+import re
+
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -32,6 +34,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 #: literals. The prefix below and these names must stay in step.
 ENV_SYN_SESSION_STORE_URL = "SYN_SESSION_STORE_URL"
 ENV_SYN_SESSION_STORE_AUTH_TOKEN = "SYN_SESSION_STORE_AUTH_TOKEN"
+ENV_SYN_SESSION_STORE_LABEL = "SYN_SESSION_STORE_LABEL"
 
 #: Provider identifier understood by the capability inside the workspace image.
 SESHMAGIC_PROVIDER = "seshmagic"
@@ -40,6 +43,20 @@ SESHMAGIC_PROVIDER = "seshmagic"
 #: uploading. Deliberately NOT a mounted volume for this first integration —
 #: see the note in the workspace adapter for the durability tradeoff.
 DEFAULT_SPOOL_DIR = "/spool"
+
+#: What a store label is allowed to be: ASCII letters, digits, dot, underscore
+#: and hyphen, 1 to 64 characters.
+#:
+#: Narrow on purpose. This string exists so an operator can TRUST which store a
+#: posture line names, and the threats to that are not only control characters.
+#: Printable Unicode carries homoglyphs, combining marks and variation
+#: selectors, so a label can render as one store while being another. Rejecting
+#: anything outside a plain identifier removes that class entirely, and the
+#: length bound stops a pasted blob flooding the line.
+#:
+#: Enforced by REJECTION, not truncation. Truncating would mean the logged text
+#: is not the configured value, which is the opposite of what this field is for.
+_LABEL_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 class SessionStoreSettings(BaseSettings):
@@ -80,6 +97,27 @@ class SessionStoreSettings(BaseSettings):
             "Write token for the session store. Handled as a credential: never "
             "logged, never included in exception messages, never written to "
             "container labels. Only used when SYN_SESSION_STORE_URL is set."
+        ),
+    )
+
+    label: str = Field(
+        default="",
+        description=(
+            "Short non-secret name for the store this deployment writes to, "
+            "shown in the startup posture line. Set it when more than one store "
+            "is reachable from the same environment. The posture line "
+            "deliberately logs NO part of SYN_SESSION_STORE_URL, because every "
+            "part of a URL is operator-supplied and could carry a credential, "
+            "so two stores differing only by path are otherwise "
+            "indistinguishable. MUST be a plain identifier: ASCII letters, "
+            "digits, dot, underscore and hyphen, 1 to 64 characters (so "
+            "prod-west, not prod:west or org/tenant, and no accented or "
+            "non-ASCII letters). Anything else is IGNORED with a warning that "
+            "does not repeat the value, and the line falls back to naming the "
+            "deployment alone. Surrounding whitespace is trimmed. Declared "
+            "non-secret by the operator rather than derived from a value that "
+            "might not be. Do NOT put a token, a password or a full URL here. "
+            "Example: tenant-a"
         ),
     )
 
@@ -159,6 +197,37 @@ class SessionStoreSettings(BaseSettings):
         capture for an operator who deliberately configured an open store.
         """
         return self.is_enabled and not self.auth_value
+
+    @property
+    def display_label(self) -> str:
+        """The operator's label if it is a usable identifier, otherwise empty.
+
+        "Verbatim" in the sense that matters: the operator's own text, never a
+        value derived from the URL. It does NOT mean any string reaches the log.
+        A label containing a newline could forge a second posture record, and
+        one built from homoglyphs or combining marks can render as a store it is
+        not - and a posture line an operator cannot trust is worse than no label
+        at all.
+
+        Anything outside `_LABEL_PATTERN` yields "", the same as unset. The
+        invalid text is deliberately NOT echoed: whatever it is, it is probably
+        not what the operator believed they set, and echoing it is how a
+        mis-pasted secret reaches the log this field exists to keep clean.
+        `has_unusable_label` lets a caller report the problem without repeating
+        the value.
+        """
+        candidate = self.label.strip()
+        return candidate if _LABEL_PATTERN.fullmatch(candidate) else ""
+
+    @property
+    def has_unusable_label(self) -> bool:
+        """True when a label was configured but cannot be used.
+
+        Distinguishes "none declared" from "one was declared and it is not
+        usable". Both are `""` through `display_label`, but the second is a
+        misconfiguration worth reporting - without repeating the value.
+        """
+        return bool(self.label.strip()) and not self.display_label
 
     @property
     def auth_value(self) -> str:

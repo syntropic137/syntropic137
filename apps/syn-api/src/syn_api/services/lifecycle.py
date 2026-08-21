@@ -33,6 +33,7 @@ from syn_api.types import Err, LifecycleError, Ok, Result
 from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
     SessionStoreSettings,
 )
@@ -339,9 +340,13 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
     aggregator.
 
     What identifies the destination instead is the DEPLOYMENT, which is
-    derived from AppEnvironment and cannot contain a secret. Two stores that
-    differ only by URL path are therefore indistinguishable here; that needs an
-    explicitly non-secret label, tracked in #849.
+    derived from AppEnvironment and cannot contain a secret, plus the operator's
+    own SYN_SESSION_STORE_LABEL when one is declared. The label exists because
+    the deployment separates ENVIRONMENTS but not tenants within one: two stores
+    differing only by URL path produce an identical posture line without it
+    (#849). It is declared non-secret by the operator rather than derived from a
+    value that may not be, which is why it can be logged when no part of the URL
+    can.
     """
     from syn_adapters.workspace_backends.agentic.session_store_env import (
         deployment_identity,
@@ -356,6 +361,21 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
         return
 
     deployment = deployment_identity(app_environment)
+    label = store.display_label
+    destination = f"{deployment} (store: {label})" if label else deployment
+
+    if store.has_unusable_label:
+        # Value-free on purpose. Whatever was set is probably not what the
+        # operator believed they set, and echoing it here is exactly how a
+        # mis-pasted URL or token reaches the log this line exists to keep
+        # clean.
+        logger.warning(
+            "%s is set to something that is not a usable label (ASCII letters, "
+            "digits, dot, underscore and hyphen, up to 64 characters). It is "
+            "being ignored and is not repeated here in case it is not what you "
+            "meant to set. Capture is unaffected.",
+            ENV_SYN_SESSION_STORE_LABEL,
+        )
 
     if store.is_unauthenticated:
         logger.warning(
@@ -364,7 +384,7 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
             "at finalize with 401, AFTER the workspace has run, and the "
             "exporter suppresses the cause to avoid leaking the credential. "
             "Set the token, or ignore this if the store is deliberately open.",
-            deployment,
+            destination,
             ENV_SYN_SESSION_STORE_URL,
             ENV_SYN_SESSION_STORE_AUTH_TOKEN,
         )
@@ -375,7 +395,7 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
         "Not yet verified: the next workflow is the first runtime check, so "
         "confirm its capture outcome - only CAPTURED proves the store was "
         "actually reachable and writable.",
-        deployment,
+        destination,
         ENV_SYN_SESSION_STORE_URL,
     )
 
