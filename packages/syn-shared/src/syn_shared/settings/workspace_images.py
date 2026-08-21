@@ -158,8 +158,10 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 #                  envelopes already carry execution_id, workspace_id and
 #                  phase_id as host-supplied TAGS, so this list is not the only
 #                  route from a phase to its sessions - it is the only one that
-#                  names the transcripts themselves rather than the run that
-#                  produced them.
+#                  records the agent-native session IDS confirmed during the
+#                  sweep, rather than identifying the run that produced them.
+#                  Note one session id can cover several envelopes, so it is an
+#                  id list and not a transcript count.
 #
 #                  ROLLOUT ORDER WAS SATISFIED BEFORE THIS PIN. capture_result
 #                  accepts result schema 1 AND 2 (#862, merged). Pinning an
