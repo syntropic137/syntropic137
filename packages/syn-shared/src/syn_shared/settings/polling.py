@@ -8,10 +8,7 @@ from __future__ import annotations
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-#: Spelled once so callers that have to NAME this variable in a diagnostic do
-#: not re-spell it as a literal. The prefix below and this name must stay in
-#: step.
-ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES = "SYN_POLLING_MAX_CONCURRENT_DISPATCHES"
+from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 
 
 class PollingSettings(BaseSettings):
@@ -114,9 +111,13 @@ class PollingSettings(BaseSettings):
     max_concurrent_dispatches: int = Field(
         default=1,
         ge=1,
+        validation_alias=ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
         description=(
-            "Maximum number of workflow executions running simultaneously. "
-            "Prevents OOM from concurrent container launches. Default: 1. "
+            "How many workflow executions the background TRIGGER dispatcher "
+            "runs at once. Scope is deliberately narrow: it does NOT bound "
+            "manual executions started through the API, which build their own "
+            "processor, and it is per-process rather than per-cluster. "
+            "Default: 1. "
             "TEMPORARILY 1, not 5, because concurrent executions are not "
             "isolated from each other: the processor keeps per-execution state "
             "on an instance they share, so they read each other's inputs, and "

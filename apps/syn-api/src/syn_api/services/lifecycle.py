@@ -30,6 +30,7 @@ from syn_api.services.credentials import validate_credentials
 from syn_api.services.reconciliation import cleanup_orphaned_containers, reconcile_orphaned_sessions
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import Err, LifecycleError, Ok, Result
+from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
     ENV_SYN_SESSION_STORE_URL,
@@ -188,6 +189,7 @@ async def startup(
 
     try:
         _log_session_capture_posture(settings.session_store, settings.app_environment)
+        _log_execution_concurrency_posture(settings.polling.max_concurrent_dispatches)
     except Exception:
         # Diagnostics must never become a startup prerequisite. No exception
         # object and no exc_info: a settings error can echo its input, and the
@@ -272,6 +274,37 @@ async def health_check() -> Result[dict, LifecycleError]:
 
 
 # ── Private helpers ─────────────────────────────────────────────────
+
+
+def _log_execution_concurrency_posture(max_concurrent: int) -> None:
+    """Say so when this deployment runs workflows concurrently.
+
+    Beside the capture posture and for the same reason: an operator should
+    learn a risky posture at startup rather than from its consequences.
+
+    Emitted HERE, once, rather than while constructing the dispatcher. In the
+    dispatcher it fired only if construction got that far, was skipped
+    entirely on the test and offline startup paths, and could repeat on every
+    subscription-recovery attempt. Posture is a property of the settings, so it
+    is reported where the settings are read.
+
+    Concurrent executions are not isolated from each other (#865): they share
+    the processor instance holding their per-run state, so one can read
+    another's inputs and finish successfully against the wrong target, and one
+    execution's cancellation tears down the others' containers.
+    """
+    if max_concurrent <= 1:
+        return
+
+    logger.warning(
+        "%s is %d, so workflow executions can run concurrently. They are NOT "
+        "yet isolated from each other (#865): concurrent executions can read "
+        "each other's inputs and finish against the wrong target, and one "
+        "execution's cancellation tears down the others' containers. Set it "
+        "to 1 until that is fixed.",
+        ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
+        max_concurrent,
+    )
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
