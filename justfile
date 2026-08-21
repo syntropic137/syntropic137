@@ -172,6 +172,7 @@ onboard-dev *flags:
         eval "$(uv run python scripts/resolve_infra_env.py)"
         # Derive vault name
         case "${APP_ENVIRONMENT:-development}" in
+            selfhost)    _VAULT="syntropic137" ;;
             development) _VAULT="syn137-dev" ;;
             production)  _VAULT="syn137-prod" ;;
             beta)        _VAULT="syn137-beta" ;;
@@ -1431,6 +1432,7 @@ secrets-store-token:
     if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
     # Derive vault from APP_ENVIRONMENT
     case "${APP_ENVIRONMENT:-}" in
+        selfhost)    _OP_VAULT="syntropic137" ;;
         development) _OP_VAULT="syn137-dev" ;;
         production)  _OP_VAULT="syn137-prod" ;;
         beta)        _OP_VAULT="syn137-beta" ;;
@@ -1469,6 +1471,7 @@ secrets-delete-token:
     if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
     # Derive vault from APP_ENVIRONMENT
     case "${APP_ENVIRONMENT:-}" in
+        selfhost)    _OP_VAULT="syntropic137" ;;
         development) _OP_VAULT="syn137-dev" ;;
         production)  _OP_VAULT="syn137-prod" ;;
         beta)        _OP_VAULT="syn137-beta" ;;

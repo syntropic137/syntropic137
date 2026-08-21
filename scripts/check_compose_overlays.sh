@@ -36,31 +36,59 @@ echo "  ondemand: ok"
 # It drifted once already: selfhost.yaml defaulted to `production` while
 # selfhost.env.example and docker-compose.syntropic137.yaml both said
 # `selfhost` - three files, two answers, and which one you got depended on the
-# compose file you launched. Asserting the RESOLVED value is the only check
+# compose file you launched. Asserting the RESOLVED values is the only check
 # that notices, since each file looks self-consistent on its own.
+#
+# HERMETIC and SEMANTIC, deliberately:
+#   --env-file /dev/null  so a developer's local docker/.env cannot make a
+#                         broken default appear to pass. Compose loads that
+#                         file automatically otherwise.
+#   --format json + jq    so each value is looked up by its exact path. A
+#                         first-textual-match grep would silently start
+#                         reading some other service the day one gains an
+#                         APP_ENVIRONMENT of its own.
+#   no 2>/dev/null        so a Compose failure is a loud failure rather than
+#                         an empty string that fails with a confusing message.
+#
+# All four identities are asserted, not just the API variable: they have
+# already disagreed with each other once.
 echo "Checking default deployment identities..."
 
-check_default_environment() {
-    local label="$1" expected="$2"
-    shift 2
+check_selfhost_defaults() {
+    local expected_tier="selfhost"
     local resolved
-    # `|| true` on the pipeline: under `set -o pipefail` a grep that matches
-    # nothing would abort the script before the diagnostic below ever printed,
-    # turning a clear failure into a bare non-zero exit.
-    resolved=$(env -u APP_ENVIRONMENT docker compose "$@" config 2>/dev/null \
-        | grep -m1 -E '^[[:space:]]+APP_ENVIRONMENT:' | awk '{print $2}' || true)
-    if [ "$resolved" != "$expected" ]; then
-        echo "  FAIL $label: APP_ENVIRONMENT defaults to '$resolved', expected '$expected'"
-        echo "       Sessions from this stack would be attributed to the wrong tier."
+    resolved=$(env -u APP_ENVIRONMENT docker compose --env-file /dev/null \
+        -f docker-compose.yaml -f docker-compose.selfhost.yaml config --format json)
+
+    local project api_env api_net net_name
+    project=$(printf '%s' "$resolved" | jq -r '.name')
+    api_env=$(printf '%s' "$resolved" | jq -r '.services.api.environment.APP_ENVIRONMENT')
+    api_net=$(printf '%s' "$resolved" | jq -r '.services.api.environment.SYN_AGENT_NETWORK')
+    net_name=$(printf '%s' "$resolved" | jq -r '.networks["agent-net"].name')
+
+    local failed=0
+    _expect() {
+        if [ "$2" != "$3" ]; then
+            echo "  FAIL selfhost $1: '$2', expected '$3'"
+            failed=1
+        fi
+    }
+    _expect "project name"    "$project"  "syntropic137_${expected_tier}"
+    _expect "APP_ENVIRONMENT" "$api_env"  "$expected_tier"
+    _expect "SYN_AGENT_NETWORK" "$api_net" "syntropic137_${expected_tier}_agent-net"
+    _expect "agent-net name"  "$net_name" "syntropic137_${expected_tier}_agent-net"
+
+    if [ "$failed" -ne 0 ]; then
+        echo "       Sessions from this stack would be attributed to the wrong"
+        echo "       tier, and selfhost-env.sh would derive the wrong vault."
         exit 1
     fi
-    echo "  $label defaults to $resolved: ok"
+    echo "  selfhost defaults are all ${expected_tier}: ok"
 }
 
-# Selfhost only. The dev stack takes APP_ENVIRONMENT from the repo-root .env
-# rather than from a compose default, so asserting it here would be checking a
-# file this script does not own - and would fail in any worktree without one.
-check_default_environment selfhost selfhost \
-    -f docker-compose.yaml -f docker-compose.selfhost.yaml
+# Selfhost only. The dev overlay has a fixed project name and takes
+# APP_ENVIRONMENT from the user-owned repo-root .env rather than a compose
+# default, so there is no stable default there for this gate to enforce.
+check_selfhost_defaults
 
 echo "All compose overlays valid."
