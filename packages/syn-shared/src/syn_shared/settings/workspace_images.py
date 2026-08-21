@@ -129,7 +129,9 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # Pinned digests
 #
 # These are multi-arch image *index* digests, so the same pin resolves on both
-# linux/amd64 and linux/arm64. Verified against GHCR on 2026-08-17.
+# linux/amd64 and linux/arm64. Each entry below records its OWN verification
+# date; there is no single date for the whole table, because pins move
+# independently.
 #
 # claude-cli       built from agentic-primitives d31c88a, which carries the
 #                  capability runtime, the entrypoint `exec` fix (so the agent
@@ -150,9 +152,14 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 #                  CONFIRMED during the sweep. syn137 reads it into
 #                  AuthoritativeCapture.agent_session_ids and surfaces it at
 #                  /capture/status, which is how a phase is related to the
-#                  agent-native transcripts it produced - syn137's own
-#                  session_id is a uuid4 the agent never sees, so the two are
-#                  disjoint namespaces and this list is the only join.
+#                  agent-native transcripts it produced. syn137's own
+#                  session_id is a uuid4 the agent never sees, so the host's
+#                  identifier and the store's are disjoint namespaces. Store
+#                  envelopes already carry execution_id, workspace_id and
+#                  phase_id as host-supplied TAGS, so this list is not the only
+#                  route from a phase to its sessions - it is the only one that
+#                  names the transcripts themselves rather than the run that
+#                  produced them.
 #
 #                  ROLLOUT ORDER WAS SATISFIED BEFORE THIS PIN. capture_result
 #                  accepts result schema 1 AND 2 (#862, merged). Pinning an
