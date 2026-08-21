@@ -57,7 +57,10 @@ echo "Checking default deployment identities..."
 check_selfhost_defaults() {
     local expected_tier="selfhost"
     local resolved
-    resolved=$(env -u APP_ENVIRONMENT docker compose --env-file /dev/null \
+    # COMPOSE_PROJECT_NAME too: it outranks the top-level `name:` key, so an
+    # ambient one in the caller's shell would mask a broken default and make
+    # the project assertion pass for the wrong reason.
+    resolved=$(env -u APP_ENVIRONMENT -u COMPOSE_PROJECT_NAME docker compose --env-file /dev/null \
         -f docker-compose.yaml -f docker-compose.selfhost.yaml config --format json)
 
     local project api_env api_net net_name
