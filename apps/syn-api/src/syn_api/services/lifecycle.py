@@ -187,14 +187,24 @@ async def startup(
     if not skip_validation and not settings.uses_in_memory_stores:
         validate_credentials(_state.degraded_reasons)
 
+    # SEPARATE guards, deliberately. Sharing one meant a failure in the first
+    # diagnostic silently suppressed the second - and there is a test that
+    # makes the capture posture raise on purpose, so the concurrency warning
+    # would have been skipped on exactly the startup someone was debugging.
+    # Diagnostics must never become a startup prerequisite, and they must not
+    # become each other's prerequisite either.
+    #
+    # No exception object and no exc_info on either: a settings error can echo
+    # its input, and the input here may be the write token.
     try:
         _log_session_capture_posture(settings.session_store, settings.app_environment)
+    except Exception:
+        logger.warning("Could not determine session capture posture at startup.")
+
+    try:
         _log_execution_concurrency_posture(settings.polling.max_concurrent_dispatches)
     except Exception:
-        # Diagnostics must never become a startup prerequisite. No exception
-        # object and no exc_info: a settings error can echo its input, and the
-        # input here may be the write token.
-        logger.warning("Could not determine session capture posture at startup.")
+        logger.warning("Could not determine execution concurrency posture at startup.")
 
     if settings.is_test:
         return Ok({"mode": "full"})
