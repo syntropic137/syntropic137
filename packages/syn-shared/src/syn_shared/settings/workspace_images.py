@@ -129,7 +129,9 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # Pinned digests
 #
 # These are multi-arch image *index* digests, so the same pin resolves on both
-# linux/amd64 and linux/arm64. Verified against GHCR on 2026-08-17.
+# linux/amd64 and linux/arm64. Each entry below records its OWN verification
+# date; there is no single date for the whole table, because pins move
+# independently.
 #
 # claude-cli       built from agentic-primitives d31c88a, which carries the
 #                  capability runtime, the entrypoint `exec` fix (so the agent
@@ -139,6 +141,44 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # interactive-tmux built by the same workflow run matrix; it is published to
 #                  GHCR (it is one of the two providers in the build matrix of
 #                  agentic-primitives .github/workflows/build-workspace-images.yml).
+# omni-agent       built from agentic-primitives a6b5d3f, omni-agent manifest
+#                  1.3.0. Verified on 2026-08-21 by running the binary OUT OF
+#                  THIS DIGEST on BOTH architectures: linux/amd64 and
+#                  linux/arm64 each report
+#                  "apss-session-exporter 0.5.0 (APS-V1-0004 SCS 1.0)".
+#
+#                  v0.5.0 adds a `sessions` array to the exporter's --json
+#                  result at RESULT_SCHEMA_VERSION 2: the session ids the store
+#                  CONFIRMED during the sweep. syn137 reads it into
+#                  AuthoritativeCapture.agent_session_ids and surfaces it at
+#                  /capture/status, which is how a phase is related to the
+#                  agent-native transcripts it produced. syn137's own
+#                  session_id is a uuid4 the agent never sees, so the host's
+#                  identifier and the store's are disjoint namespaces. Store
+#                  envelopes already carry execution_id, workspace_id and
+#                  phase_id as host-supplied TAGS, so this list is not the only
+#                  route from a phase to its sessions - it is the only one that
+#                  records the agent-native session IDS confirmed during the
+#                  sweep, rather than identifying the run that produced them.
+#                  Note one session id can cover several envelopes, so it is an
+#                  id list and not a transcript count.
+#
+#                  ROLLOUT ORDER WAS SATISFIED BEFORE THIS PIN. capture_result
+#                  accepts result schema 1 AND 2 (#862, merged). Pinning an
+#                  image that emits schema 2 against a build that accepted only
+#                  1 would have turned every capture probe into a parse error,
+#                  and a document that will not parse is indistinguishable from
+#                  a capture that never happened.
+#
+#                  The exporter image itself was verified before it went into
+#                  omni: both platforms present, both binaries at mode 0755,
+#                  and cosign verifying keyless against
+#                  release.yml@refs/tags/v0.5.0. That check is done by hand
+#                  because the exporter's own release gate builds a scratch
+#                  image rather than the release context
+#                  (agentic-session-exporter#22).
+#
+#                  Previous pin, for the record:
 # omni-agent       built from agentic-primitives 1bc7253. Verified on
 #                  2026-08-20 by running OUT OF THIS DIGEST: the baked
 #                  exporter reports "apss-session-exporter 0.3.0", and the
@@ -187,7 +227,7 @@ PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
             "sha256:222c0ec72ebf786c8a37dec359e14326c9efbb7ec57a523da7227ba7531c43a4"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:dd27d01d5655638d9bffbad6a8a521c0466a78de2f797641fa429686afe457a8"
+            "sha256:70de5883ba60441b4bc5c357fdb5ec8106852d526735cea90d98aeea1652a7d3"
         ),
     }
 )
