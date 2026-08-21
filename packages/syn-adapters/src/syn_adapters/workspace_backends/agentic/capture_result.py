@@ -39,16 +39,29 @@ from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 
 __all__ = [
     "LOSS_COUNTERS",
-    "SUPPORTED_SCHEMA_VERSION",
+    "SUPPORTED_SCHEMA_VERSIONS",
     "AuthoritativeCapture",
     "CaptureExpectations",
     "parse_capture_result",
 ]
 
-#: The `schema_version` this parser understands. The exporter bumps it on any
-#: incompatible change precisely so a consumer can refuse a shape it does not
-#: know instead of misreading it, which is what this constant is for.
-SUPPORTED_SCHEMA_VERSION: Final = 1
+#: The `schema_version` values this parser understands. The exporter bumps it
+#: on any incompatible change precisely so a consumer can refuse a shape it does
+#: not know instead of misreading it, which is what this constant is for.
+#:
+#: A SET rather than a single number, because the two ends of this contract are
+#: deployed independently. The exporter ships inside the workspace image and
+#: syn137 ships on the host, so during any rollout one side is newer than the
+#: other. A parser that accepts exactly one version turns that ordinary skew
+#: into a total capture outage: every probe fails to parse, and a failure to
+#: parse reads as a failure to capture.
+#:
+#: Version 2 adds a `sessions` array naming the session ids the store confirmed.
+#: It is additive - every field version 1 defined still means what it meant - so
+#: reading a version 2 document with the version 1 rules is correct, just less
+#: informative. Anything that is NOT purely additive must get a new version and
+#: must NOT be added here without the code to handle it.
+SUPPORTED_SCHEMA_VERSIONS: Final = frozenset({1, 2})
 
 #: Exit codes the exporter defines. Named rather than inlined so the mapping
 #: below reads as the contract it implements.
@@ -220,10 +233,17 @@ def _refuse_unreadable(
         )
 
     version = document.get("schema_version")
-    if version != SUPPORTED_SCHEMA_VERSION:
+    # `type(...) is int` rather than isinstance or bare membership, because
+    # Python equality makes lookalikes pass: True == 1 and 2.0 == 2, so a
+    # document declaring `"schema_version": true` would clear a plain `in`
+    # check. bool is also a subclass of int, so isinstance would let it
+    # through. A version that is not literally an integer is a shape this
+    # build has no reason to trust.
+    if type(version) is not int or version not in SUPPORTED_SCHEMA_VERSIONS:
+        known = ", ".join(str(v) for v in sorted(SUPPORTED_SCHEMA_VERSIONS))
         return _unknown(
-            f"exporter result schema_version {version!r} is not "
-            f"{SUPPORTED_SCHEMA_VERSION}; refusing to guess at its meaning"
+            f"exporter result schema_version {version!r} is not one of "
+            f"{{{known}}}; refusing to guess at its meaning"
         )
 
     if not isinstance(document.get("captured_everything"), bool):

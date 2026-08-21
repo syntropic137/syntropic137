@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SESSION_CAPTURE_OBSERVATION",
+    "SUPPORTED_OBSERVATION_SCHEMA_VERSIONS",
     "CaptureObservationData",
     "ObservationWriter",
     "build_expectations",
@@ -45,6 +46,29 @@ logger = logging.getLogger(__name__)
 
 #: Bumped on any incompatible change to the recorded payload.
 _PAYLOAD_SCHEMA_VERSION: Final = 1
+
+#: The recorded-payload versions a reader can interpret.
+#:
+#: A SEPARATE NAMESPACE from the exporter's result `schema_version`, which is
+#: `capture_result.SUPPORTED_SCHEMA_VERSIONS`. The two count independently: this
+#: one versions what syn137 PERSISTS (state / needs_backfill / reason), that one
+#: versions what the exporter PRINTS (captured_everything / counters / origin).
+#:
+#: They were previously coupled by the API route importing the exporter's
+#: constant to validate this payload, which worked only for as long as both
+#: happened to equal 1. When the exporter moved to 2 that import silently
+#: widened this gate to accept a recorded shape nothing defines or writes.
+#: Reading either number as the other is exactly the misreading these fields
+#: exist to prevent.
+#: Declared as a LITERAL, not derived from _PAYLOAD_SCHEMA_VERSION. The two say
+#: different things: that one is what this build WRITES, this one is what it can
+#: READ. Deriving the reader from the writer means an incompatible writer bump
+#: silently makes the reader accept the new shape and stop accepting the old
+#: one, with no compatibility decision taken anywhere - which is the same class
+#: of silent widening that coupling this gate to the exporter's constant caused.
+#: When the payload version moves, this set is edited deliberately, or not
+#: at all.
+SUPPORTED_OBSERVATION_SCHEMA_VERSIONS: Final = frozenset({1})
 
 #: Telemetry gets a short, bounded slice of teardown. The write is already
 #: failure-tolerant, but a hung connection pool would otherwise block a phase

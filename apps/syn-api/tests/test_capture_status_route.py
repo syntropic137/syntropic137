@@ -157,6 +157,41 @@ class TestTheBiasIsTowardsReportingWork:
         assert entry.needs_backfill is True
 
     @pytest.mark.unit
+    @pytest.mark.parametrize("lookalike", [True, 1.0, "1", None])
+    def test_a_version_that_is_not_an_integer_is_unknown(self, lookalike: object) -> None:
+        """True == 1 and 1.0 == 1, so membership alone would admit them.
+
+        The stored payload is written by another process, so the reader cannot
+        assume the writer's type discipline held.
+        """
+        entry = _to_entry(_row(schema_version=lookalike))
+
+        assert entry is not None
+        assert entry.state == "unknown"
+        assert entry.needs_backfill is True
+
+    @pytest.mark.unit
+    def test_the_exporter_result_version_is_not_this_version(self) -> None:
+        """These are two version namespaces, not one.
+
+        This route validates the RECORDED OBSERVATION payload (state /
+        needs_backfill / reason). The exporter's own result document
+        (captured_everything / counters / origin) versions separately, and
+        moved to 2 in agentic-session-exporter#20.
+
+        The two were briefly coupled: this route imported the exporter's
+        constant, which worked only while both happened to equal 1. Widening
+        the exporter's set to {1, 2} silently widened this gate to accept a
+        recorded shape nothing defines or writes. Reading either number as the
+        other is exactly the misreading the field exists to prevent.
+        """
+        entry = _to_entry(_row(schema_version=2))
+
+        assert entry is not None
+        assert entry.state == "unknown"
+        assert entry.needs_backfill is True
+
+    @pytest.mark.unit
     @pytest.mark.parametrize("state", ["", "CAPTURED", "definitely-fine", None])
     def test_an_unrecognised_state_is_never_echoed_back(self, state: object) -> None:
         """Including the uppercase spelling, which is not what is recorded."""
