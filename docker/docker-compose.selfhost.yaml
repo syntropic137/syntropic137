@@ -192,7 +192,13 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID:-}
       - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME:-}
-      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
+      # Defaults to `selfhost`, matching selfhost.env.example and
+      # docker-compose.syntropic137.yaml. It used to default to `production`,
+      # so a stack brought up without setting it reported its sessions as
+      # syntropic137__production and derived the wrong 1Password vault - three
+      # files, two answers, and which one you got depended on the compose file
+      # you launched.
+      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-selfhost}
       # 1Password (optional).
       # op_resolver derives a PER-VAULT token name from APP_ENVIRONMENT
       # (syn137-beta -> OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA) and falls back to
@@ -225,7 +231,7 @@ services:
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
       - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-${PWD}}/workspaces
-      - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+      - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-selfhost}_agent-net
       # Envoy proxy URL for agent containers (must resolve on agent-net)
       - SYN_PROXY_URL=http://envoy-proxy:8081
     depends_on:
@@ -417,5 +423,5 @@ networks:
     name: syn137_internal
     driver: bridge
   agent-net:
-    name: syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+    name: syntropic137_${APP_ENVIRONMENT:-selfhost}_agent-net
     driver: bridge
