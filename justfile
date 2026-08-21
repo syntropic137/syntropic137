@@ -1217,37 +1217,66 @@ _selfhost-preflight:
     mkdir -p workspaces
     echo "  ✅ workspaces/"
 
-    # --- Legacy compose project (upgrade hazard) ---
+    # --- Stale compose project (upgrade hazard) ---
     # The selfhost overlay uses FIXED container names (syn137-api and friends),
-    # so if those containers are owned by a previous compose project, bringing
-    # the stack up now collides on the name instead of recreating them.
+    # so if those containers are owned by a DIFFERENT compose project than the
+    # one this invocation will create, `up` collides on the name instead of
+    # recreating them.
     #
-    # Matched by NAME *and* owning project, not by project alone: the dev stack
-    # legitimately runs as `syntropic137_development`. An earlier version of
-    # this check looked only for containers under that project and fired on any
-    # machine with a dev stack up, which is most of them.
+    # Compared against the TARGET project, not a hardcoded list of old ones.
+    # An earlier version treated syntropic137_production as always-stale, which
+    # permanently blocked a legitimate APP_ENVIRONMENT=production selfhost
+    # stack from restarting: its own containers looked stale to it.
     #
-    # Docker's --format uses Go templates, whose braces collide with just's own
-    # interpolation, so this uses filters only and never a template.
+    # Set difference via filters only - docker's --format uses Go templates
+    # whose braces collide with just's interpolation.
     #
     # Volumes are explicitly named (syn137_db_data and friends) and are never
     # project-prefixed, so this is a rename to perform, not data to migrate.
-    STRAY_PROJECTS=""
-    for _proj in syntropic137_development syntropic137_production; do
-        if [ -n "$(docker ps -aq --filter 'name=^syn137-' --filter "label=com.docker.compose.project=${_proj}" 2>/dev/null)" ]; then
-            STRAY_PROJECTS="${STRAY_PROJECTS} ${_proj}"
-        fi
-    done
-    if [ -n "$STRAY_PROJECTS" ]; then
-        echo "  ❌ Selfhost containers (syn137-*) owned by a previous project:${STRAY_PROJECTS}"
-        echo "     This stack now runs as 'syntropic137_selfhost'. Starting it"
-        echo "     now would collide on those fixed container names."
-        echo ""
-        echo "     Bring the old project down first. Data volumes are"
-        echo "     explicitly named and are NOT removed by this:"
-        for _proj in ${STRAY_PROJECTS}; do
-            echo "       docker compose -p ${_proj} down"
+    TARGET_PROJECT="syntropic137_${APP_ENVIRONMENT}"
+    _all=$(docker ps -aq --filter 'name=^syn137-' 2>/dev/null | sort)
+    _mine=$(docker ps -aq --filter 'name=^syn137-' \
+        --filter "label=com.docker.compose.project=${TARGET_PROJECT}" 2>/dev/null | sort)
+    _stray=$(comm -23 <(printf '%s\n' "$_all") <(printf '%s\n' "$_mine") | grep -v '^$' || true)
+
+    if [ -n "$_stray" ]; then
+        # Name the owning tier so the recovery command is exact. Probing known
+        # tiers avoids a Go-template `docker inspect`.
+        _owner=""
+        for _tier in development production selfhost beta staging; do
+            if [ -n "$(docker ps -aq --filter 'name=^syn137-' \
+                --filter "label=com.docker.compose.project=syntropic137_${_tier}" 2>/dev/null)" ]; then
+                _owner="${_tier}"
+                break
+            fi
         done
+        echo "  ❌ Selfhost containers (syn137-*) belong to a different compose project"
+        echo "     This invocation targets: ${TARGET_PROJECT}"
+        echo "     Starting now would collide on those fixed container names."
+        echo ""
+        if [ -n "$_owner" ]; then
+            echo "     Stop the old project first. Data volumes are explicitly"
+            echo "     named and are NOT removed by this:"
+            echo ""
+            echo "       APP_ENVIRONMENT=${_owner} docker compose \\"
+            echo "         -p syntropic137_${_owner} \\"
+            echo "         -f docker/docker-compose.yaml \\"
+            echo "         -f docker/docker-compose.selfhost.yaml \\"
+            echo "         down --remove-orphans"
+            echo ""
+            echo "     Containers are removed by their project label, so they"
+            echo "     all go; --remove-orphans catches extras such as"
+            echo "     syn137-cloudflared."
+            echo ""
+            echo "     A stale agent network may remain, because the old stack"
+            echo "     created it under a name the current files no longer"
+            echo "     derive. Check and remove once nothing is attached:"
+            echo "       docker network ls --filter 'name=syntropic137_.*_agent-net'"
+            echo "       docker network rm <name>"
+        else
+            echo "     Could not determine the owning project. Inspect with:"
+            echo "       docker ps -a --filter 'name=^syn137-'"
+        fi
         echo ""
         echo "     Do this while no workflow executions are running: agent"
         echo "     containers on the old agent network cannot reach the"
