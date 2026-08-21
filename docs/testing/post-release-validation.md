@@ -1321,9 +1321,17 @@ docker run --rm --entrypoint /usr/local/bin/apss-session-exporter \
   "ghcr.io/agentparadise/omni-agent-workspace@${OMNI}" --version
 # expect: apss-session-exporter 0.5.0 (APS-V1-0004 SCS 1.0)
 
-# Store reachable, and enforcing auth
-curl -s -o /dev/null -w 'healthz  %{http_code}\n' http://127.0.0.1:5361/healthz
-curl -s -o /dev/null -w 'sessions %{http_code}\n' http://127.0.0.1:5361/sessions
+# Store reachable, and enforcing auth.
+# Read the endpoint from the environment - never hardcode it. The value the
+# platform actually uses is the only one worth probing, and it differs per
+# tier. Resolve it the same way the API does.
+STORE_URL=$(docker exec <api-container> printenv SYN_SESSION_STORE_URL)
+test -n "$STORE_URL" || echo "capture is DISABLED on this stack"
+
+# host.docker.internal is a container-side name; map it back for a host probe
+PROBE_URL=${STORE_URL/host.docker.internal/127.0.0.1}
+curl -s -o /dev/null -w 'healthz  %{http_code}\n' "$PROBE_URL/healthz"
+curl -s -o /dev/null -w 'sessions %{http_code}\n' "$PROBE_URL/sessions"
 ```
 
 - [ ] Exporter reports `0.5.0` or later **from inside the pinned omni image**
@@ -1350,7 +1358,7 @@ unconfigured even when the value is present in the vault.
 
 | Field label | Value | Notes |
 |---|---|---|
-| `SYN_SESSION_STORE_URL` | e.g. `http://host.docker.internal:5361` | Empty disables capture entirely |
+| `SYN_SESSION_STORE_URL` | tier-specific, e.g. `http://host.docker.internal:5361` | Empty disables capture entirely. Read it from the running container, never from this table |
 | `SYN_SESSION_STORE_AUTH_TOKEN` | write token | Store as a concealed/password field |
 | `SYN_SESSION_STORE_LABEL` | optional | `[A-Za-z0-9._-]{1,64}`; anything else ignored with a warning |
 
