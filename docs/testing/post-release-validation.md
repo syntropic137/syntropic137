@@ -1288,6 +1288,165 @@ syn claude-plugin global remove <name> <version>
 
 ---
 
+## 6.4 Functional Validation - SeshMagic Session Storage
+
+> Added for the session-capture integration (syn137 #862/#863/#864, exporter
+> v0.5.0, omni-agent manifest 1.3.0). Goal: every Syntropic137 agent session is
+> retrievable from the central SeshMagic store, attributed to the deployment
+> that produced it.
+
+Claude and Codex transcripts are spooled inside the workspace container and
+uploaded to a store speaking APS-V1-0004. The upload is performed by
+`/usr/local/bin/apss-session-exporter`, which ships **in the omni-agent image
+only**. A workspace running `claude-cli` or `interactive-tmux` captures nothing,
+and does so silently.
+
+**Capture is FAIL-OPEN by design.** A capture problem records `UNKNOWN`/`FAILED`
+and asks for a backfill; it never turns a successful agent run into a failed
+one. So a green workflow is NOT evidence that capture worked - only the recorded
+verdict is.
+
+### Preconditions
+
+Assert the exporter version from inside the pinned image. Do not infer it from a
+digest bump: the exporter's own release gate built a scratch image containing
+only `.keep` for a period (agentic-session-exporter#22), so a green build proved
+nothing about the published artifact.
+
+```bash
+OMNI=$(grep -A2 'OMNI_AGENT:' \
+  packages/syn-shared/src/syn_shared/settings/workspace_images.py \
+  | grep -o 'sha256:[a-f0-9]*' | head -1)
+docker run --rm --entrypoint /usr/local/bin/apss-session-exporter \
+  "ghcr.io/agentparadise/omni-agent-workspace@${OMNI}" --version
+# expect: apss-session-exporter 0.5.0 (APS-V1-0004 SCS 1.0)
+
+# Store reachable, and enforcing auth
+curl -s -o /dev/null -w 'healthz  %{http_code}\n' http://127.0.0.1:5361/healthz
+curl -s -o /dev/null -w 'sessions %{http_code}\n' http://127.0.0.1:5361/sessions
+```
+
+- [ ] Exporter reports `0.5.0` or later **from inside the pinned omni image**
+- [ ] `/healthz` returns 200
+- [ ] `/sessions` returns 401 unauthenticated
+
+> **A 401 on `/sessions` is the expected healthy state, not a failure.** It is
+> also why the token is mandatory: with a URL and no token, capture fails at
+> finalize with the cause suppressed, and the run still goes green.
+
+> **The phase must run on the omni image.** Confirm the workspace image in use
+> before trusting a negative result - "nothing captured" and "wrong image" look
+> identical from `/capture/status`.
+
+### Configuration
+
+Two variables enable capture. Both resolve from 1Password item
+`syntropic137-config`, in the vault selected by `APP_ENVIRONMENT`
+(`selfhost` -> `syntropic137`, `development` -> `syn137-dev`).
+
+Field labels must match the variable names **exactly**. `op_env_export.py`
+resolves an allowlist by label, so a differently-named field reads as
+unconfigured even when the value is present in the vault.
+
+| Field label | Value | Notes |
+|---|---|---|
+| `SYN_SESSION_STORE_URL` | e.g. `http://host.docker.internal:5361` | Empty disables capture entirely |
+| `SYN_SESSION_STORE_AUTH_TOKEN` | write token | Store as a concealed/password field |
+| `SYN_SESSION_STORE_LABEL` | optional | `[A-Za-z0-9._-]{1,64}`; anything else ignored with a warning |
+
+> **The URL is injected verbatim into the workspace container, so it must
+> resolve THERE, not on the host.** `127.0.0.1:5361` is wrong - inside the
+> container that address is the container itself. Use `host.docker.internal`,
+> or attach `seshmagic-session-api` to the agent network and use its service
+> name.
+>
+> A Caddy short hostname or a `.local` name will NOT resolve: the exporter is a
+> musl static binary, and musl ignores `nsswitch.conf`. A real public DNS name
+> is fine.
+
+- [ ] Both fields present in the vault item for the tier under test
+- [ ] Startup posture line names the deployment and **contains no part of the
+      store URL** - that omission is the invariant, not a bug
+- [ ] Startup warns when a URL is set with no token
+
+### Validating a real capture
+
+A clean startup proves nothing. The first workflow is the first real check.
+
+```bash
+syn workflow run <workflow-id>
+syn capture status            # or: GET /api/v1/capture/status
+```
+
+- [ ] An entry exists for the phase that just ran
+- [ ] `state` is **`captured`** - the ONLY value proving the store was reachable
+      AND writable. `UNKNOWN` / `FAILED` mean capture did not happen
+- [ ] `origin_deployment` matches the tier: `syntropic137__selfhost` from
+      `syn137-api`, `syntropic137__development` from `syn-api`
+- [ ] `agent_session_ids` is non-empty
+- [ ] Each id fetched from the store returns a transcript whose content matches
+      what the phase actually did
+
+### Linkage - prove BOTH directions
+
+Either direction alone can look correct while the join is broken.
+
+**syn137 -> store.** `/capture/status` yields `execution_id`, `phase_id`,
+`workspace_id`, `agent_session_ids[]`. The store keys on those agent-native ids.
+
+**store -> syn137.** Every envelope carries host-supplied tags: `source`
+(`syntropic137`), `execution_id`, `workspace_id`, `workflow_id`, `phase_id`,
+`deployment`.
+
+- [ ] Every id in `agent_session_ids` resolves to a session in the store
+- [ ] That session's tags carry the same `execution_id` and `phase_id`
+- [ ] Querying the store by `execution_id` tag returns exactly the sessions the
+      execution produced - no more, no fewer
+
+> **Prefer the tag direction when the two disagree.** Tags are host-supplied
+> from the phase's environment block and are not forgeable by the agent.
+> Session ids derive from transcript FILENAMES in an agent-writable spool.
+>
+> `workflow_id` exists on the store side only - `/capture/status` does not
+> return it, so its absence there is not a defect.
+
+### Multi-session capture (phase-to-many-sessions)
+
+One phase can produce more than one agent session: a codex phase delegating to
+`claude -p`, or a phase spawning subagents.
+
+**As of 2026-08-21 this has only ever been exercised with hand-written
+transcripts.** A run through the §6.1 delegation matrix is the first real
+evidence, in either direction.
+
+- [ ] Run a delegating phase and record how many ids `agent_session_ids` returns
+- [ ] **State the count explicitly in the report, including when it is exactly
+      1.** A single id from a genuinely delegating phase is a finding, not a pass
+- [ ] Each id resolves to a distinct transcript in the store
+- [ ] The delegated session's transcript is the OTHER harness's
+
+### Known limits - do NOT report these as new findings
+
+| Limit | Consequence for this run |
+|---|---|
+| No backfill yet (#861) | Spool is container-local. A SIGKILLed container loses its transcript and nothing retries. Capture is best-effort, not guaranteed |
+| Absence, not substitution (#859, #843) | Ids come from agent-writable filenames, so a valid decoy would read as captured |
+| `origin.host` is the CONTAINER ID | Not the machine. Use tags for identity, never `origin_host` |
+| `origin.environment` is always `container` | It is a runtime CLASS. `origin.deployment` is the axis separating dev from selfhost |
+| Shared interactive-tmux not probed per phase (#847) | One container spans phases, so a sweep cannot answer per-phase honestly |
+
+### Concurrency
+
+- [ ] `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` is **UNSET**
+
+The code default is now 1 (#866), because one execution's cancel or failure
+tears down every other concurrently running execution's containers (#865, design
+in #869). Pinning the value in compose means remembering to remove it when #865
+is fixed and the default rises again. A deployment that raises it above 1 warns
+at startup, naming #865.
+
+---
+
 ## 7. Functional Validation - Trigger Lifecycle & Round-Trip
 
 ### Verify event poller is running before testing round-trips
@@ -1848,6 +2007,18 @@ Full pass/fail/skip for every command and feature tested.
 | syn claude-plugin show/install     |        |       |
 | syn claude-plugin global add/rm    |        |       |
 | workflow install plugin preflight  |        |       |
+| **SeshMagic Session Storage**      |        |       |
+| exporter 0.5.0 in omni image       |        | assert, don't infer |
+| store /healthz 200, /sessions 401  |        |       |
+| URL+token resolve from 1Password   |        |       |
+| posture line leaks no store URL    |        |       |
+| state=captured after a real run    |        | only real proof |
+| origin_deployment matches tier     |        |       |
+| agent_session_ids non-empty        |        |       |
+| ids resolve to store transcripts   |        |       |
+| store tags carry execution/phase   |        |       |
+| multi-session count stated         |        | even if 1 |
+| MAX_CONCURRENT_DISPATCHES unset    |        | #865/#866 |
 | **Executions**                     |        |       |
 | syn execution list/show            |        |       |
 | syn execution list --status        |        |       |
