@@ -1330,16 +1330,36 @@ test -n "$STORE_URL" || echo "capture is DISABLED on this stack"
 
 # host.docker.internal is a container-side name; map it back for a host probe
 PROBE_URL=${STORE_URL/host.docker.internal/127.0.0.1}
-curl -s -o /dev/null -w 'healthz  %{http_code}\n' "$PROBE_URL/healthz"
-curl -s -o /dev/null -w 'sessions %{http_code}\n' "$PROBE_URL/sessions"
+curl -s -o /dev/null -w 'healthz %{http_code}\n' "$PROBE_URL/healthz"
+
+# Discover the write path rather than assuming it. Store versions differ:
+# seshmagic 0.1.6 exposes POST /v1/sessions/batch, and a bare /sessions is a
+# 404 there. Never encode a route observed on a different instance.
+curl -s "$PROBE_URL/openapi.json" -o /tmp/store-api.json
+python3 -c 'import json;d=json.load(open("/tmp/store-api.json"));[print(m.upper(),k) for k,o in d["paths"].items() for m in o]'
+```
+
+**Reachability must be checked from INSIDE the workspace image, not the host.**
+The host and the container resolve names and routes differently, and the
+container is the party that actually uploads:
+
+```bash
+docker run --rm --network <agent-net> --entrypoint sh \
+  "ghcr.io/agentparadise/omni-agent-workspace@${OMNI}" \
+  -c "curl -s -m 15 -o /dev/null -w 'healthz %{http_code}\n' $STORE_URL/healthz"
 ```
 
 - [ ] Exporter reports `0.5.0` or later **from inside the pinned omni image**
-- [ ] `/healthz` returns 200
-- [ ] `/sessions` returns 401 unauthenticated
+- [ ] `/healthz` returns 200 **from the host**
+- [ ] `/healthz` returns 200 **from inside the omni image, on the agent network**
+- [ ] The write path exists in the store's own `/openapi.json`
+      (seshmagic 0.1.6: `POST /v1/sessions/batch`)
 
-> **A 401 on `/sessions` is the expected healthy state, not a failure.** It is
-> also why the token is mandatory: with a URL and no token, capture fails at
+> **Do not assert a status on a guessed path.** Routes differ between store
+> versions: `/sessions` answers 401 on one instance and 404 on another, because
+> the real write path there is `/v1/sessions/batch`. Read `/openapi.json`.
+>
+> The token is still mandatory. With a URL and no token, capture fails at
 > finalize with the cause suppressed, and the run still goes green.
 
 > **The phase must run on the omni image.** Confirm the workspace image in use

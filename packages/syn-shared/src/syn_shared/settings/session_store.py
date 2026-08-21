@@ -151,6 +151,53 @@ class SessionStoreSettings(BaseSettings):
             return None
         return v
 
+    @field_validator("url", "auth_token", mode="before")
+    @classmethod
+    def _strip_surrounding_whitespace(cls, v: object) -> object:
+        """Trim whitespace a human left around a hand-pasted value.
+
+        A trailing space is invisible in a vault UI and in most log output, and
+        it does not fail loudly: the URL becomes
+        ``http://host:18090 /v1/sessions/batch``, every upload errors, capture
+        records FAILED, and because capture is fail-open the workflow still
+        goes green. That is exactly the failure shape this whole subsystem is
+        built to avoid, so normalise rather than trust the input.
+
+        Observed for real on 2026-08-21: SYN_SESSION_STORE_URL held 27 bytes
+        for a 26-byte URL. Reproduced directly - the trailing space returned a
+        curl error while the trimmed value returned 200.
+
+        The same hazard applies to the token: a stray space would be sent in
+        the Authorization header and produce a 401 at finalize, with the cause
+        suppressed. ``label`` already trimmed; these two, which are the pair
+        that actually break capture, did not.
+        """
+        if isinstance(v, str):
+            return v.strip()
+        # auth_token may already be a SecretStr when constructed directly
+        # rather than parsed from an env var. Unwrapping and rewrapping keeps
+        # both paths normalised - a test caught this asymmetry.
+        if isinstance(v, SecretStr):
+            return SecretStr(v.get_secret_value().strip())
+        return v
+
+    @field_validator("url")
+    @classmethod
+    def _reject_internal_whitespace(cls, v: str | None) -> str | None:
+        """Fail loudly on whitespace INSIDE the URL - it cannot be guessed away.
+
+        Trimming the ends is safe and unambiguous. A space in the middle is a
+        genuinely malformed value, and silently mangling it further would hide
+        an operator error rather than surface it.
+        """
+        if v is not None and any(c.isspace() for c in v):
+            msg = (
+                "SYN_SESSION_STORE_URL contains whitespace inside the value. "
+                "Check the vault entry for a pasted line break or a stray space."
+            )
+            raise ValueError(msg)
+        return v
+
     @field_validator("provider", mode="before")
     @classmethod
     def _blank_provider_to_default(cls, v: object) -> object:
