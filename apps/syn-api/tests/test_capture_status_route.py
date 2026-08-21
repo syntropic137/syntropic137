@@ -18,6 +18,7 @@ import pytest
 
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
+    SUPPORTED_OBSERVATION_SCHEMA_VERSIONS,
     CaptureObservationData,
 )
 from syn_api.routes.capture import _to_entry, get_capture_status
@@ -184,12 +185,79 @@ class TestTheBiasIsTowardsReportingWork:
         the exporter's set to {1, 2} silently widened this gate to accept a
         recorded shape nothing defines or writes. Reading either number as the
         other is exactly the misreading the field exists to prevent.
+
+        Both sets now happen to be {1, 2} again - the observation payload gained
+        `agent_session_ids` at version 2 - so this pins the observation set by
+        VALUE rather than by comparison, and refuses a version outside it. If
+        the exporter later moves to 3, this route must not follow.
         """
-        entry = _to_entry(_row(schema_version=2))
+        assert frozenset({1, 2}) == SUPPORTED_OBSERVATION_SCHEMA_VERSIONS
+
+        entry = _to_entry(_row(schema_version=3))
 
         assert entry is not None
         assert entry.state == "unknown"
         assert entry.needs_backfill is True
+
+    @pytest.mark.unit
+    def test_a_phase_reports_every_agent_session_it_produced(self) -> None:
+        """The join from a host-owned phase to the agent-named transcripts.
+
+        This is what makes a phase's sessions fetchable from the store, which
+        keys on the agent-native id and knows nothing about syn137's uuid4.
+        """
+        entry = _to_entry(_row(agent_session_ids=["sess-codex", "sess-claude"]))
+
+        assert entry is not None
+        assert entry.agent_session_ids == ["sess-codex", "sess-claude"]
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("version", [0, 3, 999], ids=["zero", "next", "far-future"])
+    @pytest.mark.parametrize("stored", [[], ["x"]], ids=["empty", "populated"])
+    def test_an_unsupported_schema_never_yields_agent_sessions(
+        self, version: int, stored: object
+    ) -> None:
+        """A version this build does not understand is not partially trusted.
+
+        `_state_of` already refuses to interpret these payloads. Reading their
+        `agent_session_ids` anyway would have the reader disagreeing with
+        itself about whether it understands the document.
+        """
+        entry = _to_entry(_row(schema_version=version, agent_session_ids=stored))
+
+        assert entry is not None
+        assert entry.agent_session_ids is None
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("stored", [[], ["x"]], ids=["empty", "populated"])
+    def test_a_schema_1_row_never_yields_agent_sessions(self, stored: object) -> None:
+        """The field did not exist at schema 1.
+
+        A schema 1 payload carrying the key did not get it from a writer of
+        ours, so interpreting it under schema 2 semantics would mean trusting a
+        shape nobody declared.
+        """
+        entry = _to_entry(_row(schema_version=1, agent_session_ids=stored))
+
+        assert entry is not None
+        assert entry.agent_session_ids is None
+
+    @pytest.mark.unit
+    def test_a_schema_2_row_keeps_the_empty_list_distinct(self) -> None:
+        """At schema 2 the field means something, including when it is empty."""
+        assert _to_entry(_row(schema_version=2, agent_session_ids=[])).agent_session_ids == []
+        assert _to_entry(_row(schema_version=2, agent_session_ids=["x"])).agent_session_ids == ["x"]
+
+    @pytest.mark.unit
+    def test_unreported_agent_sessions_are_null_not_empty(self) -> None:
+        """A verdict from an older exporter cannot answer the question.
+
+        null says "not reported"; [] would claim the sweep confirmed none.
+        """
+        entry = _to_entry(_row())
+
+        assert entry is not None
+        assert entry.agent_session_ids is None
 
     @pytest.mark.unit
     @pytest.mark.parametrize("state", ["", "CAPTURED", "definitely-fine", None])

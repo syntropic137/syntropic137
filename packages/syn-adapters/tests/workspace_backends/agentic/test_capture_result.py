@@ -295,6 +295,77 @@ class TestTheVerdictIsNeverGuessed:
         assert v2.state is v1.state
         assert v2.needs_backfill == v1.needs_backfill
         assert v2.reason == v1.reason
+        # The v1 twin still CARRIES `sessions`, because only the version was
+        # changed. Reading it anyway would be interpreting a schema 2 field
+        # under schema 1, so the twin must report None while the original
+        # reports whatever it confirmed. Asserting only state/backfill/reason
+        # let a version-unaware parser pass this test unchanged.
+        assert v1.agent_session_ids is None
+
+    def test_a_phase_can_carry_many_agent_session_ids(self) -> None:
+        """One phase, several agent sessions - the shape delegation produces.
+
+        A codex phase that hands work to claude, a subagent, or a resumed
+        thread all leave separate transcripts under the same partition, and the
+        sweep confirms each. syn137's own session id is a per-phase uuid4 the
+        agent never sees, so this list is the ONLY relation between the host's
+        identity for a phase and the ids the agents chose.
+        """
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "sessions": ["sess-codex", "sess-claude", "sess-sub"]})
+
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+
+        assert out.agent_session_ids == ("sess-codex", "sess-claude", "sess-sub")
+
+    def test_a_repeated_id_is_one_session(self) -> None:
+        """The exporter reports a multiset, one entry per confirmed ENVELOPE.
+
+        That multiplicity is meaningful there, because two envelopes can share
+        an id while differing in content. Here the question is which SESSIONS
+        the phase produced, so repeats collapse and order is kept.
+        """
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "sessions": ["a", "b", "a"]})
+
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+
+        assert out.agent_session_ids == ("a", "b")
+
+    def test_no_sessions_array_is_not_an_empty_one(self) -> None:
+        """A schema 1 exporter cannot answer; that is not "confirmed nothing".
+
+        None and () must stay distinguishable or a version skew reads as loss.
+        """
+        v1_doc = _CLEAN
+        assert _parse(v1_doc, 0).agent_session_ids is None
+
+        base = json.loads(_CLEAN_V2)
+        empty = json.dumps({**base, "sessions": []})
+        assert _parse(empty, 0, expectations=_CLEAN_V2_EXPECT).agent_session_ids == ()
+
+    @pytest.mark.parametrize("version", [1, 0, -1])
+    def test_sessions_are_not_read_below_the_schema_that_introduced_them(
+        self, version: int
+    ) -> None:
+        """A document carrying `sessions` at a version that never had it.
+
+        It did not come from an exporter of ours, so interpreting it under
+        schema 2 semantics would mean trusting a shape nobody declared.
+        """
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "schema_version": version, "sessions": ["x"]})
+
+        assert _parse(doc, 0, expectations=_CLEAN_V2_EXPECT).agent_session_ids is None
+
+    def test_a_session_id_that_is_not_a_string_is_dropped(self) -> None:
+        """This came off the wire; a non-string id is a shape we do not know."""
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "sessions": ["ok", 7, None, "", "fine"]})
+
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+
+        assert out.agent_session_ids == ("ok", "fine")
 
     def test_the_supported_set_is_exactly_what_this_build_claims(self) -> None:
         # Pins the contract itself. Widening the set is then a deliberate edit

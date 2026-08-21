@@ -63,6 +63,10 @@ __all__ = [
 #: must NOT be added here without the code to handle it.
 SUPPORTED_SCHEMA_VERSIONS: Final = frozenset({1, 2})
 
+#: The result schema that introduced the `sessions` array. Below this the field
+#: did not exist, so its presence is not something this build should interpret.
+_SESSIONS_SINCE: Final = 2
+
 #: Exit codes the exporter defines. Named rather than inlined so the mapping
 #: below reads as the contract it implements.
 _EXIT_CAPTURED: Final = 0
@@ -134,6 +138,21 @@ class AuthoritativeCapture(BaseModel):
     origin_environment: str | None = None
     origin_deployment: str | None = None
     counters: dict[str, int] = Field(default_factory=dict)
+    #: The AGENT-NATIVE session ids the store confirmed, or None when the
+    #: exporter did not report any (schema 1, or a document that never got far
+    #: enough to have them).
+    #:
+    #: None and () mean different things and must stay distinguishable: None is
+    #: "this exporter cannot tell us", () is "it looked and confirmed nothing".
+    #: Collapsing them is how a silent gap reads as a clean answer.
+    #:
+    #: A PHASE HAS MANY OF THESE. syn137's own `session_id` is a uuid4 the host
+    #: assigns per phase run; these are the ids the agents chose for themselves,
+    #: and one phase produces several whenever it delegates (a codex phase
+    #: handing work to claude, a subagent, a resumed thread). The two are
+    #: disjoint namespaces - the host id is never given to the agent - so this
+    #: is a recorded mapping, not a comparison.
+    agent_session_ids: tuple[str, ...] | None = None
 
     @property
     def needs_backfill(self) -> bool:
@@ -274,6 +293,7 @@ def _verdict(
         "origin_environment": _text(origin.get("environment")),
         "origin_deployment": origin_deployment,
         "counters": counters,
+        "agent_session_ids": _agent_session_ids(document),
     }
 
     if exit_code == _EXIT_COULD_NOT_RUN:
@@ -423,6 +443,40 @@ def _counters(document: Mapping[str, object]) -> dict[str, int]:
     if not isinstance(raw, dict):
         return {}
     return {k: v for k, v in raw.items() if isinstance(v, int) and not isinstance(v, bool)}
+
+
+def _agent_session_ids(document: Mapping[str, object]) -> tuple[str, ...] | None:
+    """The `sessions` array, or None when the document does not carry one.
+
+    Absent and empty are kept apart on purpose. An exporter older than result
+    schema 2 has no `sessions` key at all, and reading that as "confirmed
+    nothing" would turn a version skew into a reported loss.
+
+    DE-DUPLICATED, unlike the exporter's own multiset. There, one entry per
+    confirmed ENVELOPE is what makes the count meaningful, since two envelopes
+    can share a session id while differing in content. Here the question is
+    which agent SESSIONS this phase produced, and the same id twice is one
+    session, so order is preserved and repeats are dropped.
+
+    Non-strings are discarded rather than coerced: this came off the wire, and
+    a session id that is not a string is a shape we do not understand.
+    """
+    # VERSION-GATED, like the reader on the other side of this contract.
+    # `sessions` arrived at result schema 2, so a schema 1 document carrying the
+    # key did not get it from an exporter of ours, and interpreting it under
+    # schema 2 semantics would mean trusting a shape nobody declared. Fixing
+    # this only in the route reader would have left the same hole upstream.
+    version = document.get("schema_version")
+    if type(version) is not int or version < _SESSIONS_SINCE:
+        return None
+    raw = document.get("sessions")
+    if not isinstance(raw, list):
+        return None
+    seen: dict[str, None] = {}
+    for item in raw:
+        if isinstance(item, str) and item:
+            seen.setdefault(item, None)
+    return tuple(seen)
 
 
 def _text(value: object) -> str | None:

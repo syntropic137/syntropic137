@@ -64,6 +64,144 @@ class TestExpectationsComeFromTheSameSettings:
 
 
 @pytest.mark.unit
+class TestThePhaseToAgentSessionMapping:
+    """A phase is host-owned; the agent sessions inside it are many.
+
+    These assert the RECORDED payload, not the in-memory verdict. A mutation
+    check found the gap: deleting the writer's assignment entirely left every
+    other test green, because the parser tests inspect AuthoritativeCapture and
+    the route tests build the payload by hand. Nothing connected the two.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("ids", "expected"),
+        [
+            (None, None),
+            ((), []),
+            (("a",), ["a"]),
+            (("a", "b"), ["a", "b"]),
+        ],
+        ids=["not-reported", "confirmed-none", "one", "many"],
+    )
+    async def test_the_recorded_payload_carries_the_agent_sessions(
+        self, ids: tuple[str, ...] | None, expected: list[str] | None
+    ) -> None:
+        writer = _Writer()
+        outcome = AuthoritativeCapture(
+            state=CaptureState.CAPTURED,
+            store_url="http://store:8799",
+            agent_session_ids=ids,
+        )
+
+        await record_capture_outcome(
+            writer,
+            outcome,
+            session_id="s-1",
+            expectations=None,
+            partition="e-1/w-1",
+            execution_id="e-1",
+            phase_id="p-1",
+        )
+
+        data = writer.calls[0]["data"]
+        assert data["schema_version"] == 2
+        assert data["agent_session_ids"] == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("result_schema", "sessions", "expected"),
+        [
+            (2, ["a", "b"], ["a", "b"]),
+            (2, [], []),
+            (1, ["a", "b"], None),
+        ],
+        ids=["v2-populated", "v2-none-confirmed", "v1-cannot-tell"],
+    )
+    async def test_the_whole_chain_from_exporter_document_to_entry(
+        self, result_schema: int, sessions: list[str], expected: list[str] | None
+    ) -> None:
+        """Exporter document -> parser -> writer -> JSON -> route entry.
+
+        The other round-trip test starts from a hand-built AuthoritativeCapture
+        and so skips the parser, which is exactly where a version-unaware read
+        hid: a schema 1 document carrying `sessions` was interpreted under
+        schema 2 rules and no test noticed.
+
+        The v1 case is the load-bearing one. The document still CARRIES the
+        sessions; only its declared version is older. Nothing downstream may
+        surface them.
+        """
+        import json
+
+        from syn_adapters.workspace_backends.agentic.capture_result import (
+            CaptureExpectations,
+            parse_capture_result,
+        )
+        from syn_api.routes.capture import _agent_session_ids
+
+        document = json.dumps(
+            {
+                "schema_version": result_schema,
+                "scs_version": "1.0",
+                "captured_everything": True,
+                "store_url": "http://store:8799",
+                "origin": {"environment": "container", "deployment": "syntropic137__test"},
+                "counters": {"discovered": len(sessions), "accepted": len(sessions)},
+                "sessions": sessions,
+            }
+        )
+        verdict = parse_capture_result(
+            document,
+            0,
+            expectations=CaptureExpectations(
+                store_url="http://store:8799",
+                deployment="syntropic137__test",
+                expect_sessions=bool(sessions),
+            ),
+        )
+
+        writer = _Writer()
+        await record_capture_outcome(
+            writer,
+            verdict,
+            session_id="s-1",
+            expectations=None,
+            partition="e-1/w-1",
+        )
+
+        stored = json.loads(json.dumps(writer.calls[0]["data"]))
+        assert _agent_session_ids(stored) == expected
+
+    @pytest.mark.asyncio
+    async def test_the_payload_survives_a_json_round_trip_into_an_entry(self) -> None:
+        """The recorded row is JSON in a store, not a Python object in memory.
+
+        None and [] are the pair most likely to collapse across that boundary,
+        and they are exactly the two that must not.
+        """
+        import json
+
+        from syn_api.routes.capture import _agent_session_ids
+
+        for ids, expected in ((None, None), ((), []), (("a", "b"), ["a", "b"])):
+            writer = _Writer()
+            await record_capture_outcome(
+                writer,
+                AuthoritativeCapture(
+                    state=CaptureState.CAPTURED,
+                    store_url="http://store:8799",
+                    agent_session_ids=ids,
+                ),
+                session_id="s-1",
+                expectations=None,
+                partition="e-1/w-1",
+            )
+            stored = json.loads(json.dumps(writer.calls[0]["data"]))
+            assert _agent_session_ids(stored) == expected
+
+
+@pytest.mark.unit
 class TestRecordingIsLaneTwo:
     @pytest.mark.asyncio
     async def test_a_verdict_is_written_with_its_identity(self) -> None:

@@ -22,7 +22,7 @@ anything unreadable here reads as UNKNOWN and counts as needing backfill.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -99,6 +99,48 @@ def _counted_loss(payload: Mapping[str, object]) -> bool:
     if not isinstance(counters, dict):
         return False
     return any(isinstance(counters.get(name), int) and counters[name] > 0 for name in LOSS_COUNTERS)
+
+
+#: The observation schema that introduced `agent_session_ids`. Below this the
+#: field did not exist, so its presence in such a payload is not something this
+#: build has any reason to interpret.
+_AGENT_SESSIONS_SINCE: Final = 2
+
+
+def _agent_session_ids(payload: Mapping[str, object]) -> list[str] | None:
+    """The recorded agent-native session ids, or None when none were recorded.
+
+    Absent and empty stay apart: None is "the verdict that produced this could
+    not tell us", [] is "it looked and confirmed none". Reading the first as the
+    second turns a version skew into a reported loss.
+
+    VERSION-AWARE rather than a bare field read. A schema 1 payload predates
+    this field, so a schema 1 row that carries the key anyway did not get it
+    from a writer of ours, and interpreting it under schema 2 semantics would
+    mean trusting a shape nobody declared. Reading the field only where the
+    version says it means something is the same discipline the version gate
+    itself exists for.
+
+    Non-strings are dropped rather than coerced. This payload was written by
+    another process, possibly an older one, so its shape is not guaranteed.
+    """
+    # BOTH predicates. `_AGENT_SESSIONS_SINCE` says when the field was
+    # introduced; the supported set says which shapes this build understands at
+    # all. Without the second, an unsupported future schema (3, 999) would have
+    # its `agent_session_ids` trusted while `_state_of` refuses to interpret the
+    # very same payload - the reader disagreeing with itself about whether it
+    # understands the document.
+    version = payload.get("schema_version")
+    if (
+        type(version) is not int
+        or version not in SUPPORTED_OBSERVATION_SCHEMA_VERSIONS
+        or version < _AGENT_SESSIONS_SINCE
+    ):
+        return None
+    raw = payload.get("agent_session_ids")
+    if not isinstance(raw, list):
+        return None
+    return [item for item in raw if isinstance(item, str) and item]
 
 
 def _state_of(payload: Mapping[str, object]) -> CaptureState:
@@ -184,6 +226,7 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
         partition=_text(payload.get("partition")),
         expected_deployment=_text(payload.get("expected_deployment")),
         origin_deployment=_text(payload.get("origin_deployment")),
+        agent_session_ids=_agent_session_ids(payload),
     )
 
 
