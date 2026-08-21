@@ -1404,6 +1404,29 @@ syn claude-plugin global remove <name> <version>
 
 ---
 
+## 6.35 Functional Validation - GitHub App CLI
+
+> Added 2026-08-21 by the section 9.5 command-coverage check, which found this
+> was the ONE command group in `registry.ts` with no section here. The runbook
+> mentioned GitHub twenty times and exercised `syn github` zero times - all
+> twenty were about the App's configuration, not its CLI surface. A group with
+> no section is not a group that works; it is a group nobody looked at.
+
+```bash
+syn github repos
+```
+
+- [ ] `repos` lists repositories the App can reach, with owner, default branch,
+      private flag and installation id
+- [ ] The installation id matches the one configured for this tier
+- [ ] A repo the App was granted access to appears; one it was not does not
+
+The output is the App's view, not the org's. A repo missing here means the
+installation lacks access to it, which is the thing to check FIRST when a
+trigger never fires for a repo that plainly exists.
+
+---
+
 ## 6.4 Functional Validation - SeshMagic Session Storage
 
 > Added for the session-capture integration (syn137 #862/#863/#864, exporter
@@ -1870,6 +1893,7 @@ claude plugin update syntropic137@syntropic137
 | `/syn-triggers list` | Returns trigger list (may be empty) |
 | `/syn-run <workflow-id>` | Starts an execution (after workflows exist from Section 6) |
 | `/syn-observe <session-id> events` | Returns event timeline for a session from Section 6 |
+| `/syn-setup` | Onboarding guidance; must not reference removed commands or stale ports |
 
 - [ ] All commands above return results without errors
 - [ ] No commands reference deprecated field names (`window_cost_usd`) or removed subcommands (`syn workflow installed` - renamed to `syn workflow packages`)
@@ -1881,6 +1905,31 @@ Invoke these skills and verify they give correct guidance:
 - [ ] **`execution-control` skill**: Walk through pause/resume guidance - references valid CLI flags
 - [ ] **`observability` skill**: Query tool timeline for a session from Section 6 - session output uses server-rendered `*_display` fields (`total_cost_display`, `total_tokens_display`, `agent_model_display`, `duration_display`) per ADR-064, not client-formatted numbers
 - [ ] **`marketplace` skill**: Workflow install/list guidance uses `syn workflow packages` (not `syn workflow installed`) with a note that `syn workflow list` shows the live stack
+
+The plugin ships more skills than the three above. Every skill in
+`lib/syntropic137-claude-plugin/skills/` must appear here - the 2026-08-21
+section 9.5 sweep found eight that did not, which means nobody had checked
+whether they still described commands that exist.
+
+- [ ] **`setup`**: onboarding steps match the current `npx` flow and ports
+- [ ] **`syn-workflow`**: create/run/inspect guidance matches current flags
+- [ ] **`workflow-management`**: lifecycle guidance; no `syn workflow installed`
+- [ ] **`syn-marketplace`**: matches the `marketplace` skill, no drift between the pair
+- [ ] **`syn-triggers`**: uses `max_attempts` (not `max_fires`) and names the safety guards
+- [ ] **`syn-control`**: pause/resume/cancel flags match `syn control --help`
+- [ ] **`syn-insights`**: references endpoints that exist and cost fields that are current
+- [ ] **`syn-repo`**: repo add/assign guidance matches `syn repo --help`
+- [ ] **`organization`**: org/system/repo hierarchy guidance is current
+- [ ] **`github-automation`**: references `syn github repos` and real trigger presets
+- [ ] **`platform-ops`**: operational guidance names real containers and real ports
+- [ ] **`troubleshooting-workflow-failures`**: the failure modes it names still exist,
+      and the diagnostics it suggests still work
+
+> **A skill that names a removed command is worse than a missing skill.** It
+> reads as authoritative and sends the user somewhere that no longer exists.
+> `syn workflow installed` -> `syn workflow packages` and `max_fires` ->
+> `max_attempts` are both renames that already shipped, so both are live
+> candidates for stale guidance.
 
 ### Clean state note
 
