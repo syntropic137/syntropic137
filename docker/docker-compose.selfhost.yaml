@@ -9,6 +9,21 @@
 # See: ADR-034 - Test Infrastructure Architecture
 # See: ADR-060 - On-Demand Environment Creation
 
+# Project name, overriding the base compose default of
+# `syntropic137_${APP_ENVIRONMENT:-development}`. Without this an unset
+# APP_ENVIRONMENT gave a selfhost stack a `syntropic137_development` project
+# while its API reported `selfhost` and its agent network was
+# `syntropic137_selfhost_agent-net` - three names for one stack.
+#
+# To be precise about what the project name governs: container names here are
+# FIXED (`syn137-api` and friends) and every volume is explicitly named
+# (`syn137_db_data`, `syn137_minio_data`, ...), so neither is project-prefixed.
+# What is project-keyed is Compose OWNERSHIP and implicit resources such as the
+# docker-proxy network. That is why renaming the project cannot lose data, but
+# CAN collide on fixed container names when upgrading a stack started under the
+# old project - see the upgrade note in the justfile preflight.
+name: syntropic137_${APP_ENVIRONMENT:-selfhost}
+
 services:
   # ===========================================================================
   # DATABASE
@@ -192,7 +207,13 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID:-}
       - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME:-}
-      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
+      # Defaults to `selfhost`, matching selfhost.env.example and
+      # docker-compose.syntropic137.yaml. It used to default to `production`,
+      # so a stack brought up without setting it reported its sessions as
+      # syntropic137__production and derived the wrong 1Password vault - three
+      # files, two answers, and which one you got depended on the compose file
+      # you launched.
+      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-selfhost}
       # 1Password (optional).
       # op_resolver derives a PER-VAULT token name from APP_ENVIRONMENT
       # (syn137-beta -> OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA) and falls back to
@@ -225,7 +246,7 @@ services:
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
       - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-${PWD}}/workspaces
-      - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+      - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-selfhost}_agent-net
       # Envoy proxy URL for agent containers (must resolve on agent-net)
       - SYN_PROXY_URL=http://envoy-proxy:8081
     depends_on:
@@ -417,5 +438,5 @@ networks:
     name: syn137_internal
     driver: bridge
   agent-net:
-    name: syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+    name: syntropic137_${APP_ENVIRONMENT:-selfhost}_agent-net
     driver: bridge
