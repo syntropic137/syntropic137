@@ -22,8 +22,21 @@ if [ -f infra/.env ]; then
     set +a
 fi
 
-# 3. Derive vault name from APP_ENVIRONMENT (no separate OP_VAULT needed)
-case "${APP_ENVIRONMENT:-}" in
+# 3. Default the tier BEFORE deriving anything from it.
+#
+# This loader runs before Compose and cannot see Compose's defaults - they are
+# resolved inside Compose and never exported back to this shell. So an unset
+# APP_ENVIRONMENT used to fall through the case below to an empty vault, which
+# meant no service-account token was loaded and every vault-only setting was
+# silently missing. Defaulting in the compose file alone does NOT fix that;
+# the value has to exist here, in this shell, before the case runs.
+#
+# Exported so Compose sees the same value this script derived the vault from,
+# rather than resolving its own default independently and disagreeing.
+export APP_ENVIRONMENT="${APP_ENVIRONMENT:-selfhost}"
+
+# 4. Derive vault name from APP_ENVIRONMENT (no separate OP_VAULT needed)
+case "${APP_ENVIRONMENT}" in
     selfhost)    _OP_VAULT="syntropic137" ;;
     development) _OP_VAULT="syn137-dev" ;;
     production)  _OP_VAULT="syn137-prod" ;;

@@ -1216,6 +1216,46 @@ _selfhost-preflight:
     mkdir -p workspaces
     echo "  ✅ workspaces/"
 
+    # --- Legacy compose project (upgrade hazard) ---
+    # The selfhost overlay uses FIXED container names (syn137-api and friends),
+    # so if those containers are owned by a previous compose project, bringing
+    # the stack up now collides on the name instead of recreating them.
+    #
+    # Matched by NAME *and* owning project, not by project alone: the dev stack
+    # legitimately runs as `syntropic137_development`. An earlier version of
+    # this check looked only for containers under that project and fired on any
+    # machine with a dev stack up, which is most of them.
+    #
+    # Docker's --format uses Go templates, whose braces collide with just's own
+    # interpolation, so this uses filters only and never a template.
+    #
+    # Volumes are explicitly named (syn137_db_data and friends) and are never
+    # project-prefixed, so this is a rename to perform, not data to migrate.
+    STRAY_PROJECTS=""
+    for _proj in syntropic137_development syntropic137_production; do
+        if [ -n "$(docker ps -aq --filter 'name=^syn137-' --filter "label=com.docker.compose.project=${_proj}" 2>/dev/null)" ]; then
+            STRAY_PROJECTS="${STRAY_PROJECTS} ${_proj}"
+        fi
+    done
+    if [ -n "$STRAY_PROJECTS" ]; then
+        echo "  ❌ Selfhost containers (syn137-*) owned by a previous project:${STRAY_PROJECTS}"
+        echo "     This stack now runs as 'syntropic137_selfhost'. Starting it"
+        echo "     now would collide on those fixed container names."
+        echo ""
+        echo "     Bring the old project down first. Data volumes are"
+        echo "     explicitly named and are NOT removed by this:"
+        for _proj in ${STRAY_PROJECTS}; do
+            echo "       docker compose -p ${_proj} down"
+        done
+        echo ""
+        echo "     Do this while no workflow executions are running: agent"
+        echo "     containers on the old agent network cannot reach the"
+        echo "     recreated envoy-proxy on the new one."
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "  ✅ No selfhost containers under a stale compose project"
+    fi
+
     if [ "$ERRORS" -gt 0 ]; then
         echo ""
         echo "❌ ${ERRORS} pre-flight check(s) failed. Fix the above issues and retry."
