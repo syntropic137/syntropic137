@@ -62,9 +62,7 @@ it. ``--show-values`` opts out, deliberately, per invocation.
 from __future__ import annotations
 
 import argparse
-import inspect
 import os
-import re
 import sys
 import textwrap
 from dataclasses import dataclass, replace
@@ -72,7 +70,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
+from syn_shared.env_constants import (
+    ENV_APP_ENVIRONMENT,
+    ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
+)
+from syn_shared.settings.config import AppEnvironment
 from syn_shared.settings.env_file import parse_env_file
 from syn_shared.settings.op_client import fetch_op_item, op_available
 from syn_shared.settings.op_resolver import _ENV_TO_VAULT, _OP_ITEM_TITLE
@@ -84,12 +86,13 @@ from syn_shared.settings.session_store import (
 )
 from syn_shared.settings.workspace_images import (
     PINNED_DIGESTS,
+    PINNED_EXPORTER_VERSIONS,
     WorkspaceImageProvider,
     workspace_image_name,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Mapping
 
 __all__ = [
     "CaptureVerdict",
@@ -106,7 +109,6 @@ __all__ = [
     "resolver_tier",
 ]
 
-ENV_APP_ENVIRONMENT = "APP_ENVIRONMENT"
 
 # An environment absent from ``_ENV_TO_VAULT`` (test, offline, anything
 # mistyped) is reported as "no vault" rather than as the justfile summary's
@@ -127,8 +129,6 @@ _SECRET_NAMES: frozenset[str] = frozenset(
         ENV_SYN_SESSION_STORE_URL,
     }
 )
-
-_EXPORTER_VERSION = re.compile(r"apss-session-exporter (\d+\.\d+\.\d+)")
 
 
 class Source(StrEnum):
@@ -251,13 +251,21 @@ class DoctorReport:
     exporter_version: str | None
 
     @property
+    def findings(self) -> tuple[Finding, ...]:
+        """Every finding, in report order. The single source for the exit code."""
+        return (*_environment_findings(self), *_capture_findings(self))
+
+    @property
     def exit_code(self) -> int:
         """0 unless something is genuinely broken.
 
-        A missing session-store configuration is deliberately not broken: OFF is
-        the documented default, and an open store is a legitimate deployment.
+        A missing session-store configuration is deliberately NOT broken: OFF is
+        the documented default and an open store is a legitimate deployment, so
+        WARN must never fail the command. Only a value the application itself
+        would reject at startup earns a non-zero exit - otherwise operators
+        learn to ignore the exit code, and then it protects nothing.
         """
-        return 0
+        return 1 if any(f.severity is Severity.ERROR for f in self.findings) else 0
 
 
 # ---------------------------------------------------------------------------
@@ -283,8 +291,14 @@ def _holders(name: str, sources: EnvSources) -> list[tuple[Source, str]]:
 
 
 def _inert_sources(name: str, sources: EnvSources) -> tuple[Source, ...]:
-    """Files that hold ``name`` but that nothing on this path reads."""
-    if sources.infra_dotenv.get(name):
+    """Files that DECLARE ``name`` but that nothing on this path reads.
+
+    Membership, not truthiness: ``SYN_SESSION_STORE_URL=`` in infra/.env is a
+    declaration an operator can see in the file and reasonably expect to matter.
+    Hiding it because it happens to be blank is the same silence this command
+    exists to break.
+    """
+    if name in sources.infra_dotenv:
         return (Source.INFRA_DOTENV,)
     return ()
 
@@ -471,20 +485,9 @@ def classify_capture(settings: SessionStoreSettings) -> CaptureVerdict:
     return CaptureVerdict.OK
 
 
-def _exporter_version() -> str | None:
-    """Best-effort read of the exporter version recorded beside the omni pin.
-
-    Deliberately a source read, not a ``docker`` call: the doctor must work with
-    no daemon, no network and no registry credentials.
-    """
-    from syn_shared.settings import workspace_images
-
-    try:
-        source = inspect.getsource(workspace_images)
-    except OSError:
-        return None
-    match = _EXPORTER_VERSION.search(source)
-    return match.group(1) if match else None
+def _exporter_version(provider: WorkspaceImageProvider) -> str | None:
+    """The exporter version recorded beside the pin, or None if that image has none."""
+    return PINNED_EXPORTER_VERSIONS.get(provider)
 
 
 def build_report(sources: EnvSources) -> DoctorReport:
@@ -541,7 +544,7 @@ def build_report(sources: EnvSources) -> DoctorReport:
             ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES, sources, default="1"
         ),
         image_ref=image_ref,
-        exporter_version=_exporter_version(),
+        exporter_version=_exporter_version(provider),
     )
 
 
@@ -595,6 +598,26 @@ def _wrap_finding(finding: Finding) -> list[str]:
         initial_indent=prefix,
         subsequent_indent=" " * len(prefix),
     )
+
+
+_KNOWN_TIERS = ", ".join(member.value for member in AppEnvironment)
+
+
+def _environment_findings(report: DoctorReport) -> list[Finding]:
+    """Problems with the tier itself, which decides vault, deployment and network."""
+    tier = (report.app_environment.value or "").strip().lower()
+    if tier and tier not in {member.value for member in AppEnvironment}:
+        return [
+            Finding(
+                Severity.ERROR,
+                f"APP_ENVIRONMENT={tier!r} is not a known environment. Settings would "
+                f"reject it at startup, so nothing runs with this value. It also "
+                f"silently selects no 1Password vault, which is why an unusable tier "
+                f"can look like missing secrets rather than a typo. Known: "
+                f"{_KNOWN_TIERS}.",
+            )
+        ]
+    return []
 
 
 def _capture_findings(report: DoctorReport) -> list[Finding]:
@@ -699,6 +722,8 @@ def render(report: DoctorReport, *, show_values: bool) -> str:
     """Render the whole report as plain text."""
     lines: list[str] = ["Syntropic137 configuration doctor", ""]
     lines.extend(_environment_section(report))
+    for finding in _environment_findings(report):
+        lines.extend(_wrap_finding(finding))
     lines.append("")
 
     lines.append(f"Session capture: {report.capture.value}")
@@ -731,10 +756,6 @@ def render(report: DoctorReport, *, show_values: bool) -> str:
     return "\n".join(lines)
 
 
-def _severities(report: DoctorReport) -> Iterable[Severity]:
-    return (finding.severity for finding in _capture_findings(report))
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="just doctor",
@@ -754,15 +775,18 @@ def main(argv: list[str] | None = None) -> int:
         "--repo-root",
         type=Path,
         default=Path.cwd(),
-        help="Repository root to read .env and infra/.env from. Default: cwd.",
+        help=(
+            "Repository root whose .env and infra/.env are read. Default: cwd. This "
+            "changes which FILES are parsed, never the process environment - `just` "
+            "has already loaded the invoking root's .env by the time this runs, so "
+            "run from the root you mean to diagnose."
+        ),
     )
     args = parser.parse_args(argv)
 
     sources = collect_sources(args.repo_root, consult_vault=not args.no_1password)
     report = build_report(sources)
     print(render(report, show_values=args.show_values))
-    if any(severity is Severity.ERROR for severity in _severities(report)):
-        return 1
     return report.exit_code
 
 

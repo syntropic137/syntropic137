@@ -16,6 +16,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
+from syn_shared.env_constants import ENV_APP_ENVIRONMENT
 from syn_shared.settings.env_file import parse_env_file
 from syn_shared.settings.op_client import fetch_op_item, inject_fields, op_available
 
@@ -60,7 +61,7 @@ def resolve_op_secrets(env_file: str = ".env") -> None:
     candidates = parse_env_file(Path(env_file))
     candidates.update(os.environ)
 
-    app_env = candidates.get("APP_ENVIRONMENT", "").strip().lower()
+    app_env = candidates.get(ENV_APP_ENVIRONMENT, "").strip().lower()
     if not app_env or app_env in _SKIP_ENVIRONMENTS or app_env not in _ENV_TO_VAULT:
         logger.debug("APP_ENVIRONMENT=%r — skipping 1Password resolution", app_env or "(not set)")
         return

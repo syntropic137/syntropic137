@@ -8,6 +8,8 @@ report that got the winner wrong would be worse than no report.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from syn_shared.doctor import (
@@ -16,6 +18,8 @@ from syn_shared.doctor import (
     Source,
     _load_vault,
     build_report,
+    collect_sources,
+    main,
     render,
     resolve_variable,
     resolver_tier,
@@ -25,6 +29,15 @@ from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
 )
+from syn_shared.settings.workspace_images import (
+    PINNED_DIGESTS,
+    PINNED_EXPORTER_VERSIONS,
+    WorkspaceImageProvider,
+    workspace_image_name,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.unit
 
@@ -160,9 +173,11 @@ def test_an_empty_environment_value_beats_a_populated_dotenv() -> None:
     """
     result = resolve_variable(_NAME, _sources(environ={_NAME: ""}, dotenv={_NAME: "from-file"}))
     assert result.empty_override is True
+    assert result.source is Source.SHELL
+    assert result.inferred is False
     assert result.value is None
     assert result.is_set is False
-    assert Source.DOTENV in result.shadowed
+    assert result.shadowed == (Source.DOTENV,)
 
 
 def test_the_vault_replaces_an_empty_environment_value() -> None:
@@ -282,7 +297,12 @@ def test_usable_label_is_accepted() -> None:
     report = build_report(_sources(environ={ENV_SYN_SESSION_STORE_LABEL: "prod-west"}))
     assert report.label_declared is True
     assert report.label_usable is True
-    assert "would be ignored" not in render(report, show_values=False)
+    text = render(report, show_values=False)
+    # Assert against the string the code actually emits. "would be ignored"
+    # appears nowhere in the module, so the old assertion held whether or not
+    # the warning was rendered.
+    assert "IGNORED" not in text
+    assert "prod-west" in text
 
 
 def test_invalid_label_is_reported_as_ignored_without_echoing_it() -> None:
@@ -389,10 +409,23 @@ def test_an_emptied_app_environment_names_no_vault_either() -> None:
 
 
 def test_pinned_image_and_exporter_version_are_reported() -> None:
+    """Exact, not "some dotted string".
+
+    The version used to be recovered by searching the pin's prose, which keeps
+    previous pins on purpose - so a loose assertion passed while the report
+    named a historical exporter.
+    """
     report = build_report(_sources())
-    assert report.image_ref.startswith("omni-agent-workspace@sha256:")
-    assert report.exporter_version is not None
-    assert report.exporter_version.count(".") == 2
+    assert report.image_ref == (
+        f"{workspace_image_name(WorkspaceImageProvider.OMNI_AGENT)}"
+        f"@{PINNED_DIGESTS[WorkspaceImageProvider.OMNI_AGENT]}"
+    )
+    assert report.exporter_version == PINNED_EXPORTER_VERSIONS[WorkspaceImageProvider.OMNI_AGENT]
+
+
+def test_every_pinned_exporter_version_belongs_to_a_pinned_image() -> None:
+    """A version recorded for an image that is no longer pinned describes nothing."""
+    assert set(PINNED_EXPORTER_VERSIONS) <= set(PINNED_DIGESTS)
 
 
 def test_report_reads_the_collected_sources_not_the_ambient_environment(
@@ -472,3 +505,156 @@ def test_no_vault_is_read_when_app_environment_names_none(
     )
     assert _load_vault("") is None
     assert _load_vault("test") is None
+
+
+# ---------------------------------------------------------------------------
+# The command boundary
+#
+# Everything above tests pure functions. These tests exist because the pure
+# functions being right is not the same claim as `just doctor` being right:
+# argument parsing, file reading and the exit code are what an operator and a
+# CI job actually meet.
+# ---------------------------------------------------------------------------
+
+
+def _write_repo(root: Path, *, dotenv: str = "", infra_dotenv: str = "") -> Path:
+    (root / "infra").mkdir(parents=True, exist_ok=True)
+    (root / ".env").write_text(dotenv, encoding="utf-8")
+    (root / "infra" / ".env").write_text(infra_dotenv, encoding="utf-8")
+    return root
+
+
+def test_collect_sources_reads_both_env_files_and_skips_the_vault_when_asked(
+    tmp_path: Path,
+) -> None:
+    root = _write_repo(
+        tmp_path,
+        dotenv="APP_ENVIRONMENT=selfhost\nSYN_SESSION_STORE_LABEL=mac-mini\n",
+        infra_dotenv="SYN_SESSION_STORE_AUTH_TOKEN=inert\n",
+    )
+    sources = collect_sources(root, consult_vault=False)
+    assert sources.dotenv["SYN_SESSION_STORE_LABEL"] == "mac-mini"
+    assert sources.infra_dotenv[ENV_SYN_SESSION_STORE_AUTH_TOKEN] == "inert"
+    assert sources.vault_consulted is False
+
+
+def test_collect_sources_survives_a_repo_with_no_env_files(tmp_path: Path) -> None:
+    """A diagnostic that dies on a fresh clone is useless exactly when it is needed."""
+    sources = collect_sources(tmp_path, consult_vault=False)
+    assert sources.dotenv == {}
+    assert sources.infra_dotenv == {}
+
+
+def test_collect_sources_selects_the_vault_from_the_files_it_was_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tier that picks the vault comes from the same resolution as the report."""
+    asked: list[str] = []
+    monkeypatch.delenv("APP_ENVIRONMENT", raising=False)
+    monkeypatch.setattr("syn_shared.doctor.op_available", lambda: True)
+    monkeypatch.setattr(
+        "syn_shared.doctor.fetch_op_item",
+        lambda vault, _title: asked.append(vault) or {"fields": []},
+    )
+    root = _write_repo(tmp_path, dotenv="APP_ENVIRONMENT=production\n")
+    collect_sources(root)
+    assert asked == ["syn137-prod"]
+
+
+def test_main_prints_the_report_and_exits_zero_when_capture_is_off(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_repo(tmp_path, dotenv="APP_ENVIRONMENT=selfhost\n")
+    code = main(["--no-1password", "--repo-root", str(tmp_path)])
+    assert code == 0
+    assert "Syntropic137 configuration doctor" in capsys.readouterr().out
+
+
+def test_main_exits_zero_on_a_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """WARN must never fail the command - capture-off is a legitimate posture.
+
+    Asserted through main(), not through the report property, so an exit-code
+    regression in the command itself is caught.
+    """
+    monkeypatch.setenv(ENV_SYN_SESSION_STORE_URL, "https://s.example.com")
+    monkeypatch.delenv(ENV_SYN_SESSION_STORE_AUTH_TOKEN, raising=False)
+    _write_repo(tmp_path, dotenv="APP_ENVIRONMENT=selfhost\n")
+    assert main(["--no-1password", "--repo-root", str(tmp_path)]) == 0
+    assert "Session capture: WARN" in capsys.readouterr().out
+
+
+def test_main_exits_one_on_an_unusable_app_environment(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Settings would reject this at startup, so nothing runs with it."""
+    monkeypatch.setenv("APP_ENVIRONMENT", "prodution")
+    _write_repo(tmp_path)
+    assert main(["--no-1password", "--repo-root", str(tmp_path)]) == 1
+    assert "not a known environment" in capsys.readouterr().out
+
+
+def test_main_redacts_secrets_by_default_and_prints_them_only_when_asked(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Redaction has to hold through argument parsing, not just through render()."""
+    url = "https://token@sessions.example.com/tenant"
+    monkeypatch.setenv(ENV_SYN_SESSION_STORE_URL, url)
+    _write_repo(tmp_path, dotenv="APP_ENVIRONMENT=selfhost\n")
+
+    assert main(["--no-1password", "--repo-root", str(tmp_path)]) == 0
+    assert url not in capsys.readouterr().out
+
+    assert main(["--no-1password", "--repo-root", str(tmp_path), "--show-values"]) == 0
+    assert url in capsys.readouterr().out
+
+
+def test_main_never_consults_1password_with_the_offline_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "syn_shared.doctor.op_available",
+        lambda: pytest.fail("--no-1password must not reach op"),
+    )
+    _write_repo(tmp_path, dotenv="APP_ENVIRONMENT=production\n")
+    assert main(["--no-1password", "--repo-root", str(tmp_path)]) == 0
+
+
+def test_main_rejects_an_unknown_flag_with_the_argparse_convention(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--not-a-flag"])
+    assert excinfo.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# Legend
+# ---------------------------------------------------------------------------
+
+
+def test_the_inferred_legend_appears_only_when_something_is_inferred() -> None:
+    inferred = build_report(
+        _sources(
+            environ={ENV_SYN_SESSION_STORE_LABEL: "same"},
+            dotenv={ENV_SYN_SESSION_STORE_LABEL: "same"},
+        )
+    )
+    assert "inferred" in render(inferred, show_values=False)
+    assert "matched by value, not observed" in render(inferred, show_values=False)
+
+    certain = build_report(_sources(environ={ENV_SYN_SESSION_STORE_LABEL: "only-shell"}))
+    assert "matched by value, not observed" not in render(certain, show_values=False)
+
+
+def test_the_inert_legend_appears_only_when_something_is_inert() -> None:
+    inert = build_report(_sources(infra_dotenv={ENV_SYN_SESSION_STORE_URL: "https://x.test"}))
+    assert "is not the env_file of any Settings class" in render(inert, show_values=False)
+
+    clean = build_report(_sources())
+    assert "is not the env_file of any Settings class" not in render(clean, show_values=False)
+
+
+def test_an_empty_infra_declaration_is_still_reported() -> None:
+    """`NAME=` is a line an operator can see and reasonably expect to matter."""
+    result = resolve_variable(_NAME, _sources(infra_dotenv={_NAME: ""}))
+    assert result.inert == (Source.INFRA_DOTENV,)

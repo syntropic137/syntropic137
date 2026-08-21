@@ -24,6 +24,8 @@ from pathlib import Path
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from syn_shared.env_constants import ENV_APP_ENVIRONMENT
+
 _logger = logging.getLogger(__name__)
 
 
@@ -213,7 +215,7 @@ class StorageSettings(BaseSettings):
     def warn_local_provider_in_production(self) -> StorageSettings:
         """Warn if using LOCAL storage outside test/offline mode."""
         if self.provider == StorageProvider.LOCAL:
-            app_env = os.environ.get("APP_ENVIRONMENT", "development").lower()
+            app_env = os.environ.get(ENV_APP_ENVIRONMENT, "development").lower()
             if app_env not in ("test", "offline"):
                 _logger.warning(
                     "SYN_STORAGE_PROVIDER=local — artifact storage uses filesystem. "

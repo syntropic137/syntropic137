@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 
+from syn_shared.env_constants import ENV_APP_ENVIRONMENT
 from syn_shared.settings.git_identity import GitIdentitySettings
 
 
@@ -32,7 +33,7 @@ class GitIdentityResolver:
         if env_settings.is_configured:
             return env_settings
 
-        if os.getenv("APP_ENVIRONMENT", "development") == "development":
+        if os.getenv(ENV_APP_ENVIRONMENT, "development") == "development":
             local_identity = self._from_local_git_config()
             if local_identity:
                 return local_identity
