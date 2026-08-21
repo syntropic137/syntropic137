@@ -26,14 +26,30 @@ Resolution order (verified against the code, not assumed)
 4. the pydantic field default.
 
 ``infra/.env`` is NOT read by the pydantic ``Settings`` classes (see
-``InfraSettings``); it reaches recipes through ``scripts/resolve_infra_env.py``.
-It is reported for completeness and flagged as file-only.
+``InfraSettings``); it reaches only the recipes that go through
+``scripts/resolve_infra_env.py``. It can therefore never supply the effective
+value of a name this report resolves, so it is never a winner and never a
+shadowed loser: it is listed separately as INERT, a copy nothing on this path
+reads. Reporting it as the winner would let an infra-only
+``SYN_SESSION_STORE_URL`` show capture as ON while it is off.
 
-A caveat this report is explicit about: the justfile sets ``dotenv-load``, so
-under ``just doctor`` the root ``.env`` has ALREADY been merged into the process
-environment. A name is therefore attributed to ``.env`` when the environment
-value equals the file value, and to ``shell`` only when the environment holds a
-value no file explains.
+Two caveats this report is explicit about rather than papering over:
+
+*Attribution under ``just`` is inferred, not proven.* The justfile sets
+``dotenv-load``, so the root ``.env`` has ALREADY been merged into the process
+environment by the time a recipe runs. A name is attributed to ``.env`` when the
+environment value equals the file value, and to ``shell`` only when the
+environment holds a value no file explains - but a shell export of a byte-identical
+value is indistinguishable from the file having supplied it. Such a line is marked
+``inferred`` so the report never claims more than it knows. The vault is NOT a
+candidate explanation here: this process never calls ``resolve_op_secrets``, so
+nothing in ``os.environ`` can have come from 1Password, however the values compare.
+
+*An explicitly empty environment variable is a real value, not an absence.*
+``inject_fields`` treats ``""`` as absent and writes the vault field over it, but
+if the vault holds nothing then pydantic reads that ``""`` from ``os.environ``
+before it ever opens its ``env_file``. ``SYN_SESSION_STORE_URL=`` in the shell
+therefore beats a populated ``.env`` line and capture is OFF. The report says so.
 
 Redaction
 ---------
@@ -83,9 +99,11 @@ __all__ = [
     "VariableReport",
     "build_report",
     "classify_capture",
+    "collect_sources",
     "main",
     "render",
     "resolve_variable",
+    "resolver_tier",
 ]
 
 ENV_APP_ENVIRONMENT = "APP_ENVIRONMENT"
@@ -168,9 +186,22 @@ class VariableReport:
     source: Source
     value: str | None
     is_secret: bool
-    #: Sources that also hold this name but lost. Reported so a shadowed value
-    #: is visible rather than mysterious.
+    #: Sources that also hold this name, are genuinely read on this path, and
+    #: lost. Reported so a shadowed value is visible rather than mysterious.
     shadowed: tuple[Source, ...]
+    #: Sources that hold this name but are not read at all on this path, so they
+    #: never competed. ``infra/.env`` is the only one today. Kept apart from
+    #: ``shadowed`` because "lost a race" and "was never in the race" are
+    #: different facts, and conflating them is how an operator edits the file
+    #: that was never going to matter.
+    inert: tuple[Source, ...] = ()
+    #: True when ``.env`` could equally be a byte-identical shell export. See
+    #: the module docstring: presence alone cannot separate them under ``just``.
+    inferred: bool = False
+    #: True when the process environment holds this name as an empty string and
+    #: no vault value replaced it. The empty value is what pydantic reads, so it
+    #: beats any file - the variable is off, not merely unconfigured.
+    empty_override: bool = False
     #: Set for a non-secret value that still must not be echoed - see
     #: ``withheld_note``. Independent of ``is_secret`` so the reason survives.
     withhold: bool = False
@@ -181,6 +212,8 @@ class VariableReport:
         return self.value is not None and self.value != ""
 
     def display_value(self, *, show_values: bool) -> str:
+        if self.empty_override:
+            return "(set to empty - overrides every file)"
         if not self.is_set:
             return "(unset)"
         if self.withhold and not show_values:
@@ -233,7 +266,12 @@ class DoctorReport:
 
 
 def _holders(name: str, sources: EnvSources) -> list[tuple[Source, str]]:
-    """Every (source, value) pair holding ``name``, in real precedence order."""
+    """Every (source, value) pair that can actually SUPPLY ``name``, in precedence order.
+
+    ``infra/.env`` is deliberately absent: no ``Settings`` class lists it as an
+    ``env_file`` and ``just doctor`` does not export it, so it can never be the
+    effective value. It is surfaced separately by ``_inert_sources``.
+    """
     found: list[tuple[Source, str]] = []
     if name in sources.environ:
         found.append((Source.SHELL, sources.environ[name]))
@@ -241,26 +279,35 @@ def _holders(name: str, sources: EnvSources) -> list[tuple[Source, str]]:
         found.append((Source.ONEPASSWORD, sources.vault[name]))
     if name in sources.dotenv:
         found.append((Source.DOTENV, sources.dotenv[name]))
-    if name in sources.infra_dotenv:
-        found.append((Source.INFRA_DOTENV, sources.infra_dotenv[name]))
     return found
 
 
-def _attribute_environ(name: str, environ_value: str, sources: EnvSources) -> Source:
+def _inert_sources(name: str, sources: EnvSources) -> tuple[Source, ...]:
+    """Files that hold ``name`` but that nothing on this path reads."""
+    if sources.infra_dotenv.get(name):
+        return (Source.INFRA_DOTENV,)
+    return ()
+
+
+def _attribute_environ(name: str, environ_value: str, sources: EnvSources) -> tuple[Source, bool]:
     """Decide which source put ``environ_value`` into the process environment.
 
+    Returns the source and whether the answer is INFERRED rather than proven.
+
     ``just`` loads the root ``.env`` before a recipe runs (``set dotenv-load``),
-    so a file value is indistinguishable from a shell export by presence alone.
-    Matching on the value is the only signal available, and it is the right one:
-    if the file and the environment agree, the file explains the value.
+    so a file value is indistinguishable from a shell export of the same bytes.
+    Matching on the value is the only signal available, and it is a real one -
+    but it is evidence of compatibility, not of origin, so the caller marks the
+    line accordingly instead of asserting a source it cannot know.
+
+    1Password is NOT a candidate. This process never calls
+    ``resolve_op_secrets``, so no vault field was injected into ``os.environ``
+    here no matter how the values compare; claiming otherwise would name a
+    source that did nothing and would hide the real one.
     """
     if sources.dotenv.get(name) == environ_value:
-        return Source.DOTENV
-    if sources.infra_dotenv.get(name) == environ_value:
-        return Source.INFRA_DOTENV
-    if sources.vault is not None and sources.vault.get(name) == environ_value:
-        return Source.ONEPASSWORD
-    return Source.SHELL
+        return Source.DOTENV, True
+    return Source.SHELL, False
 
 
 def resolve_variable(
@@ -276,33 +323,65 @@ def resolve_variable(
     """
     is_secret = name in _SECRET_NAMES
     holders = _holders(name, sources)
-    present = [(source, value) for source, value in holders if value != ""]
+    inert = _inert_sources(name, sources)
+    environ_value = sources.environ.get(name)
+    vault_value = sources.vault.get(name) if sources.vault is not None else None
+
+    present = [(holder, value) for holder, value in holders if value != ""]
+
+    if environ_value == "" and not vault_value and present:
+        # Explicitly empty in the process environment, nothing in the vault to
+        # displace it, and something else does hold a value. `inject_fields`
+        # skips the name, pydantic reads os.environ before it opens its
+        # env_file, and the empty string is what the settings see. The populated
+        # `.env` line does NOT win, and reporting that it did would show capture
+        # ON for an operator who had just turned it off.
+        #
+        # Empty with nothing to override is not an override at all - it falls
+        # through to the ordinary unset path below.
+        source, inferred = _attribute_environ(name, "", sources)
+        losers = tuple(holder for holder, _ in present if holder is not source)
+        return VariableReport(
+            name,
+            source,
+            None,
+            is_secret,
+            losers,
+            inert=inert,
+            inferred=inferred,
+            empty_override=True,
+        )
 
     if not present:
         # A name present but EMPTY everywhere is the same as unset: the
         # session-store validators turn "" into None on purpose.
-        losers = tuple(source for source, _ in holders)
+        losers = tuple(holder for holder, _ in holders)
         if default is not None:
-            return VariableReport(name, Source.DEFAULT, default, is_secret, losers)
-        return VariableReport(name, Source.UNSET, None, is_secret, losers)
+            return VariableReport(name, Source.DEFAULT, default, is_secret, losers, inert=inert)
+        return VariableReport(name, Source.UNSET, None, is_secret, losers, inert=inert)
 
-    winner_source, winner_value = present[0]
-    if winner_source is Source.SHELL:
-        winner_source = _attribute_environ(name, winner_value, sources)
-    elif winner_source is Source.INFRA_DOTENV:
-        # infra/.env is not an env_file of any Settings class; it only reaches a
-        # process that was launched through a justfile recipe.
-        pass
+    raw_winner, winner_value = present[0]
+    winner_source = raw_winner
+    inferred = False
+    if raw_winner is Source.SHELL:
+        winner_source, inferred = _attribute_environ(name, winner_value, sources)
 
     # A value that reached os.environ FROM a file is one holder, not two: the
     # environ entry and the file entry are the same fact. Excluding both the raw
     # holder and the source it was attributed to keeps ".env (also set in: .env)"
     # off the report.
-    raw_winner = present[0][0]
     shadowed = tuple(
-        source for source, _ in holders if source is not raw_winner and source is not winner_source
+        holder for holder, _ in holders if holder is not raw_winner and holder is not winner_source
     )
-    return VariableReport(name, winner_source, winner_value, is_secret, shadowed)
+    return VariableReport(
+        name,
+        winner_source,
+        winner_value,
+        is_secret,
+        shadowed,
+        inert=inert,
+        inferred=inferred,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -310,31 +389,59 @@ def resolve_variable(
 # ---------------------------------------------------------------------------
 
 
-def _load_vault(app_env: str) -> Mapping[str, str] | None:
-    """Read the vault item, or return None when 1Password is not consulted.
+def _vault_fields(item: Mapping[str, object]) -> Mapping[str, str]:
+    """Flatten a 1Password item into label -> value exactly as the runtime sees it.
 
-    Never required. ``op`` missing, unauthenticated, unreachable or slow all
-    land on None, and the report says so instead of failing.
+    `inject_fields` skips empty values and never overwrites a label it has
+    already injected, so on a duplicated label the FIRST non-empty field is what
+    the running process gets. Last-write-wins here would make the doctor name a
+    value nothing ever received - the exact failure it exists to prevent.
     """
-    if app_env not in _ENV_TO_VAULT:
-        return None
-    if not op_available():
-        return None
-    item = fetch_op_item(_ENV_TO_VAULT[app_env], _OP_ITEM_TITLE)
-    if item is None:
-        return None
-    fields: object = item.get("fields", [])
+    fields = item.get("fields", [])
     if not isinstance(fields, list):
-        return None
+        return {}
     values: dict[str, str] = {}
     for field in fields:  # pyright: ignore[reportUnknownVariableType]
         if not isinstance(field, dict):
             continue
         label: object = field.get("label", "")  # pyright: ignore[reportUnknownMemberType]
         value: object = field.get("value", "")  # pyright: ignore[reportUnknownMemberType]
-        if isinstance(label, str) and isinstance(value, str) and label.strip():
-            values[label.strip()] = value
+        if isinstance(label, str) and isinstance(value, str) and label.strip() and value:
+            values.setdefault(label.strip(), value)
     return values
+
+
+def _load_vault(app_env: str) -> Mapping[str, str] | None:
+    """Read the vault item, or return None when 1Password is not consulted.
+
+    Never required. An unmapped environment, `op` missing, unauthenticated,
+    unreachable or slow all land on None, and the report says so instead of
+    failing. A diagnostic that dies when a dependency is absent is useless
+    exactly when it is needed.
+    """
+    if app_env not in _ENV_TO_VAULT or not op_available():
+        return None
+    item = fetch_op_item(_ENV_TO_VAULT[app_env], _OP_ITEM_TITLE)
+    if item is None:
+        return None
+    return _vault_fields(item)
+
+
+def resolver_tier(sources: EnvSources) -> str:
+    """The APP_ENVIRONMENT that `resolve_op_secrets` would act on, or "".
+
+    Empty means the resolver returns before it looks a vault up, so no vault is
+    read. Deliberately NOT the pydantic default: `AppEnvironment` falls back to
+    development, but the 1Password resolver never does.
+
+    Both the vault fetch and the reported vault name go through this one
+    function so they cannot disagree - that split is exactly how the report came
+    to claim `syn137-dev` while saying 1Password was not consulted.
+    """
+    app_environment = resolve_variable(ENV_APP_ENVIRONMENT, sources, default="development")
+    if app_environment.source is Source.DEFAULT or app_environment.empty_override:
+        return ""
+    return (app_environment.value or "").strip().lower()
 
 
 def collect_sources(repo_root: Path, *, consult_vault: bool = True) -> EnvSources:
@@ -343,8 +450,15 @@ def collect_sources(repo_root: Path, *, consult_vault: bool = True) -> EnvSource
     dotenv = parse_env_file(repo_root / ".env")
     infra_dotenv = parse_env_file(repo_root / "infra" / ".env")
 
-    app_env = (environ.get(ENV_APP_ENVIRONMENT) or dotenv.get(ENV_APP_ENVIRONMENT) or "").strip()
-    vault = _load_vault(app_env.lower()) if consult_vault else None
+    # The vault is one more candidate source, so it has to be fetched before the
+    # EnvSources is complete - but which vault depends on APP_ENVIRONMENT, which
+    # is resolved from the other three. Resolve it against a vault-less view
+    # first: APP_ENVIRONMENT is never a vault field (it selects the vault), so
+    # nothing is lost.
+    without_vault = EnvSources(
+        environ=environ, dotenv=dotenv, infra_dotenv=infra_dotenv, vault=None
+    )
+    vault = _load_vault(resolver_tier(without_vault)) if consult_vault else None
     return EnvSources(environ=environ, dotenv=dotenv, infra_dotenv=infra_dotenv, vault=vault)
 
 
@@ -377,7 +491,14 @@ def build_report(sources: EnvSources) -> DoctorReport:
     """Turn raw sources into the structured report. Pure - no I/O."""
     app_environment = resolve_variable(ENV_APP_ENVIRONMENT, sources, default="development")
     tier = (app_environment.value or "development").strip().lower()
-    vault = _ENV_TO_VAULT.get(tier)
+
+    # The vault is NOT derived from the defaulted tier. `resolve_op_secrets`
+    # returns early on an empty APP_ENVIRONMENT, before it ever looks the vault
+    # up, so with the variable unset no vault is read at all - naming syn137-dev
+    # would advertise an association the runtime never makes. The DEPLOYMENT
+    # identity does use the default, because `AppEnvironment` really does fall
+    # back to development and that is what gets stamped on a captured session.
+    vault = _ENV_TO_VAULT.get(resolver_tier(sources))
 
     store_url = resolve_variable(ENV_SYN_SESSION_STORE_URL, sources)
     store_token = resolve_variable(ENV_SYN_SESSION_STORE_AUTH_TOKEN, sources)
@@ -444,10 +565,16 @@ _NAME_WIDTH = 28
 def _variable_line(report: VariableReport, *, show_values: bool) -> str:
     name = report.name.ljust(_NAME_WIDTH)
     line = f"    {name} = {report.display_value(show_values=show_values)}"
-    line += f"  [from: {report.source.value}]"
+    origin = report.source.value
+    if report.inferred:
+        origin += ", inferred"
+    line += f"  [from: {origin}]"
     if report.shadowed:
         also = ", ".join(source.value for source in report.shadowed)
         line += f"  (also set in: {also} - not used)"
+    if report.inert:
+        also = ", ".join(source.value for source in report.inert)
+        line += f"  (also set in: {also} - never read on this path)"
     return line
 
 
@@ -476,8 +603,8 @@ def _capture_findings(report: DoctorReport) -> list[Finding]:
         findings.append(
             Finding(
                 Severity.INFO,
-                "Session capture OFF - no SYN_SESSION_STORE_URL is set. This is the "
-                "default and it is fine: nothing is injected into workspace "
+                "Session capture OFF - SYN_SESSION_STORE_URL holds no value. This is "
+                "the default and it is fine: nothing is injected into workspace "
                 "containers and behaviour is identical to having no store at all.",
             )
         )
@@ -512,30 +639,66 @@ def _capture_findings(report: DoctorReport) -> list[Finding]:
     return findings
 
 
+_INFERRED_LEGEND = (
+    'A source marked "inferred" was matched by value, not observed: `just` sets dotenv-load, so '
+    ".env is already in the process environment and a shell export of the same bytes looks "
+    "identical. The value is right either way; only which file to edit is uncertain."
+)
+
+_INERT_LEGEND = (
+    'A source marked "never read on this path" holds the name but cannot supply it: infra/.env '
+    "is not the env_file of any Settings class and reaches only the recipes that export it "
+    "explicitly. Editing it will not change the value above."
+)
+
+
+def _environment_section(report: DoctorReport) -> list[str]:
+    if report.vault:
+        vault_line = report.vault
+    elif report.app_environment.source is Source.DEFAULT or report.app_environment.empty_override:
+        vault_line = "(none - APP_ENVIRONMENT is unset, so vault resolution is skipped entirely)"
+    else:
+        vault_line = "(none - this environment skips 1Password resolution)"
+
+    lines = [
+        "Environment",
+        _variable_line(report.app_environment, show_values=True),
+        _plain_line("1Password vault", vault_line),
+        _plain_line("deployment identity", report.deployment),
+    ]
+    if report.vault_consulted:
+        lines.append(_plain_line("vault item", f"{_OP_ITEM_TITLE} (read)"))
+        return lines
+    lines.append(_plain_line("vault item", "1Password not consulted"))
+    lines.append(
+        "         APP_ENVIRONMENT names no vault, or op is missing, not "
+        "authenticated, or unreachable."
+    )
+    lines.append("         Every other line below is still accurate for non-vault sources.")
+    return lines
+
+
+def _legend(report: DoctorReport) -> list[str]:
+    """Explain the two annotations that would otherwise read as hedging."""
+    variables = (
+        report.app_environment,
+        report.store_url,
+        report.store_token,
+        report.store_label,
+        report.dispatch_concurrency,
+    )
+    lines: list[str] = []
+    if any(variable.inferred for variable in variables):
+        lines.extend(_wrap_finding(Finding(Severity.INFO, _INFERRED_LEGEND)))
+    if any(variable.inert for variable in variables):
+        lines.extend(_wrap_finding(Finding(Severity.INFO, _INERT_LEGEND)))
+    return lines
+
+
 def render(report: DoctorReport, *, show_values: bool) -> str:
     """Render the whole report as plain text."""
     lines: list[str] = ["Syntropic137 configuration doctor", ""]
-
-    lines.append("Environment")
-    lines.append(_variable_line(report.app_environment, show_values=True))
-    lines.append(
-        _plain_line(
-            "1Password vault",
-            report.vault
-            if report.vault
-            else "(none - this environment skips 1Password resolution)",
-        )
-    )
-    lines.append(_plain_line("deployment identity", report.deployment))
-    if report.vault_consulted:
-        lines.append(_plain_line("vault item", f"{_OP_ITEM_TITLE} (read)"))
-    else:
-        lines.append(_plain_line("vault item", "1Password not consulted"))
-        lines.append(
-            "         op is missing, not authenticated, unreachable, or this "
-            "environment has no vault."
-        )
-        lines.append("         Every other line below is still accurate for non-vault sources.")
+    lines.extend(_environment_section(report))
     lines.append("")
 
     lines.append(f"Session capture: {report.capture.value}")
@@ -562,6 +725,7 @@ def render(report: DoctorReport, *, show_values: bool) -> str:
     )
     lines.append("")
 
+    lines.extend(_legend(report))
     if not show_values:
         lines.append("Secret values are redacted. Re-run with --show-values to print them.")
     return "\n".join(lines)

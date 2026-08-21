@@ -14,9 +14,11 @@ from syn_shared.doctor import (
     CaptureVerdict,
     EnvSources,
     Source,
+    _load_vault,
     build_report,
     render,
     resolve_variable,
+    resolver_tier,
 )
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
@@ -74,14 +76,60 @@ def test_environ_value_matching_dotenv_is_attributed_to_dotenv() -> None:
         _sources(environ={_NAME: "same"}, dotenv={_NAME: "same"}),
     )
     assert result.source is Source.DOTENV
+    # A shell export of the same bytes is indistinguishable, so the report must
+    # not claim certainty it does not have.
+    assert result.inferred is True
 
 
-def test_environ_value_matching_infra_dotenv_is_attributed_to_infra() -> None:
+def test_shell_value_no_file_matches_is_not_inferred() -> None:
+    result = resolve_variable(
+        _NAME,
+        _sources(environ={_NAME: "from-shell"}, dotenv={_NAME: "other"}),
+    )
+    assert result.source is Source.SHELL
+    assert result.inferred is False
+
+
+def test_a_vault_value_equal_to_the_environment_is_not_credited_with_supplying_it() -> None:
+    """The doctor never calls `resolve_op_secrets`, so no vault field is in os.environ.
+
+    Crediting 1Password on a value match would name a source that did nothing
+    and would drop the real one from the report.
+    """
+    result = resolve_variable(
+        _NAME,
+        _sources(environ={_NAME: "same"}, vault={_NAME: "same"}),
+    )
+    assert result.source is Source.SHELL
+    assert Source.ONEPASSWORD in result.shadowed
+
+
+def test_infra_dotenv_never_explains_the_environment() -> None:
+    """`just` loads the root .env only; infra/.env is not exported to a recipe.
+
+    Attributing the value to infra/.env would send an operator to edit a file
+    that has no effect on it.
+    """
     result = resolve_variable(
         _NAME,
         _sources(environ={_NAME: "same"}, infra_dotenv={_NAME: "same"}),
     )
-    assert result.source is Source.INFRA_DOTENV
+    assert result.source is Source.SHELL
+    assert result.inert == (Source.INFRA_DOTENV,)
+    assert Source.INFRA_DOTENV not in result.shadowed
+
+
+def test_infra_dotenv_alone_can_never_be_the_effective_value() -> None:
+    """No Settings class lists infra/.env as an env_file.
+
+    Letting it win would report session capture as ON for an operator whose only
+    copy of the URL sits in a file the API never opens.
+    """
+    report = build_report(_sources(infra_dotenv={ENV_SYN_SESSION_STORE_URL: "https://x.test"}))
+    assert report.capture is CaptureVerdict.OFF
+    assert report.store_url.source is Source.UNSET
+    assert report.store_url.inert == (Source.INFRA_DOTENV,)
+    assert "never read on this path" in render(report, show_values=False)
 
 
 def test_dotenv_only_wins_when_environment_is_empty() -> None:
@@ -96,11 +144,44 @@ def test_vault_only_is_reported_as_onepassword() -> None:
     assert result.value == "from-vault"
 
 
-def test_empty_string_anywhere_is_treated_as_unset() -> None:
+def test_empty_string_everywhere_is_treated_as_unset() -> None:
     """`SYN_SESSION_STORE_URL=` in a template must mean disabled, not enabled."""
     result = resolve_variable(_NAME, _sources(environ={_NAME: ""}, dotenv={_NAME: ""}))
     assert result.source is Source.UNSET
     assert result.value is None
+
+
+def test_an_empty_environment_value_beats_a_populated_dotenv() -> None:
+    """`SYN_SESSION_STORE_URL= just doctor` turns capture OFF, and must report OFF.
+
+    pydantic reads os.environ before it opens its env_file, so the empty string
+    is what the settings see. Reporting the .env line as the winner would tell
+    an operator capture is ON immediately after they turned it off.
+    """
+    result = resolve_variable(_NAME, _sources(environ={_NAME: ""}, dotenv={_NAME: "from-file"}))
+    assert result.empty_override is True
+    assert result.value is None
+    assert result.is_set is False
+    assert Source.DOTENV in result.shadowed
+
+
+def test_the_vault_replaces_an_empty_environment_value() -> None:
+    """`inject_fields` guards on `not os.environ.get(label)`, so "" counts as absent."""
+    result = resolve_variable(_NAME, _sources(environ={_NAME: ""}, vault={_NAME: "from-vault"}))
+    assert result.source is Source.ONEPASSWORD
+    assert result.value == "from-vault"
+    assert result.empty_override is False
+
+
+def test_an_emptied_url_reports_capture_off_and_says_so_in_the_output() -> None:
+    report = build_report(
+        _sources(
+            environ={ENV_SYN_SESSION_STORE_URL: ""},
+            dotenv={ENV_SYN_SESSION_STORE_URL: "https://file.example.com"},
+        )
+    )
+    assert report.capture is CaptureVerdict.OFF
+    assert "overrides every file" in render(report, show_values=False)
 
 
 # ---------------------------------------------------------------------------
@@ -278,10 +359,33 @@ def test_environments_without_a_vault_report_none() -> None:
     assert report.deployment == "syntropic137__test"
 
 
-def test_app_environment_defaults_to_development() -> None:
+def test_app_environment_defaults_to_development_but_names_no_vault() -> None:
+    """`resolve_op_secrets` returns before it looks a vault up when the tier is unset.
+
+    The deployment identity still defaults, because `AppEnvironment` really does
+    fall back to development and that is what gets stamped on a session. The
+    vault does not, because naming syn137-dev would advertise an association the
+    runtime never makes - and the report would then say "syn137-dev" and
+    "1Password not consulted" on consecutive lines.
+    """
     report = build_report(_sources())
     assert report.app_environment.source is Source.DEFAULT
-    assert report.vault == "syn137-dev"
+    assert report.vault is None
+    assert report.deployment == "syntropic137__development"
+    assert "APP_ENVIRONMENT is unset" in render(report, show_values=False)
+
+
+def test_resolver_tier_is_empty_when_app_environment_is_unset() -> None:
+    assert resolver_tier(_sources()) == ""
+    assert resolver_tier(_sources(environ={"APP_ENVIRONMENT": "Selfhost"})) == "selfhost"
+    assert resolver_tier(_sources(dotenv={"APP_ENVIRONMENT": "beta"})) == "beta"
+
+
+def test_an_emptied_app_environment_names_no_vault_either() -> None:
+    """The resolver skips on a blank APP_ENVIRONMENT even when .env has one."""
+    sources = _sources(environ={"APP_ENVIRONMENT": ""}, dotenv={"APP_ENVIRONMENT": "production"})
+    assert resolver_tier(sources) == ""
+    assert build_report(sources).vault is None
 
 
 def test_pinned_image_and_exporter_version_are_reported() -> None:
@@ -327,3 +431,44 @@ def test_shadowing_is_rendered_so_the_operator_can_see_the_losing_copy() -> None
     assert report.store_url.source is Source.SHELL
     assert Source.DOTENV in report.store_url.shadowed
     assert "also set in: .env - not used" in render(report, show_values=False)
+
+
+# ---------------------------------------------------------------------------
+# Vault reading
+# ---------------------------------------------------------------------------
+
+
+def test_a_duplicated_vault_label_resolves_the_way_inject_fields_would(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`inject_fields` never overwrites a label it already wrote, so the FIRST wins.
+
+    A dict comprehension here would take the last, and the doctor would then
+    name a value the running process never received - the exact failure this
+    command exists to prevent.
+    """
+    item = {
+        "fields": [
+            {"label": "DUPED", "value": ""},
+            {"label": "DUPED", "value": "first-nonempty"},
+            {"label": "DUPED", "value": "second-nonempty"},
+            {"label": "  SPACED  ", "value": "trimmed"},
+            {"label": "", "value": "unlabelled"},
+        ]
+    }
+    monkeypatch.setattr("syn_shared.doctor.op_available", lambda: True)
+    monkeypatch.setattr("syn_shared.doctor.fetch_op_item", lambda _vault, _title: item)
+
+    vault = _load_vault("development")
+    assert vault == {"DUPED": "first-nonempty", "SPACED": "trimmed"}
+
+
+def test_no_vault_is_read_when_app_environment_names_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "syn_shared.doctor.op_available",
+        lambda: pytest.fail("op must not be consulted for an unmapped environment"),
+    )
+    assert _load_vault("") is None
+    assert _load_vault("test") is None
