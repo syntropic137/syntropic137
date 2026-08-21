@@ -150,6 +150,122 @@ Preflight (sequential - reset stack, install CLI, verify health)
 
 ---
 
+## 0.0 Gotchas - how a validation run lies to you
+
+> Read this before running anything. Every entry below cost real time on
+> 2026-08-21, several of them twice, and each one produces a **confident wrong
+> answer** rather than an error.
+
+The single failure mode behind almost all of them: **you validated something
+other than what you think you validated.** A stale artifact, a different tier,
+a cached tag, or your own test harness answers instead of the system under
+test - and the answer looks legitimate.
+
+### Stale artifacts - assert the identity of what you are testing
+
+The same class bit three different ways in one day.
+
+| What was stale | How it lied | The check |
+|---|---|---|
+| Running container 11 days old | Reported a pricing bug fixed 6 days earlier | `docker inspect <c> --format '{{.Created}}'` before trusting any result |
+| Local `:latest` tag cached from an earlier pull | Showed exporter 0.1.1 when the registry had 0.5.0 | `docker buildx imagetools inspect <ref>` - asks the REGISTRY, not your daemon |
+| Local git checkout behind origin | Validated code that had already been superseded | `git fetch && git status -sb` as step one |
+
+**Environment variables are fixed at container-create time.** Editing a vault,
+a `.env`, or a compose file changes nothing for a process already running. A
+restart is not always enough either - `docker restart` reuses the existing
+container and its environment. Recreate (`up -d --force-recreate`, or
+`just dev-down && just dev`).
+
+- [ ] Container build time is newer than the change under test
+- [ ] Image digest resolved from the registry, not from a local tag
+- [ ] Checkout is current with origin
+- [ ] Config changes reached the process, verified with `docker exec <c> printenv`
+
+### Absence looks exactly like success
+
+Capture is fail-open, an empty store URL means "deliberately disabled", and a
+missing test marker collects nothing. None of these produce an error.
+
+**Zero is not a result until you can name what a non-zero would have required.**
+On 2026-08-21 "0 captured sessions" had **five** independent causes, each
+sufficient on its own and none of them logged:
+
+1. compose never passed `SYN_SESSION_STORE_*` to the api service
+2. the URL used a short hostname, unresolvable inside the workspace (musl)
+3. the running container held a stale URL
+4. a trailing space in the vault value made every upload target malformed
+5. the phase ran on an image with no exporter
+
+Before reporting a negative, establish a **baseline you expect to move**, and
+confirm the mechanism could have worked at all.
+
+- [ ] Baseline recorded before the run, from a source independent of the
+      component under test
+- [ ] Every precondition asserted, not assumed
+
+### Your own harness is not evidence
+
+Three false findings in one session came from the test, not the system:
+
+- greps run from a subdirectory returned nothing, read as "this code does not
+  exist" - it existed, six files of it. **Check `pwd` when a grep is
+  surprisingly empty.**
+- a hand-built request used the wrong Envoy hostname and returned 403; that was
+  the harness being wrong, not the platform
+- a status code was asserted on a route observed on a *different* instance of
+  the same service (`/sessions` is 401 on one, 404 on another, because the real
+  path is `/v1/sessions/batch`)
+
+**Read the service's own contract** (`/openapi.json`, `--help`, the manifest)
+rather than porting an expectation from somewhere else.
+
+- [ ] A surprising negative was re-run from a known-good working directory
+- [ ] Endpoints and routes come from the service's own spec
+
+### Whitespace and quoting damage is invisible
+
+A hand-pasted secret or URL carries whatever the editor added. A trailing space
+does not show in a vault UI, in `echo`, or in most logs, and it fails deep
+inside provisioning with the cause suppressed.
+
+```bash
+docker exec <c> sh -c 'printf "%s" "$SYN_SESSION_STORE_URL" | wc -c'
+```
+
+Compare against the expected length. Also: `op item get --fields --reveal`
+CSV-quotes values containing quotes or commas, which reads exactly like a
+corrupted secret - use `--format json`.
+
+- [ ] Byte length of critical env values matches expectation
+
+### Cold paths look like outages
+
+A Tailscale route that has not been used recently returns connection failures
+for the first few probes, then succeeds once the direct path is established.
+The same is true of a container image being pulled on first use.
+
+- [ ] A connectivity failure was retried before being reported
+
+### Reachability is per-network, not global
+
+The host and the workspace container resolve names and routes differently. A
+store the host can reach may be unreachable from the agent network, and vice
+versa. The exporter is a **musl static binary**, so it ignores
+`nsswitch.conf`: short hostnames and `.local` names never resolve there even
+when the host resolves them fine.
+
+Always probe from **inside the image, on the agent network**:
+
+```bash
+docker run --rm --network <agent-net> --entrypoint sh <image> \
+  -c "curl -s -m 15 -o /dev/null -w '%{http_code}\n' $URL/healthz"
+```
+
+- [ ] Reachability proven from the container that actually performs the work
+
+---
+
 ## 0. Reset and Upgrade Selfhost Stack
 
 > **MANDATORY before every validation run.** Don't bother checking what's
