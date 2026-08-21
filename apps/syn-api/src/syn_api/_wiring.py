@@ -758,7 +758,13 @@ class BackgroundWorkflowDispatcher:
     - Semaphore-bounded concurrency (Phase A2)
     """
 
-    def __init__(self, handler: ExecuteWorkflowHandler, max_concurrent: int = 5) -> None:
+    def __init__(self, handler: ExecuteWorkflowHandler, max_concurrent: int = 1) -> None:
+        """`max_concurrent` defaults to 1 for the same reason the setting does.
+
+        A caller that omits it used to get 5, which quietly reintroduced the
+        unsafe value the setting exists to avoid (#865). The safe value has to
+        be the one you get by saying nothing.
+        """
         self._handler = handler
         self._tasks: set[asyncio.Task[None]] = set()
         self._semaphore = asyncio.Semaphore(max_concurrent)

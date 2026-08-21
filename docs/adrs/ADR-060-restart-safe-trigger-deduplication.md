@@ -177,7 +177,11 @@ This second layer protects against implementation mistakes where historical even
 
 `BackgroundWorkflowDispatcher.MAX_CONCURRENT` was hardcoded at 10. On a Docker host with limited memory (e.g., 8GB), 10 simultaneous 4GB containers cause OOM kills.
 
-Now configurable via `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` (default 5). This is distinct from `WorkspaceSettings.max_concurrent` (workspace pool capacity) -- dispatch concurrency is a safety limit on how many workflows fire simultaneously from triggers.
+Now configurable via `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` (default 1). This is distinct from `WorkspaceSettings.max_concurrent` (workspace pool capacity) -- dispatch concurrency is a safety limit on how many workflows fire simultaneously from triggers.
+
+**The default is 1 TEMPORARILY, and for correctness rather than memory.** Concurrent executions are not isolated from each other (#865): the processor keeps per-execution state on an instance they share, so one execution can read another's inputs and finish successfully against the wrong target, and one execution's cancellation tears down the others' containers. Restore a higher default once #865 lands.
+
+**Scope is narrower than the name suggests.** It bounds the background TRIGGER dispatcher only. Manual executions started through the API build their own processor and do not pass through this semaphore, and the limit is per-process rather than per-cluster, so it is not a global cap across API replicas. Raising it above 1 logs a startup warning naming #865.
 
 **Location:** `packages/syn-shared/src/syn_shared/settings/polling.py`, `apps/syn-api/src/syn_api/_wiring.py`
 

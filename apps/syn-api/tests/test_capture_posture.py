@@ -149,6 +149,45 @@ class TestNoPartOfTheUrlIsLogged:
             assert TOKEN not in str(record.args)
 
 
+class TestOnePostureCannotSuppressTheOther:
+    """They used to share one try block.
+
+    A failure in the capture posture silently skipped the concurrency posture -
+    and the test below deliberately makes the capture posture raise, so the
+    #865 warning would have been missing on exactly the startup someone was
+    debugging. Diagnostics must not become each other's prerequisite.
+    """
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_failing_capture_posture_still_warns_about_concurrency(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import syn_api.services.lifecycle as lifecycle
+        from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
+        from syn_shared.settings import get_settings
+
+        def _boom(*_a: object, **_k: object) -> None:
+            raise RuntimeError("capture posture exploded")
+
+        monkeypatch.setattr(lifecycle, "_log_session_capture_posture", _boom)
+        monkeypatch.setenv(ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES, "4")
+        get_settings.cache_clear()  # type: ignore[attr-defined]
+
+        try:
+            with caplog.at_level(logging.WARNING):
+                await lifecycle.startup(skip_validation=True)
+        finally:
+            get_settings.cache_clear()  # type: ignore[attr-defined]
+
+        concurrency_warnings = [
+            r for r in caplog.records if ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES in r.getMessage()
+        ]
+        assert len(concurrency_warnings) == 1, (
+            "the concurrency posture must survive a failing capture posture"
+        )
+
+
 class TestTwoStoresCanBeToldApart:
     """#849: the deployment separates environments, not tenants within one."""
 
