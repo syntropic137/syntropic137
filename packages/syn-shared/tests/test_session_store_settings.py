@@ -199,3 +199,116 @@ class TestUnauthenticatedIsSurfacedNotRefused:
         s = SessionStoreSettings(url=None)
         assert not s.is_enabled
         assert not s.is_unauthenticated
+
+
+@pytest.mark.unit
+class TestTheStoreLabel:
+    """The label exists so a posture line can name WHICH store, safely.
+
+    The posture line logs no part of SYN_SESSION_STORE_URL, because every part
+    of a URL is operator-supplied and could carry a credential. That leaves two
+    stores differing only by path indistinguishable, which is what the label
+    fixes (#849). Everything here defends the property that makes it loggable:
+    it is an operator-declared identifier, not derived from anything secret.
+    """
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["tenant-a", "tenant_a", "tenant.a", "TenantA", "a", "z" * 64, "0"],
+    )
+    def test_a_plain_identifier_is_kept(self, raw: str) -> None:
+        assert SessionStoreSettings(url="https://s", label=raw).display_label == raw
+
+    def test_surrounding_whitespace_is_trimmed(self) -> None:
+        s = SessionStoreSettings(url="https://s", label="  tenant-a  ")
+        assert s.display_label == "tenant-a"
+        assert not s.has_unusable_label
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "tenant a",
+            "tenant/a",
+            "a\nb",
+            "a\tb",
+            "\x1b[31mred",
+            "tenant\u2013a",  # en dash, not a hyphen
+            "tenant\u200db",  # zero-width joiner
+            "\u202etnanet",  # right-to-left override
+            "z" * 65,
+            "https://store.example/tenant-a",
+        ],
+        ids=[
+            "space",
+            "slash",
+            "newline",
+            "tab",
+            "ansi-escape",
+            "en-dash-homoglyph",
+            "zero-width-joiner",
+            "bidi-override",
+            "one-over-the-limit",
+            "a-pasted-url",
+        ],
+    )
+    def test_anything_that_is_not_an_identifier_is_refused(self, raw: str) -> None:
+        """Refused, not repaired.
+
+        Sanitising into a shorter or cleaned-up string would mean the logged
+        text is not the configured value, which defeats the point of the field.
+        """
+        s = SessionStoreSettings(url="https://s", label=raw)
+        assert s.display_label == ""
+        assert s.has_unusable_label
+
+    def test_an_over_long_label_is_refused_rather_than_truncated(self) -> None:
+        """An earlier version truncated to 64 and appended "...", making 67.
+
+        Beyond the arithmetic, truncation logs a value the operator never set.
+        """
+        s = SessionStoreSettings(url="https://s", label="z" * 200)
+        assert s.display_label == ""
+
+    def test_the_alphabet_is_exactly_the_declared_one(self) -> None:
+        """Every printable ASCII code point, checked against the contract.
+
+        Sampling a few bad characters does not pin the grammar: adding `:` to
+        the pattern, or swapping it for `\\w` (which admits non-ASCII letters),
+        left the earlier tests entirely green.
+        """
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        for code_point in range(0x21, 0x7F):
+            ch = chr(code_point)
+            label = SessionStoreSettings(url="https://s", label=ch).display_label
+            if ch in allowed:
+                assert label == ch, f"{ch!r} should be allowed"
+            else:
+                assert label == "", f"{ch!r} should be refused"
+
+    @pytest.mark.parametrize("raw", ["caf\u00e9", "\u79df\u6237", "\u00fcber"])
+    def test_ordinary_non_ascii_letters_are_refused_too(self, raw: str) -> None:
+        """Not a control or formatting hazard - just not ASCII.
+
+        Pins the identifier as ASCII rather than "printable and unambiguous",
+        which is what a `\\w`-based pattern would silently become.
+        """
+        assert SessionStoreSettings(url="https://s", label=raw).display_label == ""
+
+    def test_the_length_boundary_is_exact(self) -> None:
+        assert SessionStoreSettings(url="https://s", label="z" * 64).display_label
+        assert not SessionStoreSettings(url="https://s", label="z" * 65).display_label
+
+    def test_unset_is_not_the_same_as_unusable(self) -> None:
+        """Both yield "", but only one is a misconfiguration worth reporting."""
+        unset = SessionStoreSettings(url="https://s")
+        assert unset.display_label == ""
+        assert not unset.has_unusable_label
+
+        blank = SessionStoreSettings(url="https://s", label="   ")
+        assert blank.display_label == ""
+        assert not blank.has_unusable_label
+
+    def test_the_label_is_read_from_the_environment(self) -> None:
+        """The whole point is that an operator sets this per deployment."""
+        with patch.dict(os.environ, {"SYN_SESSION_STORE_LABEL": "tenant-a"}):
+            assert SessionStoreSettings(url="https://s").display_label == "tenant-a"
