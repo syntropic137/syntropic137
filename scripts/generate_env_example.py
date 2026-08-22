@@ -45,6 +45,26 @@ from syn_shared.settings.workspace import (  # noqa: E402
     WorkspaceSettings,
 )
 
+# Characters that make `just`'s dotenv parser reject a line. A bare regex
+# default (cosign certificate identity, for example) contains `(`, `|` and `$`
+# and breaks EVERY just recipe - including the pre-push hook, which then stops
+# gating silently. Quoting is the fix; the parser accepts a quoted value
+# verbatim. Observed 2026-08-22: a fresh `cp .env.example .env` produced a tree
+# where `just` could not run at all.
+_DOTENV_NEEDS_QUOTING = set("()|$&;<>`\\ \t")
+
+
+def _quote_if_needed(value: str) -> str:
+    """Quote a default that `just`'s dotenv loader would otherwise reject."""
+    if not value:
+        return value
+    if value[0] in "'\"":
+        return value  # already quoted by the author
+    if any(c in _DOTENV_NEEDS_QUOTING for c in value):
+        escaped = value.replace("'", "'\"'\"'")
+        return f"'{escaped}'"
+    return value
+
 
 def get_env_var_name(field_name: str, prefix: str = "") -> str:
     """Convert field name to environment variable name."""
@@ -526,10 +546,10 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, li
 
             if key in existing_vars:
                 # Preserve existing value
-                output_lines.append(f"{key}={existing_vars[key]}")
+                output_lines.append(f"{key}={_quote_if_needed(existing_vars[key])}")
             else:
                 # Add new variable with default (empty for secrets)
-                output_lines.append(f"{key}={default_value}")
+                output_lines.append(f"{key}={_quote_if_needed(default_value)}")
                 new_vars.append(key)
         else:
             output_lines.append(line)
@@ -552,7 +572,7 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, li
             ]
         )
         for key in sorted(extra_vars):
-            output_lines.append(f"{key}={existing_vars[key]}")
+            output_lines.append(f"{key}={_quote_if_needed(existing_vars[key])}")
         output_lines.append("")
 
     # Write the synced .env

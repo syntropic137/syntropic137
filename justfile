@@ -1040,8 +1040,14 @@ check-test-markers:
 
     total = collected()
     unmarked = collected("-m", "not unit and not integration and not e2e")
+    # Skip .venv AND nested worktrees: .claude/worktrees/ holds full repo copies,
+    # so an agent worktree made this count the same file three times and the gate
+    # reported four xfails that did not exist. A gate that cries wolf gets muted,
+    # which is the failure this whole check exists to prevent.
+    _EXCLUDED = (".venv", ".claude/worktrees", "node_modules")
     xfails = len(re.findall(r"@pytest\.mark\.xfail", "\n".join(
-        p.read_text() for p in Path(".").rglob("test_*.py") if ".venv" not in str(p))))
+        p.read_text(errors="ignore") for p in Path(".").rglob("test_*.py")
+        if not any(x in str(p) for x in _EXCLUDED))))
 
     failed = False
     for name, actual in (("unmarked", unmarked), ("xfail", xfails)):
