@@ -32,6 +32,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
 )
+from syn_shared.agents import AgentProvider
 
 # =========================================================================
 # AgentExecutionHandler
@@ -1587,6 +1588,71 @@ def _make_skill_todo() -> object:
     )
 
 
+@pytest.mark.unit
+def test_skills_cli_agent_keys_table_matches_the_skills_cli_registry() -> None:
+    """Pin the agent-key translation table itself, not just the selector.
+
+    The values are the vercel skills-CLI agent ids, verified against the CLI
+    bundled in the omni-agent workspace image (skills 1.5.14): the agent
+    registry in ``dist/cli.mjs`` keys entries by exactly these ids, and
+    ``skills add --agent <id>`` installs into that entry's ``skillsDir``:
+
+        claude-code -> .claude/skills
+        codex       -> .agents/skills
+        gemini-cli  -> .agents/skills
+
+    ``gemini`` (without the ``-cli`` suffix) is only a display alias the CLI
+    maps ONTO ``gemini-cli``; the registry key is the suffixed form. Getting
+    any of these wrong installs the skill where the harness never looks, and
+    ``skills list`` still reports success (it does not filter by agent), so
+    this table is the only place the mistake is catchable.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        _SKILLS_CLI_AGENT_KEYS,
+    )
+    from syn_shared.agents import AgentProvider
+
+    assert _SKILLS_CLI_AGENT_KEYS == {
+        "claude": "claude-code",
+        "codex": "codex",
+        "gemini": "gemini-cli",
+    }
+    # The keys are our provider vocabulary; both headless providers must map.
+    assert _SKILLS_CLI_AGENT_KEYS[AgentProvider.CLAUDE] == "claude-code"
+    assert _SKILLS_CLI_AGENT_KEYS[AgentProvider.CODEX] == "codex"
+    # claude-interactive is deliberately absent: the selector resolves it to a
+    # pane agent_id first, so a raw lookup on it must miss.
+    assert AgentProvider.CLAUDE_INTERACTIVE not in _SKILLS_CLI_AGENT_KEYS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("provider", "agent_id", "expected_key"),
+    [
+        (AgentProvider.CLAUDE, None, "claude-code"),
+        (AgentProvider.CODEX, None, "codex"),
+        # Stray agent_id on a headless phase must not retarget the install.
+        (AgentProvider.CLAUDE, "codex", "claude-code"),
+        (AgentProvider.CODEX, "claude", "codex"),
+        # Interactive-tmux keys by the pane's agent_id.
+        (AgentProvider.CLAUDE_INTERACTIVE, "codex", "codex"),
+        (AgentProvider.CLAUDE_INTERACTIVE, "gemini", "gemini-cli"),
+        (AgentProvider.CLAUDE_INTERACTIVE, None, "claude-code"),
+    ],
+)
+def test_selector_plus_table_resolve_to_the_expected_cli_agent_key(
+    provider: str, agent_id: str | None, expected_key: str
+) -> None:
+    """Compose selector and table: this is the value actually passed to the CLI."""
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        _SKILLS_CLI_AGENT_KEYS,
+        _skills_cli_agent_selector,
+    )
+
+    assert _SKILLS_CLI_AGENT_KEYS[_skills_cli_agent_selector(provider, agent_id)] == expected_key
+
+
+@pytest.mark.unit
 def test_skills_cli_agent_selector_keys_by_provider_for_headless() -> None:
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         _skills_cli_agent_selector,
