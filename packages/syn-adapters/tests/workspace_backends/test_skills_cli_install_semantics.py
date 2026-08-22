@@ -87,8 +87,8 @@ class SkillsLockEntry(TypedDict, total=False):
     """One skill's record in ``/workspace/skills-lock.json``."""
 
     source: str
-    sourceType: str  # noqa: N815 - the skills CLI emits camelCase
-    computedHash: str  # noqa: N815
+    sourceType: str
+    computedHash: str
 
 
 class SkillsLockFile(TypedDict, total=False):
