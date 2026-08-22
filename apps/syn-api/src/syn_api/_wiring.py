@@ -161,25 +161,10 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     from syn_shared.settings.workspace import WorkspaceSettings
 
     ws_settings = WorkspaceSettings()
-    # The default workspace service ALWAYS stays on the Docker claude -p
-    # path: normal claude phases keep the stream-json pipeline, Envoy
-    # token accounting, and telemetry regardless of the interactive flag.
+    # The workspace service is the Docker headless path: claude -p and
+    # codex exec both run there, keeping the stream-json pipeline, Envoy
+    # token accounting, and telemetry.
     ws_config = WorkspaceServiceConfig(image=ws_settings.docker_image)
-
-    # Interactive-tmux opt-in (SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED). When
-    # on, a SECOND provider-specific WorkspaceService is wired and selected
-    # per phase (agent.provider="claude-interactive") by the processor. It
-    # routes through InteractiveTmuxIsolationAdapter with no Envoy
-    # ext_authz injection (see docs/plans/interactive-tmux-integration.md
-    # §3.4). Default off. Image is provider-specific.
-    interactive_workspace_service: WorkspaceService | None = None
-    if ws_settings.interactive_tmux_enabled:
-        interactive_workspace_service = WorkspaceService.create(
-            config=WorkspaceServiceConfig(
-                image=ws_settings.interactive_tmux_image,
-                provider_kind="interactive-tmux",
-            ),
-        )
 
     # WHY (issue #726, PR2): the materializer turns ResolvedClaudePlugin
     # entries on each phase into workspace files; the processor passes it
@@ -227,7 +212,6 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         prompt_builder=_build_workspace_prompt,
         command_builder=_build_agent_command,
         todo_projection=ExecutionTodoProjection(store=get_projection_store()),
-        interactive_workspace_service=interactive_workspace_service,
         claude_plugin_materializer=claude_plugin_materializer,
         skill_materializer=skill_materializer,
         session_capture=session_capture,

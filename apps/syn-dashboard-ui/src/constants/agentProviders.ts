@@ -4,7 +4,6 @@
 
 export const AGENT_PROVIDER = {
   CLAUDE: 'claude',
-  CLAUDE_INTERACTIVE: 'claude-interactive',
   CODEX: 'codex',
 } as const
 
@@ -18,7 +17,6 @@ export interface ProviderOption {
 export const PROVIDER_OPTIONS: readonly ProviderOption[] = [
   { value: AGENT_PROVIDER.CLAUDE, label: 'Claude' },
   { value: AGENT_PROVIDER.CODEX, label: 'Codex' },
-  { value: AGENT_PROVIDER.CLAUDE_INTERACTIVE, label: 'Claude (interactive)' },
 ]
 
 // Codex uses its account-default model; a Claude model id (e.g. "haiku") is

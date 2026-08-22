@@ -62,7 +62,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 7  # Bumped: surface per-phase provider/agent_id + apply provider on phase update
+    VERSION = 8  # Bumped: agent_id (tmux pane selector) removed with the interactive-tmux path
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -102,7 +102,6 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
                 provider=p.get("provider"),
-                agent_id=p.get("agent_id"),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),

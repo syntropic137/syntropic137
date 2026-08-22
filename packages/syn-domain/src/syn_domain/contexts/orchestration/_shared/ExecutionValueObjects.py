@@ -38,7 +38,7 @@ class AgentConfiguration:
     Immutable to ensure configuration integrity.
 
     NOTE: 'mock' provider is ONLY valid in test environments (APP_ENVIRONMENT=test).
-    Production/development MUST use 'claude', 'claude-interactive', or 'codex'
+    Production/development MUST use 'claude' or 'codex'
     (or 'openai') with valid API keys/auth.
 
     Model Aliases (CLI-compatible, recommended):
@@ -47,12 +47,10 @@ class AgentConfiguration:
         - "haiku" -> latest Claude Haiku
 
     'codex' selects the programmatic codex harness on the same docker path
-    as 'claude' (not the interactive-tmux path). ``agent_id`` is meaningless
-    on that path, so it MUST be ``None`` or ``"codex"`` when
-    ``provider == "codex"`` - see ``__post_init__``.
+    as 'claude'.
     """
 
-    provider: str = AgentProvider.CLAUDE  # + claude-interactive, codex, openai (mock in tests)
+    provider: str = AgentProvider.CLAUDE  # + codex, openai (mock in tests)
     # Declared default is None = "caller named no model". __post_init__ then
     # resolves it PER PROVIDER: Claude gets DEFAULT_CLAUDE_MODEL, codex stays
     # None because codex does not report its own model on the wire and a
@@ -64,17 +62,12 @@ class AgentConfiguration:
     temperature: float = 0.7
     timeout_seconds: int = 300
     allowed_tools: tuple[str, ...] = ()  # Tools allowed during execution
-    # Multi-agent interactive-tmux: which tmux pane the phase targets.
-    # Valid values: "claude", "codex", "gemini". None means "not selected" -
-    # distinguishable from an explicit "claude" pane choice. Ignored by the
-    # default claude -p / codex docker path. See docs/plans/multi-agent-workspaces.md.
-    agent_id: str | None = None
     # When true, both agent auths are staged so this phase's primary agent may
     # delegate one-shot to the other CLI. Default false = single-provider isolation.
     allow_delegation: bool = False
 
     def __post_init__(self) -> None:
-        """Resolve the per-provider model default, reject bad provider/agent_id.
+        """Resolve the per-provider model default.
 
         Mirrors ``aggregate_execution.value_objects.AgentConfiguration`` -
         keep both in sync.
@@ -82,17 +75,6 @@ class AgentConfiguration:
         resolved_model = resolve_phase_model(self.provider, self.model)
         if resolved_model != self.model:
             object.__setattr__(self, "model", resolved_model)
-        if self.provider == AgentProvider.CODEX and self.agent_id not in (
-            None,
-            AgentProvider.CODEX,
-        ):
-            msg = (
-                f"AgentConfiguration.provider='codex' selects the programmatic "
-                f"codex harness; agent_id must be None or 'codex', got "
-                f"{self.agent_id!r} (agent_id does not select a tmux pane on "
-                "the docker path)."
-            )
-            raise ValueError(msg)
 
 
 @dataclass(frozen=True)

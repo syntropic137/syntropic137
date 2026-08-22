@@ -1,7 +1,7 @@
 """Shared, type-safe identifiers for workflow phase agents.
 
-These replace bare string literals ("claude" / "codex" / "claude-interactive")
-that were previously compared in many places across the domain, adapter, and API
+These replace bare string literals ("claude" / "codex") that were
+previously compared in many places across the domain, adapter, and API
 layers. `StrEnum` members compare equal to their string value, so a loose
 ``provider: str`` field can still be compared against a member
 (``provider == AgentProvider.CODEX``) without changing the field type.
@@ -23,11 +23,21 @@ class AgentProvider(StrEnum):
     CLAUDE = "claude"
     """Default headless ``claude -p`` docker-exec path."""
 
-    CLAUDE_INTERACTIVE = "claude-interactive"
-    """Interactive-tmux pane path (parked hedge, syn137#777)."""
-
     CODEX = "codex"
     """Headless ``codex exec`` docker-exec path (the codex bridge)."""
+
+
+REMOVED_INTERACTIVE_PROVIDER: str = "claude-interactive"
+"""The provider value of the REMOVED interactive-tmux path.
+
+Deliberately NOT an ``AgentProvider`` member: nothing may route on it. It
+exists so workflow parsing can recognise a stale workflow and fail with a
+message that names the removal, instead of a generic "unknown provider".
+The tmux path was a failed experiment - a send race, a pane-scrape
+completion heuristic, and empty observability timelines - and was excised in
+favour of the headless docker-exec substrate (``claude -p`` / ``codex exec``).
+Do not reintroduce it as a provider.
+"""
 
 
 class AgentRunner(StrEnum):

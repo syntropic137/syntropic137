@@ -13,7 +13,7 @@ of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
@@ -22,9 +22,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-    WorkspaceMisconfiguredError,
 )
 from syn_shared.agents import AgentProvider
 from syn_shared.env_constants import (
@@ -82,7 +79,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Maps our phase agent_id values onto the vercel skills-cli --agent keys.
+# Maps our phase provider values onto the vercel skills-cli --agent keys.
 # The skills CLI (pinned 1.5.14 in the workspace images) owns the per-harness
 # install location; we only translate our identifier vocabulary to theirs.
 # Verify against `skills add --help` inside the image whenever the pin bumps.
@@ -104,21 +101,6 @@ _DELEGATION_TARGET_SKILL: dict[str, str] = {
 }
 
 
-def _skills_cli_agent_selector(provider: str, agent_id: str | None) -> str:
-    """Skills-CLI agent-key source for a phase.
-
-    Interactive-tmux phases key by the pane's ``agent_id``; every headless phase
-    keys by ``provider`` (``agent_id`` is meaningless off the interactive path).
-    Keying by ``agent_id`` unconditionally would install skills for the wrong
-    harness when a headless phase carries a stray ``agent_id`` (e.g.
-    ``provider="claude"`` with ``agent_id="codex"``, which YAML validation
-    currently permits): the phase runs ``claude -p`` but skills would target codex.
-    """
-    if provider == AgentProvider.CLAUDE_INTERACTIVE:
-        return agent_id or AgentProvider.CLAUDE
-    return provider
-
-
 # Callable types for dependency injection
 PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, object]],
@@ -127,69 +109,16 @@ PromptBuilder = Callable[
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 
 
-def _is_interactive_phase(workspace: ManagedWorkspace, phase: ExecutablePhase) -> bool:
-    """Return whether this phase should dispatch via the interactive-tmux path.
-
-    Explicit signal only: ``phase.agent_config.provider ==
-    "claude-interactive"``. The YAML schema has carried an `agent.provider`
-    field since PR #765, so `workspace.isolation_handle.isolation_type` is
-    no longer consulted as an implicit fallback (issue #771 item 5).
-
-    Raises WorkspaceMisconfiguredError if the phase's declared provider
-    and the workspace's actual isolation backend disagree.
-    `WorkflowExecutionProcessor._workspace_service_for` is responsible for
-    routing `claude-interactive` phases to the interactive-tmux
-    WorkspaceService and every other phase to the default one — if that
-    routing broke, proceeding here would silently flip which path runs
-    (previously masked by the implicit OR) instead of failing loudly.
-    """
-    explicit_interactive = phase.agent_config.provider == AgentProvider.CLAUDE_INTERACTIVE
-    workspace_is_interactive_tmux = workspace.isolation_handle.isolation_type == "interactive-tmux"
-    if explicit_interactive != workspace_is_interactive_tmux:
-        msg = (
-            f"Phase '{phase.phase_id}' agent_config.provider="
-            f"{phase.agent_config.provider!r} but its workspace was provisioned "
-            f"with isolation_type={workspace.isolation_handle.isolation_type!r}. "
-            "WorkflowExecutionProcessor._workspace_service_for must route "
-            "claude-interactive phases to the interactive-tmux WorkspaceService "
-            "and all other phases to the default one - this mismatch means that "
-            "routing picked the wrong backend for this phase."
-        )
-        raise WorkspaceMisconfiguredError(msg)
-    return explicit_interactive
-
-
-def _provisioned_agents(phase: ExecutablePhase) -> tuple[str, ...]:
-    """Interactive agent name(s) to stage for this phase's workspace.
-
-    For an interactive-tmux phase (`provider == "claude-interactive"`) return
-    just the agent the phase drives - `agent_config.agent_id` is the canonical
-    claude/codex/gemini name the driver stages auth and launches a pane for.
-    Staging only the needed agent avoids the multi-minute cost of copying the
-    other two agents' credentials. Returns () for the default docker path
-    (which ignores agent selection entirely).
-    """
-    if phase.agent_config.provider == AgentProvider.CLAUDE_INTERACTIVE:
-        # `agent_id` now defaults to None (codex-bridge: fixes the
-        # provider->agent_id invariant); at the interactive-tmux boundary a
-        # pane MUST be named, so coerce a missing agent_id to "claude" here
-        # (preserving the pre-existing default) rather than at construction.
-        return (phase.agent_config.agent_id or AgentProvider.CLAUDE,)
-    return ()
-
-
-def _auth_staging_for(
-    provider: str, allow_delegation: bool, is_interactive: bool
-) -> tuple[bool, bool]:
+def _auth_staging_for(provider: str, allow_delegation: bool) -> tuple[bool, bool]:
     """Return ``(include_codex_auth, needs_claude_env)`` for a phase.
 
     Delegation opt-in stages BOTH auths so the primary agent can shell out to
     the other CLI; otherwise auth is scoped to the phase's single provider (the
     codex ``~/.codex/auth.json`` file for codex phases, the claude env
-    otherwise). Interactive-tmux never uses the claude sidecar env.
+    otherwise).
     """
     include_codex_auth = allow_delegation or provider == AgentProvider.CODEX
-    needs_claude_env = not is_interactive and (allow_delegation or provider != AgentProvider.CODEX)
+    needs_claude_env = allow_delegation or provider != AgentProvider.CODEX
     return include_codex_auth, needs_claude_env
 
 
@@ -333,7 +262,6 @@ class ProvisionResult:
         "agent_env",
         "claude_cmd",
         "command",
-        "interactive_prompt",
         "workspace",
         "workspace_cm",
     )
@@ -345,19 +273,12 @@ class ProvisionResult:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         command: ProvisionWorkspaceCompletedCommand,
-        interactive_prompt: str | None = None,
     ) -> None:
         self.workspace = workspace
         self.workspace_cm = workspace_cm  # async context manager for cleanup
         self.agent_env = agent_env
         self.claude_cmd = claude_cmd
         self.command = command
-        # When non-None, AgentExecutionHandler dispatches to the
-        # interactive-tmux path (send_message/await_completion/
-        # capture_response) instead of workspace.stream(claude_cmd).
-        # Populated by WorkspaceProvisionHandler when the phase's
-        # agent_config.provider == "claude-interactive".
-        self.interactive_prompt = interactive_prompt
 
 
 class WorkspaceProvisionHandler:
@@ -427,7 +348,6 @@ class WorkspaceProvisionHandler:
             phase_id=todo.phase_id,
             with_sidecar=True,
             inject_tokens=True,
-            agents=_provisioned_agents(phase),
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
@@ -436,7 +356,6 @@ class WorkspaceProvisionHandler:
             include_codex_auth, _ = _auth_staging_for(
                 phase.agent_config.provider,
                 phase.agent_config.allow_delegation,
-                is_interactive=False,
             )
             await self._hydrate_workspace(
                 workspace,
@@ -557,13 +476,9 @@ class WorkspaceProvisionHandler:
                 "is wired; refusing to run the agent without them (issue #772)"
             )
             raise RuntimeError(msg)
-        # Resolve the skills-CLI agent key. Interactive-tmux phases key by the
-        # pane's agent_id; headless phases have agent_id=None and key by provider
-        # (claude / codex). Prefer agent_id, fall back to provider so a headless
-        # codex or claude phase resolves too.
-        agent_selector = _skills_cli_agent_selector(
-            phase.agent_config.provider, phase.agent_config.agent_id
-        )
+        # Resolve the skills-CLI agent key from the phase's provider
+        # (claude / codex) - the harness that will actually run.
+        agent_selector = phase.agent_config.provider
         agent_key = _SKILLS_CLI_AGENT_KEYS.get(agent_selector)
         if agent_key is None:
             raise SkillInstallFailed(
@@ -634,38 +549,20 @@ class WorkspaceProvisionHandler:
         prompt = await self._prompt_builder(
             phase, todo.execution_id, workflow_id, repo_url_for_prompt, outputs, inputs or {}
         )
-        # Interactive-tmux dispatch: when the phase declares
-        # provider="claude-interactive", AgentExecutionHandler will drive
-        # the agent through send_message/await_completion against the
-        # tmux pane instead of running claude -p. Skip the CLI command
-        # builder (it would produce a noisy claude_cmd we never run) and
-        # carry the prompt out-of-band on the ProvisionResult.
-        # Interactive detection is explicit-only (issue #771 item 5); see
-        # `_is_interactive_phase` for the mismatch guard against the
-        # workspace's actual isolation backend.
-        is_interactive = _is_interactive_phase(workspace, phase)
-        claude_cmd = [] if is_interactive else self._command_builder(phase, prompt)
-        interactive_prompt = prompt if is_interactive else None
+        claude_cmd = self._command_builder(phase, prompt)
         # `--plugin-dir` is a claude-only flag; appending it to a `codex exec`
         # argv (after the prompt) produces an invalid command, so restrict the
         # plugin-dir augmentation to the claude headless path.
-        if not is_interactive and phase.agent_config.provider != AgentProvider.CODEX:
+        if phase.agent_config.provider != AgentProvider.CODEX:
             _append_claude_plugin_dirs(claude_cmd, phase)
 
-        # Interactive-tmux runs claude as a TUI with OAuth-on-disk;
-        # `_build_agent_env` requires the Envoy proxy URL because the
-        # claude -p path needs ANTHROPIC_BASE_URL to route SDK traffic
-        # through the sidecar. That sidecar is intentionally absent on
-        # this path (see _create_interactive_tmux_impl in
-        # WorkspaceService). Skip env build for interactive phases.
         # Codex authenticates via the injected ~/.codex/auth.json file, NOT the
         # claude env creds; a codex phase must not receive CLAUDE_CODE_OAUTH_TOKEN /
         # ANTHROPIC_API_KEY (cross-provider secret exposure), so it gets an empty
-        # agent env like the interactive path.
+        # agent env.
         _, needs_claude_env = _auth_staging_for(
             phase.agent_config.provider,
             phase.agent_config.allow_delegation,
-            is_interactive=is_interactive,
         )
         agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
         assert todo.phase_id is not None
@@ -681,47 +578,6 @@ class WorkspaceProvisionHandler:
             agent_env=agent_env,
             claude_cmd=claude_cmd,
             command=command,
-            interactive_prompt=interactive_prompt,
-        )
-
-    async def build_followup_result(
-        self,
-        todo: TodoItem,
-        phase: ExecutablePhase,
-        workflow_id: str,
-        session_id: str,
-        workspace: ManagedWorkspace,
-        workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
-        phase_outputs: dict[str, str] | None = None,
-        inputs: Mapping[str, object] | None = None,
-        repos: list[str] | None = None,
-    ) -> ProvisionResult:
-        """Build a ProvisionResult for a follow-up phase in a shared workspace.
-
-        Multi-agent (docs/plans/multi-agent-workspaces.md): when the
-        execution's first phase already provisioned an
-        interactive-tmux workspace, subsequent phases reuse it
-        without re-running setup / context injection / artifact
-        injection. This method builds only the prompt + per-phase
-        ProvisionResult shell.
-
-        ``repos`` is the original execution-scoped repo URL list. It is
-        threaded through ONLY for ``{{repo_url}}`` prompt-template
-        substitution (see ``_build_provision_result``); workspace
-        hydration is still skipped on follow-up phases. Callers that
-        already provisioned the workspace in a prior phase should pass
-        the same list they passed to ``handle()``.
-        """
-        return await self._build_provision_result(
-            workspace=workspace,
-            workspace_cm=workspace_cm,
-            todo=todo,
-            phase=phase,
-            workflow_id=workflow_id,
-            session_id=session_id,
-            effective_repos=repos or [],
-            outputs=phase_outputs or {},
-            inputs=dict(inputs) if inputs is not None else None,
         )
 
     @staticmethod
@@ -752,9 +608,7 @@ class WorkspaceProvisionHandler:
             return
         # Install the skill teaching the PRIMARY agent to call the OTHER CLI.
         skill_name = _DELEGATION_TARGET_SKILL.get(cfg.provider)
-        agent_key = _SKILLS_CLI_AGENT_KEYS.get(
-            _skills_cli_agent_selector(cfg.provider, cfg.agent_id)
-        )
+        agent_key = _SKILLS_CLI_AGENT_KEYS.get(cfg.provider)
         if skill_name is None or agent_key is None:
             # allow_delegation is validated headless-only (claude/codex); defensive.
             return

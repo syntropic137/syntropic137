@@ -91,9 +91,7 @@ def _processor(capture: object, workspace: object, cm: object) -> WorkflowExecut
     p._phase_session_ids = {PHASE: "s-1"}  # type: ignore[attr-defined]
     p._active_envs = {}  # type: ignore[attr-defined]
     p._active_cmds = {}  # type: ignore[attr-defined]
-    p._active_prompts = {}  # type: ignore[attr-defined]
     p._active_workspace_cms = {PHASE: cm}  # type: ignore[attr-defined]
-    p._shared_workspaces = {}  # type: ignore[attr-defined]
     p._session_capture = capture  # type: ignore[attr-defined]
     return p
 
@@ -166,29 +164,6 @@ class TestCaptureOnCancelAndFailure:
 
         assert log == ["capture", "exec", "teardown"]
         assert capture.seen["session_id"] == "s-1"
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_a_shared_workspace_is_not_probed_per_phase(self) -> None:
-        """A shared container cannot answer a per-phase question honestly.
-
-        The exporter sweeps a workspace partition, not a session. On a
-        container reused across phases, phase 2's probe would find phase 1's
-        transcript, satisfy expect_sessions and record phase 2 as CAPTURED
-        having captured nothing - the one verdict that suppresses a backfill.
-        Tracked in #847; needs a session selector on the exporter.
-        """
-        log: list[str] = []
-        capture = _Capture(log)
-        cm = _WorkspaceCm(log)
-        p = _processor(capture, _Workspace(log), cm)
-        p._shared_workspaces = {"e-1": ("w-1", cm)}  # type: ignore[attr-defined]
-
-        await p._close_phase_workspace_cms("failure")  # pyright: ignore[reportPrivateUsage]
-
-        # Neither probed nor torn down: _cleanup_shared_workspace owns the
-        # teardown, and double-exiting would destroy the container twice.
-        assert log == []
 
 
 class TestTheRealConstructorSetsWhatFinalizeReads:

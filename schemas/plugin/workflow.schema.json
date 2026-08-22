@@ -4,14 +4,13 @@
   "$defs": {
     "AgentYamlDefinition": {
       "additionalProperties": false,
-      "description": "Per-phase ``agent`` block as parsed from YAML.\n\nSelects which agent provider drives the phase (e.g. ``claude`` for the\ndefault ``claude -p`` Docker path, ``claude-interactive`` for the\ninteractive-tmux workspace provider, ``codex`` for the programmatic\ncodex harness on the same Docker path as ``claude``), which tmux pane\nthe phase targets, and optionally the model. See\ndocs/plans/multi-agent-workspaces.md.",
+      "description": "Per-phase ``agent`` block as parsed from YAML.\n\nSelects which headless agent provider drives the phase (``claude`` for\nthe default ``claude -p`` docker-exec path, ``codex`` for the\nprogrammatic ``codex exec`` harness on the same path) and optionally\nthe model.",
       "properties": {
         "provider": {
           "anyOf": [
             {
               "enum": [
                 "claude",
-                "claude-interactive",
                 "codex"
               ],
               "type": "string"
@@ -22,23 +21,6 @@
           ],
           "default": null,
           "title": "Provider"
-        },
-        "agent_id": {
-          "anyOf": [
-            {
-              "enum": [
-                "claude",
-                "codex",
-                "gemini"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Agent Id"
         },
         "model": {
           "anyOf": [

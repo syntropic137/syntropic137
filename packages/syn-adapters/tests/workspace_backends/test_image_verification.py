@@ -154,7 +154,7 @@ class TestReferenceClassification:
         "ref",
         [
             "agentic-workspace-claude-cli:dev",
-            "agentic-workspace-interactive-tmux:latest",
+            "agentic-workspace-omni-agent:latest",
             "myorg/myimage:1",
         ],
     )

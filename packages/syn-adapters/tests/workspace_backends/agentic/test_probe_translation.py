@@ -163,8 +163,8 @@ class TestTheStateFileIsPassedUnderOurOwnName:
 
 
 class TestAnImageThatDoesNoCaptureAtAll:
-    """Verified against the pinned interactive-tmux image, which has NEITHER
-    the capability directory nor the exporter binary:
+    """Verified against an image that has NEITHER the capability directory
+    nor the exporter binary:
 
         CAPABILITY ABSENT
         EXPORTER ABSENT
@@ -183,8 +183,7 @@ class TestAnImageThatDoesNoCaptureAtAll:
         """127 first, so an image with no exporter reads as DISABLED.
 
         UNKNOWN would ask for a backfill of transcripts that could never have
-        existed - interactive-tmux images carry neither the capability nor the
-        binary.
+        existed - such an image carries neither the capability nor the binary.
         """
         script = SCRIPT
         assert script.index(f"exit {EXIT_COMMAND_NOT_FOUND}") < script.index(

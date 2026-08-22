@@ -3251,8 +3251,6 @@ export interface components {
             model?: string | null;
             /** Provider */
             provider?: string | null;
-            /** Agent Id */
-            agent_id?: string | null;
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {

@@ -9,7 +9,6 @@
 // Keep in sync with AgentProvider in packages/syn-shared/src/syn_shared/agents.py.
 export const AGENT_PROVIDER_LABELS: Record<string, string> = {
   claude: 'Claude',
-  'claude-interactive': 'Claude (interactive)',
   codex: 'Codex',
 }
 

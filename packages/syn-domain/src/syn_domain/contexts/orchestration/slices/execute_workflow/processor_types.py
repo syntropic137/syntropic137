@@ -11,7 +11,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionMetrics,
     PhaseResult,
 )
-from syn_shared.agents import AgentProvider, AgentRunner
+from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -96,8 +96,6 @@ class AgentHandlerProtocol(Protocol):
         agent_model: str | None,
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
-        interactive_prompt: str | None = None,
-        agent_id: str = AgentProvider.CLAUDE,
         runner: Runner = AgentRunner.CLAUDE,
     ) -> AgentExecutionResult: ...
 

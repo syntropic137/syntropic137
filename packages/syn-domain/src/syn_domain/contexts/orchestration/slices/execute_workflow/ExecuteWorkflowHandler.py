@@ -162,23 +162,20 @@ def _resolve_repos_from_template(
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
-    Multi-agent (docs/plans/multi-agent-workspaces.md): the YAML
-    `agent:` block contributes `provider` + `agent_id`; the top-level
-    `model` field still feeds the model. All three are optional;
-    AgentConfiguration's defaults preserve back-compat with PR #765.
+    The YAML `agent:` block contributes `provider` and `allow_delegation`;
+    the top-level `model` field feeds the model. All are optional;
+    AgentConfiguration's defaults apply when none are set.
     """
     phase_model: str | None = getattr(phase, "model", None)
     phase_provider: str | None = getattr(phase, "provider", None)
-    phase_agent_id: str | None = getattr(phase, "agent_id", None)
     allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
-    if not (phase_model or phase_provider or phase_agent_id or allow_delegation):
+    if not (phase_model or phase_provider or allow_delegation):
         return AgentConfiguration()
     defaults = AgentConfiguration()
     resolved_provider = phase_provider or defaults.provider
     return AgentConfiguration(
         provider=resolved_provider,
         model=phase_model,
-        agent_id=phase_agent_id or defaults.agent_id,
         allow_delegation=allow_delegation,
     )
 

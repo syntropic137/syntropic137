@@ -151,7 +151,7 @@ explicitly rather than by omission:
   raw event-store concurrency error. Users will hit this immediately.
 - **#821 projection event map gaps**, **#828** remove `claude_plugins:`,
   **#784** base-skill tier, **#775** followup-phase injection (unreachable,
-  gated behind the dropped interactive-tmux path).
+  gated behind the removed interactive-tmux path).
 
 ## Phase 4: pre-release validation
 
