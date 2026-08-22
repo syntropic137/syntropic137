@@ -210,7 +210,7 @@ def generate_settings_section(
         if is_secret_type(field_type):
             lines.append(f"{env_name}=")
         else:
-            lines.append(f"{env_name}={default}")
+            lines.append(f"{env_name}={_quote_if_needed(default)}")
 
         lines.append("")
 
@@ -345,7 +345,7 @@ def generate_env_example() -> str:
             if is_secret_type(field_type):
                 lines.append(f"{env_name}=")
             else:
-                lines.append(f"{env_name}={default}")
+                lines.append(f"{env_name}={_quote_if_needed(default)}")
 
             lines.append("")
 
@@ -678,7 +678,7 @@ def generate_infra_env_example() -> str:
                 desc_lines = format_description(description)
                 lines.extend(desc_lines)
 
-            lines.append(f"{env_name}={default}")
+            lines.append(f"{env_name}={_quote_if_needed(default)}")
             lines.append("")
 
     return "\n".join(lines)
