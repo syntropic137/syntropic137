@@ -461,6 +461,22 @@ function parseInputDeclarations(data: Record<string, unknown>): Array<{
 
 const FRONTMATTER_DELIMITER = "---";
 
+function isDelimiterLine(line: string): boolean {
+  return line.replace(/\r?\n$/, "") === FRONTMATTER_DELIMITER;
+}
+
+/** Line indices of the opening and closing `---`, or null if there is no frontmatter. */
+function findDelimiters(lines: string[]): [number, number] | null {
+  let open = 0;
+  while (open < lines.length && lines[open]!.trim() === "") open += 1;
+  if (open >= lines.length || !isDelimiterLine(lines[open]!)) return null;
+
+  for (let close = open + 1; close < lines.length; close++) {
+    if (isDelimiterLine(lines[close]!)) return [open, close];
+  }
+  return null;
+}
+
 /**
  * Mirrors `_split_frontmatter` / `_parse_md_prompt` in `md_prompt_loader`.
  *
@@ -474,35 +490,17 @@ function parseFrontmatter(content: string): {
   body: string;
 } {
   const lines = content.split(/(?<=\n)/);
+  const bounds = findDelimiters(lines);
+  if (bounds === null) return { frontmatter: null, body: content.trim() };
 
-  let idx = 0;
-  while (idx < lines.length && lines[idx]!.trim() === "") idx += 1;
-  if (idx >= lines.length) return { frontmatter: null, body: content.trim() };
-
-  if (lines[idx]!.replace(/\r?\n$/, "") !== FRONTMATTER_DELIMITER) {
-    return { frontmatter: null, body: content.trim() };
-  }
-  idx += 1;
-
-  let closeIdx = -1;
-  for (let j = idx; j < lines.length; j++) {
-    if (lines[j]!.replace(/\r?\n$/, "") === FRONTMATTER_DELIMITER) {
-      closeIdx = j;
-      break;
-    }
-  }
-  if (closeIdx === -1) return { frontmatter: null, body: content.trim() };
-
-  const fmContent = lines.slice(idx, closeIdx).join("");
-  const body = lines.slice(closeIdx + 1).join("").trim();
-  const fm = parseYaml(fmContent);
-
+  const [open, close] = bounds;
+  const fm = parseYaml(lines.slice(open + 1, close).join(""));
   return {
     frontmatter:
       typeof fm === "object" && fm !== null && !Array.isArray(fm)
         ? (fm as Record<string, unknown>)
         : null,
-    body,
+    body: lines.slice(close + 1).join("").trim(),
   };
 }
 
