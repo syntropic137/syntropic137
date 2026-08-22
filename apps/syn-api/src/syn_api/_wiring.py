@@ -94,7 +94,12 @@ from syn_adapters.storage.repositories import (
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
-from syn_shared.agents import AgentProvider, ModelAlias
+from syn_shared.agents import (
+    AgentProvider,
+    ModelAlias,
+    UnsupportedAgentProviderError,
+    require_executable_provider,
+)
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -297,10 +302,23 @@ def _build_agent_command(
     phase: ExecutablePhase,
     prompt: str,
 ) -> list[str]:
-    """Build the command selected by the phase provider."""
-    if phase.agent_config.provider == AgentProvider.CODEX:
+    """Build the command selected by the phase provider.
+
+    Exhaustive on purpose: every known provider is named, and anything else
+    raises. The previous ``return _build_claude_command(...)`` fall-through
+    meant an unknown or removed provider - a stored ``claude-interactive``
+    template rehydrated from history, say - quietly ran as headless Claude and
+    reported success.
+    """
+    provider = require_executable_provider(
+        phase.agent_config.provider,
+        phase_id=phase.phase_id,
+    )
+    if provider is AgentProvider.CODEX:
         return _build_codex_command(prompt, phase.agent_config.model)
-    return _build_claude_command(phase, prompt)
+    if provider is AgentProvider.CLAUDE:
+        return _build_claude_command(phase, prompt)
+    raise UnsupportedAgentProviderError(provider, phase_id=phase.phase_id)
 
 
 def _owner_repo_from_url(url: str | None) -> str:

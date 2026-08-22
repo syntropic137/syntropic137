@@ -29,6 +29,11 @@ from syn_api.types import (
     WorkflowError,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_shared.agents import (
+    AgentProvider,
+    UnsupportedAgentProviderError,
+    require_executable_provider,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
@@ -451,6 +456,25 @@ async def _preflight_repos_or_reject(
     await _validate_all_repos_access(preflight_repos)
 
 
+def _check_phase_providers(workflow: WorkflowTemplateAggregate) -> None:
+    """Raise 422 if any stored phase names a provider that cannot be executed.
+
+    The domain rejects these at the execution boundary too (that is what makes
+    trigger- and CLI-initiated runs behave identically). This boundary check
+    exists so an API caller gets the migration message as a 422 instead of a
+    200 followed by a BackgroundTask failure - the same reason repo preflight
+    lives here.
+    """
+    for phase in workflow.phases:
+        try:
+            require_executable_provider(
+                phase.provider or AgentProvider.CLAUDE,
+                phase_id=phase.phase_id,
+            )
+        except UnsupportedAgentProviderError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
@@ -461,6 +485,11 @@ async def _validate_execution_request(
     workflow = await workflow_repo.get_by_id(workflow_id)
     if workflow is None:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+    # ADR-068: a template stored before the interactive-tmux removal rehydrates
+    # with its historical provider. Reject it here rather than remapping it to
+    # headless claude downstream.
+    _check_phase_providers(workflow)
 
     # ADR-063: repository identity is typed on `repos[]`, not smuggled through `inputs`.
     # Reject at the boundary so silent-success-then-BackgroundTask-failure can't happen.

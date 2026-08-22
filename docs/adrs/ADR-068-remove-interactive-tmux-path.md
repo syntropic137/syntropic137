@@ -84,6 +84,24 @@ validator on `AgentYamlDefinition.provider` intercepts it ahead of the
 `Literal["claude", "codex"]` check, so the author sees the removal rather than a
 generic enum error.
 
+Parse time is not enough on its own. A template stored BEFORE this change is
+rehydrated straight from its historical `WorkflowTemplateCreated` event and
+never passes the YAML validator, and both the GitHub-trigger dispatcher and the
+API execute route run from those persisted templates. So the same refusal is
+enforced again at the **execution boundary**, in
+`_build_agent_config_from_phase`, before a workspace is provisioned or an
+execution stream is created - one typed error
+(`syn_shared.agents.UnsupportedAgentProviderError`) carrying the migration
+message, so API-, trigger- and CLI-initiated executions behave identically.
+Aggregate replay itself stays permissive on purpose: an operator must still be
+able to read and fix an old template.
+
+The same gate (`require_executable_provider`) makes every downstream provider
+decision exhaustive - agent command construction, stream-runner selection, and
+auth staging. Each of those was previously written as "codex, otherwise
+claude", and it was that fall-through, not the missing validation, that turned a
+stored interactive workflow into a headless Claude run reporting SUCCESS.
+
 ## Consequences
 
 - One agent execution path. `AgentExecutionHandler` streams a command through
@@ -94,8 +112,13 @@ generic enum error.
 - Every workspace is per-phase again, so the session-capture probe can answer a
   per-phase question honestly. The `#847` carve-out (shared containers are not
   probed) is no longer needed and is removed with the shared workspace itself.
-- `get_workflow_detail`'s projection version is bumped because the stored phase
-  shape lost `agent_id`.
+- `get_workflow_detail`'s projection version is deliberately NOT bumped, even
+  though the stored phase shape lost `agent_id`. The reader addresses stored
+  phase dicts by key, so a version-7 row that still carries `agent_id` stays
+  readable and the field simply stops surfacing in the API. A bump would buy
+  nothing and cost a full replay through the coordinator's non-atomic
+  clear-then-delete-checkpoint sequence, which loses the entire workflow-detail
+  read model if the process dies between those two steps.
 - Existing `claude-interactive` workflows must be edited before they run again.
   This is a breaking change to the workflow schema and is why the parse error
   names the replacement providers explicitly.

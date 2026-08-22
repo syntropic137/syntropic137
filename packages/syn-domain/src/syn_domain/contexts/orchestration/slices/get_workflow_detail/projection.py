@@ -62,7 +62,13 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 8  # Bumped: agent_id (tmux pane selector) removed with the interactive-tmux path
+    # Deliberately NOT bumped for the agent_id removal (PR #875 review): the
+    # reader addresses stored phase dicts by key, so a version-7 row that still
+    # carries "agent_id" stays readable and the field simply stops surfacing. A
+    # bump would buy nothing and cost a full replay through the coordinator's
+    # non-atomic clear-then-delete-checkpoint sequence, which loses the whole
+    # read model if the process dies between the two steps.
+    VERSION = 7  # v7: surface per-phase provider + apply provider on phase update
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""

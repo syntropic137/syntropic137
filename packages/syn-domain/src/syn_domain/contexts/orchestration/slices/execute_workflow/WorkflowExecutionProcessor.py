@@ -65,7 +65,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
-from syn_shared.agents import AgentProvider, AgentRunner
+from syn_shared.agents import runner_for_provider
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -606,8 +606,11 @@ class WorkflowExecutionProcessor:
         self._phase_session_ids[todo.phase_id] = session_id
         workflow_id = aggregate.workflow_id or ""
         timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
-        is_codex = phase.agent_config.provider == AgentProvider.CODEX
-        runner: Runner = AgentRunner.CODEX if is_codex else AgentRunner.CLAUDE
+        # Raises on an unknown or removed provider instead of defaulting to
+        # the claude parser. The execution boundary
+        # (_build_agent_config_from_phase) already rejected it, so reaching
+        # that raise means a new entry point skipped the gate.
+        runner: Runner = runner_for_provider(phase.agent_config.provider, phase_id=phase.phase_id)
 
         collector = ObservabilityCollector(
             writer=self._observability_writer,

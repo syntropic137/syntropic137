@@ -23,7 +23,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
-from syn_shared.agents import AgentProvider
+from syn_shared.agents import AgentProvider, require_executable_provider
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_ANTHROPIC_BASE_URL,
@@ -116,9 +116,14 @@ def _auth_staging_for(provider: str, allow_delegation: bool) -> tuple[bool, bool
     the other CLI; otherwise auth is scoped to the phase's single provider (the
     codex ``~/.codex/auth.json`` file for codex phases, the claude env
     otherwise).
+
+    Validates the provider first: ``!= AgentProvider.CODEX`` is a fall-through
+    that would hand claude credentials to any unrecognised provider, so an
+    unrunnable one must fail before auth is staged into a workspace.
     """
-    include_codex_auth = allow_delegation or provider == AgentProvider.CODEX
-    needs_claude_env = allow_delegation or provider != AgentProvider.CODEX
+    known = require_executable_provider(provider)
+    include_codex_auth = allow_delegation or known is AgentProvider.CODEX
+    needs_claude_env = allow_delegation or known is not AgentProvider.CODEX
     return include_codex_auth, needs_claude_env
 
 

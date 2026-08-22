@@ -1515,7 +1515,16 @@ class TestWorkspaceProvisionSkills:
 
     @pytest.mark.anyio
     async def test_unknown_provider_raises(self) -> None:
-        from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
+        """An unrunnable provider is refused BEFORE any auth is staged.
+
+        This used to surface as ``SkillInstallFailed`` ("no skills-cli agent
+        key") deep in skill installation, which meant a phase whose provider
+        the platform cannot run had already been handed credentials, and a
+        skill-less phase was not stopped at all (PR #875 review). Provision now
+        validates the provider up front, so the refusal is the same for every
+        phase regardless of whether it declares skills.
+        """
+        from syn_shared.agents import UnsupportedAgentProviderError
 
         workspace = AsyncMock()
         workspace.proxy_url = "http://envoy:10000"
@@ -1531,13 +1540,12 @@ class TestWorkspaceProvisionSkills:
         handler, _ = _make_skill_provision_handler(
             workspace=workspace, skill_materializer=materializer
         )
-        # An unsupported provider yields no skills-cli agent key (headless keys by provider).
         phase = _make_skill_phase(provider="mystery", skills=(skill,))
         todo = _make_skill_todo()
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
             MockSecrets.create = AsyncMock(return_value=MagicMock())
-            with pytest.raises(SkillInstallFailed, match="no skills-cli agent key"):
+            with pytest.raises(UnsupportedAgentProviderError, match="mystery"):
                 await handler.handle(
                     todo=todo,
                     phase=phase,
