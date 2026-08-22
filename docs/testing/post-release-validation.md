@@ -150,6 +150,122 @@ Preflight (sequential - reset stack, install CLI, verify health)
 
 ---
 
+## 0.0 Gotchas - how a validation run lies to you
+
+> Read this before running anything. Every entry below cost real time on
+> 2026-08-21, several of them twice, and each one produces a **confident wrong
+> answer** rather than an error.
+
+The single failure mode behind almost all of them: **you validated something
+other than what you think you validated.** A stale artifact, a different tier,
+a cached tag, or your own test harness answers instead of the system under
+test - and the answer looks legitimate.
+
+### Stale artifacts - assert the identity of what you are testing
+
+The same class bit three different ways in one day.
+
+| What was stale | How it lied | The check |
+|---|---|---|
+| Running container 11 days old | Reported a pricing bug fixed 6 days earlier | `docker inspect <c> --format '{{.Created}}'` before trusting any result |
+| Local `:latest` tag cached from an earlier pull | Showed exporter 0.1.1 when the registry had 0.5.0 | `docker buildx imagetools inspect <ref>` - asks the REGISTRY, not your daemon |
+| Local git checkout behind origin | Validated code that had already been superseded | `git fetch && git status -sb` as step one |
+
+**Environment variables are fixed at container-create time.** Editing a vault,
+a `.env`, or a compose file changes nothing for a process already running. A
+restart is not always enough either - `docker restart` reuses the existing
+container and its environment. Recreate (`up -d --force-recreate`, or
+`just dev-down && just dev`).
+
+- [ ] Container build time is newer than the change under test
+- [ ] Image digest resolved from the registry, not from a local tag
+- [ ] Checkout is current with origin
+- [ ] Config changes reached the process, verified with `docker exec <c> printenv`
+
+### Absence looks exactly like success
+
+Capture is fail-open, an empty store URL means "deliberately disabled", and a
+missing test marker collects nothing. None of these produce an error.
+
+**Zero is not a result until you can name what a non-zero would have required.**
+On 2026-08-21 "0 captured sessions" had **five** independent causes, each
+sufficient on its own and none of them logged:
+
+1. compose never passed `SYN_SESSION_STORE_*` to the api service
+2. the URL used a short hostname, unresolvable inside the workspace (musl)
+3. the running container held a stale URL
+4. a trailing space in the vault value made every upload target malformed
+5. the phase ran on an image with no exporter
+
+Before reporting a negative, establish a **baseline you expect to move**, and
+confirm the mechanism could have worked at all.
+
+- [ ] Baseline recorded before the run, from a source independent of the
+      component under test
+- [ ] Every precondition asserted, not assumed
+
+### Your own harness is not evidence
+
+Three false findings in one session came from the test, not the system:
+
+- greps run from a subdirectory returned nothing, read as "this code does not
+  exist" - it existed, six files of it. **Check `pwd` when a grep is
+  surprisingly empty.**
+- a hand-built request used the wrong Envoy hostname and returned 403; that was
+  the harness being wrong, not the platform
+- a status code was asserted on a route observed on a *different* instance of
+  the same service (`/sessions` is 401 on one, 404 on another, because the real
+  path is `/v1/sessions/batch`)
+
+**Read the service's own contract** (`/openapi.json`, `--help`, the manifest)
+rather than porting an expectation from somewhere else.
+
+- [ ] A surprising negative was re-run from a known-good working directory
+- [ ] Endpoints and routes come from the service's own spec
+
+### Whitespace and quoting damage is invisible
+
+A hand-pasted secret or URL carries whatever the editor added. A trailing space
+does not show in a vault UI, in `echo`, or in most logs, and it fails deep
+inside provisioning with the cause suppressed.
+
+```bash
+docker exec <c> sh -c 'printf "%s" "$SYN_SESSION_STORE_URL" | wc -c'
+```
+
+Compare against the expected length. Also: `op item get --fields --reveal`
+CSV-quotes values containing quotes or commas, which reads exactly like a
+corrupted secret - use `--format json`.
+
+- [ ] Byte length of critical env values matches expectation
+
+### Cold paths look like outages
+
+A Tailscale route that has not been used recently returns connection failures
+for the first few probes, then succeeds once the direct path is established.
+The same is true of a container image being pulled on first use.
+
+- [ ] A connectivity failure was retried before being reported
+
+### Reachability is per-network, not global
+
+The host and the workspace container resolve names and routes differently. A
+store the host can reach may be unreachable from the agent network, and vice
+versa. The exporter is a **musl static binary**, so it ignores
+`nsswitch.conf`: short hostnames and `.local` names never resolve there even
+when the host resolves them fine.
+
+Always probe from **inside the image, on the agent network**:
+
+```bash
+docker run --rm --network <agent-net> --entrypoint sh <image> \
+  -c "curl -s -m 15 -o /dev/null -w '%{http_code}\n' $URL/healthz"
+```
+
+- [ ] Reachability proven from the container that actually performs the work
+
+---
+
 ## 0. Reset and Upgrade Selfhost Stack
 
 > **MANDATORY before every validation run.** Don't bother checking what's
@@ -1288,6 +1404,216 @@ syn claude-plugin global remove <name> <version>
 
 ---
 
+## 6.35 Functional Validation - GitHub App CLI
+
+> Added 2026-08-21 by the section 9.5 command-coverage check, which found this
+> was the ONE command group in `registry.ts` with no section here. The runbook
+> mentioned GitHub twenty times and exercised `syn github` zero times - all
+> twenty were about the App's configuration, not its CLI surface. A group with
+> no section is not a group that works; it is a group nobody looked at.
+
+```bash
+syn github repos
+```
+
+- [ ] `repos` lists repositories the App can reach, with owner, default branch,
+      private flag and installation id
+- [ ] The installation id matches the one configured for this tier
+- [ ] A repo the App was granted access to appears; one it was not does not
+
+The output is the App's view, not the org's. A repo missing here means the
+installation lacks access to it, which is the thing to check FIRST when a
+trigger never fires for a repo that plainly exists.
+
+---
+
+## 6.4 Functional Validation - SeshMagic Session Storage
+
+> Added for the session-capture integration (syn137 #862/#863/#864, exporter
+> v0.5.0, omni-agent manifest 1.3.0). Goal: every Syntropic137 agent session is
+> retrievable from the central SeshMagic store, attributed to the deployment
+> that produced it.
+
+Claude and Codex transcripts are spooled inside the workspace container and
+uploaded to a store speaking APS-V1-0004. The upload is performed by
+`/usr/local/bin/apss-session-exporter`, which ships **in the omni-agent image
+only**. A workspace running `claude-cli` or `interactive-tmux` captures nothing,
+and does so silently.
+
+**Capture is FAIL-OPEN by design.** A capture problem records `UNKNOWN`/`FAILED`
+and asks for a backfill; it never turns a successful agent run into a failed
+one. So a green workflow is NOT evidence that capture worked - only the recorded
+verdict is.
+
+### Preconditions
+
+Assert the exporter version from inside the pinned image. Do not infer it from a
+digest bump: the exporter's own release gate built a scratch image containing
+only `.keep` for a period (agentic-session-exporter#22), so a green build proved
+nothing about the published artifact.
+
+```bash
+OMNI=$(grep -A2 'OMNI_AGENT:' \
+  packages/syn-shared/src/syn_shared/settings/workspace_images.py \
+  | grep -o 'sha256:[a-f0-9]*' | head -1)
+docker run --rm --entrypoint /usr/local/bin/apss-session-exporter \
+  "ghcr.io/agentparadise/omni-agent-workspace@${OMNI}" --version
+# expect: apss-session-exporter 0.5.0 (APS-V1-0004 SCS 1.0)
+
+# Store reachable, and enforcing auth.
+# Read the endpoint from the environment - never hardcode it. The value the
+# platform actually uses is the only one worth probing, and it differs per
+# tier. Resolve it the same way the API does.
+STORE_URL=$(docker exec <api-container> printenv SYN_SESSION_STORE_URL)
+test -n "$STORE_URL" || echo "capture is DISABLED on this stack"
+
+# host.docker.internal is a container-side name; map it back for a host probe
+PROBE_URL=${STORE_URL/host.docker.internal/127.0.0.1}
+curl -s -o /dev/null -w 'healthz %{http_code}\n' "$PROBE_URL/healthz"
+
+# Discover the write path rather than assuming it. Store versions differ:
+# seshmagic 0.1.6 exposes POST /v1/sessions/batch, and a bare /sessions is a
+# 404 there. Never encode a route observed on a different instance.
+curl -s "$PROBE_URL/openapi.json" -o /tmp/store-api.json
+python3 -c 'import json;d=json.load(open("/tmp/store-api.json"));[print(m.upper(),k) for k,o in d["paths"].items() for m in o]'
+```
+
+**Reachability must be checked from INSIDE the workspace image, not the host.**
+The host and the container resolve names and routes differently, and the
+container is the party that actually uploads:
+
+```bash
+docker run --rm --network <agent-net> --entrypoint sh \
+  "ghcr.io/agentparadise/omni-agent-workspace@${OMNI}" \
+  -c "curl -s -m 15 -o /dev/null -w 'healthz %{http_code}\n' $STORE_URL/healthz"
+```
+
+- [ ] Exporter reports `0.5.0` or later **from inside the pinned omni image**
+- [ ] `/healthz` returns 200 **from the host**
+- [ ] `/healthz` returns 200 **from inside the omni image, on the agent network**
+- [ ] The write path exists in the store's own `/openapi.json`
+      (seshmagic 0.1.6: `POST /v1/sessions/batch`)
+
+> **Do not assert a status on a guessed path.** Routes differ between store
+> versions: `/sessions` answers 401 on one instance and 404 on another, because
+> the real write path there is `/v1/sessions/batch`. Read `/openapi.json`.
+>
+> The token is still mandatory. With a URL and no token, capture fails at
+> finalize with the cause suppressed, and the run still goes green.
+
+> **The phase must run on the omni image.** Confirm the workspace image in use
+> before trusting a negative result - "nothing captured" and "wrong image" look
+> identical from `/capture/status`.
+
+### Configuration
+
+Two variables enable capture. Both resolve from 1Password item
+`syntropic137-config`, in the vault selected by `APP_ENVIRONMENT`
+(`selfhost` -> `syntropic137`, `development` -> `syn137-dev`).
+
+Field labels must match the variable names **exactly**. `op_env_export.py`
+resolves an allowlist by label, so a differently-named field reads as
+unconfigured even when the value is present in the vault.
+
+| Field label | Value | Notes |
+|---|---|---|
+| `SYN_SESSION_STORE_URL` | tier-specific, e.g. `http://host.docker.internal:5361` | Empty disables capture entirely. Read it from the running container, never from this table |
+| `SYN_SESSION_STORE_AUTH_TOKEN` | write token | Store as a concealed/password field |
+| `SYN_SESSION_STORE_LABEL` | optional | `[A-Za-z0-9._-]{1,64}`; anything else ignored with a warning |
+
+> **The URL is injected verbatim into the workspace container, so it must
+> resolve THERE, not on the host.** `127.0.0.1:5361` is wrong - inside the
+> container that address is the container itself. Use `host.docker.internal`,
+> or attach `seshmagic-session-api` to the agent network and use its service
+> name.
+>
+> A Caddy short hostname or a `.local` name will NOT resolve: the exporter is a
+> musl static binary, and musl ignores `nsswitch.conf`. A real public DNS name
+> is fine.
+
+- [ ] Both fields present in the vault item for the tier under test
+- [ ] Startup posture line names the deployment and **contains no part of the
+      store URL** - that omission is the invariant, not a bug
+- [ ] Startup warns when a URL is set with no token
+
+### Validating a real capture
+
+A clean startup proves nothing. The first workflow is the first real check.
+
+```bash
+syn workflow run <workflow-id>
+syn capture status            # or: GET /api/v1/capture/status
+```
+
+- [ ] An entry exists for the phase that just ran
+- [ ] `state` is **`captured`** - the ONLY value proving the store was reachable
+      AND writable. `UNKNOWN` / `FAILED` mean capture did not happen
+- [ ] `origin_deployment` matches the tier: `syntropic137__selfhost` from
+      `syn137-api`, `syntropic137__development` from `syn-api`
+- [ ] `agent_session_ids` is non-empty
+- [ ] Each id fetched from the store returns a transcript whose content matches
+      what the phase actually did
+
+### Linkage - prove BOTH directions
+
+Either direction alone can look correct while the join is broken.
+
+**syn137 -> store.** `/capture/status` yields `execution_id`, `phase_id`,
+`workspace_id`, `agent_session_ids[]`. The store keys on those agent-native ids.
+
+**store -> syn137.** Every envelope carries host-supplied tags: `source`
+(`syntropic137`), `execution_id`, `workspace_id`, `workflow_id`, `phase_id`,
+`deployment`.
+
+- [ ] Every id in `agent_session_ids` resolves to a session in the store
+- [ ] That session's tags carry the same `execution_id` and `phase_id`
+- [ ] Querying the store by `execution_id` tag returns exactly the sessions the
+      execution produced - no more, no fewer
+
+> **Prefer the tag direction when the two disagree.** Tags are host-supplied
+> from the phase's environment block and are not forgeable by the agent.
+> Session ids derive from transcript FILENAMES in an agent-writable spool.
+>
+> `workflow_id` exists on the store side only - `/capture/status` does not
+> return it, so its absence there is not a defect.
+
+### Multi-session capture (phase-to-many-sessions)
+
+One phase can produce more than one agent session: a codex phase delegating to
+`claude -p`, or a phase spawning subagents.
+
+**As of 2026-08-21 this has only ever been exercised with hand-written
+transcripts.** A run through the §6.1 delegation matrix is the first real
+evidence, in either direction.
+
+- [ ] Run a delegating phase and record how many ids `agent_session_ids` returns
+- [ ] **State the count explicitly in the report, including when it is exactly
+      1.** A single id from a genuinely delegating phase is a finding, not a pass
+- [ ] Each id resolves to a distinct transcript in the store
+- [ ] The delegated session's transcript is the OTHER harness's
+
+### Known limits - do NOT report these as new findings
+
+| Limit | Consequence for this run |
+|---|---|
+| No backfill yet (#861) | Spool is container-local. A SIGKILLed container loses its transcript and nothing retries. Capture is best-effort, not guaranteed |
+| Absence, not substitution (#859, #843) | Ids come from agent-writable filenames, so a valid decoy would read as captured |
+| `origin.host` is the CONTAINER ID | Not the machine. Use tags for identity, never `origin_host` |
+| `origin.environment` is always `container` | It is a runtime CLASS. `origin.deployment` is the axis separating dev from selfhost |
+| Shared interactive-tmux not probed per phase (#847) | One container spans phases, so a sweep cannot answer per-phase honestly |
+
+### Concurrency
+
+- [ ] `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` is **UNSET**
+
+The code default is now 1 (#866), because one execution's cancel or failure
+tears down every other concurrently running execution's containers (#865, design
+in #869). Pinning the value in compose means remembering to remove it when #865
+is fixed and the default rises again. A deployment that raises it above 1 warns
+at startup, naming #865.
+
+---
+
 ## 7. Functional Validation - Trigger Lifecycle & Round-Trip
 
 ### Verify event poller is running before testing round-trips
@@ -1567,6 +1893,7 @@ claude plugin update syntropic137@syntropic137
 | `/syn-triggers list` | Returns trigger list (may be empty) |
 | `/syn-run <workflow-id>` | Starts an execution (after workflows exist from Section 6) |
 | `/syn-observe <session-id> events` | Returns event timeline for a session from Section 6 |
+| `/syn-setup` | Onboarding guidance; must not reference removed commands or stale ports |
 
 - [ ] All commands above return results without errors
 - [ ] No commands reference deprecated field names (`window_cost_usd`) or removed subcommands (`syn workflow installed` - renamed to `syn workflow packages`)
@@ -1578,6 +1905,31 @@ Invoke these skills and verify they give correct guidance:
 - [ ] **`execution-control` skill**: Walk through pause/resume guidance - references valid CLI flags
 - [ ] **`observability` skill**: Query tool timeline for a session from Section 6 - session output uses server-rendered `*_display` fields (`total_cost_display`, `total_tokens_display`, `agent_model_display`, `duration_display`) per ADR-064, not client-formatted numbers
 - [ ] **`marketplace` skill**: Workflow install/list guidance uses `syn workflow packages` (not `syn workflow installed`) with a note that `syn workflow list` shows the live stack
+
+The plugin ships more skills than the three above. Every skill in
+`lib/syntropic137-claude-plugin/skills/` must appear here - the 2026-08-21
+section 9.5 sweep found eight that did not, which means nobody had checked
+whether they still described commands that exist.
+
+- [ ] **`setup`**: onboarding steps match the current `npx` flow and ports
+- [ ] **`syn-workflow`**: create/run/inspect guidance matches current flags
+- [ ] **`workflow-management`**: lifecycle guidance; no `syn workflow installed`
+- [ ] **`syn-marketplace`**: matches the `marketplace` skill, no drift between the pair
+- [ ] **`syn-triggers`**: uses `max_attempts` (not `max_fires`) and names the safety guards
+- [ ] **`syn-control`**: pause/resume/cancel flags match `syn control --help`
+- [ ] **`syn-insights`**: references endpoints that exist and cost fields that are current
+- [ ] **`syn-repo`**: repo add/assign guidance matches `syn repo --help`
+- [ ] **`organization`**: org/system/repo hierarchy guidance is current
+- [ ] **`github-automation`**: references `syn github repos` and real trigger presets
+- [ ] **`platform-ops`**: operational guidance names real containers and real ports
+- [ ] **`troubleshooting-workflow-failures`**: the failure modes it names still exist,
+      and the diagnostics it suggests still work
+
+> **A skill that names a removed command is worse than a missing skill.** It
+> reads as authoritative and sends the user somewhere that no longer exists.
+> `syn workflow installed` -> `syn workflow packages` and `max_fires` ->
+> `max_attempts` are both renames that already shipped, so both are live
+> candidates for stale guidance.
 
 ### Clean state note
 
@@ -1848,6 +2200,18 @@ Full pass/fail/skip for every command and feature tested.
 | syn claude-plugin show/install     |        |       |
 | syn claude-plugin global add/rm    |        |       |
 | workflow install plugin preflight  |        |       |
+| **SeshMagic Session Storage**      |        |       |
+| exporter 0.5.0 in omni image       |        | assert, don't infer |
+| store /healthz 200, /sessions 401  |        |       |
+| URL+token resolve from 1Password   |        |       |
+| posture line leaks no store URL    |        |       |
+| state=captured after a real run    |        | only real proof |
+| origin_deployment matches tier     |        |       |
+| agent_session_ids non-empty        |        |       |
+| ids resolve to store transcripts   |        |       |
+| store tags carry execution/phase   |        |       |
+| multi-session count stated         |        | even if 1 |
+| MAX_CONCURRENT_DISPATCHES unset    |        | #865/#866 |
 | **Executions**                     |        |       |
 | syn execution list/show            |        |       |
 | syn execution list --status        |        |       |
