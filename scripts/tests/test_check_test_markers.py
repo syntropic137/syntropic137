@@ -24,7 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from check_test_markers import (  # noqa: E402
+from check_test_markers import (
     Budget,
     count_xfail_markers,
     evaluate,
@@ -114,7 +114,7 @@ class TestXfailCounting:
         same false positive as the worktree bug, one level down.
         """
         (tmp_path / "test_meta.py").write_text(
-            'BODY = "import pytest\\n@pytest.mark.xfail(reason=\'x\')\\ndef test_a(): pass"\n'
+            "BODY = \"import pytest\\n@pytest.mark.xfail(reason='x')\\ndef test_a(): pass\"\n"
             "def test_uses_body(): assert BODY\n"
         )
         assert count_xfail_markers(tmp_path) == 0

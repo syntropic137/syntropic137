@@ -93,8 +93,8 @@ def parse_collected(output: str) -> int:
 
 def _collect(*args: str) -> int:
     # No -q: the "N/M tests collected" summary is only emitted without it.
-    result = subprocess.run(  # noqa: S603
-        ["uv", "run", "pytest", "--collect-only", *args],  # noqa: S607
+    result = subprocess.run(
+        ["uv", "run", "pytest", "--collect-only", *args],
         capture_output=True,
         text=True,
         check=False,
