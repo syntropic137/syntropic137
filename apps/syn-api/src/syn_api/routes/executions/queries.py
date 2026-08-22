@@ -438,7 +438,10 @@ async def get(
 
     with contextlib.suppress(Exception):
         exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
-        if exec_cost is not None and exec_cost.total_tokens > 0:
+        # has_cost_data, not total_tokens > 0: the displayed total grew to
+        # include cache tokens in #873, and gating dollars on it would flip a
+        # cache-only record from the fallback to exec_cost.total_cost_usd.
+        if exec_cost is not None and exec_cost.has_cost_data:
             total_input = exec_cost.input_tokens
             total_output = exec_cost.output_tokens
             total_cache_creation = exec_cost.cache_creation_tokens or total_cache_creation
@@ -482,7 +485,10 @@ async def _enrich_costs(
         logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
         return fallback_tokens, fallback_cost
 
-    if exec_cost is None or exec_cost.total_tokens == 0:
+    # Availability is decided by has_cost_data (input + output), while the
+    # number displayed below is total_tokens (all four components). Keeping
+    # those two decoupled is what makes #873 a display-only change.
+    if exec_cost is None or not exec_cost.has_cost_data:
         return fallback_tokens, fallback_cost
 
     if exec_cost.cost_by_phase:

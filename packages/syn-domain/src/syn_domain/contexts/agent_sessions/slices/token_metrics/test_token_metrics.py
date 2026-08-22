@@ -221,3 +221,81 @@ class TestTokenMetricsHandler:
         assert metrics.total_tokens == 1350
         assert metrics.message_count == 2
         assert len(metrics.records) == 0  # Records excluded
+
+
+@pytest.mark.unit
+class TestStoredTotalTokensIsDerived:
+    """``TokenUsageRecord.total_tokens`` is derived, never read from the row.
+
+    Rows written before issue #873 carry a total that omits both cache
+    components. ``from_dict`` is the only door those rows come back through
+    (``get_metrics`` and ``get_all`` both use it), so trusting a stored total
+    would hand the old wrong number straight back out for all of history.
+    """
+
+    def test_a_stale_stored_total_is_recomputed_not_trusted(self) -> None:
+        """A pre-#873 row: total_tokens stored as input + output only."""
+        from syn_domain.contexts.agent_sessions.domain.read_models.token_metrics import (
+            TokenUsageRecord,
+        )
+
+        stale_row = {
+            "event_id": "evt-pre-873",
+            "session_id": "session-pre-873",
+            "message_uuid": "msg-pre-873",
+            "timestamp": "2025-12-09T10:00:00Z",
+            "input_tokens": 35,
+            "output_tokens": 1_708,
+            "cache_creation_tokens": 59_932,
+            "cache_read_tokens": 57_214,
+            "total_tokens": 1_743,  # what the old projection wrote
+        }
+
+        record = TokenUsageRecord.from_dict(stale_row)
+
+        assert record.total_tokens == 118_889, (
+            "from_dict trusted the stored total; pre-#873 rows would keep "
+            "reporting a total that omits both cache components"
+        )
+        assert record.total_tokens != stale_row["total_tokens"]
+
+    def test_a_row_with_no_stored_total_still_sums_all_four(self) -> None:
+        from syn_domain.contexts.agent_sessions.domain.read_models.token_metrics import (
+            TokenUsageRecord,
+        )
+
+        record = TokenUsageRecord.from_dict(
+            {
+                "event_id": "evt-no-total",
+                "session_id": "session-no-total",
+                "message_uuid": "msg-no-total",
+                "timestamp": "2025-12-09T10:00:00Z",
+                "input_tokens": 35,
+                "output_tokens": 1_708,
+                "cache_creation_tokens": 59_932,
+                "cache_read_tokens": 57_214,
+            }
+        )
+
+        assert record.total_tokens == 118_889
+
+    def test_a_round_trip_through_the_store_stays_reconciled(self) -> None:
+        from syn_domain.contexts.agent_sessions.domain.read_models.token_metrics import (
+            TokenUsageRecord,
+        )
+
+        original = TokenUsageRecord(
+            event_id="evt-round-trip",
+            session_id="session-round-trip",
+            message_uuid="msg-round-trip",
+            timestamp="2025-12-09T10:00:00Z",
+            input_tokens=35,
+            output_tokens=1_708,
+            cache_creation_tokens=59_932,
+            cache_read_tokens=57_214,
+            total_tokens=1_743,  # deliberately wrong on the way in
+        )
+
+        restored = TokenUsageRecord.from_dict(original.to_dict())
+
+        assert restored.total_tokens == 118_889
