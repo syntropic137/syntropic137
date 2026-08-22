@@ -54,7 +54,36 @@ class TestTokenMetricsProjection:
         assert metrics.total_output_tokens == 350
         assert metrics.total_cache_creation_tokens == 500
         assert metrics.total_cache_read_tokens == 200
-        assert metrics.total_tokens == 1850
+        # All four components (issue #873): 1500 + 350 + 500 + 200.
+        assert metrics.total_tokens == 2550
+
+    @pytest.mark.asyncio
+    async def test_on_token_usage_reads_the_canonical_cache_field_names(
+        self, projection: TokenMetricsProjection
+    ) -> None:
+        """token_usage events store cache_creation_tokens / cache_read_tokens.
+
+        The projection previously only looked for the raw Anthropic API
+        spelling (``cache_*_input_tokens``), so every real event contributed
+        zero cache tokens (issue #873).
+        """
+        await projection.on_token_usage(
+            {
+                "event_id": "evt-873",
+                "session_id": "session-873",
+                "message_uuid": "msg-873",
+                "timestamp": "2025-12-09T10:30:00Z",
+                "input_tokens": 35,
+                "output_tokens": 1708,
+                "cache_creation_tokens": 59932,
+                "cache_read_tokens": 57214,
+            }
+        )
+
+        metrics = await projection.get_metrics("session-873")
+        assert metrics.total_cache_creation_tokens == 59932
+        assert metrics.total_cache_read_tokens == 57214
+        assert metrics.total_tokens == 118889
 
     @pytest.mark.asyncio
     async def test_multiple_messages(self, projection: TokenMetricsProjection) -> None:

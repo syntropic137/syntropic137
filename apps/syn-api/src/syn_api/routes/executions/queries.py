@@ -316,6 +316,10 @@ async def _load_execution_enrichment(
             continue
         if ec is None:
             continue
+        # Summed explicitly rather than read from ExecutionCost.total_tokens.
+        # This path and the cost path must arrive at the same number by
+        # independent routes, which is what makes the cross-read-model test in
+        # test_cross_read_model_token_totals.py a real check (issue #873).
         total = ec.input_tokens + ec.output_tokens + ec.cache_creation_tokens + ec.cache_read_tokens
         out[eid] = _ExecutionEnrichment(
             total_cost_usd=ec.total_cost_usd,
@@ -504,7 +508,12 @@ async def get_detail(
         execution_id,
         manager,
         phases,
-        fallback_tokens=detail.total_input_tokens + detail.total_output_tokens,
+        fallback_tokens=(
+            detail.total_input_tokens
+            + detail.total_output_tokens
+            + detail.total_cache_creation_tokens
+            + detail.total_cache_read_tokens
+        ),
         fallback_cost=Decimal("0"),
     )
 

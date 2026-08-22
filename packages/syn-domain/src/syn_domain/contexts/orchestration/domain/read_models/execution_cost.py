@@ -132,8 +132,19 @@ class ExecutionCost:
 
     @property
     def total_tokens(self) -> int:
-        """Total tokens (input + output)."""
-        return self.input_tokens + self.output_tokens
+        """Total tokens (input + output + cache creation + cache read).
+
+        All four components are summed so this agrees with the executions
+        read model, which reports the same figure under the same name
+        (issue #873). Cost is unaffected: pricing reads the four component
+        fields directly and never goes through this property.
+        """
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_tokens
+            + self.cache_read_tokens
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExecutionCost":

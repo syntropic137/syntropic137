@@ -7785,6 +7785,16 @@
             "title": "Total Output Tokens",
             "default": 0
           },
+          "total_cache_creation_tokens": {
+            "type": "integer",
+            "title": "Total Cache Creation Tokens",
+            "default": 0
+          },
+          "total_cache_read_tokens": {
+            "type": "integer",
+            "title": "Total Cache Read Tokens",
+            "default": 0
+          },
           "cost_by_repo": {
             "additionalProperties": {
               "type": "string"

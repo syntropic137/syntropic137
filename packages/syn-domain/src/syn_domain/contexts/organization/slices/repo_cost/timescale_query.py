@@ -28,6 +28,8 @@ SELECT
     execution_id,
     SUM((data->>'total_input_tokens')::int) as total_input,
     SUM((data->>'total_output_tokens')::int) as total_output,
+    SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as total_cache_creation,
+    SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as total_cache_read,
     SUM((data->>'total_cost_usd')::numeric) as total_cost
 FROM agent_events
 WHERE event_type = $1
@@ -40,7 +42,9 @@ _EXECUTION_COSTS_FALLBACK_QUERY = """
 SELECT
     execution_id,
     SUM((data->>'input_tokens')::int) as total_input,
-    SUM((data->>'output_tokens')::int) as total_output
+    SUM((data->>'output_tokens')::int) as total_output,
+    SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as total_cache_creation,
+    SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as total_cache_read
 FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2)
@@ -54,6 +58,8 @@ class _ExecutionCostEntry:
 
     total_input: int
     total_output: int
+    total_cache_creation: int
+    total_cache_read: int
     total_cost: Decimal
 
 
@@ -88,6 +94,8 @@ class TimescaleRepoCostQuery:
                 result[row["execution_id"]] = _ExecutionCostEntry(
                     total_input=row["total_input"] or 0,
                     total_output=row["total_output"] or 0,
+                    total_cache_creation=row["total_cache_creation"] or 0,
+                    total_cache_read=row["total_cache_read"] or 0,
                     total_cost=Decimal(str(row["total_cost"]))
                     if row["total_cost"]
                     else Decimal("0"),
@@ -105,6 +113,8 @@ class TimescaleRepoCostQuery:
                 result[row["execution_id"]] = _ExecutionCostEntry(
                     total_input=row["total_input"] or 0,
                     total_output=row["total_output"] or 0,
+                    total_cache_creation=row["total_cache_creation"] or 0,
+                    total_cache_read=row["total_cache_read"] or 0,
                     total_cost=Decimal("0"),
                 )
         return result
@@ -119,12 +129,16 @@ class TimescaleRepoCostQuery:
         total_cost = Decimal("0")
         total_input = 0
         total_output = 0
+        total_cache_creation = 0
+        total_cache_read = 0
         execution_count = 0
         for eid in execution_ids:
             if eid in exec_costs:
                 entry = exec_costs[eid]
                 total_input += entry.total_input
                 total_output += entry.total_output
+                total_cache_creation += entry.total_cache_creation
+                total_cache_read += entry.total_cache_read
                 total_cost += entry.total_cost
                 execution_count += 1
 
@@ -134,7 +148,8 @@ class TimescaleRepoCostQuery:
         return RepoCost(
             repo_full_name=repo_full_name,
             total_cost_usd=total_cost,
-            total_tokens=total_input + total_output,
+            # All four components (issue #873) - matches the executions read model.
+            total_tokens=total_input + total_output + total_cache_creation + total_cache_read,
             total_input_tokens=total_input,
             total_output_tokens=total_output,
             execution_count=execution_count,

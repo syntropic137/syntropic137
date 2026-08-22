@@ -38,7 +38,7 @@ class TokenUsageRecord:
     """Tokens read from cache."""
 
     total_tokens: int = 0
-    """Total tokens (input + output)."""
+    """Total tokens (input + output + cache creation + cache read) - issue #873."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TokenUsageRecord":
@@ -57,7 +57,13 @@ class TokenUsageRecord:
             output_tokens=output_toks,
             cache_creation_tokens=data.get("cache_creation_tokens", 0),
             cache_read_tokens=data.get("cache_read_tokens", 0),
-            total_tokens=data.get("total_tokens", input_toks + output_toks),
+            total_tokens=data.get(
+                "total_tokens",
+                input_toks
+                + output_toks
+                + data.get("cache_creation_tokens", 0)
+                + data.get("cache_read_tokens", 0),
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -105,7 +111,7 @@ class SessionTokenMetrics:
     """Total cache read tokens."""
 
     total_tokens: int
-    """Total tokens (input + output)."""
+    """Total tokens (input + output + cache creation + cache read) - issue #873."""
 
     message_count: int
     """Number of messages with token usage."""
@@ -129,7 +135,7 @@ class SessionTokenMetrics:
             total_output_tokens=total_output,
             total_cache_creation_tokens=total_cache_creation,
             total_cache_read_tokens=total_cache_read,
-            total_tokens=total_input + total_output,
+            total_tokens=total_input + total_output + total_cache_creation + total_cache_read,
             message_count=len(records),
         )
 
