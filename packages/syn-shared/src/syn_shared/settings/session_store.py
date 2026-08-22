@@ -78,6 +78,15 @@ class SessionStoreSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # Pydantic embeds the offending INPUT in ValidationError by default.
+        # `_reject_internal_whitespace` raises on the URL, and this class holds
+        # that URL precisely because every part of it is operator-supplied and
+        # could carry a credential - which is why the startup posture line logs
+        # no part of it. Without this, one pasted space defeats that: the
+        # validation error prints the whole URL into the startup log. A
+        # validator writing a careful message is not enough, the framework
+        # appends the input regardless. Mirrors `Settings` in config.py.
+        hide_input_in_errors=True,
     )
 
     url: str | None = Field(

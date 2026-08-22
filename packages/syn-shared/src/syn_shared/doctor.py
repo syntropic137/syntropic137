@@ -70,6 +70,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from syn_shared.env_constants import (
     ENV_APP_ENVIRONMENT,
     ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
@@ -157,6 +159,10 @@ class CaptureVerdict(StrEnum):
     OFF = "OFF"
     WARN = "WARN"
     OK = "OK"
+    #: The settings object could not be built at all, so no posture can be
+    #: derived. Distinct from OFF: OFF is a working system with capture
+    #: disabled, INVALID is a system that will not start.
+    INVALID = "INVALID"
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +250,10 @@ class DoctorReport:
     store_token: VariableReport
     store_label: VariableReport
     capture: CaptureVerdict
+    #: Variables SessionStoreSettings refused. Names only, never values: the
+    #: whole point of the URL being secret is that a malformed one is still
+    #: secret, and a rejected value is the likeliest to be a mis-paste.
+    rejected_names: tuple[str, ...]
     label_usable: bool
     label_declared: bool
     dispatch_concurrency: VariableReport
@@ -490,6 +500,48 @@ def _exporter_version(provider: WorkspaceImageProvider) -> str | None:
     return PINNED_EXPORTER_VERSIONS.get(provider)
 
 
+#: The settings field names, as the operator sees them in their environment.
+_FIELD_TO_ENV: Mapping[str, str] = {
+    "url": ENV_SYN_SESSION_STORE_URL,
+    "auth_token": ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    "label": ENV_SYN_SESSION_STORE_LABEL,
+}
+
+
+def _build_settings(
+    store_url: VariableReport,
+    store_token: VariableReport,
+    store_label: VariableReport,
+) -> tuple[SessionStoreSettings | None, tuple[str, ...]]:
+    """Build the real settings, or report which variables it refused.
+
+    `SessionStoreSettings` rejects a URL with whitespace inside it, because a
+    pasted line break cannot be guessed away. That rejection is correct - and it
+    means the doctor is handed a value that raises on construction. Letting it
+    propagate would end the command in a traceback on exactly the
+    misconfiguration it exists to diagnose, which is the one moment an operator
+    most needs it to keep talking.
+
+    Only the NAMES come back. A value pydantic refused is the likeliest of all
+    to be a mis-paste of something else, and the URL is secret here by design.
+    """
+    try:
+        settings = SessionStoreSettings(
+            url=store_url.value,
+            auth_token=store_token.value,
+            label=store_label.value or "",
+            _env_file=None,  # pyright: ignore[reportCallIssue]
+        )
+    except ValidationError as error:
+        names = {
+            _FIELD_TO_ENV.get(str(location[0]), str(location[0]))
+            for err in error.errors()
+            if (location := err["loc"])
+        }
+        return None, tuple(sorted(names))
+    return settings, ()
+
+
 def build_report(sources: EnvSources) -> DoctorReport:
     """Turn raw sources into the structured report. Pure - no I/O."""
     app_environment = resolve_variable(ENV_APP_ENVIRONMENT, sources, default="development")
@@ -509,14 +561,9 @@ def build_report(sources: EnvSources) -> DoctorReport:
 
     # Reuse the real settings object so OFF/WARN/OK and the label rule can never
     # drift from what the running system does.
-    settings = SessionStoreSettings(
-        url=store_url.value,
-        auth_token=store_token.value,
-        label=store_label.value or "",
-        _env_file=None,  # pyright: ignore[reportCallIssue]
-    )
+    settings, rejected_names = _build_settings(store_url, store_token, store_label)
 
-    if store_label.is_set and not settings.display_label:
+    if settings is not None and store_label.is_set and not settings.display_label:
         # An unusable label is probably not what the operator believed they set,
         # and echoing it is how a mis-pasted secret reaches a log. Same reasoning
         # as SessionStoreSettings.display_label.
@@ -537,8 +584,9 @@ def build_report(sources: EnvSources) -> DoctorReport:
         store_url=store_url,
         store_token=store_token,
         store_label=store_label,
-        capture=classify_capture(settings),
-        label_usable=bool(settings.display_label),
+        capture=classify_capture(settings) if settings else CaptureVerdict.INVALID,
+        rejected_names=rejected_names,
+        label_usable=bool(settings and settings.display_label),
         label_declared=bool(store_label.value and store_label.value.strip()),
         dispatch_concurrency=resolve_variable(
             ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES, sources, default="1"
@@ -622,6 +670,19 @@ def _environment_findings(report: DoctorReport) -> list[Finding]:
 
 def _capture_findings(report: DoctorReport) -> list[Finding]:
     findings: list[Finding] = []
+    if report.capture is CaptureVerdict.INVALID:
+        rejected = ", ".join(report.rejected_names)
+        return [
+            Finding(
+                Severity.ERROR,
+                f"Session-store settings could not be built: {rejected} was rejected as "
+                "malformed. The most common cause is a value pasted with a line break or "
+                "a stray space inside it, which is invisible in a vault UI. The API would "
+                "fail to start with this configuration. The value is not echoed here - a "
+                "value that failed validation is the likeliest of all to be a mis-paste "
+                "of something else.",
+            )
+        ]
     if report.capture is CaptureVerdict.OFF:
         findings.append(
             Finding(

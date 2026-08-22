@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from syn_shared.doctor import (
     CaptureVerdict,
@@ -28,6 +29,7 @@ from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
     ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
+    SessionStoreSettings,
 )
 from syn_shared.settings.workspace_images import (
     PINNED_DIGESTS,
@@ -658,3 +660,59 @@ def test_an_empty_infra_declaration_is_still_reported() -> None:
     """`NAME=` is a line an operator can see and reasonably expect to matter."""
     result = resolve_variable(_NAME, _sources(infra_dotenv={_NAME: ""}))
     assert result.inert == (Source.INFRA_DOTENV,)
+
+
+# ---------------------------------------------------------------------------
+# Settings the application itself refuses
+#
+# `SessionStoreSettings` rejects a URL with whitespace inside it (a pasted line
+# break cannot be guessed away). The doctor is therefore handed values that
+# raise on construction - on exactly the misconfiguration it exists to
+# diagnose, which is the one moment it most needs to keep talking.
+# ---------------------------------------------------------------------------
+
+_PASTED_URL = "http://host:18090 /v1/sessions/batch"
+
+
+def test_a_url_the_settings_reject_is_reported_not_raised() -> None:
+    report = build_report(_sources(environ={ENV_SYN_SESSION_STORE_URL: _PASTED_URL}))
+    assert report.capture is CaptureVerdict.INVALID
+    assert report.rejected_names == (ENV_SYN_SESSION_STORE_URL,)
+
+
+def test_a_rejected_value_is_never_echoed() -> None:
+    """A value that failed validation is the likeliest of all to be a mis-paste."""
+    report = build_report(_sources(environ={ENV_SYN_SESSION_STORE_URL: _PASTED_URL}))
+    text = render(report, show_values=False)
+    assert _PASTED_URL not in text
+    # Findings are wrapped to the report width, so match on the unwrapped text.
+    assert "was rejected as malformed" in " ".join(text.split())
+
+
+def test_an_unbuildable_configuration_fails_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The API would not start with this, so the doctor must not exit 0."""
+    monkeypatch.setenv(ENV_SYN_SESSION_STORE_URL, _PASTED_URL)
+    _write_repo(tmp_path, dotenv="APP_ENVIRONMENT=selfhost\n")
+    assert main(["--no-1password", "--repo-root", str(tmp_path)]) == 1
+
+
+def test_invalid_is_distinct_from_off() -> None:
+    """OFF is a working system with capture disabled; INVALID will not start."""
+    off = build_report(_sources())
+    assert off.capture is CaptureVerdict.OFF
+    assert off.rejected_names == ()
+    assert off.exit_code == 0
+
+
+def test_the_settings_do_not_leak_a_rejected_url_into_their_own_error() -> None:
+    """Pydantic embeds the offending input by default, and this URL is secret.
+
+    Guarded here because the leak reaches the API startup log too, not only
+    this command - the posture line logs no part of the URL for the same
+    reason.
+    """
+    with pytest.raises(ValidationError) as excinfo:
+        SessionStoreSettings(url=_PASTED_URL, _env_file=None)  # pyright: ignore[reportCallIssue]
+    assert "host:18090" not in str(excinfo.value)
