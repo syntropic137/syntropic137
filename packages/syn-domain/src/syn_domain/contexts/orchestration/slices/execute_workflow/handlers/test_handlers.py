@@ -31,6 +31,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
 )
+from syn_shared.agents import AgentProvider
 
 # =========================================================================
 # AgentExecutionHandler
@@ -1390,11 +1391,46 @@ def _make_skill_todo() -> object:
     )
 
 
-def test_skills_cli_agent_key_is_defined_for_every_headless_provider() -> None:
+@pytest.mark.unit
+def test_skills_cli_agent_keys_table_matches_the_skills_cli_registry() -> None:
+    """Pin the agent-key translation table itself, not just the selector.
+
+    The values are the vercel skills-CLI agent ids, verified against the CLI
+    bundled in the omni-agent workspace image (skills 1.5.14): the agent
+    registry in ``dist/cli.mjs`` keys entries by exactly these ids, and
+    ``skills add --agent <id>`` installs into that entry's ``skillsDir``:
+
+        claude-code -> .claude/skills
+        codex       -> .agents/skills
+        gemini-cli  -> .agents/skills
+
+    ``gemini`` (without the ``-cli`` suffix) is only a display alias the CLI
+    maps ONTO ``gemini-cli``; the registry key is the suffixed form. Getting
+    any of these wrong installs the skill where the harness never looks, and
+    ``skills list`` still reports success (it does not filter by agent), so
+    this table is the only place the mistake is catchable.
+    """
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         _SKILLS_CLI_AGENT_KEYS,
     )
-    from syn_shared.agents import AgentProvider
+
+    assert _SKILLS_CLI_AGENT_KEYS == {
+        "claude": "claude-code",
+        "codex": "codex",
+        "gemini": "gemini-cli",
+    }
+    # The keys are our provider vocabulary; both headless providers must map.
+    assert _SKILLS_CLI_AGENT_KEYS[AgentProvider.CLAUDE] == "claude-code"
+    assert _SKILLS_CLI_AGENT_KEYS[AgentProvider.CODEX] == "codex"
+    # claude-interactive is deliberately absent: the selector resolves it to a
+    # pane agent_id first, so a raw lookup on it must miss.
+
+
+@pytest.mark.unit
+def test_skills_cli_agent_selector_keys_by_provider_for_headless() -> None:
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        _SKILLS_CLI_AGENT_KEYS,
+    )
 
     # The phase's provider IS the skills-CLI agent selector now that the
     # tmux pane selector (agent_id) is gone.
