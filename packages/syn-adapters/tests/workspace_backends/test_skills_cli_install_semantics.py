@@ -38,7 +38,7 @@ import shutil
 import subprocess
 import uuid
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, TypedDict
 
 import pytest
 
@@ -83,14 +83,42 @@ def _image_present(ref: str) -> bool:
     return result.returncode == 0
 
 
+class SkillsLockEntry(TypedDict, total=False):
+    """One skill's record in ``/workspace/skills-lock.json``."""
+
+    source: str
+    sourceType: str  # noqa: N815 - the skills CLI emits camelCase
+    computedHash: str  # noqa: N815
+
+
+class SkillsLockFile(TypedDict, total=False):
+    """Wire shape of ``skills-lock.json`` as the skills CLI writes it."""
+
+    version: int
+    skills: dict[str, SkillsLockEntry]
+
+
+class SkillsListEntry(TypedDict, total=False):
+    """One entry from ``skills list --json``.
+
+    ``path`` is the load-bearing field: it is the ONLY reliable discriminator
+    between harnesses, because ``--agent`` does not filter the listing.
+    """
+
+    name: str
+    path: str
+    scope: str
+    agents: list[str]
+
+
 @dataclass(frozen=True)
 class SkillsCliProbe:
     """Everything the in-container probe observed after one ``skills add``."""
 
     version: str
     installed_paths: tuple[str, ...]
-    lock: dict[str, object]
-    listing: tuple[dict[str, object], ...]
+    lock: SkillsLockFile
+    listing: tuple[SkillsListEntry, ...]
 
 
 def _probe_script(skill_name: str, agent_key: str) -> str:
