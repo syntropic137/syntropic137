@@ -1019,48 +1019,7 @@ check-untyped-dicts:
 # fitness-exceptions.toml [test-markers.*]; both must ratchet to 0.
 # See docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md
 check-test-markers:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    python3 - <<'PY'
-    import re, subprocess, sys, tomllib
-    from pathlib import Path
-
-    cfg = tomllib.loads(Path("fitness-exceptions.toml").read_text()).get("test-markers", {})
-
-    def collected(*args: str) -> int:
-        # No -q: the "N/M tests collected" summary is only emitted without it.
-        out = subprocess.run(
-            ["uv", "run", "pytest", "--collect-only", *args],
-            capture_output=True, text=True,
-        ).stdout
-        m = re.search(r"(\d+)/(\d+) tests collected", out) or re.search(r"(\d+) tests collected", out)
-        if not m:
-            print("  FAIL could not parse pytest collection output"); sys.exit(1)
-        return int(m.group(1))
-
-    total = collected()
-    unmarked = collected("-m", "not unit and not integration and not e2e")
-    xfails = len(re.findall(r"@pytest\.mark\.xfail", "\n".join(
-        p.read_text() for p in Path(".").rglob("test_*.py") if ".venv" not in str(p))))
-
-    failed = False
-    for name, actual in (("unmarked", unmarked), ("xfail", xfails)):
-        entry = cfg.get(name, {})
-        budget, issue = entry.get("value", 0), entry.get("issue", "")
-        if actual > budget:
-            print(f"  FAIL {name}: {actual} (budget {budget}) [{issue}]")
-            failed = True
-        elif budget > 0:
-            print(f"  WARN {name}: {actual}/{budget} - ratchet to 0 [{issue}]")
-        else:
-            print(f"  ok {name}: clean")
-    print(f"  census: {total} tests collected, {unmarked} selected by no CI job")
-
-    if failed:
-        print("\nA test no job runs is not coverage. Mark it, or lower the budget"
-              " in fitness-exceptions.toml only when the count went DOWN.")
-        sys.exit(1)
-    PY
+    @uv run python scripts/check_test_markers.py
 
 # Run type checker (strict mode)
 typecheck:
