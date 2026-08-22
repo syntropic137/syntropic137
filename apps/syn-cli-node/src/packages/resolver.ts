@@ -495,13 +495,17 @@ function parseFrontmatter(content: string): {
 
   const [open, close] = bounds;
   const fm = parseYaml(lines.slice(open + 1, close).join(""));
-  return {
-    frontmatter:
-      typeof fm === "object" && fm !== null && !Array.isArray(fm)
-        ? (fm as Record<string, unknown>)
-        : null,
-    body: lines.slice(close + 1).join("").trim(),
-  };
+  const body = lines.slice(close + 1).join("").trim();
+
+  if (typeof fm === "object" && fm !== null && !Array.isArray(fm)) {
+    return { frontmatter: fm as Record<string, unknown>, body };
+  }
+  // An empty block is `{}` to the domain; anything else that is not a mapping
+  // is a ValueError there, so it must not be silently ignored here.
+  if (fm === null) return { frontmatter: null, body };
+  throw new Error(
+    `YAML frontmatter must be a mapping, got ${Array.isArray(fm) ? "list" : typeof fm}`,
+  );
 }
 
 // ---------------------------------------------------------------------------

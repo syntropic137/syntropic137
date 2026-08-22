@@ -232,3 +232,25 @@ describe("phase prompt resolution matches the domain", () => {
     expect(() => resolvePackage(pkg)).toThrow(/must be a relative path/);
   });
 });
+
+describe("frontmatter shape", () => {
+  it("rejects frontmatter that is not a mapping, as the domain does", () => {
+    // The domain raises "YAML frontmatter must be a mapping"; silently
+    // ignoring it here shipped a phase missing every field it declared.
+    fs.writeFileSync(
+      path.join(pkg, "phase-library", "summarize.md"),
+      "---\n- one\n- two\n---\n\nSummarize.\n",
+    );
+    writeWorkflow("shared://summarize");
+
+    expect(() => resolvePackage(pkg)).toThrow(/frontmatter must be a mapping/);
+  });
+
+  it("treats an empty frontmatter block as no metadata, not an error", () => {
+    fs.writeFileSync(path.join(pkg, "phase-library", "summarize.md"), "---\n---\n\nSummarize.\n");
+    writeWorkflow("shared://summarize");
+
+    const phase = resolvePackage(pkg).workflows[0]!.phases[0]!;
+    expect(phase["prompt_template"]).toBe("Summarize.");
+  });
+});
