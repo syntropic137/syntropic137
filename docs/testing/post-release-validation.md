@@ -1283,7 +1283,9 @@ merge with workflow-scope refs (deduped by `source_url` + `version` + `name`).
 
 ```yaml
 skills:
-  - "anthropics/skills/frontend-design@v1.2.0"   # org/repo/skill-name@version
+  # org/repo/skill-name@version. anthropics/skills publishes no git tags, so a
+  # commit sha is the only pin that resolves against it.
+  - "anthropics/skills/doc-coauthoring@3b3fad96af16a10759d930941b4520ba0c40edae"
   - "https://github.com/acme/tdd-skill@v2.0.0"   # <url>@<version>
   - source: github.com/acme/skills               # verbose form
     version: feature/branch-with-slash
@@ -1296,38 +1298,12 @@ skills:
 
 ### Fixture plugin (bundled + external skills)
 
-Build this once; the checks below all use it.
-
-```bash
-mkdir -p /tmp/fixture-plugin/skills/repo-conventions /tmp/fixture-plugin/workflows/demo
-cat > /tmp/fixture-plugin/skills/repo-conventions/SKILL.md <<'MD'
----
-name: repo-conventions
-description: Use when the task touches this repository's layout.
----
-Prefer small focused modules.
-MD
-cat > /tmp/fixture-plugin/workflows/demo/workflow.yaml <<'YAML'
-id: skills-demo
-name: Skills Demo
-type: research
-classification: simple
-requires_repos: false
-skills:
-  - ./skills/repo-conventions
-phases:
-  - id: demo
-    name: Demo
-    order: 1
-    execution_type: sequential
-    timeout_seconds: 600
-    agent:
-      provider: codex
-      model: gpt-5.6-sol
-    prompt_template: |
-      List the skills available to you, then stop.
-YAML
-```
+The fixture is committed, not built here: `workflows/examples/starter-plugin/`.
+It is the same artifact a plugin author copies, so validating it validates what
+users actually get. It declares a **vendored** skill (`./skills/repo-conventions`,
+a directory inside the plugin) and an **external** one
+(`anthropics/skills/doc-coauthoring@<sha>`), diverging per phase, all phases on
+`model: haiku` to keep a validation run cheap.
 
 A **bundled** skill is a path inside the plugin; it has no version of its own, so the
 CLI pins it by the sha256 of its file tree and uploads a definition in which every
@@ -1335,11 +1311,13 @@ skill ref is explicitly pinned. Editing a bundled skill therefore produces a new
 identity rather than silently resolving to the previously stored tree.
 
 ```bash
-syn workflow install /tmp/fixture-plugin
+syn workflow install ./workflows/examples/starter-plugin
 ```
 
 - [ ] Output includes `registered skill repo-conventions@sha256-<hash>`
-- [ ] The workflow is created with its declared id (`skills-demo`), not a fresh uuid
+- [ ] Output includes `registered skill doc-coauthoring@<sha>` after a clone
+- [ ] The workflows are created with their declared ids (`starter-research-v1`,
+      `starter-pr-review-v1`), not fresh uuids
 - [ ] A second `syn workflow install` prints `already registered` and performs **no**
       upload - this is the caching claim; if it uploads twice, content-addressing is
       not doing its job. (The workflow-creation step itself will error, see the

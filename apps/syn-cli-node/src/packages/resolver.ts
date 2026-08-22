@@ -174,17 +174,19 @@ function parseManifestFile(filePath: string, format: "json" | "yaml"): PluginMan
 function loadWorkflowYaml(
   workflowDir: string,
   sourcePath: string,
+  phaseLibraryDir: string | null = null,
 ): ResolvedWorkflow {
   const yamlPath = path.join(workflowDir, "workflow.yaml");
   if (!fs.existsSync(yamlPath)) {
     throw new Error(`workflow.yaml not found in ${workflowDir}`);
   }
-  return loadWorkflowYamlFromPath(yamlPath, sourcePath);
+  return loadWorkflowYamlFromPath(yamlPath, sourcePath, phaseLibraryDir);
 }
 
 function loadWorkflowYamlFromPath(
   yamlPath: string,
   sourcePath: string,
+  phaseLibraryDir: string | null = null,
 ): ResolvedWorkflow {
   const workflowDir = path.dirname(yamlPath);
   const content = fs.readFileSync(yamlPath, "utf-8");
@@ -192,7 +194,7 @@ function loadWorkflowYamlFromPath(
 
   const phases = Array.isArray(data["phases"]) ? data["phases"] : [];
   const resolvedPhases = phases.map((phase) =>
-    resolvePhase(phase as Record<string, unknown>, workflowDir),
+    resolvePhase(phase as Record<string, unknown>, workflowDir, phaseLibraryDir),
   );
 
   const repository = data["repository"] as Record<string, unknown> | undefined;
@@ -218,15 +220,69 @@ function loadWorkflowYamlFromPath(
   };
 }
 
+const SHARED_PREFIX = "shared://";
+
+/**
+ * Resolve a `shared://<name>` prompt reference to a file in `phase-library/`.
+ *
+ * WHY this lives in the CLI and not only in the domain: the server has no base
+ * directory, so it rejects any `prompt_file` that still appears in an uploaded
+ * document. The multi-workflow package format documents `shared://` as the way
+ * to reuse a phase across workflows, so if the CLI does not inline it the
+ * install fails with "prompt_file 'shared://x' was not resolved" and the
+ * feature is unusable from `syn workflow install`.
+ *
+ * Mirrors `_resolve_shared_prompt_path` in the domain: a reference without a
+ * phase library is an error, an empty name is an error, and the resolved path
+ * must stay inside the library directory (a `..` segment is an escape, not a
+ * naming mistake).
+ */
+function resolveSharedPromptPath(
+  phaseId: string,
+  ref: string,
+  phaseLibraryDir: string | null,
+): string {
+  const name = ref.slice(SHARED_PREFIX.length);
+  if (phaseLibraryDir === null) {
+    throw new Error(
+      `Phase '${phaseId}': shared:// reference '${ref}' requires a phase-library/ ` +
+        `directory, which only the multi-workflow package format has`,
+    );
+  }
+  if (!name) {
+    throw new Error(`Phase '${phaseId}': shared:// reference is empty`);
+  }
+
+  const libRoot = path.resolve(phaseLibraryDir);
+  const resolved = path.resolve(libRoot, `${name}.md`);
+  if (!resolved.startsWith(libRoot + path.sep)) {
+    throw new Error(
+      `Phase '${phaseId}': shared:// path '${name}' escapes the phase-library directory`,
+    );
+  }
+  if (!fs.existsSync(resolved)) {
+    throw new Error(
+      `Phase '${phaseId}': shared:// reference '${ref}' does not exist ` +
+        `(looked for ${path.relative(libRoot, resolved)} in ${libRoot})`,
+    );
+  }
+  return resolved;
+}
+
 function resolvePhase(
   phase: Record<string, unknown>,
   workflowDir: string,
+  phaseLibraryDir: string | null = null,
 ): Record<string, unknown> {
   if (typeof phase["prompt_file"] !== "string" || phase["prompt_template"]) {
     return phase;
   }
 
-  const promptPath = path.join(workflowDir, phase["prompt_file"] as string);
+  const promptFile = phase["prompt_file"] as string;
+  const phaseId = String(phase["id"] ?? "(unnamed)");
+  const promptPath = promptFile.startsWith(SHARED_PREFIX)
+    ? resolveSharedPromptPath(phaseId, promptFile, phaseLibraryDir)
+    : path.join(workflowDir, promptFile);
   if (!fs.existsSync(promptPath)) return phase;
 
   const promptContent = fs.readFileSync(promptPath, "utf-8");
@@ -312,6 +368,10 @@ function resolveMultiWorkflow(
   source: string,
 ): ResolvedWorkflow[] {
   const workflowsDir = path.join(pkgPath, "workflows");
+  // Only the multi-workflow format has a phase library, so `shared://` is only
+  // resolvable here. Passing the path even when the directory is absent keeps
+  // the error message about the missing FILE rather than the missing feature.
+  const phaseLibraryDir = path.join(pkgPath, "phase-library");
   const subdirs = fs
     .readdirSync(workflowsDir)
     .sort()
@@ -324,7 +384,7 @@ function resolveMultiWorkflow(
     });
 
   return subdirs.map((d) =>
-    loadWorkflowYaml(path.join(workflowsDir, d), source),
+    loadWorkflowYaml(path.join(workflowsDir, d), source, phaseLibraryDir),
   );
 }
 
@@ -547,7 +607,7 @@ export function scaffoldMultiPackage(
     `syn workflow install ./${path.basename(directory)}/\n` +
     `syn workflow run ${wfName}-v1 --task "Your task here"\n` +
     "```\n\n" +
-    `## Phases\n\n- **${opts.name}** — ${opts.numPhases ?? 3} phases\n`;
+    `## Phases\n\n- **${opts.name}**: ${opts.numPhases ?? 3} phases\n`;
 
   fs.writeFileSync(path.join(directory, "README.md"), readme, "utf-8");
 }
