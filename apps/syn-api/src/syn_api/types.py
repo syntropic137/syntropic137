@@ -840,6 +840,12 @@ class SessionCostData(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    """Sum of input, output, cache creation and cache read tokens (issue #873).
+
+    Means the same thing as ``total_tokens`` on the executions read model.
+    Excluding the cache components undercounted this by up to ~68x while
+    cost stayed correct, because pricing reads the cache fields directly.
+    """
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     tool_calls: int = 0
@@ -867,6 +873,11 @@ class ExecutionCostData(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    """Sum of input, output, cache creation and cache read tokens (issue #873).
+
+    Must equal ``total_tokens`` on ``/api/v1/executions/{id}`` for the same
+    execution.
+    """
     # These four were absent from this DTO, so the query service computed them
     # correctly and the mapping silently dropped them - the response then fell
     # back to its `= 0` defaults. An execution reported 0 cache reads and 0 tool
@@ -897,6 +908,7 @@ class CostSummary(BaseModel):
     total_sessions: int = 0
     total_executions: int = 0
     total_tokens: int = 0
+    """Sum of all four token components across executions (issue #873)."""
     total_tool_calls: int = 0
     top_models: list[dict] = Field(default_factory=list)
     top_sessions: list[dict] = Field(default_factory=list)
@@ -1377,8 +1389,11 @@ class GlobalCostResponse(BaseModel):
     organization_id: str = ""
     total_cost_usd: str = "0"
     total_tokens: int = 0
+    """Sum of input, output, cache creation and cache read tokens (issue #873)."""
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
     cost_by_repo: dict[str, str] = Field(default_factory=dict)
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
     cost_by_model: dict[str, str] = Field(default_factory=dict)
