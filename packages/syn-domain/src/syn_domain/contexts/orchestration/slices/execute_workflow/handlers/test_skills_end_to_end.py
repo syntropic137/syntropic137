@@ -90,10 +90,12 @@ phases:
       - "example/code-review-repo/code-review@1.0.0"
 """
 
-# Two phases, DIVERGENT providers, one distinct skill each. Phase 1 pairs
-# provider "claude" with a stray agent_id "codex": YAML validation permits that
-# combination (agent_id only means "which tmux pane" on the interactive path),
-# and it is exactly the misroute _skills_cli_agent_selector exists to prevent.
+# Two phases, DIVERGENT providers, one distinct skill each. This is what pins
+# _SKILLS_CLI_AGENT_KEYS: a claude phase must install its skill for agent
+# "claude-code" and a codex phase for "codex", and those land in DIFFERENT
+# directories inside the workspace (.claude/skills vs .agents/skills). Getting
+# the mapping wrong installs a skill where the harness never looks, and
+# `skills list` still reports success because it does not filter by agent.
 _DIVERGENT_WORKFLOW_YAML = """
 id: e2e-divergent-skills-workflow
 name: E2E Divergent Skills Workflow
@@ -104,7 +106,6 @@ phases:
     prompt_template: "Review this."
     agent:
       provider: claude
-      agent_id: codex
     skills:
       - "example/code-review-repo/code-review@1.0.0"
   - id: ship
@@ -294,10 +295,9 @@ async def test_divergent_providers_install_each_phase_skill_for_its_own_harness(
       ``codex``). Those keys are what decide the on-disk install root inside
       the container, verified against the real image in
       ``packages/syn-adapters/tests/workspace_backends/test_skills_cli_install_semantics.py``.
-    * The stray-``agent_id`` guard in ``_skills_cli_agent_selector``. Phase 1
-      is ``provider="claude"`` with ``agent_id="codex"`` - a combination YAML
-      validation permits. The phase runs ``claude -p``, so keying the skills
-      CLI off ``agent_id`` would install its skill where claude never looks.
+    * The provider-to-agent-key mapping. Phase 1 runs ``claude -p`` and phase
+      2 runs ``codex exec``, so a swapped mapping would install each skill
+      where the other harness never looks.
     """
     storage = get_test_skill_storage()
     lock = SkillLockProjection(InMemoryProjectionStore())
@@ -339,7 +339,6 @@ async def test_divergent_providers_install_each_phase_skill_for_its_own_harness(
             description="",
             agent_config=AgentConfiguration(
                 provider=phase_def.provider or "claude",
-                agent_id=phase_def.agent_id,
             ),
             prompt_template=phase_def.prompt_template,
             output_artifact_type="text",
@@ -364,7 +363,7 @@ async def test_divergent_providers_install_each_phase_skill_for_its_own_harness(
             )
         observed.append((phase.phase_id, _skills_add_calls(workspace)))
 
-    # Phase 1: provider claude (despite agent_id="codex") -> --agent claude-code.
+    # Phase 1: provider claude -> --agent claude-code.
     assert observed[0] == (
         "phase-1",
         [
@@ -378,8 +377,8 @@ async def test_divergent_providers_install_each_phase_skill_for_its_own_harness(
             ]
         ],
     ), (
-        "phase 1 runs claude -p; its skill must be installed for claude-code, "
-        "not for the stray agent_id"
+        "phase 1 runs claude -p, so its skill must be installed for "
+        "claude-code and land in .claude/skills"
     )
 
     # Phase 2: provider codex -> --agent codex, and its OWN skill only.
