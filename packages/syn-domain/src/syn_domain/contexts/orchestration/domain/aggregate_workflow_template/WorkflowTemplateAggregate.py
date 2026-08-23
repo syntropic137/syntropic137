@@ -116,13 +116,8 @@ def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDe
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         PhaseDefinition,
     )
-    from syn_shared.agents import AgentProvider
 
     updated_provider = _coalesce(data["provider"], phase.provider)
-    # agent_id only names a tmux pane on the interactive path; if the phase is
-    # (now) headless, drop a stale agent_id so it can't outlive a provider switch
-    # (e.g. claude-interactive+gemini -> codex) and crash AgentConfiguration later.
-    agent_id = phase.agent_id if updated_provider == AgentProvider.CLAUDE_INTERACTIVE else None
     return PhaseDefinition(
         phase_id=phase.phase_id,
         name=phase.name,
@@ -138,7 +133,6 @@ def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDe
         argument_hint=phase.argument_hint,
         model=_coalesce(data["model"], phase.model),
         provider=updated_provider,
-        agent_id=agent_id,
         allow_delegation=phase.allow_delegation,
         skills=phase.skills,
         claude_plugins=phase.claude_plugins,

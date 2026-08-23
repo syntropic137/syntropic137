@@ -22,6 +22,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
     WorkflowNotFoundError,
 )
+from syn_shared.agents import require_executable_provider
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
@@ -162,23 +163,32 @@ def _resolve_repos_from_template(
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
-    Multi-agent (docs/plans/multi-agent-workspaces.md): the YAML
-    `agent:` block contributes `provider` + `agent_id`; the top-level
-    `model` field still feeds the model. All three are optional;
-    AgentConfiguration's defaults preserve back-compat with PR #765.
+    The YAML `agent:` block contributes `provider` and `allow_delegation`;
+    the top-level `model` field feeds the model. All are optional;
+    AgentConfiguration's defaults apply when none are set.
+
+    This is the EXECUTION boundary for provider validity. It runs for every
+    phase of every execution - API, GitHub trigger and CLI alike - before any
+    workspace is provisioned or any execution stream is created. YAML parsing
+    rejects the removed ``claude-interactive`` provider, but a template stored
+    before the removal is rehydrated straight from its historical
+    ``WorkflowTemplateCreated`` event and never sees the YAML validator; the
+    aggregate stays permissive on purpose so operators can still read and fix
+    those templates. Validating here is what stops such a phase from falling
+    through to ``claude -p`` and reporting a headless SUCCESS.
     """
     phase_model: str | None = getattr(phase, "model", None)
     phase_provider: str | None = getattr(phase, "provider", None)
-    phase_agent_id: str | None = getattr(phase, "agent_id", None)
     allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
-    if not (phase_model or phase_provider or phase_agent_id or allow_delegation):
-        return AgentConfiguration()
+    phase_id: str | None = getattr(phase, "phase_id", None)
     defaults = AgentConfiguration()
     resolved_provider = phase_provider or defaults.provider
+    require_executable_provider(resolved_provider, phase_id=phase_id)
+    if not (phase_model or phase_provider or allow_delegation):
+        return defaults
     return AgentConfiguration(
         provider=resolved_provider,
         model=phase_model,
-        agent_id=phase_agent_id or defaults.agent_id,
         allow_delegation=allow_delegation,
     )
 

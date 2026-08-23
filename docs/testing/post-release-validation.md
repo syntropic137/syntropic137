@@ -1006,8 +1006,7 @@ A phase selects its harness with a per-phase `agent:` block:
 phases:
   - id: implement
     agent:
-      provider: claude | claude-interactive | codex
-      agent_id: claude | codex | gemini     # only meaningful for claude-interactive
+      provider: claude | codex
       model: <model-id>                     # ignored for codex
       allow_delegation: false
 ```
@@ -1082,10 +1081,6 @@ Two example workflows ship in `workflows/examples/` and are seeded by `just dev`
 |---|---|
 | `codex-demo.yaml` | Single codex phase, no repo required. The primary probe. |
 | `codex-delegates-to-claude.yaml` | `provider: codex` + `allow_delegation: true`; proves dual-auth staging and delegation-skill install. |
-
-> `multi-agent-claude-then-codex-markers.yaml` is **not** the codex bridge - it is
-> `provider: claude-interactive` with `agent_id: codex` (a tmux pane). Do not use it
-> to validate this section.
 
 ```bash
 syn workflow run <codex-demo-workflow-id>
@@ -1204,30 +1199,64 @@ Across the pair, assert:
 
 ## 6.2 Functional Validation - Skill Injection
 
-> Added for harness-agnostic skill injection (#772 / #774). **Plan 1 of 3** - the CLI
-> surface (`syn skill*`) is Plan 2 and does **not** exist yet.
+> Harness-agnostic skill injection (#772 / #774). **Plan 1 of 3** - the CLI surface
+> (`syn skill*`) is Plan 2 and does **not** exist yet. Everything below was rewritten
+> against the working implementation and re-derived from the skills CLI actually
+> shipped in the pinned images; the previous version of this section predated the
+> implementation and had never been run.
+
+### The one thing to read before running anything
+
+**`skills list --agent <key>` DOES NOT FILTER BY AGENT.** It prints every project
+skill regardless of which harness each was installed for. Both keys return
+byte-identical output:
+
+```
+$ skills list --agent claude-code          $ skills list --agent codex
+Project Skills                             Project Skills
+beta  ./.agents/skills/beta  Agents: not linked    beta  ./.agents/skills/beta  Agents: not linked
+alpha ./.claude/skills/alpha Agents: Claude Code   alpha ./.claude/skills/alpha Agents: Claude Code
+```
+
+So a check shaped like "run `skills list --agent codex`, see the skill, tick the
+box" **passes when the skill was installed for the wrong harness**. That is the
+exact failure #772's agent-key table exists to prevent, and this command cannot
+see it. Never gate on `skills list --agent`.
+
+The real discriminator is the **install path**, which differs per harness:
+
+| skills-CLI agent key | our `provider` / `agent_id` | install path under `/workspace` |
+|---|---|---|
+| `claude-code` | `claude` | `.claude/skills/<name>/SKILL.md` |
+| `codex` | `codex` | `.agents/skills/<name>/SKILL.md` |
+| `gemini-cli` | `gemini` (interactive-tmux pane only) | `.agents/skills/<name>/SKILL.md` |
+
+Note that `codex` and `gemini-cli` share `.agents/skills`, so the path separates
+claude from the rest but not codex from gemini. For codex, `skills list --json`
+reporting `"agents": []` on a `.agents/skills` entry is expected, not a failure -
+the CLI only reports a linked agent for the claude-specific directory.
 
 ### Known surface limits (do not treat these as bugs)
 
 - Write surface is `POST /skills/registrations`. Reads are `GET /skills/registrations`
-  (is this triple registered?) and `GET /skills/storage` (store size). There is still
-  no delete endpoint and no `syn skill` command.
+  and `GET /skills/storage`. There is still no delete endpoint and no `syn skill`
+  command.
 - The marketplace does **not** serve skills, but `syn workflow install` **does**
-  preflight them: it registers every declared skill before creating any workflow, so a
-  bad ref fails the install rather than the run.
+  preflight them: it registers every declared skill before creating any workflow, so
+  a bad ref fails the **install**, not the run.
 - `claude_plugins` and `skills` coexist; nothing is deprecated until Plan 3.
-- `syn workflow install` is **not** idempotent for the workflow itself: re-installing a
-  package whose workflow id already exists fails with "Concurrency conflict: expected
-  version 0, got 1". This predates skill distribution and is not caused by it - the
-  skills preflight correctly reports "already registered" first. Use
-  `syn workflow update` to re-install.
+- `syn workflow install` is **not** idempotent for the workflow itself: re-installing
+  a package whose workflow id already exists fails with "Concurrency conflict:
+  expected version 0, got 1". This predates skill distribution - the skills preflight
+  correctly reports "already registered" first. Use `syn workflow update` to
+  re-install.
+- Merge of workflow-scope and phase-scope `skills:` is keyed on the identity triple
+  `(source_url, version, skill_name)`, **not** on skill name. Phase scope does not
+  override a workflow-scope version by name; both survive the merge and the phase
+  then aborts at provisioning with "conflicting versions". There is no by-name
+  override mechanism in this plan.
 
-### Precondition: the default workspace image runs both harnesses
-
-Run this FIRST. It resolves `DEFAULT_WORKSPACE_IMAGE`, pulls it, and probes every
-harness the platform depends on. Until this recipe existed, nothing local or in
-CI ever executed the pinned default, so preflight could be green while the image
-every deployment pulls was unable to start an agent.
+### Precondition: the image actually running your phase has the skills CLI
 
 ```bash
 just check-default-workspace-image
@@ -1236,30 +1265,43 @@ just check-default-workspace-image
 - [ ] claude, codex, and skills all report a version
 - [ ] the image reported is the digest in `workspace_images.py`, not a tag
 
-### Precondition: the skills CLI must exist in the workspace image
+Then probe the specific image, resolved rather than hardcoded (the default moved
+from claude-cli to omni-agent, and a tag fallback is rejected by image
+verification anyway):
 
 ```bash
-# Resolve the image the stack ACTUALLY defaults to, rather than hardcoding one.
-# A hardcoded fallback here silently validates a different image than the stack
-# runs: the default moved from claude-cli to omni-agent, and a tag fallback is
-# also rejected by image verification (registry refs must be digest-pinned).
 WS_IMAGE="${SYN_WORKSPACE_DOCKER_IMAGE:-$(uv run python -c \
   'from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE; print(DEFAULT_WORKSPACE_IMAGE)')}"
 echo "validating against: $WS_IMAGE"
-docker run --rm "$WS_IMAGE" skills --version
+docker run --rm --entrypoint sh "$WS_IMAGE" -c 'skills --version'
 ```
 
-- [ ] `skills` CLI present (expected pin: 1.5.14)
-- [ ] `skills add --help` accepts agent keys `claude-code`, `codex`, `gemini-cli`
+- [ ] `skills` CLI present, and the version it PRINTS is the expected pin (1.5.14)
 
-> If this binary is missing, **every** skills-declaring phase fails at provisioning.
+> At the digests currently pinned in `workspace_images.py`, the skills CLI 1.5.14 is
+> present in **all three** images (claude-cli, interactive-tmux, omni-agent), so a
+> skills-declaring phase is not image-limited today. Nothing contractual guarantees
+> that: no image build asserts the pin, and an operator override
+> (`SYN_WORKSPACE_DOCKER_IMAGE`) can point at anything. Assert the version the
+> command printed; never infer it from "the omni image has it".
+>
+> The **session exporter** (`apss-session-exporter`) genuinely IS omni-only - it is
+> absent from claude-cli and interactive-tmux. Do not conflate the two binaries;
+> §6.6 covers the exporter.
+
+If the skills CLI is missing, **every** skills-declaring phase fails at provisioning
+(loudly - `SkillInstallFailed`), which is the intended behavior.
 
 ### Register a skill
 
 The API does no git work - the client clones and POSTs the file tree (ADR-066).
 
 ```bash
-git clone --depth 1 --branch <tag> https://github.com/anthropics/skills /tmp/sk
+# NOTE: anthropics/skills publishes NO git tags. `git ls-remote --tags` returns
+# nothing, so the '@v1.2.0' form this runbook used to show would 404. Pin a
+# commit sha on main instead.
+COMMIT=$(git ls-remote https://github.com/anthropics/skills main | cut -f1)
+git clone --depth 1 https://github.com/anthropics/skills /tmp/sk
 # Build payload: files[] = {rel_path (SKILL.md at root), content_base64}
 curl -sS -X POST "$SYN_API_URL/skills/registrations" \
   -H 'content-type: application/json' -d @/tmp/payload.json
@@ -1271,15 +1313,14 @@ curl -sS -X POST "$SYN_API_URL/skills/registrations" \
 
 Negative cases:
 
-- [ ] `rel_path: "../evil"` → 422 unsafe-path error code
-- [ ] Malformed base64 → 400
-- [ ] Tree with no `SKILL.md` → 422 manifest-missing
-- [ ] > 10,000 files or > 50 MiB → 413
+- [ ] `rel_path: "../evil"` -> 422 unsafe-path error code
+- [ ] Malformed base64 -> 400
+- [ ] Tree with no `SKILL.md` -> 422 manifest-missing
+- [ ] More than 10,000 files or more than 50 MiB -> 413
 
 ### Declare skills in a workflow
 
-`skills:` is accepted at **both** workflow scope and phase scope. Phase-scope refs
-merge with workflow-scope refs (deduped by `source_url` + `version` + `name`).
+`skills:` is accepted at **both** workflow scope and phase scope.
 
 ```yaml
 skills:
@@ -1292,56 +1333,132 @@ skills:
     names: [alpha, beta]
 ```
 
-- [ ] `@latest` is rejected
+- [ ] `@latest` is rejected in every form (shorthand, URL, verbose, `names:` expansion)
 - [ ] Two-segment `org/repo@ver` (the plugin-era shape) is rejected with a corrective message
-- [ ] Declaring an **unregistered** skill fails with `SkillNotRegistered` rather than running skill-less
+- [ ] Declaring an **unregistered** skill fails with `SkillNotRegistered` rather than
+      running skill-less
 
-### Fixture plugin (bundled + external skills)
+### Both sources must be exercised
 
-The fixture is committed, not built here: `workflows/examples/starter-plugin/`.
-It is the same artifact a plugin author copies, so validating it validates what
-users actually get. It declares a **vendored** skill (`./skills/repo-conventions`,
-a directory inside the plugin) and an **external** one
-(`anthropics/skills/doc-coauthoring@<sha>`), diverging per phase, all phases on
-`model: haiku` to keep a validation run cheap.
+Skill distribution has two independent code paths; validating only one leaves the
+other unproven.
 
-A **bundled** skill is a path inside the plugin; it has no version of its own, so the
-CLI pins it by the sha256 of its file tree and uploads a definition in which every
-skill ref is explicitly pinned. Editing a bundled skill therefore produces a new
-identity rather than silently resolving to the previously stored tree.
+| Source | How it is declared | How it is pinned |
+|---|---|---|
+| Vendored (in the plugin package) | `./skills/<name>` | sha256 of the file tree, computed by the CLI at install time |
+| External (a git repo) | `org/repo/<name>@<ref>` or `<url>@<ref>` | the declared ref, resolved to a sha at registration |
+
+A vendored skill has no version of its own, so the CLI pins it by tree hash and
+uploads a definition in which every ref is explicitly pinned. Editing a vendored
+skill therefore produces a NEW identity rather than silently resolving to the
+previously stored tree.
+
+Build the fixture once; the checks below all use it.
+
+The fixture is committed, not built here: `workflows/examples/starter-plugin/`. It is the same artifact a
+plugin author copies, so validating it validates what users actually get.
+It declares a vendored skill (`./skills/repo-conventions`) and an external
+one (`anthropics/skills/doc-coauthoring@<sha>`), diverging per phase, all
+phases on `model: haiku` to keep a validation run cheap.
 
 ```bash
 syn workflow install ./workflows/examples/starter-plugin
 ```
 
-- [ ] Output includes `registered skill repo-conventions@sha256-<hash>`
-- [ ] Output includes `registered skill doc-coauthoring@<sha>` after a clone
-- [ ] The workflows are created with their declared ids (`starter-research-v1`,
-      `starter-pr-review-v1`), not fresh uuids
 - [ ] A second `syn workflow install` prints `already registered` and performs **no**
-      upload - this is the caching claim; if it uploads twice, content-addressing is
-      not doing its job. (The workflow-creation step itself will error, see the
-      not-idempotent note above.)
-- [ ] Adding `- anthropics/skills/does-not-exist@v9.9.9` to `skills:` makes the
-      **install** fail and creates no workflow (`syn workflow list` unchanged)
+      upload - this is the content-addressing claim. (The workflow-creation step
+      itself will error; see the not-idempotent note above.)
+- [ ] Editing `repo-conventions/SKILL.md` and re-installing registers a **different**
+      `sha256-<hash>`
+- [ ] Adding `- anthropics/skills/does-not-exist@3b3fad9...` makes the **install**
+      fail and creates no workflow (`syn workflow list` unchanged)
 - [ ] `GET /skills/storage` reports non-zero `object_count` and `total_bytes`
 
-### Prove the skill actually reached the agent
+### Prove the skill reached the harness (deterministic checks)
 
-Staging alone is not proof - `.syn-skills/` is only the drop point; `skills add`
-performs the per-harness install.
+Staging is not installation. `/workspace/.syn-skills/` is only the drop point;
+`skills add <dir> --agent <key> -y` (run with cwd `/workspace`) performs the
+per-harness install. Run these against the live workspace container.
 
 ```bash
+# 1. Staged?
 docker exec <workspace> ls -R /workspace/.syn-skills/<skill-name>
-docker exec <workspace> skills list
+
+# 2. Installed WHERE? -- this is the check that actually discriminates harnesses.
+docker exec -w /workspace <workspace> find /workspace/.claude/skills /workspace/.agents/skills \
+  -maxdepth 2 -name SKILL.md
+
+# 3. Machine-readable inventory (project scope; cwd matters).
+docker exec -w /workspace <workspace> skills list --json
+
+# 4. The lockfile the CLI writes.
+docker exec <workspace> cat /workspace/skills-lock.json
+
+# 5. Our side of the story.
 docker logs syn137-api 2>&1 | grep "Installed .* skill"
 ```
 
-- [ ] `/workspace/.syn-skills/<name>/SKILL.md` present in the container
-- [ ] `skills list` (or `~/.claude/skills` for claude) shows the skill **installed**
-- [ ] API logged `Installed N skill(s) for agent <key>`
+- [ ] `/workspace/.syn-skills/<name>/SKILL.md` present (staged)
+- [ ] For a **claude** phase: `/workspace/.claude/skills/<name>/SKILL.md` exists
+- [ ] For a **codex** phase: `/workspace/.agents/skills/<name>/SKILL.md` exists
+- [ ] The path matches the phase's provider. A claude phase whose skill landed in
+      `.agents/skills` is the wrong-harness bug, and it is invisible to `skills list`
+- [ ] `skills list --json` lists each skill with `"scope": "project"` and a `path`
+      under `/workspace`. Run it with cwd `/workspace`; `skills list -g --json`
+      returns `[]` because nothing is installed at global scope
+- [ ] `/workspace/skills-lock.json` has a `skills.<name>.computedHash` entry per
+      installed skill, and the hash changes when the source tree changes
+- [ ] API logged `Installed N skill(s) for agent <key>` with the **expected** key
+      (`claude-code` / `codex` / `gemini-cli`)
 - [ ] Conflicting versions of the same skill name abort the run (no silent last-wins)
-- [ ] A phase declaring skills with a broken materializer **fails** - it must never run skill-less
+- [ ] A phase declaring skills with a broken materializer **fails** - never runs
+      skill-less
+
+### Prove the harness registered the skill (claude only, deterministic)
+
+The claude stream-json `system` / `init` event carries a `skills[]` array read from
+the harness's own registry **before any inference happens**. It is therefore
+deterministic and model-independent - a real gate, not a vibe check.
+
+```bash
+docker exec -w /workspace <workspace> \
+  claude -p --output-format stream-json --verbose 'exit' \
+  | head -1 | jq '{type, subtype, skills}'
+```
+
+- [ ] The first event is `{"type":"system","subtype":"init"}` and its `skills[]`
+      contains the installed skill name
+- [ ] Skills whose `SKILL.md` frontmatter sets `userInvocable: false` are **filtered
+      out** of `skills[]`. Absence there is expected for those and is not a failure;
+      check the install path instead
+- [ ] **Codex has no equivalent init event.** For codex phases, the install path and
+      `skills list --json` are the whole deterministic story. Do not invent a codex
+      version of this check
+
+### Human-only step: is the skill actually reachable?
+
+Ask the agent to list its skills, or give it a prompt the skill should trigger on.
+
+**This is not a CI gate and must never become one.** The answer comes from
+inference, so it is non-deterministic: a model can omit a skill it has, or claim
+one it does not. Its value is catching "installed but not reachable" - correct file
+in the correct directory that the harness nonetheless does not surface - which none
+of the deterministic checks above can see.
+
+- [ ] (human) A phase prompted to list its skills mentions the injected one, or acts
+      on its content. Record the transcript link; if it does not, re-run before
+      filing anything - one negative answer is not a bug report
+
+### Failure modes that look like success
+
+| Symptom | What actually happened | Check that catches it |
+|---|---|---|
+| Green run, agent ignores the skill | Wrong/overridden image with no or older `skills` CLI | `skills --version` inside the running container, asserting the printed pin |
+| `.syn-skills/<name>/SKILL.md` present, agent unaware | Staged but `skills add` never ran or failed | Install path under `.claude/skills` or `.agents/skills` |
+| `skills list` shows the skill, agent unaware | Installed for the WRONG harness | Install path. `skills list --agent` cannot see this |
+| Install succeeds, run fails at provisioning | Skill declared but never registered | `SkillNotRegistered`; register via `POST /skills/registrations` first |
+| Two versions of one skill name declared | Merge is additive across scopes; both survive | Provisioning aborts with "conflicting versions" - expected, not a regression |
+| External ref 404s at install | `anthropics/skills` has no git tags | Pin a commit sha, not `@vX.Y.Z` |
 
 ---
 
@@ -1415,8 +1532,8 @@ trigger never fires for a repo that plainly exists.
 Claude and Codex transcripts are spooled inside the workspace container and
 uploaded to a store speaking APS-V1-0004. The upload is performed by
 `/usr/local/bin/apss-session-exporter`, which ships **in the omni-agent image
-only**. A workspace running `claude-cli` or `interactive-tmux` captures nothing,
-and does so silently.
+only**. A workspace running `claude-cli` captures nothing, and does so
+silently.
 
 **Capture is FAIL-OPEN by design.** A capture problem records `UNKNOWN`/`FAILED`
 and asks for a backfill; it never turns a successful agent run into a failed
@@ -1578,7 +1695,6 @@ evidence, in either direction.
 | Absence, not substitution (#859, #843) | Ids come from agent-writable filenames, so a valid decoy would read as captured |
 | `origin.host` is the CONTAINER ID | Not the machine. Use tags for identity, never `origin_host` |
 | `origin.environment` is always `container` | It is a runtime CLASS. `origin.deployment` is the axis separating dev from selfhost |
-| Shared interactive-tmux not probed per phase (#847) | One container spans phases, so a sweep cannot answer per-phase honestly |
 
 ### Concurrency
 
@@ -1978,7 +2094,7 @@ grep -c '"skills"' schemas/plugin/workflow.schema.json
 grep -c 'CODEX_AUTH_JSON' .env.example
 ```
 
-- [ ] `provider` enum includes every value in `AgentProvider` (`claude`, `claude-interactive`, `codex`)
+- [ ] `provider` enum includes every value in `AgentProvider` (`claude`, `codex`)
 - [ ] `skills` is present in the published workflow schema
 - [ ] Every Pydantic setting has a corresponding `.env.example` entry
 
@@ -2166,13 +2282,20 @@ Full pass/fail/skip for every command and feature tested.
 | codex->claude delegation           |        | optional |
 | parent_session_id sub-session link |        |       |
 | **Skills**                         |        |       |
-| workspace image has skills CLI     |        |       |
+| skills CLI version PRINTED = pin   |        | assert, don't infer |
 | POST /skills/registrations         |        |       |
 | registration idempotent (same sha) |        |       |
 | unsafe path / bad base64 rejected  |        |       |
 | workflow YAML `skills:` parsed     |        |       |
-| skill installed in container       |        |       |
-| unregistered skill fails loudly    |        |       |
+| `@latest` rejected in every form   |        |       |
+| vendored skill pinned by tree sha  |        |       |
+| external skill pinned by commit    |        | no tags upstream |
+| install PATH matches phase harness |        | the real check |
+| `skills list --json` + lock hash   |        |       |
+| claude init event lists the skill  |        | claude only |
+| (human) agent reaches the skill    |        | not a CI gate |
+| unregistered skill fails install   |        |       |
+| conflicting versions abort the run |        |       |
 | **Claude Plugins**                 |        |       |
 | syn claude-plugin list/installed   |        |       |
 | syn claude-plugin show/install     |        |       |

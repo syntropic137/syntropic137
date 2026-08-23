@@ -79,7 +79,6 @@ from syn_shared.settings.workspace import (
 )
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_IMAGE,
-    INTERACTIVE_TMUX_WORKSPACE_IMAGE,
     WorkspaceImageProvider,
     workspace_image_ref,
 )
@@ -93,7 +92,6 @@ __all__ = [
     "DEFAULT_SPOOL_DIR",
     "DEFAULT_WORKSPACE_IMAGE",
     "GITHUB_ACTIONS_OIDC_ISSUER",
-    "INTERACTIVE_TMUX_WORKSPACE_IMAGE",
     "SESHMAGIC_PROVIDER",
     "AppEnvironment",
     "CloudProvider",
