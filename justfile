@@ -17,7 +17,6 @@ compose_test := compose + " -f docker/docker-compose.test.yaml"
 compose_selfhost := compose + " -f docker/docker-compose.selfhost.yaml"
 compose_selfhost_cf := compose_selfhost + " -f docker/docker-compose.cloudflare.yaml"
 compose_dev_cf := compose_dev + " -f docker/docker-compose.dev-cloudflare.yaml"
-compose_dev_interactive := compose_dev + " -f docker/docker-compose.dev-interactive-tmux.yaml"
 
 # Platform detection
 _os := `uname -s`
@@ -414,61 +413,6 @@ dev: _workspace-check
     echo "   • Stop stack:    just dev-stop"
     echo "   • Fresh start:   just dev-fresh"
     echo "   • Run CLI:       just cli --help"
-
-# Mirrors `just dev` but layers in docker/docker-compose.dev-interactive-tmux.yaml
-# so the EXP-04 swarm container (claude / codex / gemini panes), the envoy
-# token-accounting sidecar, and the token-injector come up as a single unit.
-# Prereqs on the host: ~/.claude + ~/.claude.json (other agents are optional;
-# the driver gracefully disables panes whose creds are missing). Since #226
-# credential seeding is exec-based (docker exec -i), so no host temp-dir
-# bind-mount path is needed.
-# Bring up dev stack with the interactive-tmux workspace overlay (for #768 e2e)
-dev-interactive: _workspace-check
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🚀 Starting dev stack with interactive-tmux overlay..."
-    echo ""
-    just _env-check
-    echo ""
-
-    # Resolve .env + 1Password so Docker Compose inherits secrets
-    eval "$(uv run python scripts/resolve_infra_env.py)"
-
-    # Confirm the host has what the overlay expects to bind-mount.
-    if [ ! -d "${HOME}/.claude" ] || [ ! -f "${HOME}/.claude.json" ]; then
-        echo "   ⚠️ ~/.claude or ~/.claude.json missing on host."
-        echo "      Interactive-tmux container will boot but the claude pane will"
-        echo "      fail to launch. Run \`claude login\` once, then retry."
-    fi
-
-    echo "1️⃣ Syncing Python dependencies..."
-    uv sync
-    echo ""
-
-    echo "2️⃣ Building and starting Docker services with interactive-tmux overlay..."
-    {{compose_dev_interactive}} up -d --build
-    echo ""
-    echo "3️⃣ Waiting for services to be healthy..."
-    sleep 5
-    echo ""
-    echo "4️⃣ Seeding workflows..."
-    just seed-workflows || echo "   ⚠️ Seed skipped (workflows may already exist)"
-    echo ""
-    echo "5️⃣ Seeding triggers..."
-    just seed-triggers || echo "   ⚠️ Seed skipped (triggers may already exist)"
-    echo ""
-    echo "✅ Interactive-tmux dev stack ready!"
-    echo ""
-    echo "   🚀 Backend API:  http://localhost:9137"
-    echo "   📊 API Docs:     http://localhost:9137/docs"
-    echo "   🧩 Overlay:      docker/docker-compose.dev-interactive-tmux.yaml"
-    echo ""
-    echo "💡 Tips:"
-    echo "   • Tail logs:        {{compose_dev_interactive}} logs -f api"
-    echo "   • Upload a phase:   curl -X POST http://localhost:9137/workflows/from-yaml \\"
-    echo "                          -H 'Content-Type: application/yaml' \\"
-    echo "                          --data-binary @workflows/examples/multi-agent-claude-then-codex-markers.yaml"
-    echo "   • Stop the stack:   {{compose_dev_interactive}} stop"
 
 # Clean database, seed workflows, and start full dev stack (fresh start)
 # Fresh start: wipe all data and restart from scratch

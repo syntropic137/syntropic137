@@ -39,7 +39,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseExecutionType,
     WorkflowClassification,
 )
-from syn_shared.agents import AgentProvider
+from syn_shared.agents import REMOVED_INTERACTIVE_PROVIDER, AgentProvider
 
 _SHARED_PREFIX = "shared://"
 
@@ -173,26 +173,22 @@ class InputYamlDefinition(BaseModel):
 class AgentYamlDefinition(BaseModel):
     """Per-phase ``agent`` block as parsed from YAML.
 
-    Selects which agent provider drives the phase (e.g. ``claude`` for the
-    default ``claude -p`` Docker path, ``claude-interactive`` for the
-    interactive-tmux workspace provider, ``codex`` for the programmatic
-    codex harness on the same Docker path as ``claude``), which tmux pane
-    the phase targets, and optionally the model. See
-    docs/plans/multi-agent-workspaces.md.
+    Selects which headless agent provider drives the phase (``claude`` for
+    the default ``claude -p`` docker-exec path, ``codex`` for the
+    programmatic ``codex exec`` harness on the same path) and optionally
+    the model.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    provider: Literal["claude", "claude-interactive", "codex"] | None = None
-    """One of: ``claude`` (default; ``claude -p`` path),
-    ``claude-interactive`` (drives the interactive-tmux pane),
-    ``codex`` (programmatic codex harness on the ``claude`` Docker path)."""
+    provider: Literal["claude", "codex"] | None = None
+    """One of: ``claude`` (default; ``claude -p`` path), ``codex``
+    (programmatic ``codex exec`` harness on the same docker path).
 
-    agent_id: Literal["claude", "codex", "gemini"] | None = None
-    """Which tmux pane the phase targets when provider is
-    ``claude-interactive``. Meaningless when provider is ``codex``
-    (docker path) - must be omitted or ``"codex"`` there; see
-    ``_validate_provider_agent_combo``."""
+    A ``Literal`` so the exported JSON schema keeps the enum. The REMOVED
+    ``claude-interactive`` value is intercepted BEFORE this type check by
+    ``_reject_removed_provider`` so a stale workflow gets a message naming
+    the removal rather than a bare "Input should be 'claude' or 'codex'"."""
 
     model: str | None = None
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
@@ -204,38 +200,30 @@ class AgentYamlDefinition(BaseModel):
     preserves single-provider isolation. See
     docs/superpowers/plans/2026-07-23-codex-claude-delegation.md."""
 
-    @model_validator(mode="after")
-    def _validate_provider_agent_combo(self) -> AgentYamlDefinition:
-        """Reject a codex provider paired with an unrelated agent_id, and
-        reject delegation on the interactive-tmux path.
+    @field_validator("provider", mode="before")
+    @classmethod
+    def _reject_removed_provider(cls, value: object) -> object:
+        """Fail a workflow that still declares the removed interactive provider.
 
-        ``provider="codex"`` selects the programmatic codex harness on the
-        docker path; ``agent_id`` only means "which tmux pane" on the
-        ``claude-interactive`` path. Omitted or explicitly ``"codex"`` are
-        the only sensible values here - anything else (e.g. ``"gemini"``)
-        is a contradiction we reject at parse time.
+        ``claude-interactive`` was the interactive-tmux pane path. It was a
+        failed experiment (send race, pane-scrape completion heuristic, empty
+        observability timelines) and has been removed. Rejecting here - rather
+        than silently remapping to ``claude`` - is deliberate: the workflow was
+        authored against an interactive REPL, so quietly running it headless
+        would change what the phase does without telling the author.
 
-        ``allow_delegation`` is headless-only: the interactive-tmux path has a
-        different image/auth model that this feature does not verify.
+        ``mode="before"`` so this fires ahead of the ``Literal`` check and the
+        author sees the removal, not a generic enum error.
         """
-        if self.provider == AgentProvider.CODEX and self.agent_id not in (
-            None,
-            AgentProvider.CODEX,
-        ):
+        if value == REMOVED_INTERACTIVE_PROVIDER:
             msg = (
-                "agent.provider='codex' selects the programmatic codex harness; "
-                "agent_id must be omitted or 'codex' (it does not select a tmux "
-                "pane here)."
+                f"agent.provider={REMOVED_INTERACTIVE_PROVIDER!r} has been removed. "
+                "The interactive-tmux workspace path no longer exists; every phase "
+                f"now runs headless. Use '{AgentProvider.CLAUDE}' (claude -p) or "
+                f"'{AgentProvider.CODEX}' (codex exec) instead."
             )
             raise ValueError(msg)
-        if self.allow_delegation and self.provider == AgentProvider.CLAUDE_INTERACTIVE:
-            msg = (
-                "agent.allow_delegation is only supported on the headless "
-                "providers ('claude', 'codex'); the interactive-tmux path has a "
-                "different image/auth model. Remove allow_delegation or switch provider."
-            )
-            raise ValueError(msg)
-        return self
+        return value
 
 
 class PhaseYamlDefinition(BaseModel):
@@ -267,7 +255,7 @@ class PhaseYamlDefinition(BaseModel):
     argument_hint: str | None = None
     model: str | None = None
 
-    # Per-phase agent provider selection (interactive-tmux integration).
+    # Per-phase agent provider selection.
     # ``agent.model`` is a fallback for the top-level ``model`` field.
     agent: AgentYamlDefinition | None = None
 
@@ -311,12 +299,10 @@ class PhaseYamlDefinition(BaseModel):
             )
             raise ValueError(msg)
 
-        # Multi-agent (interactive-tmux): per-phase agent block. When
-        # absent, leave provider/agent_id as None so the domain default
-        # ("claude") applies. Top-level model wins; agent.model is the
-        # fallback.
+        # Per-phase agent block. When absent, leave provider as None so the
+        # domain default ("claude") applies. Top-level model wins;
+        # agent.model is the fallback.
         provider = self.agent.provider if self.agent else None
-        agent_id = self.agent.agent_id if self.agent else None
         agent_model = self.agent.model if self.agent else None
         allow_delegation = self.agent.allow_delegation if self.agent else False
         model = self.model or agent_model
@@ -336,7 +322,6 @@ class PhaseYamlDefinition(BaseModel):
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,
-            agent_id=agent_id,
             allow_delegation=allow_delegation,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),

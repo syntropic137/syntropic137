@@ -93,11 +93,6 @@ class TestDerivedProvidersUnchanged:
         assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-claude-cli"
         assert "@sha256:" in ref
 
-    def test_interactive_tmux_still_derives(self) -> None:
-        ref = workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)
-        assert ref.split("@")[0] == "ghcr.io/agentparadise/agentic-workspace-interactive-tmux"
-        assert "@sha256:" in ref
-
 
 @pytest.mark.unit
 class TestEveryProviderIsPinned:

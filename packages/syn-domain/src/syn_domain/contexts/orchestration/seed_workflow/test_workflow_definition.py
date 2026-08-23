@@ -334,7 +334,7 @@ def test_validate_empty_yaml_with_base_dir(tmp_path: Path) -> None:
 
 
 # =============================================================================
-# Per-phase agent block Tests (interactive-tmux integration, PR #765)
+# Per-phase agent block Tests
 # =============================================================================
 
 AGENT_BLOCK_WORKFLOW_YAML = """
@@ -343,13 +343,12 @@ name: Agent Block Workflow
 requires_repos: false
 
 phases:
-  - id: interactive
-    name: Interactive Phase
+  - id: codex-phase
+    name: Codex Phase
     order: 1
     agent:
-      provider: claude-interactive
-      agent_id: codex
-      model: sonnet
+      provider: codex
+      model: gpt-5.6
     prompt_template: Reply with OK.
 
   - id: standard
@@ -363,11 +362,10 @@ def test_parse_agent_block() -> None:
     """agent.provider / agent.model are parsed from the YAML phase."""
     definition = WorkflowDefinition.from_yaml(AGENT_BLOCK_WORKFLOW_YAML)
 
-    interactive = definition.phases[0]
-    assert interactive.agent is not None
-    assert interactive.agent.provider == "claude-interactive"
-    assert interactive.agent.agent_id == "codex"
-    assert interactive.agent.model == "sonnet"
+    codex_phase = definition.phases[0]
+    assert codex_phase.agent is not None
+    assert codex_phase.agent.provider == "codex"
+    assert codex_phase.agent.model == "gpt-5.6"
 
     standard = definition.phases[1]
     assert standard.agent is None
@@ -378,12 +376,10 @@ def test_agent_block_reaches_domain_phase() -> None:
     definition = WorkflowDefinition.from_yaml(AGENT_BLOCK_WORKFLOW_YAML)
     domain_phases = definition.get_domain_phases()
 
-    assert domain_phases[0].provider == "claude-interactive"
-    assert domain_phases[0].agent_id == "codex"
-    assert domain_phases[0].model == "sonnet"  # agent.model fallback
+    assert domain_phases[0].provider == "codex"
+    assert domain_phases[0].model == "gpt-5.6"  # agent.model fallback
 
     assert domain_phases[1].provider is None
-    assert domain_phases[1].agent_id is None
     assert domain_phases[1].model is None
 
 
@@ -400,14 +396,14 @@ phases:
     order: 1
     model: opus
     agent:
-      provider: claude-interactive
+      provider: claude
       model: sonnet
     prompt_template: Do the thing.
 """
     definition = WorkflowDefinition.from_yaml(yaml_content)
     domain_phase = definition.get_domain_phases()[0]
     assert domain_phase.model == "opus"
-    assert domain_phase.provider == "claude-interactive"
+    assert domain_phase.provider == "claude"
 
 
 @pytest.mark.anyio
@@ -430,17 +426,15 @@ async def test_agent_provider_reaches_executable_phase() -> None:
     )
     executable = await handler._get_executable_phases(_StubTemplate())  # type: ignore[arg-type]
 
-    assert executable[0].agent_config.provider == "claude-interactive"
-    assert executable[0].agent_config.agent_id == "codex"
-    assert executable[0].agent_config.model == "sonnet"
+    assert executable[0].agent_config.provider == "codex"
+    assert executable[0].agent_config.model == "gpt-5.6"
 
     # Default phase keeps the default provider (claude -p path).
     assert executable[1].agent_config.provider == "claude"
 
 
-def test_agent_block_rejects_unknown_provider_and_agent_id() -> None:
-    """provider and agent_id are constrained at the YAML boundary, so a typo
-    like 'codez' fails at parse time instead of after provisioning."""
+def test_agent_block_rejects_unknown_provider() -> None:
+    """A provider typo fails at parse time instead of after provisioning."""
     bad_provider = """
 id: bad-provider-wf
 name: Bad Provider Workflow
@@ -451,15 +445,23 @@ phases:
     name: Phase 1
     order: 1
     agent:
-      provider: claude-interactiv
+      provider: codez
     prompt_template: Do the thing.
 """
     with pytest.raises(ValueError, match="provider"):
         WorkflowDefinition.from_yaml(bad_provider)
 
-    bad_agent_id = """
-id: bad-agent-wf
-name: Bad Agent Workflow
+
+def test_agent_block_rejects_the_removed_interactive_provider() -> None:
+    """A stale workflow naming the removed tmux path fails LOUDLY at parse.
+
+    Silently remapping it to `claude` would change what the phase does
+    (it was authored against an interactive REPL) without telling anyone,
+    so the error names the removal and the replacement providers.
+    """
+    stale = """
+id: stale-interactive-wf
+name: Stale Interactive Workflow
 requires_repos: false
 
 phases:
@@ -468,11 +470,10 @@ phases:
     order: 1
     agent:
       provider: claude-interactive
-      agent_id: codez
     prompt_template: Do the thing.
 """
-    with pytest.raises(ValueError, match="agent_id"):
-        WorkflowDefinition.from_yaml(bad_agent_id)
+    with pytest.raises(ValueError, match="has been removed"):
+        WorkflowDefinition.from_yaml(stale)
 
 
 CODEX_WORKFLOW_YAML = """
@@ -497,87 +498,14 @@ def test_agent_block_parses_codex_provider() -> None:
     phase = definition.phases[0]
     assert phase.agent is not None
     assert phase.agent.provider == "codex"
-    assert phase.agent.agent_id is None
 
     domain_phase = definition.get_domain_phases()[0]
     assert domain_phase.provider == "codex"
-    assert domain_phase.agent_id is None
-
-
-def test_agent_block_codex_with_explicit_codex_agent_id_parses() -> None:
-    """agent_id='codex' is the one explicit value allowed alongside provider=codex."""
-    yaml_content = """
-id: codex-explicit-wf
-name: Codex Explicit Workflow
-requires_repos: false
-
-phases:
-  - id: p1
-    name: Phase 1
-    order: 1
-    agent:
-      provider: codex
-      agent_id: codex
-    prompt_template: Reply with OK.
-"""
-    definition = WorkflowDefinition.from_yaml(yaml_content)
-    assert definition.phases[0].agent is not None
-    assert definition.phases[0].agent.agent_id == "codex"
-
-
-def test_agent_block_rejects_codex_provider_with_contradicting_agent_id() -> None:
-    """provider=codex + agent_id=gemini is a contradiction rejected at parse time."""
-    yaml_content = """
-id: codex-contradiction-wf
-name: Codex Contradiction Workflow
-requires_repos: false
-
-phases:
-  - id: p1
-    name: Phase 1
-    order: 1
-    agent:
-      provider: codex
-      agent_id: gemini
-    prompt_template: Reply with OK.
-"""
-    with pytest.raises(ValueError, match="codex"):
-        WorkflowDefinition.from_yaml(yaml_content)
-
-
-def test_agent_block_claude_interactive_with_codex_agent_id_still_parses() -> None:
-    """provider=claude-interactive + agent_id=codex is unrelated and still valid."""
-    yaml_content = """
-id: interactive-codex-wf
-name: Interactive Codex Workflow
-requires_repos: false
-
-phases:
-  - id: p1
-    name: Phase 1
-    order: 1
-    agent:
-      provider: claude-interactive
-      agent_id: codex
-    prompt_template: Reply with OK.
-"""
-    definition = WorkflowDefinition.from_yaml(yaml_content)
-    assert definition.phases[0].agent is not None
-    assert definition.phases[0].agent.provider == "claude-interactive"
-    assert definition.phases[0].agent.agent_id == "codex"
 
 
 @pytest.mark.anyio
-async def test_codex_provider_reaches_executable_phase_without_agent_id_coercion() -> None:
-    """A codex phase must not silently read back agent_id='claude'.
-
-    This is the must-fix regression: `_build_agent_config_from_phase` used to
-    fill agent_id from the domain default ("claude") whenever the YAML
-    omitted it, so `provider="codex"` silently paired with
-    `agent_id="claude"`. AgentConfiguration.agent_id now defaults to None,
-    so a codex phase with no agent_id in the YAML must round-trip to
-    `agent_id is None`, never `"claude"`.
-    """
+async def test_codex_provider_reaches_executable_phase() -> None:
+    """A codex phase round-trips to an executable phase with provider=codex."""
     from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
         ExecuteWorkflowHandler,
     )
@@ -596,7 +524,6 @@ async def test_codex_provider_reaches_executable_phase_without_agent_id_coercion
     executable = await handler._get_executable_phases(_StubTemplate())  # type: ignore[arg-type]
 
     assert executable[0].agent_config.provider == "codex"
-    assert executable[0].agent_config.agent_id is None
 
 
 # =============================================================================
@@ -616,38 +543,21 @@ phases:
       provider: claude
     prompt_template: Reply with CLAUDE_OK.
 
-  - id: claude-interactive-phase
-    name: Claude Interactive Phase
-    order: 2
-    agent:
-      provider: claude-interactive
-    prompt_template: Reply with CLAUDE_INTERACTIVE_OK.
-
   - id: codex-phase
     name: Codex Phase
-    order: 3
+    order: 2
     agent:
       provider: codex
     prompt_template: Reply with CODEX_OK.
 """
 
 
-def test_mixed_workflow_with_claude_claude_interactive_and_codex_parses() -> None:
-    """A workflow mixing all three providers parses without error.
-
-    Proves the back-compat guarantee: adding the codex provider does not
-    disturb parsing of pre-existing claude / claude-interactive phases
-    when all three appear together in one workflow.
-    """
+def test_mixed_workflow_with_claude_and_codex_parses() -> None:
+    """A workflow mixing both headless providers parses without error."""
     definition = WorkflowDefinition.from_yaml(MIXED_PROVIDER_WORKFLOW_YAML)
 
     domain_phases = definition.get_domain_phases()
-    assert [p.provider for p in domain_phases] == ["claude", "claude-interactive", "codex"]
-
-    claude_phase, interactive_phase, codex_phase = domain_phases
-    assert claude_phase.agent_id is None
-    assert interactive_phase.agent_id is None
-    assert codex_phase.agent_id is None
+    assert [p.provider for p in domain_phases] == ["claude", "codex"]
 
 
 def test_codex_demo_example_yaml_loads_and_validates() -> None:
@@ -664,11 +574,9 @@ def test_codex_demo_example_yaml_loads_and_validates() -> None:
     phase = definition.phases[0]
     assert phase.agent is not None
     assert phase.agent.provider == "codex"
-    assert phase.agent.agent_id is None
     # No model override: codex uses its ChatGPT-account default (a claude-style
     # id like "gpt-5.6" is rejected by codex, so codex-demo.yaml omits it).
     assert phase.agent.model is None
 
     domain_phase = definition.get_domain_phases()[0]
     assert domain_phase.provider == "codex"
-    assert domain_phase.agent_id is None

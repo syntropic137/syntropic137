@@ -94,7 +94,12 @@ from syn_adapters.storage.repositories import (
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
-from syn_shared.agents import AgentProvider, ModelAlias
+from syn_shared.agents import (
+    AgentProvider,
+    ModelAlias,
+    UnsupportedAgentProviderError,
+    require_executable_provider,
+)
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -161,25 +166,10 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     from syn_shared.settings.workspace import WorkspaceSettings
 
     ws_settings = WorkspaceSettings()
-    # The default workspace service ALWAYS stays on the Docker claude -p
-    # path: normal claude phases keep the stream-json pipeline, Envoy
-    # token accounting, and telemetry regardless of the interactive flag.
+    # The workspace service is the Docker headless path: claude -p and
+    # codex exec both run there, keeping the stream-json pipeline, Envoy
+    # token accounting, and telemetry.
     ws_config = WorkspaceServiceConfig(image=ws_settings.docker_image)
-
-    # Interactive-tmux opt-in (SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED). When
-    # on, a SECOND provider-specific WorkspaceService is wired and selected
-    # per phase (agent.provider="claude-interactive") by the processor. It
-    # routes through InteractiveTmuxIsolationAdapter with no Envoy
-    # ext_authz injection (see docs/plans/interactive-tmux-integration.md
-    # §3.4). Default off. Image is provider-specific.
-    interactive_workspace_service: WorkspaceService | None = None
-    if ws_settings.interactive_tmux_enabled:
-        interactive_workspace_service = WorkspaceService.create(
-            config=WorkspaceServiceConfig(
-                image=ws_settings.interactive_tmux_image,
-                provider_kind="interactive-tmux",
-            ),
-        )
 
     # WHY (issue #726, PR2): the materializer turns ResolvedClaudePlugin
     # entries on each phase into workspace files; the processor passes it
@@ -227,7 +217,6 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         prompt_builder=_build_workspace_prompt,
         command_builder=_build_agent_command,
         todo_projection=ExecutionTodoProjection(store=get_projection_store()),
-        interactive_workspace_service=interactive_workspace_service,
         claude_plugin_materializer=claude_plugin_materializer,
         skill_materializer=skill_materializer,
         session_capture=session_capture,
@@ -313,10 +302,23 @@ def _build_agent_command(
     phase: ExecutablePhase,
     prompt: str,
 ) -> list[str]:
-    """Build the command selected by the phase provider."""
-    if phase.agent_config.provider == AgentProvider.CODEX:
+    """Build the command selected by the phase provider.
+
+    Exhaustive on purpose: every known provider is named, and anything else
+    raises. The previous ``return _build_claude_command(...)`` fall-through
+    meant an unknown or removed provider - a stored ``claude-interactive``
+    template rehydrated from history, say - quietly ran as headless Claude and
+    reported success.
+    """
+    provider = require_executable_provider(
+        phase.agent_config.provider,
+        phase_id=phase.phase_id,
+    )
+    if provider is AgentProvider.CODEX:
         return _build_codex_command(prompt, phase.agent_config.model)
-    return _build_claude_command(phase, prompt)
+    if provider is AgentProvider.CLAUDE:
+        return _build_claude_command(phase, prompt)
+    raise UnsupportedAgentProviderError(provider, phase_id=phase.phase_id)
 
 
 def _owner_repo_from_url(url: str | None) -> str:

@@ -13,7 +13,6 @@ import pytest
 
 from syn_shared.settings import (
     DEFAULT_WORKSPACE_IMAGE,
-    INTERACTIVE_TMUX_WORKSPACE_IMAGE,
     CloudProvider,
     ContainerLoggingSettings,
     GitCredentialType,
@@ -313,38 +312,6 @@ class TestWorkspaceImages:
         with patch.dict(os.environ, env, clear=True):
             settings = WorkspaceSettings(_env_file=None)
             assert settings.docker_image == "my-registry/custom-image:v1"
-
-    def test_interactive_tmux_image_is_ghcr_digest_pinned(self) -> None:
-        """Interactive-tmux is published to GHCR and pinned exactly like claude-cli.
-
-        It is one of the two providers in the agentic-primitives build matrix
-        (.github/workflows/build-workspace-images.yml), so it is published and
-        signed by the same workflow run.
-        """
-        from syn_shared.settings.workspace_images import (
-            PINNED_DIGESTS,
-            WorkspaceImageProvider,
-        )
-
-        assert INTERACTIVE_TMUX_WORKSPACE_IMAGE.startswith(
-            "ghcr.io/agentparadise/agentic-workspace-interactive-tmux@"
-        )
-        assert INTERACTIVE_TMUX_WORKSPACE_IMAGE.endswith(
-            PINNED_DIGESTS[WorkspaceImageProvider.INTERACTIVE_TMUX]
-        )
-
-    def test_interactive_tmux_image_matches_settings(self) -> None:
-        """WorkspaceSettings.interactive_tmux_image default should match the registry constant."""
-        with patch.dict(os.environ, {}, clear=True):
-            settings = WorkspaceSettings(_env_file=None)
-            assert settings.interactive_tmux_image == INTERACTIVE_TMUX_WORKSPACE_IMAGE
-
-    def test_interactive_tmux_image_overridable_via_env(self) -> None:
-        """interactive_tmux_image should be overridable via SYN_WORKSPACE_INTERACTIVE_TMUX_IMAGE."""
-        env = {"SYN_WORKSPACE_INTERACTIVE_TMUX_IMAGE": "my-registry/custom-tmux-image:v1"}
-        with patch.dict(os.environ, env, clear=True):
-            settings = WorkspaceSettings(_env_file=None)
-            assert settings.interactive_tmux_image == "my-registry/custom-tmux-image:v1"
 
 
 class TestSettingsWorkspaceIntegration:

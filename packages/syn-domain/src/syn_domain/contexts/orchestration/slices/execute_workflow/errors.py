@@ -43,28 +43,6 @@ class WorkflowExecutionError(Exception):
         self.__cause__ = cause
 
 
-class WorkspaceMisconfiguredError(RuntimeError):
-    """Raised when a phase and its workspace disagree about the interactive-tmux backend.
-
-    Covers two misconfigurations (issue #771 items 5 and 7):
-      * `WorkflowExecutionProcessor._workspace_service_for` selects a phase
-        declaring `agent.provider="claude-interactive"` but no interactive
-        workspace service was wired in (``SYN_WORKSPACE_INTERACTIVE_TMUX_ENABLED``
-        never set).
-      * `WorkspaceProvisionHandler._is_interactive_phase` finds the phase's
-        explicit provider and the workspace's actual isolation backend
-        disagree — this used to be silently resolved by an implicit OR
-        over `isolation_handle.isolation_type`; that fallback is gone, so
-        a mismatch is now a loud failure instead of a silent flip.
-
-    Subclasses ``RuntimeError`` (rather than the plain ``Exception`` used
-    by sibling errors in this module) so it is a drop-in replacement for
-    the bare ``raise RuntimeError(...)`` calls it supersedes — existing
-    ``except RuntimeError`` / ``pytest.raises(RuntimeError)`` call sites
-    keep working unchanged.
-    """
-
-
 class WorkflowInterruptedError(Exception):
     """Raised when workflow execution is forcefully interrupted via SIGINT.
 

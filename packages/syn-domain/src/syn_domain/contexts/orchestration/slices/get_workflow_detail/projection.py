@@ -62,7 +62,13 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 7  # Bumped: surface per-phase provider/agent_id + apply provider on phase update
+    # Deliberately NOT bumped for the agent_id removal (PR #875 review): the
+    # reader addresses stored phase dicts by key, so a version-7 row that still
+    # carries "agent_id" stays readable and the field simply stops surfacing. A
+    # bump would buy nothing and cost a full replay through the coordinator's
+    # non-atomic clear-then-delete-checkpoint sequence, which loses the whole
+    # read model if the process dies between the two steps.
+    VERSION = 7  # v7: surface per-phase provider + apply provider on phase update
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -102,7 +108,6 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
                 provider=p.get("provider"),
-                agent_id=p.get("agent_id"),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),

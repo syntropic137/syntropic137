@@ -2,12 +2,11 @@
 
 `WorkspaceProvisionError` originally lived only in
 `syn_adapters.workspace_backends.agentic.adapter` (the Docker-backed
-provider). Other backends - interactive-tmux, and the `WorkspaceService`
-factory methods that wire them - need the same typed error so
-error-mapping layers downstream (`_fail_execution`, `syn execution show`)
-have one type to match against instead of a bare `RuntimeError`. Moved
-here so it is importable without pulling in the agentic adapter module;
-`agentic/adapter.py` re-exports it for backward compatibility.
+provider). It lives here so error-mapping layers downstream
+(`_fail_execution`, `syn execution show`) have one type to match against
+instead of a bare `RuntimeError`, importable without pulling in the
+agentic adapter module; `agentic/adapter.py` re-exports it for backward
+compatibility.
 """
 
 from __future__ import annotations

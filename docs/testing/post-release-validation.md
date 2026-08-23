@@ -1006,8 +1006,7 @@ A phase selects its harness with a per-phase `agent:` block:
 phases:
   - id: implement
     agent:
-      provider: claude | claude-interactive | codex
-      agent_id: claude | codex | gemini     # only meaningful for claude-interactive
+      provider: claude | codex
       model: <model-id>                     # ignored for codex
       allow_delegation: false
 ```
@@ -1082,10 +1081,6 @@ Two example workflows ship in `workflows/examples/` and are seeded by `just dev`
 |---|---|
 | `codex-demo.yaml` | Single codex phase, no repo required. The primary probe. |
 | `codex-delegates-to-claude.yaml` | `provider: codex` + `allow_delegation: true`; proves dual-auth staging and delegation-skill install. |
-
-> `multi-agent-claude-then-codex-markers.yaml` is **not** the codex bridge - it is
-> `provider: claude-interactive` with `agent_id: codex` (a tmux pane). Do not use it
-> to validate this section.
 
 ```bash
 syn workflow run <codex-demo-workflow-id>
@@ -1561,8 +1556,8 @@ trigger never fires for a repo that plainly exists.
 Claude and Codex transcripts are spooled inside the workspace container and
 uploaded to a store speaking APS-V1-0004. The upload is performed by
 `/usr/local/bin/apss-session-exporter`, which ships **in the omni-agent image
-only**. A workspace running `claude-cli` or `interactive-tmux` captures nothing,
-and does so silently.
+only**. A workspace running `claude-cli` captures nothing, and does so
+silently.
 
 **Capture is FAIL-OPEN by design.** A capture problem records `UNKNOWN`/`FAILED`
 and asks for a backfill; it never turns a successful agent run into a failed
@@ -1724,7 +1719,6 @@ evidence, in either direction.
 | Absence, not substitution (#859, #843) | Ids come from agent-writable filenames, so a valid decoy would read as captured |
 | `origin.host` is the CONTAINER ID | Not the machine. Use tags for identity, never `origin_host` |
 | `origin.environment` is always `container` | It is a runtime CLASS. `origin.deployment` is the axis separating dev from selfhost |
-| Shared interactive-tmux not probed per phase (#847) | One container spans phases, so a sweep cannot answer per-phase honestly |
 
 ### Concurrency
 
@@ -2124,7 +2118,7 @@ grep -c '"skills"' schemas/plugin/workflow.schema.json
 grep -c 'CODEX_AUTH_JSON' .env.example
 ```
 
-- [ ] `provider` enum includes every value in `AgentProvider` (`claude`, `claude-interactive`, `codex`)
+- [ ] `provider` enum includes every value in `AgentProvider` (`claude`, `codex`)
 - [ ] `skills` is present in the published workflow schema
 - [ ] Every Pydantic setting has a corresponding `.env.example` entry
 

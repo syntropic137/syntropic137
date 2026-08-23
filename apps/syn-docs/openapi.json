@@ -8466,17 +8466,6 @@
               }
             ],
             "title": "Provider"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Id"
           }
         },
         "type": "object",

@@ -339,9 +339,8 @@ class TestPhaseUpdatePreservesDelegationFields:
     """Regression: prompt/model edits must not wipe provider/allow_delegation/skills."""
 
     def test_prompt_update_preserves_provider_and_delegation(self) -> None:
-        # A codex phase is headless, so it carries no agent_id; the fields that
-        # must survive a prompt-only edit are provider, allow_delegation, and the
-        # #772 skills / #726 claude_plugins.
+        # The fields that must survive a prompt-only edit are provider,
+        # allow_delegation, and the #772 skills / #726 claude_plugins.
         agg = WorkflowTemplateAggregate()
         agg._handle_command(
             CreateWorkflowTemplateCommand(
@@ -444,44 +443,6 @@ class TestPhaseProviderUpdate:
         phase = next(p for p in aggregate.phases if p.phase_id == "phase-1")
         assert phase.provider == AgentProvider.CODEX
         assert phase.prompt_template == "new prompt"
-
-    def test_provider_switch_to_headless_clears_stale_agent_id(self) -> None:
-        # Regression: switching an interactive phase (agent_id set) to a headless
-        # provider must drop agent_id, else AgentConfiguration.__post_init__ rejects
-        # the codex + non-codex-agent_id combo at execution.
-        agg = WorkflowTemplateAggregate()
-        agg._handle_command(
-            CreateWorkflowTemplateCommand(
-                aggregate_id=_WORKFLOW_ID,
-                name="W",
-                workflow_type=WorkflowType.RESEARCH,
-                classification=WorkflowClassification.SIMPLE,
-                repository_url="",
-                repository_ref="main",
-                phases=[
-                    PhaseDefinition(
-                        phase_id="phase-1",
-                        name="p",
-                        order=1,
-                        prompt_template="orig",
-                        provider="claude-interactive",
-                        agent_id="gemini",
-                    )
-                ],
-            )
-        )
-        agg.mark_events_as_committed()
-        agg._handle_command(
-            UpdatePhasePromptCommand(
-                aggregate_id=_WORKFLOW_ID,
-                phase_id="phase-1",
-                prompt_template="new",
-                provider="codex",
-            )
-        )
-        phase = next(p for p in agg.phases if p.phase_id == "phase-1")
-        assert phase.provider == AgentProvider.CODEX
-        assert phase.agent_id is None
 
     def test_prompt_update_preserves_skills_and_plugins(self) -> None:
         agg = WorkflowTemplateAggregate()

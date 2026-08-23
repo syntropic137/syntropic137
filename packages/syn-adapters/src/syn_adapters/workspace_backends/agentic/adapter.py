@@ -30,10 +30,10 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 )
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
-# definition moved to `syn_adapters.workspace_backends.errors` so other
-# backends (interactive-tmux) can raise/import it without depending on this
-# Docker-specific module. Existing `from ...agentic.adapter import
-# WorkspaceProvisionError` call sites keep working unchanged.
+# definition lives in `syn_adapters.workspace_backends.errors` so it can be
+# raised/imported without depending on this Docker-specific module. Existing
+# `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
+# working unchanged.
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
 from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
