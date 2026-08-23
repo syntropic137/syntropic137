@@ -2953,6 +2953,16 @@ export interface components {
              * @default 0
              */
             total_output_tokens: number;
+            /**
+             * Total Cache Creation Tokens
+             * @default 0
+             */
+            total_cache_creation_tokens: number;
+            /**
+             * Total Cache Read Tokens
+             * @default 0
+             */
+            total_cache_read_tokens: number;
             /** Cost By Repo */
             cost_by_repo?: {
                 [key: string]: string;
@@ -3251,8 +3261,6 @@ export interface components {
             model?: string | null;
             /** Provider */
             provider?: string | null;
-            /** Agent Id */
-            agent_id?: string | null;
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {

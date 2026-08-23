@@ -28,7 +28,7 @@ from syn_domain.contexts.orchestration import (
     SubagentTracker,
     TokenAccumulator,
 )
-from syn_shared.agents import AgentProvider, AgentRunner
+from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
@@ -80,8 +80,6 @@ class FakeAgentExecutionHandler:
         agent_model: str | None,
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
-        interactive_prompt: str | None = None,
-        agent_id: str = AgentProvider.CLAUDE,
         runner: Runner = AgentRunner.CLAUDE,
     ) -> AgentExecutionResult:
         self.calls.append(todo)

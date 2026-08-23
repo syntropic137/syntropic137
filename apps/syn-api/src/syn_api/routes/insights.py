@@ -73,6 +73,8 @@ def _aggregate_costs(costs: list[Any]) -> dict[str, Any]:
     total_cost = Decimal("0")
     total_input = 0
     total_output = 0
+    total_cache_creation = 0
+    total_cache_read = 0
     cost_by_workflow: dict[str, Decimal] = {}
     cost_by_model: dict[str, Decimal] = {}
 
@@ -80,6 +82,8 @@ def _aggregate_costs(costs: list[Any]) -> dict[str, Any]:
         total_cost += c.total_cost_usd
         total_input += c.input_tokens
         total_output += c.output_tokens
+        total_cache_creation += c.cache_creation_tokens
+        total_cache_read += c.cache_read_tokens
         if c.workflow_id:
             cost_by_workflow[c.workflow_id] = (
                 cost_by_workflow.get(c.workflow_id, Decimal("0")) + c.total_cost_usd
@@ -89,9 +93,12 @@ def _aggregate_costs(costs: list[Any]) -> dict[str, Any]:
 
     return {
         "total_cost_usd": str(total_cost),
-        "total_tokens": total_input + total_output,
+        # All four components (issue #873) - matches the executions read model.
+        "total_tokens": total_input + total_output + total_cache_creation + total_cache_read,
         "total_input_tokens": total_input,
         "total_output_tokens": total_output,
+        "total_cache_creation_tokens": total_cache_creation,
+        "total_cache_read_tokens": total_cache_read,
         "cost_by_workflow": {k: str(v) for k, v in cost_by_workflow.items()},
         "cost_by_model": {k: str(v) for k, v in cost_by_model.items()},
         "execution_count": len(costs),
@@ -224,6 +231,8 @@ async def get_global_cost_endpoint(
         total_tokens=data.get("total_tokens", 0),
         total_input_tokens=data.get("total_input_tokens", 0),
         total_output_tokens=data.get("total_output_tokens", 0),
+        total_cache_creation_tokens=data.get("total_cache_creation_tokens", 0),
+        total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
         cost_by_repo=data.get("cost_by_repo", {}),
         cost_by_workflow=data.get("cost_by_workflow", {}),
         cost_by_model=data.get("cost_by_model", {}),

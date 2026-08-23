@@ -44,7 +44,6 @@ export interface PhaseDefinition {
   argument_hint: string | null
   model: string | null
   provider: string | null
-  agent_id: string | null
 }
 
 export interface WorkflowResponse {

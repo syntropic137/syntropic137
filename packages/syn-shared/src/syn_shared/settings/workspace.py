@@ -30,7 +30,6 @@ from syn_shared.settings.git_identity_resolver import (
 )
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_IMAGE,
-    INTERACTIVE_TMUX_WORKSPACE_IMAGE,
 )
 from syn_shared.settings.workspace_security import (  # noqa: F401
     ContainerLoggingSettings,
@@ -128,24 +127,6 @@ class WorkspaceSettings(BaseSettings):
     docker_network: str = Field(
         default="none",
         description="Docker network for containers.",
-    )
-
-    interactive_tmux_enabled: bool = Field(
-        default=False,
-        description=(
-            "Enable the interactive-tmux workspace provider "
-            "(agentic-primitives / EXP-05). When false, attempts to use "
-            "provider_kind='interactive-tmux' are rejected. Default off "
-            "so the default 'claude -p' Docker path is the only live path."
-        ),
-    )
-
-    interactive_tmux_image: str = Field(
-        default=INTERACTIVE_TMUX_WORKSPACE_IMAGE,
-        description=(
-            "Docker image for the interactive-tmux workspace provider. "
-            "Bundles tmux + interactive claude/codex/gemini CLIs."
-        ),
     )
 
 

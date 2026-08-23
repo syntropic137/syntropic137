@@ -316,6 +316,10 @@ async def _load_execution_enrichment(
             continue
         if ec is None:
             continue
+        # Summed explicitly rather than read from ExecutionCost.total_tokens.
+        # This path and the cost path must arrive at the same number by
+        # independent routes, which is what makes the cross-read-model test in
+        # test_cross_read_model_token_totals.py a real check (issue #873).
         total = ec.input_tokens + ec.output_tokens + ec.cache_creation_tokens + ec.cache_read_tokens
         out[eid] = _ExecutionEnrichment(
             total_cost_usd=ec.total_cost_usd,
@@ -434,7 +438,10 @@ async def get(
 
     with contextlib.suppress(Exception):
         exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
-        if exec_cost is not None and exec_cost.total_tokens > 0:
+        # has_cost_data, not total_tokens > 0: the displayed total grew to
+        # include cache tokens in #873, and gating dollars on it would flip a
+        # cache-only record from the fallback to exec_cost.total_cost_usd.
+        if exec_cost is not None and exec_cost.has_cost_data:
             total_input = exec_cost.input_tokens
             total_output = exec_cost.output_tokens
             total_cache_creation = exec_cost.cache_creation_tokens or total_cache_creation
@@ -478,7 +485,10 @@ async def _enrich_costs(
         logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
         return fallback_tokens, fallback_cost
 
-    if exec_cost is None or exec_cost.total_tokens == 0:
+    # Availability is decided by has_cost_data (input + output), while the
+    # number displayed below is total_tokens (all four components). Keeping
+    # those two decoupled is what makes #873 a display-only change.
+    if exec_cost is None or not exec_cost.has_cost_data:
         return fallback_tokens, fallback_cost
 
     if exec_cost.cost_by_phase:
@@ -504,7 +514,12 @@ async def get_detail(
         execution_id,
         manager,
         phases,
-        fallback_tokens=detail.total_input_tokens + detail.total_output_tokens,
+        fallback_tokens=(
+            detail.total_input_tokens
+            + detail.total_output_tokens
+            + detail.total_cache_creation_tokens
+            + detail.total_cache_read_tokens
+        ),
         fallback_cost=Decimal("0"),
     )
 

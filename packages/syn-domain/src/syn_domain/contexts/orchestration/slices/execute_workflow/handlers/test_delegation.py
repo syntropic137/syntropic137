@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
@@ -51,12 +49,6 @@ def test_allow_delegation_defaults_false() -> None:
     yaml = _YAML.replace("      allow_delegation: true\n", "")
     phase = WorkflowDefinition.from_yaml(yaml).get_domain_phases()[0]
     assert phase.allow_delegation is False
-
-
-def test_allow_delegation_rejected_for_interactive() -> None:
-    yaml = _YAML.replace("provider: codex", "provider: claude-interactive")
-    with pytest.raises(ValueError, match="headless"):
-        WorkflowDefinition.from_yaml(yaml)
 
 
 # === B2: agent config ===
@@ -134,20 +126,16 @@ def test_codex_phase_explicit_model_override_is_preserved() -> None:
 
 
 def test_codex_phase_no_delegation_stages_codex_only() -> None:
-    assert _auth_staging_for(AgentProvider.CODEX, False, False) == (True, False)
+    assert _auth_staging_for(AgentProvider.CODEX, False) == (True, False)
 
 
 def test_claude_phase_no_delegation_stages_claude_only() -> None:
-    assert _auth_staging_for(AgentProvider.CLAUDE, False, False) == (False, True)
+    assert _auth_staging_for(AgentProvider.CLAUDE, False) == (False, True)
 
 
 def test_delegation_stages_both_regardless_of_provider() -> None:
-    assert _auth_staging_for(AgentProvider.CODEX, True, False) == (True, True)
-    assert _auth_staging_for(AgentProvider.CLAUDE, True, False) == (True, True)
-
-
-def test_interactive_never_needs_claude_env() -> None:
-    assert _auth_staging_for(AgentProvider.CLAUDE, True, True)[1] is False
+    assert _auth_staging_for(AgentProvider.CODEX, True) == (True, True)
+    assert _auth_staging_for(AgentProvider.CLAUDE, True) == (True, True)
 
 
 # === B4: baked delegation skill install (rides #772's `skills add`) ===
@@ -180,28 +168,13 @@ class _RecordingWorkspace:
         return _FakeResult(self._exit_code)
 
 
-def _phase(provider: str, allow_delegation: bool, agent_id: str | None = None) -> ExecutablePhase:
+def _phase(provider: str, allow_delegation: bool) -> ExecutablePhase:
     return ExecutablePhase(
         phase_id="p1",
         name="p",
         order=1,
-        agent_config=AgentConfiguration(
-            provider=provider, allow_delegation=allow_delegation, agent_id=agent_id
-        ),
+        agent_config=AgentConfiguration(provider=provider, allow_delegation=allow_delegation),
     )
-
-
-async def test_stray_agent_id_ignored_provider_wins() -> None:
-    # provider=claude with a stray agent_id=codex (permitted by YAML validation)
-    # must install for claude-code, not codex (the phase runs claude -p).
-    ws = _RecordingWorkspace()
-    await WorkspaceProvisionHandler._install_baked_delegation_skill(
-        ws,
-        _phase(AgentProvider.CLAUDE, True, agent_id="codex"),  # type: ignore[arg-type]
-    )
-    cmd = ws.calls[0]
-    assert cmd[2].endswith("delegating-to-codex")
-    assert cmd[3:5] == ["--agent", "claude-code"]
 
 
 async def test_codex_phase_installs_delegating_to_claude_skill() -> None:

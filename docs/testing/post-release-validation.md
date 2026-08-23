@@ -1006,8 +1006,7 @@ A phase selects its harness with a per-phase `agent:` block:
 phases:
   - id: implement
     agent:
-      provider: claude | claude-interactive | codex
-      agent_id: claude | codex | gemini     # only meaningful for claude-interactive
+      provider: claude | codex
       model: <model-id>                     # ignored for codex
       allow_delegation: false
 ```
@@ -1082,10 +1081,6 @@ Two example workflows ship in `workflows/examples/` and are seeded by `just dev`
 |---|---|
 | `codex-demo.yaml` | Single codex phase, no repo required. The primary probe. |
 | `codex-delegates-to-claude.yaml` | `provider: codex` + `allow_delegation: true`; proves dual-auth staging and delegation-skill install. |
-
-> `multi-agent-claude-then-codex-markers.yaml` is **not** the codex bridge - it is
-> `provider: claude-interactive` with `agent_id: codex` (a tmux pane). Do not use it
-> to validate this section.
 
 ```bash
 syn workflow run <codex-demo-workflow-id>
@@ -1329,7 +1324,9 @@ Negative cases:
 
 ```yaml
 skills:
-  - "anthropics/skills/frontend-design@3b3fad96af16a10759d930941b4520ba0c40edae"
+  # org/repo/skill-name@version. anthropics/skills publishes no git tags, so a
+  # commit sha is the only pin that resolves against it.
+  - "anthropics/skills/doc-coauthoring@3b3fad96af16a10759d930941b4520ba0c40edae"
   - "https://github.com/acme/tdd-skill@v2.0.0"   # <url>@<version>
   - source: github.com/acme/skills               # verbose form
     version: feature/branch-with-slash
@@ -1358,42 +1355,16 @@ previously stored tree.
 
 Build the fixture once; the checks below all use it.
 
+The fixture is committed, not built here: `workflows/examples/starter-plugin/`. It is the same artifact a
+plugin author copies, so validating it validates what users actually get.
+It declares a vendored skill (`./skills/repo-conventions`) and an external
+one (`anthropics/skills/doc-coauthoring@<sha>`), diverging per phase, all
+phases on `model: haiku` to keep a validation run cheap.
+
 ```bash
-mkdir -p /tmp/fixture-plugin/skills/repo-conventions /tmp/fixture-plugin/workflows/demo
-cat > /tmp/fixture-plugin/skills/repo-conventions/SKILL.md <<'MD'
----
-name: repo-conventions
-description: Use when the task touches this repository's layout.
----
-Prefer small focused modules.
-MD
-cat > /tmp/fixture-plugin/workflows/demo/workflow.yaml <<'YAML'
-id: skills-demo
-name: Skills Demo
-type: research
-classification: simple
-requires_repos: false
-skills:
-  - ./skills/repo-conventions                                              # vendored
-  - anthropics/skills/frontend-design@3b3fad96af16a10759d930941b4520ba0c40edae  # external
-phases:
-  - id: demo
-    name: Demo
-    order: 1
-    execution_type: sequential
-    timeout_seconds: 600
-    agent:
-      provider: codex
-      model: gpt-5.6-sol
-    prompt_template: |
-      List the skills available to you, then stop.
-YAML
-syn workflow install /tmp/fixture-plugin
+syn workflow install ./workflows/examples/starter-plugin
 ```
 
-- [ ] Output includes `registered skill repo-conventions@sha256-<hash>` (vendored)
-- [ ] Output includes the external skill registered at its commit sha
-- [ ] The workflow is created with its declared id (`skills-demo`), not a fresh uuid
 - [ ] A second `syn workflow install` prints `already registered` and performs **no**
       upload - this is the content-addressing claim. (The workflow-creation step
       itself will error; see the not-idempotent note above.)
@@ -1561,8 +1532,8 @@ trigger never fires for a repo that plainly exists.
 Claude and Codex transcripts are spooled inside the workspace container and
 uploaded to a store speaking APS-V1-0004. The upload is performed by
 `/usr/local/bin/apss-session-exporter`, which ships **in the omni-agent image
-only**. A workspace running `claude-cli` or `interactive-tmux` captures nothing,
-and does so silently.
+only**. A workspace running `claude-cli` captures nothing, and does so
+silently.
 
 **Capture is FAIL-OPEN by design.** A capture problem records `UNKNOWN`/`FAILED`
 and asks for a backfill; it never turns a successful agent run into a failed
@@ -1724,7 +1695,6 @@ evidence, in either direction.
 | Absence, not substitution (#859, #843) | Ids come from agent-writable filenames, so a valid decoy would read as captured |
 | `origin.host` is the CONTAINER ID | Not the machine. Use tags for identity, never `origin_host` |
 | `origin.environment` is always `container` | It is a runtime CLASS. `origin.deployment` is the axis separating dev from selfhost |
-| Shared interactive-tmux not probed per phase (#847) | One container spans phases, so a sweep cannot answer per-phase honestly |
 
 ### Concurrency
 
@@ -2124,7 +2094,7 @@ grep -c '"skills"' schemas/plugin/workflow.schema.json
 grep -c 'CODEX_AUTH_JSON' .env.example
 ```
 
-- [ ] `provider` enum includes every value in `AgentProvider` (`claude`, `claude-interactive`, `codex`)
+- [ ] `provider` enum includes every value in `AgentProvider` (`claude`, `codex`)
 - [ ] `skills` is present in the published workflow schema
 - [ ] Every Pydantic setting has a corresponding `.env.example` entry
 

@@ -1,7 +1,7 @@
 """Shared, type-safe identifiers for workflow phase agents.
 
-These replace bare string literals ("claude" / "codex" / "claude-interactive")
-that were previously compared in many places across the domain, adapter, and API
+These replace bare string literals ("claude" / "codex") that were
+previously compared in many places across the domain, adapter, and API
 layers. `StrEnum` members compare equal to their string value, so a loose
 ``provider: str`` field can still be compared against a member
 (``provider == AgentProvider.CODEX``) without changing the field type.
@@ -23,11 +23,85 @@ class AgentProvider(StrEnum):
     CLAUDE = "claude"
     """Default headless ``claude -p`` docker-exec path."""
 
-    CLAUDE_INTERACTIVE = "claude-interactive"
-    """Interactive-tmux pane path (parked hedge, syn137#777)."""
-
     CODEX = "codex"
     """Headless ``codex exec`` docker-exec path (the codex bridge)."""
+
+
+REMOVED_INTERACTIVE_PROVIDER: str = "claude-interactive"
+"""The provider value of the REMOVED interactive-tmux path.
+
+Deliberately NOT an ``AgentProvider`` member: nothing may route on it. It
+exists so workflow parsing can recognise a stale workflow and fail with a
+message that names the removal, instead of a generic "unknown provider".
+The tmux path was a failed experiment - a send race, a pane-scrape
+completion heuristic, and empty observability timelines - and was excised in
+favour of the headless docker-exec substrate (``claude -p`` / ``codex exec``).
+Do not reintroduce it as a provider.
+"""
+
+
+class UnsupportedAgentProviderError(ValueError):
+    """A phase names a provider that cannot be executed.
+
+    Raised at the EXECUTION boundary, never during aggregate replay. YAML
+    parsing already rejects ``claude-interactive``
+    (``PhaseYamlDefinition._reject_removed_provider``), but YAML is not the
+    only entry point: templates stored BEFORE the removal are rehydrated
+    straight from their historical ``WorkflowTemplateCreated`` events, and
+    trigger-, API- and CLI-initiated executions all run from those stored
+    templates. Rehydration stays permissive on purpose - an operator must
+    still be able to read and fix an old template - so the refusal has to
+    happen where execution begins.
+
+    Without it, a stored interactive phase fell through to ``claude -p`` and
+    reported an ordinary headless SUCCESS: exactly the silent remap that
+    rejecting (rather than remapping) exists to prevent.
+    """
+
+    def __init__(self, provider: object, *, phase_id: str | None = None) -> None:
+        self.provider = provider
+        self.phase_id = phase_id
+        super().__init__(_unsupported_provider_message(provider, phase_id))
+
+
+def _unsupported_provider_message(provider: object, phase_id: str | None) -> str:
+    """Build the actionable message carried by ``UnsupportedAgentProviderError``."""
+    where = f"Phase {phase_id!r}" if phase_id else "This phase"
+    if provider == REMOVED_INTERACTIVE_PROVIDER:
+        return (
+            f"{where} declares agent.provider={REMOVED_INTERACTIVE_PROVIDER!r}, which has been "
+            "removed (ADR-068). The interactive-tmux workspace path no longer exists. This "
+            "workflow is REJECTED rather than rerun headless, because it was authored against "
+            "an interactive REPL and running it under "
+            f"'{AgentProvider.CLAUDE}' would change what the phase does while still reporting "
+            "success. Migrate the stored template: set the phase provider to "
+            f"'{AgentProvider.CLAUDE}' (claude -p) or '{AgentProvider.CODEX}' (codex exec) and "
+            "re-upload the workflow YAML, then execute again."
+        )
+    supported = ", ".join(f"'{member}'" for member in AgentProvider)
+    return (
+        f"{where} declares agent.provider={provider!r}, which is not an executable provider. "
+        f"Supported providers: {supported}."
+    )
+
+
+def require_executable_provider(
+    provider: object,
+    *,
+    phase_id: str | None = None,
+) -> AgentProvider:
+    """Return the ``AgentProvider`` named by ``provider``, or raise.
+
+    The single gate every execution-side provider decision goes through. Call
+    it BEFORE provisioning a workspace or building an agent command, so an
+    unrunnable provider can never reach a container. Deliberately exhaustive:
+    a fall-through default (``return claude_command``) is how a removed
+    provider silently became a headless Claude run.
+    """
+    for known in AgentProvider:
+        if provider == known:
+            return known
+    raise UnsupportedAgentProviderError(provider, phase_id=phase_id)
 
 
 class AgentRunner(StrEnum):
@@ -35,6 +109,24 @@ class AgentRunner(StrEnum):
 
     CLAUDE = "claude"
     CODEX = "codex"
+
+
+_RUNNER_BY_PROVIDER: dict[AgentProvider, AgentRunner] = {
+    AgentProvider.CLAUDE: AgentRunner.CLAUDE,
+    AgentProvider.CODEX: AgentRunner.CODEX,
+}
+"""Which stream processor drives each provider. One entry per AgentProvider."""
+
+
+def runner_for_provider(provider: object, *, phase_id: str | None = None) -> AgentRunner:
+    """Return the stream processor for ``provider``, or raise.
+
+    Exhaustive by construction: the lookup is a total mapping over
+    ``AgentProvider``, and anything that is not a member never gets that far.
+    The previous ``CODEX if is_codex else CLAUDE`` sent every unknown or
+    removed provider to the claude parser.
+    """
+    return _RUNNER_BY_PROVIDER[require_executable_provider(provider, phase_id=phase_id)]
 
 
 class ModelAlias(StrEnum):

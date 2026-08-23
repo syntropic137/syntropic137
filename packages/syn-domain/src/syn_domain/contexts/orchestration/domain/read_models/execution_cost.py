@@ -132,8 +132,40 @@ class ExecutionCost:
 
     @property
     def total_tokens(self) -> int:
-        """Total tokens (input + output)."""
-        return self.input_tokens + self.output_tokens
+        """Total tokens (input + output + cache creation + cache read).
+
+        All four components are summed so this agrees with the executions
+        read model, which reports the same figure under the same name
+        (issue #873). Cost is unaffected: pricing reads the four component
+        fields directly and never goes through this property.
+        """
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_tokens
+            + self.cache_read_tokens
+        )
+
+    @property
+    def has_cost_data(self) -> bool:
+        """Whether this record carries cost data worth preferring over a fallback.
+
+        Deliberately NOT ``total_tokens > 0``. ``total_tokens`` is a DISPLAY
+        figure that grew to include cache tokens in issue #873; wiring dollar
+        selection to it would let a cache-only record (input == output == 0)
+        newly satisfy the gate and flip the reported dollar figure from the
+        caller's fallback to ``total_cost_usd``. #873 was a display fix that
+        was required to move no dollars, so the availability predicate keeps
+        the input + output shape it had before that change.
+
+        ``is_complete`` would be the better long-term predicate but is not a
+        drop-in: it is False for an execution still running, and the API
+        enriches in-progress executions today. Swapping to it would change
+        behaviour for live executions, which is a separate decision from this
+        one. ``unpriced_observation_count`` measures confidence in the total,
+        not whether a total exists, so it does not answer this question either.
+        """
+        return self.input_tokens + self.output_tokens > 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExecutionCost":

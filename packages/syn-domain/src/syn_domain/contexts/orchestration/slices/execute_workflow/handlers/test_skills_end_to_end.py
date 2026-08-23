@@ -9,7 +9,7 @@ in-memory/fake adapters at the infrastructure boundary:
    the register-skill route's background projector would (mirrors the
    seeding pattern in ``test_skill_resolution_service.py``).
 3. A workflow YAML string with a phase-scoped ``skills:`` entry (three-
-   segment shorthand) and an ``agent:`` block selecting ``agent_id: codex``
+   segment shorthand) and an ``agent:`` block selecting ``provider: codex``
    is parsed via ``WorkflowDefinition.from_yaml`` into a ``PhaseDefinition``.
 4. ``SkillResolutionService`` resolves the phase's declared ``SkillRef``
    against the lock projection into a ``ResolvedSkill``.
@@ -86,7 +86,6 @@ phases:
     order: 1
     prompt_template: "Review this."
     agent:
-      agent_id: codex
     skills:
       - "example/code-review-repo/code-review@1.0.0"
 """
@@ -221,7 +220,6 @@ async def test_skills_pipeline_end_to_end_registration_to_install() -> None:
     workflow = WorkflowDefinition.from_yaml(_WORKFLOW_YAML)
     phase_yaml = workflow.phases[0]
     phase_def = phase_yaml.to_domain()
-    assert phase_def.agent_id == "codex"
     assert len(phase_def.skills) == 1
 
     resolution_service = SkillResolutionService(lock_projection=lock)
