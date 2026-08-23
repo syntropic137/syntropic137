@@ -12,8 +12,12 @@ registers*. PR #874 proved the skills-CLI install semantics against the real ima
 but synthetically (`docker run` plus `skills add` directly). Neither ran a workflow.
 
 The unproven chain was: **install -> resolve -> materialise -> `skills add` ->
-agent-can-use-it, per phase, through a real execution.** This document captures that
-chain running for real, with output taken from inside live phase containers.
+agent-can-discover-it, per phase, through a real execution.** This document captures
+that chain running for real, with output taken from inside live phase containers.
+
+Scope of the claim: the chain proven here ends at **installation and pre-inference
+harness discovery**. Nothing below shows Claude loading a `SKILL.md` body or invoking
+a skill during the turn; that is a separate claim and is not made here.
 
 ## Setup
 
@@ -162,8 +166,11 @@ drwxr-xr-x 3 agent agent 96 Aug 22 19:52 repo-conventions
 ls: cannot access '/workspace/.agents/skills/': No such file or directory
 ```
 
-**`doc-coauthoring` is absent.** This is the per-phase isolation claim, proven on a
-real execution, at the install path rather than at `skills list`.
+**`doc-coauthoring` is absent from Syntropic's `.syn-skills/` staging directory and
+from both agent install paths (`.claude/skills/`, `.agents/skills/`).** This is the
+per-phase isolation claim, proven on a real execution, at the install path rather
+than at `skills list`. The captures above are scoped to those three directories; they
+are not a filesystem-wide sweep of the container.
 
 ### `skills list --json`, phase `summarize`
 
@@ -214,7 +221,10 @@ This file is written by the vendored `skills` CLI, not by Syntropic137. It recor
 `.syn-skills/<name>` as the install source, which pins the staging-to-installed hop.
 One skill entry, matching the phase declaration.
 
-## Link 5: deterministic harness surface, pre-inference (PROVEN, with a caveat)
+## Link 5: skill is discoverable by the harness pre-inference (PROVEN, with a caveat)
+
+This link proves the skill is **visible to the harness before the first inference
+turn**. It does not prove the model read the skill body or invoked the skill.
 
 The claude stream-json `system`/`init` event was emitted (the API logged its key set,
 including `skills`), but the API does not log the array values and the stdout stream
@@ -314,14 +324,28 @@ Stated plainly, because a gap reported is worth more than a claim that cannot be
 
 The live proof above is a point-in-time observation. To keep it from rotting,
 `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/test_skills_per_phase_isolation.py`
-provisions two phases from one workflow through the real `WorkspaceProvisionHandler`
-and asserts the negative for phase B: no `doc-coauthoring` in any injected path and no
-`skills add` for it.
+drives the production path: the workflow YAML is stored as a real
+`WorkflowTemplateAggregate` via `build_command_from_definition`, the executable phases
+are built by the real `ExecuteWorkflowHandler` with its real `phase_skill_resolver`
+wiring (captured off a fake processor), and those captured phases are provisioned
+through the real `WorkspaceProvisionHandler`. It asserts the positive for phase A
+(both skill trees injected, one `skills add` each) and the negative for phase B: no
+`doc-coauthoring` in any injected path and no `skills add` for it.
+
+Phase construction is deliberately NOT hand-rolled in the test, because that step is
+exactly where per-phase skills were being dropped.
 
 Before this, every skills test provisioned a single phase. Nothing asserted isolation.
 
-The test was mutation-checked: declaring the phase-only skill at workflow scope makes
-it fail with
+The test was mutation-checked against four separate defects, each of which makes it
+fail:
+
+| mutation | result |
+|---|---|
+| declare the phase-only skill at workflow scope (YAML) | FAILS: `doc-coauthoring` leaks into phase B |
+| `_get_executable_phases` reuses phase A's resolved skills for phase B | FAILS: `doc-coauthoring` leaks into phase B |
+| `_get_executable_phases` passes WORKFLOW refs where PHASE refs belong | FAILS: `doc-coauthoring` missing from phase A |
+| `phase_skill_resolver` wiring omitted (`None`) | FAILS: no skills reach either phase |
 
 ```
 AssertionError: phase-scope skill 'doc-coauthoring' leaked into a phase that does not
@@ -337,7 +361,8 @@ declare it: ['.syn-skills/repo-conventions/SKILL.md', '.syn-skills/doc-coauthori
 | resolve + materialise into the container | PROVEN |
 | `skills add` executed for the phase's harness | PROVEN (via API log + on-disk result) |
 | installed at the claude harness path, not just staged | PROVEN |
-| **skill on phase A absent from phase B** | **PROVEN, live, both containers** |
-| skill visible to the harness pre-inference | PROVEN via rendered listing; literal `skills[]` array NOT captured |
+| **skill on phase A absent from phase B's staging dir, agent install paths and harness registry** | **PROVEN, live, both containers** |
+| skill discoverable by the harness pre-inference | PROVEN via rendered listing; literal `skills[]` array NOT captured |
+| model loaded the `SKILL.md` body or invoked the skill | NOT PROVEN (out of scope here) |
 | codex harness path end to end | NOT PROVEN |
 | isolation on the shared-interactive path | KNOWN BROKEN by inspection, not exercised |

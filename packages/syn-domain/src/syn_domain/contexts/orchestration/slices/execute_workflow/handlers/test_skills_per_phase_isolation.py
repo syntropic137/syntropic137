@@ -4,8 +4,17 @@ Every existing skills test provisions a single phase, so nothing pinned the
 claim that actually matters operationally: a skill declared on phase A must
 NOT reach phase B's workspace.
 
-This test provisions two phases from one workflow through the real
-``WorkspaceProvisionHandler`` and asserts the negative for phase B:
+This test drives the PRODUCTION path end to end: the workflow YAML is turned
+into a stored ``WorkflowTemplateAggregate`` via the same
+``build_command_from_definition`` mapping the seeder and the YAML-upload route
+use, the executable phases are built by the real ``ExecuteWorkflowHandler``
+with its real ``phase_skill_resolver`` wiring (captured off a fake processor),
+and those captured phases are then provisioned through the real
+``WorkspaceProvisionHandler``. Nothing about the phase construction step is
+hand-rolled here, because that step is exactly where per-phase skills were
+being dropped.
+
+It then asserts both directions:
 
 - phase A (workflow-scope skill + phase-scope skill) injects BOTH skill trees
   and issues one ``skills add`` per skill;
@@ -24,6 +33,8 @@ Live-container evidence for the same claim is recorded in
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -37,16 +48,27 @@ from syn_api.services.skill_materializer import SkillMaterializer
 from syn_api.services.skill_resolution_service import SkillResolutionService
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    AgentConfiguration,
-    ExecutablePhase,
+from syn_domain.contexts.orchestration._shared.yaml_to_command import (
+    build_command_from_definition,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+    WorkflowTemplateAggregate,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+    ExecuteWorkflowCommand,
+)
 from syn_domain.contexts.orchestration.ports.SkillStoragePort import SkillFile
+from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+    ExecuteWorkflowHandler,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
     WorkspaceProvisionHandler,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    WorkflowExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.register_skill.projection import (
     SkillLockProjection,
@@ -54,6 +76,13 @@ from syn_domain.contexts.orchestration.slices.register_skill.projection import (
 from syn_domain.contexts.orchestration.slices.register_skill.RegisterSkillHandler import (
     RegisterSkillHandler,
 )
+
+if TYPE_CHECKING:
+    from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        ExecutablePhase,
+    )
+
 
 # Mirrors the starter plugin: a workflow-scope skill every phase gets, and a
 # phase-scope skill only the first phase gets.
@@ -76,6 +105,7 @@ Draft the doc.
 _WORKFLOW_YAML = """
 id: per-phase-isolation-workflow
 name: Per Phase Isolation Workflow
+requires_repos: false
 skills:
   - "example/shared-repo/repo-conventions@1.0.0"
 phases:
@@ -91,6 +121,7 @@ phases:
     prompt_template: "Summarize."
 """
 
+_WORKFLOW_ID = "per-phase-isolation-workflow"
 _SHARED_SKILL = "repo-conventions"
 _PHASE_ONLY_SKILL = "doc-coauthoring"
 
@@ -154,6 +185,83 @@ def _skills_add_argv(workspace: AsyncMock) -> list[list[str]]:
     ]
 
 
+class _CapturingProcessor:
+    """Stands in for ``WorkflowExecutionProcessor``, capturing what it is handed.
+
+    The point of this fake is NOT to avoid running the processor -- it is to
+    read back the exact ``ExecutablePhase`` objects the real
+    ``ExecuteWorkflowHandler`` built, so the test provisions those rather than
+    ones it constructed itself.
+    """
+
+    def __init__(self) -> None:
+        self.phases: list[ExecutablePhase] = []
+
+    async def run(
+        self,
+        *,
+        workflow_id: str,
+        workflow_name: str,
+        phases: list[ExecutablePhase],
+        inputs: dict[str, str],
+        execution_id: str,
+        repos: list[RepositoryRef],
+    ) -> WorkflowExecutionResult:
+        del workflow_name, inputs, repos
+        self.phases = list(phases)
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="completed",
+            started_at=datetime.now(UTC),
+        )
+
+
+class _WorkflowRepositoryStub:
+    """Returns the stored template, as the real repository would."""
+
+    def __init__(self, aggregate: WorkflowTemplateAggregate) -> None:
+        self._aggregate = aggregate
+
+    async def get_by_id(self, aggregate_id: str) -> WorkflowTemplateAggregate | None:
+        return self._aggregate if aggregate_id == _WORKFLOW_ID else None
+
+
+def _store_workflow_template() -> WorkflowTemplateAggregate:
+    """Persist the YAML through the production mapping the seeder/route use.
+
+    ``build_command_from_definition`` is the single source of truth for
+    YAML -> ``CreateWorkflowTemplateCommand``, and the aggregate's own
+    ``create_workflow`` handler is what writes ``WorkflowTemplateCreated``.
+    Going through both means the stored template really does carry the
+    per-phase ``skills`` refs -- the exact thing that used to be dropped.
+    """
+    definition = WorkflowDefinition.from_yaml(_WORKFLOW_YAML)
+    aggregate = WorkflowTemplateAggregate()
+    aggregate.create_workflow(build_command_from_definition(definition))
+    return aggregate
+
+
+async def _executable_phases_from_production_path(
+    lock: SkillLockProjection,
+) -> list[ExecutablePhase]:
+    """Build phases the way production does: real handler + real resolver wiring."""
+    processor = _CapturingProcessor()
+    resolution_service = SkillResolutionService(lock_projection=lock)
+    handler = ExecuteWorkflowHandler(
+        processor=processor,  # type: ignore[arg-type]
+        workflow_repository=_WorkflowRepositoryStub(_store_workflow_template()),
+        phase_skill_resolver=resolution_service.resolve_for_phase,
+    )
+
+    await handler.handle(ExecuteWorkflowCommand(aggregate_id=_WORKFLOW_ID))
+
+    assert [p.phase_id for p in processor.phases] == ["investigate", "summarize"], (
+        "the handler must hand the processor both phases in declaration order"
+    )
+    return processor.phases
+
+
 async def _provision(phase: ExecutablePhase, storage: object) -> AsyncMock:
     """Run the real provision handler for one phase, return its fake workspace."""
     workspace = _fake_workspace()
@@ -200,27 +308,12 @@ async def test_phase_scoped_skill_is_absent_from_a_phase_that_does_not_declare_i
     """A phase-scope skill on phase A must not reach phase B's workspace."""
     storage, lock = await _register_two_skills()
 
-    workflow = WorkflowDefinition.from_yaml(_WORKFLOW_YAML)
-    resolution_service = SkillResolutionService(lock_projection=lock)
+    # Phases come from the REAL handler, not from this test.
+    phases = await _executable_phases_from_production_path(lock)
 
-    workspaces: dict[str, AsyncMock] = {}
-    for phase_yaml in workflow.phases:
-        phase_def = phase_yaml.to_domain()
-        resolved = await resolution_service.resolve_for_phase(
-            list(workflow.skills),
-            list(phase_def.skills),
-        )
-        phase = ExecutablePhase(
-            phase_id=phase_def.phase_id,
-            name=phase_def.name,
-            order=phase_def.order,
-            description="",
-            agent_config=AgentConfiguration(provider="claude"),
-            prompt_template="Go.",
-            output_artifact_type="text",
-            skills=resolved,
-        )
-        workspaces[phase_def.phase_id] = await _provision(phase, storage)
+    workspaces: dict[str, AsyncMock] = {
+        phase.phase_id: await _provision(phase, storage) for phase in phases
+    }
 
     investigate = workspaces["investigate"]
     summarize = workspaces["summarize"]
