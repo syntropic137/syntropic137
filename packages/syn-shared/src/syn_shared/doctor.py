@@ -85,6 +85,7 @@ from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
     SessionStoreSettings,
+    usable_label,
 )
 from syn_shared.settings.workspace_images import (
     PINNED_DIGESTS,
@@ -500,6 +501,10 @@ def _exporter_version(provider: WorkspaceImageProvider) -> str | None:
     return PINNED_EXPORTER_VERSIONS.get(provider)
 
 
+#: Named when a validator rejects the configuration as a whole rather than one
+#: field, so the finding always has something to point at.
+_WHOLE_SETTINGS = "session-store configuration"
+
 #: The settings field names, as the operator sees them in their environment.
 _FIELD_TO_ENV: Mapping[str, str] = {
     "url": ENV_SYN_SESSION_STORE_URL,
@@ -535,8 +540,11 @@ def _build_settings(
     except ValidationError as error:
         names = {
             _FIELD_TO_ENV.get(str(location[0]), str(location[0]))
-            for err in error.errors()
             if (location := err["loc"])
+            # A model-level validator reports an empty location. Discarding it
+            # would leave the finding with nothing to name at all.
+            else _WHOLE_SETTINGS
+            for err in error.errors()
         }
         return None, tuple(sorted(names))
     return settings, ()
@@ -563,7 +571,13 @@ def build_report(sources: EnvSources) -> DoctorReport:
     # drift from what the running system does.
     settings, rejected_names = _build_settings(store_url, store_token, store_label)
 
-    if settings is not None and store_label.is_set and not settings.display_label:
+    # The label rule is applied INDEPENDENTLY of whether the rest of the settings
+    # built. A rejected URL must not take it down with it: a malformed label is
+    # exactly the case the rule exists to catch, and it is the one likeliest to
+    # be a mis-pasted credential, so "the URL was bad" must never become "and so
+    # we printed the label verbatim".
+    label_usable = bool(usable_label(store_label.value))
+    if store_label.is_set and not label_usable:
         # An unusable label is probably not what the operator believed they set,
         # and echoing it is how a mis-pasted secret reaches a log. Same reasoning
         # as SessionStoreSettings.display_label.
@@ -586,7 +600,7 @@ def build_report(sources: EnvSources) -> DoctorReport:
         store_label=store_label,
         capture=classify_capture(settings) if settings else CaptureVerdict.INVALID,
         rejected_names=rejected_names,
-        label_usable=bool(settings and settings.display_label),
+        label_usable=label_usable,
         label_declared=bool(store_label.value and store_label.value.strip()),
         dispatch_concurrency=resolve_variable(
             ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES, sources, default="1"

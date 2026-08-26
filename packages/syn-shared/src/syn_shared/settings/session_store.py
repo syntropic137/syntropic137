@@ -59,6 +59,21 @@ DEFAULT_SPOOL_DIR = "/spool"
 _LABEL_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
+def usable_label(label: str | None) -> str:
+    """The operator's label if it is a usable identifier, otherwise "".
+
+    A module function, not only a property, because a caller may need the label
+    rule when the rest of the settings CANNOT be built - a rejected URL must not
+    take the label rule down with it, or a malformed label (the case this rule
+    exists to catch) escapes the handling that keeps it out of logs.
+
+    `SessionStoreSettings.display_label` delegates here, so there is exactly one
+    definition of what a usable label is.
+    """
+    candidate = (label or "").strip()
+    return candidate if _LABEL_PATTERN.fullmatch(candidate) else ""
+
+
 class SessionStoreSettings(BaseSettings):
     """Configuration for forwarding agent sessions to a central session store.
 
@@ -272,8 +287,7 @@ class SessionStoreSettings(BaseSettings):
         `has_unusable_label` lets a caller report the problem without repeating
         the value.
         """
-        candidate = self.label.strip()
-        return candidate if _LABEL_PATTERN.fullmatch(candidate) else ""
+        return usable_label(self.label)
 
     @property
     def has_unusable_label(self) -> bool:

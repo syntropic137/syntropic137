@@ -30,6 +30,7 @@ from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
     SessionStoreSettings,
+    usable_label,
 )
 from syn_shared.settings.workspace_images import (
     PINNED_DIGESTS,
@@ -680,8 +681,13 @@ def test_a_url_the_settings_reject_is_reported_not_raised() -> None:
     assert report.rejected_names == (ENV_SYN_SESSION_STORE_URL,)
 
 
-def test_a_rejected_value_is_never_echoed() -> None:
-    """A value that failed validation is the likeliest of all to be a mis-paste."""
+def test_a_rejected_value_is_not_echoed_by_default() -> None:
+    """A value that failed validation is the likeliest of all to be a mis-paste.
+
+    "By default" is the accurate claim: `--show-values` prints it, which is that
+    flag's whole contract. The name used to say "never", which the flag
+    contradicts.
+    """
     report = build_report(_sources(environ={ENV_SYN_SESSION_STORE_URL: _PASTED_URL}))
     text = render(report, show_values=False)
     assert _PASTED_URL not in text
@@ -716,3 +722,47 @@ def test_the_settings_do_not_leak_a_rejected_url_into_their_own_error() -> None:
     with pytest.raises(ValidationError) as excinfo:
         SessionStoreSettings(url=_PASTED_URL, _env_file=None)  # pyright: ignore[reportCallIssue]
     assert "host:18090" not in str(excinfo.value)
+
+
+def test_a_malformed_label_is_withheld_even_when_the_url_is_rejected() -> None:
+    """A bad URL must not take the label rule down with it.
+
+    The label rule exists to catch a value that is not what the operator thinks
+    they set, which is the case likeliest to be a mis-pasted credential. Gating
+    it on the whole settings object building meant one malformed URL printed the
+    label verbatim in default, redacted output.
+    """
+    pasted_secret = "sk-live-accident/credential"
+    report = build_report(
+        _sources(
+            environ={
+                ENV_SYN_SESSION_STORE_URL: _PASTED_URL,
+                ENV_SYN_SESSION_STORE_LABEL: pasted_secret,
+            }
+        )
+    )
+    assert report.capture is CaptureVerdict.INVALID
+    assert report.label_usable is False
+    assert pasted_secret not in render(report, show_values=False)
+
+
+def test_a_usable_label_survives_a_rejected_url() -> None:
+    """`label_usable` describes the LABEL, not whether some other field parsed."""
+    report = build_report(
+        _sources(
+            environ={
+                ENV_SYN_SESSION_STORE_URL: _PASTED_URL,
+                ENV_SYN_SESSION_STORE_LABEL: "mac-mini",
+            }
+        )
+    )
+    assert report.capture is CaptureVerdict.INVALID
+    assert report.label_usable is True
+    assert "mac-mini" in render(report, show_values=False)
+
+
+def test_the_label_rule_has_one_definition() -> None:
+    """`display_label` delegates to `usable_label`, so they cannot drift."""
+    for candidate in ("mac-mini", "prod:west", "", "a" * 65, "  spaced  "):
+        settings = SessionStoreSettings(label=candidate, _env_file=None)  # pyright: ignore[reportCallIssue]
+        assert settings.display_label == usable_label(candidate)
