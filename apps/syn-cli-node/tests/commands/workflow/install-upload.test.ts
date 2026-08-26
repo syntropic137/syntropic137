@@ -215,3 +215,31 @@ describe("install provenance (issue #822)", () => {
     ).rejects.toThrow(/already installed/);
   });
 });
+
+describe("unchanged reinstall (issue #822)", () => {
+  it("reports an identical reinstall as already installed, not as a failure", async () => {
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "demo",
+          name: "Demo",
+          workflow_type: "research",
+          classification: "simple",
+          repository_url: "",
+          requires_repos: false,
+          status: "unchanged",
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const refs = await installWorkflowsViaApi(
+      [workflow({ id: "demo", name: "Demo", phases: [] })],
+      { version: "0.3.0", sourceDigest: "aaa111" },
+    );
+
+    // Still counted as installed: it is present and current, which is what a
+    // caller rerunning the command needs to know.
+    expect(refs).toEqual([{ id: "demo", name: "Demo" }]);
+  });
+});

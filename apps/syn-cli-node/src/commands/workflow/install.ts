@@ -170,7 +170,12 @@ export async function installWorkflowsViaApi(
         ...provenanceOptions(provenance),
       });
       const wfId = data.id;
-      print(`${style("done", GREEN)} (id: ${wfId})`);
+      // WHY the two outcomes read differently (issue #822): the server
+      // reports status="unchanged" when the definition it already holds is
+      // identical, and writes no event. Printing "done" for both would hide
+      // the distinction that makes a rerun safe to trust.
+      const unchanged = data.status === "unchanged";
+      print(unchanged ? style("already installed", DIM) : `${style("done", GREEN)} (id: ${wfId})`);
       installed.push({ id: wfId, name: wf.name });
     } catch (err) {
       print(style("failed", "\x1b[31m"));
