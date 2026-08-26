@@ -420,3 +420,25 @@ async def test_endpoint_round_trip_preserves_classification_repo_and_requires_re
     assert created.classification == "complex"
     assert created.repository_url == "https://github.com/acme/widgets"
     assert created.requires_repos is False
+
+
+async def test_endpoint_identical_reinstall_succeeds_as_unchanged() -> None:
+    """A byte-identical reinstall is a no-op, not a 409 (issue #822).
+
+    Exit 0 here is what makes `syn workflow install` safe to run
+    unconditionally from a script or a CI step: under the refusal behaviour
+    every rerun of an unchanged pipeline failed.
+    """
+    request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    first = await create_workflow_from_yaml_endpoint(
+        request_a, version="0.3.0", source_digest="aaa111"
+    )
+    assert first.status == "created"
+
+    request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    second = await create_workflow_from_yaml_endpoint(
+        request_b, version="0.3.0", source_digest="aaa111"
+    )
+
+    assert second.id == first.id
+    assert second.status == "unchanged"

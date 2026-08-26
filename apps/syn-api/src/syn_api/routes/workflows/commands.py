@@ -36,6 +36,9 @@ if TYPE_CHECKING:
         WorkflowClassification,
         WorkflowType,
     )
+    from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+        InstallOutcome,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +137,7 @@ async def create_workflow(
     version: str | None = None,
     source_digest: str | None = None,
     force: bool = False,
-) -> Result[str, WorkflowError]:
+) -> Result[InstallOutcome, WorkflowError]:
     """Create or update a workflow template (install upsert, issue #822).
 
     Args:
@@ -153,7 +156,9 @@ async def create_workflow(
         force: Overwrite an already-installed matching version.
 
     Returns:
-        Ok(workflow_id) on success, Err(WorkflowError) on failure.
+        Ok(InstallOutcome) on success, Err(WorkflowError) on failure. The
+        outcome reports whether anything actually changed: a byte-identical
+        reinstall is a successful no-op (issue #822).
     """
     from event_sourcing import ConcurrencyConflictError, StreamAlreadyExistsError
 
@@ -190,9 +195,9 @@ async def create_workflow(
     )
 
     try:
-        workflow_id = await handler.handle(command)
+        outcome = await handler.handle(command)
         await sync_published_events_to_projections()
-        return Ok(workflow_id)
+        return Ok(outcome)
     except WorkflowTemplateConflictError as e:
         # Domain conflict (already installed / digest mismatch). Carries a
         # user-facing message; never event-store wording. Maps to HTTP 409.
@@ -455,13 +460,13 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
         raise HTTPException(status_code=status_code, detail=result.message)
 
     return CreateWorkflowResponse(
-        id=result.value,
+        id=result.value.workflow_id,
         name=body.name,
         workflow_type=body.workflow_type,
         classification=body.classification,
         repository_url=body.repository_url,
         requires_repos=body.requires_repos,
-        status="created",
+        status="created" if result.value.changed else "unchanged",
     )
 
 
@@ -652,6 +657,8 @@ class _YamlCreateOutcome(BaseModel):
     classification: str
     repository_url: str
     requires_repos: bool
+    changed: bool = True
+    """False when the package was already installed byte-identical (#822)."""
 
 
 async def create_workflow_from_yaml(
@@ -721,7 +728,7 @@ async def create_workflow_from_yaml(
     # store. Both are user-input problems. Anything else is a bug or
     # infrastructure failure and should propagate as a 500.
     try:
-        workflow_id = await handler.handle(command)
+        outcome = await handler.handle(command)
     except WorkflowTemplateConflictError as e:
         # Already installed / republished digest. A refusal against existing
         # state, not bad input, so it maps to 409 (issue #822).
@@ -740,7 +747,8 @@ async def create_workflow_from_yaml(
     await sync_published_events_to_projections()
     return Ok(
         _YamlCreateOutcome(
-            workflow_id=workflow_id,
+            workflow_id=outcome.workflow_id,
+            changed=outcome.changed,
             name=command.name,
             workflow_type=command.workflow_type.value,
             classification=command.classification.value,
@@ -834,5 +842,5 @@ async def create_workflow_from_yaml_endpoint(
         classification=outcome.classification,
         repository_url=outcome.repository_url,
         requires_repos=outcome.requires_repos,
-        status="created",
+        status="created" if outcome.changed else "unchanged",
     )

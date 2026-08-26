@@ -366,12 +366,36 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
                 installed_value=self._source_digest,
             )
 
+    def is_identical_to(self, command: UpdateWorkflowTemplateCommand) -> bool:
+        """Whether the command installs exactly what is already installed.
+
+        Same version AND same source digest means the incoming package is
+        byte-identical to the installed one, so installing it is a no-op
+        rather than a conflict (issue #822).
+
+        Both digests must be present. Matching versions with no digest on
+        either side prove nothing: a publisher can move content under an
+        unchanged version, which is precisely the case the digest exists to
+        catch.
+        """
+        return (
+            command.version is not None
+            and command.version == self._package_version
+            and command.source_digest is not None
+            and self._source_digest is not None
+            and command.source_digest == self._source_digest
+        )
+
     def _guard_version_not_already_installed(self, command: UpdateWorkflowTemplateCommand) -> None:
         """Refuse a reinstall of a version already installed, unless forced.
 
         A matching version whose source digest differs is refused with the
         stronger error: that is the signature of a republished version, which
         a version check alone would not catch.
+
+        A byte-identical reinstall never reaches here: the caller treats it as
+        a no-op, because #822 is about install being idempotent and failing on
+        an identical reinstall is not idempotent.
         """
         from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
             WorkflowTemplateDigestMismatchError,

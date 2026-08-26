@@ -66,7 +66,7 @@ async def _create_test_workflow(
         phases=phases,
     )
     assert isinstance(result, Ok)
-    return result.value
+    return result.value.workflow_id
 
 
 # -- Package format ---

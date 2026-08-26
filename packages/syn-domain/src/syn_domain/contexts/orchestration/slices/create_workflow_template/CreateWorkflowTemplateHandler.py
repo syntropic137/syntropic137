@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
@@ -44,6 +45,19 @@ class EventPublisher(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class InstallOutcome:
+    """Result of an install (issue #822).
+
+    ``changed`` is False when the package was already installed byte-identical
+    - same version, same source digest. That is a successful no-op, not a
+    conflict, so callers report it as unchanged rather than failing.
+    """
+
+    workflow_id: str
+    changed: bool
+
+
 class CreateWorkflowTemplateHandler:
     """Application service handler for CreateWorkflowTemplateCommand.
 
@@ -62,7 +76,7 @@ class CreateWorkflowTemplateHandler:
         self._repository = repository
         self._event_publisher = event_publisher
 
-    async def handle(self, command: CreateWorkflowTemplateCommand) -> str:
+    async def handle(self, command: CreateWorkflowTemplateCommand) -> InstallOutcome:
         """Handle the CreateWorkflowTemplateCommand.
 
         Install is load-or-create (issue #822). A package declares a stable id,
@@ -72,7 +86,7 @@ class CreateWorkflowTemplateHandler:
         that reached users.
 
         Returns:
-            The workflow ID.
+            The workflow ID and whether anything actually changed.
         """
         aggregate = await self._repository.get_by_id(command.aggregate_id)
 
@@ -81,9 +95,19 @@ class CreateWorkflowTemplateHandler:
             aggregate = WorkflowTemplateAggregate()
             aggregate.create_workflow(command)
         else:
+            update_command = _to_update_command(command)
+            # Byte-identical reinstall: same version, same digest. Nothing to
+            # record, so emit no event at all rather than an Updated carrying
+            # the definition already on the stream. Reporting this as success
+            # is what makes install idempotent (issue #822), and it is what
+            # lets a retry after a partly-failed multi-workflow install get
+            # past the workflows that already succeeded.
+            if aggregate.is_identical_to(update_command):
+                return InstallOutcome(workflow_id=command.aggregate_id, changed=False)
+
             # Reinstall: replace the definition on the existing stream. The
             # aggregate decides whether this is allowed (version + digest).
-            aggregate.update_workflow(_to_update_command(command))
+            aggregate.update_workflow(update_command)
 
         # Persist via repository
         await self._repository.save(aggregate)
@@ -101,7 +125,7 @@ class CreateWorkflowTemplateHandler:
             msg = "Workflow ID should not be None after creation"
             raise RuntimeError(msg)
 
-        return workflow_id
+        return InstallOutcome(workflow_id=workflow_id, changed=True)
 
 
 def _to_update_command(

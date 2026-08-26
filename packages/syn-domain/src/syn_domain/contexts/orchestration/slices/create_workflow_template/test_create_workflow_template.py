@@ -253,7 +253,8 @@ class TestCreateWorkflowTemplateHandler:
         result = await handler.handle(command)
 
         # Assert
-        assert result == "test-id"
+        assert result.workflow_id == "test-id"
+        assert result.changed is True
 
 
 # === requires_repos Regression Tests (ADR-058 #666) ===
@@ -424,11 +425,12 @@ class TestReinstallIsIdempotent:
 
         await handler.handle(create_test_command(aggregate_id="code-review"))
         # Second install with no version declared: plain upsert, no refusal.
-        workflow_id = await handler.handle(
+        outcome = await handler.handle(
             create_test_command(aggregate_id="code-review", name="Code Review v2")
         )
 
-        assert workflow_id == "code-review"
+        assert outcome.workflow_id == "code-review"
+        assert outcome.changed is True
         aggregate = await repository.get_by_id("code-review")
         assert aggregate is not None
         assert aggregate.name == "Code Review v2"
@@ -774,3 +776,102 @@ class TestConcurrentInstall:
 
         # Created plus exactly one Updated - the loser committed nothing.
         assert len(repository.streams["code-review"]) == 2
+
+
+@pytest.mark.unit
+class TestInstallIsIdempotent:
+    """A byte-identical reinstall succeeds and writes nothing (issue #822).
+
+    The issue title is "install is not idempotent". Refusing an identical
+    reinstall with a nicer error is still not idempotent: it exits non-zero,
+    it breaks retry after a partly-failed multi-workflow install, and it
+    trains users to reach for --force, which is the flag that disables the
+    republish check.
+    """
+
+    @pytest.mark.asyncio
+    async def test_identical_reinstall_is_a_successful_no_op(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        command = create_test_command(
+            aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
+        )
+
+        first = await handler.handle(command)
+        second = await handler.handle(command)
+
+        assert first.changed is True
+        assert second.changed is False
+        assert second.workflow_id == "code-review"
+
+    @pytest.mark.asyncio
+    async def test_identical_reinstall_writes_no_event(self) -> None:
+        """Stronger than overwriting quietly: nothing is appended at all."""
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        command = create_test_command(
+            aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
+        )
+
+        await handler.handle(command)
+        await handler.handle(command)
+
+        assert len(repository.streams["code-review"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_matching_version_without_digests_still_refuses(self) -> None:
+        """No digest on either side proves nothing, so it fails safe."""
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateVersionAlreadyInstalledError,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        command = create_test_command(aggregate_id="code-review", version="0.3.0")
+
+        await handler.handle(command)
+
+        with pytest.raises(WorkflowTemplateVersionAlreadyInstalledError):
+            await handler.handle(command)
+
+    @pytest.mark.asyncio
+    async def test_changed_digest_still_refuses_loudly(self) -> None:
+        """The security lives here, and the no-op path must not weaken it."""
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateDigestMismatchError,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        await handler.handle(
+            create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
+        )
+
+        with pytest.raises(WorkflowTemplateDigestMismatchError):
+            await handler.handle(
+                create_test_command(
+                    aggregate_id="code-review", version="0.3.0", source_digest="bbb222"
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_retry_after_partial_failure_gets_past_the_installed_one(self) -> None:
+        """The case that motivated this: A succeeded, B failed, user retries.
+
+        Under the refusal behaviour the retry died on A before ever reaching
+        B, and the only way through was --force.
+        """
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+
+        wf_a = create_test_command(aggregate_id="wf-a", version="0.3.0", source_digest="aaa111")
+        wf_b = create_test_command(aggregate_id="wf-b", version="0.3.0", source_digest="aaa111")
+
+        await handler.handle(wf_a)  # first attempt: A lands, B "fails" (not sent)
+
+        # Retry the whole package. A must not block B.
+        retry_a = await handler.handle(wf_a)
+        retry_b = await handler.handle(wf_b)
+
+        assert retry_a.changed is False
+        assert retry_b.changed is True
