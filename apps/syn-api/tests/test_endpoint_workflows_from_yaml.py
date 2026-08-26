@@ -353,16 +353,60 @@ async def test_endpoint_workflow_id_query_param_overrides_yaml_id() -> None:
     assert response.id == "custom-id"
 
 
-async def test_endpoint_surfaces_handler_error_as_400() -> None:
-    # Creating the same workflow twice must fail with Err → 400.
+async def test_endpoint_upserts_when_the_same_workflow_is_posted_twice() -> None:
+    """Reinstalling must update in place (issue #822).
+
+    This previously asserted a 400. That assertion encoded the bug: posting
+    the same package twice is the normal update path, and failing it is what
+    made `syn workflow install` unusable after the first run.
+    """
     request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
     first = await create_workflow_from_yaml_endpoint(request_a)
     assert first.status == "created"
 
     request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    second = await create_workflow_from_yaml_endpoint(request_b)
+    assert second.id == first.id
+
+
+async def test_endpoint_refuses_reinstall_of_matching_version_with_409() -> None:
+    """A declared version must not be silently overwritten (issue #822)."""
+    request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    await create_workflow_from_yaml_endpoint(request_a, version="0.3.0")
+
+    request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
     with pytest.raises(HTTPException) as exc_info:
-        await create_workflow_from_yaml_endpoint(request_b)
-    assert exc_info.value.status_code == 400
+        await create_workflow_from_yaml_endpoint(request_b, version="0.3.0")
+
+    assert exc_info.value.status_code == 409
+    detail = str(exc_info.value.detail)
+    assert "already installed" in detail
+    # The event-store internal must never reach a user (issue #822).
+    assert "Concurrency conflict" not in detail
+
+
+async def test_endpoint_force_reinstalls_matching_version() -> None:
+    """--force is the documented escape hatch (issue #822)."""
+    request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    first = await create_workflow_from_yaml_endpoint(request_a, version="0.3.0")
+
+    request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    second = await create_workflow_from_yaml_endpoint(request_b, version="0.3.0", force=True)
+
+    assert second.id == first.id
+
+
+async def test_endpoint_refuses_matching_version_with_changed_digest() -> None:
+    """Republished content under an unchanged version is refused loudly (issue #822)."""
+    request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    await create_workflow_from_yaml_endpoint(request_a, version="0.3.0", source_digest="aaa111")
+
+    request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    with pytest.raises(HTTPException) as exc_info:
+        await create_workflow_from_yaml_endpoint(request_b, version="0.3.0", source_digest="bbb222")
+
+    assert exc_info.value.status_code == 409
+    assert "different source" in str(exc_info.value.detail)
 
 
 async def test_endpoint_round_trip_preserves_classification_repo_and_requires_repos() -> None:

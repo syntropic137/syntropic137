@@ -144,6 +144,31 @@ class WorkflowDetailProjection(AutoDispatchProjection):
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 
+    async def on_workflow_template_updated(self, event_data: dict) -> None:
+        """Handle WorkflowTemplateUpdated - rebuild the detail in place (issue #822).
+
+        A reinstall replaces the definition wholesale, so the detail is rebuilt
+        from the event exactly as create does. Run history is a property of the
+        template, not of the definition, so runs_count and created_at survive.
+        """
+        workflow_id = event_data.get("workflow_id", "")
+        if not workflow_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        await self.on_workflow_template_created(event_data)
+
+        if not existing:
+            return
+
+        rebuilt = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        if not rebuilt:
+            return
+        rebuilt["runs_count"] = existing.get("runs_count", 0)
+        if existing.get("created_at"):
+            rebuilt["created_at"] = existing["created_at"]
+        await self._store.save(self.PROJECTION_NAME, workflow_id, rebuilt)
+
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted - increment runs_count."""
         workflow_id = event_data.get("workflow_id")

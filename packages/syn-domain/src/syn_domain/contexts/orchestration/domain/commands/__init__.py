@@ -36,6 +36,9 @@ from syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand
 from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
     UpdatePhasePromptCommand,
 )
+from syn_domain.contexts.orchestration.domain.commands.UpdateWorkflowTemplateCommand import (
+    UpdateWorkflowTemplateCommand,
+)
 
 __all__ = [
     "AddGlobalClaudePluginCommand",
@@ -49,4 +52,5 @@ __all__ = [
     "RemoveGlobalClaudePluginCommand",
     "TerminateWorkspaceCommand",
     "UpdatePhasePromptCommand",
+    "UpdateWorkflowTemplateCommand",
 ]

@@ -1,4 +1,9 @@
-"""WorkflowCreated event - represents the fact that a workflow was created."""
+"""WorkflowTemplateUpdated event - an installed definition was replaced.
+
+WHY (issue #822): the stream holds Created -> Updated -> Updated, so replaying
+to the position recorded on an execution reconstructs the exact definition that
+produced it. That is what makes a stable aggregate ID safe for provenance.
+"""
 
 from __future__ import annotations
 
@@ -18,18 +23,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
 )
 
 
-@event("WorkflowTemplateCreated", "v1")
-class WorkflowTemplateCreatedEvent(DomainEvent):
-    """Event emitted when a workflow is created.
+@event("WorkflowTemplateUpdated", "v1")
+class WorkflowTemplateUpdatedEvent(DomainEvent):
+    """Event emitted when an installed workflow template's definition is replaced.
 
-    Extends DomainEvent from event_sourcing SDK.
-    Events represent facts - what happened.
-    Named in past tense (WorkflowCreated, not CreateWorkflow).
-
-    DomainEvent provides:
-    - Immutability (frozen=True)
-    - JSON serialization
-    - event_type and schema_version via @event decorator
+    Carries the full definition rather than a diff, so a single event replays
+    to complete state without needing the events before it.
     """
 
     # Workflow identity
@@ -56,23 +55,15 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
 
     # Multi-repo support (ADR-058)
     repos: list[str] = Field(default_factory=list)
-    """Full GitHub URLs declared for this workflow template (ADR-058). Empty = single-repo (use repository_url)."""
 
     # Execution gate (ADR-058 #666)
     requires_repos: bool = True
-    """Whether this workflow requires repository access. Default True for backward compat with existing events."""
 
-    # Workflow-scope claude plugin refs (issue #726, PR2). Defaults to an
-    # empty list so older events without this field rehydrate cleanly.
+    # Workflow-scope refs (issues #726, #772)
     claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
-
-    # Workflow-scope skill refs (issue #772). Additive alongside
-    # claude_plugins; defaults to an empty list so older events without this
-    # field rehydrate cleanly.
     skills: list[SkillRef] = Field(default_factory=list)
 
-    # Provenance (issue #822). Optional so events written before this field
-    # existed rehydrate cleanly.
+    # Provenance (issue #822)
     version: str | None = None
     """Package version this definition came from."""
 

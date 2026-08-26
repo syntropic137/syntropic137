@@ -74,3 +74,14 @@ class CreateWorkflowTemplateCommand(BaseModel):
     # ``PhaseDefinition.skills``. A follow-up task wires this through the
     # aggregate the same way claude_plugins is wired.
     skills: list[SkillRef] = Field(default_factory=list)
+
+    # Provenance (issue #822). Recorded at install time so an execution can be
+    # traced back to the package version and source commit that produced it.
+    version: str | None = None
+    """Package version being installed."""
+
+    source_digest: str | None = None
+    """Resolved source commit SHA the definition was built from."""
+
+    force: bool = False
+    """Explicit intent to overwrite an already-installed matching version."""

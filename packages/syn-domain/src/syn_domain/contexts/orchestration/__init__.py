@@ -62,6 +62,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+    WorkflowTemplateConflictError,
+    WorkflowTemplateDigestMismatchError,
+    WorkflowTemplateProvenanceStrippedError,
+    WorkflowTemplateVersionAlreadyInstalledError,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
 )
@@ -80,6 +86,7 @@ from syn_domain.contexts.orchestration.domain.commands import (
     InjectTokensCommand,
     TerminateWorkspaceCommand,
     UpdatePhasePromptCommand,
+    UpdateWorkflowTemplateCommand,
 )
 from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
     ArchiveWorkflowTemplateHandler,
@@ -184,6 +191,7 @@ __all__ = [
     "TokenAccumulator",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowPhaseHandler",
+    "UpdateWorkflowTemplateCommand",
     "WorkflowClassification",
     "WorkflowDefinition",
     "WorkflowExecutionAggregate",
@@ -191,6 +199,10 @@ __all__ = [
     # Errors
     "WorkflowNotFoundError",
     "WorkflowTemplateAggregate",
+    "WorkflowTemplateConflictError",
+    "WorkflowTemplateDigestMismatchError",
+    "WorkflowTemplateProvenanceStrippedError",
+    "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
     "build_command_from_definition",

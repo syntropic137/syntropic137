@@ -74,6 +74,32 @@ class WorkflowListProjection(AutoDispatchProjection):
             summary.to_dict(),
         )
 
+    async def on_workflow_template_updated(self, event_data: dict) -> None:
+        """Handle WorkflowTemplateUpdated - refresh the summary (issue #822).
+
+        Reinstalling also clears the archived flag, mirroring the aggregate:
+        an install brings back a template that a failed update had archived.
+        runs_count belongs to the template, so it carries across.
+        """
+        workflow_id = event_data.get("workflow_id")
+        if not workflow_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        summary = WorkflowSummary(
+            id=workflow_id,
+            name=event_data["name"],
+            workflow_type=event_data.get("workflow_type", ""),
+            classification=event_data.get("classification", ""),
+            phase_count=len(event_data.get("phases", [])),
+            description=event_data.get("description"),
+            created_at=(existing or {}).get("created_at") or event_data.get("created_at"),
+            runs_count=(existing or {}).get("runs_count", 0),
+            is_archived=False,
+            requires_repos=event_data.get("requires_repos", True),
+        )
+        await self._store.save(self.PROJECTION_NAME, summary.id, summary.to_dict())
+
     async def on_workflow_template_archived(self, event_data: dict) -> None:
         """Handle WorkflowTemplateArchived event.
 

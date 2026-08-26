@@ -173,6 +173,13 @@ export interface paths {
          *     intended for scripted bulk installation (e.g. renaming a template
          *     on install). They are *not* a second source of truth for fields
          *     that live in the YAML.
+         *
+         *     ``version``, ``source_digest`` and ``force`` carry install provenance
+         *     and policy (issue #822). ``syn workflow install`` supplies the package
+         *     version and the resolved commit SHA; reinstalling a matching version is
+         *     refused with 409 unless ``force`` is set, and a matching version that
+         *     resolves to a different digest is refused regardless of how it looks,
+         *     because that is the signature of a republished version.
          */
         post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
         delete?: never;
@@ -2297,6 +2304,22 @@ export interface components {
              * @default true
              */
             requires_repos: boolean;
+            /**
+             * Version
+             * @description Package version being installed (issue #822). Recorded on the template so an execution can be traced to the version that produced it. Reinstalling a matching version is refused unless force is set.
+             */
+            version?: string | null;
+            /**
+             * Source Digest
+             * @description Resolved source commit SHA for the package content (issue #822). A matching version resolving to a different digest is refused: that is the signature of a republished version.
+             */
+            source_digest?: string | null;
+            /**
+             * Force
+             * @description Overwrite an already-installed matching version.
+             * @default false
+             */
+            force: boolean;
         };
         /** CreateWorkflowResponse */
         CreateWorkflowResponse: {
@@ -5623,6 +5646,9 @@ export interface operations {
             query?: {
                 name?: string | null;
                 workflow_id?: string | null;
+                version?: string | null;
+                source_digest?: string | null;
+                force?: boolean;
             };
             header?: never;
             path?: never;

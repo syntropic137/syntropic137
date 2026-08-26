@@ -74,6 +74,10 @@ export const createCommand: CommandDef = {
           description: description ?? null,
           ...(templateRepos.length > 0 ? { repos: templateRepos } : {}),
           requires_repos: !noRepos,
+          // `syn workflow create` mints a workflow by name rather than
+          // installing a versioned package, so it declares no provenance and
+          // never needs the overwrite escape hatch (issue #822).
+          force: false,
         },
       }),
       "Failed to create workflow",
