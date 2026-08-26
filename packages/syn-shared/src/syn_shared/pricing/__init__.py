@@ -113,14 +113,33 @@ class PricedAmount:
 
 
 # `gpt-5.6` is OpenAI's ALIAS for `gpt-5.6-sol`, not a distinct model, so it
-# carries Sol's published rates. Verified 2026-08-16 against the OpenAI pricing
-# page and the OpenRouter models API. The former $15/$60/$1.50 values here were
-# an unverified TODO(#780) placeholder, ~3x and 2x over the real input/output
-# rates - found by cross-model review of #816.
-_GPT_5_6_CODEX_INPUT_PER_MILLION = Decimal("5.00")
-_GPT_5_6_CODEX_OUTPUT_PER_MILLION = Decimal("30.00")
-_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION = Decimal("0.50")
-_GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION = Decimal("6.25")
+# carries Sol's published rates.
+#
+# Source: https://developers.openai.com/api/docs/pricing (2026-08-26).
+#
+# THESE ARE THE SHORT-CONTEXT RATES. OpenAI bills gpt-5.6 in two context tiers
+# and the long-context tier is roughly 2x on every field (Sol long: $8.00 in,
+# $30.00 out). This table has no tier concept, so a run above the long-context
+# threshold is UNDER-priced. Observed sessions on this platform run 897 to
+# ~28k input tokens, comfortably short-tier, so short is the correct default.
+# Tiering is tracked separately; see the issue linked from ADR-067 phase 2.
+#
+# WHY THIS KEEPS BEING WRONG. These values have now been incorrect twice. They
+# were an unverified $15/$60/$1.50 TODO(#780) placeholder, then "verified" on
+# 2026-08-16 to $5/$30/$0.50/$6.25 - which matches NEITHER published tier and
+# is Opus 5's $5.00 base with Anthropic's cache multipliers (1.25x write, 0.10x
+# read) applied to it. Do not derive OpenAI rates from Anthropic conventions;
+# OpenAI publishes cached-input and cache-write prices directly.
+#
+# DO NOT "correct" these down to the OpenRouter models API. OpenRouter carries
+# promotional pricing: on 2026-08-26 it listed Sol at exactly half the vendor
+# rate ($2.00/$10.00) during a 50% promotion, while agreeing with the vendor
+# exactly on Terra and Luna. It is a useful sanity check for relative rates and
+# an unreliable one for absolute rates.
+_GPT_5_6_CODEX_INPUT_PER_MILLION = Decimal("4.00")
+_GPT_5_6_CODEX_OUTPUT_PER_MILLION = Decimal("20.00")
+_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION = Decimal("0.40")
+_GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION = Decimal("5.00")
 
 
 @dataclass(frozen=True)
@@ -154,7 +173,7 @@ class ModelPricing:
 
 
 # ---------------------------------------------------------------------------
-# Pricing table — all supported Claude models
+# Pricing table: all supported Claude models
 #
 # Source: https://docs.anthropic.com/en/docs/about-claude/pricing
 # Last updated: 2026-04-06
@@ -202,10 +221,25 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
     # legacy GPT_5_6 entry below, which codex rejects under that auth mode.
     ModelId.GPT_5_6_SOL: ModelPricing(
         model_id=ModelId.GPT_5_6_SOL,
-        input_per_million=Decimal("5.00"),
-        output_per_million=Decimal("30.00"),
-        cache_creation_per_million=Decimal("6.25"),
-        cache_read_per_million=Decimal("0.50"),
+        input_per_million=_GPT_5_6_CODEX_INPUT_PER_MILLION,
+        output_per_million=_GPT_5_6_CODEX_OUTPUT_PER_MILLION,
+        cache_creation_per_million=_GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION,
+        cache_read_per_million=_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION,
+    ),
+    # Short-context rates, same source and caveats as Sol above.
+    ModelId.GPT_5_6_TERRA: ModelPricing(
+        model_id=ModelId.GPT_5_6_TERRA,
+        input_per_million=Decimal("2.00"),
+        output_per_million=Decimal("12.00"),
+        cache_creation_per_million=Decimal("2.50"),
+        cache_read_per_million=Decimal("0.20"),
+    ),
+    ModelId.GPT_5_6_LUNA: ModelPricing(
+        model_id=ModelId.GPT_5_6_LUNA,
+        input_per_million=Decimal("0.20"),
+        output_per_million=Decimal("1.20"),
+        cache_creation_per_million=Decimal("0.25"),
+        cache_read_per_million=Decimal("0.02"),
     ),
     # --- Previous generation (kept: historical sessions reference these) ---
     ModelId.CLAUDE_OPUS_4_5: ModelPricing(
