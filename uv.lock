@@ -47,7 +47,7 @@ dev = [
 
 [[package]]
 name = "agentic-isolation"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "lib/agentic-primitives/lib/python/agentic_isolation" }
 dependencies = [
     { name = "pydantic" },
