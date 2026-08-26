@@ -253,7 +253,8 @@ class TestCreateWorkflowTemplateHandler:
         result = await handler.handle(command)
 
         # Assert
-        assert result == "test-id"
+        assert result.workflow_id == "test-id"
+        assert result.changed is True
 
 
 # === requires_repos Regression Tests (ADR-058 #666) ===
@@ -424,11 +425,12 @@ class TestReinstallIsIdempotent:
 
         await handler.handle(create_test_command(aggregate_id="code-review"))
         # Second install with no version declared: plain upsert, no refusal.
-        workflow_id = await handler.handle(
+        outcome = await handler.handle(
             create_test_command(aggregate_id="code-review", name="Code Review v2")
         )
 
-        assert workflow_id == "code-review"
+        assert outcome.workflow_id == "code-review"
+        assert outcome.changed is True
         aggregate = await repository.get_by_id("code-review")
         assert aggregate is not None
         assert aggregate.name == "Code Review v2"
@@ -441,14 +443,19 @@ class TestReinstallIsIdempotent:
         handler = CreateWorkflowTemplateHandler(repository, publisher)
 
         await handler.handle(create_test_command(aggregate_id="code-review"))
-        await handler.handle(create_test_command(aggregate_id="code-review"))
+        await handler.handle(create_test_command(aggregate_id="code-review", name="Changed"))
 
         event_types = [e.event.event_type for e in publisher.published_events]
         assert event_types == ["WorkflowTemplateCreated", "WorkflowTemplateUpdated"]
 
     @pytest.mark.asyncio
-    async def test_reinstalling_same_version_is_refused_without_force(self) -> None:
-        """No silent overwrite: a matching version needs explicit intent."""
+    async def test_changed_content_under_same_version_is_refused_without_force(self) -> None:
+        """No silent overwrite: changed content under an unchanged version needs intent.
+
+        This is the "you edited the package and forgot to bump" signal, and
+        it is caught by comparing the definitions server-side rather than by
+        trusting a digest the caller supplied.
+        """
         from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
             WorkflowTemplateVersionAlreadyInstalledError,
         )
@@ -456,12 +463,13 @@ class TestReinstallIsIdempotent:
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
         handler = CreateWorkflowTemplateHandler(repository, publisher)
-        command = create_test_command(aggregate_id="code-review", version="0.3.0")
 
-        await handler.handle(command)
+        await handler.handle(create_test_command(aggregate_id="code-review", version="0.3.0"))
 
         with pytest.raises(WorkflowTemplateVersionAlreadyInstalledError, match="already installed"):
-            await handler.handle(command)
+            await handler.handle(
+                create_test_command(aggregate_id="code-review", name="Edited", version="0.3.0")
+            )
 
     @pytest.mark.asyncio
     async def test_force_reinstalls_a_matching_version(self) -> None:
@@ -774,3 +782,225 @@ class TestConcurrentInstall:
 
         # Created plus exactly one Updated - the loser committed nothing.
         assert len(repository.streams["code-review"]) == 2
+
+
+@pytest.mark.unit
+class TestInstallIsIdempotent:
+    """A byte-identical reinstall succeeds and writes nothing (issue #822).
+
+    The issue title is "install is not idempotent". Refusing an identical
+    reinstall with a nicer error is still not idempotent: it exits non-zero,
+    it breaks retry after a partly-failed multi-workflow install, and it
+    trains users to reach for --force, which is the flag that disables the
+    republish check.
+    """
+
+    @pytest.mark.asyncio
+    async def test_identical_reinstall_is_a_successful_no_op(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        command = create_test_command(
+            aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
+        )
+
+        first = await handler.handle(command)
+        second = await handler.handle(command)
+
+        assert first.changed is True
+        assert second.changed is False
+        assert second.workflow_id == "code-review"
+
+    @pytest.mark.asyncio
+    async def test_identical_reinstall_writes_no_event(self) -> None:
+        """Stronger than overwriting quietly: nothing is appended at all."""
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        command = create_test_command(
+            aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
+        )
+
+        await handler.handle(command)
+        await handler.handle(command)
+
+        assert len(repository.streams["code-review"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_identical_content_no_ops_even_without_digests(self) -> None:
+        """The server compared the definitions, so no digest is needed to prove it.
+
+        The digest was only ever a proxy for content. With the definition in
+        hand the comparison is ground truth, which is why a forged digest
+        cannot buy a no-op.
+        """
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        command = create_test_command(aggregate_id="code-review", version="0.3.0")
+
+        await handler.handle(command)
+        second = await handler.handle(command)
+
+        assert second.changed is False
+
+    @pytest.mark.asyncio
+    async def test_changed_digest_still_refuses_loudly(self) -> None:
+        """The security lives here, and the no-op path must not weaken it."""
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateDigestMismatchError,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        await handler.handle(
+            create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
+        )
+
+        with pytest.raises(WorkflowTemplateDigestMismatchError):
+            await handler.handle(
+                create_test_command(
+                    aggregate_id="code-review", version="0.3.0", source_digest="bbb222"
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_retry_after_partial_failure_gets_past_the_installed_one(self) -> None:
+        """The case that motivated this: A succeeded, B failed, user retries.
+
+        Under the refusal behaviour the retry died on A before ever reaching
+        B, and the only way through was --force.
+        """
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+
+        wf_a = create_test_command(aggregate_id="wf-a", version="0.3.0", source_digest="aaa111")
+        wf_b = create_test_command(aggregate_id="wf-b", version="0.3.0", source_digest="aaa111")
+
+        await handler.handle(wf_a)  # first attempt: A lands, B "fails" (not sent)
+
+        # Retry the whole package. A must not block B.
+        retry_a = await handler.handle(wf_a)
+        retry_b = await handler.handle(wf_b)
+
+        assert retry_a.changed is False
+        assert retry_b.changed is True
+
+
+@pytest.mark.unit
+class TestNoOpCannotBeForged:
+    """Identity comes from aggregate state, never from caller-supplied digest.
+
+    Found in cross-model review of #822. source_digest is provenance the
+    server cannot verify. Using it as the equality proof let a caller submit
+    materially different content under a digest it had used before and have
+    the server accept it as unchanged without ever looking at the definition.
+    """
+
+    @pytest.mark.asyncio
+    async def test_changed_content_under_a_reused_digest_is_not_a_no_op(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        await handler.handle(
+            create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
+        )
+
+        # Same version, same claimed digest, materially different definition.
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateVersionAlreadyInstalledError,
+        )
+
+        with pytest.raises(WorkflowTemplateVersionAlreadyInstalledError):
+            await handler.handle(
+                create_test_command(
+                    aggregate_id="code-review",
+                    name="Totally Different",
+                    version="0.3.0",
+                    source_digest="aaa111",
+                )
+            )
+
+        aggregate = await repository.get_by_id("code-review")
+        assert aggregate is not None
+        assert aggregate.name == "Test Workflow"
+
+    @pytest.mark.asyncio
+    async def test_reinstall_of_an_archived_template_reactivates_it(self) -> None:
+        """An archived template is not 'already installed'.
+
+        The no-op must not short-circuit the reactivation an install is
+        supposed to perform, or a failed update leaves the user unable to
+        reinstall their way out.
+        """
+        from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
+            ArchiveWorkflowTemplateCommand,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        command = create_test_command(
+            aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
+        )
+        await handler.handle(command)
+
+        archived = await repository.get_by_id("code-review")
+        assert archived is not None
+        archived.archive_workflow(ArchiveWorkflowTemplateCommand(workflow_id="code-review"))
+        await repository.save(archived)
+
+        outcome = await handler.handle(command)
+
+        assert outcome.changed is True
+        restored = await repository.get_by_id("code-review")
+        assert restored is not None
+        assert restored.is_archived is False
+
+    @pytest.mark.asyncio
+    async def test_reinstall_over_a_local_edit_refuses_then_force_restores(self) -> None:
+        """A local edit must not be silently discarded by a reinstall.
+
+        Provenance describes the source, not the current state, so a phase
+        edited in place leaves version and digest untouched. Comparing actual
+        state catches the drift; refusing is the non-silent overwrite the
+        policy asks for, and --force is the deliberate restore.
+        """
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateVersionAlreadyInstalledError,
+        )
+        from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
+            UpdatePhasePromptCommand,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        command = create_test_command(
+            aggregate_id="code-review", version="0.3.0", source_digest="aaa111"
+        )
+        await handler.handle(command)
+
+        edited = await repository.get_by_id("code-review")
+        assert edited is not None
+        edited.update_phase_prompt(
+            UpdatePhasePromptCommand(
+                aggregate_id="code-review",
+                workflow_id="code-review",
+                phase_id="phase-1",
+                prompt_template="locally edited",
+            )
+        )
+        await repository.save(edited)
+
+        # The drift is detected: this is not reported as already-installed-and-fine.
+        with pytest.raises(WorkflowTemplateVersionAlreadyInstalledError):
+            await handler.handle(command)
+
+        forced = await handler.handle(
+            create_test_command(
+                aggregate_id="code-review",
+                version="0.3.0",
+                source_digest="aaa111",
+                force=True,
+            )
+        )
+
+        assert forced.changed is True
+        restored = await repository.get_by_id("code-review")
+        assert restored is not None
+        assert restored.phases[0].prompt_template != "locally edited"

@@ -380,12 +380,20 @@ class WorkflowSeeder:
     ) -> SeedResult:
         command = build_command_from_definition(definition)
         try:
-            created_id = await self._handler.handle(command)
+            outcome = await self._handler.handle(command)
         except Exception as e:
             return _handle_seed_error(e, workflow_id, definition.name, self._existing_ids)
         self._existing_ids.add(workflow_id)
-        logger.info("Workflow seeded successfully", workflow_id=created_id, name=definition.name)
-        return SeedResult(workflow_id=created_id, name=definition.name, success=True)
+        # changed is False when the definition on disk is byte-identical to
+        # what is already seeded (issue #822), which is the normal case on a
+        # restart. Still a success, just nothing written.
+        logger.info(
+            "Workflow seeded successfully",
+            workflow_id=outcome.workflow_id,
+            name=definition.name,
+            changed=outcome.changed,
+        )
+        return SeedResult(workflow_id=outcome.workflow_id, name=definition.name, success=True)
 
     def register_existing(self, workflow_ids: set[str]) -> None:
         """Register existing workflow IDs to skip during seeding.

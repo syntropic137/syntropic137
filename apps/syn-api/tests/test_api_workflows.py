@@ -44,8 +44,9 @@ async def test_create_workflow():
     )
 
     assert isinstance(result, Ok)
-    assert isinstance(result.value, str)
-    assert len(result.value) > 0
+    assert isinstance(result.value.workflow_id, str)
+    assert len(result.value.workflow_id) > 0
+    assert result.value.changed is True
 
 
 async def test_list_workflows_empty():
@@ -85,7 +86,7 @@ async def test_create_and_get_workflow():
         description="Test getting details",
     )
     assert isinstance(create_result, Ok)
-    workflow_id = create_result.value
+    workflow_id = create_result.value.workflow_id
 
     get_result = await get_workflow(workflow_id)
     assert isinstance(get_result, Ok)
@@ -185,7 +186,7 @@ async def test_delete_workflow():
 
     create_result = await create_workflow(name="Deletable Workflow")
     assert isinstance(create_result, Ok)
-    workflow_id = create_result.value
+    workflow_id = create_result.value.workflow_id
 
     delete_result = await delete_workflow(workflow_id)
     assert isinstance(delete_result, Ok)
@@ -205,7 +206,7 @@ async def test_delete_workflow_already_archived():
 
     create_result = await create_workflow(name="Archive Twice")
     assert isinstance(create_result, Ok)
-    workflow_id = create_result.value
+    workflow_id = create_result.value.workflow_id
 
     first = await delete_workflow(workflow_id)
     assert isinstance(first, Ok)
@@ -221,7 +222,7 @@ async def test_list_excludes_archived_by_default():
 
     create_result = await create_workflow(name="Soon Archived")
     assert isinstance(create_result, Ok)
-    workflow_id = create_result.value
+    workflow_id = create_result.value.workflow_id
 
     await delete_workflow(workflow_id)
 
@@ -236,7 +237,7 @@ async def test_list_includes_archived():
 
     create_result = await create_workflow(name="Archived But Visible")
     assert isinstance(create_result, Ok)
-    workflow_id = create_result.value
+    workflow_id = create_result.value.workflow_id
 
     await delete_workflow(workflow_id)
 
@@ -252,7 +253,7 @@ async def test_get_workflow_still_returns_archived():
 
     create_result = await create_workflow(name="Archived Detail")
     assert isinstance(create_result, Ok)
-    workflow_id = create_result.value
+    workflow_id = create_result.value.workflow_id
 
     await delete_workflow(workflow_id)
 

@@ -369,14 +369,19 @@ async def test_endpoint_upserts_when_the_same_workflow_is_posted_twice() -> None
     assert second.id == first.id
 
 
-async def test_endpoint_refuses_reinstall_of_matching_version_with_409() -> None:
-    """A declared version must not be silently overwritten (issue #822)."""
+async def test_endpoint_refuses_changed_content_under_same_version_with_409() -> None:
+    """Changed content under an unchanged version is never a silent overwrite.
+
+    Identity is decided by comparing the stored definition to the incoming
+    one, so this fires on the content actually differing rather than on a
+    digest the caller supplied (issue #822).
+    """
     request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
     await create_workflow_from_yaml_endpoint(request_a, version="0.3.0")
 
     request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
     with pytest.raises(HTTPException) as exc_info:
-        await create_workflow_from_yaml_endpoint(request_b, version="0.3.0")
+        await create_workflow_from_yaml_endpoint(request_b, name="Renamed", version="0.3.0")
 
     assert exc_info.value.status_code == 409
     detail = str(exc_info.value.detail)
@@ -420,3 +425,25 @@ async def test_endpoint_round_trip_preserves_classification_repo_and_requires_re
     assert created.classification == "complex"
     assert created.repository_url == "https://github.com/acme/widgets"
     assert created.requires_repos is False
+
+
+async def test_endpoint_identical_reinstall_succeeds_as_unchanged() -> None:
+    """A byte-identical reinstall is a no-op, not a 409 (issue #822).
+
+    Exit 0 here is what makes `syn workflow install` safe to run
+    unconditionally from a script or a CI step: under the refusal behaviour
+    every rerun of an unchanged pipeline failed.
+    """
+    request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    first = await create_workflow_from_yaml_endpoint(
+        request_a, version="0.3.0", source_digest="aaa111"
+    )
+    assert first.status == "created"
+
+    request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    second = await create_workflow_from_yaml_endpoint(
+        request_b, version="0.3.0", source_digest="aaa111"
+    )
+
+    assert second.id == first.id
+    assert second.status == "unchanged"
