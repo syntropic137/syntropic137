@@ -26,6 +26,7 @@ import { removeTempDir } from "../../packages/git.js";
 import { resolveFromMarketplace } from "../../marketplace/client.js";
 import { runClaudePluginPreflight } from "../../packages/claude-plugin-preflight.js";
 import { postYaml } from "../../client/yaml-upload.js";
+import type { PostYamlOptions } from "../../client/yaml-upload.js";
 import { runSkillPreflight } from "../../packages/skill-preflight.js";
 
 // ---------------------------------------------------------------------------
@@ -114,6 +115,29 @@ export interface InstallProvenance {
   force?: boolean;
 }
 
+
+/**
+ * Map install provenance onto the query-string options postYaml understands.
+ *
+ * WHY these are sent at all (issue #822): the server records the package
+ * version and resolved commit SHA on the template, refuses a reinstall of a
+ * version already installed unless force is set, and refuses a matching
+ * version that resolves to a different digest. Not sending them left every
+ * one of those guards inert, so same-version reinstalls and republished
+ * packages overwrote silently.
+ *
+ * Absent fields are omitted rather than sent empty: the server distinguishes
+ * "declares no version" from "declares this version", and refuses an install
+ * that would erase provenance it already holds.
+ */
+function provenanceOptions(provenance: InstallProvenance): Partial<PostYamlOptions> {
+  const options: Partial<PostYamlOptions> = {};
+  if (provenance.version !== undefined) options.version = provenance.version;
+  if (provenance.sourceDigest) options.sourceDigest = provenance.sourceDigest;
+  if (provenance.force === true) options.force = true;
+  return options;
+}
+
 export async function installWorkflowsViaApi(
   workflows: ResolvedWorkflow[],
   provenance: InstallProvenance = {},
@@ -134,22 +158,12 @@ export async function installWorkflowsViaApi(
       // it the server mints a fresh uuid on every install, so `syn workflow
       // run <yaml-id>` cannot resolve and re-installing the same package
       // silently piles up duplicates.
-      // WHY the provenance fields (issue #822): the server records the
-      // package version and resolved commit SHA on the template, refuses a
-      // reinstall of a version already installed unless force is set, and
-      // refuses a matching version that resolves to a different digest. Not
-      // sending them meant the policy never activated, so same-version
-      // reinstalls and republished packages overwrote silently.
       const data = await postYaml(Buffer.from(JSON.stringify(wf.definition), "utf-8"), {
         name: wf.name,
         workflowId: wf.id,
         contentType: "application/json",
         errorLabel: "workflow install",
-        ...(provenance.version !== undefined ? { version: provenance.version } : {}),
-        ...(provenance.sourceDigest !== null && provenance.sourceDigest !== undefined
-          ? { sourceDigest: provenance.sourceDigest }
-          : {}),
-        ...(provenance.force === true ? { force: true } : {}),
+        ...provenanceOptions(provenance),
       });
       const wfId = data.id;
       print(`${style("done", GREEN)} (id: ${wfId})`);
