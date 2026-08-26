@@ -110,6 +110,23 @@ class SkillRegistrationAggregate(AggregateRoot["SkillRegisteredEvent"]):
             msg = "Skill already registered"
             raise ValueError(msg)
 
+        # WHY the aggregate enforces this too, not just the handler: version
+        # and resolved_sha arrive as two independently supplied strings, so
+        # nothing structural stops a future command path from persisting a
+        # pinned version alongside a sha that contradicts it. Mirrors the
+        # claude-plugin aggregate deliberately: the two pin content the same
+        # way, so any divergence between them is itself the defect.
+        from syn_domain.contexts.orchestration._shared.content_pin import (
+            content_pin_is_satisfied,
+        )
+
+        if not content_pin_is_satisfied(command.version, command.resolved_sha):
+            msg = (
+                f"Skill version {command.version!r} pins a content hash that does not "
+                f"match resolved_sha {command.resolved_sha!r}"
+            )
+            raise ValueError(msg)
+
         self._initialize(command.aggregate_id)
 
         event = SkillRegisteredEvent(

@@ -111,6 +111,23 @@ class ClaudePluginRegistrationAggregate(AggregateRoot["ClaudePluginRegisteredEve
             msg = "Claude plugin already registered"
             raise ValueError(msg)
 
+        # WHY the aggregate enforces this too, not just the handler: version
+        # and resolved_sha arrive as two independently supplied strings, so
+        # nothing structural stops a future command path from persisting a
+        # pinned version alongside a sha that contradicts it. The aggregate is
+        # the last place that can refuse, and a contradictory record here is
+        # permanent - every later resolve of the triple returns it.
+        from syn_domain.contexts.orchestration._shared.content_pin import (
+            content_pin_is_satisfied,
+        )
+
+        if not content_pin_is_satisfied(command.version, command.resolved_sha):
+            msg = (
+                f"Claude plugin version {command.version!r} pins a content hash that "
+                f"does not match resolved_sha {command.resolved_sha!r}"
+            )
+            raise ValueError(msg)
+
         self._initialize(command.aggregate_id)
 
         event = ClaudePluginRegisteredEvent(

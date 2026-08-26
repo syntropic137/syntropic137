@@ -34,6 +34,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
     ClaudePluginInvalidPath,
     ClaudePluginManifestInvalid,
     ClaudePluginManifestMissing,
+    ClaudePluginVersionHashMismatch,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
     ClaudePluginRegistrationAggregate,
@@ -114,12 +115,43 @@ class RegisterClaudePluginHandler:
             source_url, version, effective_name
         )
 
+        # WHY a ``sha256-<hash>`` version is checked at all: it is a content
+        # commitment, not a label. Nothing else enforces it, so without this a
+        # caller registers arbitrary content under a version naming another
+        # tree's hash, and every later install resolving that triple silently
+        # receives the substituted content.
+        #
+        # WHY before the idempotency short-circuit: submitting different bytes
+        # against an EXISTING honest pin would otherwise hit the fast path and
+        # be reported as a successful registration, when what actually happened
+        # is that the submitted content was discarded. The caller is told their
+        # content is installed while the stored tree is someone else's.
+        pinned = _declared_hash(version)
+        sha = _compute_tree_sha(files) if pinned is not None else None
+        if sha is not None:
+            _reject_hash_version_mismatch(version, sha, source_url)
+
         # Fast path: the aggregate already exists. Idempotent re-register.
         existing = await self._repo.get_by_id(stream_id)
         if existing is not None:
+            # WHY the STORED sha is re-checked, not just the submitted one:
+            # a record written before this guard existed can carry a pinned
+            # version whose resolved_sha does not match it. Returning it here
+            # would keep serving that substituted content forever, and an
+            # honest re-registration would launder it back into circulation.
+            if pinned is not None and existing.resolved_sha != pinned:
+                # A stored sha of None is also a mismatch against a pin: the
+                # record commits to a hash it cannot evidence.
+                raise ClaudePluginVersionHashMismatch(
+                    source_url, version, existing.resolved_sha or "<unrecorded>"
+                )
             return _result_from_aggregate(existing)
 
-        sha = _compute_tree_sha(files)
+        # Ordinary versions are hashed only once the fast path has missed, so a
+        # duplicate re-register of a tag or branch does not rehash the tree.
+        if sha is None:
+            sha = _compute_tree_sha(files)
+
         tree_prefix = await self._ensure_tree_uploaded(sha, files)
 
         command = RegisterClaudePluginCommand(
@@ -346,3 +378,22 @@ def _result_from_aggregate(
         resolved_sha=aggregate.resolved_sha,
         tree_storage_prefix=aggregate.tree_storage_prefix,
     )
+
+
+_HASH_VERSION_PREFIX = "sha256-"
+
+
+def _declared_hash(version: str) -> str | None:
+    """The hash a ``sha256-<hash>`` version commits to, or None if unpinned."""
+    if not version.startswith(_HASH_VERSION_PREFIX):
+        return None
+    return version[len(_HASH_VERSION_PREFIX) :]
+
+
+def _reject_hash_version_mismatch(version: str, actual_sha: str, source_url: str) -> None:
+    """Enforce that a ``sha256-<hash>`` version names the content it carries."""
+    declared = _declared_hash(version)
+    if declared is None:
+        return
+    if declared != actual_sha:
+        raise ClaudePluginVersionHashMismatch(source_url, version, actual_sha)
