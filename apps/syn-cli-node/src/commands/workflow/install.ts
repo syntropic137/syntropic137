@@ -26,6 +26,8 @@ import { removeTempDir } from "../../packages/git.js";
 import { resolveFromMarketplace } from "../../marketplace/client.js";
 import { runClaudePluginPreflight } from "../../packages/claude-plugin-preflight.js";
 import { postYaml } from "../../client/yaml-upload.js";
+import { findInstallation, pruneWorkflows } from "./prune.js";
+import type { PostYamlOptions } from "../../client/yaml-upload.js";
 import { runSkillPreflight } from "../../packages/skill-preflight.js";
 
 // ---------------------------------------------------------------------------
@@ -86,22 +88,63 @@ export async function resolveSource(
   manifest: PluginManifest | null;
   workflows: ResolvedWorkflow[];
   tmpdir: string | null;
+  gitSha: string | null;
 }> {
   const { resolved, isRemote } = parseSource(source);
 
   if (isRemote) {
     print(`Cloning ${style(resolved, CYAN)}@${ref}...`);
-    const { tmpdir, manifest, workflows } = await resolveFromGit(resolved, ref);
-    return { packagePath: tmpdir, manifest, workflows, tmpdir };
+    const { tmpdir, manifest, workflows, gitSha } = await resolveFromGit(resolved, ref);
+    return { packagePath: tmpdir, manifest, workflows, tmpdir, gitSha };
   }
 
+  // A local path has no commit to report, so it declares no digest rather
+  // than an empty one. The server distinguishes the two (issue #822).
   const packagePath = path.resolve(resolved);
   const { manifest, workflows } = resolvePackage(packagePath);
-  return { packagePath, manifest, workflows, tmpdir: null };
+  return { packagePath, manifest, workflows, tmpdir: null, gitSha: null };
+}
+
+
+/**
+ * Install provenance sent to the API (issue #822).
+ *
+ * `version` and `sourceDigest` are what let the server refuse a silent
+ * overwrite and detect a republished version. `sourceDigest` is nullable
+ * because a local path install has no resolved commit to report.
+ */
+export interface InstallProvenance {
+  version?: string;
+  sourceDigest?: string | null;
+  force?: boolean;
+}
+
+
+/**
+ * Map install provenance onto the query-string options postYaml understands.
+ *
+ * WHY these are sent at all (issue #822): the server records the package
+ * version and resolved commit SHA on the template, refuses a reinstall of a
+ * version already installed unless force is set, and refuses a matching
+ * version that resolves to a different digest. Not sending them left every
+ * one of those guards inert, so same-version reinstalls and republished
+ * packages overwrote silently.
+ *
+ * Absent fields are omitted rather than sent empty: the server distinguishes
+ * "declares no version" from "declares this version", and refuses an install
+ * that would erase provenance it already holds.
+ */
+function provenanceOptions(provenance: InstallProvenance): Partial<PostYamlOptions> {
+  const options: Partial<PostYamlOptions> = {};
+  if (provenance.version !== undefined) options.version = provenance.version;
+  if (provenance.sourceDigest) options.sourceDigest = provenance.sourceDigest;
+  if (provenance.force === true) options.force = true;
+  return options;
 }
 
 export async function installWorkflowsViaApi(
   workflows: ResolvedWorkflow[],
+  provenance: InstallProvenance = {},
 ): Promise<InstalledWorkflowRef[]> {
   const installed: InstalledWorkflowRef[] = [];
   for (let i = 0; i < workflows.length; i++) {
@@ -124,13 +167,21 @@ export async function installWorkflowsViaApi(
         workflowId: wf.id,
         contentType: "application/json",
         errorLabel: "workflow install",
+        ...provenanceOptions(provenance),
       });
       const wfId = data.id;
-      print(`${style("done", GREEN)} (id: ${wfId})`);
+      // WHY the two outcomes read differently (issue #822): the server
+      // reports status="unchanged" when the definition it already holds is
+      // identical, and writes no event. Printing "done" for both would hide
+      // the distinction that makes a rerun safe to trust.
+      const unchanged = data.status === "unchanged";
+      print(unchanged ? style("already installed", DIM) : `${style("done", GREEN)} (id: ${wfId})`);
       installed.push({ id: wfId, name: wf.name });
     } catch (err) {
       print(style("failed", "\x1b[31m"));
-      if (err instanceof Error) printError(err.message);
+      // WHY the reason is not printed here (issue #822): it is carried in the
+      // thrown CLIError below and the top-level CLI renders that. Printing it
+      // in both places put the same refusal on stderr twice.
       // WHY rethrow rather than collect and continue: swallowing this left the
       // package half-installed while the command still printed
       // "Installed N workflow(s)" and recorded the install, so a user had no
@@ -138,8 +189,14 @@ export async function installWorkflowsViaApi(
       // created before this point still exist - install is not transactional
       // server-side - so the message says so rather than implying a clean
       // rollback.
+      // WHY the reason is repeated here (issue #822): the server's refusal is
+      // the actionable half - "version 0.3.0 is already installed, pass
+      // --force" or a digest mismatch naming a possible republish. It was
+      // only reaching stderr via printError above, so the thrown error, which
+      // is what a caller or a CI log surfaces, said just "Failed to create".
+      const reason = err instanceof Error ? `\n  ${err.message}` : "";
       throw new CLIError(
-        `Failed to create workflow '${wf.name}' (${i + 1} of ${workflows.length}).\n` +
+        `Failed to create workflow '${wf.name}' (${i + 1} of ${workflows.length}).${reason}\n` +
           (installed.length > 0
             ? `  ${installed.length} workflow(s) were already created and remain installed: ` +
               `${installed.map((w) => w.name).join(", ")}.\n` +
@@ -162,6 +219,11 @@ export const installCommand: CommandDef = {
   options: {
     ref: { type: "string", description: "Git branch/tag to clone", default: "main" },
     "dry-run": { type: "boolean", short: "n", description: "Validate without installing", default: false },
+    force: {
+      type: "boolean",
+      description: "Reinstall a version that is already installed, overwriting it",
+      default: false,
+    },
   },
   handler: async (parsed: ParsedArgs) => {
     const source = parsed.positionals[0];
@@ -172,6 +234,7 @@ export const installCommand: CommandDef = {
 
     const ref = (parsed.values["ref"] as string | undefined) ?? "main";
     const dryRun = parsed.values["dry-run"] === true;
+    const force = parsed.values["force"] === true;
 
     // Try marketplace first for bare names
     let packagePath: string;
@@ -188,10 +251,10 @@ export const installCommand: CommandDef = {
         if (mktResult !== null) {
           ({ packagePath, manifest, workflows, tmpdir, marketplaceSource, gitSha, effectiveRef } = mktResult);
         } else {
-          ({ packagePath, manifest, workflows, tmpdir } = await resolveSource(source, ref));
+          ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(source, ref));
         }
       } else {
-        ({ packagePath, manifest, workflows, tmpdir } = await resolveSource(source, ref));
+        ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(source, ref));
       }
     } catch (err) {
       printError(err instanceof Error ? err.message : String(err));
@@ -228,11 +291,55 @@ export const installCommand: CommandDef = {
       // uploaded, so both preflights must precede installWorkflowsViaApi.
       await runSkillPreflight(packagePath, workflows);
 
-      const installedRefs = await installWorkflowsViaApi(workflows);
+      const installedRefs = await installWorkflowsViaApi(workflows, {
+        version: pkgVersion,
+        sourceDigest: gitSha,
+        force,
+      });
 
       if (installedRefs.length === 0) {
         printError("No workflows were installed");
         throw new CLIError("Install failed", 1);
+      }
+
+      // WHY install prunes too (issue #822): a newer-version install now
+      // succeeds as an upsert and replaces the registry record. Without this,
+      // a workflow the new version dropped stays live on the server while its
+      // ref disappears from the registry, so nothing local names it any more.
+      // Before install became an upsert this was unreachable, because the
+      // second install just failed.
+      const priorRecord = findInstallation(pkgName);
+      if (priorRecord !== null) {
+        const liveIds = new Set(installedRefs.map((w) => w.id));
+        const orphans = priorRecord.workflows.filter((w) => !liveIds.has(w.id));
+        if (orphans.length > 0) {
+          print(`\n${style("Removing workflows no longer in the package...", BOLD)}`);
+          const prune = await pruneWorkflows(orphans);
+          // WHY this records the failures and exits non-zero, matching update
+          // (issue #822): printing a warning and then writing a record that
+          // contains only installedRefs drops the still-live workflows from
+          // the registry, which is the orphan this prune exists to prevent.
+          if (prune.failed.length > 0) {
+            recordInstallation({
+              packageName: pkgName,
+              packageVersion: pkgVersion,
+              source,
+              sourceRef: effectiveRef,
+              format: fmt,
+              workflows: [...installedRefs, ...prune.failed],
+              marketplaceSource,
+              gitSha,
+            });
+            printError(
+              `Installed, but ${prune.failed.length} workflow(s) from the previous version ` +
+                "could not be archived and remain active: " +
+                `${prune.failed.map((w) => w.name).join(", ")}. ` +
+                "They are still tracked. Re-run install, or remove them with " +
+                "`syn workflow delete`.",
+            );
+            throw new CLIError("Partial install", 1);
+          }
+        }
       }
 
       recordInstallation({

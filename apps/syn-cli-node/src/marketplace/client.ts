@@ -11,7 +11,7 @@ import {
   RegistryConfigSchema,
   type RegistryEntry,
 } from "./models.js";
-import { gitClone, gitLsRemote, makeTempDir, removeTempDir } from "../packages/git.js";
+import { gitClone, gitHeadSha, gitLsRemote, makeTempDir, removeTempDir } from "../packages/git.js";
 
 const REGISTRIES_PATH = synPath("registries.json");
 const CACHE_DIR = synPath("marketplace", "cache");
@@ -296,7 +296,11 @@ export async function resolveFromMarketplace(
     throw new Error(`Plugin source path escapes repository: ${plugin.source}`);
   }
 
-  const gitSha = await gitLsRemote(entry.repo, resolvedRef);
+  // WHY the clone's HEAD rather than a second ls-remote (issue #822):
+  // ls-remote is a separate round trip, so a ref that moves between the clone
+  // and the query yields a sha for commit B while we installed commit A.
+  // Provenance has to describe the bytes on disk.
+  const gitSha = await gitHeadSha(tmpdir);
 
   return {
     packagePath: subdir,
@@ -308,4 +312,9 @@ export async function resolveFromMarketplace(
   };
 }
 
-export { gitLsRemote as getGitHeadSha };
+// WHY the rename (issue #822): this was exported as `getGitHeadSha`, which
+// is what it is NOT. It queries the REMOTE ref, it does not read the HEAD of
+// anything we cloned. That name is how a remote-ref sha ended up recorded as
+// the provenance of locally installed bytes. `gitHeadSha` is the one that
+// reads a clone; this one is only safe for "has the remote moved?" checks.
+export { gitLsRemote as getRemoteRefSha };

@@ -151,3 +151,95 @@ describe("installWorkflowsViaApi partial failure", () => {
     ).rejects.toThrow(/remain installed/);
   });
 });
+
+describe("install provenance (issue #822)", () => {
+  it("sends the package version and resolved digest", async () => {
+    mockFetch.mockResolvedValue(created());
+
+    await installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })], {
+      version: "0.3.0",
+      sourceDigest: "abc123",
+    });
+
+    const { url } = lastCall();
+    expect(url).toContain("version=0.3.0");
+    expect(url).toContain("source_digest=abc123");
+  });
+
+  it("does not send force unless it was asked for", async () => {
+    mockFetch.mockResolvedValue(created());
+
+    await installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })], {
+      version: "0.3.0",
+    });
+
+    expect(lastCall().url).not.toContain("force");
+  });
+
+  it("sends force when set", async () => {
+    mockFetch.mockResolvedValue(created());
+
+    await installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })], {
+      version: "0.3.0",
+      force: true,
+    });
+
+    expect(lastCall().url).toContain("force=true");
+  });
+
+  it("omits the digest for a local install that has no resolved commit", async () => {
+    mockFetch.mockResolvedValue(created());
+
+    await installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })], {
+      version: "0.3.0",
+      sourceDigest: null,
+    });
+
+    expect(lastCall().url).not.toContain("source_digest");
+  });
+
+  it("surfaces the server's 409 refusal rather than a generic failure", async () => {
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: "Workflow 'demo' version 0.3.0 is already installed. Pass --force to reinstall it.",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      installWorkflowsViaApi([workflow({ id: "demo", name: "Demo", phases: [] })], {
+        version: "0.3.0",
+      }),
+    ).rejects.toThrow(/already installed/);
+  });
+});
+
+describe("unchanged reinstall (issue #822)", () => {
+  it("reports an identical reinstall as already installed, not as a failure", async () => {
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "demo",
+          name: "Demo",
+          workflow_type: "research",
+          classification: "simple",
+          repository_url: "",
+          requires_repos: false,
+          status: "unchanged",
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const refs = await installWorkflowsViaApi(
+      [workflow({ id: "demo", name: "Demo", phases: [] })],
+      { version: "0.3.0", sourceDigest: "aaa111" },
+    );
+
+    // Still counted as installed: it is present and current, which is what a
+    // caller rerunning the command needs to know.
+    expect(refs).toEqual([{ id: "demo", name: "Demo" }]);
+  });
+});

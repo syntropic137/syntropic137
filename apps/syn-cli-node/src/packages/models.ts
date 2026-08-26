@@ -10,7 +10,11 @@ export type PackageFormat = (typeof PackageFormat)[keyof typeof PackageFormat];
 export const PluginManifestSchema = z.object({
   manifest_version: z.number().default(1),
   name: z.string().min(1),
-  version: z.string().default("0.1.0"),
+  // WHY min(1) (issue #822): an empty version passes a truthiness check on
+  // the way out, so the query param is omitted and the install silently takes
+  // the unversioned overwrite path. The policy is only as good as the version
+  // being present.
+  version: z.string().trim().min(1, "manifest version must not be empty").default("0.1.0"),
   description: z.string().nullish(),
   author: z.string().nullish(),
   license: z.string().nullish(),

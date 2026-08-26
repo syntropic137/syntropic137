@@ -251,6 +251,9 @@ describe("workflow crud commands", () => {
       // First call resolves the workflow (list endpoint)
       // Second call fetches the detail
       mockFetch
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880);
+        // a prefix or absent id misses, then it falls back to the list.
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
           jsonResponse({
             workflows: [
@@ -304,6 +307,9 @@ describe("workflow crud commands", () => {
     it("archives workflow with --force", async () => {
       // First call resolves the workflow, second call deletes
       mockFetch
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880);
+        // a prefix or absent id misses, then it falls back to the list.
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
           jsonResponse({
             workflows: [
@@ -329,6 +335,9 @@ describe("workflow crud commands", () => {
     });
 
     it("throws CLIError without --force", async () => {
+      // resolveWorkflow probes GET /workflows/{id} first (issue #880); the
+      // prefix misses, then it falls back to the list.
+      mockFetch.mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404));
       mockFetch.mockResolvedValueOnce(
         jsonResponse({
           workflows: [
