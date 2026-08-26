@@ -18,6 +18,13 @@ This test ENUMERATES rather than asserting per slice. A per-slice test only
 covers the slices someone remembered to write one for; an enumerating test
 fails when a new content-addressed slice is added without the guard, which is
 the property that was missing.
+
+WHAT IT DOES NOT PROVE. It is a structural check over source text and AST, so
+it catches the realistic mistake - a new slice written without the guard, or
+the guard moved after the fast path - and not a determined bypass. A guard
+body emptied out, a call made unreachable, or hashing done under a name none
+of the markers below match would all pass. Behavioural coverage lives in the
+per-slice tests; this exists so that a NEW slice cannot silently have none.
 """
 
 from __future__ import annotations
@@ -36,12 +43,16 @@ _SLICES_DIR = (
     / "slices"
 )
 
-# A slice is content-addressed if it hashes the submitted tree itself.
-_TREE_HASH_FN = "_compute_tree_sha"
+# A slice is content-addressed if it hashes the submitted tree itself. Both
+# the shared helper name and a direct hashlib call count, so a new slice does
+# not escape discovery by rolling its own hashing.
+_TREE_HASH_MARKERS = ("_compute_tree_sha", "hashlib.sha256", "hashlib.new")
 _GUARD_FN = "_reject_hash_version_mismatch"
-# The guard must precede the idempotency short-circuit: checking after it
-# leaves the FIRST registration of a triple unguarded, and the first is the
-# only one that matters, because every later resolve returns what it stored.
+# The guard must precede the idempotency short-circuit. Not because a first
+# registration would otherwise be missed - that one misses the lookup and
+# reaches a guard placed after it - but because submitting different bytes
+# against an EXISTING pin would short-circuit and be reported as a successful
+# registration, when the submitted content was in fact discarded.
 _FAST_PATH_CALL = "get_by_id"
 
 
@@ -51,7 +62,8 @@ def _content_addressed_handlers() -> list[Path]:
     for path in sorted(_SLICES_DIR.rglob("*.py")):
         if path.name.startswith("test_"):
             continue
-        if _TREE_HASH_FN in path.read_text(encoding="utf-8"):
+        text = path.read_text(encoding="utf-8")
+        if any(marker in text for marker in _TREE_HASH_MARKERS):
             found.append(path)
     return found
 
@@ -75,9 +87,9 @@ def test_at_least_one_content_addressed_slice_is_discovered() -> None:
     """Guard the guard: a broken discovery would make every check below vacuous."""
     handlers = _content_addressed_handlers()
     assert handlers, (
-        f"No slice module under {_SLICES_DIR} references {_TREE_HASH_FN!r}. "
-        "Either the helper was renamed - update _TREE_HASH_FN - or this test "
-        "is now checking nothing."
+        f"No slice module under {_SLICES_DIR} matches any of {_TREE_HASH_MARKERS!r}. "
+        "Either the hashing helper was renamed - update _TREE_HASH_MARKERS - or "
+        "this test is now checking nothing."
     )
 
 
@@ -105,8 +117,9 @@ def test_content_addressed_slice_rejects_a_hash_version_mismatch(handler_path: P
 def test_hash_guard_runs_before_the_idempotency_fast_path(handler_path: Path) -> None:
     """The guard must precede the existing-aggregate short-circuit.
 
-    Checking afterwards leaves the first registration of a triple unguarded,
-    which is the only one that decides what every later resolve returns.
+    Checking afterwards lets a submission of different bytes against an
+    existing pin short-circuit and report success, when the submitted content
+    was actually discarded and someone else's tree stayed installed.
     """
     tree = ast.parse(handler_path.read_text(encoding="utf-8"))
 
