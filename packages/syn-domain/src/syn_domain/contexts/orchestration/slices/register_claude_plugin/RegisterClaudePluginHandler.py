@@ -140,7 +140,11 @@ class RegisterClaudePluginHandler:
             # would keep serving that substituted content forever, and an
             # honest re-registration would launder it back into circulation.
             if pinned is not None and existing.resolved_sha != pinned:
-                raise ClaudePluginVersionHashMismatch(source_url, version, existing.resolved_sha)
+                # A stored sha of None is also a mismatch against a pin: the
+                # record commits to a hash it cannot evidence.
+                raise ClaudePluginVersionHashMismatch(
+                    source_url, version, existing.resolved_sha or "<unrecorded>"
+                )
             return _result_from_aggregate(existing)
 
         # Ordinary versions are hashed only once the fast path has missed, so a
