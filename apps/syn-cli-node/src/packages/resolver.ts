@@ -11,7 +11,7 @@ import {
   PluginManifestSchema,
   type ResolvedWorkflow,
 } from "./models.js";
-import { gitClone, makeTempDir, removeTempDir } from "./git.js";
+import { gitClone, gitHeadSha, makeTempDir, removeTempDir } from "./git.js";
 import { parseYaml } from "./yaml.js";
 
 const INSTALLED_PATH = synPath("workflows", "installed.json");
@@ -617,6 +617,7 @@ export async function resolveFromGit(
   tmpdir: string;
   manifest: PluginManifest | null;
   workflows: ResolvedWorkflow[];
+  gitSha: string | null;
 }> {
   const tmpdir = makeTempDir("syn-pkg-");
   try {
@@ -626,8 +627,13 @@ export async function resolveFromGit(
     throw err;
   }
 
+  // WHY (issue #822): this returned no sha, so explicit git URLs and
+  // org/repo shorthand installed with no source_digest and the republish
+  // check was silently inert for both. A policy that does not apply on two
+  // of the resolution paths is not a policy.
+  const gitSha = await gitHeadSha(tmpdir);
   const { manifest, workflows } = resolvePackage(tmpdir);
-  return { tmpdir, manifest, workflows };
+  return { tmpdir, manifest, workflows, gitSha };
 }
 
 // ---------------------------------------------------------------------------

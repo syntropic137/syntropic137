@@ -26,6 +26,7 @@ import { removeTempDir } from "../../packages/git.js";
 import { resolveFromMarketplace } from "../../marketplace/client.js";
 import { runClaudePluginPreflight } from "../../packages/claude-plugin-preflight.js";
 import { postYaml } from "../../client/yaml-upload.js";
+import { findInstallation, pruneWorkflows } from "./prune.js";
 import type { PostYamlOptions } from "../../client/yaml-upload.js";
 import { runSkillPreflight } from "../../packages/skill-preflight.js";
 
@@ -87,18 +88,21 @@ export async function resolveSource(
   manifest: PluginManifest | null;
   workflows: ResolvedWorkflow[];
   tmpdir: string | null;
+  gitSha: string | null;
 }> {
   const { resolved, isRemote } = parseSource(source);
 
   if (isRemote) {
     print(`Cloning ${style(resolved, CYAN)}@${ref}...`);
-    const { tmpdir, manifest, workflows } = await resolveFromGit(resolved, ref);
-    return { packagePath: tmpdir, manifest, workflows, tmpdir };
+    const { tmpdir, manifest, workflows, gitSha } = await resolveFromGit(resolved, ref);
+    return { packagePath: tmpdir, manifest, workflows, tmpdir, gitSha };
   }
 
+  // A local path has no commit to report, so it declares no digest rather
+  // than an empty one. The server distinguishes the two (issue #822).
   const packagePath = path.resolve(resolved);
   const { manifest, workflows } = resolvePackage(packagePath);
-  return { packagePath, manifest, workflows, tmpdir: null };
+  return { packagePath, manifest, workflows, tmpdir: null, gitSha: null };
 }
 
 
@@ -170,7 +174,9 @@ export async function installWorkflowsViaApi(
       installed.push({ id: wfId, name: wf.name });
     } catch (err) {
       print(style("failed", "\x1b[31m"));
-      if (err instanceof Error) printError(err.message);
+      // WHY the reason is not printed here (issue #822): it is carried in the
+      // thrown CLIError below and the top-level CLI renders that. Printing it
+      // in both places put the same refusal on stderr twice.
       // WHY rethrow rather than collect and continue: swallowing this left the
       // package half-installed while the command still printed
       // "Installed N workflow(s)" and recorded the install, so a user had no
@@ -240,10 +246,10 @@ export const installCommand: CommandDef = {
         if (mktResult !== null) {
           ({ packagePath, manifest, workflows, tmpdir, marketplaceSource, gitSha, effectiveRef } = mktResult);
         } else {
-          ({ packagePath, manifest, workflows, tmpdir } = await resolveSource(source, ref));
+          ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(source, ref));
         }
       } else {
-        ({ packagePath, manifest, workflows, tmpdir } = await resolveSource(source, ref));
+        ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(source, ref));
       }
     } catch (err) {
       printError(err instanceof Error ? err.message : String(err));
@@ -289,6 +295,30 @@ export const installCommand: CommandDef = {
       if (installedRefs.length === 0) {
         printError("No workflows were installed");
         throw new CLIError("Install failed", 1);
+      }
+
+      // WHY install prunes too (issue #822): a newer-version install now
+      // succeeds as an upsert and replaces the registry record. Without this,
+      // a workflow the new version dropped stays live on the server while its
+      // ref disappears from the registry, so nothing local names it any more.
+      // Before install became an upsert this was unreachable, because the
+      // second install just failed.
+      const priorRecord = findInstallation(pkgName);
+      if (priorRecord !== null) {
+        const liveIds = new Set(installedRefs.map((w) => w.id));
+        const orphans = priorRecord.workflows.filter((w) => !liveIds.has(w.id));
+        if (orphans.length > 0) {
+          print(`\n${style("Removing workflows no longer in the package...", BOLD)}`);
+          const prune = await pruneWorkflows(orphans);
+          if (prune.failed.length > 0) {
+            printError(
+              `Installed, but ${prune.failed.length} workflow(s) from the previous version ` +
+                "could not be archived and remain active: " +
+                `${prune.failed.map((w) => w.name).join(", ")}. ` +
+                "Remove them with `syn workflow delete`.",
+            );
+          }
+        }
       }
 
       recordInstallation({

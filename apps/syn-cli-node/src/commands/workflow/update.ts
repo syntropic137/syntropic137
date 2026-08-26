@@ -5,9 +5,8 @@
 
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
-import { style, BOLD, CYAN, DIM, GREEN, RED } from "../../output/ansi.js";
+import { style, BOLD, CYAN } from "../../output/ansi.js";
 import type { InstallationRecord, PluginManifest, ResolvedWorkflow } from "../../packages/models.js";
 import {
   detectFormat,
@@ -16,25 +15,19 @@ import {
   saveInstalled,
 } from "../../packages/resolver.js";
 import { removeTempDir } from "../../packages/git.js";
-import { resolvePluginByName, getGitHeadSha } from "../../marketplace/client.js";
+import { resolvePluginByName, getRemoteRefSha } from "../../marketplace/client.js";
 import {
   isBarePluginName,
   tryMarketplaceResolution,
   resolveSource,
   installWorkflowsViaApi,
 } from "./install.js";
+import { findInstallation, pruneWorkflows } from "./prune.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function findInstallation(name: string): InstallationRecord | null {
-  const registry = loadInstalled();
-  for (const record of registry.installations) {
-    if (record.package_name === name) return record;
-  }
-  return null;
-}
 
 function removeInstallation(name: string): void {
   const registry = loadInstalled();
@@ -42,27 +35,6 @@ function removeInstallation(name: string): void {
   saveInstalled({ version: registry.version, installations: remaining });
 }
 
-async function deleteWorkflowsViaApi(record: InstallationRecord): Promise<number> {
-  let deleted = 0;
-  for (const wfRef of record.workflows) {
-    process.stdout.write(`  Removing ${style(wfRef.name, BOLD)}... `);
-    try {
-      unwrap(
-        await api.DELETE("/workflows/{workflow_id}", {
-          params: { path: { workflow_id: wfRef.id } },
-        }),
-        "Failed to delete workflow",
-      );
-      print(style("done", GREEN));
-      deleted++;
-    } catch (err) {
-      const msg = err instanceof CLIError ? err.message.toLowerCase() : "";
-      const isGone = msg.includes("already archived") || msg.includes("not found");
-      print(isGone ? style("already archived", DIM) : style("failed", RED));
-    }
-  }
-  return deleted;
-}
 
 async function isAlreadyUpToDate(
   record: InstallationRecord,
@@ -74,7 +46,7 @@ async function isAlreadyUpToDate(
   if (result === null) return false;
 
   const [_regName, entry, _plugin] = result;
-  const currentSha = await getGitHeadSha(entry.repo, effectiveRef);
+  const currentSha = await getRemoteRefSha(entry.repo, effectiveRef);
   return currentSha !== null && currentSha === record.git_sha;
 }
 
@@ -115,7 +87,11 @@ export const updateCommand: CommandDef = {
     const effectiveRef = (parsed.values["ref"] as string | undefined) ?? record.source_ref;
     const dryRun = parsed.values["dry-run"] === true;
 
-    if (await isAlreadyUpToDate(record, effectiveRef)) {
+    // WHY force short-circuits this (issue #822): the up-to-date check
+    // returned before force was considered, so --force did nothing in the
+    // exact case someone reaches for it - the sha has not moved and they want
+    // to reinstall anyway.
+    if (!force && (await isAlreadyUpToDate(record, effectiveRef))) {
       printDim(`Package '${name}' is already up to date`);
       return;
     }
@@ -147,7 +123,10 @@ export const updateCommand: CommandDef = {
           throw new CLIError("Not found", 1);
         }
       } else {
-        ({ packagePath, manifest, workflows, tmpdir } = await resolveSource(source, effectiveRef));
+        ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(
+          source,
+          effectiveRef,
+        ));
       }
     } catch (err) {
       if (err instanceof CLIError) throw err;
@@ -202,7 +181,31 @@ export const updateCommand: CommandDef = {
       const removed = record.workflows.filter((w) => !installedIds.has(w.id));
       if (removed.length > 0) {
         print(`\n${style("Removing workflows no longer in the package...", BOLD)}`);
-        await deleteWorkflowsViaApi({ ...record, workflows: removed });
+        const prune = await pruneWorkflows(removed);
+        // WHY this is not swallowed (issue #822): deleteWorkflowsViaApi
+        // catches every DELETE failure and returns normally. Recording only
+        // the new refs after a failed archive leaves that workflow live on
+        // the server and untracked locally, which is how an orphan is made.
+        // Keep the failed refs in the registry so a retry can still see them.
+        if (prune.failed.length > 0) {
+          const stillLive = prune.failed;
+          recordInstallation({
+            packageName: pkgName,
+            packageVersion: pkgVersion,
+            source,
+            sourceRef: resolvedRef,
+            format: fmt,
+            workflows: [...installedRefs, ...stillLive],
+            marketplaceSource: marketplaceSource ?? record.marketplace_source ?? null,
+            gitSha: gitSha ?? record.git_sha ?? null,
+          });
+          printError(
+            `Updated, but ${prune.failed.length} old workflow(s) could not be archived. ` +
+              "They remain active and are still tracked. Re-run update, or remove them with " +
+              "`syn workflow delete`.",
+          );
+          throw new CLIError("Partial update", 1);
+        }
       }
 
       recordInstallation({
@@ -252,8 +255,19 @@ export const uninstallCommand: CommandDef = {
 
     if (parsed.values["keep-workflows"] !== true) {
       print(`Removing workflows from ${style(name, BOLD)}...`);
-      const deleted = await deleteWorkflowsViaApi(record);
-      print(`  Removed ${deleted} workflow(s)`);
+      const prune = await pruneWorkflows(record.workflows);
+      print(`  Removed ${prune.gone.length} workflow(s)`);
+      // WHY this stops rather than dropping the record (issue #822): removing
+      // the registry entry while a workflow is still live on the server
+      // orphans it, with no local record naming it any more.
+      if (prune.failed.length > 0) {
+        printError(
+          `${prune.failed.length} workflow(s) could not be archived and are still active: ` +
+            `${prune.failed.map((w) => w.name).join(", ")}. ` +
+            "The package remains installed. Re-run uninstall once the API is reachable.",
+        );
+        throw new CLIError("Partial uninstall", 1);
+      }
     }
 
     removeInstallation(name);
