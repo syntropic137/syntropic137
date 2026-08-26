@@ -52,3 +52,27 @@ class WorkflowTemplateDigestMismatchError(WorkflowTemplateConflictError):
             f"{incoming_digest}). The publisher may have replaced an existing version. "
             f"Review the change, then pass --force if it is expected."
         )
+
+
+class WorkflowTemplateProvenanceStrippedError(WorkflowTemplateConflictError):
+    """An install would erase provenance already recorded on the template.
+
+    WHY: without this, the digest guard is trivially bypassed. Install once at
+    0.3.0/aaa111, then install again declaring neither version nor digest: the
+    matching-version check does not fire, the update is accepted, and both
+    fields are overwritten with None. A republished 0.3.0 then installs
+    cleanly, because there is no longer a recorded digest to compare against.
+
+    ``force`` does not bypass this. Force means "overwrite this version on
+    purpose", not "drop the evidence".
+    """
+
+    def __init__(self, workflow_id: str, field: str, installed_value: str) -> None:
+        self.workflow_id = workflow_id
+        self.field = field
+        self.installed_value = installed_value
+        super().__init__(
+            f"Workflow '{workflow_id}' is installed with {field} {installed_value}, but this "
+            f"install declares no {field}. Refusing to overwrite recorded provenance with "
+            f"nothing. Reinstall from a source that declares its {field}."
+        )

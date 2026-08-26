@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
@@ -558,3 +559,218 @@ class TestReinstallIsIdempotent:
         assert restored is not None
         assert restored.is_archived is False
         assert restored.name == "Restored"
+
+
+@pytest.mark.unit
+class TestProvenanceCannotBeStripped:
+    """An install must not erase provenance the template already carries.
+
+    Found in cross-model review of #822. Without these guards the digest
+    check is bypassed by declaring nothing: same_version goes false, the
+    update is accepted, and version and digest are overwritten with None, so
+    a republished package installs cleanly afterwards.
+    """
+
+    @pytest.mark.asyncio
+    async def test_install_without_version_over_versioned_template_is_refused(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateProvenanceStrippedError,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        await handler.handle(
+            create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
+        )
+
+        with pytest.raises(WorkflowTemplateProvenanceStrippedError, match="no version"):
+            await handler.handle(create_test_command(aggregate_id="code-review"))
+
+        aggregate = await repository.get_by_id("code-review")
+        assert aggregate is not None
+        assert aggregate.package_version == "0.3.0"
+        assert aggregate.source_digest == "aaa111"
+
+    @pytest.mark.asyncio
+    async def test_install_without_digest_over_digested_template_is_refused(self) -> None:
+        """0.3.0/aaa -> 0.4.0/None is a real upgrade that still drops the evidence."""
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateProvenanceStrippedError,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        await handler.handle(
+            create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
+        )
+
+        with pytest.raises(WorkflowTemplateProvenanceStrippedError, match="no source digest"):
+            await handler.handle(create_test_command(aggregate_id="code-review", version="0.4.0"))
+
+        aggregate = await repository.get_by_id("code-review")
+        assert aggregate is not None
+        assert aggregate.source_digest == "aaa111"
+
+    @pytest.mark.asyncio
+    async def test_force_does_not_permit_stripping(self) -> None:
+        """force means overwrite this version on purpose, not drop the evidence."""
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateProvenanceStrippedError,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+        await handler.handle(
+            create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
+        )
+
+        with pytest.raises(WorkflowTemplateProvenanceStrippedError):
+            await handler.handle(create_test_command(aggregate_id="code-review", force=True))
+
+    @pytest.mark.asyncio
+    async def test_unversioned_template_stays_installable_without_version(self) -> None:
+        """None -> None is the manual/unversioned path and must keep working."""
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+
+        await handler.handle(create_test_command(aggregate_id="manual-wf"))
+        await handler.handle(create_test_command(aggregate_id="manual-wf", name="Edited"))
+
+        aggregate = await repository.get_by_id("manual-wf")
+        assert aggregate is not None
+        assert aggregate.name == "Edited"
+
+    @pytest.mark.asyncio
+    async def test_unversioned_template_can_adopt_a_version(self) -> None:
+        """None -> declared is the legacy migration path and must be allowed."""
+        repository = InMemoryWorkflowRepository()
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+
+        await handler.handle(create_test_command(aggregate_id="code-review"))
+        await handler.handle(
+            create_test_command(aggregate_id="code-review", version="0.3.0", source_digest="aaa111")
+        )
+
+        aggregate = await repository.get_by_id("code-review")
+        assert aggregate is not None
+        assert aggregate.package_version == "0.3.0"
+
+
+@pytest.mark.unit
+class TestArchiveStateAcrossReplay:
+    """Archive state must follow the latest lifecycle event, whichever it is.
+
+    Found in cross-model review of #822: only WorkflowTemplateUpdated cleared
+    the flag, so a stream ending in a full-definition Created event replayed
+    to the latest definition while still marked archived.
+    """
+
+    def test_created_after_archived_replays_as_active(self) -> None:
+        from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
+            ArchiveWorkflowTemplateCommand,
+        )
+
+        aggregate = WorkflowTemplateAggregate()
+        aggregate._handle_command(create_test_command(aggregate_id="code-review"))
+        aggregate.archive_workflow(ArchiveWorkflowTemplateCommand(workflow_id="code-review"))
+        assert aggregate.is_archived is True
+
+        replayed = WorkflowTemplateAggregate()
+        replayed.rehydrate(aggregate.get_uncommitted_events())
+        assert replayed.is_archived is True
+
+        # A later full-definition event reactivates, whichever event it is.
+        replayed._apply_definition(aggregate.get_uncommitted_events()[0].event)
+        assert replayed.is_archived is False
+
+    def test_archive_still_wins_when_it_is_the_last_event(self) -> None:
+        from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
+            ArchiveWorkflowTemplateCommand,
+        )
+
+        aggregate = WorkflowTemplateAggregate()
+        aggregate._handle_command(create_test_command(aggregate_id="code-review"))
+        aggregate.archive_workflow(ArchiveWorkflowTemplateCommand(workflow_id="code-review"))
+
+        replayed = WorkflowTemplateAggregate()
+        replayed.rehydrate(aggregate.get_uncommitted_events())
+        assert replayed.is_archived is True
+
+
+class BarrieredWorkflowRepository(InMemoryWorkflowRepository):
+    """Repository that forces two callers to observe the same snapshot.
+
+    WHY: load-or-create is only race-safe because the append is guarded by
+    optimistic concurrency, and a plain fake never exercises that. Its async
+    methods contain no suspension point, so even asyncio.gather serializes
+    them and both installs succeed. This barrier holds the first N loaders
+    until all of them have read, which is what produces the interleaving that
+    matters: load-load-save-save.
+    """
+
+    def __init__(self, participants: int) -> None:
+        super().__init__()
+        self._barrier = asyncio.Barrier(participants)
+
+    async def get_by_id(self, aggregate_id: str) -> WorkflowTemplateAggregate | None:
+        loaded = await super().get_by_id(aggregate_id)
+        await self._barrier.wait()
+        return loaded
+
+
+@pytest.mark.unit
+class TestConcurrentInstall:
+    """A genuine concurrent double-install must lose exactly one writer.
+
+    Requested in cross-model review of #822.
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_first_install_commits_exactly_one_event(self) -> None:
+        from event_sourcing import ConcurrencyConflictError
+
+        repository = BarrieredWorkflowRepository(participants=2)
+        publisher = InMemoryEventPublisher()
+        handler = CreateWorkflowTemplateHandler(repository, publisher)
+
+        results = await asyncio.gather(
+            handler.handle(create_test_command(aggregate_id="code-review", name="A")),
+            handler.handle(create_test_command(aggregate_id="code-review", name="B")),
+            return_exceptions=True,
+        )
+
+        succeeded = [r for r in results if not isinstance(r, BaseException)]
+        conflicted = [r for r in results if isinstance(r, ConcurrencyConflictError)]
+        assert len(succeeded) == 1
+        assert len(conflicted) == 1
+
+        # The loser must not have half-committed: one event on the stream.
+        assert len(repository.streams["code-review"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_reinstall_commits_exactly_one_update(self) -> None:
+        from event_sourcing import ConcurrencyConflictError
+
+        repository = BarrieredWorkflowRepository(participants=2)
+        handler = CreateWorkflowTemplateHandler(repository, InMemoryEventPublisher())
+
+        # Seed the stream. This install passes the barrier alone, so it needs
+        # its own participant count of one.
+        seed_repo_barrier = repository._barrier
+        repository._barrier = asyncio.Barrier(1)
+        await handler.handle(create_test_command(aggregate_id="code-review"))
+        repository._barrier = seed_repo_barrier
+
+        results = await asyncio.gather(
+            handler.handle(create_test_command(aggregate_id="code-review", name="A")),
+            handler.handle(create_test_command(aggregate_id="code-review", name="B")),
+            return_exceptions=True,
+        )
+
+        succeeded = [r for r in results if not isinstance(r, BaseException)]
+        conflicted = [r for r in results if isinstance(r, ConcurrencyConflictError)]
+        assert len(succeeded) == 1
+        assert len(conflicted) == 1
+
+        # Created plus exactly one Updated - the loser committed nothing.
+        assert len(repository.streams["code-review"]) == 2

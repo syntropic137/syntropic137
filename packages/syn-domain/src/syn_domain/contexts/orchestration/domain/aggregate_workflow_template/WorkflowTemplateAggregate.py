@@ -274,8 +274,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         """Package version of the installed definition (issue #822).
 
         Distinct from ``version``, which the SDK owns as the aggregate's
-        stream position. Both are recorded on an execution: the package
-        version is what a human reads, the stream position is what replays.
+        stream position. The package version is what a human reads; the
+        stream position is what replays to the exact definition. Recording
+        both on WorkflowExecutionStarted is follow-up work, not done here.
         """
         return self._package_version
 
@@ -337,22 +338,76 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
 
         self._apply(event)
 
+    def _guard_provenance_retained(self, command: UpdateWorkflowTemplateCommand) -> None:
+        """Refuse an install that would erase provenance already recorded.
+
+        Without this the digest guard is bypassed by simply declaring nothing:
+        the matching-version check does not fire, the update is accepted, and
+        version and digest are overwritten with None, so a republished package
+        installs cleanly afterwards.
+
+        ``force`` does not bypass this. Force means "overwrite this version on
+        purpose", not "drop the evidence".
+        """
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateProvenanceStrippedError,
+        )
+
+        if self._package_version is not None and command.version is None:
+            raise WorkflowTemplateProvenanceStrippedError(
+                workflow_id=str(self.id),
+                field="version",
+                installed_value=self._package_version,
+            )
+        if self._source_digest is not None and command.source_digest is None:
+            raise WorkflowTemplateProvenanceStrippedError(
+                workflow_id=str(self.id),
+                field="source digest",
+                installed_value=self._source_digest,
+            )
+
+    def _guard_version_not_already_installed(self, command: UpdateWorkflowTemplateCommand) -> None:
+        """Refuse a reinstall of a version already installed, unless forced.
+
+        A matching version whose source digest differs is refused with the
+        stronger error: that is the signature of a republished version, which
+        a version check alone would not catch.
+        """
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateDigestMismatchError,
+            WorkflowTemplateVersionAlreadyInstalledError,
+        )
+
+        if command.version is None or command.version != self._package_version:
+            return
+        if command.force:
+            return
+
+        digest_changed = (
+            command.source_digest is not None
+            and self._source_digest is not None
+            and command.source_digest != self._source_digest
+        )
+        if digest_changed:
+            raise WorkflowTemplateDigestMismatchError(
+                workflow_id=str(self.id),
+                version=str(command.version),
+                installed_digest=str(self._source_digest),
+                incoming_digest=str(command.source_digest),
+            )
+
+        raise WorkflowTemplateVersionAlreadyInstalledError(
+            workflow_id=str(self.id),
+            version=str(command.version),
+        )
+
     @command_handler("UpdateWorkflowTemplateCommand")
     def update_workflow(self, command: UpdateWorkflowTemplateCommand) -> None:
         """Handle UpdateWorkflowTemplateCommand.
 
         Replaces an installed definition wholesale. This is the second and
         subsequent install of the same package id (issue #822).
-
-        Refuses by default when the incoming version is already installed, so
-        an install never silently overwrites. A matching version whose source
-        digest differs is refused even harder: that is the signature of a
-        republished version, which a version check alone would not catch.
         """
-        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
-            WorkflowTemplateDigestMismatchError,
-            WorkflowTemplateVersionAlreadyInstalledError,
-        )
         from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
             WorkflowTemplateUpdatedEvent,
         )
@@ -367,25 +422,8 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             msg = "Workflow must have at least one phase"
             raise ValueError(msg)
 
-        same_version = command.version is not None and command.version == self._package_version
-        if same_version:
-            digest_changed = (
-                command.source_digest is not None
-                and self._source_digest is not None
-                and command.source_digest != self._source_digest
-            )
-            if digest_changed and not command.force:
-                raise WorkflowTemplateDigestMismatchError(
-                    workflow_id=self.id,
-                    version=str(command.version),
-                    installed_digest=str(self._source_digest),
-                    incoming_digest=str(command.source_digest),
-                )
-            if not command.force:
-                raise WorkflowTemplateVersionAlreadyInstalledError(
-                    workflow_id=self.id,
-                    version=str(command.version),
-                )
+        self._guard_provenance_retained(command)
+        self._guard_version_not_already_installed(command)
 
         event = WorkflowTemplateUpdatedEvent(
             workflow_id=self.id,
@@ -467,7 +505,6 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         back a template a failed `update` had archived.
         """
         self._apply_definition(event)
-        self._is_archived = False
 
     def _apply_definition(self, event: DomainEvent) -> None:
         """Apply a full workflow definition event to aggregate state.
@@ -522,6 +559,13 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # so an install carrying a version is never mistaken for a reinstall.
         self._package_version = data.get("version")
         self._source_digest = data.get("source_digest")
+
+        # A full definition event reactivates the template. Applying this in
+        # the shared path rather than only on Updated keeps archive semantics
+        # consistent across legacy WorkflowCreated, WorkflowTemplateCreated and
+        # WorkflowTemplateUpdated, so a stream ending in any of them replays to
+        # active rather than depending on which one it happens to end with.
+        self._is_archived = False
 
     @command_handler("ArchiveWorkflowTemplateCommand")
     def archive_workflow(self, command: ArchiveWorkflowTemplateCommand) -> None:

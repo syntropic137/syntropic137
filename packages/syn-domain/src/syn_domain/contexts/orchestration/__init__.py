@@ -65,6 +65,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
     WorkflowTemplateConflictError,
     WorkflowTemplateDigestMismatchError,
+    WorkflowTemplateProvenanceStrippedError,
     WorkflowTemplateVersionAlreadyInstalledError,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
@@ -200,6 +201,7 @@ __all__ = [
     "WorkflowTemplateAggregate",
     "WorkflowTemplateConflictError",
     "WorkflowTemplateDigestMismatchError",
+    "WorkflowTemplateProvenanceStrippedError",
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
