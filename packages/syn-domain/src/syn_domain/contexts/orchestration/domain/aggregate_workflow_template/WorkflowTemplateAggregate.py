@@ -37,6 +37,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
         UpdatePhasePromptCommand,
     )
+    from syn_domain.contexts.orchestration.domain.commands.UpdateWorkflowTemplateCommand import (
+        UpdateWorkflowTemplateCommand,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
         WorkflowPhaseUpdatedEvent,
     )
@@ -45,6 +48,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
+        WorkflowTemplateUpdatedEvent,
     )
 
 
@@ -60,6 +66,8 @@ _EVENT_FIELDS = [
     "input_declarations",
     "claude_plugins",
     "skills",
+    "version",
+    "source_digest",
 ]
 
 
@@ -198,6 +206,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # the skill resolution service can union them with per-phase refs at
         # execute time without re-reading YAML.
         self._skills: list[SkillRef] = []
+        # WHY (issue #822): provenance for install/upsert. version drives the
+        # already-installed refusal; source_digest catches a republished
+        # version whose content changed underneath the same version string.
+        self._package_version: str | None = None
+        self._source_digest: str | None = None
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -256,6 +269,21 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         """
         return list(self._skills)
 
+    @property
+    def package_version(self) -> str | None:
+        """Package version of the installed definition (issue #822).
+
+        Distinct from ``version``, which the SDK owns as the aggregate's
+        stream position. Both are recorded on an execution: the package
+        version is what a human reads, the stream position is what replays.
+        """
+        return self._package_version
+
+    @property
+    def source_digest(self) -> str | None:
+        """Resolved source commit SHA of the installed definition (issue #822)."""
+        return self._source_digest
+
     # =========================================================================
     # COMMAND HANDLERS - Validate business rules, emit events
     # =========================================================================
@@ -303,6 +331,79 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             requires_repos=command.requires_repos,
             claude_plugins=command.claude_plugins,
             skills=command.skills,
+            version=command.version,
+            source_digest=command.source_digest,
+        )
+
+        self._apply(event)
+
+    @command_handler("UpdateWorkflowTemplateCommand")
+    def update_workflow(self, command: UpdateWorkflowTemplateCommand) -> None:
+        """Handle UpdateWorkflowTemplateCommand.
+
+        Replaces an installed definition wholesale. This is the second and
+        subsequent install of the same package id (issue #822).
+
+        Refuses by default when the incoming version is already installed, so
+        an install never silently overwrites. A matching version whose source
+        digest differs is refused even harder: that is the signature of a
+        republished version, which a version check alone would not catch.
+        """
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateDigestMismatchError,
+            WorkflowTemplateVersionAlreadyInstalledError,
+        )
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
+            WorkflowTemplateUpdatedEvent,
+        )
+
+        # Guard: workflow must already exist
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+
+        # Guard: must have at least one phase
+        if not command.phases:
+            msg = "Workflow must have at least one phase"
+            raise ValueError(msg)
+
+        same_version = command.version is not None and command.version == self._package_version
+        if same_version:
+            digest_changed = (
+                command.source_digest is not None
+                and self._source_digest is not None
+                and command.source_digest != self._source_digest
+            )
+            if digest_changed and not command.force:
+                raise WorkflowTemplateDigestMismatchError(
+                    workflow_id=self.id,
+                    version=str(command.version),
+                    installed_digest=str(self._source_digest),
+                    incoming_digest=str(command.source_digest),
+                )
+            if not command.force:
+                raise WorkflowTemplateVersionAlreadyInstalledError(
+                    workflow_id=self.id,
+                    version=str(command.version),
+                )
+
+        event = WorkflowTemplateUpdatedEvent(
+            workflow_id=self.id,
+            name=command.name,
+            workflow_type=command.workflow_type,
+            classification=command.classification,
+            repository_url=command.repository_url,
+            repository_ref=command.repository_ref,
+            phases=command.phases,
+            project_name=command.project_name,
+            description=command.description,
+            input_declarations=command.input_declarations,
+            repos=command.repos,
+            requires_repos=command.requires_repos,
+            claude_plugins=command.claude_plugins,
+            skills=command.skills,
+            version=command.version,
+            source_digest=command.source_digest,
         )
 
         self._apply(event)
@@ -354,6 +455,26 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         Note: When rehydrating from gRPC event store, event may be a GenericDomainEvent
         with dict attributes instead of proper typed objects. Handle both cases.
         """
+        self._apply_definition(event)
+
+    @event_sourcing_handler("WorkflowTemplateUpdated")
+    def on_workflow_updated(self, event: WorkflowTemplateUpdatedEvent) -> None:
+        """Apply WorkflowTemplateUpdatedEvent to update aggregate state.
+
+        WHY (issue #822): the updated event carries the full definition, so
+        applying it is the same state transition as create. Reinstalling also
+        clears the archived flag, which is what makes `install` able to bring
+        back a template a failed `update` had archived.
+        """
+        self._apply_definition(event)
+        self._is_archived = False
+
+    def _apply_definition(self, event: DomainEvent) -> None:
+        """Apply a full workflow definition event to aggregate state.
+
+        Shared by the created and updated handlers - both events carry the
+        complete definition, so both replay through the same transition.
+        """
         data = _normalize_event_data(event)
 
         from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
@@ -396,6 +517,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             item if isinstance(item, SkillRef) else SkillRef.model_validate(item)
             for item in raw_skills
         ]
+
+        # WHY (issue #822): legacy events predate provenance; absent stays None
+        # so an install carrying a version is never mistaken for a reinstall.
+        self._package_version = data.get("version")
+        self._source_digest = data.get("source_digest")
 
     @command_handler("ArchiveWorkflowTemplateCommand")
     def archive_workflow(self, command: ArchiveWorkflowTemplateCommand) -> None:

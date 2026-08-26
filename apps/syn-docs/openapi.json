@@ -496,7 +496,7 @@
           "workflows"
         ],
         "summary": "Create Workflow From Yaml Endpoint",
-        "description": "Create a workflow template by uploading raw YAML.\n\nThe CLI (`syn workflow create --from <file>`) POSTs the file bytes\nhere. Every semantic field (name, classification, repository,\nphases, inputs, requires_repos) comes from the YAML itself.\n\nQuery-string ``name`` and ``workflow_id`` are optional overrides\nintended for scripted bulk installation (e.g. renaming a template\non install). They are *not* a second source of truth for fields\nthat live in the YAML.",
+        "description": "Create a workflow template by uploading raw YAML.\n\nThe CLI (`syn workflow create --from <file>`) POSTs the file bytes\nhere. Every semantic field (name, classification, repository,\nphases, inputs, requires_repos) comes from the YAML itself.\n\nQuery-string ``name`` and ``workflow_id`` are optional overrides\nintended for scripted bulk installation (e.g. renaming a template\non install). They are *not* a second source of truth for fields\nthat live in the YAML.\n\n``version``, ``source_digest`` and ``force`` carry install provenance\nand policy (issue #822). ``syn workflow install`` supplies the package\nversion and the resolved commit SHA; reinstalling a matching version is\nrefused with 409 unless ``force`` is set, and a matching version that\nresolves to a different digest is refused regardless of how it looks,\nbecause that is the signature of a republished version.",
         "operationId": "create_workflow_from_yaml_endpoint_workflows_from_yaml_post",
         "parameters": [
           {
@@ -529,6 +529,48 @@
                 }
               ],
               "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          },
+          {
+            "name": "source_digest",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Digest"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Force"
             }
           }
         ],
@@ -6381,6 +6423,38 @@
             "title": "Requires Repos",
             "description": "Whether this workflow requires repository access at execution time (ADR-058 #666). Set to false for research or analysis workflows that don't need repos.",
             "default": true
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Package version being installed (issue #822). Recorded on the template so an execution can be traced to the version that produced it. Reinstalling a matching version is refused unless force is set."
+          },
+          "source_digest": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Digest",
+            "description": "Resolved source commit SHA for the package content (issue #822). A matching version resolving to a different digest is refused: that is the signature of a republished version."
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "description": "Overwrite an already-installed matching version.",
+            "default": false
           }
         },
         "additionalProperties": false,

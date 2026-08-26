@@ -10,7 +10,7 @@
 
 This diagram shows which events feed which projections in the Syn137 system.
 
-**Total Relationships:** 61 events → 25 projections
+**Total Relationships:** 62 events → 25 projections
 
 ```mermaid
 graph LR
@@ -21,9 +21,9 @@ graph LR
         e4[phase_completed]
         e5[workflow_template_created]
         e6[trigger_fired]
-        e7[phase_started]
-        e8[execution_cancelled]
-        e9[workflow_interrupted]
+        e7[workflow_interrupted]
+        e8[phase_started]
+        e9[execution_cancelled]
         e10[session_completed]
     end
 
@@ -45,34 +45,34 @@ graph LR
         p15[SystemProjection]
     end
 
+    e5 --> p3
+    e10 --> p13
+    e10 --> p3
+    e6 --> p8
     e1 --> p8
     e1 --> p5
     e1 --> p3
-    e10 --> p13
-    e10 --> p3
-    e5 --> p3
     e2 --> p10
     e2 --> p9
     e2 --> p5
     e2 --> p3
-    e6 --> p8
-    e4 --> p5
-    e7 --> p3
+    e7 --> p5
     e3 --> p10
     e3 --> p9
     e3 --> p5
     e3 --> p3
-    e8 --> p5
+    e8 --> p3
     e9 --> p5
+    e4 --> p5
 ```
 
 ---
 
 ## Statistics
 
-- **Events with projections:** 61
+- **Events with projections:** 62
 - **Unique projections:** 25
-- **Total event-to-projection mappings:** 96
+- **Total event-to-projection mappings:** 98
 
 ---
 
@@ -86,9 +86,9 @@ graph LR
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
 | workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
 | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
+| workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
 | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
 | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
-| workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection | 3 |
 | session_completed | SessionListProjection, DashboardMetricsProjection | 2 |
 
 ---

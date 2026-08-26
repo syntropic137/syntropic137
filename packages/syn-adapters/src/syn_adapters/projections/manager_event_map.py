@@ -110,6 +110,14 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_detail", "on_workflow_template_created"),
         ("dashboard_metrics", "on_workflow_template_created"),
     ],
+    # WHY (issue #822): a reinstall emits Updated, not Created. Without these
+    # the read models keep serving the definition from the first install, so
+    # the upsert looks like a no-op to the CLI and dashboard. dashboard_metrics
+    # is deliberately absent: an update is not a new template.
+    "WorkflowTemplateUpdated": [
+        ("workflow_list", "on_workflow_template_updated"),
+        ("workflow_detail", "on_workflow_template_updated"),
+    ],
     "WorkflowTemplateArchived": [
         ("workflow_list", "on_workflow_template_archived"),
     ],
