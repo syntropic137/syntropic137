@@ -2,13 +2,7 @@
 # One codex phase that writes a small artifact and reports a one-line
 # summary, producing a real dashboard observability timeline (tokens /
 # cost / tool-ops streamed live). Proves the codex provider dispatches
-# on the same docker workspace path as claude - no `claude-interactive`
-# / tmux involvement.
-#
-# NOTE: the live end-to-end codex execution (AgentExecutionHandler
-# runner branch) is a later task - this file is schema-valid and loads
-# via WorkflowDefinition.from_file(), but is not yet wired to a live
-# run in this worktree.
+# on the same docker workspace path as claude.
 
 id: codex-demo-workflow-v1
 name: Codex Bridge Demo

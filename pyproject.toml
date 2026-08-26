@@ -145,6 +145,7 @@ testpaths = [
     "packages/syn-shared/src",  # co-located tests, same convention
     "packages/syn-tokens/tests",
     "scripts/workflows",
+    "scripts/tests",
     "infra/scripts/tests",
 ]
 pythonpath = [
@@ -155,6 +156,7 @@ pythonpath = [
     "packages/syn-shared/src",
     "packages/syn-tokens/tests",
     "scripts/workflows",
+    "scripts/tests",
     ".",  # infra/scripts importable from repo root
 ]
 python_files = ["test_*.py", "*_test.py"]

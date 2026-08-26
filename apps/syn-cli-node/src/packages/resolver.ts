@@ -174,17 +174,19 @@ function parseManifestFile(filePath: string, format: "json" | "yaml"): PluginMan
 function loadWorkflowYaml(
   workflowDir: string,
   sourcePath: string,
+  phaseLibraryDir: string | null = null,
 ): ResolvedWorkflow {
   const yamlPath = path.join(workflowDir, "workflow.yaml");
   if (!fs.existsSync(yamlPath)) {
     throw new Error(`workflow.yaml not found in ${workflowDir}`);
   }
-  return loadWorkflowYamlFromPath(yamlPath, sourcePath);
+  return loadWorkflowYamlFromPath(yamlPath, sourcePath, phaseLibraryDir);
 }
 
 function loadWorkflowYamlFromPath(
   yamlPath: string,
   sourcePath: string,
+  phaseLibraryDir: string | null = null,
 ): ResolvedWorkflow {
   const workflowDir = path.dirname(yamlPath);
   const content = fs.readFileSync(yamlPath, "utf-8");
@@ -192,7 +194,7 @@ function loadWorkflowYamlFromPath(
 
   const phases = Array.isArray(data["phases"]) ? data["phases"] : [];
   const resolvedPhases = phases.map((phase) =>
-    resolvePhase(phase as Record<string, unknown>, workflowDir),
+    resolvePhase(phase as Record<string, unknown>, workflowDir, phaseLibraryDir),
   );
 
   const repository = data["repository"] as Record<string, unknown> | undefined;
@@ -218,43 +220,223 @@ function loadWorkflowYamlFromPath(
   };
 }
 
-function resolvePhase(
-  phase: Record<string, unknown>,
-  workflowDir: string,
-): Record<string, unknown> {
-  if (typeof phase["prompt_file"] !== "string" || phase["prompt_template"]) {
-    return phase;
+const SHARED_PREFIX = "shared://";
+
+/**
+ * `fs.realpathSync` that reports "missing" instead of throwing.
+ *
+ * Containment checks must run against the REAL path: `path.resolve` only
+ * normalizes segments, so a symlink inside the library that points at
+ * `/etc/hosts` would sail through a purely lexical check. Python's
+ * `Path.resolve()` follows links, so a lexical-only CLI check let a malicious
+ * plugin upload host files that the domain would have rejected.
+ */
+function realPathOrNull(target: string): string | null {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return null;
+  }
+}
+
+function isContained(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(root + path.sep);
+}
+
+/**
+ * Resolve a `shared://<name>` prompt reference to a file in `phase-library/`.
+ *
+ * WHY this lives in the CLI and not only in the domain: the server has no base
+ * directory, so it rejects any `prompt_file` that still appears in an uploaded
+ * document. The multi-workflow package format documents `shared://` as the way
+ * to reuse a phase across workflows, so if the CLI does not inline it the
+ * install fails with "prompt_file 'shared://x' was not resolved" and the
+ * feature is unusable from `syn workflow install`.
+ *
+ * Mirrors `_resolve_shared_prompt_path` in the domain: a reference without a
+ * phase library is an error, an empty name is an error, and the resolved path
+ * must stay inside the library directory. Containment is checked both
+ * lexically (catches `../..`) and after following symlinks (catches a link
+ * planted inside the library), because the two are different attacks.
+ */
+function resolveSharedPromptPath(
+  phaseId: string,
+  ref: string,
+  phaseLibraryDir: string | null,
+): string {
+  const name = ref.slice(SHARED_PREFIX.length);
+  if (phaseLibraryDir === null) {
+    throw new Error(
+      `Phase '${phaseId}': shared:// reference '${ref}' requires a phase-library/ ` +
+        `directory, which only the multi-workflow package format has`,
+    );
+  }
+  if (!name) {
+    throw new Error(`Phase '${phaseId}': shared:// reference is empty`);
   }
 
-  const promptPath = path.join(workflowDir, phase["prompt_file"] as string);
-  if (!fs.existsSync(promptPath)) return phase;
+  const libRoot = realPathOrNull(phaseLibraryDir);
+  if (libRoot === null) {
+    throw new Error(
+      `Phase '${phaseId}': shared:// reference '${ref}' does not exist ` +
+        `(no phase-library directory at ${path.resolve(phaseLibraryDir)})`,
+    );
+  }
 
-  const promptContent = fs.readFileSync(promptPath, "utf-8");
-  const { frontmatter, body } = parseFrontmatter(promptContent);
-  const resolved: Record<string, unknown> = { ...phase, prompt_template: body };
-  delete resolved["prompt_file"];
+  const candidate = path.resolve(libRoot, `${name}.md`);
+  // Lexical check first: a `../..` reference must report an escape even when
+  // the target it points at does not exist.
+  if (!isContained(libRoot, candidate)) {
+    throw new Error(
+      `Phase '${phaseId}': shared:// path '${name}' escapes the phase-library directory`,
+    );
+  }
 
-  if (frontmatter) {
-    mergeFrontmatter(resolved, frontmatter);
+  const resolved = realPathOrNull(candidate);
+  if (resolved === null) {
+    throw new Error(
+      `Phase '${phaseId}': shared:// reference '${ref}' does not exist ` +
+        `(looked for ${path.relative(libRoot, candidate)} in ${libRoot})`,
+    );
+  }
+  if (!isContained(libRoot, resolved)) {
+    throw new Error(
+      `Phase '${phaseId}': shared:// path '${name}' escapes the phase-library directory`,
+    );
   }
   return resolved;
 }
 
+/**
+ * Resolve a relative `prompt_file` against the workflow directory.
+ *
+ * Mirrors `_resolve_local_prompt_path` in the domain: absolute paths are
+ * rejected, and the resolved path must stay inside the base directory. Same
+ * two-stage containment as `shared://` - lexical, then post-symlink.
+ */
+function resolveLocalPromptPath(
+  phaseId: string,
+  promptFile: string,
+  baseDir: string,
+): string {
+  if (path.isAbsolute(promptFile)) {
+    throw new Error(
+      `Phase '${phaseId}': prompt_file must be a relative path, got: '${promptFile}'`,
+    );
+  }
+
+  const base = realPathOrNull(baseDir) ?? path.resolve(baseDir);
+  const candidate = path.resolve(base, promptFile);
+  if (!isContained(base, candidate)) {
+    throw new Error(
+      `Phase '${phaseId}': prompt_file '${promptFile}' escapes base directory '${base}'`,
+    );
+  }
+
+  const resolved = realPathOrNull(candidate);
+  if (resolved === null) {
+    throw new Error(
+      `Phase '${phaseId}': prompt_file '${promptFile}' does not exist (looked for ${candidate})`,
+    );
+  }
+  if (!isContained(base, resolved)) {
+    throw new Error(
+      `Phase '${phaseId}': prompt_file '${promptFile}' escapes base directory '${base}'`,
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Mirrors `_resolve_phase_prompt_file` in the domain.
+ *
+ * Presence and null checks, never truthiness: the domain treats an explicit
+ * falsy YAML value (`max_tokens: 0`, `prompt_template: ""`) as PRESENT, and a
+ * falsy frontmatter value as a value worth merging. Truthiness here made the
+ * CLI resolve documents the server then rejected, or ship documents whose
+ * fields differed from what the domain would have produced.
+ */
+function resolvePhase(
+  phase: Record<string, unknown>,
+  workflowDir: string,
+  phaseLibraryDir: string | null = null,
+): Record<string, unknown> {
+  if (!Object.hasOwn(phase, "prompt_file")) {
+    return phase;
+  }
+
+  const phaseId = String(phase["id"] ?? "?");
+
+  // The domain raises here rather than letting both fields reach validation.
+  if (
+    Object.hasOwn(phase, "prompt_template") &&
+    phase["prompt_template"] !== null &&
+    phase["prompt_template"] !== undefined
+  ) {
+    throw new Error(
+      `Phase '${phaseId}': specify either 'prompt_template' or 'prompt_file', not both`,
+    );
+  }
+
+  const promptFile = phase["prompt_file"];
+  if (typeof promptFile !== "string") {
+    throw new Error(
+      `Phase '${phaseId}': prompt_file must be a string, got ${promptFile === null ? "null" : typeof promptFile}`,
+    );
+  }
+
+  const promptPath = promptFile.startsWith(SHARED_PREFIX)
+    ? resolveSharedPromptPath(phaseId, promptFile, phaseLibraryDir)
+    : resolveLocalPromptPath(phaseId, promptFile, workflowDir);
+
+  const promptContent = fs.readFileSync(promptPath, "utf-8");
+  const { frontmatter, body } = parseFrontmatter(promptContent);
+  const resolved: Record<string, unknown> = { ...phase };
+
+  if (frontmatter) {
+    mergeFrontmatter(resolved, frontmatter);
+  }
+  resolved["prompt_template"] = body;
+  delete resolved["prompt_file"];
+  return resolved;
+}
+
+/** Mirrors `_KEBAB_TO_SNAKE` in `md_prompt_loader`. */
+const KEBAB_TO_SNAKE: Record<string, string> = {
+  "argument-hint": "argument_hint",
+  "allowed-tools": "allowed_tools",
+  "execution-type": "execution_type",
+  "max-tokens": "max_tokens",
+  "timeout-seconds": "timeout_seconds",
+};
+
+/** Mirrors `normalize_frontmatter`: rename known keys, pass everything else through. */
+function normalizeFrontmatter(fm: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fm)) {
+    const snakeKey = KEBAB_TO_SNAKE[key] ?? key;
+    out[snakeKey] =
+      snakeKey === "allowed_tools" && typeof value === "string"
+        ? value.split(",").map((t) => t.trim()).filter((t) => t.length > 0)
+        : value;
+  }
+  return out;
+}
+
+/**
+ * Merge normalized frontmatter into the phase; explicit YAML values win.
+ *
+ * The domain's rule is `key not in phase or phase[key] is None`, so a phase
+ * that explicitly sets `max_tokens: 0` keeps the 0 and a frontmatter value of
+ * `0` or `""` is still merged. Truthiness got both of those backwards.
+ */
 function mergeFrontmatter(
   phase: Record<string, unknown>,
   fm: Record<string, unknown>,
 ): void {
-  const mappings: [string, string, ((v: unknown) => unknown)?][] = [
-    ["argument-hint", "argument_hint"],
-    ["allowed-tools", "allowed_tools", (v) => String(v).split(",").map((t) => t.trim())],
-    ["max-tokens", "max_tokens", Number],
-    ["timeout-seconds", "timeout_seconds", Number],
-    ["model", "model"],
-  ];
-
-  for (const [fmKey, phaseKey, transform] of mappings) {
-    if (fm[fmKey] && !phase[phaseKey]) {
-      phase[phaseKey] = transform ? transform(fm[fmKey]) : fm[fmKey];
+  for (const [key, value] of Object.entries(normalizeFrontmatter(fm))) {
+    if (!Object.hasOwn(phase, key) || phase[key] === null || phase[key] === undefined) {
+      phase[key] = value;
     }
   }
 }
@@ -277,30 +459,53 @@ function parseInputDeclarations(data: Record<string, unknown>): Array<{
   });
 }
 
+const FRONTMATTER_DELIMITER = "---";
+
+function isDelimiterLine(line: string): boolean {
+  return line.replace(/\r?\n$/, "") === FRONTMATTER_DELIMITER;
+}
+
+/** Line indices of the opening and closing `---`, or null if there is no frontmatter. */
+function findDelimiters(lines: string[]): [number, number] | null {
+  let open = 0;
+  while (open < lines.length && lines[open]!.trim() === "") open += 1;
+  if (open >= lines.length || !isDelimiterLine(lines[open]!)) return null;
+
+  for (let close = open + 1; close < lines.length; close++) {
+    if (isDelimiterLine(lines[close]!)) return [open, close];
+  }
+  return null;
+}
+
+/**
+ * Mirrors `_split_frontmatter` / `_parse_md_prompt` in `md_prompt_loader`.
+ *
+ * Delimiters must be a line that is exactly `---`; `---extra` is body text, not
+ * a delimiter. Leading blank lines are skipped. Both halves are trimmed. The
+ * previous `indexOf("---", 3)` scan disagreed with the domain on every one of
+ * those, and the body is what gets uploaded as `prompt_template`.
+ */
 function parseFrontmatter(content: string): {
   frontmatter: Record<string, unknown> | null;
   body: string;
 } {
-  if (!content.startsWith("---")) {
-    return { frontmatter: null, body: content };
+  const lines = content.split(/(?<=\n)/);
+  const bounds = findDelimiters(lines);
+  if (bounds === null) return { frontmatter: null, body: content.trim() };
+
+  const [open, close] = bounds;
+  const fm = parseYaml(lines.slice(open + 1, close).join(""));
+  const body = lines.slice(close + 1).join("").trim();
+
+  if (typeof fm === "object" && fm !== null && !Array.isArray(fm)) {
+    return { frontmatter: fm as Record<string, unknown>, body };
   }
-
-  const endIdx = content.indexOf("---", 3);
-  if (endIdx === -1) {
-    return { frontmatter: null, body: content };
-  }
-
-  const fmContent = content.slice(3, endIdx).trim();
-  const body = content.slice(endIdx + 3).trim();
-  const fm = parseYaml(fmContent);
-
-  return {
-    frontmatter:
-      typeof fm === "object" && fm !== null && !Array.isArray(fm)
-        ? (fm as Record<string, unknown>)
-        : null,
-    body,
-  };
+  // An empty block is `{}` to the domain; anything else that is not a mapping
+  // is a ValueError there, so it must not be silently ignored here.
+  if (fm === null) return { frontmatter: null, body };
+  throw new Error(
+    `YAML frontmatter must be a mapping, got ${Array.isArray(fm) ? "list" : typeof fm}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +517,10 @@ function resolveMultiWorkflow(
   source: string,
 ): ResolvedWorkflow[] {
   const workflowsDir = path.join(pkgPath, "workflows");
+  // Only the multi-workflow format has a phase library, so `shared://` is only
+  // resolvable here. Passing the path even when the directory is absent keeps
+  // the error message about the missing FILE rather than the missing feature.
+  const phaseLibraryDir = path.join(pkgPath, "phase-library");
   const subdirs = fs
     .readdirSync(workflowsDir)
     .sort()
@@ -324,7 +533,7 @@ function resolveMultiWorkflow(
     });
 
   return subdirs.map((d) =>
-    loadWorkflowYaml(path.join(workflowsDir, d), source),
+    loadWorkflowYaml(path.join(workflowsDir, d), source, phaseLibraryDir),
   );
 }
 
@@ -547,7 +756,7 @@ export function scaffoldMultiPackage(
     `syn workflow install ./${path.basename(directory)}/\n` +
     `syn workflow run ${wfName}-v1 --task "Your task here"\n` +
     "```\n\n" +
-    `## Phases\n\n- **${opts.name}** — ${opts.numPhases ?? 3} phases\n`;
+    `## Phases\n\n- **${opts.name}**: ${opts.numPhases ?? 3} phases\n`;
 
   fs.writeFileSync(path.join(directory, "README.md"), readme, "utf-8");
 }

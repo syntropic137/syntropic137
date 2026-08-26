@@ -141,8 +141,8 @@ services:
       # Docker socket proxy (ISS-164) - all stacks use the same proxy
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       # Central session store (SeshMagic). Declared HERE, in the base, because
-      # every stack layers on this file - dev, dev-cloudflare,
-      # dev-interactive-tmux, test, selfhost and ondemand. Declaring it per
+      # every stack layers on this file - dev, dev-cloudflare, test,
+      # selfhost and ondemand. Declaring it per
       # overlay is how dev and ondemand ended up unable to capture at all: the
       # vault resolved both values, `just dev` exported them, and compose then
       # dropped them because the dev api service never named them.

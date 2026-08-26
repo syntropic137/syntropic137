@@ -45,6 +45,44 @@ from syn_shared.settings.workspace import (  # noqa: E402
     WorkspaceSettings,
 )
 
+# THE ONLY QUOTING LAYER IN THIS FILE.
+#
+# `just` loads .env through dotenvy. A value dotenvy rejects breaks EVERY just
+# recipe - including the pre-push hook, which then stops gating silently. That
+# has happened twice: once from a bare regex default (cosign certificate
+# identity, which contains `(`, `|` and `$`), and once from a fix that quoted
+# only three of six emit sites.
+#
+# "Quote only when the value looks dangerous" is what produced both failures,
+# because the danger set is never complete: apostrophes, double quotes, a
+# leading quote character and embedded newlines all escaped it. So there is no
+# danger set any more. Every non-empty value is single-quoted, unconditionally.
+#
+# Single quotes and not double quotes: dotenvy performs variable SUBSTITUTION
+# inside double quotes, so a literal `$HOME` would silently change on load.
+# Only single quotes suppress it. Empirically, dotenvy also rejects a
+# backslash-escaped backtick inside double quotes outright, so the
+# double-quoted form is not even universally parseable.
+#
+# `'"'"'` is the standard way to put an apostrophe inside a single-quoted
+# string: close, emit a double-quoted apostrophe, reopen. Both POSIX shell and
+# dotenvy concatenate the adjacent parts. (python-dotenv does not implement
+# that concatenation; no current default contains an apostrophe, and dotenvy
+# is the parser whose failure takes the whole build down.)
+_APOSTROPHE_ESCAPE = "'\"'\"'"
+
+
+def serialize_dotenv_value(value: str) -> str:
+    """Serialize a RAW SEMANTIC value into the right-hand side of a .env line.
+
+    The input is the value itself, never a pre-quoted lexical string. The
+    output round-trips back to exactly that value under dotenvy and POSIX
+    shell. Callers must not add quotes of their own.
+    """
+    if value == "":
+        return ""
+    return "'" + value.replace("'", _APOSTROPHE_ESCAPE) + "'"
+
 
 def get_env_var_name(field_name: str, prefix: str = "") -> str:
     """Convert field name to environment variable name."""
@@ -78,13 +116,10 @@ def get_default_value(field_info: FieldInfo) -> str:
     if isinstance(default, list | tuple):
         return ""  # Empty for complex defaults
 
-    value = str(default)
-    # WHY quote whitespace-bearing values: shell-sourced .env files split on
-    # whitespace unless the value is quoted (e.g. BACKUP_SCHEDULE="0 3 * * *").
-    # python-dotenv tolerates either form, but `set -a; source .env` does not.
-    if any(ch.isspace() for ch in value) and not (value.startswith(('"', "'"))):
-        return f'"{value}"'
-    return value
+    # Returns the RAW value. Quoting is serialize_dotenv_value's job and only
+    # its job - a second quoting layer here is what let `"$HOME"` reach the
+    # file as a substitutable double-quoted string.
+    return str(default)
 
 
 def is_secret_type(field_type: type[Any]) -> bool:
@@ -190,7 +225,7 @@ def generate_settings_section(
         if is_secret_type(field_type):
             lines.append(f"{env_name}=")
         else:
-            lines.append(f"{env_name}={default}")
+            lines.append(f"{env_name}={serialize_dotenv_value(default)}")
 
         lines.append("")
 
@@ -325,7 +360,7 @@ def generate_env_example() -> str:
             if is_secret_type(field_type):
                 lines.append(f"{env_name}=")
             else:
-                lines.append(f"{env_name}={default}")
+                lines.append(f"{env_name}={serialize_dotenv_value(default)}")
 
             lines.append("")
 
@@ -525,10 +560,14 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, li
             template_keys.add(key)
 
             if key in existing_vars:
-                # Preserve existing value
+                # Preserve the existing assignment VERBATIM. parse_env_file
+                # returns the lexical text as written, quotes included, so
+                # re-serializing it would quote the quotes. Never mix lexical
+                # strings with raw values.
                 output_lines.append(f"{key}={existing_vars[key]}")
             else:
-                # Add new variable with default (empty for secrets)
+                # .env.example was written by serialize_dotenv_value, so this
+                # right-hand side is already correctly serialized. Copy it.
                 output_lines.append(f"{key}={default_value}")
                 new_vars.append(key)
         else:
@@ -552,6 +591,7 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, li
             ]
         )
         for key in sorted(extra_vars):
+            # Verbatim, for the same reason as above: these came off disk.
             output_lines.append(f"{key}={existing_vars[key]}")
         output_lines.append("")
 
@@ -658,7 +698,7 @@ def generate_infra_env_example() -> str:
                 desc_lines = format_description(description)
                 lines.extend(desc_lines)
 
-            lines.append(f"{env_name}={default}")
+            lines.append(f"{env_name}={serialize_dotenv_value(default)}")
             lines.append("")
 
     return "\n".join(lines)

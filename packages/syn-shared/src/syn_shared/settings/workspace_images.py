@@ -55,9 +55,8 @@ Operators override the full image reference through the existing workspace
 settings, no code change required:
 
 - ``SYN_WORKSPACE_DOCKER_IMAGE`` overrides the claude-cli image
-- ``SYN_WORKSPACE_INTERACTIVE_TMUX_IMAGE`` overrides the interactive-tmux image
 
-Both accept any reference form. A registry reference is required to be
+It accepts any reference form. A registry reference is required to be
 digest-pinned; a registry tag is rejected, because verifying a tag does not
 establish what will actually be pulled.
 
@@ -95,7 +94,6 @@ class WorkspaceImageProvider(StrEnum):
     """
 
     CLAUDE_CLI = "claude-cli"
-    INTERACTIVE_TMUX = "interactive-tmux"
     OMNI_AGENT = "omni-agent"
     """Multi-harness image: claude AND codex on the shared ADR-040 runtime.
 
@@ -138,9 +136,6 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 #                  process is PID 1 and honours `docker stop -t`) and the
 #                  credential-repr fix. Tags :latest and :d31c88a both resolved
 #                  to this digest at pin time.
-# interactive-tmux built by the same workflow run matrix; it is published to
-#                  GHCR (it is one of the two providers in the build matrix of
-#                  agentic-primitives .github/workflows/build-workspace-images.yml).
 # omni-agent       built from agentic-primitives a6b5d3f, omni-agent manifest
 #                  1.3.0. Verified on 2026-08-21 by running the binary OUT OF
 #                  THIS DIGEST on BOTH architectures: linux/amd64 and
@@ -222,9 +217,6 @@ PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
             "sha256:88bb708151caf11eb77bb2ee912e35319a3745d1212ee261e508f1623dc5c81d"
-        ),
-        WorkspaceImageProvider.INTERACTIVE_TMUX: (
-            "sha256:222c0ec72ebf786c8a37dec359e14326c9efbb7ec57a523da7227ba7531c43a4"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
             "sha256:7b82a14dd65cdd6bdee141a87677055e3110c0cb86d52b33765e6850a773aaea"
@@ -315,14 +307,4 @@ configuration.
 
 Operators pin a different image with ``SYN_WORKSPACE_DOCKER_IMAGE``. It must be
 a digest reference; a registry tag is rejected.
-"""
-
-INTERACTIVE_TMUX_WORKSPACE_IMAGE: str = workspace_image_ref(WorkspaceImageProvider.INTERACTIVE_TMUX)
-"""Default interactive-tmux workspace image - digest-pinned, from GHCR.
-
-This provider is published to GHCR by the same agentic-primitives workflow that
-publishes claude-cli, so it is pinned and verified identically. Local
-development against a locally built ``agentic-workspace-interactive-tmux:<tag>``
-still works through ``SYN_WORKSPACE_INTERACTIVE_TMUX_IMAGE`` together with
-``SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=true``.
 """

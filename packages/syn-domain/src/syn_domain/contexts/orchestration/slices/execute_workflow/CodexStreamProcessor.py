@@ -171,7 +171,6 @@ class CodexObservabilityRecorder(Protocol):
         cache_read: int,
         num_turns: int | None,
         duration_ms: int | None,
-        agent_id: str | None = None,
     ) -> None: ...
 
 
@@ -294,7 +293,6 @@ class CodexStreamProcessor:
             cache_read=self._totals.cache_read,
             num_turns=self._totals.turns or None,
             duration_ms=duration_ms,
-            agent_id=None,
         )
 
         logger.info(

@@ -30,20 +30,9 @@ issue = "#316"
 value = 20
 issue = "#624"
 
-# --- interactive-tmux transport (stress-fix poll-then-race) ---
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler::_race_completion_against_cancel"]
-value = 50
-issue = "#768"  # poll-then-race cancel loop from fix/interactive-tmux-stress-blockers; D-block-1 fix
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler::_race_completion_against_cancel"]
-value = 15
-issue = "#768"  # interactive-tmux cancel-polling loop; landed via fix/interactive-tmux-stress-blockers
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum LOC (function-level, threshold: 100)
@@ -54,8 +43,8 @@ issue = "#768"  # interactive-tmux cancel-polling loop; landed via fix/interacti
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 877
-issue = "#768"  # grew absorbing 769's _DispatchContext + shared-workspace exactly-once cleanup, the stale-COLLECT_ARTIFACTS skip guard, the codex-review phase-aware interactive-tmux gate / followup repos threading, #772's skill_materializer wiring, and the session-capture probe hook (the probe body lives in phase_capture.py; what remains here is the port, the per-phase session id, and the calls that must sit before teardown on both the finalize path and the cancel/failure path, plus the #847 shared-workspace exclusion); split scheduled with the interactive-tmux post-launch polish
+value = 760
+issue = "#768"  # grew absorbing 769's _DispatchContext, the stale-COLLECT_ARTIFACTS skip guard, #772's skill_materializer wiring, and the session-capture probe hook (the probe body lives in phase_capture.py; what remains here is the port, the per-phase session id, and the calls that must sit before teardown on both the finalize path and the cancel/failure path); a split is still owed
 
 [max-loc-file."apps.syn-api.src.syn_api._wiring"]
 value = 1200
