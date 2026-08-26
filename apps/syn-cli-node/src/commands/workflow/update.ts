@@ -201,8 +201,8 @@ export const updateCommand: CommandDef = {
           });
           printError(
             `Updated, but ${prune.failed.length} old workflow(s) could not be archived. ` +
-              "They remain active and are still tracked. Re-run update, or remove them with " +
-              "`syn workflow delete`.",
+              "They remain active and are still tracked. Re-run with `syn workflow update --force` (a plain re-run can short-circuit as already up to date), or " +
+              "remove them with `syn workflow delete`.",
           );
           throw new CLIError("Partial update", 1);
         }

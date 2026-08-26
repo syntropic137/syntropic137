@@ -310,13 +310,29 @@ export const installCommand: CommandDef = {
         if (orphans.length > 0) {
           print(`\n${style("Removing workflows no longer in the package...", BOLD)}`);
           const prune = await pruneWorkflows(orphans);
+          // WHY this records the failures and exits non-zero, matching update
+          // (issue #822): printing a warning and then writing a record that
+          // contains only installedRefs drops the still-live workflows from
+          // the registry, which is the orphan this prune exists to prevent.
           if (prune.failed.length > 0) {
+            recordInstallation({
+              packageName: pkgName,
+              packageVersion: pkgVersion,
+              source,
+              sourceRef: effectiveRef,
+              format: fmt,
+              workflows: [...installedRefs, ...prune.failed],
+              marketplaceSource,
+              gitSha,
+            });
             printError(
               `Installed, but ${prune.failed.length} workflow(s) from the previous version ` +
                 "could not be archived and remain active: " +
                 `${prune.failed.map((w) => w.name).join(", ")}. ` +
-                "Remove them with `syn workflow delete`.",
+                "They are still tracked. Re-run install, or remove them with " +
+                "`syn workflow delete`.",
             );
+            throw new CLIError("Partial install", 1);
           }
         }
       }
