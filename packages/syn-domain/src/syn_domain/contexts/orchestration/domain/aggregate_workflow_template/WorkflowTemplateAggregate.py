@@ -366,25 +366,70 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
                 installed_value=self._source_digest,
             )
 
-    def is_identical_to(self, command: UpdateWorkflowTemplateCommand) -> bool:
-        """Whether the command installs exactly what is already installed.
+    def _definition_fingerprint(self) -> tuple[object, ...]:
+        """Every persisted field of the current definition, in a fixed order.
 
-        Same version AND same source digest means the incoming package is
-        byte-identical to the installed one, so installing it is a no-op
-        rather than a conflict (issue #822).
-
-        Both digests must be present. Matching versions with no digest on
-        either side prove nothing: a publisher can move content under an
-        unchanged version, which is precisely the case the digest exists to
-        catch.
+        Paired with ``_command_fingerprint``. Comparing tuples rather than
+        chaining a dozen ``and`` clauses keeps this within the complexity
+        budget and makes a forgotten field a visible asymmetry between the
+        two methods rather than a silently dropped comparison.
         """
         return (
-            command.version is not None
-            and command.version == self._package_version
-            and command.source_digest is not None
-            and self._source_digest is not None
-            and command.source_digest == self._source_digest
+            self._name,
+            self._workflow_type,
+            self._classification,
+            self._repository_url,
+            self._repository_ref,
+            self._project_name,
+            self._description,
+            self._requires_repos,
+            self._phases,
+            self._input_declarations,
+            self._repos,
+            self._claude_plugins,
+            self._skills,
+            self._package_version,
+            self._source_digest,
         )
+
+    @staticmethod
+    def _command_fingerprint(command: UpdateWorkflowTemplateCommand) -> tuple[object, ...]:
+        """The same fields as ``_definition_fingerprint``, from the command."""
+        return (
+            command.name,
+            command.workflow_type,
+            command.classification,
+            command.repository_url,
+            command.repository_ref,
+            command.project_name,
+            command.description,
+            command.requires_repos,
+            list(command.phases),
+            list(command.input_declarations),
+            [str(r) for r in command.repos],
+            list(command.claude_plugins),
+            list(command.skills),
+            command.version,
+            command.source_digest,
+        )
+
+    def is_identical_to(self, command: UpdateWorkflowTemplateCommand) -> bool:
+        """Whether applying this command would change nothing at all.
+
+        Identity is decided from the aggregate's OWN state, never from the
+        caller's claimed digest (issue #822). ``source_digest`` is provenance:
+        it says which commit the package came from, and the server cannot
+        verify it. Using it as the equality proof let a caller submit
+        materially different content under a digest it had used before and
+        have the server accept it as unchanged without ever looking.
+
+        The aggregate must also be ACTIVE. An archived template whose stored
+        definition still matches is not "already installed": reinstalling it
+        has to reactivate it, which only a full-definition event does.
+        """
+        if self._is_archived:
+            return False
+        return self._definition_fingerprint() == self._command_fingerprint(command)
 
     def _guard_version_not_already_installed(self, command: UpdateWorkflowTemplateCommand) -> None:
         """Refuse a reinstall of a version already installed, unless forced.
@@ -405,6 +450,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         if command.version is None or command.version != self._package_version:
             return
         if command.force:
+            return
+        # An archived template is not "already installed". Reinstalling it is
+        # how a user restores one a failed update archived, so refusing here
+        # would strand them behind --force for an ordinary recovery.
+        if self._is_archived:
             return
 
         digest_changed = (
