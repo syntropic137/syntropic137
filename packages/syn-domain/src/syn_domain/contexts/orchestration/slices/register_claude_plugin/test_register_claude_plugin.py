@@ -206,3 +206,99 @@ async def test_lock_projection_reflects_registered_plugin() -> None:
     assert entry.name == "baz"
     assert entry.resolved_sha == result.resolved_sha
     assert entry.tree_storage_prefix == result.tree_storage_prefix
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sha256_version_must_name_the_content_it_carries() -> None:
+    """A sha256- version is a content commitment, not a label.
+
+    register_skill has enforced this since #772. This slice pins content the
+    same way and did not, so a caller could register arbitrary content under
+    a version naming another tree's hash, and every later install resolving
+    that triple would receive the substituted content.
+    """
+    from syn_domain.contexts.orchestration import ClaudePluginVersionHashMismatch
+
+    handler, storage, _repo = _make_handler()
+
+    with pytest.raises(ClaudePluginVersionHashMismatch) as exc_info:
+        await handler.handle(
+            source_url="https://github.com/example/hello-world",
+            version="sha256-" + "0" * 64,
+            name="hello-world",
+            manifest=_manifest("hello-world"),
+            files=_make_files(name="hello-world"),
+        )
+
+    assert "claims a content hash" in str(exc_info.value)
+    # Nothing was uploaded: the refusal precedes any write.
+    assert storage.count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sha256_version_matching_the_tree_is_accepted() -> None:
+    handler, _storage, _repo = _make_handler()
+    files = _make_files(name="hello-world")
+
+    # Register once with a plain version to learn the tree's real hash.
+    probe = await handler.handle(
+        source_url="https://github.com/example/hello-world",
+        version="1.0.0",
+        name="hello-world",
+        manifest=_manifest("hello-world"),
+        files=files,
+    )
+
+    result = await handler.handle(
+        source_url="https://github.com/example/hello-world",
+        version=f"sha256-{probe.resolved_sha}",
+        name="hello-world",
+        manifest=_manifest("hello-world"),
+        files=files,
+    )
+
+    assert result.resolved_sha == probe.resolved_sha
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_hash_check_precedes_the_idempotency_fast_path() -> None:
+    """Checking after the fast path would leave the first registration unguarded.
+
+    The first registration of a triple is the only one that matters: every
+    later resolve of it returns whatever that first call stored.
+    """
+    from syn_domain.contexts.orchestration import ClaudePluginVersionHashMismatch
+
+    handler, _storage, _repo = _make_handler()
+    honest = _make_files(name="hello-world", extra="original")
+    forged = _make_files(name="hello-world", extra="substituted")
+
+    probe = await handler.handle(
+        source_url="https://github.com/example/hello-world",
+        version="1.0.0",
+        name="hello-world",
+        manifest=_manifest("hello-world"),
+        files=honest,
+    )
+    pinned = f"sha256-{probe.resolved_sha}"
+
+    await handler.handle(
+        source_url="https://github.com/example/hello-world",
+        version=pinned,
+        name="hello-world",
+        manifest=_manifest("hello-world"),
+        files=honest,
+    )
+
+    # Same triple, different bytes. The existing aggregate must not let it through.
+    with pytest.raises(ClaudePluginVersionHashMismatch):
+        await handler.handle(
+            source_url="https://github.com/example/hello-world",
+            version=pinned,
+            name="hello-world",
+            manifest=_manifest("hello-world"),
+            files=forged,
+        )

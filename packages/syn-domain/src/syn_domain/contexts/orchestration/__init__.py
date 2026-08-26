@@ -19,6 +19,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
     ClaudePluginManifestInvalid,
     ClaudePluginManifestMissing,
     ClaudePluginNotRegistered,
+    ClaudePluginVersionHashMismatch,
 )
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,
@@ -152,6 +153,7 @@ __all__ = [
     "ClaudePluginNotFoundError",
     "ClaudePluginNotRegistered",
     "ClaudePluginRef",
+    "ClaudePluginVersionHashMismatch",
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",

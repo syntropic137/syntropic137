@@ -117,3 +117,29 @@ class ClaudePluginNotRegistered(ClaudePluginError):
         )
         self.name = name
         self.version = version
+
+
+class ClaudePluginVersionHashMismatch(ClaudePluginError):
+    """A ``sha256-<hash>`` version does not match the submitted tree's hash.
+
+    Such a version is a content commitment, not a label. Without this check a
+    caller could register arbitrary content under a version naming another
+    tree's hash, and every later install resolving that triple would receive
+    the substituted content.
+
+    ``register_skill`` has enforced this since #772; the plugin slice did not,
+    despite pinning content the same way. The two paths are the same shape and
+    the same exploit, so they now carry the same guard.
+    """
+
+    error_code = "claude_plugin_version_hash_mismatch"
+
+    def __init__(self, source_url: str, declared: str, actual_sha: str) -> None:
+        super().__init__(
+            f"Claude plugin version {declared!r} for {source_url!r} claims a content hash, "
+            f"but the submitted tree hashes to {actual_sha!r}. A sha256- version must name "
+            f"the content it carries."
+        )
+        self.source_url = source_url
+        self.declared = declared
+        self.actual_sha = actual_sha

@@ -34,6 +34,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
     ClaudePluginInvalidPath,
     ClaudePluginManifestInvalid,
     ClaudePluginManifestMissing,
+    ClaudePluginVersionHashMismatch,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
     ClaudePluginRegistrationAggregate,
@@ -114,12 +115,22 @@ class RegisterClaudePluginHandler:
             source_url, version, effective_name
         )
 
+        sha = _compute_tree_sha(files)
+
+        # WHY before the idempotency short-circuit: a ``sha256-<hash>`` version
+        # is a content commitment, not just a label. Nothing else enforces it,
+        # so without this check a caller could register arbitrary content under
+        # a version naming another tree's hash, and every later install
+        # resolving that triple would silently receive the substituted content.
+        # Checking after the fast path would leave the first registration of a
+        # given triple unguarded, which is the only one that matters.
+        _reject_hash_version_mismatch(version, sha, source_url)
+
         # Fast path: the aggregate already exists. Idempotent re-register.
         existing = await self._repo.get_by_id(stream_id)
         if existing is not None:
             return _result_from_aggregate(existing)
 
-        sha = _compute_tree_sha(files)
         tree_prefix = await self._ensure_tree_uploaded(sha, files)
 
         command = RegisterClaudePluginCommand(
@@ -346,3 +357,15 @@ def _result_from_aggregate(
         resolved_sha=aggregate.resolved_sha,
         tree_storage_prefix=aggregate.tree_storage_prefix,
     )
+
+
+_HASH_VERSION_PREFIX = "sha256-"
+
+
+def _reject_hash_version_mismatch(version: str, actual_sha: str, source_url: str) -> None:
+    """Enforce that a ``sha256-<hash>`` version names the content it carries."""
+    if not version.startswith(_HASH_VERSION_PREFIX):
+        return
+    declared = version[len(_HASH_VERSION_PREFIX) :]
+    if declared != actual_sha:
+        raise ClaudePluginVersionHashMismatch(source_url, version, actual_sha)
