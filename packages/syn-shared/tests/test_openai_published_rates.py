@@ -4,10 +4,10 @@ WHY THIS EXISTS. The gpt-5.6 rates have been wrong twice. First as an
 unverified ``TODO(#780)`` placeholder at $15/$60/$1.50. Then, after a review
 that recorded "verified against the OpenAI pricing page and the OpenRouter
 models API", at $5.00/$30.00/$0.50/$6.25 - which matches NEITHER published
-context tier. That second set is Opus 5's $5.00 base with Anthropic's cache
-multipliers (1.25x write, 0.10x read) applied on top, so the failure was
-deriving OpenAI rates from Anthropic conventions rather than reading OpenAI's
-published cached-input and cache-write columns.
+context tier, but IS an exact match for OpenAI's `chat-latest` ($5.00 input /
+$0.50 cached input / $30.00 output). Sol is described in the pricing table as
+the model a ChatGPT-account codex login runs, so the likely error was pricing
+the ChatGPT product instead of the API model.
 
 Both times the wrong value shipped behind a claim of verification, and no test
 disagreed, because every existing pricing test asserted only that a model
@@ -20,10 +20,20 @@ read against that page, not reasoned about from the surrounding code.
 
 Source: https://developers.openai.com/api/docs/pricing (read 2026-08-26).
 
-SHORT-CONTEXT TIER. OpenAI bills gpt-5.6 in two context tiers, roughly 2x apart
-on every field. This table has no tier concept, so short-tier is asserted here
-and the gap is tracked separately. If tiering lands, this file should grow a
-long-tier case rather than have these numbers edited.
+TWO DIMENSIONS THIS TABLE CANNOT EXPRESS.
+
+Context tier: short and long, roughly 2x apart on every field.
+Service tier: Standard, Batch, Flex and Fast mode. Sol short-context output
+spans $10.00 (Batch/Flex) to $40.00 (Fast).
+
+Together that is an 8x spread on a single model, and ``ModelPricing`` holds one
+number. Standard plus short context is asserted here: standard because codex
+does not set ``service_tier``, short because observed sessions on this platform
+run 897 to roughly 28k input tokens. If tiering lands, this file should grow
+cases rather than have these numbers edited.
+
+Sol's rates are also PROMOTIONAL, stated as available at least through
+2026-11-21. They have a known expiry.
 """
 
 from __future__ import annotations
@@ -67,30 +77,31 @@ class TestPublishedRatesMatchTheVendorPage:
         assert pricing.cache_creation_per_million == Decimal(expected_write), f"{model} cache write"
         assert pricing.output_per_million == Decimal(expected_output), f"{model} output"
 
-    def test_rate_is_not_an_anthropic_derivation(
+    def test_rate_is_not_chat_latest(
         self, model: str, published: tuple[str, str, str, str]
     ) -> None:
-        """Guard the exact mistake that shipped: Anthropic multipliers on an OpenAI model.
+        """Guard the specific wrong rate that shipped: OpenAI's ChatGPT model.
 
-        Anthropic's convention is cache read at 0.10x base and 5-minute cache
-        write at 1.25x base. OpenAI publishes both directly and they do not
-        follow those ratios. If a future edit reintroduces the derivation, the
-        computed value will not equal the published one.
+        The 2026-08-16 "verified" values were $5.00 input / $0.50 cached input
+        / $30.00 output, which is `chat-latest` in the Specialized models table
+        exactly. The entry's comment describes Sol as the model a ChatGPT-account
+        codex login runs, so pricing the ChatGPT product rather than the API
+        model is the plausible and repeatable mistake. It is repeatable because
+        the confusion is in the naming, not in anyone's care.
         """
         pricing = resolve_model_pricing(model)
         assert pricing is not None
 
-        anthropic_style_read = pricing.input_per_million * Decimal("0.10")
-        anthropic_style_write = pricing.input_per_million * Decimal("1.25")
-
-        assert (
-            pricing.cache_read_per_million != anthropic_style_read
-            or Decimal(published[1]) == anthropic_style_read
-        ), f"{model} cache read looks derived from Anthropic's 0.10x rule rather than published"
-        assert (
-            pricing.cache_creation_per_million != anthropic_style_write
-            or Decimal(published[2]) == anthropic_style_write
-        ), f"{model} cache write looks derived from Anthropic's 1.25x rule rather than published"
+        chat_latest = (Decimal("5.00"), Decimal("0.50"), Decimal("30.00"))
+        actual = (
+            pricing.input_per_million,
+            pricing.cache_read_per_million,
+            pricing.output_per_million,
+        )
+        assert actual != chat_latest, (
+            f"{model} carries chat-latest's rates. chat-latest is the ChatGPT "
+            f"model, not the gpt-5.6 API model. Use the Flagship models table."
+        )
 
 
 @pytest.mark.unit

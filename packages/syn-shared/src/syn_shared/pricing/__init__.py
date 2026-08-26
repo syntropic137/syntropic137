@@ -124,18 +124,27 @@ class PricedAmount:
 # ~28k input tokens, comfortably short-tier, so short is the correct default.
 # Tiering is tracked separately; see the issue linked from ADR-067 phase 2.
 #
-# WHY THIS KEEPS BEING WRONG. These values have now been incorrect twice. They
-# were an unverified $15/$60/$1.50 TODO(#780) placeholder, then "verified" on
-# 2026-08-16 to $5/$30/$0.50/$6.25 - which matches NEITHER published tier and
-# is Opus 5's $5.00 base with Anthropic's cache multipliers (1.25x write, 0.10x
-# read) applied to it. Do not derive OpenAI rates from Anthropic conventions;
-# OpenAI publishes cached-input and cache-write prices directly.
+# WHY THIS KEEPS BEING WRONG. These values have been incorrect twice. They were
+# an unverified $15/$60/$1.50 TODO(#780) placeholder, then "verified" on
+# 2026-08-16 to $5/$30/$0.50 - which matches no gpt-5.6 tier at all, but IS an
+# exact match for OpenAI's `chat-latest` ($5.00 in / $0.50 cached / $30.00 out)
+# in the Specialized models table. The entry's own comment says Sol is "the
+# model a ChatGPT-account codex login actually runs", so the likely mistake was
+# pricing the ChatGPT model rather than the API model. The $6.25 cache write was
+# invented; `chat-latest` publishes no cache-write rate.
 #
-# DO NOT "correct" these down to the OpenRouter models API. OpenRouter carries
-# promotional pricing: on 2026-08-26 it listed Sol at exactly half the vendor
-# rate ($2.00/$10.00) during a 50% promotion, while agreeing with the vendor
-# exactly on Terra and Luna. It is a useful sanity check for relative rates and
-# an unreliable one for absolute rates.
+# PROMOTIONAL. The vendor page states Sol's pricing is promotional "at least
+# through November 21, 2026". These rates have a known expiry; recheck then.
+#
+# SERVICE TIERS. OpenAI publishes four (Standard, Batch, Flex, Fast mode). Sol
+# short-context output spans $10.00 (Batch/Flex) to $40.00 (Fast). Standard is
+# used here because codex does not set `service_tier`. This is also why the
+# OpenRouter listing reads $2.00/$10.00: that is the Batch/Flex column, not a
+# discount to chase.
+#
+# DO NOT "correct" these down to the OpenRouter models API. Its $2.00/$10.00
+# listing for Sol is OpenAI's Batch/Flex column, not the Standard rate this
+# platform bills at. Useful for relative sanity, misleading for absolute rates.
 _GPT_5_6_CODEX_INPUT_PER_MILLION = Decimal("4.00")
 _GPT_5_6_CODEX_OUTPUT_PER_MILLION = Decimal("20.00")
 _GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION = Decimal("0.40")

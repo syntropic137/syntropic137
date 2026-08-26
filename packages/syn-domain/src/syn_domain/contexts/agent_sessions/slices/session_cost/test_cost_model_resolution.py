@@ -6,6 +6,14 @@ nothing else - it can fail on main indefinitely without turning a check red.
 That is exactly what happened: both ``gpt-5.6`` cases below still asserted the
 pre-#816 rates ($15/$60) after that PR corrected them to $5/$30, and stayed
 red on main because no CI job ran them.
+
+It then happened AGAIN. The $5/$30 those cases were updated to was itself
+wrong, so this file carried a third incorrect literal. Duplicating a rate into
+a test expectation is the recurring fault, not any one number: the assertion
+looks like verification while only restating the implementation. Rates are now
+pinned field by field against the vendor page in
+``packages/syn-shared/tests/test_openai_published_rates.py``; cases here should
+assert that pricing is MODEL-AWARE, not what any particular rate is.
 """
 
 from decimal import Decimal
@@ -30,9 +38,11 @@ from syn_shared.agents import ModelId
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        # 1M in + 1M out. gpt-5.6 is an alias of gpt-5.6-sol at $5/$30 (#816
-        # corrected this from an unverified $15/$60 placeholder).
-        (ModelId.GPT_5_6, Decimal("35.00")),
+        # 1M in + 1M out. gpt-5.6 aliases gpt-5.6-sol, standard tier / short
+        # context: $4.00 in + $20.00 out. This literal has now been wrong three
+        # times ($15/$60, then $5/$30); see tests/test_openai_published_rates.py,
+        # which pins every field to the vendor page so this one does not have to.
+        (ModelId.GPT_5_6, Decimal("24.00")),
         (ModelId.CLAUDE_SONNET_4, Decimal("18.00")),
     ],
 )
@@ -63,9 +73,11 @@ async def test_projection_prices_token_usage_by_model(model: str, expected: Deci
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        # 1M in + 1M out. gpt-5.6 is an alias of gpt-5.6-sol at $5/$30 (#816
-        # corrected this from an unverified $15/$60 placeholder).
-        (ModelId.GPT_5_6, Decimal("35.00")),
+        # 1M in + 1M out. gpt-5.6 aliases gpt-5.6-sol, standard tier / short
+        # context: $4.00 in + $20.00 out. This literal has now been wrong three
+        # times ($15/$60, then $5/$30); see tests/test_openai_published_rates.py,
+        # which pins every field to the vendor page so this one does not have to.
+        (ModelId.GPT_5_6, Decimal("24.00")),
         (ModelId.CLAUDE_SONNET_4, Decimal("18.00")),
     ],
 )
