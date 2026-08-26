@@ -89,6 +89,11 @@ export const updateCommand: CommandDef = {
   options: {
     ref: { type: "string", description: "Override git ref" },
     "dry-run": { type: "boolean", short: "n", description: "Check for updates without applying", default: false },
+    force: {
+      type: "boolean",
+      description: "Reinstall even if the resolved version is already installed",
+      default: false,
+    },
   },
   handler: async (parsed: ParsedArgs) => {
     const name = parsed.positionals[0];
@@ -96,6 +101,8 @@ export const updateCommand: CommandDef = {
       printError("Missing required argument: name");
       throw new CLIError("Missing argument", 1);
     }
+
+    const force = parsed.values["force"] === true;
 
     const record = findInstallation(name);
     if (record === null) {
@@ -166,18 +173,36 @@ export const updateCommand: CommandDef = {
       print(`  Format: ${fmt}`);
       print(`  Workflows: ${workflows.length}`);
 
-      // Remove old
-      print(`\n${style("Removing old workflows...", BOLD)}`);
-      await deleteWorkflowsViaApi(record);
-      removeInstallation(name);
-
-      // Install new
+      // WHY this order (issue #822): update used to archive every old
+      // workflow and drop the registry record BEFORE creating the
+      // replacements. Any failure in the create step - a 409, a validation
+      // error, a half-installed multi-workflow package - left the user with
+      // nothing and no record to recover from. Archive is a soft delete, so
+      // the ids were not even reusable. That is data loss, and it is the
+      // command a user reaches for after an install fails.
+      //
+      // Install is an upsert now, so the replacements can be written first.
+      // Only workflows the package no longer declares are archived, and only
+      // once every upsert has succeeded.
       print(`\n${style("Installing updated workflows...", BOLD)}`);
-      const installedRefs = await installWorkflowsViaApi(workflows);
+      const installedRefs = await installWorkflowsViaApi(workflows, {
+        version: pkgVersion,
+        sourceDigest: gitSha,
+        force,
+      });
 
       if (installedRefs.length === 0) {
         printError("No workflows were installed during update");
         throw new CLIError("Update failed", 1);
+      }
+
+      // Prune workflows that existed before but are gone from this version.
+      // Runs only after every upsert above succeeded.
+      const installedIds = new Set(installedRefs.map((w) => w.id));
+      const removed = record.workflows.filter((w) => !installedIds.has(w.id));
+      if (removed.length > 0) {
+        print(`\n${style("Removing workflows no longer in the package...", BOLD)}`);
+        await deleteWorkflowsViaApi({ ...record, workflows: removed });
       }
 
       recordInstallation({

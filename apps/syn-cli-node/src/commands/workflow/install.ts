@@ -100,8 +100,23 @@ export async function resolveSource(
   return { packagePath, manifest, workflows, tmpdir: null };
 }
 
+
+/**
+ * Install provenance sent to the API (issue #822).
+ *
+ * `version` and `sourceDigest` are what let the server refuse a silent
+ * overwrite and detect a republished version. `sourceDigest` is nullable
+ * because a local path install has no resolved commit to report.
+ */
+export interface InstallProvenance {
+  version?: string;
+  sourceDigest?: string | null;
+  force?: boolean;
+}
+
 export async function installWorkflowsViaApi(
   workflows: ResolvedWorkflow[],
+  provenance: InstallProvenance = {},
 ): Promise<InstalledWorkflowRef[]> {
   const installed: InstalledWorkflowRef[] = [];
   for (let i = 0; i < workflows.length; i++) {
@@ -119,11 +134,22 @@ export async function installWorkflowsViaApi(
       // it the server mints a fresh uuid on every install, so `syn workflow
       // run <yaml-id>` cannot resolve and re-installing the same package
       // silently piles up duplicates.
+      // WHY the provenance fields (issue #822): the server records the
+      // package version and resolved commit SHA on the template, refuses a
+      // reinstall of a version already installed unless force is set, and
+      // refuses a matching version that resolves to a different digest. Not
+      // sending them meant the policy never activated, so same-version
+      // reinstalls and republished packages overwrote silently.
       const data = await postYaml(Buffer.from(JSON.stringify(wf.definition), "utf-8"), {
         name: wf.name,
         workflowId: wf.id,
         contentType: "application/json",
         errorLabel: "workflow install",
+        ...(provenance.version !== undefined ? { version: provenance.version } : {}),
+        ...(provenance.sourceDigest !== null && provenance.sourceDigest !== undefined
+          ? { sourceDigest: provenance.sourceDigest }
+          : {}),
+        ...(provenance.force === true ? { force: true } : {}),
       });
       const wfId = data.id;
       print(`${style("done", GREEN)} (id: ${wfId})`);
@@ -138,8 +164,14 @@ export async function installWorkflowsViaApi(
       // created before this point still exist - install is not transactional
       // server-side - so the message says so rather than implying a clean
       // rollback.
+      // WHY the reason is repeated here (issue #822): the server's refusal is
+      // the actionable half - "version 0.3.0 is already installed, pass
+      // --force" or a digest mismatch naming a possible republish. It was
+      // only reaching stderr via printError above, so the thrown error, which
+      // is what a caller or a CI log surfaces, said just "Failed to create".
+      const reason = err instanceof Error ? `\n  ${err.message}` : "";
       throw new CLIError(
-        `Failed to create workflow '${wf.name}' (${i + 1} of ${workflows.length}).\n` +
+        `Failed to create workflow '${wf.name}' (${i + 1} of ${workflows.length}).${reason}\n` +
           (installed.length > 0
             ? `  ${installed.length} workflow(s) were already created and remain installed: ` +
               `${installed.map((w) => w.name).join(", ")}.\n` +
@@ -162,6 +194,11 @@ export const installCommand: CommandDef = {
   options: {
     ref: { type: "string", description: "Git branch/tag to clone", default: "main" },
     "dry-run": { type: "boolean", short: "n", description: "Validate without installing", default: false },
+    force: {
+      type: "boolean",
+      description: "Reinstall a version that is already installed, overwriting it",
+      default: false,
+    },
   },
   handler: async (parsed: ParsedArgs) => {
     const source = parsed.positionals[0];
@@ -172,6 +209,7 @@ export const installCommand: CommandDef = {
 
     const ref = (parsed.values["ref"] as string | undefined) ?? "main";
     const dryRun = parsed.values["dry-run"] === true;
+    const force = parsed.values["force"] === true;
 
     // Try marketplace first for bare names
     let packagePath: string;
@@ -228,7 +266,11 @@ export const installCommand: CommandDef = {
       // uploaded, so both preflights must precede installWorkflowsViaApi.
       await runSkillPreflight(packagePath, workflows);
 
-      const installedRefs = await installWorkflowsViaApi(workflows);
+      const installedRefs = await installWorkflowsViaApi(workflows, {
+        version: pkgVersion,
+        sourceDigest: gitSha,
+        force,
+      });
 
       if (installedRefs.length === 0) {
         printError("No workflows were installed");

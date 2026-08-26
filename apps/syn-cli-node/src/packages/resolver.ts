@@ -51,9 +51,18 @@ export function recordInstallation(opts: {
     marketplace_source: opts.marketplaceSource ?? null,
     git_sha: opts.gitSha ?? null,
   };
+  // WHY dedup by package_name (issue #822): this used to append
+  // unconditionally, and only `update` got away with it because it called
+  // removeInstallation first. Now that install is an upsert server-side, a
+  // second install of the same package would append a duplicate registry
+  // entry pointing at the same workflow ids, so `list` double-counts and
+  // `uninstall` removes only one of them. One installation per package.
+  const filtered = registry.installations.filter(
+    (i) => i.package_name !== opts.packageName,
+  );
   saveInstalled({
     version: registry.version,
-    installations: [...registry.installations, record],
+    installations: [...filtered, record],
   });
 }
 
