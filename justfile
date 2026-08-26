@@ -1765,6 +1765,10 @@ _ensure-env:
         echo "📝 Created infra/.env from infra/.env.example"; \
     fi
 
+# Report config health + WHERE each value came from (shell/.env/1Password). Adds session capture, which dev-doctor never checks
+doctor *ARGS:
+    @uv run python scripts/doctor.py {{ARGS}}
+
 # Check .env for common misconfigurations and warn loudly
 _env-check: _ensure-env
     #!/usr/bin/env bash

@@ -19,6 +19,16 @@ Model aliases are NOT here - they are not env var names. They live in
 """
 
 # ---------------------------------------------------------------------------
+# Deployment identity
+# APP_ENVIRONMENT is read in more places than any other name here, and it does
+# not select one thing but three: the 1Password vault, the deployment identity
+# stamped on every captured session, and the compose project and network names.
+# A typo in any one of those literals fails silently as "development".
+# ---------------------------------------------------------------------------
+
+ENV_APP_ENVIRONMENT = "APP_ENVIRONMENT"
+
+# ---------------------------------------------------------------------------
 # Agent credential env vars
 # Read from Settings (pydantic-settings); these are the raw env var name strings.
 # ---------------------------------------------------------------------------
@@ -130,6 +140,7 @@ __all__ = [
     "ENV_AGENTIC_SESSION_STORE_URL",
     "ENV_ANTHROPIC_API_KEY",
     "ENV_ANTHROPIC_BASE_URL",
+    "ENV_APP_ENVIRONMENT",
     "ENV_CLAUDE_CODE_ENABLE_TELEMETRY",
     "ENV_CLAUDE_CODE_OAUTH_TOKEN",
     "ENV_CLAUDE_SESSION_ID",

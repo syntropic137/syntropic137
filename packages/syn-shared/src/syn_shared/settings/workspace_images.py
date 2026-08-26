@@ -225,6 +225,23 @@ PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
 )
 
 
+#: The apss-session-exporter baked into each pinned image, for the providers
+#: that carry one at all. Verified by running OUT OF the digest above and
+#: reading what the binary reports, the same way the pin itself is verified.
+#:
+#: It lives here, beside the digest, because the two move together: an image
+#: bump that leaves this stale makes every report of it name a version nothing
+#: is running. Deliberately NOT recovered by reading the prose above - the
+#: comment block keeps previous pins on purpose, so a text search returns
+#: whichever version happens to appear first and silently reports a historical
+#: one after any reordering.
+PINNED_EXPORTER_VERSIONS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
+    {
+        WorkspaceImageProvider.OMNI_AGENT: "0.5.0",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # Image reference builder
 # ---------------------------------------------------------------------------

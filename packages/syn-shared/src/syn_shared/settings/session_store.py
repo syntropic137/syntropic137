@@ -59,6 +59,21 @@ DEFAULT_SPOOL_DIR = "/spool"
 _LABEL_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
+def usable_label(label: str | None) -> str:
+    """The operator's label if it is a usable identifier, otherwise "".
+
+    A module function, not only a property, because a caller may need the label
+    rule when the rest of the settings CANNOT be built - a rejected URL must not
+    take the label rule down with it, or a malformed label (the case this rule
+    exists to catch) escapes the handling that keeps it out of logs.
+
+    `SessionStoreSettings.display_label` delegates here, so there is exactly one
+    definition of what a usable label is.
+    """
+    candidate = (label or "").strip()
+    return candidate if _LABEL_PATTERN.fullmatch(candidate) else ""
+
+
 class SessionStoreSettings(BaseSettings):
     """Configuration for forwarding agent sessions to a central session store.
 
@@ -78,6 +93,15 @@ class SessionStoreSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # Pydantic embeds the offending INPUT in ValidationError by default.
+        # `_reject_internal_whitespace` raises on the URL, and this class holds
+        # that URL precisely because every part of it is operator-supplied and
+        # could carry a credential - which is why the startup posture line logs
+        # no part of it. Without this, one pasted space defeats that: the
+        # validation error prints the whole URL into the startup log. A
+        # validator writing a careful message is not enough, the framework
+        # appends the input regardless. Mirrors `Settings` in config.py.
+        hide_input_in_errors=True,
     )
 
     url: str | None = Field(
@@ -263,8 +287,7 @@ class SessionStoreSettings(BaseSettings):
         `has_unusable_label` lets a caller report the problem without repeating
         the value.
         """
-        candidate = self.label.strip()
-        return candidate if _LABEL_PATTERN.fullmatch(candidate) else ""
+        return usable_label(self.label)
 
     @property
     def has_unusable_label(self) -> bool:
