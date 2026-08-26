@@ -1107,7 +1107,11 @@ uv run python scripts/validate_codex_observability.py --execution <execution-id>
 - [ ] Timeline shows `Bash` ops (from `command_execution`) and `Edit` ops (from `file_change`)
 - [ ] Token usage non-zero, with `cache_creation == 0` (codex reports no cache-creation)
 - [ ] Exactly **one** session summary is recorded
-- [ ] Cost is priced off `gpt-5.6` (alias of `codex`) - **not** a sonnet/haiku rate
+- [ ] The phase declared an explicit supported model (normally `gpt-5.6-sol`).
+      There is deliberately NO `codex` -> `gpt-5.6` substitution: a run that
+      names no model resolves to nothing and must surface as UNPRICED, never
+      as $0.00 and never silently priced at some other model's rate.
+- [ ] Cost is priced off the declared model - **not** a sonnet/haiku rate
 - [ ] Transcript renders raw codex JSONL: `agent_message` as assistant text, `turn.completed` as `result`
 - [ ] CLI banner noise is absent from the transcript (`Reading additional input from stdin`, `warning: --full-auto is deprecated`)
 - [ ] `validate_codex_observability.py` exits 0
@@ -1167,7 +1171,8 @@ Per run, assert:
 Across the pair, assert:
 
 - [ ] Cost is attributed **per session with its own model rate** - the codex
-      delegate priced off `gpt-5.6`, the claude delegate off its claude model.
+      delegate priced off its declared model (`gpt-5.6-sol`), the claude
+      delegate off its claude model.
       A single blended rate across a mixed execution is a defect
 - [ ] Execution-level total equals the sum of its sessions
 - [ ] `unpriced_observation_count` is 0 for both runs
@@ -2274,7 +2279,7 @@ Full pass/fail/skip for every command and feature tested.
 | workspace image has codex binary   |        |       |
 | codex phase runs to exit 0         |        |       |
 | session records provider=codex     |        |       |
-| codex cost priced off gpt-5.6      |        | not haiku |
+| codex cost priced off declared model |      | not haiku; unnamed model = unpriced |
 | codex transcript renders           |        |       |
 | CLI banner noise filtered          |        |       |
 | codex auth 0600 + staged file gone |        |       |

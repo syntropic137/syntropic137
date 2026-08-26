@@ -22,7 +22,8 @@ Source: https://developers.openai.com/api/docs/pricing (read 2026-08-26).
 
 TWO DIMENSIONS THIS TABLE CANNOT EXPRESS.
 
-Context tier: short and long, roughly 2x apart on every field.
+Context tier: short and long. Input, cached input and cache write scale 2x;
+output scales 1.5x. Not a uniform multiplier.
 Service tier: Standard, Batch, Flex and Fast mode. Sol short-context output
 spans $10.00 (Batch/Flex) to $40.00 (Fast).
 
@@ -123,18 +124,49 @@ class TestAliasAgreesWithTarget:
 
 
 @pytest.mark.unit
-class TestLongContextIsTwiceShort:
-    """The recorded tiers must stay internally consistent.
+class TestLongContextTierRelationships:
+    """Pin the recorded long-context tier, field by field.
 
-    This asserts the relationship the vendor page shows rather than the table,
-    so it documents why an untiered table under-prices a long-context run.
+    The first version of this class asserted "2x on every field" and read only
+    tuple index 0, so nine of the twelve long-context literals were never
+    consumed by any assertion and the class name stated something false: output
+    scales 1.5x, not 2x, while input, cached input and cache write scale 2x.
+
+    That is the same defect this whole file exists to catch, one level up. A
+    test that transcribes numbers into a fixture and then checks one of them is
+    not pinning the fixture, it is decorating it. Every literal below is now
+    consumed by an assertion that can fail.
     """
 
+    #: field index -> (name, long/short ratio) as published.
+    RATIOS: tuple[tuple[int, str, str], ...] = (
+        (0, "input", "2"),
+        (1, "cached input", "2"),
+        (2, "cache write", "2"),
+        (3, "output", "1.5"),
+    )
+
     @pytest.mark.parametrize("model", sorted(PUBLISHED_SHORT_CONTEXT))
-    def test_long_tier_input_is_double_short(self, model: str) -> None:
-        short_input = Decimal(PUBLISHED_SHORT_CONTEXT[model][0])
-        long_input = Decimal(PUBLISHED_LONG_CONTEXT[model][0])
-        assert long_input == short_input * 2
+    @pytest.mark.parametrize(("index", "field", "ratio"), RATIOS)
+    def test_long_tier_scales_by_published_ratio(
+        self, model: str, index: int, field: str, ratio: str
+    ) -> None:
+        short = Decimal(PUBLISHED_SHORT_CONTEXT[model][index])
+        long_ = Decimal(PUBLISHED_LONG_CONTEXT[model][index])
+        assert long_ == short * Decimal(ratio), (
+            f"{model} {field}: published long tier is {long_}, expected {short} * {ratio}"
+        )
+
+    @pytest.mark.parametrize("model", sorted(PUBLISHED_SHORT_CONTEXT))
+    def test_output_does_not_scale_like_the_other_fields(self, model: str) -> None:
+        """Guard the specific wrong belief that shipped here.
+
+        If someone reasons "long context is just double" and edits the output
+        literal to match, this fails.
+        """
+        short_out = Decimal(PUBLISHED_SHORT_CONTEXT[model][3])
+        long_out = Decimal(PUBLISHED_LONG_CONTEXT[model][3])
+        assert long_out != short_out * 2, f"{model} long-context output must be 1.5x short, not 2x"
 
     @pytest.mark.parametrize("model", sorted(PUBLISHED_SHORT_CONTEXT))
     def test_untiered_table_uses_the_short_tier(self, model: str) -> None:

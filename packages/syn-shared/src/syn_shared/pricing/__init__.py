@@ -194,10 +194,15 @@ class ModelPricing:
 
 MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
     # --- Current generation (ADR-067 phase 0) ---
-    # Verified 2026-08-16 against the vendor pricing pages and cross-checked
-    # against the OpenRouter models API; both agreed on every rate below.
-    # Anthropic cache rates follow the documented multipliers (read 0.10x,
-    # 5-min write 1.25x of base input).
+    # ANTHROPIC ROWS ONLY: verified 2026-08-16 against the vendor pricing pages
+    # and cross-checked against the OpenRouter models API; both agreed. Cache
+    # rates follow Anthropic's documented multipliers (read 0.10x, 5-min write
+    # 1.25x of base input).
+    #
+    # The OpenAI rows are NOT covered by that cross-check and must not be read
+    # as if they were. OpenRouter lists Sol at OpenAI's Batch/Flex price, not
+    # Standard, so the two sources do not agree there. See the gpt-5.6 block
+    # above for the authoritative source and its caveats.
     ModelId.CLAUDE_OPUS_5: ModelPricing(
         model_id=ModelId.CLAUDE_OPUS_5,
         input_per_million=Decimal("5.00"),
