@@ -1552,6 +1552,25 @@ submodules-update:
 gen-env:
     uv run python scripts/generate_env_example.py
 
+# Re-mint the codex credential and install it, end to end.
+# A ChatGPT account has ONE credential lineage: `codex login` revokes whatever
+# was there, including the copy this deployment holds. So re-minting and
+# re-installing are one operation, not two, and skipping the rebuild leaves the
+# old value live because container env is fixed at create time.
+codex-reauth:
+    @echo "This revokes the CURRENT codex credential everywhere it is installed."
+    @echo "Anything else using it will fail until it receives the new value."
+    @printf "Continue? [y/N] " && read -r ans && [ "$ans" = "y" ] || { echo "aborted"; exit 1; }
+    codex login
+    uv run python scripts/codex_auth_install.py
+    @echo ""
+    @echo "Installed to .env. Now rebuild so containers pick it up:"
+    @echo "  just dev-down && just dev"
+
+# Report how long the configured codex credential has left.
+codex-auth-status:
+    @uv run python scripts/codex_auth_install.py --status-only
+
 # Copy local ~/.codex/auth.json (compacted) to clipboard for 1Password or .env.
 # Pass --dotenv for a ready-to-paste `CODEX_AUTH_JSON='...'` .env line.
 codex-auth-clip *flags:
