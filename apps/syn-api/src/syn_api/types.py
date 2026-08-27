@@ -713,6 +713,11 @@ class PhaseExecution(BaseModel):
     status: str
     session_id: str | None = None
     artifact_id: str | None = None
+    # Why a failed phase reports the reason it failed (#891): the projection
+    # already writes error_message onto the phase record, and the HTTP model
+    # already declares the field. This intermediate model was the one hop that
+    # dropped it, so every failed phase surfaced error_message: null.
+    error_message: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
