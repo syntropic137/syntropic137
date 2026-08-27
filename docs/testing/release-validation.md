@@ -347,6 +347,31 @@ a platform bug rather than a credential collision.
 - [ ] Codex credentials re-minted before a run that exercises codex phases
 - [ ] Local `codex` not used concurrently with a containerized codex phase
 
+### `main...HEAD` in a worktree attributes other people's commits to your branch
+
+A worktree's local `main` ref does not move when `origin/main` does. So
+`git diff main...HEAD` computes against a stale merge base, and everything that
+landed on origin/main since then appears **inside your diff**.
+
+This produced a confident, wrong review finding: a PR was reported as containing
+"unrelated image-digest changes" that in fact belonged to a commit already
+merged to origin/main. Acting on it would have reverted someone else's work.
+
+It fails in both directions. It can also HIDE a change: if your branch touches
+something that landed on origin/main after your stale ref, the three-dot diff
+shows nothing for it.
+
+```bash
+git fetch origin                 # first, always
+git diff origin/main...HEAD      # not main...HEAD
+```
+
+When a review claims a diff contains unrelated changes, check the base ref
+before believing it. Provenance claims are as fallible as code claims, and
+harder to spot because they sound like bookkeeping rather than analysis.
+
+- [ ] Diffs and reviews computed against a freshly fetched `origin/main`
+
 ### A green check belongs to a commit, not to a PR
 
 `gh pr checks` and the PR page summarise the checks they last saw. Push a new
