@@ -12,6 +12,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from syn_shared.control import ControlSignalType
+
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
 
@@ -52,8 +54,6 @@ class CancelSignalPoller:
 
         if line_count % self._poll_interval != 0:
             return PollResult(should_interrupt=False)
-
-        from syn_adapters.control.commands import ControlSignalType
 
         signal = await self._controller.check_signal(self._execution_id)
         if signal and signal.signal_type == ControlSignalType.CANCEL:

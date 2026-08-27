@@ -98,29 +98,37 @@ layer_separation:
 # Grandfathered violations (issue #817)
 #
 # CI ran vsa 0.6.1-beta for months while the submodule pinned 0.12.0, so every
-# rule added in that window never executed. Un-freezing the gate surfaced 65
-# pre-existing violations; 51 were resolved outright and these 14 are budgeted
-# so the gate is REAL going forward rather than disabled again.
+# rule added in that window never executed. Un-freezing the gate surfaced a
+# batch of pre-existing violations; most were resolved outright and the rest
+# are budgeted here so the gate is REAL going forward rather than disabled.
 #
 # Budgets are per-file with exact counts, so a NEW violation in one of these
 # files still fails the build - only the known ones are absorbed.
 #
 # THIS LIST SHOULD ONLY EVER GET SHORTER.
+#
+# A BUDGET LARGER THAN REALITY IS A HOLE, NOT A CUSHION. vsa does not report an
+# exception whose budget exceeds the violations actually present, so once a
+# violation is fixed its leftover budget silently absorbs the NEXT regression in
+# that file. AgentExecutionHandler.py carried exactly such a stale entry
+# (budget 1, actual 0) and was removed on 2026-08-27. When you fix a violation,
+# delete its entry in the same commit.
+#
+# To see the real counts this budget is absorbing:
+#   python -c "import yaml;c=yaml.safe_load(open('vsa.yaml'));c['exceptions']=[];\
+#     yaml.safe_dump(c,open('vsa-noexc.tmp.yaml','w'),sort_keys=False)"
+#   vsa -c vsa-noexc.tmp.yaml validate   # config must sit in the repo root:
+#                                        # `root` resolves relative to the
+#                                        # CONFIG file, and a config elsewhere
+#                                        # validates an empty tree and reports
+#                                        # "All checks passed".
 exceptions:
   # Genuine hexagonal violations: slice code reaching for adapters. Want ports.
   - file: "orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py"
     rule: "VSA206"
     budget: 4
     issue: "#817"
-  - file: "orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py"
-    rule: "VSA206"
-    budget: 1
-    issue: "#817"
   - file: "orchestration/slices/execute_workflow/ConversationRecorder.py"
-    rule: "VSA206"
-    budget: 1
-    issue: "#817"
-  - file: "orchestration/slices/execute_workflow/CancelSignalPoller.py"
     rule: "VSA206"
     budget: 1
     issue: "#817"

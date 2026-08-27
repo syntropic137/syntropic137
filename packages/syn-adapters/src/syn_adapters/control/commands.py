@@ -8,17 +8,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import StrEnum
 from typing import Literal
 
+# Re-exported, not defined here. The enum moved to syn_shared so that domain
+# slice code can compare against it without importing the adapter layer
+# (issue #817 / VSA206). This name stays importable from here so existing
+# adapter call sites are unaffected, and there is still exactly one definition.
+from syn_shared.control import ControlSignalType
 
-class ControlSignalType(StrEnum):
-    """Types of control signals."""
-
-    PAUSE = "pause"
-    RESUME = "resume"
-    CANCEL = "cancel"
-    INJECT = "inject"
+__all__ = [
+    "CancelExecution",
+    "ControlCommand",
+    "ControlResult",
+    "ControlSignal",
+    "ControlSignalType",
+    "InjectContext",
+    "PauseExecution",
+    "ResumeExecution",
+]
 
 
 @dataclass(frozen=True)
