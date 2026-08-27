@@ -163,6 +163,8 @@ class ModelId(StrEnum):
     CLAUDE_FABLE_5 = "claude-fable-5"
     CLAUDE_HAIKU_4_5 = "claude-haiku-4-5-20251001"
     GPT_5_6_SOL = "gpt-5.6-sol"
+    GPT_5_6_TERRA = "gpt-5.6-terra"
+    GPT_5_6_LUNA = "gpt-5.6-luna"
     # --- Previous generation ---
     CLAUDE_OPUS_4_5 = "claude-opus-4-5-20251101"
     CLAUDE_SONNET_4_5 = "claude-sonnet-4-5-20250929"

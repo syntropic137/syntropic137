@@ -22,14 +22,22 @@ pytestmark = pytest.mark.unit
 
 
 def test_gpt_5_6_resolves_to_codex_pricing() -> None:
-    """`gpt-5.6` is OpenAI's alias for `gpt-5.6-sol` and carries Sol's rates."""
+    """`gpt-5.6` is OpenAI's alias for `gpt-5.6-sol` and carries Sol's rates.
+
+    The literals here previously asserted $5.00/$30.00/$0.50, which matched no
+    published OpenAI tier. This test therefore held the wrong rate in place: it
+    passed precisely because implementation and expectation shared one mistake.
+    The authoritative field-by-field assertions now live in
+    ``tests/test_openai_published_rates.py``, transcribed from the vendor page,
+    so this case only needs to establish that the alias resolves at all.
+    """
     pricing = resolve_model_pricing("gpt-5.6")
 
     assert pricing is not None
     assert pricing.model_id == "gpt-5.6"
-    assert pricing.input_per_million == Decimal("5.00")
-    assert pricing.output_per_million == Decimal("30.00")
-    assert pricing.cache_read_per_million == Decimal("0.50")
+    assert pricing.input_per_million == Decimal("4.00")
+    assert pricing.output_per_million == Decimal("20.00")
+    assert pricing.cache_read_per_million == Decimal("0.40")
 
 
 def test_gpt_5_6_alias_and_sol_agree() -> None:

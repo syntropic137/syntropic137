@@ -152,7 +152,37 @@ vendored as a committed snapshot. Verified directly against vendor docs on 2026-
 | `anthropic/claude-opus-5` | $5 / $25, cache r $0.50 w $6.25 | $5 / $25, r $0.50 w $6.25 | match |
 | `anthropic/claude-sonnet-5` | $2 / $10, r $0.20 w $2.50 | $2 / $10, r $0.20 w $2.50 | match |
 | `anthropic/claude-haiku-4.5` | $1 / $5, r $0.10 w $1.25 | $1 / $5, r $0.10 w $1.25 | match |
-| `openai/gpt-5.6-sol` | $5 / $30, r $0.50 w $6.25 | $5 / $30, r $0.50 w $6.25 | match |
+| `openai/gpt-5.6-sol` | $2 / $10, r $0.20 w $2.50 | $4 / $20, r $0.40 w $5.00 | **MISMATCH** |
+
+> **Correction, 2026-08-26.** The Sol row above originally recorded $5 / $30 for both
+> sources and marked it a match. That was wrong on every count, and it mattered because
+> this table is part of the evidence for choosing OpenRouter as the source.
+>
+> The vendor's Standard short-context rate is $4 / $20 (r $0.40, w $5.00). The $5 / $30
+> figure is OpenAI's `chat-latest`, a different model. OpenRouter's Sol row is $2 / $10,
+> which is OpenAI's Batch/Flex column rather than Standard, so the two sources do NOT
+> agree for OpenAI models even though they do for the Anthropic rows.
+>
+> Two consequences for this ADR's reasoning. OpenRouter's default row does not always
+> correspond to a vendor Standard rate, so the `:batch` handling noted below is not
+> sufficient to normalise it. And OpenAI publishes both a service tier (Standard, Batch,
+> Flex, Fast) and a context tier (short, long); across those, Sol's output rate spans
+> $10.00 to $60.00. A single scalar per model cannot represent that, which is a
+> requirement phase 2 must address alongside rate-at-write.
+>
+> **This changes the source decision below, not just its evidence.** The schema checks,
+> sanity ranges and diff review this ADR proposes all operate on a scalar rate, and none
+> of them can tell a correct Batch rate from a correct Standard rate: both are valid
+> numbers in a plausible range. Regenerating from OpenRouter under the rules as written
+> would reproduce exactly the error this note documents, silently.
+>
+> OpenRouter is therefore demoted to **model-discovery metadata**: useful for knowing a
+> model exists and for relative sanity, not authoritative for an absolute rate. A rate
+> that reaches the pricing table must carry an explicit provider, service tier and
+> context tier, and must be checked against a vendor-conformance fixture for every
+> actively-used model. Where a source's tier cannot be mapped, the pipeline fails closed
+> and the model stays unpriced rather than being priced wrongly. D0, D1 and
+> implementation phases 4 and 7 are amended accordingly.
 
 It is the only evaluated source current on **both** generations, and it additionally
 carries `:batch` (50% off) and `-fast` variants as first-class rows, covering two cost
