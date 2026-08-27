@@ -1,0 +1,39 @@
+id: claude-delegates-to-codex
+name: Claude delegates a subtask to Codex
+description: A claude-primary phase that shells out to `codex exec` one-shot (opt-in delegation).
+type: research
+classification: simple
+requires_repos: false
+
+# WHY this exists as a counterpart to codex-delegates-to-claude.yaml: the
+# delegation matrix has two directions and only one was covered by a shipped
+# example, so the claude-leads path was never exercised by validation. A
+# harness-neutral platform has to prove both, not assume symmetry.
+
+phases:
+  - id: plan-and-delegate
+    name: Claude plans, delegates implementation to Codex
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - text
+    max_tokens: 4096
+    timeout_seconds: 600
+    agent:
+      provider: claude
+      allow_delegation: true
+      model: haiku
+    prompt_template: |
+      Write a one-line spec for a function is_palindrome(s: str) -> bool that
+      ignores case and non-alphanumeric characters. Then delegate the
+      implementation to Codex with one shell command:
+
+      `codex exec -s workspace-write --skip-git-repo-check -C /workspace
+      "Create /workspace/palindrome.py implementing is_palindrome(s: str) -> bool
+      that ignores case and non-alphanumerics. Print DONE when the file exists."
+      < /dev/null`
+
+      Note the `< /dev/null`: codex exec waits on stdin forever without it.
+
+      Then print Codex's output and a one-line summary of what was built.
