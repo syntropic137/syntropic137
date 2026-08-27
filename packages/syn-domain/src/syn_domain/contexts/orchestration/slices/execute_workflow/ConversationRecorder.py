@@ -35,7 +35,26 @@ class ConversationRecorder:
         started_at: datetime,
         success: bool,
     ) -> None:
-        """Store conversation log. No-op if storage is None or lines empty. Never raises."""
+        """Store conversation log. No-op if storage is None or lines empty. Never raises.
+
+        ``success`` means THE AGENT PROCESS EXITED ZERO. It is not the phase's
+        verdict, and the two can legitimately disagree.
+
+        The caller records the conversation as soon as the stream ends, before
+        the phase outcome is decided. Work that happens afterwards - applying
+        the completion command to the aggregate, saving and syncing it - can
+        still raise, and the outer handler then records a FAILED execution
+        naming this phase. A stored ``success=True`` can therefore coexist with
+        a failed phase.
+
+        That is a reporting nuance, not a correctness bug: the conversation log
+        is Lane 2 telemetry describing how the agent process ended, while phase
+        success is Lane 1 domain truth decided later. Anyone reading this field
+        as "the phase succeeded" will be wrong some of the time. Reordering the
+        write to after the verdict is deliberately NOT done here - it would
+        mean losing the transcript entirely whenever the later save fails,
+        which is precisely when the transcript is most wanted.
+        """
         if self._storage is None or not lines:
             return
 

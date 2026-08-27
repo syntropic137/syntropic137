@@ -98,27 +98,54 @@ DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider
 # about a symptom that names the wrong subsystem and gives an operator nothing
 # to act on (issue #891).
 #
-# Two independent conditions, BOTH required:
+# THREE conditions, ALL required. Each rejects lines the other two accept.
 #
-#   1. an error severity, and
-#   2. an explicit auth-FAILURE marker.
+#   1. error severity, ANCHORED to the tracing-line format,
+#   2. auth CONTEXT (the codex_login target, or an auth:: module path),
+#   3. an explicit auth-FAILURE marker.
 #
-# Neither is sufficient alone, and in particular the subsystem NAME is not a
-# marker. `codex_login` appears on healthy lines too:
+# Why each is needed, with the line that motivates it:
 #
-#   INFO codex_login::auth::manager: loaded cached credentials
+# (1) anchored severity. A severity word can appear anywhere in a line,
+#     including inside captured command output:
 #
-# An earlier draft ORed the alternatives, so that line matched. Because
-# AgentExecutionHandler forces exit code 1 whenever a codex stream carries any
-# error_reason, that draft would have failed successful codex phases - a worse
-# defect than the missing reason it set out to fix.
+#       INFO codex_exec: command output: ERROR deleting file: unauthorized operation
 #
-# Requiring a severity alone is not enough either: the golden fixture contains
-# a routine `ERROR codex_models_manager::manager: ...` diagnostic that a
-# severity-only filter would promote into a phase failure.
-_ERROR_SEVERITY_RE = re.compile(r"\b(?:ERROR|FATAL)\b")
+#     A file-deletion failure is not an auth failure. Matching `ERROR`
+#     anywhere would diagnose it as one. The tracing format puts the severity
+#     first, so that is where it is required.
+#
+# (2) auth context. The golden fixture carries a routine
+#     `ERROR codex_models_manager::manager: ...` diagnostic; without an auth
+#     requirement, a severity+marker filter would promote unrelated subsystem
+#     errors into authentication verdicts.
+#
+# (3) a failure marker. The subsystem NAME is not evidence of a fault -
+#     healthy lines carry it too:
+#
+#       INFO codex_login::auth::manager: loaded cached credentials
+#
+#     An early draft ORed its alternatives, so the bare name matched. Because
+#     AgentExecutionHandler forces exit code 1 whenever a codex stream carries
+#     any error_reason, that draft would have failed SUCCESSFUL codex phases -
+#     a worse defect than the missing reason it set out to fix.
+#
+# The marker list is deliberately broader than the single production line that
+# prompted #891. Real auth failures the CLI spells differently -
+# "Authentication failed: HTTP 401", "token expired" - were falling through to
+# the generic "stream ended without a terminal turn" message, which is exactly
+# the misdiagnosis this exists to remove.
+_TRACING_ERROR_SEVERITY_RE = re.compile(r"^\s*(?:ERROR|FATAL)\b")
+_AUTH_CONTEXT_RE = re.compile(r"codex_login|auth::", re.IGNORECASE)
 _AUTH_FAILURE_MARKER_RE = re.compile(
-    r"failed to refresh token|refresh_token_reused|invalid_grant|unauthorized",
+    r"failed to refresh token"
+    r"|refresh_token_reused"
+    r"|invalid_grant"
+    r"|unauthorized"
+    r"|authentication failed"
+    r"|token expired"
+    r"|login required"
+    r"|\b(?:401|403)\b",
     re.IGNORECASE,
 )
 _HTTP_AUTH_STATUS_RE = re.compile(r"\b(401|403)\b")
@@ -455,7 +482,9 @@ class CodexStreamProcessor:
         """
         if self._auth_fault_candidate is not None:
             return
-        if not _ERROR_SEVERITY_RE.search(line):
+        if not _TRACING_ERROR_SEVERITY_RE.search(line):
+            return
+        if not _AUTH_CONTEXT_RE.search(line):
             return
         if not _AUTH_FAILURE_MARKER_RE.search(line):
             return
