@@ -128,6 +128,12 @@ export interface SessionResponse {
   cache_read_tokens: number
   total_tokens: number
   total_cost_usd: number
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
   cost_by_model: Record<string, string>
   operations: OperationInfo[]
   started_at: string | null
@@ -290,6 +296,12 @@ export interface PhaseExecutionDetail {
   cache_read_tokens: number
   duration_seconds: number
   cost_usd: number
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
   started_at: string | null
   completed_at: string | null
   model: string | null
@@ -311,6 +323,12 @@ export interface ExecutionDetailResponse {
   total_cache_read_tokens: number
   total_tokens: number
   total_cost_usd: number
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
   artifact_ids: string[]
   error_message: string | null
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
@@ -484,6 +502,12 @@ export interface SessionCost {
 
   // Status
   is_finalized: boolean
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
   started_at: string | null
   completed_at: string | null
 }
@@ -516,11 +540,24 @@ export interface ExecutionCost {
 
   // Breakdowns
   cost_by_phase: Record<string, string>
+  /**
+   * Per-phase count of observations that could not be priced.
+   *
+   * A phase listed here but missing from `cost_by_phase` cost an UNKNOWN
+   * amount; a phase in neither genuinely spent nothing (#890).
+   */
+  unpriced_by_phase: Record<string, number>
   cost_by_model: Record<string, string>
   cost_by_tool: Record<string, string>
 
   // Status
   is_complete: boolean
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
   started_at: string | null
   completed_at: string | null
 }

@@ -38,6 +38,7 @@ from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
     WorkflowListProjection,
 )
 from syn_shared.display import (
+    EM_DASH,
     format_cost,
     format_duration_seconds,
     format_model_compact,
@@ -98,7 +99,14 @@ class SessionSummaryResponse(BaseModel):
     total_tokens: int = 0
     total_tokens_display: str = "0"
     total_cost_usd: Decimal = Decimal("0")
-    total_cost_display: str = "$0.00"
+    total_cost_display: str = EM_DASH
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means ``total_cost_usd`` is INCOMPLETE, not that the work was
+    free. Clients render "unpriced" (or ">=$X (partial)") off this field rather
+    than printing a dollar figure they cannot back up (issue #890).
+    """
     duration_seconds: float | None = None
     duration_display: str = "\u2014"
     started_at: str | None = None
@@ -174,7 +182,14 @@ class SessionResponse(BaseModel):
     total_tokens: int = 0
     total_tokens_display: str = "0"
     total_cost_usd: Decimal = Decimal("0")
-    total_cost_display: str = "$0.00"
+    total_cost_display: str = EM_DASH
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means ``total_cost_usd`` is INCOMPLETE, not that the work was
+    free. Clients render "unpriced" (or ">=$X (partial)") off this field rather
+    than printing a dollar figure they cannot back up (issue #890).
+    """
     cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
     operations: list[OperationInfo] = Field(default_factory=list)
     started_at: str | None = None
@@ -216,6 +231,8 @@ class _SummaryEnrichment:
     """
 
     total_cost_usd: Decimal = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations Lane 2 could not price; non-zero means the cost is partial."""
     agent_model: str | None = None
     duration_seconds: float | None = None
     input_tokens: int | None = None
@@ -230,6 +247,7 @@ def _enrichment_from_cost(cost: SessionCost) -> _SummaryEnrichment:
     duration_ms = cost.duration_ms
     return _SummaryEnrichment(
         total_cost_usd=cost.total_cost_usd,
+        unpriced_observation_count=cost.unpriced_observation_count,
         agent_model=cost.agent_model,
         duration_seconds=(duration_ms / 1000.0) if duration_ms else None,
         input_tokens=cost.input_tokens,
@@ -421,6 +439,8 @@ class _CostData:
     cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations Lane 2 could not price; non-zero means the cost is partial."""
     agent_model: str | None = None
     cost_by_model: dict[str, Decimal] = field(default_factory=dict)
     duration_seconds: float | None = None
@@ -462,6 +482,10 @@ async def _load_cost_data(
         # ISS-217: Use authoritative totals from cost projection; fall back to session_list
         total_tokens=cost.total_tokens or fallback_tokens,
         total_cost_usd=cost.total_cost_usd,
+        # Dropping this was the fix failing inside its own PR: session detail is
+        # the most-viewed cost surface, and without the count it renders a
+        # confident dollar figure for work nobody could price (#890).
+        unpriced_observation_count=cost.unpriced_observation_count,
         agent_model=cost.agent_model,
         cost_by_model=cost.cost_by_model,
         duration_seconds=(cost.duration_ms / 1000.0) if cost.duration_ms else None,
@@ -521,6 +545,7 @@ async def get_session(
             cache_read_tokens=cd.cache_read_tokens,
             total_tokens=cd.total_tokens,
             total_cost_usd=cd.total_cost_usd,
+            unpriced_observation_count=cd.unpriced_observation_count,
             agent_model=cd.agent_model,
             cost_by_model=dict(cd.cost_by_model),
             operations=operations,
@@ -578,7 +603,8 @@ def _build_session_summary_response(
         total_tokens=total_tokens,
         total_tokens_display=format_tokens(total_tokens),
         total_cost_usd=info.total_cost_usd,
-        total_cost_display=format_cost(info.total_cost_usd),
+        total_cost_display=format_cost(info.total_cost_usd, info.unpriced_observation_count),
+        unpriced_observation_count=info.unpriced_observation_count,
         duration_seconds=info.duration_seconds,
         duration_display=format_duration_seconds(info.duration_seconds),
         started_at=str(s.started_at) if s.started_at else None,
@@ -707,7 +733,8 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         total_tokens=detail.total_tokens,
         total_tokens_display=format_tokens(detail.total_tokens),
         total_cost_usd=total_cost,
-        total_cost_display=format_cost(total_cost),
+        total_cost_display=format_cost(total_cost, detail.unpriced_observation_count),
+        unpriced_observation_count=detail.unpriced_observation_count,
         cost_by_model=detail.cost_by_model,
         operations=operations,
         started_at=str(detail.started_at) if detail.started_at else None,

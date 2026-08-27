@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatCost,
+  formatCostWithCoverage,
   formatDate,
   formatDuration,
   formatDurationFromRange,
@@ -29,6 +30,42 @@ describe('formatCost', () => {
 
   it('handles zero', () => {
     expect(formatCost(0)).toBe('$0.000000')
+  })
+})
+
+describe('formatCostWithCoverage', () => {
+  it('renders a plain figure when nothing went unpriced', () => {
+    expect(formatCostWithCoverage(1.5, 0)).toBe('$1.50')
+    expect(formatCostWithCoverage(1.5, undefined)).toBe('$1.50')
+    expect(formatCostWithCoverage(1.5, null)).toBe('$1.50')
+  })
+
+  it('says unpriced when nothing could be priced at all', () => {
+    expect(formatCostWithCoverage(0, 3)).toBe('unpriced')
+  })
+
+  it('distinguishes a known zero from an unknown one', () => {
+    // The whole point of #890: these two must not render the same.
+    expect(formatCostWithCoverage(0, 0)).toBe('$0.000000')
+    expect(formatCostWithCoverage(0, 1)).toBe('unpriced')
+  })
+
+  it('marks a partially priced total as a lower bound', () => {
+    expect(formatCostWithCoverage(12.5, 3)).toBe('\u2265$12.50 (partial)')
+  })
+
+  it('accepts the string costs the API sends for Decimal fields', () => {
+    expect(formatCostWithCoverage('2.50', 0)).toBe('$2.50')
+    expect(formatCostWithCoverage('0', 4)).toBe('unpriced')
+  })
+
+  it('refuses to launder a malformed cost into a confident label', () => {
+    // `!NaN` is true, so a naive falsy check would render NaN as "unpriced" -
+    // a confident claim about a number we do not have.
+    expect(formatCostWithCoverage(Number.NaN, 0)).toBe('unknown')
+    expect(formatCostWithCoverage(Number.NaN, 5)).toBe('unknown')
+    expect(formatCostWithCoverage('not-a-number', 0)).toBe('unknown')
+    expect(formatCostWithCoverage(-1, 0)).toBe('unknown')
   })
 })
 

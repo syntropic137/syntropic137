@@ -6806,6 +6806,13 @@
             "type": "object",
             "title": "Cost By Phase"
           },
+          "unpriced_by_phase": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Unpriced By Phase"
+          },
           "cost_by_model": {
             "additionalProperties": {
               "type": "string"
@@ -6932,6 +6939,11 @@
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Total Cost Usd",
             "default": "0"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
           },
           "total_duration_seconds": {
             "type": "number",
@@ -7315,7 +7327,12 @@
           "total_cost_display": {
             "type": "string",
             "title": "Total Cost Display",
-            "default": "$0.00"
+            "default": "\u2014"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
           },
           "duration_seconds": {
             "anyOf": [
@@ -8625,6 +8642,11 @@
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Cost Usd",
             "default": "0"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
           },
           "started_at": {
             "anyOf": [
@@ -10043,7 +10065,12 @@
           "total_cost_display": {
             "type": "string",
             "title": "Total Cost Display",
-            "default": "$0.00"
+            "default": "\u2014"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
           },
           "cost_by_model": {
             "additionalProperties": {
@@ -10283,7 +10310,12 @@
           "total_cost_display": {
             "type": "string",
             "title": "Total Cost Display",
-            "default": "$0.00"
+            "default": "\u2014"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
           },
           "duration_seconds": {
             "anyOf": [

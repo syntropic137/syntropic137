@@ -281,13 +281,14 @@ class TestCacheOnlyCostDollarInvariance:
         fallback_cost = Decimal("0")
         fallback_tokens = 0
 
-        tokens, dollars = await _enrich_costs(
+        enriched = await _enrich_costs(
             cost.execution_id,
             manager,
             phases=[],
             fallback_tokens=fallback_tokens,
             fallback_cost=fallback_cost,
         )
+        tokens, dollars = enriched.total_tokens, enriched.total_cost_usd
 
         assert dollars == fallback_cost, (
             "cache-only record flipped _enrich_costs from the fallback dollar "
@@ -303,13 +304,14 @@ class TestCacheOnlyCostDollarInvariance:
         cost = _execution_cost()
         manager = _StubProjectionManager(_StubExecutionCostProjection(cost))
 
-        tokens, dollars = await _enrich_costs(
+        enriched = await _enrich_costs(
             cost.execution_id,
             manager,
             phases=[],
             fallback_tokens=0,
             fallback_cost=Decimal("0"),
         )
+        tokens, dollars = enriched.total_tokens, enriched.total_cost_usd
 
         assert dollars == TOTAL_COST_USD
         assert tokens == EXPECTED_TOTAL

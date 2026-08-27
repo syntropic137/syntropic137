@@ -40,7 +40,16 @@ class TestFormatTokens:
         assert format_tokens(value) == expected
 
 
+@pytest.mark.unit
 class TestFormatCost:
+    """NOTE the ``unit`` marker above.
+
+    It was missing, so CI's ``pytest -m unit`` never ran a single one of these
+    cases - the same silent-hole failure documented in
+    ``session_cost/test_cost_model_resolution.py``. Every class in this file
+    needs it.
+    """
+
     @pytest.mark.parametrize(
         ("value", "expected"),
         [
@@ -65,6 +74,29 @@ class TestFormatCost:
         assert format_cost(Decimal("-0.05")) == "-$0.05"
 
 
+@pytest.mark.unit
+class TestFormatCostCoverage:
+    """``$0.00`` must not be able to mean "we could not price this" (#890)."""
+
+    def test_zero_with_unpriced_observations_is_not_a_dollar_figure(self) -> None:
+        assert format_cost(Decimal("0"), 1) == "unpriced"
+
+    def test_zero_with_no_unpriced_observations_is_still_free(self) -> None:
+        """A known model that burned nothing really did cost $0."""
+        assert format_cost(Decimal("0"), 0) == "$0.00"
+
+    def test_partial_coverage_marks_the_total_as_a_lower_bound(self) -> None:
+        assert format_cost(Decimal("12.50"), 3) == ">=$12.50 (partial)"
+
+    def test_none_stays_an_em_dash_regardless_of_coverage(self) -> None:
+        assert format_cost(None, 5) == EM_DASH
+
+    def test_default_coverage_preserves_the_original_rendering(self) -> None:
+        """The parameter is additive: existing callers must not shift output."""
+        assert format_cost(Decimal("1.234")) == format_cost(Decimal("1.234"), 0)
+
+
+@pytest.mark.unit
 class TestFormatDurationSeconds:
     @pytest.mark.parametrize(
         ("value", "expected"),
@@ -86,6 +118,7 @@ class TestFormatDurationSeconds:
         assert format_duration_seconds(value) == expected
 
 
+@pytest.mark.unit
 class TestFormatModelCompact:
     @pytest.mark.parametrize(
         ("value", "expected"),
@@ -105,6 +138,7 @@ class TestFormatModelCompact:
         assert format_model_compact(value) == expected
 
 
+@pytest.mark.unit
 class TestFormatPhase:
     @pytest.mark.parametrize(
         ("value", "expected"),
@@ -130,6 +164,7 @@ class TestFormatPhase:
         assert format_phase(value) == expected
 
 
+@pytest.mark.unit
 class TestFormatRepos:
     @pytest.mark.parametrize(
         ("value", "expected"),

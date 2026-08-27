@@ -9,7 +9,7 @@ import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, RED } from "../output/ansi.js";
-import { formatCost, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
+import { formatCostWithCoverage, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
 
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
@@ -68,7 +68,7 @@ const listCommand: CommandDef = {
         formatTimestamp(ex.started_at),
         `${ex.completed_phases}/${ex.total_phases}`,
         formatTokens(ex.total_tokens),
-        formatCost(ex.total_cost_usd),
+        formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count),
         reposCell,
       );
     }
@@ -99,7 +99,7 @@ const showCommand: CommandDef = {
     print(`  Started:    ${formatTimestamp(ex.started_at)}`);
     if (ex.completed_at) print(`  Completed:  ${formatTimestamp(ex.completed_at)}`);
     print(`  Tokens:     ${formatTokens(ex.total_tokens)}`);
-    print(`  Cost:       ${formatCost(ex.total_cost_usd)}`);
+    print(`  Cost:       ${formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count)}`);
     if (ex.error_message) print(`  ${style("Error:", RED)}     ${ex.error_message}`);
 
     const repos = ex.repos ?? [];
@@ -130,7 +130,7 @@ const showCommand: CommandDef = {
           formatStatus(ph.status),
           formatTimestamp(ph.started_at),
           formatTokens(ph.total_tokens),
-          formatCost(ph.cost_usd),
+          formatCostWithCoverage(ph.cost_usd, ph.unpriced_observation_count),
         );
       }
       table.print();
