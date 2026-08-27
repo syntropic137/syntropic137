@@ -186,10 +186,10 @@ def main() -> int:
     payload = _build_payload(compact, dotenv=args.dotenv)
     if args.dotenv:
         fmt = "dotenv line"
-        target = "root .env,  then: just sync-env"
+        target = "the root .env (replace any existing CODEX_AUTH_JSON line)"
     else:
         fmt = "raw value"
-        target = f"a new 1Password field named {ENV_CODEX_AUTH_JSON},  then: just sync-env"
+        target = f"the 1Password field named {ENV_CODEX_AUTH_JSON}"
 
     if args.stdout:
         sys.stdout.write(payload + "\n")
@@ -205,6 +205,17 @@ def main() -> int:
     for line in _token_status(data):
         print(line)
     print(f"  Paste into: {target}")
+    print()
+    print("  THEN REBUILD, or the paste does nothing:")
+    print("    just dev-down && just dev")
+    print("  Environment variables are fixed when a container is created, so a")
+    print("  running stack keeps the old value. `docker restart` is NOT enough:")
+    print("  it reuses the existing container and its environment.")
+    if not args.dotenv:
+        print()
+        print("  NOTE: the dev stack reads the ROOT .env (justfile set dotenv-load),")
+        print("  not 1Password. Updating the vault alone will not reach `just dev`.")
+        print("  For the dev stack use: just codex-auth-clip --dotenv")
     print()
     print("  WHY THIS KEEPS BREAKING: this laptop and the container share ONE")
     print("  OAuth refresh token, and refresh tokens are single-use. Whichever")
