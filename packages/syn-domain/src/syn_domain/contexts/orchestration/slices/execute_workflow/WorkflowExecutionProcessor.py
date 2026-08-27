@@ -31,9 +31,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
 from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import (
     ConversationRecorder,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.delegation_gate import (
-    assert_declared_delegation_happened,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
@@ -671,8 +668,6 @@ class WorkflowExecutionProcessor:
             msg = f"{base} (tokens={result.tokens.input_tokens}+{result.tokens.output_tokens})"
             logger.error(msg)
             raise RuntimeError(msg)
-
-        assert_declared_delegation_happened(todo.phase_id, phase, result)
 
         aggregate.agent_execution_completed(result.command)
         await self._save_and_sync(aggregate)

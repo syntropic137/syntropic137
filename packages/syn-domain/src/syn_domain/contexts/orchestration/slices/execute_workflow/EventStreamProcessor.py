@@ -31,7 +31,7 @@ from syn_shared.agents import AgentProvider
 from syn_shared.delegation import (
     DELEGATION_TARGET_BY_PRIMARY,
     DelegationTarget,
-    is_delegation_command,
+    looks_like_delegation_command,
 )
 from syn_shared.events import VALID_EVENT_TYPES
 
@@ -265,6 +265,9 @@ class EventStreamProcessor:
         # of those invocations so the tool_result can tell "tried and failed"
         # apart from "tried and succeeded".
         self._delegation_tool_use_ids: set[str] = set()
+        # A tool_result can be replayed for the same tool_use_id; dedup so the
+        # same delegation is not counted twice.
+        self._delegation_completed_ids: set[str] = set()
         self._delegation_attempts: int = 0
         self._delegation_successes: int = 0
 
@@ -613,7 +616,7 @@ class EventStreamProcessor:
         """
         if not isinstance(command, str):
             return
-        if not is_delegation_command(command, DELEGATION_TARGET):
+        if not looks_like_delegation_command(command, DELEGATION_TARGET):
             return
         if tool_use_id in self._delegation_tool_use_ids:
             return
@@ -648,7 +651,12 @@ class EventStreamProcessor:
         if tool_content:
             await self._embedded_scanner.scan_and_record(str(tool_content), tool_name)
 
-        if tool_use_id in self._delegation_tool_use_ids and not is_error:
+        if (
+            tool_use_id in self._delegation_tool_use_ids
+            and not is_error
+            and tool_use_id not in self._delegation_completed_ids
+        ):
+            self._delegation_completed_ids.add(tool_use_id)
             self._delegation_successes += 1
 
         # Record tool completion

@@ -1,4 +1,4 @@
-"""Tests for delegated-CLI invocation detection (#894)."""
+"""Tests for delegated-CLI invocation RECOGNITION (telemetry only, see #894)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from syn_shared.agents import AgentProvider
 from syn_shared.delegation import (
     DELEGATION_TARGET_BY_PRIMARY,
     DelegationTarget,
-    is_delegation_command,
+    looks_like_delegation_command,
 )
 
 pytestmark = pytest.mark.unit
@@ -34,7 +34,7 @@ def test_each_primary_provider_delegates_to_the_other_cli() -> None:
     ],
 )
 def test_codex_exec_invocations_are_recognised(command: str) -> None:
-    assert is_delegation_command(command, DelegationTarget.CODEX) is True
+    assert looks_like_delegation_command(command, DelegationTarget.CODEX) is True
 
 
 @pytest.mark.parametrize(
@@ -49,7 +49,7 @@ def test_codex_exec_invocations_are_recognised(command: str) -> None:
     ],
 )
 def test_non_codex_delegations_are_not_recognised(command: str) -> None:
-    assert is_delegation_command(command, DelegationTarget.CODEX) is False
+    assert looks_like_delegation_command(command, DelegationTarget.CODEX) is False
 
 
 @pytest.mark.parametrize(
@@ -62,7 +62,7 @@ def test_non_codex_delegations_are_not_recognised(command: str) -> None:
     ],
 )
 def test_claude_print_invocations_are_recognised(command: str) -> None:
-    assert is_delegation_command(command, DelegationTarget.CLAUDE) is True
+    assert looks_like_delegation_command(command, DelegationTarget.CLAUDE) is True
 
 
 @pytest.mark.parametrize(
@@ -76,4 +76,4 @@ def test_claude_print_invocations_are_recognised(command: str) -> None:
     ],
 )
 def test_non_claude_delegations_are_not_recognised(command: str) -> None:
-    assert is_delegation_command(command, DelegationTarget.CLAUDE) is False
+    assert looks_like_delegation_command(command, DelegationTarget.CLAUDE) is False

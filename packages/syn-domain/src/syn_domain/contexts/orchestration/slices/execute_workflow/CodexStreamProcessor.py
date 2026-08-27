@@ -67,7 +67,7 @@ from syn_shared.codex_stream import (
 from syn_shared.delegation import (
     DELEGATION_TARGET_BY_PRIMARY,
     DelegationTarget,
-    is_delegation_command,
+    looks_like_delegation_command,
 )
 from syn_shared.pricing import resolve_model_pricing
 
@@ -98,11 +98,27 @@ DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider
 # about a symptom that names the wrong subsystem and gives an operator nothing
 # to act on (issue #891).
 #
-# The match is deliberately narrow: an explicit auth-subsystem signature, not
-# the word ERROR. A generic ERROR filter would promote the routine
-# `codex_models_manager` diagnostic in the golden fixture into a phase failure.
-_CODEX_AUTH_FAULT_RE = re.compile(
-    r"codex_login|failed to refresh token|refresh_token_reused|invalid_grant",
+# Two independent conditions, BOTH required:
+#
+#   1. an error severity, and
+#   2. an explicit auth-FAILURE marker.
+#
+# Neither is sufficient alone, and in particular the subsystem NAME is not a
+# marker. `codex_login` appears on healthy lines too:
+#
+#   INFO codex_login::auth::manager: loaded cached credentials
+#
+# An earlier draft ORed the alternatives, so that line matched. Because
+# AgentExecutionHandler forces exit code 1 whenever a codex stream carries any
+# error_reason, that draft would have failed successful codex phases - a worse
+# defect than the missing reason it set out to fix.
+#
+# Requiring a severity alone is not enough either: the golden fixture contains
+# a routine `ERROR codex_models_manager::manager: ...` diagnostic that a
+# severity-only filter would promote into a phase failure.
+_ERROR_SEVERITY_RE = re.compile(r"\b(?:ERROR|FATAL)\b")
+_AUTH_FAILURE_MARKER_RE = re.compile(
+    r"failed to refresh token|refresh_token_reused|invalid_grant|unauthorized",
     re.IGNORECASE,
 )
 _HTTP_AUTH_STATUS_RE = re.compile(r"\b(401|403)\b")
@@ -287,9 +303,17 @@ class CodexStreamProcessor:
         )
         self._totals = _CodexTotals()
         self._error_reason: str | None = None
+        # Held, not applied. An auth error the CLI RECOVERS from (retry, then a
+        # normal turn.completed) must not fail an otherwise successful phase,
+        # so the candidate is only promoted at end-of-stream and only when no
+        # terminal turn arrived.
+        self._auth_fault_candidate: str | None = None
 
         # #894: A codex phase delegates to `claude -p`.
         self._delegation_tool_use_ids: set[str] = set()
+        # codex can emit item.completed more than once for one item; without
+        # this the same delegation would be counted repeatedly.
+        self._delegation_completed_ids: set[str] = set()
         self._delegation_attempts: int = 0
         self._delegation_successes: int = 0
 
@@ -318,9 +342,13 @@ class CodexStreamProcessor:
             await self._process_line(line)
 
         if not self._totals.saw_terminal_turn:
-            self._error_reason = self._error_reason or (
-                "codex stream ended without a terminal turn.completed event "
-                "(no authoritative usage)"
+            self._error_reason = (
+                self._error_reason
+                or self._auth_fault_candidate
+                or (
+                    "codex stream ended without a terminal turn.completed event "
+                    "(no authoritative usage)"
+                )
             )
 
         total_cost_usd = self._estimate_cost()
@@ -417,29 +445,33 @@ class CodexStreamProcessor:
         return event
 
     def _note_non_json_fault(self, line: str) -> None:
-        """Promote a recognisable terminal fault out of an inert CLI log line.
+        """Remember a recognisable auth fault seen on an inert CLI log line.
 
-        Only an explicit auth failure qualifies today. Everything else stays
-        inert noise, exactly as before - this widens what the parser SEES, not
-        what it treats as fatal.
+        Deliberately does NOT decide anything. It records a CANDIDATE reason;
+        `process_stream` promotes it only if the stream never reached a
+        terminal `turn.completed`. This widens what the parser SEES, not what
+        it treats as fatal - a run that hits a transient auth error and then
+        completes normally still succeeds.
         """
-        if self._error_reason is not None:
+        if self._auth_fault_candidate is not None:
             return
-        if not _CODEX_AUTH_FAULT_RE.search(line):
+        if not _ERROR_SEVERITY_RE.search(line):
+            return
+        if not _AUTH_FAILURE_MARKER_RE.search(line):
             return
         status = _HTTP_AUTH_STATUS_RE.search(line)
         label = api_error_label(
             ApiErrorType.AUTHENTICATION,
             status.group(1) if status else "",
         )
-        self._error_reason = f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"
-        logger.error("Codex auth fault detected on stdout: %s", line[:_MAX_FAULT_LINE_LEN])
+        self._auth_fault_candidate = f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"
+        logger.warning("Codex auth fault seen on stdout: %s", line[:_MAX_FAULT_LINE_LEN])
 
     def _note_delegation_attempt(self, tool_use_id: str, command: str) -> None:
         """Record a codex command_execution that invokes `claude -p` (#894)."""
         if tool_use_id in self._delegation_tool_use_ids:
             return
-        if not is_delegation_command(command, DELEGATION_TARGET):
+        if not looks_like_delegation_command(command, DELEGATION_TARGET):
             return
         self._delegation_tool_use_ids.add(tool_use_id)
         self._delegation_attempts += 1
@@ -501,7 +533,12 @@ class CodexStreamProcessor:
         # item.completed repeats the command, so a delegation is still counted
         # if the matching item.started never arrived (truncated stream).
         self._note_delegation_attempt(tool_use_id, str(item.get("command", "")))
-        if success and tool_use_id in self._delegation_tool_use_ids:
+        if (
+            success
+            and tool_use_id in self._delegation_tool_use_ids
+            and tool_use_id not in self._delegation_completed_ids
+        ):
+            self._delegation_completed_ids.add(tool_use_id)
             self._delegation_successes += 1
         if not success:
             # A failed inner command is a failed TOOL op, not automatically a

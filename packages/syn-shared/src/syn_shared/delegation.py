@@ -1,22 +1,48 @@
-"""Recognising a DELEGATED CLI invocation inside a primary agent's tool call.
+"""Best-effort RECOGNITION of a delegated CLI invocation in a shell command.
 
 A delegation-enabled phase (``agent.allow_delegation: true``) declares that its
 primary agent will hand part of the work to the OTHER harness: a claude phase
 shells out to ``codex exec``, a codex phase shells out to ``claude -p``. That
 declaration is provisioned for (both auths staged, the matching delegation
-skill installed) but nothing ever checked that it HAPPENED.
+skill installed) but nothing observes whether it HAPPENED.
 
-It has to be checked from the stream rather than from the agent's own report.
-The agent's ``TASK_RESULT`` block is self-reported: in the run that motivated
-this module (issue #894) the delegated ``codex exec`` died on bubblewrap, the
-primary agent noted that in prose, and still reported ``success: true``. The
-tool call itself is not self-reported - the primary agent cannot run a command
-without the harness emitting it - so the command text is the honest signal.
+What this module gives you is TELEMETRY: a count of how many commands looked
+like a delegated invocation, and how many of those exited zero. It is useful
+for dashboards, for spotting phases whose delegation never fires, and as raw
+material for the real fix.
 
-Matching is deliberately narrow. It looks for the delegate CLI's OWN
-invocation shape (``codex exec`` / ``claude -p``), not merely the word
-"codex" or "claude" appearing somewhere in a command, so that a ``grep codex
-notes.md`` or a path containing "claude" is not mistaken for a handoff.
+DO NOT GATE PHASE SUCCESS ON THESE COUNTS
+-----------------------------------------
+
+An earlier revision of this module did exactly that (a phase whose declared
+delegation recorded zero successes was failed) and it was removed in review,
+because pattern-matching shell text is not a sound basis for a verdict. Three
+concrete defeats, all verified:
+
+1. **False positives - the gate is satisfied without any delegate running.**
+   ``echo "run codex exec later"``, ``grep -F "codex exec" notes.md``, and a
+   heredoc writing a script that merely CONTAINS the delegate invocation all
+   match, and all exit zero. A phase could satisfy the gate having delegated
+   nothing.
+
+2. **Wrong exit status - a failed delegate reads as a success.** The exit code
+   observed belongs to the ENCLOSING shell, not to the delegate.
+   ``codex exec "review" || true`` and ``claude -p "review" | tee log`` both
+   report zero however the delegate itself fared.
+
+3. **False negatives - a good run looks like a bad one.** A legitimate
+   delegation through a wrapper script, a line-continuation
+   (``claude \\`` newline ``-p ...``), or an unanticipated flag position
+   (``codex --config "..." exec``) is invisible to any regex written against
+   today's spellings. This is the dangerous direction: it FAILS working runs.
+
+A gate that an ``echo`` satisfies and a ``|| true`` defeats manufactures false
+confidence, which is the exact defect class the delegation work set out to
+remove. A sound gate needs the delegate to report itself - a platform-owned
+shim on PATH that emits a structured start/end record and propagates the
+DELEGATE's own exit status, so delegation is a first-class platform operation
+rather than something inferred from shell text. See the follow-up issue linked
+from #894 / #895; wire nothing to a gate before that exists.
 """
 
 from __future__ import annotations
@@ -45,7 +71,7 @@ DELEGATION_TARGET_BY_PRIMARY: dict[AgentProvider, DelegationTarget] = {
 
 Mirrors ``_DELEGATION_TARGET_SKILL`` in ``WorkspaceProvisionHandler``: the
 skill we install teaches the primary agent to call exactly this CLI, so the
-skill we install and the invocation we then assert on stay in step.
+skill we install and the invocation we then count stay in step.
 """
 
 # A command boundary: start of string, whitespace, or a shell operator/quote.
@@ -71,16 +97,18 @@ _MATCHERS: dict[DelegationTarget, re.Pattern[str]] = {
 }
 
 
-def is_delegation_command(command: str, target: DelegationTarget) -> bool:
-    """Return True when ``command`` invokes ``target``'s headless CLI.
+def looks_like_delegation_command(command: str, target: DelegationTarget) -> bool:
+    """Return True when ``command`` LOOKS LIKE an invocation of ``target``'s CLI.
+
+    Observational only - see the module docstring for why this must not decide
+    whether a phase succeeded. "Looks like" is load-bearing in the name: the
+    answer is a textual resemblance, not a fact about what ran.
 
     Examples:
-        >>> is_delegation_command("codex exec --json 'do it'", DelegationTarget.CODEX)
+        >>> looks_like_delegation_command("codex exec 'go'", DelegationTarget.CODEX)
         True
-        >>> is_delegation_command("grep -r codex .", DelegationTarget.CODEX)
+        >>> looks_like_delegation_command("grep -r codex .", DelegationTarget.CODEX)
         False
-        >>> is_delegation_command("claude -p 'review this'", DelegationTarget.CLAUDE)
-        True
     """
     if not command:
         return False

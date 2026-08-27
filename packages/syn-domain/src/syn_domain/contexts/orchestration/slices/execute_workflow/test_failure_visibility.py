@@ -1,11 +1,23 @@
-"""Failure-visibility regressions: #891 (why a phase failed) and #894 (silent no-delegation).
+"""#891: a failed phase must say WHY it failed, accurately.
 
-Two independent ways a failed run looked fine:
+The codex CLI announces a login failure only as a plain-text tracing line on
+stdout, which the parser used to discard as inert noise. The failure then
+surfaced as "codex stream ended without a terminal turn.completed event": a
+true statement about a symptom that names the parser rather than the fault.
 
-- #891: a codex auth failure was reported as "codex stream ended without a
-  terminal turn.completed event" - a symptom, naming the wrong subsystem.
-- #894: a phase declaring ``allow_delegation: true`` whose delegate never
-  succeeded still reported ``exit_code == 0`` and therefore success.
+The tests here pin BOTH directions, because the first draft of the fix only
+had the first and would have failed working runs:
+
+- an actual, unrecovered auth failure must be reported as one, and
+- a healthy or recovered codex run must NOT be.
+
+The second matters because AgentExecutionHandler forces exit code 1 whenever a
+codex stream carries any error_reason, so an over-eager matcher fails
+successful phases.
+
+The delegation counters are exercised here too, but ONLY as telemetry. Nothing
+gates on them - see the syn_shared.delegation module docstring for why they are
+not sound enough to.
 """
 
 from __future__ import annotations
@@ -13,26 +25,20 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     CodexStreamProcessor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
-    StreamResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
-    WorkflowExecutionProcessor,
 )
 
 if TYPE_CHECKING:
@@ -106,6 +112,10 @@ def _codex_processor() -> CodexStreamProcessor:
     )
 
 
+def _turn_completed() -> str:
+    return json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}})
+
+
 def _bash_tool_use(tool_use_id: str, command: str) -> str:
     return json.dumps(
         {
@@ -167,21 +177,26 @@ def _codex_command_events(item_id: str, command: str, exit_code: int) -> tuple[s
     return started, completed
 
 
-# --- #891: an accurate reason for a codex auth failure ------------------------
+# --- #891: an accurate reason, and no reason when there is no fault -----------
 
-
-_AUTH_LINE = (
+# The exact line from the production run that motivated the issue.
+_PRODUCTION_401 = (
     "ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized "
     '- {"error": "invalid_grant", "code": "refresh_token_reused"}'
 )
+# A healthy line from the SAME subsystem. The subsystem name alone must never
+# be treated as evidence of a fault.
+_HEALTHY_LOGIN = "INFO codex_login::auth::manager: loaded cached credentials"
+# A real diagnostic from the golden fixture: error severity, nothing to do with auth.
+_GENERIC_ERROR = "ERROR codex_models_manager::manager: could not refresh the model list"
 
 
 @pytest.mark.anyio
-async def test_codex_auth_failure_line_becomes_the_error_reason() -> None:
-    """A 401 on the codex login refresh must name authentication, not the stream shape."""
+async def test_unrecovered_auth_failure_is_reported_as_authentication() -> None:
+    """The production 401 with no terminal turn must name authentication."""
     processor = _codex_processor()
 
-    result = await processor.process_stream(_stream(_AUTH_LINE), _NoopWorkspace())
+    result = await processor.process_stream(_stream(_PRODUCTION_401), _NoopWorkspace())
 
     assert result.error_reason is not None
     assert "Authentication failed (HTTP 401)" in result.error_reason
@@ -191,33 +206,84 @@ async def test_codex_auth_failure_line_becomes_the_error_reason() -> None:
 
 
 @pytest.mark.anyio
-async def test_inert_codex_noise_is_still_ignored() -> None:
-    """Widening what the parser sees must not turn routine log noise into a failure."""
-    noise = (
-        "warning: --full-auto is deprecated",
-        "Reading additional input from stdin...",
-        "ERROR codex_models_manager::manager: could not refresh the model list",
-        json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}),
-    )
+async def test_healthy_login_line_does_not_fail_a_successful_phase() -> None:
+    """An INFO line from the auth subsystem is not a fault.
+
+    Regression guard: an earlier draft ORed its alternatives, so the bare
+    subsystem name matched and this run - which completes normally - would
+    have been forced to exit code 1.
+    """
     processor = _codex_processor()
 
-    result = await processor.process_stream(_stream(*noise), _NoopWorkspace())
+    result = await processor.process_stream(
+        _stream(_HEALTHY_LOGIN, _turn_completed()), _NoopWorkspace()
+    )
 
     assert result.error_reason is None
 
 
 @pytest.mark.anyio
-async def test_missing_terminal_turn_still_reports_the_stream_reason() -> None:
-    """Without a recognised fault the pre-existing stream-shape reason is unchanged."""
+async def test_transient_auth_error_followed_by_a_terminal_turn_succeeds() -> None:
+    """A recovered auth error must not fail the phase.
+
+    The CLI retried and reached a normal turn.completed, so whatever it
+    complained about mid-stream did not stop the run.
+    """
     processor = _codex_processor()
 
-    result = await processor.process_stream(_stream("warning: nothing useful"), _NoopWorkspace())
+    result = await processor.process_stream(
+        _stream(_PRODUCTION_401, _turn_completed()), _NoopWorkspace()
+    )
+
+    assert result.error_reason is None
+
+
+@pytest.mark.anyio
+async def test_generic_error_line_keeps_the_stream_shape_reason() -> None:
+    """Error severity alone is not an auth fault.
+
+    It still fails (no terminal turn arrived) but must not be mislabelled as
+    an authentication problem, which would send an operator to the wrong place.
+    """
+    processor = _codex_processor()
+
+    result = await processor.process_stream(_stream(_GENERIC_ERROR), _NoopWorkspace())
 
     assert result.error_reason is not None
+    assert "Authentication failed" not in result.error_reason
     assert "turn.completed" in result.error_reason
 
 
-# --- #894: delegation counting in both stream processors ----------------------
+@pytest.mark.anyio
+async def test_healthy_login_line_without_a_terminal_turn_is_not_an_auth_fault() -> None:
+    """Failing for a different reason must not be blamed on auth."""
+    processor = _codex_processor()
+
+    result = await processor.process_stream(_stream(_HEALTHY_LOGIN), _NoopWorkspace())
+
+    assert result.error_reason is not None
+    assert "Authentication failed" not in result.error_reason
+
+
+@pytest.mark.anyio
+async def test_inert_codex_noise_is_still_ignored() -> None:
+    """Widening what the parser sees must not turn routine log noise into a failure."""
+    processor = _codex_processor()
+
+    result = await processor.process_stream(
+        _stream(
+            "warning: --full-auto is deprecated",
+            "Reading additional input from stdin...",
+            _GENERIC_ERROR,
+            _turn_completed(),
+        ),
+        _NoopWorkspace(),
+    )
+
+    assert result.error_reason is None
+
+
+# --- Delegation counters: TELEMETRY ONLY, nothing gates on these --------------
 
 
 @pytest.mark.anyio
@@ -238,7 +304,6 @@ async def test_claude_stream_counts_a_successful_codex_delegation() -> None:
 
 @pytest.mark.anyio
 async def test_claude_stream_counts_a_failed_codex_delegation_as_attempt_only() -> None:
-    """The bubblewrap failure from #894: attempted, never succeeded."""
     processor = _claude_processor()
 
     result = await processor.process_stream(
@@ -270,10 +335,24 @@ async def test_claude_stream_ignores_unrelated_bash_commands() -> None:
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("exit_code", "expected_successes"),
-    [(0, 1), (1, 0)],
-)
+async def test_claude_stream_does_not_double_count_a_repeated_tool_result() -> None:
+    processor = _claude_processor()
+
+    result = await processor.process_stream(
+        _stream(
+            _bash_tool_use("tu-1", "codex exec 'go'"),
+            _bash_tool_result("tu-1", is_error=False),
+            _bash_tool_result("tu-1", is_error=False),
+        ),
+        _NoopWorkspace(),
+    )
+
+    assert result.delegation_attempts == 1
+    assert result.delegation_successes == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("exit_code", "expected_successes"), [(0, 1), (1, 0)])
 async def test_codex_stream_counts_claude_p_delegation(
     exit_code: int, expected_successes: int
 ) -> None:
@@ -297,116 +376,14 @@ async def test_codex_stream_ignores_unrelated_commands() -> None:
     assert result.delegation_successes == 0
 
 
-# --- #894: the phase-level gate ----------------------------------------------
-
-
-def _make_processor() -> WorkflowExecutionProcessor:
-    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
-        ExecutionTodoProjection,
-    )
-
-    return WorkflowExecutionProcessor(
-        execution_repository=AsyncMock(),
-        session_repository=AsyncMock(),
-        workspace_service=MagicMock(),
-        artifact_repository=AsyncMock(),
-        artifact_content_storage=None,
-        artifact_query=None,
-        conversation_storage=None,
-        observability_writer=None,
-        controller=None,
-        prompt_builder=AsyncMock(return_value="test prompt"),
-        command_builder=MagicMock(return_value=["claude", "--model", "haiku"]),
-        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
-    )
-
-
-def _stream_result(attempts: int, successes: int) -> StreamResult:
-    return StreamResult(
-        line_count=1,
-        interrupt_requested=False,
-        interrupt_reason=None,
-        agent_task_result={"success": True, "comments": "delegation failed, but all good"},
-        delegation_attempts=attempts,
-        delegation_successes=successes,
-    )
-
-
-async def _run_phase(*, allow_delegation: bool, attempts: int, successes: int) -> None:
-    """Drive ``_handle_run_agent`` for a clean (exit_code 0) agent run."""
-    from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
-        TodoAction,
-        TodoItem,
-    )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-        AgentConfiguration,
-        ExecutablePhase,
-    )
-
-    processor = _make_processor()
-    result = MagicMock()
-    result.stream_result = _stream_result(attempts, successes)
-    result.command = MagicMock(
-        exit_code=0,
-        input_tokens=0,
-        output_tokens=0,
-        cache_creation_tokens=0,
-        cache_read_tokens=0,
-    )
-    result.tokens = TokenAccumulator()
-
-    handler = MagicMock()
-    handler.handle = AsyncMock(return_value=result)
-    processor._agent_handler = handler
-    processor._active_workspaces["p-1"] = MagicMock()
-    processor._active_envs["p-1"] = {}
-    processor._active_cmds["p-1"] = ["agent"]
-
-    phase = ExecutablePhase(
-        phase_id="p-1",
-        name="Phase 1",
-        order=1,
-        agent_config=AgentConfiguration(
-            provider="claude",
-            allow_delegation=allow_delegation,
-        ),
-        prompt_template="do it",
-    )
-    aggregate = MagicMock(workflow_id="wf-1")
-    aggregate.uncommitted_events = []
-
-    await processor._handle_run_agent(
-        TodoItem(
-            execution_id="exec-1",
-            action=TodoAction.RUN_AGENT,
-            phase_id="p-1",
-            session_id="sess-1",
-        ),
-        phase,
-        aggregate,
-    )
-
-
 @pytest.mark.anyio
-async def test_phase_passes_when_the_declared_delegation_succeeded() -> None:
-    await _run_phase(allow_delegation=True, attempts=1, successes=1)
+async def test_codex_stream_does_not_double_count_a_repeated_item_completed() -> None:
+    started, completed = _codex_command_events("item-1", "claude -p 'go'", 0)
+    processor = _codex_processor()
 
+    result = await processor.process_stream(
+        _stream(started, completed, completed), _NoopWorkspace()
+    )
 
-@pytest.mark.anyio
-async def test_phase_fails_when_the_delegation_was_attempted_and_failed() -> None:
-    with pytest.raises(RuntimeError, match="Declared delegation did not occur") as excinfo:
-        await _run_phase(allow_delegation=True, attempts=1, successes=0)
-    # "tried and failed" must be distinguishable from "never tried".
-    assert "attempts=1" in str(excinfo.value)
-
-
-@pytest.mark.anyio
-async def test_phase_fails_when_the_delegation_was_never_attempted() -> None:
-    with pytest.raises(RuntimeError, match="Declared delegation did not occur") as excinfo:
-        await _run_phase(allow_delegation=True, attempts=0, successes=0)
-    assert "attempts=0" in str(excinfo.value)
-
-
-@pytest.mark.anyio
-async def test_phase_without_allow_delegation_is_unaffected() -> None:
-    await _run_phase(allow_delegation=False, attempts=0, successes=0)
+    assert result.delegation_attempts == 1
+    assert result.delegation_successes == 1
