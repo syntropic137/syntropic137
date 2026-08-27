@@ -2514,6 +2514,10 @@ export interface components {
             cost_by_phase?: {
                 [key: string]: string;
             };
+            /** Unpriced By Phase */
+            unpriced_by_phase?: {
+                [key: string]: number;
+            };
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
@@ -2568,6 +2572,11 @@ export interface components {
              * @default 0
              */
             total_cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /**
              * Total Duration Seconds
              * @default 0
@@ -2746,9 +2755,14 @@ export interface components {
             total_cost_usd: string;
             /**
              * Total Cost Display
-             * @default $0.00
+             * @default —
              */
             total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Duration Seconds */
             duration_seconds?: number | null;
             /**
@@ -3317,6 +3331,11 @@ export interface components {
              * @default 0
              */
             cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Started At */
             started_at?: string | null;
             /** Completed At */
@@ -4153,9 +4172,14 @@ export interface components {
             total_cost_usd: string;
             /**
              * Total Cost Display
-             * @default $0.00
+             * @default —
              */
             total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
@@ -4256,9 +4280,14 @@ export interface components {
             total_cost_usd: string;
             /**
              * Total Cost Display
-             * @default $0.00
+             * @default —
              */
             total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Duration Seconds */
             duration_seconds?: number | null;
             /**

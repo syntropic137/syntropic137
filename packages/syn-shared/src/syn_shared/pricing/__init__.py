@@ -431,6 +431,15 @@ def price_tokens(
         context: Optional identifier (session id, execution id) for the log
             line, so an unpriced run can be traced back to its source.
     """
+    if input_tokens == 0 and output_tokens == 0 and cache_creation == 0 and cache_read == 0:
+        # Zero tokens cost zero at every rate, so no rate is needed to answer.
+        # Resolving the model first made a no-token observation with no model
+        # report as UNPRICED - claiming we cannot say what it cost, when we can
+        # say exactly. That erodes the very distinction this module exists to
+        # protect: "the cost is zero" must not collapse into "the cost is
+        # unknown" (issue #890).
+        return PricedAmount(cost=Decimal("0"), status=PricingStatus.PRICED, model=model or None)
+
     if not model:
         logger.warning(
             "unpriced token usage: no model recorded (in=%d out=%d cache_creation=%d cache_read=%d) %s",

@@ -390,9 +390,22 @@ def _price_session_summary_row(
     return _RowPricing(cost=group_cost, model=model, unpriced_count=0)
 
 
-def price_phase_rows(
-    rows: Sequence[asyncpg.Record], cost_calculator: CostCalculator
-) -> dict[str, Decimal]:
+@dataclass
+class PhaseCosts:
+    """Per-phase cost breakdown plus per-phase unpriced coverage.
+
+    The two dicts answer different questions and neither substitutes for the
+    other: ``cost_by_phase`` says what a phase cost, ``unpriced_by_phase`` says
+    how much of a phase we could not price at all. A phase in the second but not
+    the first is a phase whose cost is UNKNOWN - previously indistinguishable
+    from a phase that simply spent nothing (#890).
+    """
+
+    cost_by_phase: dict[str, Decimal]
+    unpriced_by_phase: dict[str, int]
+
+
+def price_phase_rows(rows: Sequence[asyncpg.Record], cost_calculator: CostCalculator) -> PhaseCosts:
     """Accumulate per-phase cost from split (phase, model, priced?) groups.
 
     Uses the same per-row rule as the execution total: authoritative
@@ -402,10 +415,11 @@ def price_phase_rows(
     (issue #812).
 
     A row that is genuinely unpriceable (unknown model, no ``sdk_cost``)
-    contributes nothing rather than a guess, matching
-    ``price_grouped_session_summary``. Its phase can therefore be absent
-    from the result, which is the honest representation of "we cannot say
-    what this phase cost".
+    contributes nothing to ``cost_by_phase`` rather than a guess, matching
+    ``price_grouped_session_summary``, and its observations land in
+    ``unpriced_by_phase`` instead. Absence from ``cost_by_phase`` alone was
+    never enough: a caller could not tell it apart from a phase that spent
+    nothing, so the API rendered both as ``$0.00`` (#890).
 
     Rows with no ``phase_id`` are bucketed under ``UNATTRIBUTED_PHASE_ID``
     rather than skipped. The column is nullable and the execution total
@@ -413,13 +427,15 @@ def price_phase_rows(
     reconciliation this function exists to restore.
     """
     costs: dict[str, Decimal] = {}
+    unpriced: dict[str, int] = {}
     for row in rows:
         phase_id = row["phase_id"] or UNATTRIBUTED_PHASE_ID
         priced = _price_session_summary_row(row, _extract_group_tokens(row), cost_calculator)
         if priced.cost is None:
+            unpriced[phase_id] = unpriced.get(phase_id, 0) + priced.unpriced_count
             continue
         costs[phase_id] = costs.get(phase_id, Decimal("0")) + priced.cost
-    return costs
+    return PhaseCosts(cost_by_phase=costs, unpriced_by_phase=unpriced)
 
 
 def price_grouped_session_summary(
@@ -586,7 +602,7 @@ class TimescaleExecutionCostQuery:
 
     async def _query_cost_by_phase(
         self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str
-    ) -> dict[str, Decimal]:
+    ) -> PhaseCosts:
         """Query per-phase cost breakdown from session_summary events."""
         phase_rows = await conn.fetch(_COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY)
         return price_phase_rows(phase_rows, self._cost_calculator)
@@ -615,7 +631,7 @@ class TimescaleExecutionCostQuery:
         duration_ms: float,
         tool_count: int,
         turn_count: int,
-        cost_by_phase: dict[str, Decimal],
+        phase_costs: PhaseCosts,
         cost_by_model: dict[str, Decimal],
         unpriced_observation_count: int,
         started_at: datetime | None = None,
@@ -638,7 +654,8 @@ class TimescaleExecutionCostQuery:
             tool_calls=tool_count,
             turns=turn_count,
             duration_ms=duration_ms,
-            cost_by_phase=cost_by_phase,
+            cost_by_phase=phase_costs.cost_by_phase,
+            unpriced_by_phase=phase_costs.unpriced_by_phase,
             cost_by_model=cost_by_model,
             unpriced_observation_count=unpriced_observation_count,
             # is_complete deliberately NOT set here - see the note on
@@ -665,10 +682,10 @@ class TimescaleExecutionCostQuery:
 
             if has_summary:
                 priced = self._price_session_summary_groups(token_rows)
-                cost_by_phase = await self._query_cost_by_phase(conn, execution_id)
+                phase_costs = await self._query_cost_by_phase(conn, execution_id)
             else:
                 priced = self._price_token_usage_groups(token_rows)
-                cost_by_phase = {}
+                phase_costs = PhaseCosts(cost_by_phase={}, unpriced_by_phase={})
 
             data = priced.data
             total_cost = priced.total_cost
@@ -684,7 +701,7 @@ class TimescaleExecutionCostQuery:
                 duration_ms=self._calculate_duration(data),
                 tool_count=tool_count,
                 turn_count=turn_count,
-                cost_by_phase=cost_by_phase,
+                phase_costs=phase_costs,
                 cost_by_model=cost_by_model,
                 unpriced_observation_count=unpriced_observation_count,
             )
