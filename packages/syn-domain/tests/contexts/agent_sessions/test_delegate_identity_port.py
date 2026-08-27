@@ -1,14 +1,14 @@
 """The port syn137 depends on for harness-native delegate identity (#895).
 
-WHY a port rather than an implementation: knowing that codex emits
-``thread.started.thread_id`` is knowledge about a CLI, not about our domain. It
-changes when OpenAI ships a new codex version, so per the boundary rule in
-AGENTS.md it belongs in agentic-primitives beside the existing
-``harnesses/{claude,codex}`` adapters.
+The double here uses a DELIBERATELY SYNTHETIC line format. It is not codex's
+schema and not Claude's, because encoding a real CLI's format in a domain test
+would make these tests stale when that CLI changes, which is the coupling the
+port exists to prevent. What is asserted is the CONTRACT: what a conforming
+adapter must return, and for which inputs.
 
-These tests use a double deliberately. The point of the port is that the domain
-is testable without the submodule, so this work does not serialise behind the
-image build -> release channel -> pin bump chain.
+The corresponding correctness test, that each REAL adapter returns the right id
+from recorded CLI output containing malformed lines and misleading id-shaped
+fields, belongs in agentic-primitives, because it changes with CLI formats.
 """
 
 from __future__ import annotations
@@ -21,61 +21,109 @@ from syn_domain.contexts.agent_sessions.ports.DelegateIdentityPort import (
     DelegateIdentityPort,
 )
 
-_CODEX_THREAD_ID = "01a04470-3a1c-7883-9229-632918155605"
+_IDENTITY_KIND = "identity-announcement"
+_OTHER_KIND = "some-other-event"
+_NATIVE_ID = "native-session-id-0001"
 
 
-class _FakeCodexIdentity:
-    """Stands in for the agentic-primitives codex harness adapter."""
+class _ConformingAdapter:
+    """A minimal adapter that honours the whole contract.
+
+    Its format is invented for this test. Any real harness shape is one of
+    agentic-primitives' concerns.
+    """
 
     def native_session_id_from_stream(self, line: str) -> str | None:
-        payload = json.loads(line)
-        if payload.get("type") != "thread.started":
+        try:
+            payload = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            # The contract says never raise: a delegate's stream is not
+            # guaranteed well-formed, and a line that will not parse was
+            # never going to announce identity.
             return None
-        thread_id = payload.get("thread_id")
-        return thread_id if isinstance(thread_id, str) and thread_id else None
+        if not isinstance(payload, dict) or payload.get("kind") != _IDENTITY_KIND:
+            return None
+        native_id = payload.get("id")
+        return native_id if isinstance(native_id, str) and native_id else None
+
+
+def _line(**fields: object) -> str:
+    return json.dumps(fields)
 
 
 @pytest.mark.unit
-def test_a_double_satisfies_the_port() -> None:
-    """Structural typing: no import from the submodule is required."""
-    identity: DelegateIdentityPort = _FakeCodexIdentity()
-    line = json.dumps({"type": "thread.started", "thread_id": _CODEX_THREAD_ID})
+def test_returns_the_id_from_an_identity_line() -> None:
+    adapter: DelegateIdentityPort = _ConformingAdapter()
 
-    assert identity.native_session_id_from_stream(line) == _CODEX_THREAD_ID
+    result = adapter.native_session_id_from_stream(_line(kind=_IDENTITY_KIND, id=_NATIVE_ID))
+
+    assert result == _NATIVE_ID
 
 
 @pytest.mark.unit
-def test_only_the_line_that_carries_identity_is_trusted() -> None:
-    """Mirrors the lesson already learned in agentic-primitives (#792): reading
-    an id off ANY line let an unrelated session's id through. A line of the
-    wrong type yields nothing even when it carries an id-shaped field.
+def test_only_an_identity_line_is_trusted() -> None:
+    """A non-identity line yields nothing EVEN WHEN it carries an id-shaped
+    field. agentic-primitives found that reading an id off any line let an
+    unrelated session's id through (#792), binding a child to the wrong parent
+    while looking like it worked.
     """
-    identity: DelegateIdentityPort = _FakeCodexIdentity()
-    line = json.dumps({"type": "item.completed", "thread_id": "WRONG-SESSION"})
+    adapter: DelegateIdentityPort = _ConformingAdapter()
 
-    assert identity.native_session_id_from_stream(line) is None
+    result = adapter.native_session_id_from_stream(
+        _line(kind=_OTHER_KIND, id="a-different-session")
+    )
+
+    assert result is None
 
 
 @pytest.mark.unit
 def test_an_empty_id_is_not_an_id() -> None:
-    """An empty string would bind a child to nothing while looking successful."""
-    identity: DelegateIdentityPort = _FakeCodexIdentity()
-    line = json.dumps({"type": "thread.started", "thread_id": ""})
+    """It would bind the child to nothing while reporting success."""
+    adapter: DelegateIdentityPort = _ConformingAdapter()
 
-    assert identity.native_session_id_from_stream(line) is None
-
-
-@pytest.mark.unit
-def test_port_is_runtime_checkable_so_wiring_can_be_asserted() -> None:
-    """Production wiring must be able to prove it passed a real adapter."""
-    assert isinstance(_FakeCodexIdentity(), DelegateIdentityPort)
+    assert adapter.native_session_id_from_stream(_line(kind=_IDENTITY_KIND, id="")) is None
 
 
 @pytest.mark.unit
-def test_an_object_without_the_method_does_not_satisfy_the_port() -> None:
-    """Guards the guard: if this passed, the check above would prove nothing."""
+@pytest.mark.parametrize(
+    "line",
+    ["not json at all", "", "{unclosed", '"a bare string"', "[1, 2, 3]", "null"],
+    ids=["garbage", "empty", "truncated", "bare-string", "array", "null"],
+)
+def test_a_malformed_line_yields_none_rather_than_raising(line: str) -> None:
+    """The contract forbids raising, and a double that raises would be STRICTER
+    than the contract: it would pass an implementation that violates the
+    contract in the other direction, which is the failure mode a test double is
+    most likely to hide.
+    """
+    adapter: DelegateIdentityPort = _ConformingAdapter()
 
-    class _NotAnIdentity:
+    assert adapter.native_session_id_from_stream(line) is None
+
+
+@pytest.mark.unit
+def test_runtime_check_catches_a_missing_method() -> None:
+    """The ONLY thing runtime_checkable buys: wiring fails at startup rather
+    than at delegation time, when a child is already running.
+    """
+
+    class _MissingTheMethod:
         pass
 
-    assert not isinstance(_NotAnIdentity(), DelegateIdentityPort)
+    assert isinstance(_ConformingAdapter(), DelegateIdentityPort)
+    assert not isinstance(_MissingTheMethod(), DelegateIdentityPort)
+
+
+@pytest.mark.unit
+def test_the_runtime_check_does_not_prove_a_usable_adapter() -> None:
+    """Documents the limit rather than implying a guarantee.
+
+    isinstance on a Protocol checks the NAME only, so this passes for an
+    attribute that is not even callable. Anything relying on that check for
+    more than a missing-method guard is relying on something that is not there.
+    """
+
+    class _NotCallable:
+        native_session_id_from_stream = 42
+
+    assert isinstance(_NotCallable(), DelegateIdentityPort)
