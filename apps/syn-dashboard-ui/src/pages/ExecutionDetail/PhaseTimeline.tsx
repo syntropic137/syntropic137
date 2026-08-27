@@ -166,6 +166,12 @@ interface PhaseTimelineProps {
 export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
   const totalTokens = phases.reduce((s, p) => s + p.input_tokens + p.output_tokens + (p.cache_creation_tokens ?? 0) + (p.cache_read_tokens ?? 0), 0)
   const totalCost = phases.reduce((s, p) => s + Number(p.cost_usd), 0)
+  // The roll-up is its own consumer of coverage, not a side effect of fixing
+  // the cards. Summing only cost_usd made the header report a confident
+  // $0.0000 for an execution whose phases were entirely unpriced, and an
+  // apparently complete total for a mixed one - the #890 defect surviving one
+  // level up from the per-phase fix directly below.
+  const totalUnpriced = phases.reduce((s, p) => s + (p.unpriced_observation_count ?? 0), 0)
   const totalDuration = phases.reduce((s, p) => s + p.duration_seconds, 0)
 
   return (
@@ -185,7 +191,7 @@ export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
           <span className="text-[var(--color-border)]">|</span>
           <div className="flex items-center gap-1.5">
             <DollarSign className="h-4 w-4 text-[var(--color-text-muted)]" />
-            <span>${totalCost.toFixed(4)}</span>
+            <span>{formatCostWithCoverage(totalCost, totalUnpriced)}</span>
           </div>
           <span className="text-[var(--color-border)]">|</span>
           <div className="flex items-center gap-1.5">

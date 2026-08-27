@@ -49,15 +49,24 @@ def _token_usage_group(
     *,
     input_tokens: int,
     output_tokens: int,
+    cache_creation: int = 0,
+    cache_read: int = 0,
     observation_count: int = 3,
 ) -> _FakeRow:
-    """One model-grouped token_usage row, in the shape the SQL now returns."""
+    """One model-grouped token_usage row, in the shape the SQL now returns.
+
+    Cache counts are explicit parameters because they dominate real agent
+    sessions (cache reads outnumber input tokens by up to ~68x, see #873) and
+    every fixture here used to leave them at zero - so a break in cache
+    accumulation, cache pricing, or cache's contribution to dominant-model
+    selection would have gone unnoticed by the whole suite.
+    """
     return {
         "agent_model": model,
         "total_input": input_tokens,
         "total_output": output_tokens,
-        "cache_creation": 0,
-        "cache_read": 0,
+        "cache_creation": cache_creation,
+        "cache_read": cache_read,
         "observation_count": observation_count,
         "execution_id": "exec-1",
         "phase_id": "phase-1",
@@ -231,3 +240,156 @@ def test_zero_token_observation_is_a_priced_zero_not_unpriced() -> None:
     assert totals is not None
     assert totals.total_cost == Decimal("0")
     assert totals.unpriced_observation_count == 0
+
+
+@pytest.mark.unit
+class TestCacheTokensParticipateFully:
+    """Cache counts must survive every step of the merge, not just the totals.
+
+    Cache reads dominate agent sessions, so a cache-blind merge is wrong by
+    orders of magnitude while still looking plausible. Every fixture above this
+    class leaves cache at zero, which means three separate defects could all
+    hide: dropped accumulation, dropped pricing, and dropped weight in
+    dominant-model selection.
+
+    Each case below is the SINGLE fixture that fails if only its own concern is
+    broken - deliberately not merged into one omnibus assertion, which would
+    tell you that something broke but not which of the three.
+    """
+
+    def test_cache_only_group_accumulates_cache_tokens(self) -> None:
+        """Fails if ONLY cache accumulation into the running totals is removed.
+
+        Pricing and dominant-model selection read the per-group tokens, not the
+        accumulator, so both stay correct while these two fields go to zero.
+        """
+        totals = price_session_rows(
+            [
+                _token_usage_group(
+                    ModelId.CLAUDE_SONNET_4,
+                    input_tokens=0,
+                    output_tokens=0,
+                    cache_creation=1_000_000,
+                    cache_read=1_000_000,
+                )
+            ],
+            CostCalculator(),
+            "session-cache",
+        )
+
+        assert totals is not None
+        assert totals.cache_creation == 1_000_000
+        assert totals.cache_read == 1_000_000
+
+    def test_cache_only_group_is_priced_from_cache_rates(self) -> None:
+        """Fails if ONLY the cache counts stop being passed to the calculator.
+
+        A cache-only group would then price at zero with non-zero tokens - and,
+        because a known model still resolves, it would report as a PRICED zero:
+        the exact "this was free" lie #890 exists to remove, reintroduced
+        through the back door.
+        """
+        totals = price_session_rows(
+            [
+                _token_usage_group(
+                    ModelId.CLAUDE_SONNET_4,
+                    input_tokens=0,
+                    output_tokens=0,
+                    cache_creation=1_000_000,
+                    cache_read=1_000_000,
+                )
+            ],
+            CostCalculator(),
+            "session-cache",
+        )
+
+        assert totals is not None
+        # Sonnet 4: 3.75/M cache write + 0.30/M cache read.
+        assert totals.total_cost == Decimal("4.05")
+        assert totals.cost_by_model == {ModelId.CLAUDE_SONNET_4: Decimal("4.05")}
+        assert totals.unpriced_observation_count == 0
+
+    def test_dominant_model_counts_cache_tokens(self) -> None:
+        """Fails if ONLY cache is dropped from the dominant-model weighting.
+
+        Sonnet has more input+output; Haiku has vastly more cache. Judging on
+        input+output alone reports Sonnet, which is the wrong answer about who
+        did the work. Accumulation and pricing are untouched by this defect.
+        """
+        totals = price_session_rows(
+            [
+                _token_usage_group(
+                    ModelId.CLAUDE_SONNET_4, input_tokens=5_000, output_tokens=5_000
+                ),
+                _token_usage_group(
+                    ModelId.CLAUDE_HAIKU_3_5,
+                    input_tokens=10,
+                    output_tokens=10,
+                    cache_read=1_000_000,
+                ),
+            ],
+            CostCalculator(),
+            "session-cache",
+        )
+
+        assert totals is not None
+        assert totals.primary_model == ModelId.CLAUDE_HAIKU_3_5
+
+    def test_cache_dominant_unknown_model_is_counted_not_priced(self) -> None:
+        """The production shape: a codex phase whose cache reads carry no rate."""
+        totals = price_session_rows(
+            [
+                _token_usage_group(
+                    ModelId.CLAUDE_SONNET_4,
+                    input_tokens=1_000_000,
+                    output_tokens=1_000_000,
+                    observation_count=2,
+                ),
+                _token_usage_group(
+                    _UNPRICED_REAL_MODEL,
+                    input_tokens=0,
+                    output_tokens=0,
+                    cache_creation=500_000,
+                    cache_read=9_000_000,
+                    observation_count=11,
+                ),
+            ],
+            CostCalculator(),
+            "session-cache",
+        )
+
+        assert totals is not None
+        # Only the Sonnet group contributes dollars.
+        assert totals.total_cost == Decimal("18.00")
+        assert totals.unpriced_observation_count == 11
+        # ...but the unpriced group's cache tokens are real work and are reported.
+        assert totals.cache_creation == 500_000
+        assert totals.cache_read == 9_000_000
+        assert totals.cost_by_model == {ModelId.CLAUDE_SONNET_4: Decimal("18.00")}
+
+
+@pytest.mark.unit
+def test_exact_token_tie_resolves_to_the_lexically_greater_model() -> None:
+    """Pin the tie-break so it is a decision rather than an accident.
+
+    On an exact token tie ``_pick_primary_model`` takes the lexically greater
+    model id. Between a priced Claude model and an unpriced ``gpt-5.6-mini``
+    that reports the UNPRICED one, which is the behaviour we want: the session
+    already carries a non-zero unpriced count, and naming the model with no rate
+    is what tells an operator which rate is missing. Naming the priced model
+    would hide that behind a familiar-looking id.
+    """
+    totals = price_session_rows(
+        [
+            _token_usage_group(
+                ModelId.CLAUDE_SONNET_4, input_tokens=500_000, output_tokens=500_000
+            ),
+            _token_usage_group(_UNPRICED_REAL_MODEL, input_tokens=500_000, output_tokens=500_000),
+        ],
+        CostCalculator(),
+        "session-tie",
+    )
+
+    assert totals is not None
+    assert totals.primary_model == _UNPRICED_REAL_MODEL
+    assert totals.unpriced_observation_count == 3
