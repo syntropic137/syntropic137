@@ -29,11 +29,22 @@ phases:
       ignores case and non-alphanumeric characters. Then delegate the
       implementation to Codex with one shell command:
 
-      `codex exec -s workspace-write --skip-git-repo-check -C /workspace
-      "Create /workspace/palindrome.py implementing is_palindrome(s: str) -> bool
-      that ignores case and non-alphanumerics. Print DONE when the file exists."
+      `codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -C /workspace
+      "Create palindrome.py implementing is_palindrome(s: str) -> bool that
+      ignores case and non-alphanumerics. Print DONE when the file exists."
       < /dev/null`
 
-      Note the `< /dev/null`: codex exec waits on stdin forever without it.
+      Two things that will break this if you change them:
+
+      - `< /dev/null`. codex exec waits on stdin forever without it.
+      - `--dangerously-bypass-approvals-and-sandbox`, NOT `-s workspace-write`.
+        Codex sandboxes itself with bubblewrap, and bubblewrap cannot create a
+        user namespace inside a Docker container:
+          bwrap: No permissions to create a new namespace, likely because the
+          kernel does not allow non-privileged user namespaces.
+        Every sandboxed write then fails with "Failed to write file". The flag
+        name sounds alarming but this is the case its own docs describe: the
+        workspace container IS the sandbox, so codex sandboxing inside it is
+        both redundant and broken.
 
       Then print Codex's output and a one-line summary of what was built.
