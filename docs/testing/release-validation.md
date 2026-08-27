@@ -246,6 +246,40 @@ corrupted secret - use `--format json`.
 
 - [ ] Byte length of critical env values matches expectation
 
+### A green test suite is not evidence that a guard is tested
+
+Five separate times in two days, a test passed while covering nothing. Different
+mechanism each time, same outcome: a guard nobody was actually checking.
+
+| What passed | Why it proved nothing |
+|---|---|
+| `test_pricing_codex.py` | The wrong rate was written in as the expectation, so implementation and test shared one mistake |
+| `TestLongContextIsTwiceShort` | Read 1 of 12 literals; the other 11 could be anything |
+| `TestFormatCost` | Never marked `unit`, so `pytest -m unit` never ran it |
+| `test_unpriced_cost_surfacing.py` | Injected a correct object past the broken function it claimed to test |
+| A codex auth severity check | No fixture existed that only that check could reject |
+
+**Mutation testing catches the first four and misses the fifth.** A mutant only
+proves the paths it touches, so "I reverted the fix and tests failed" establishes
+less than it feels like it does. The fifth case survived two rounds of mutation
+work by an author who was actively looking for it.
+
+The check that would have caught all five, for any guard you add:
+
+> Name the fixture that fails if **only this guard** is removed, with every
+> other guard intact.
+
+If you cannot name one, the guard is untested no matter how green the suite is.
+Two conditions ANDed together need a case that trips exactly one of them;
+testing them jointly proves neither.
+
+And when a mutant survives, the result is ambiguous rather than reassuring: it
+means the code is dead **or** no test distinguishes it. Both readings deserve
+checking, and the flattering one is the one to distrust.
+
+- [ ] Every new guard has a fixture that isolates it
+- [ ] A surviving mutant was investigated, not explained away
+
 ### A model's explanation of an error is not the error
 
 Agent transcripts contain the agent's own account of what went wrong, written
