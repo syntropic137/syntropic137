@@ -1,7 +1,14 @@
-# Post-Release Validation Runbook
+# Release Validation Runbook
 
-Step-by-step validation of a new Syntropic137 release on a **selfhost stack**.
-Run this after every release to catch regressions before users hit them.
+Step-by-step validation of a Syntropic137 release on a **selfhost stack**.
+
+> Renamed from "post-release validation" on 2026-08-27. The process is
+> unchanged; the name was wrong. Running it BEFORE cutting is the point, so a
+> gap found here costs a fix rather than a hotfix. Nothing here requires a
+> published release: [section 0-PRE](#0-pre-stand-up-a-pre-release-stack)
+> stands up a stack from an arbitrary ref.
+Run this before cutting a release, and again after, to catch regressions
+before users hit them.
 
 > **This runbook validates the published release artifacts (GHCR images, npm CLI
 > package) running on the selfhost compose project (`syntropic137_selfhost`).**
@@ -821,7 +828,7 @@ syn repo unassign <repo-id>
 > **If run by Claude Code:** Before executing workflows, pause and confirm with the
 > developer:
 >
-> *"I'm at the workflow execution stage of the post-release validation. I need to
+> *"I'm at the workflow execution stage of the release validation. I need to
 > run at least 2 workflows to validate the execution → session → observability
 > pipeline. This will consume Anthropic API tokens. Do you want me to proceed?"*
 >
@@ -2155,9 +2162,9 @@ git rev-list --count HEAD..origin/main   # must be 0
 
 ```bash
 # When was the runbook last updated, and how much has landed since?
-git log -1 --format='%h %ad %s' --date=short -- docs/testing/post-release-validation.md
-git log --oneline $(git log -1 --format=%H -- docs/testing/post-release-validation.md)..HEAD | wc -l
-git log --oneline $(git log -1 --format=%H -- docs/testing/post-release-validation.md)..HEAD \
+git log -1 --format='%h %ad %s' --date=short -- docs/testing/release-validation.md
+git log --oneline $(git log -1 --format=%H -- docs/testing/release-validation.md)..HEAD | wc -l
+git log --oneline $(git log -1 --format=%H -- docs/testing/release-validation.md)..HEAD \
   | grep -iE 'feat|BREAKING'
 ```
 
@@ -2223,10 +2230,10 @@ done
 Save the report to `docs/testing/output/` using the naming convention:
 
 ```
-docs/testing/output/v<VERSION>-post-release-validation.md
+docs/testing/output/v<VERSION>-release-validation.md
 ```
 
-Example: `docs/testing/output/v<VERSION>-post-release-validation.md`
+Example: `docs/testing/output/v<VERSION>-release-validation.md`
 
 This directory is **gitignored** (`docs/testing/output/.gitignore` excludes `*.md`), so
 reports never pollute the commit history. They persist locally as reference artifacts
@@ -2248,14 +2255,14 @@ hit this? How bad is the experience?
 Copy and fill in after completing the runbook.
 
 ```markdown
-# v<VERSION> Post-Release Validation
+# v<VERSION> Release Validation
 
 **Release version:** v_.__._
 **Date:** YYYY-MM-DD
 **Validated by:** <name or agent>
 **Stack environment:** selfhost (`syntropic137_selfhost`)
 **Webhook mode:** polling-only / webhook active
-**Runbook:** [docs/testing/post-release-validation.md](../post-release-validation.md)
+**Runbook:** [docs/testing/release-validation.md](../release-validation.md)
 
 ## What Passed
 

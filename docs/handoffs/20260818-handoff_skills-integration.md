@@ -267,5 +267,5 @@ happened.
   "What changed during implementation" section recording where it was wrong)
 - ADR: `docs/adrs/ADR-065-claude-plugin-injection.md`
 - Guide: `apps/syn-docs/content/docs/guide/skills.mdx`
-- Runbook: `docs/testing/post-release-validation.md` section 6.2
+- Runbook: `docs/testing/release-validation.md` section 6.2
 - PRs: #824, #829, #831

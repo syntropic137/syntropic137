@@ -156,7 +156,7 @@ explicitly rather than by omission:
 ## Phase 4: pre-release validation
 
 Use the **pre-release** mode in
-`/Users/neural/Code/Syntropic137/syntropic137/docs/testing/post-release-validation.md`:
+`/Users/neural/Code/Syntropic137/syntropic137/docs/testing/release-validation.md`:
 on-demand env (ADR-060), port `<slot>8137`, images built from the working tree.
 Do not validate on the dev stack; dev images are locally built and may carry
 uncommitted changes, so results there do not validate release quality.
