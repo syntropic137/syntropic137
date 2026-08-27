@@ -19,11 +19,13 @@ See ADR-004 (environment configuration) and the codex-runner workflow phases.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import cast
 
@@ -40,7 +42,7 @@ def _auth_path() -> Path:
     return base / "auth.json"
 
 
-def _load_compact(path: Path) -> tuple[str, str]:
+def _load_compact(path: Path) -> tuple[str, str, dict[str, object]]:
     """Read auth.json; return its compact single-line JSON and its auth_mode.
 
     Raises SystemExit with actionable guidance when the file is missing or not
@@ -63,7 +65,51 @@ def _load_compact(path: Path) -> tuple[str, str]:
     compact = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
     mode = data.get(_AUTH_MODE_KEY)
     auth_mode = mode if isinstance(mode, str) else "?"
-    return compact, auth_mode
+    return compact, auth_mode, data
+
+
+def _token_status(data: dict[str, object]) -> list[str]:
+    """Human-readable, NON-SECRET lines describing the token's freshness.
+
+    WHY this exists: the copy step is not the failure mode. Copying a burned
+    token succeeds silently and the breakage only surfaces later, inside a
+    container, as `refresh_token_reused`. Reporting expiry here turns a
+    ten-minute container-log dig into a line of output.
+
+    Only the JWT `exp` claim is decoded, and only to compute a duration. No
+    token material is returned, printed, or logged.
+    """
+    lines: list[str] = []
+    last = data.get("last_refresh")
+    if isinstance(last, str):
+        lines.append(f"  last_refresh: {last}")
+
+    tokens = data.get("tokens")
+    if not isinstance(tokens, dict):
+        return lines
+    access = tokens.get("access_token")
+    if not isinstance(access, str) or access.count(".") != 2:
+        return lines
+
+    body = access.split(".")[1]
+    body += "=" * (-len(body) % 4)
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(body))
+    except (ValueError, json.JSONDecodeError):
+        return lines
+    if not isinstance(claims, dict):
+        return lines
+    exp = claims.get("exp")
+    if not isinstance(exp, (int, float)):
+        return lines
+
+    remaining = exp - time.time()
+    if remaining < 0:
+        lines.append(f"  access_token: EXPIRED {abs(remaining) / 3600:.1f}h ago")
+        lines.append("  -> run `codex login` before copying; this value is dead.")
+    else:
+        lines.append(f"  access_token: valid, {remaining / 3600:.1f}h left")
+    return lines
 
 
 def _clipboard_command() -> list[str] | None:
@@ -135,7 +181,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    compact, auth_mode = _load_compact(_auth_path())
+    compact, auth_mode, data = _load_compact(_auth_path())
 
     payload = _build_payload(compact, dotenv=args.dotenv)
     if args.dotenv:
@@ -156,7 +202,15 @@ def main() -> int:
         )
 
     print(f"Copied codex auth to clipboard ({fmt}, {len(payload)} bytes, auth_mode={auth_mode}).")
+    for line in _token_status(data):
+        print(line)
     print(f"  Paste into: {target}")
+    print()
+    print("  WHY THIS KEEPS BREAKING: this laptop and the container share ONE")
+    print("  OAuth refresh token, and refresh tokens are single-use. Whichever")
+    print("  side refreshes first invalidates the other, and the loser fails")
+    print("  with `refresh_token_reused`. Running codex locally during a")
+    print("  containerized run is enough to break it. See issue #893.")
     return 0
 
 
