@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 
 import { Card, CardContent, CardHeader } from '../../components'
 import type { ExecutionDetailResponse } from '../../types'
-import { formatTokens } from '../../utils/formatters'
+import { formatCostWithCoverage, formatTokens } from '../../utils/formatters'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 
 function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, string> }) {
@@ -91,7 +91,9 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
       <div className="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
         <span>{formatTokens(totalPhaseTokens)}</span>
         <span className="text-[var(--color-border)]">&middot;</span>
-        <span>${Number(phase.cost_usd).toFixed(4)}</span>
+        <span>
+          {formatCostWithCoverage(Number(phase.cost_usd), phase.unpriced_observation_count)}
+        </span>
         <span className="text-[var(--color-border)]">&middot;</span>
         <span>{duration}s</span>
       </div>

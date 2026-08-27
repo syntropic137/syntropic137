@@ -11,6 +11,13 @@ These cases pin the whole hop: read model in, response model out, with the
 rendered ``*_display`` string asserted rather than just the raw count. Asserting
 only the count would let a future change carry the number correctly and still
 print ``$0.00`` next to it.
+
+They also go THROUGH the loaders (``_load_cost_data``, ``_enrich_costs``) rather
+than hand-building an already-correct carrier and passing it to the mapper. An
+earlier version of this file did the latter and stayed green while
+``_load_cost_data`` silently dropped the count - a test that passes by not
+executing the code it names is worse than no test, because it also retires the
+suspicion.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ import pytest
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+from syn_shared.display import format_cost
 
 # A real OpenAI model with no rate in MODEL_PRICING_TABLE - the production shape
 # of "unpriced", rather than an invented id that could never occur on the wire.
@@ -42,8 +50,89 @@ def _unpriced_session_cost() -> SessionCost:
     return cost
 
 
+@dataclass
+class _StubSessionCostQuery:
+    """Stands in for ``SessionCostQueryService`` at the ``_load_cost_data`` seam."""
+
+    cost: SessionCost | None
+
+    async def get(self, session_id: str) -> SessionCost | None:
+        return self.cost
+
+
+def _patch_session_cost_query(monkeypatch: pytest.MonkeyPatch, cost: SessionCost | None) -> None:
+    """Point ``_load_cost_data`` at a stubbed query service.
+
+    Patching HERE rather than injecting a ready-made ``_CostData`` is the whole
+    point: everything between the read model and the response - including the
+    ``_CostData`` construction that dropped the count - stays under test.
+    """
+    from syn_api.routes import sessions
+
+    monkeypatch.setattr(sessions, "get_session_cost_query", lambda: _StubSessionCostQuery(cost))
+
+
 @pytest.mark.unit
-class TestSessionSurfacesUnpriced:
+class TestSessionDetailSurfacesUnpriced:
+    """The detail endpoint's own path: ``_load_cost_data`` -> ``_CostData`` -> response."""
+
+    @pytest.mark.asyncio
+    async def test_load_cost_data_carries_the_count_off_the_read_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from syn_api.routes.sessions import _load_cost_data
+
+        _patch_session_cost_query(monkeypatch, _unpriced_session_cost())
+
+        data = await _load_cost_data("sess-890", fallback_tokens=0, fallback_cost=Decimal("0"))
+
+        assert data.unpriced_observation_count == 12
+
+    @pytest.mark.asyncio
+    async def test_detail_response_says_unpriced_not_zero_dollars(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End to end for the most-viewed cost surface (#890)."""
+        from syn_api.routes.sessions import _load_cost_data
+        from syn_api.types import SessionDetail
+
+        _patch_session_cost_query(monkeypatch, _unpriced_session_cost())
+        data = await _load_cost_data("sess-890", fallback_tokens=0, fallback_cost=Decimal("0"))
+
+        detail = SessionDetail(
+            id="sess-890",
+            status="completed",
+            total_cost_usd=data.total_cost_usd,
+            unpriced_observation_count=data.unpriced_observation_count,
+            agent_model=data.agent_model,
+        )
+        rendered = format_cost(detail.total_cost_usd, detail.unpriced_observation_count)
+
+        assert detail.unpriced_observation_count == 12
+        assert rendered == "unpriced"
+        assert rendered != "$0.00"
+
+    @pytest.mark.asyncio
+    async def test_a_priced_session_detail_still_renders_a_dollar_figure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The change must be invisible to sessions we can actually price."""
+        from syn_api.routes.sessions import _load_cost_data
+
+        cost = _unpriced_session_cost()
+        cost.agent_model = "claude-sonnet-4-20250514"
+        cost.total_cost_usd = Decimal("1.25")
+        cost.unpriced_observation_count = 0
+        _patch_session_cost_query(monkeypatch, cost)
+
+        data = await _load_cost_data("sess-890", fallback_tokens=0, fallback_cost=Decimal("0"))
+
+        assert data.unpriced_observation_count == 0
+        assert format_cost(data.total_cost_usd, data.unpriced_observation_count) == "$1.25"
+
+
+@pytest.mark.unit
+class TestSessionSummarySurfacesUnpriced:
     def test_summary_response_says_unpriced_not_zero_dollars(self) -> None:
         from syn_api.routes.sessions import (
             _build_session_summary_response,

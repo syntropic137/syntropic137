@@ -482,6 +482,10 @@ async def _load_cost_data(
         # ISS-217: Use authoritative totals from cost projection; fall back to session_list
         total_tokens=cost.total_tokens or fallback_tokens,
         total_cost_usd=cost.total_cost_usd,
+        # Dropping this was the fix failing inside its own PR: session detail is
+        # the most-viewed cost surface, and without the count it renders a
+        # confident dollar figure for work nobody could price (#890).
+        unpriced_observation_count=cost.unpriced_observation_count,
         agent_model=cost.agent_model,
         cost_by_model=cost.cost_by_model,
         duration_seconds=(cost.duration_ms / 1000.0) if cost.duration_ms else None,

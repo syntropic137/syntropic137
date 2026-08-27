@@ -111,13 +111,20 @@ class TestBuildFromSummaryPricesByModel:
 
 @pytest.mark.unit
 class TestBuildFromTokenUsagePricesByModel:
+    """``_build_from_token_usage`` now takes this session's model-grouped rows.
+
+    The query groups by (session, model), so one session can produce several
+    rows. Passing them as a list is what lets each be priced with its own rate.
+    """
+
     def test_opus_session_prices_as_opus_not_sonnet(self) -> None:
         service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
 
         result = service._build_from_token_usage(
-            _token_usage_row(_OPUS_MODEL), tool_counts={}, started_map={}
+            "session-2", [_token_usage_row(_OPUS_MODEL)], tool_counts={}, started_map={}
         )
 
+        assert result is not None
         assert result.total_cost_usd == _OPUS_COST_1M_1M
         assert result.total_cost_usd != _SONNET_COST_1M_1M
         assert result.cost_by_model == {_OPUS_MODEL: _OPUS_COST_1M_1M}
@@ -127,9 +134,10 @@ class TestBuildFromTokenUsagePricesByModel:
         service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
 
         result = service._build_from_token_usage(
-            _token_usage_row(None), tool_counts={}, started_map={}
+            "session-2", [_token_usage_row(None)], tool_counts={}, started_map={}
         )
 
+        assert result is not None
         assert result.total_cost_usd == Decimal("0")
         assert result.cost_by_model == {}
 
@@ -138,10 +146,38 @@ class TestBuildFromTokenUsagePricesByModel:
         service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
 
         result = service._build_from_token_usage(
-            _token_usage_row(_UNPRICED_REAL_MODEL), tool_counts={}, started_map={}
+            "session-2",
+            [_token_usage_row(_UNPRICED_REAL_MODEL)],
+            tool_counts={},
+            started_map={},
         )
 
+        assert result is not None
         assert result.total_cost_usd == Decimal("0")
         # The fixture row aggregates 7 token_usage observations.
         assert result.unpriced_observation_count == 7
         assert result.cost_by_model == {}
+
+    def test_mixed_model_session_prices_each_group_with_its_own_rate(self) -> None:
+        """One session, two models: price what we can, count what we cannot (#890).
+
+        Under the old ``MAX(data->>'model')`` shape this session came back
+        either as $90 with zero unpriced (the unknown tokens billed at Opus
+        rates) or as $0 entirely unpriced, depending on which id sorted last.
+        """
+        service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
+
+        result = service._build_from_token_usage(
+            "session-2",
+            [_token_usage_row(_OPUS_MODEL), _token_usage_row(_UNPRICED_REAL_MODEL)],
+            tool_counts={},
+            started_map={},
+        )
+
+        assert result is not None
+        assert result.total_cost_usd == _OPUS_COST_1M_1M
+        assert result.unpriced_observation_count == 7
+        assert result.cost_by_model == {_OPUS_MODEL: _OPUS_COST_1M_1M}
+        # Tokens from both groups are real work and must both be reported.
+        assert result.input_tokens == 2_000_000
+        assert result.output_tokens == 2_000_000
