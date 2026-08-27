@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, TypedDict
@@ -51,14 +52,22 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPolle
     CancelSignalPoller,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    ApiErrorType,
     InterruptibleWorkspace,
     StreamResult,
+    api_error_label,
 )
+from syn_shared.agents import AgentProvider
 from syn_shared.codex_stream import (
     CODEX_TOOL_NAME_COMMAND,
     CODEX_TOOL_NAME_FILE_CHANGE,
     CodexItemType,
     CodexStreamType,
+)
+from syn_shared.delegation import (
+    DELEGATION_TARGET_BY_PRIMARY,
+    DelegationTarget,
+    is_delegation_command,
 )
 from syn_shared.pricing import resolve_model_pricing
 
@@ -71,6 +80,33 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+# This processor drives a CODEX primary, so its declared delegate is claude -p.
+DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CODEX]
+
+# --- Terminal faults the codex CLI reports on stdout as NON-JSON log lines ----
+#
+# The codex CLI writes tracing lines to the same stdout as its JSON events. Most
+# are inert noise (see module docstring) and are rightly discarded, but a login
+# failure is announced ONLY there:
+#
+#   ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized
+#   ... "code": "refresh_token_reused"
+#
+# Discarding it meant an expired codex login surfaced downstream as "codex
+# stream ended without a terminal turn.completed event" - a true statement
+# about a symptom that names the wrong subsystem and gives an operator nothing
+# to act on (issue #891).
+#
+# The match is deliberately narrow: an explicit auth-subsystem signature, not
+# the word ERROR. A generic ERROR filter would promote the routine
+# `codex_models_manager` diagnostic in the golden fixture into a phase failure.
+_CODEX_AUTH_FAULT_RE = re.compile(
+    r"codex_login|failed to refresh token|refresh_token_reused|invalid_grant",
+    re.IGNORECASE,
+)
+_HTTP_AUTH_STATUS_RE = re.compile(r"\b(401|403)\b")
+_MAX_FAULT_LINE_LEN = 160
 
 _MAX_PREVIEW_LEN = 500
 
@@ -252,6 +288,11 @@ class CodexStreamProcessor:
         self._totals = _CodexTotals()
         self._error_reason: str | None = None
 
+        # #894: A codex phase delegates to `claude -p`.
+        self._delegation_tool_use_ids: set[str] = set()
+        self._delegation_attempts: int = 0
+        self._delegation_successes: int = 0
+
     async def process_stream(
         self,
         stream: AsyncIterator[str],
@@ -318,6 +359,8 @@ class CodexStreamProcessor:
             duration_ms=duration_ms,
             num_turns=self._totals.turns,
             error_reason=self._error_reason,
+            delegation_attempts=self._delegation_attempts,
+            delegation_successes=self._delegation_successes,
         )
 
     def _estimate_cost(self) -> float | None:
@@ -354,7 +397,10 @@ class CodexStreamProcessor:
         exit) and is skipped.
         """
         stripped = line.strip()
-        if not stripped or not stripped.startswith("{"):
+        if not stripped:
+            return None
+        if not stripped.startswith("{"):
+            self._note_non_json_fault(stripped)
             return None
 
         try:
@@ -369,6 +415,35 @@ class CodexStreamProcessor:
         if not isinstance(event, dict):
             return None
         return event
+
+    def _note_non_json_fault(self, line: str) -> None:
+        """Promote a recognisable terminal fault out of an inert CLI log line.
+
+        Only an explicit auth failure qualifies today. Everything else stays
+        inert noise, exactly as before - this widens what the parser SEES, not
+        what it treats as fatal.
+        """
+        if self._error_reason is not None:
+            return
+        if not _CODEX_AUTH_FAULT_RE.search(line):
+            return
+        status = _HTTP_AUTH_STATUS_RE.search(line)
+        label = api_error_label(
+            ApiErrorType.AUTHENTICATION,
+            status.group(1) if status else "",
+        )
+        self._error_reason = f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"
+        logger.error("Codex auth fault detected on stdout: %s", line[:_MAX_FAULT_LINE_LEN])
+
+    def _note_delegation_attempt(self, tool_use_id: str, command: str) -> None:
+        """Record a codex command_execution that invokes `claude -p` (#894)."""
+        if tool_use_id in self._delegation_tool_use_ids:
+            return
+        if not is_delegation_command(command, DELEGATION_TARGET):
+            return
+        self._delegation_tool_use_ids.add(tool_use_id)
+        self._delegation_attempts += 1
+        logger.info("Delegation invocation detected (item=%s)", tool_use_id)
 
     async def _process_line(self, line: str) -> None:
         """Parse and dispatch a single codex JSONL line."""
@@ -398,6 +473,7 @@ class CodexStreamProcessor:
 
         tool_use_id = str(item.get("id", "unknown"))
         command = str(item.get("command", ""))
+        self._note_delegation_attempt(tool_use_id, command)
         await self._collector.record_tool_started(
             tool_name=CODEX_TOOL_NAME_COMMAND,
             tool_use_id=tool_use_id,
@@ -422,6 +498,11 @@ class CodexStreamProcessor:
         exit_code = item.get("exit_code")
         success = exit_code == 0
         output = str(item.get("aggregated_output") or "")
+        # item.completed repeats the command, so a delegation is still counted
+        # if the matching item.started never arrived (truncated stream).
+        self._note_delegation_attempt(tool_use_id, str(item.get("command", "")))
+        if success and tool_use_id in self._delegation_tool_use_ids:
+            self._delegation_successes += 1
         if not success:
             # A failed inner command is a failed TOOL op, not automatically a
             # failed codex run (docs/superpowers/plans/2026-07-22-codex-bridge-integration.md
