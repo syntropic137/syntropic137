@@ -4,7 +4,22 @@
 
 **Goal:** A cross-harness delegated run (`codex exec` from a Claude phase, or the reverse) gets its own linked platform session, its tokens and cost attributed to it, and those costs added to the execution total.
 
-**Architecture:** The delegate is launched through a platform-owned wrapper that mints a `delegation_attempt_id` before launch, reports the edge, and binds the child's harness-native session id from the child's own stream. A to-do-list processor then imports the child's transcript from the session store, emits Lane 2 observations under the child's platform session id, and prices it independently. Execution totals add cross-harness children only; native same-harness sub-agents are excluded because their tokens are already recorded under the parent.
+**Architecture:** Split across two repositories along an existing boundary.
+`agentic-primitives` owns everything harness-specific: how a CLI names its
+sessions, what its stream and transcript look like, and the `syn-delegate`
+binary that ships inside the workspace image. It already has this abstraction
+(`harnesses/{claude,codex}`, `AgentName`, `HarnessTranscript`,
+`TranscriptExtractionResult`), so this extends it rather than inventing one.
+Syntropic137 owns what a delegation MEANS: the edge as a domain event, child
+session aggregates, pricing, execution totals, and the read path.
+
+The test for which side a change belongs on: **if it changes when Anthropic or
+OpenAI ships a new CLI, it is agentic-primitives. If it changes when we decide
+what a cost or a session is, it is Syntropic137.**
+
+Contract-first, so the AP delivery lead time does not serialise the work. Task
+0 defines the interface both sides code against; syn137 tasks proceed against a
+test double while AP implements the real adapter.
 
 **Tech Stack:** Python 3.14, Pydantic v2, event_sourcing SDK, TimescaleDB observability lane, pytest.
 
@@ -23,6 +38,20 @@
 
 ---
 
+## Repository split
+
+| Lives in agentic-primitives | Lives in Syntropic137 |
+|---|---|
+| Native session id extraction per harness | `DelegationStarted/Bound/Finished` events |
+| Transcript format parsing | Child session aggregate and lifecycle |
+| The `syn-delegate` binary (ships in the image) | Pricing and execution totals |
+| Delegation skills that call it | The read path and lineage queries |
+
+**Delivery lead time is the cost of this split and must be planned around.**
+Anything landing in AP needs merge -> image build -> release channel -> pin
+bump in syn137 before it reaches a workspace. That is the chain #376 is
+currently sitting in. Put as little in AP as genuinely needs to be there.
+
 ## Scope
 
 **In:** cross-harness delegation only (`codex exec`, `claude -p` as a subprocess).
@@ -30,6 +59,158 @@
 **Out, and tracked separately:**
 - Native same-harness fan-out attribution (plan 2). Money is already counted; the missing piece is a sub-agent identifier on the `token_usage` observation.
 - Read-path and query surface (plan 3).
+
+---
+
+### Task 0: The contract both repos code against (Syntropic137)
+
+Defined first and deliberately tiny, so syn137 work is not blocked behind the
+AP image chain. syn137 depends on this Protocol, never on a harness detail.
+
+**Files:**
+- Create: `packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/ports/delegate_identity.py`
+- Test: `packages/syn-domain/tests/contexts/agent_sessions/test_delegate_identity_port.py`
+
+**Interfaces:**
+- Produces: `DelegateIdentity` Protocol with
+  `native_session_id_from_stream(line: str) -> str | None`.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+import pytest
+from syn_domain.contexts.agent_sessions.domain.ports.delegate_identity import (
+    DelegateIdentity,
+)
+
+
+class _FakeCodexIdentity:
+    """Test double standing in for the agentic-primitives codex adapter."""
+
+    def native_session_id_from_stream(self, line: str) -> str | None:
+        if '"thread.started"' in line:
+            import json
+
+            return json.loads(line).get("thread_id")
+        return None
+
+
+@pytest.mark.unit
+def test_double_satisfies_the_port() -> None:
+    """syn137 codes against this Protocol so the AP image lead time does not
+    serialise the domain work."""
+    identity: DelegateIdentity = _FakeCodexIdentity()
+    line = '{"type":"thread.started","thread_id":"01a04470-3a1c-7883"}'
+    assert identity.native_session_id_from_stream(line) == "01a04470-3a1c-7883"
+    assert identity.native_session_id_from_stream('{"type":"item.completed"}') is None
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `uv run pytest packages/syn-domain/tests/contexts/agent_sessions/test_delegate_identity_port.py -v`
+Expected: FAIL with `ModuleNotFoundError`
+
+- [ ] **Step 3: Write minimal implementation**
+
+```python
+"""Port for harness-native delegate identity.
+
+WHY this is a port and not an implementation (issue #895): knowing that codex
+emits `thread.started.thread_id` is knowledge about a CLI, not about our
+domain. It changes when OpenAI ships a new codex version, so it belongs in
+agentic-primitives beside the existing `harnesses/{claude,codex}` adapters.
+Syntropic137 depends on this shape and never on the format behind it.
+"""
+
+from __future__ import annotations
+
+from typing import Protocol, runtime_checkable
+
+
+@runtime_checkable
+class DelegateIdentity(Protocol):
+    """Recovers a harness's own session id from its output stream."""
+
+    def native_session_id_from_stream(self, line: str) -> str | None:
+        """The harness-native session id, or None if this line does not carry one."""
+        ...
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `uv run pytest packages/syn-domain/tests/contexts/agent_sessions/test_delegate_identity_port.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/syn-domain
+git commit -m "feat(agent_sessions): port for harness-native delegate identity (#895)"
+```
+
+---
+
+### Task 3A: Native session id extraction (agentic-primitives)
+
+**Repo:** `AgentParadise/agentic-primitives`. Extends the EXISTING harness
+abstraction rather than adding a parallel one.
+
+**Files:**
+- Modify: `lib/python/agentic_isolation/agentic_isolation/harnesses/codex/transcripts.py`
+- Modify: `lib/python/agentic_isolation/agentic_isolation/harnesses/claude/`
+- Test: `lib/python/agentic_isolation/tests/harnesses/test_native_session_id.py`
+
+**Interfaces:**
+- Produces: `native_session_id_from_stream(line: str) -> str | None` on each
+  harness adapter, satisfying syn137's `DelegateIdentity` port from Task 0.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+import pytest
+from agentic_isolation.harnesses.codex import CodexHarness
+
+
+@pytest.mark.unit
+def test_codex_reports_its_thread_id() -> None:
+    line = '{"type":"thread.started","thread_id":"01a04470-3a1c-7883"}'
+    assert CodexHarness().native_session_id_from_stream(line) == "01a04470-3a1c-7883"
+
+
+@pytest.mark.unit
+def test_codex_ignores_other_event_types() -> None:
+    """Mirrors the #792 finding already fixed in _resolve_session_id: reading
+    an id off ANY line let an unrelated session's id through. Only the line
+    type that actually carries identity is trusted."""
+    assert CodexHarness().native_session_id_from_stream(
+        '{"type":"item.completed","thread_id":"WRONG"}'
+    ) is None
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `uv run pytest lib/python/agentic_isolation/tests/harnesses/test_native_session_id.py -v`
+Expected: FAIL, method does not exist
+
+- [ ] **Step 3: Implement on each adapter**
+
+Reuse the existing constant naming the trusted line type; do not introduce a
+second source of truth for which line carries identity.
+
+- [ ] **Step 4: Run tests**
+
+Expected: PASS
+
+- [ ] **Step 5: Bump the plugin/package version and CHANGELOG**
+
+AP CI fails a content change without a version bump, and without it
+`claude plugin update` does not deliver the change.
+
+- [ ] **Step 6: Commit and open a PR**
+
+```bash
+git commit -m "feat(harnesses): report the harness-native session id from a stream"
+```
 
 ---
 
@@ -210,7 +391,9 @@ git commit -m "feat(agent_sessions): require root_session_id at the command boun
 
 **Interfaces:**
 - Consumes: `DelegationStartedEvent`, `DelegationBoundEvent`, `DelegationFinishedEvent` from Task 1.
-- Produces: `mint_attempt_id() -> str`, `parse_harness_session_id(provider: str, stream_line: str) -> str | None`.
+- Produces: `mint_attempt_id() -> str`. Consumes a `DelegateIdentity` (Task 0)
+  for the native id; this module holds NO harness-specific parsing, because
+  that lives in agentic-primitives (Task 3A).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -407,7 +590,119 @@ git commit -m "fix(costs): add cross-harness delegates to execution totals (#895
 - [ ] **Step 4:** Confirm the delegate's cost is non-zero and matches the store transcript's tokens.
 - [ ] **Step 5:** Commit the recorded fixture so this is a regression test, not a one-off.
 
+---
+
+### Task 7: Cost reconciliation, so the number is provable rather than asserted
+
+Without this, "accurate cost" is a claim. This makes it something you can point
+at, which is what an eval needs before it can be trusted.
+
+**Files:**
+- Create: `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/reconcile.py`
+- Test: `packages/syn-domain/tests/contexts/orchestration/test_cost_reconciliation.py`
+
+**Interfaces:**
+- Consumes: execution totals from Task 5.
+- Produces: `reconcile_execution_cost(execution_id) -> CostReconciliation`
+  with `tokens_match: bool`, `platform_cost_usd`, `harness_reported_cost_usd`,
+  `divergence_usd`.
+
+**Why two numbers exist.** The platform prices tokens from its OWN rate table.
+Each harness also reports its own figure, captured today as
+`total_cost_usd` off the CLI result event (`EventStreamProcessor.py:504`).
+Those are independent, and they fail differently:
+
+- **Tokens are objective.** The harness counts them and there is nothing to
+  interpret. A mismatch is a bug, so it FAILS.
+- **Dollars can legitimately diverge**, because the rate table is ours and has
+  already drifted once (the gpt-5.6-sol correction), and because a codex
+  session's cost is frozen at write time so a later rate fix reaches no
+  completed session. So divergence is REPORTED, never silently reconciled.
+
+Treating a dollar difference as a failure would train everyone to ignore it.
+Treating it as a signal about the rate table is what makes it useful.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_token_mismatch_is_a_failure() -> None:
+    """Tokens come from the harness. If ours disagree, we have a bug."""
+    result = await reconcile_execution_cost("exec-token-mismatch")
+    assert result.tokens_match is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_cross_harness_child_tokens_are_included_in_the_match() -> None:
+    """The delegate's tokens must be in the platform total, or reconciliation
+    passes while the money is still missing, which is today's bug wearing a
+    green check."""
+    result = await reconcile_execution_cost("exec-with-codex-delegate")
+    assert result.tokens_match is True
+    assert result.platform_cost_usd > LEADER_ONLY_COST
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dollar_divergence_is_reported_not_failed() -> None:
+    """A rate-table difference is a signal, not a defect. Failing on it would
+    train people to ignore the check."""
+    result = await reconcile_execution_cost("exec-rate-drift")
+    assert result.tokens_match is True
+    assert result.divergence_usd != 0
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `uv run pytest packages/syn-domain/tests/contexts/orchestration/test_cost_reconciliation.py -v`
+Expected: FAIL with import error
+
+- [ ] **Step 3: Implement**
+
+Compare per session, not only in aggregate: a leader overcount and a child
+undercount can cancel out and produce a total that looks correct.
+
+- [ ] **Step 4: Run tests**
+
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/syn-domain
+git commit -m "feat(costs): reconcile platform cost against harness-reported cost (#895)"
+```
+
+---
+
+### Task 8: Regression fixtures from real runs
+
+A recorded run is the only test that proves the whole chain, and it is what
+stops this regressing silently later.
+
+- [ ] **Step 1:** Record a real `claude-delegates-to-codex` run, capturing the
+      leader stream, the child stream, and the exported transcripts.
+- [ ] **Step 2:** Commit the recording as a fixture under
+      `packages/syn-domain/tests/fixtures/delegation/`.
+- [ ] **Step 3:** Write a replay test asserting: two platform sessions, the
+      child's `parent_session_id` is the leader, correct `root_session_id`,
+      the child's cost is non-zero, and the execution total is the sum.
+- [ ] **Step 4:** Add the inverse fixture, a native sub-agent run, asserting
+      the total is NOT the sum, because those tokens are already counted under
+      the parent. **This is the double-count regression test and it is the one
+      most likely to save you later**, since the bug it guards silently
+      inflates rather than breaking anything visibly.
+- [ ] **Step 5:** Verify both tests FAIL against the pre-change code, so they
+      are known to be capable of failing rather than merely green.
+- [ ] **Step 6: Commit**
+
+```bash
+git commit -m "test(delegation): regression fixtures for delegated cost (#895)"
+```
+
 ## Self-review notes
 
-- **Spec coverage:** binding protocol (T1, T3), required root (T2), importer with ordering and idempotency (T4), the summing rule (T5), e2e (T6). Reconciliation, the wrapper-at-canonical-paths boundary, and the read path are deliberately NOT here; they are plans 2 and 3.
+- **Spec coverage:** contract (T0), harness identity in AP (T3A), binding protocol (T1, T3), required root (T2), importer with ordering and idempotency (T4), the summing rule (T5), e2e (T6), reconciliation (T7), regression fixtures (T8). Reconciliation, the wrapper-at-canonical-paths boundary, and the read path are deliberately NOT here; they are plans 2 and 3.
 - **Known gap carried forward:** reconciliation for a bypassed delegate is not in this plan, so until plan 3 lands, a delegate that neither goes through the shim nor persists a transcript is still silent. That is the residual the design names.
