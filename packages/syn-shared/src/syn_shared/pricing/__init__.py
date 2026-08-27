@@ -117,10 +117,10 @@ class PricedAmount:
 #
 # Source: https://developers.openai.com/api/docs/pricing (2026-08-26).
 #
-# THESE ARE THE SHORT-CONTEXT RATES. OpenAI bills gpt-5.6 in two context tiers
-# and the long-context tier is roughly 2x on every field (Sol long: $8.00 in,
-# $30.00 out). This table has no tier concept, so a run above the long-context
-# threshold is UNDER-priced. Observed sessions on this platform run 897 to
+# THESE ARE THE SHORT-CONTEXT RATES. OpenAI bills gpt-5.6 in two context tiers.
+# The multiplier is NOT uniform: input, cached input and cache write are 2x,
+# output is 1.5x (Sol long: $8.00 in, $30.00 out). This table has no tier
+# concept, so a run above the long-context threshold is UNDER-priced. Observed sessions on this platform run 897 to
 # ~28k input tokens, comfortably short-tier, so short is the correct default.
 # Tiering is tracked separately; see the issue linked from ADR-067 phase 2.
 #

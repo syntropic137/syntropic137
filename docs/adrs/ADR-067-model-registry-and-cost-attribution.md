@@ -169,6 +169,20 @@ vendored as a committed snapshot. Verified directly against vendor docs on 2026-
 > Flex, Fast) and a context tier (short, long); across those, Sol's output rate spans
 > $10.00 to $60.00. A single scalar per model cannot represent that, which is a
 > requirement phase 2 must address alongside rate-at-write.
+>
+> **This changes the source decision below, not just its evidence.** The schema checks,
+> sanity ranges and diff review this ADR proposes all operate on a scalar rate, and none
+> of them can tell a correct Batch rate from a correct Standard rate: both are valid
+> numbers in a plausible range. Regenerating from OpenRouter under the rules as written
+> would reproduce exactly the error this note documents, silently.
+>
+> OpenRouter is therefore demoted to **model-discovery metadata**: useful for knowing a
+> model exists and for relative sanity, not authoritative for an absolute rate. A rate
+> that reaches the pricing table must carry an explicit provider, service tier and
+> context tier, and must be checked against a vendor-conformance fixture for every
+> actively-used model. Where a source's tier cannot be mapped, the pipeline fails closed
+> and the model stays unpriced rather than being priced wrongly. D0, D1 and
+> implementation phases 4 and 7 are amended accordingly.
 
 It is the only evaluated source current on **both** generations, and it additionally
 carries `:batch` (50% off) and `-fast` variants as first-class rows, covering two cost

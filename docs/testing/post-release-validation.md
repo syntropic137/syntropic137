@@ -239,6 +239,73 @@ corrupted secret - use `--format json`.
 
 - [ ] Byte length of critical env values matches expectation
 
+### A 200 from an SPA is not a health check
+
+The dev stack serves the dashboard on the same port as the API, with a
+single-page-app catch-all. `GET :9137/health` returns **200 and an HTML
+document**, because the SPA fallback answers every unmatched path. Any probe
+built on it passes forever, including against a stack whose API is broken.
+
+The API lives under `/api/v1/`. Probe a real endpoint and check the body, not
+just the status:
+
+```bash
+curl -s -m 8 -o /dev/null -w '%{http_code}\n' http://localhost:9137/api/v1/workflows
+```
+
+- [ ] Health probes hit a real API route and assert on the payload
+
+### Skill NAME and DESCRIPTION are in context; the BODY is not
+
+Claude Code discloses skills progressively. The frontmatter `name` and
+`description` are visible to the model; `SKILL.md`'s body loads only when the
+skill is **invoked**. A validation that plants a marker word in the body and
+then asks "list your skills" will see the skill NAMED and the marker ABSENT,
+every time, on a perfectly working system.
+
+That is a correct result being read as a failure. To prove the body loads, give
+the skill a narrow `description` trigger, ask for exactly that task, and put the
+assertion inside the body. Run a control phase with no skill so the evidence
+cannot be explained by the model already knowing the answer.
+
+- [ ] Skill tests distinguish DISCOVERY (name listed) from INVOCATION (body applied)
+
+### Local codex and containerized codex share one refresh token
+
+`CODEX_AUTH_JSON` in the vault and `~/.codex/auth.json` on the host carry the
+same OAuth refresh token. Refreshing in one place invalidates the other: the
+loser gets `401 refresh_token_reused` and the phase fails with zero tokens.
+
+Running `codex exec` locally during a validation window can therefore break the
+containerized codex phase you are about to validate, and the failure looks like
+a platform bug rather than a credential collision.
+
+- [ ] Codex credentials re-minted before a run that exercises codex phases
+- [ ] Local `codex` not used concurrently with a containerized codex phase
+
+### A green check belongs to a commit, not to a PR
+
+`gh pr checks` and the PR page summarise the checks they last saw. Push a new
+commit and that summary can still be showing the PREVIOUS commit's green while a
+fresh run has only just started. Merging on it means merging code no check ever
+ran against.
+
+The tell is a PR that reads BLOCKED with **no failing checks**: that is what a
+required check which has not reported yet looks like, not a glitch.
+
+Before any merge, confirm the runs belong to the head SHA you are about to merge:
+
+```bash
+gh pr view <n> --json headRefOid -q .headRefOid
+gh pr view <n> --json statusCheckRollup \
+  -q '.statusCheckRollup[] | "\(.conclusion // .status)  \(.name)"'
+```
+
+"`gh pr checks` says green" and "green for the commit I am merging" are different
+claims. Only the second one is a gate.
+
+- [ ] Check runs verified against the head SHA being merged, not the PR summary
+
 ### Cold paths look like outages
 
 A Tailscale route that has not been used recently returns connection failures
@@ -1007,7 +1074,7 @@ phases:
   - id: implement
     agent:
       provider: claude | codex
-      model: <model-id>                     # ignored for codex
+      model: <model-id>                     # forwarded to codex as --model
       allow_delegation: false
 ```
 
@@ -1107,11 +1174,29 @@ uv run python scripts/validate_codex_observability.py --execution <execution-id>
 - [ ] Timeline shows `Bash` ops (from `command_execution`) and `Edit` ops (from `file_change`)
 - [ ] Token usage non-zero, with `cache_creation == 0` (codex reports no cache-creation)
 - [ ] Exactly **one** session summary is recorded
-- [ ] The phase declared an explicit supported model (normally `gpt-5.6-sol`).
-      There is deliberately NO `codex` -> `gpt-5.6` substitution: a run that
-      names no model resolves to nothing and must surface as UNPRICED, never
-      as $0.00 and never silently priced at some other model's rate.
-- [ ] Cost is priced off the declared model - **not** a sonnet/haiku rate
+**Which workflow you run decides which of the next two boxes applies.** The
+shipped `workflows/examples/codex-demo.yaml` deliberately declares NO model, so
+it CANNOT produce a priced result: `resolve_phase_model("codex", None)` returns
+`None`, and this codebase never prices an unresolved model by substitution.
+Running it and expecting a cost is asserting something the code cannot do.
+
+- [ ] **Unmodelled run** (`codex-demo.yaml` as shipped): surfaces as UNPRICED.
+      Never `$0.00`, never silently priced at another model's rate. Note that
+      #890 can still render this as `$0.00` outside the cost-specific
+      endpoints, so check a cost endpoint, not a session list.
+- [ ] **Explicitly modelled run** (a workflow declaring `agent.model`, e.g.
+      `gpt-5.6-sol`): cost is priced off the declared model, **not** a
+      sonnet/haiku rate. An explicit non-Claude model IS preserved and passed
+      through as `--model`; it is not dropped.
+
+> **Open question, unresolved as of 2026-08-26.** Every shipped codex example
+> omits the model, and `codex-demo.yaml` explains why: a claude-style id is
+> rejected by codex under a ChatGPT account. If codex under that auth mode
+> rejects every explicit id, then the second box above can never pass and codex
+> runs are structurally unpriceable. Whether the newer `gpt-5.6-sol` id is
+> accepted has NOT been established: the one attempt died on an unrelated
+> `refresh_token_reused` auth failure before reaching the model check. Settle
+> this with a single working codex run before trusting any codex cost figure.
 - [ ] Transcript renders raw codex JSONL: `agent_message` as assistant text, `turn.completed` as `result`
 - [ ] CLI banner noise is absent from the transcript (`Reading additional input from stdin`, `warning: --full-auto is deprecated`)
 - [ ] `validate_codex_observability.py` exits 0
@@ -1197,7 +1282,10 @@ Across the pair, assert:
 - [ ] Session list and detail show an agent badge reading **"Codex"**
 - [ ] A codex session shows **no** workspace-environment badge (shared image, by design)
 - [ ] Workflow phase editor exposes a provider dropdown (Claude / Codex / Claude (interactive))
-- [ ] Selecting **Codex** hides the model field (codex ignores `model`)
+- [ ] Selecting **Codex** hides the model field. NOTE: this is a UI limitation,
+      not codex ignoring the value. An explicit non-Claude `agent.model` in the
+      YAML is preserved and forwarded as `--model`; the dashboard simply does
+      not expose model selection for codex yet.
 - [ ] Codex transcript lines render, including `log` lines for CLI diagnostics
 
 ---
