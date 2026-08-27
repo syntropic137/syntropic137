@@ -1189,17 +1189,17 @@ Running it and expecting a cost is asserting something the code cannot do.
       sonnet/haiku rate. An explicit non-Claude model IS preserved and passed
       through as `--model`; it is not dropped.
 
-> **Open question, unresolved as of 2026-08-26.** Every shipped codex example
-> omits the model, and `codex-demo.yaml` explains why: a claude-style id is
-> rejected by codex under a ChatGPT account. If codex under that auth mode
-> rejects every explicit id, then the second box above can never pass and codex
-> runs are structurally unpriceable. Whether the newer `gpt-5.6-sol` id is
-> accepted has NOT been established: the one attempt died on an unrelated
-> `refresh_token_reused` auth failure before reaching the model check. Settle
-> this with a single working codex run before trusting any codex cost figure.
-- [ ] Transcript renders raw codex JSONL: `agent_message` as assistant text, `turn.completed` as `result`
-- [ ] CLI banner noise is absent from the transcript (`Reading additional input from stdin`, `warning: --full-auto is deprecated`)
-- [ ] `validate_codex_observability.py` exits 0
+> **Settled 2026-08-26.** Codex DOES accept an explicit `gpt-5.6-sol` under
+> ChatGPT auth: verified on `exec-9e55e62987a4`, which completed with
+> `agent_model=gpt-5.6-sol` and a cost of $0.0299256, matching the corrected
+> Standard short-context rates to seven decimals. The older warning in
+> `codex-demo.yaml` named the ALIAS `gpt-5.6`, which is a different string and
+> may still be rejected; name the concrete id. All three shipped codex examples
+> now declare it. See issue #892.
+>
+> So the modelled branch above is the normal path. The unmodelled branch is kept
+> to document what happens when a model is genuinely absent, not as a thing to
+> aim for.
 
 ### Codex security assertions
 

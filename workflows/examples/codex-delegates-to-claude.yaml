@@ -17,6 +17,13 @@ phases:
     agent:
       provider: codex
       allow_delegation: true
+      # Verified 2026-08-26: the concrete model id IS accepted under ChatGPT
+      # auth and is required for cost attribution. An unnamed model resolves to
+      # no rate, and this platform never prices by substitution, so omitting it
+      # makes the run unpriced. The ALIAS `gpt-5.6` is a different string and
+      # may still be rejected ("model not supported when using Codex with a
+      # ChatGPT account"); name the concrete id. See issue #892.
+      model: gpt-5.6-sol
     prompt_template: |
       Implement palindrome.py with is_palindrome(s: str) -> bool. Then delegate a
       code review to Claude Code with one shell command:
