@@ -1,6 +1,6 @@
 # Delegated session capture (#895) and the delegation shim (#899)
 
-**Status:** design, revision 3. Revised against a cross-model review that
+**Status:** design, revision 4. Revised against a cross-model review that
 declined to approve revision 1. Grounded in `exec-bf732cd21c0a` and
 `exec-dd8d177bbde6` on the dev stack, 2026-08-27.
 
@@ -71,6 +71,58 @@ So: **lineage and guaranteed child completeness are the gaps.**
    identical tags, identical agent type, and concurrency defeats ordering.
 3. **Two ID spaces.** Platform ids are minted by the processor; the store holds
    harness-native ids. The join must be established, not assumed.
+
+## The session store is NOT a dependency, and this is why
+
+Revision 3 said "the store supplies the data". Measured against the actual
+configuration, that was wrong in a way that would have shipped a silent
+failure.
+
+`.env` line 470 reads **"CENTRAL SESSION STORE (SeshMagic) - OPT-IN, DEFAULT
+OFF"**, `SYN_SESSION_STORE_URL` is empty by default, and the documentation is
+explicit about what empty means:
+
+> When empty, no session-store variables are injected into workspace containers
+> and behaviour is identical to having no store at all.
+
+So on a default install there is no symlinking of harness roots, no sweep, and
+no exported child transcript. Capture built on the store would have produced
+nothing on that install: no session, no cost, no error. That is the exact shape
+of failure this work exists to remove, rebuilt one layer up.
+
+**The child's own live stream carries everything cost needs, and the shim is
+already reading it.** `codex exec --json` emits `turn.completed` with
+`usage` (`input_tokens`, `cached_input_tokens`, `output_tokens`,
+`reasoning_output_tokens`), on the same stdout the shim parses for
+`thread.started.thread_id`. Claude's stream-json carries the equivalent.
+
+So the sources split by what they are each actually good for:
+
+| | Source | Required? |
+|---|---|---|
+| Lineage, tokens, cost | The child's live stream, read by the edge adapter | **Yes.** Works with the store disabled |
+| Full transcript, reconstitution | The session store | **No.** Enrichment when enabled |
+
+The store makes a run *readable*. The stream makes it *accounted for*. Only the
+second is a hard requirement, and conflating them made an opt-in feature look
+like infrastructure.
+
+### Non-goal: the parent's tool output is never a pricing source
+
+The parent captures the delegate's own summary as prose inside a Bash
+`tool_result`, for example `"tokens used\n4,598\nDONE"`. It must never be
+parsed for cost, and the reason is stronger than brittleness. Measured on
+`exec-8104e5611eba`:
+
+- prose in the parent's tool output: **4,598**
+- the child's structured record: **12,206** total (input 12,067, output 139,
+  cached 9,984), model `gpt-5.6-sol`
+
+Non-cached input plus output is 2,222, so 4,598 is not that either. Whatever
+the summary counts, it is neither total nor billable tokens, and it
+under-reports by roughly 3x while looking entirely plausible. A cost built on
+it would not look broken; it would look cheap. For work fanned out
+specifically to control spend, that is the worst available failure.
 
 ## The protocol
 
