@@ -246,6 +246,29 @@ corrupted secret - use `--format json`.
 
 - [ ] Byte length of critical env values matches expectation
 
+### A model's explanation of an error is not the error
+
+Agent transcripts contain the agent's own account of what went wrong, written
+confidently and usually first in the output. It is an interpretation, not a
+reading, and it is frequently wrong in a specific way: the model latches onto
+the most prominent line and builds a causal story around it.
+
+On 2026-08-27 a delegated codex run failed. Claude reported:
+
+> "The Codex sandbox encountered a permissions issue with bubblewrap."
+
+The tool output underneath showed a bubblewrap WARNING that codex recovered
+from, then an absolute-path complaint, and only then the real fault: a denied
+user namespace. Two wrong fixes were attempted from the top of that stack
+before anyone read to the bottom of it.
+
+Read the `tool_result`, not the assistant text that follows it. When a log has
+several plausible errors, the first one is the least likely to be the cause,
+because the ones after it are what happened when the first was survived.
+
+- [ ] Every failure diagnosis cites a tool result or a log line, not an agent's
+      summary of one
+
 ### A 200 from an SPA is not a health check
 
 The dev stack serves the dashboard on the same port as the API, with a
@@ -1233,18 +1256,80 @@ Each leader must delegate **twice**: once to a subagent of its own kind, and onc
 to the opposite harness. Same-kind delegation is the cheap common case;
 cross-harness is where credential staging and stream parsing actually break.
 
-| Workflow | Leader | Same-harness subagent | Cross-harness subagent |
+| Workflow file | Leader | Delegates to | Verified |
 |---|---|---|---|
-| `claude-leads-mixed-delegation` | claude | claude (Task subagent) | codex (`codex exec`) |
-| `codex-leads-mixed-delegation` | codex | codex (`codex exec`) | claude (`claude -p`) |
+| `workflows/examples/codex-delegates-to-claude.yaml` | codex | claude (`claude -p`) | 2026-08-27 |
+| `workflows/examples/claude-delegates-to-codex.yaml` | claude | codex (`codex exec`) | 2026-08-27 |
+
+These are single yaml files, not packages, so install them with `create --from`:
 
 ```bash
-syn workflow run claude-leads-mixed-delegation
-syn workflow run codex-leads-mixed-delegation
+syn workflow create "Codex delegates to Claude" --from workflows/examples/codex-delegates-to-claude.yaml
+syn workflow create "Claude delegates to Codex" --from workflows/examples/claude-delegates-to-codex.yaml
+syn workflow run codex-delegates-to-claude
+syn workflow run claude-delegates-to-codex
 ```
 
 Both phases need `allow_delegation: true`; the leader's provider is set by
-`agent.provider` on the phase.
+`agent.provider` on the phase. The platform installs a different baked skill per
+direction, which is visible in the api logs and is a useful confirmation that
+delegation was even attempted:
+
+```
+Installed baked delegation skill delegating-to-claude-p for agent codex
+Installed baked delegation skill delegating-to-codex   for agent claude-code
+```
+
+#### Codex must bypass its own sandbox when it is the DELEGATE
+
+A delegated `codex exec` inside a workspace container must use
+`--dangerously-bypass-approvals-and-sandbox`, never `-s workspace-write`. Codex
+sandboxes itself with bubblewrap, and bubblewrap cannot create an unprivileged
+user namespace inside Docker, so every write in the delegated run fails.
+
+The error is three layers deep and the top two both look like the answer:
+
+```
+warning: Codex could not find bubblewrap on PATH ... will use the bundled
+         bubblewrap in the meantime            <- WARNING. codex continues.
+bwrap: No permissions to create a new namespace, likely because the kernel
+       does not allow non-privileged user namespaces.     <- the actual fault
+Failed to write file /workspace/palindrome.py             <- the symptom
+```
+
+Installing bubblewrap does not help: a bundled copy is already in use and the
+namespace is what is denied. The flag sounds reckless and is not: the workspace
+container IS the sandbox.
+
+- [ ] Delegated `codex exec` uses the bypass flag, and `< /dev/null`
+- [ ] Delegated run's output appears in the parent transcript, not just a claim
+      that it ran
+
+#### Assert the delegation actually happened
+
+A failed delegation currently reports `success=true` (issue #894). The primary
+agent falls back to doing the work itself and records the fact in free text
+inside its own `TASK_RESULT` comment, which nothing reads. So a green phase is
+NOT evidence that delegation occurred.
+
+- [ ] The delegate's own output is present in the transcript. For codex-leads,
+      that means Claude's verdict text; for claude-leads, codex's `DONE`
+- [ ] `TASK_RESULT.comments` does not contain "delegation failed"
+
+#### Delegate cost is NOT captured yet
+
+Known gap, issue #895. Record what you observe rather than expecting a pass:
+
+- [ ] `cost_by_model` on the phase. TODAY this has ONE key, the primary agent
+      only, even when the delegation demonstrably ran. Two keys means #895
+      landed
+- [ ] Session count for the execution. TODAY this is 1. Two linked sessions
+      means #895 landed
+
+Measured 2026-08-27: `exec-8634cc139420` (codex leads) recorded
+`{gpt-5.6-sol: 0.226512}` and one session, while Claude's verdict text was in
+the transcript. The delegate's tokens are unrecorded, so execution cost is
+understated by the entire delegate leg.
 
 Per run, assert:
 
