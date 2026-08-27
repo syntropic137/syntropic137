@@ -106,6 +106,16 @@ class ExecutionCost:
     not a corruption.
     """
 
+    unpriced_by_phase: dict[str, int] = field(default_factory=dict)
+    """Per-phase count of observations that could not be priced.
+
+    ``cost_by_phase`` can only say "this phase cost $X". It has no way to say
+    "we do not know what this phase cost", so an unpriced phase either vanished
+    from the breakdown or showed up as ``$0.00`` - the same ambiguity #890 fixes
+    at the execution level, one level down. A phase listed here contributed real
+    work that carries no rate.
+    """
+
     cost_by_model: dict[str, Decimal] = field(default_factory=dict)
     """Cost breakdown by model."""
 
@@ -186,6 +196,7 @@ class ExecutionCost:
             turns=data.get("turns", 0),
             duration_ms=data.get("duration_ms", 0),
             cost_by_phase=_coerce_decimal_dict(data.get("cost_by_phase")),
+            unpriced_by_phase=dict(data.get("unpriced_by_phase") or {}),
             cost_by_model=_coerce_decimal_dict(data.get("cost_by_model")),
             cost_by_tool=_coerce_decimal_dict(data.get("cost_by_tool")),
             unpriced_observation_count=data.get("unpriced_observation_count", 0),
@@ -213,6 +224,7 @@ class ExecutionCost:
             "turns": self.turns,
             "duration_ms": self.duration_ms,
             "cost_by_phase": {k: str(v) for k, v in self.cost_by_phase.items()},
+            "unpriced_by_phase": dict(self.unpriced_by_phase),
             "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},
             "cost_by_tool": {k: str(v) for k, v in self.cost_by_tool.items()},
             "unpriced_observation_count": self.unpriced_observation_count,

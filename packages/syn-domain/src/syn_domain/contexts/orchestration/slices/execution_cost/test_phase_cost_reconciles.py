@@ -99,15 +99,20 @@ def _summary_row(
     )
 
 
+# A real OpenAI model with no rate in the pricing table.
+_UNPRICED_REAL_MODEL = "gpt-5.6-mini"
+
+
 @pytest.mark.unit
 class TestPhaseCostReconcilesWithTotal:
     def test_null_cost_phase_is_priced_from_its_own_tokens(self) -> None:
         """The regression itself: a phase with no SDK cost used to vanish."""
         rows = [_phase_row("plan", _OPUS_MODEL, sdk_cost=None)]
 
-        by_phase = price_phase_rows(rows, CostCalculator())
+        phases = price_phase_rows(rows, CostCalculator())
 
-        assert by_phase == {"plan": _OPUS_COST_1M_1M}
+        assert phases.cost_by_phase == {"plan": _OPUS_COST_1M_1M}
+        assert phases.unpriced_by_phase == {}
 
     def test_breakdown_sums_to_the_execution_total(self) -> None:
         """The invariant #812 is really about.
@@ -131,9 +136,9 @@ class TestPhaseCostReconcilesWithTotal:
         ]
 
         grouped = price_grouped_session_summary(summary_rows, CostCalculator())
-        by_phase = price_phase_rows(phase_rows, CostCalculator())
+        phases = price_phase_rows(phase_rows, CostCalculator())
 
-        assert sum(by_phase.values()) == grouped.total_cost
+        assert sum(phases.cost_by_phase.values()) == grouped.total_cost
 
     def test_same_phase_priced_and_unpriced_groups_both_count(self) -> None:
         """One phase can produce two rows once the null-cost flag splits them."""
@@ -142,17 +147,26 @@ class TestPhaseCostReconcilesWithTotal:
             _phase_row("plan", _OPUS_MODEL, sdk_cost=None),
         ]
 
-        by_phase = price_phase_rows(rows, CostCalculator())
+        phases = price_phase_rows(rows, CostCalculator())
 
-        assert by_phase == {"plan": Decimal("12.50") + _OPUS_COST_1M_1M}
+        assert phases.cost_by_phase == {"plan": Decimal("12.50") + _OPUS_COST_1M_1M}
 
     def test_genuinely_unpriceable_phase_is_omitted_not_zeroed(self) -> None:
         """Unknown model and no SDK cost: say nothing rather than claim $0."""
         rows = [_phase_row("mystery", None, sdk_cost=None)]
 
-        by_phase = price_phase_rows(rows, CostCalculator())
+        phases = price_phase_rows(rows, CostCalculator())
 
-        assert by_phase == {}
+        assert phases.cost_by_phase == {}
+
+    def test_unpriceable_phase_is_reported_as_unpriced_not_merely_absent(self) -> None:
+        """Omission alone reads as "spent nothing"; the count says "unknown" (#890)."""
+        rows = [_phase_row("mystery", _UNPRICED_REAL_MODEL, sdk_cost=None)]
+
+        phases = price_phase_rows(rows, CostCalculator())
+
+        assert phases.cost_by_phase == {}
+        assert phases.unpriced_by_phase == {"mystery": 1}
 
     def test_unattributed_rows_are_bucketed_not_dropped(self) -> None:
         """A phase-less summary counts toward the total, so it must appear here.
@@ -166,9 +180,9 @@ class TestPhaseCostReconcilesWithTotal:
             _phase_row(None, _OPUS_MODEL, sdk_cost=Decimal("1.00")),
         ]
 
-        by_phase = price_phase_rows(rows, CostCalculator())
+        phases = price_phase_rows(rows, CostCalculator())
 
-        assert by_phase == {
+        assert phases.cost_by_phase == {
             "build": Decimal("3.33"),
             UNATTRIBUTED_PHASE_ID: Decimal("1.00"),
         }

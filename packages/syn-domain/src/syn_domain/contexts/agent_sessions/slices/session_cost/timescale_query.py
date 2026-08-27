@@ -18,6 +18,7 @@ from syn_shared.events import (
     TOKEN_USAGE,
     TOOL_EXECUTION_COMPLETED,
 )
+from syn_shared.pricing import PricedAmount, PricingStatus
 
 _SESSION_SUMMARY_QUERY = """
 SELECT
@@ -47,6 +48,7 @@ SELECT
     MAX(time) as last_observation,
     MAX(data->>'workspace_id') as workspace_id,
     MAX(data->>'model') as agent_model,
+    COUNT(*) as observation_count,
     execution_id,
     phase_id
 FROM agent_events
@@ -75,6 +77,18 @@ def _extract_tokens(token_result: asyncpg.Record) -> tuple[int, int, int, int]:
         token_result.get("cache_creation") or 0,
         token_result.get("cache_read") or 0,
     )
+
+
+def _row_observation_count(row: asyncpg.Record) -> int:
+    """How many raw ``agent_events`` rows this aggregated row stands for.
+
+    The token_usage fallback projects ``COUNT(*) AS observation_count`` so an
+    unpriced session reports how much real work went unpriced rather than a
+    flat 1. The session_summary path has no such column (it is a single
+    finalized row), so it falls back to 1 - which is still non-zero, and
+    non-zero is what makes a client render "unpriced" instead of "$0.00".
+    """
+    return int(row.get("observation_count") or 1)
 
 
 def _resolve_agent_model(
@@ -131,23 +145,35 @@ class TimescaleSessionCostQuery:
 
     def _calculate_cost(
         self,
+        session_id: str,
         exec_result: asyncpg.Record | None,
         input_tokens: int,
         output_tokens: int,
         cache_creation: int,
         cache_read: int,
         agent_model: str | None,
-    ) -> Decimal:
-        """Calculate cost from SDK value or token-based estimation."""
+    ) -> PricedAmount:
+        """Resolve cost from the SDK-reported value or from this row's own tokens.
+
+        Returns a ``PricedAmount`` so "no rate for this model" stays
+        distinguishable from "this cost nothing" all the way to the caller
+        (issue #890). The old ``Decimal`` return collapsed both into zero here,
+        one hop after the calculator had the information to tell them apart.
+        """
         sdk_cost = exec_result.get("sdk_cost") if exec_result else None
         if sdk_cost is not None:
-            return Decimal(str(sdk_cost))
+            return PricedAmount(
+                cost=Decimal(str(sdk_cost)),
+                status=PricingStatus.PRICED,
+                model=agent_model,
+            )
         return self._cost_calculator.calculate_token_cost(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cache_creation=cache_creation,
             cache_read=cache_read,
             model=agent_model,
+            context=f"session_id={session_id}",
         )
 
     @staticmethod
@@ -155,7 +181,8 @@ class TimescaleSessionCostQuery:
         session_id: str,
         exec_result: asyncpg.Record | None,
         token_result: asyncpg.Record,
-        total_cost: Decimal,
+        priced: PricedAmount,
+        unpriced_observation_count: int,
         input_tokens: int,
         output_tokens: int,
         cache_creation: int,
@@ -165,7 +192,14 @@ class TimescaleSessionCostQuery:
         completed_at: datetime | None,
         duration_ms: int | None,
     ) -> SessionCost:
-        """Assemble a SessionCost from resolved query fields."""
+        """Assemble a SessionCost from resolved query fields.
+
+        An unpriced amount still reports zero dollars - the read model's
+        ``total_cost_usd`` is a ``Decimal`` and every consumer sums it - but it
+        now ships ``unpriced_observation_count`` alongside, so the zero is
+        labelled rather than asserted (issue #890).
+        """
+        total_cost = priced.cost if priced.cost is not None else Decimal("0")
         sc = SessionCost(session_id=session_id)
         sc.input_tokens = input_tokens
         sc.output_tokens = output_tokens
@@ -174,10 +208,14 @@ class TimescaleSessionCostQuery:
         sc.tool_calls = tool_count
         sc.token_cost_usd = total_cost
         sc.total_cost_usd = total_cost
+        sc.unpriced_observation_count = unpriced_observation_count
         agent_model = _resolve_agent_model(exec_result, token_result)
         if agent_model:
             sc.agent_model = agent_model
-            sc.cost_by_model = {agent_model: total_cost}
+            # Only a priced amount belongs in the breakdown. Writing a zero
+            # here would claim this model cost nothing.
+            if priced.is_priced:
+                sc.cost_by_model = {agent_model: total_cost}
         sc.started_at = started_at
         sc.execution_id = token_result.get("execution_id")
         sc.phase_id = token_result.get("phase_id")
@@ -203,7 +241,8 @@ class TimescaleSessionCostQuery:
 
             input_tokens, output_tokens, cache_creation, cache_read = _extract_tokens(token_result)
             agent_model = _resolve_agent_model(exec_result, token_result)
-            total_cost = self._calculate_cost(
+            priced = self._calculate_cost(
+                session_id,
                 exec_result,
                 input_tokens,
                 output_tokens,
@@ -217,7 +256,10 @@ class TimescaleSessionCostQuery:
                 session_id=session_id,
                 exec_result=exec_result,
                 token_result=token_result,
-                total_cost=total_cost,
+                priced=priced,
+                unpriced_observation_count=(
+                    0 if priced.is_priced else _row_observation_count(token_result)
+                ),
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cache_creation=cache_creation,

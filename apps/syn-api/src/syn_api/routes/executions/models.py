@@ -6,6 +6,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from syn_shared.display import EM_DASH
+
 
 class PhaseOperationInfo(BaseModel):
     operation_id: str
@@ -29,6 +31,11 @@ class PhaseExecutionInfo(BaseModel):
     total_tokens: int
     duration_seconds: float = 0.0
     cost_usd: Decimal = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
@@ -51,6 +58,11 @@ class ExecutionDetailResponse(BaseModel):
     total_cache_read_tokens: int
     total_tokens: int
     total_cost_usd: Decimal = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
@@ -82,7 +94,12 @@ class ExecutionSummaryResponse(BaseModel):
     total_cache_creation_tokens: int
     total_cache_read_tokens: int
     total_cost_usd: Decimal = Decimal("0")
-    total_cost_display: str = "$0.00"
+    total_cost_display: str = EM_DASH
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     duration_seconds: float | None = None
     duration_display: str = "—"
     tool_call_count: int = 0

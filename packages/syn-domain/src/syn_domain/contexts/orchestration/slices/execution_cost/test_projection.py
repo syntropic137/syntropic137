@@ -352,22 +352,24 @@ class TestExtractedHelpers:
 
     def test_calculate_token_cost(self) -> None:
         """_calculate_token_cost computes correct cost for a known model."""
-        cost, priced = _calculate_token_cost(
-            1_000_000, 1_000_000, 0, 0, model="claude-sonnet-4-20250514"
-        )
+        priced = _calculate_token_cost(1_000_000, 1_000_000, 0, 0, model="claude-sonnet-4-20250514")
         # 1M input @ $3 + 1M output @ $15 = $18
-        assert priced is True
-        assert cost == Decimal("18.00")
+        assert priced.is_priced
+        assert priced.cost == Decimal("18.00")
 
     def test_calculate_token_cost_unknown_model_is_unpriced(self) -> None:
-        """An unknown/missing model MUST NOT be priced as any real model (#788)."""
-        cost, priced = _calculate_token_cost(1_000_000, 1_000_000, 0, 0)
-        assert priced is False
-        assert cost == Decimal("0")
+        """An unknown/missing model MUST NOT be priced as any real model (#788).
 
-        cost, priced = _calculate_token_cost(1_000_000, 1_000_000, 0, 0, model="unknown-model")
-        assert priced is False
-        assert cost == Decimal("0")
+        And MUST NOT come back as ``Decimal("0")`` - that zero is what made
+        unpriced work indistinguishable from free work downstream (#890).
+        """
+        priced = _calculate_token_cost(1_000_000, 1_000_000, 0, 0)
+        assert not priced.is_priced
+        assert priced.cost is None
+
+        priced = _calculate_token_cost(1_000_000, 1_000_000, 0, 0, model="unknown-model")
+        assert not priced.is_priced
+        assert priced.cost is None
 
     def test_update_completed_at_sets_latest(self) -> None:
         """_update_completed_at updates to latest timestamp."""

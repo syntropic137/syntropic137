@@ -94,6 +94,12 @@ class ExecutionCostResponse(BaseModel):
     turns: int = 0
     duration_ms: float = 0
     cost_by_phase: dict[str, str] = Field(default_factory=dict)
+    unpriced_by_phase: dict[str, int] = Field(default_factory=dict)
+    """Per-phase count of observations that could not be priced.
+
+    A phase listed here but missing from ``cost_by_phase`` cost an UNKNOWN
+    amount; a phase in neither genuinely spent nothing (#890).
+    """
     cost_by_model: dict[str, str] = Field(default_factory=dict)
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
     is_complete: bool = False
@@ -179,6 +185,7 @@ def execution_cost_to_data(c: ExecutionCost) -> ExecutionCostData:
         turns=c.turns,
         duration_ms=c.duration_ms,
         cost_by_phase=c.cost_by_phase,
+        unpriced_by_phase=c.unpriced_by_phase,
         cost_by_model=c.cost_by_model,
         cost_by_tool=c.cost_by_tool,
         is_complete=c.is_complete,
@@ -373,6 +380,7 @@ def _execution_cost_to_api(c: ExecutionCostData) -> ExecutionCostResponse:
         turns=c.turns,
         duration_ms=c.duration_ms or 0.0,
         cost_by_phase={k: str(v) for k, v in (c.cost_by_phase or {}).items()},
+        unpriced_by_phase={k: int(v) for k, v in (c.unpriced_by_phase or {}).items()},
         cost_by_model={k: str(v) for k, v in (c.cost_by_model or {}).items()},
         cost_by_tool={k: str(v) for k, v in (c.cost_by_tool or {}).items()},
         is_complete=c.is_complete,
@@ -469,6 +477,7 @@ async def get_execution_cost_endpoint(
     response = _execution_cost_to_api(result.value)
     if not include_breakdown:
         response.cost_by_phase = {}
+        response.unpriced_by_phase = {}
         response.cost_by_model = {}
         response.cost_by_tool = {}
 

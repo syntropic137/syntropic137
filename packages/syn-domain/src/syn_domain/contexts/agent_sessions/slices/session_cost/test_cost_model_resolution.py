@@ -84,7 +84,8 @@ async def test_projection_prices_token_usage_by_model(model: str, expected: Deci
 def test_timescale_cost_calculation_uses_resolved_model(model: str, expected: Decimal) -> None:
     query = TimescaleSessionCostQuery(Mock())
 
-    total_cost = query._calculate_cost(
+    priced = query._calculate_cost(
+        session_id="session-1",
         exec_result=None,
         input_tokens=1_000_000,
         output_tokens=1_000_000,
@@ -93,4 +94,24 @@ def test_timescale_cost_calculation_uses_resolved_model(model: str, expected: De
         agent_model=model,
     )
 
-    assert total_cost == expected
+    assert priced.cost == expected
+    assert priced.is_priced
+
+
+@pytest.mark.unit
+def test_timescale_cost_calculation_reports_unpriced_rather_than_zero() -> None:
+    """A model with no rate must not come back as a priceable zero (#890)."""
+    query = TimescaleSessionCostQuery(Mock())
+
+    priced = query._calculate_cost(
+        session_id="session-1",
+        exec_result=None,
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        cache_creation=0,
+        cache_read=0,
+        agent_model="gpt-5.6-mini",
+    )
+
+    assert priced.cost is None
+    assert not priced.is_priced

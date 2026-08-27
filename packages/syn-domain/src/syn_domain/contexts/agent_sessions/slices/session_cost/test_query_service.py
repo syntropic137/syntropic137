@@ -24,6 +24,9 @@ _FakeRow = Mapping[str, object]
 
 _OPUS_MODEL = "claude-opus-4-20250514"
 _SONNET_MODEL = "claude-sonnet-4-20250514"
+# A real OpenAI model with no rate in the pricing table - the production shape
+# of "unpriced", as opposed to an invented model id that could never occur.
+_UNPRICED_REAL_MODEL = "gpt-5.6-mini"
 
 # 1M input + 1M output tokens at Opus rates: $15.00 + $75.00 = $90.00
 _OPUS_COST_1M_1M = Decimal("90.00")
@@ -62,6 +65,7 @@ def _token_usage_row(agent_model: str | None) -> _FakeRow:
         "agent_model": agent_model,
         "execution_id": "exec-2",
         "phase_id": "phase-2",
+        "observation_count": 7,
     }
 
 
@@ -78,6 +82,7 @@ class TestBuildFromSummaryPricesByModel:
         assert result.total_cost_usd != _SONNET_COST_1M_1M
         assert result.cost_by_model == {_OPUS_MODEL: _OPUS_COST_1M_1M}
         assert result.agent_model == _OPUS_MODEL
+        assert result.unpriced_observation_count == 0
 
     def test_unknown_model_contributes_zero_not_a_guess(self) -> None:
         service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
@@ -87,6 +92,21 @@ class TestBuildFromSummaryPricesByModel:
         assert result.total_cost_usd == Decimal("0")
         assert result.cost_by_model == {}
         assert result.agent_model is None
+
+    def test_unpriced_model_marks_the_zero_as_unpriced(self) -> None:
+        """The zero must arrive labelled, or it reads as "this was free" (#890)."""
+        service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
+
+        result = service._build_from_summary(
+            _summary_row(_UNPRICED_REAL_MODEL), tool_counts={}, started_map={}
+        )
+
+        assert result.total_cost_usd == Decimal("0")
+        assert result.unpriced_observation_count > 0
+        # The model is still reported - we know WHAT ran, just not its rate.
+        assert result.agent_model == _UNPRICED_REAL_MODEL
+        # ...but it must not appear in the breakdown claiming to have cost $0.
+        assert result.cost_by_model == {}
 
 
 @pytest.mark.unit
@@ -101,6 +121,7 @@ class TestBuildFromTokenUsagePricesByModel:
         assert result.total_cost_usd == _OPUS_COST_1M_1M
         assert result.total_cost_usd != _SONNET_COST_1M_1M
         assert result.cost_by_model == {_OPUS_MODEL: _OPUS_COST_1M_1M}
+        assert result.unpriced_observation_count == 0
 
     def test_unknown_model_contributes_zero_not_a_guess(self) -> None:
         service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
@@ -110,4 +131,17 @@ class TestBuildFromTokenUsagePricesByModel:
         )
 
         assert result.total_cost_usd == Decimal("0")
+        assert result.cost_by_model == {}
+
+    def test_unpriced_model_counts_real_observations_not_one(self) -> None:
+        """The count reports the work that went unpriced, not the row count (#890)."""
+        service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
+
+        result = service._build_from_token_usage(
+            _token_usage_row(_UNPRICED_REAL_MODEL), tool_counts={}, started_map={}
+        )
+
+        assert result.total_cost_usd == Decimal("0")
+        # The fixture row aggregates 7 token_usage observations.
+        assert result.unpriced_observation_count == 7
         assert result.cost_by_model == {}

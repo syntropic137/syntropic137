@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from decimal import Decimal
 
     import asyncpg
 
 from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
+    PhaseCosts,
     TimescaleExecutionCostQuery,
     price_grouped_session_summary,
     price_grouped_token_usage,
@@ -134,6 +134,11 @@ GROUP BY execution_id, phase_id, data->>'model', ((data->>'total_cost_usd') IS N
 """
 
 
+def _phase_costs(phase_map: dict[str, PhaseCosts], execution_id: str) -> PhaseCosts:
+    """Per-phase breakdown for one execution, empty when it has no phase rows."""
+    return phase_map.get(execution_id) or PhaseCosts(cost_by_phase={}, unpriced_by_phase={})
+
+
 class ExecutionCostQueryService:
     """Read-only query service for execution cost data.
 
@@ -211,7 +216,7 @@ class ExecutionCostQueryService:
 
     async def _fetch_phase_cost_map(
         self, conn: object, execution_ids: list[str]
-    ) -> dict[str, dict[str, Decimal]]:
+    ) -> dict[str, PhaseCosts]:
         """Fetch per-execution, per-phase costs, priced like the execution total.
 
         Rows arrive split by (execution, phase, model, priced?) so an
@@ -260,7 +265,7 @@ class ExecutionCostQueryService:
         execution_id: str,
         rows: list[asyncpg.Record],
         tool_counts: dict[str, int],
-        phase_map: dict[str, dict[str, Decimal]],
+        phase_map: dict[str, PhaseCosts],
     ) -> ExecutionCost:
         """Build an ExecutionCost from model-grouped session_summary rows.
 
@@ -272,6 +277,7 @@ class ExecutionCostQueryService:
         tokens (issue #788).
         """
         grouped = price_grouped_session_summary(rows, self._cost_calculator)
+        phases = _phase_costs(phase_map, execution_id)
         return ExecutionCost(
             execution_id=execution_id,
             session_count=len(grouped.session_ids),
@@ -287,7 +293,8 @@ class ExecutionCostQueryService:
             duration_ms=self._resolve_duration(
                 grouped.duration_ms_raw, grouped.started_at, grouped.end_at
             ),
-            cost_by_phase=phase_map.get(execution_id, {}),
+            cost_by_phase=phases.cost_by_phase,
+            unpriced_by_phase=phases.unpriced_by_phase,
             cost_by_model=grouped.cost_by_model,
             unpriced_observation_count=grouped.unpriced_observation_count,
             started_at=grouped.started_at,

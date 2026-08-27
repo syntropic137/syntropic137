@@ -26,6 +26,7 @@ from syn_shared.events import (
     TOKEN_USAGE,
     TOOL_EXECUTION_COMPLETED,
 )
+from syn_shared.pricing import PricedAmount, PricingStatus
 
 # List all sessions with cost data from session_summary (authoritative).
 _LIST_ALL_FROM_SUMMARY_QUERY = """
@@ -61,6 +62,7 @@ SELECT
     MIN(time) as started_at,
     MAX(time) as last_observation,
     MAX(data->>'model') as agent_model,
+    COUNT(*) as observation_count,
     MAX(execution_id) as execution_id,
     MAX(phase_id) as phase_id
 FROM agent_events
@@ -81,6 +83,28 @@ FROM agent_events
 WHERE event_type = $1
 GROUP BY session_id
 """
+
+
+def _observation_count(row: object) -> int:
+    """How many raw ``agent_events`` rows an aggregated row stands for.
+
+    The token_usage list query projects ``COUNT(*) AS observation_count``. The
+    session_summary query returns one finalized row per session and has no such
+    column, so it counts as 1 - non-zero, which is all a client needs to render
+    "unpriced" rather than "$0.00".
+    """
+    try:
+        raw = row["observation_count"]  # type: ignore[index]
+    except (KeyError, IndexError):
+        return 1
+    return int(raw or 1)
+
+
+def _unpriced_count(priced: PricedAmount, row: object) -> int:
+    """Observations this row contributes to ``unpriced_observation_count``."""
+    if priced.is_priced:
+        return 0
+    return _observation_count(row)
 
 
 class SessionCostQueryService:
@@ -146,23 +170,30 @@ class SessionCostQueryService:
         rows = await conn.fetch(_STARTED_AT_BY_SESSION_QUERY, SESSION_STARTED)  # type: ignore[union-attr]
         return {row["session_id"]: row["started_at"] for row in rows}  # type: ignore[index]
 
-    def _resolve_cost(self, row: object, model: str | None) -> Decimal:
+    def _resolve_cost(self, row: object, model: str | None) -> PricedAmount:
         """Resolve cost from sdk_cost field or calculate from token counts.
 
         ``model`` comes from the same row (``agent_model``, a single session's
         model - a session is one agent/phase/sandbox, see #788) and is used
         whenever the SDK-reported cost is absent and we must price from raw
         token counts.
+
+        Returns a ``PricedAmount`` rather than a ``Decimal`` so a session whose
+        model has no rate reaches the API as "unpriced" instead of as a zero
+        that reads identically to free work (issue #890).
         """
         sdk_cost = row["sdk_cost"]  # type: ignore[index]
         if sdk_cost is not None:
-            return Decimal(str(sdk_cost))
+            return PricedAmount(
+                cost=Decimal(str(sdk_cost)), status=PricingStatus.PRICED, model=model
+            )
         return self._cost_calculator.calculate_token_cost(
             input_tokens=row["total_input"] or 0,  # type: ignore[index]
             output_tokens=row["total_output"] or 0,  # type: ignore[index]
             cache_creation=row["cache_creation"] or 0,  # type: ignore[index]
             cache_read=row["cache_read"] or 0,  # type: ignore[index]
             model=model,
+            context=f"session_id={row['session_id']}",  # type: ignore[index]
         )
 
     def _build_from_summary(
@@ -174,7 +205,8 @@ class SessionCostQueryService:
         """Build a SessionCost from a session_summary row."""
         sid = row["session_id"]  # type: ignore[index]
         agent_model = row["agent_model"]  # type: ignore[index]
-        cost = self._resolve_cost(row, agent_model)
+        priced = self._resolve_cost(row, agent_model)
+        cost = priced.cost if priced.cost is not None else Decimal("0")
         sc = SessionCost(session_id=sid)
         sc.input_tokens = row["total_input"] or 0  # type: ignore[index]
         sc.output_tokens = row["total_output"] or 0  # type: ignore[index]
@@ -190,9 +222,11 @@ class SessionCostQueryService:
         sc.started_at = started_map.get(sid)  # type: ignore[arg-type]
         sc.completed_at = row["completed_at"]  # type: ignore[index]
         sc.is_finalized = True
+        sc.unpriced_observation_count = _unpriced_count(priced, row)
         if agent_model:
             sc.agent_model = agent_model
-            sc.cost_by_model = {agent_model: cost}
+            if priced.is_priced:
+                sc.cost_by_model = {agent_model: cost}
         return sc
 
     def _build_from_token_usage(
@@ -208,13 +242,15 @@ class SessionCostQueryService:
         cache_creation = row["cache_creation"] or 0  # type: ignore[index]
         cache_read = row["cache_read"] or 0  # type: ignore[index]
         agent_model = row["agent_model"]  # type: ignore[index]
-        cost = self._cost_calculator.calculate_token_cost(
+        priced = self._cost_calculator.calculate_token_cost(
             input_tokens=total_input,
             output_tokens=total_output,
             cache_creation=cache_creation,
             cache_read=cache_read,
             model=agent_model,
+            context=f"session_id={sid}",
         )
+        cost = priced.cost if priced.cost is not None else Decimal("0")
         sc = SessionCost(session_id=sid)
         sc.input_tokens = total_input
         sc.output_tokens = total_output
@@ -226,7 +262,9 @@ class SessionCostQueryService:
         sc.execution_id = row["execution_id"]  # type: ignore[index]
         sc.phase_id = row["phase_id"]  # type: ignore[index]
         sc.started_at = started_map.get(sid) or row["started_at"]  # type: ignore[index,arg-type]
+        sc.unpriced_observation_count = _unpriced_count(priced, row)
         if agent_model:
             sc.agent_model = agent_model
-            sc.cost_by_model = {agent_model: cost}
+            if priced.is_priced:
+                sc.cost_by_model = {agent_model: cost}
         return sc

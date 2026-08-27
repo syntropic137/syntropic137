@@ -429,6 +429,11 @@ class ExecutionSummary(BaseModel):
     total_cache_creation_tokens: int = 0
     total_cache_read_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     tool_call_count: int = 0
     error_message: str | None = None
     repos: list[str]
@@ -449,6 +454,11 @@ class ExecutionDetail(BaseModel):
     total_cache_creation_tokens: int = 0
     total_cache_read_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
@@ -718,6 +728,11 @@ class PhaseExecution(BaseModel):
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     cost_usd: Decimal = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     duration_seconds: float | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -736,6 +751,11 @@ class ExecutionDetailFull(BaseModel):
     phases: list[PhaseExecution] = Field(default_factory=list)
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     started_at: datetime | str | None = None
     completed_at: datetime | str | None = None
     error_message: str | None = None
@@ -776,6 +796,11 @@ class SessionDetail(BaseModel):
     cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     agent_model: str | None = None
     cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
     operations: list[ToolOperation] = Field(default_factory=list)
@@ -888,6 +913,12 @@ class ExecutionCostData(BaseModel):
     turns: int = 0
     duration_ms: float = 0.0
     cost_by_phase: dict = Field(default_factory=dict)
+    unpriced_by_phase: dict = Field(default_factory=dict)
+    """Per-phase count of observations that could not be priced.
+
+    A phase absent from ``cost_by_phase`` but present here cost an unknown
+    amount; a phase in neither genuinely had no spend (#890).
+    """
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False

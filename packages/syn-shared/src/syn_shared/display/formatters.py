@@ -29,20 +29,14 @@ def format_tokens(n: int | None) -> str:
     return str(n)
 
 
-def format_cost(usd: float | Decimal | int | None) -> str:
-    """Format a USD cost.
+UNPRICED = "unpriced"
+"""Rendered when nothing in the total could be priced."""
 
-    Sub-cent values render as ``"<$0.01"`` (we don't pretend cents below the
-    smallest payable unit are meaningful). Values at or above ``$1000`` use the
-    ``$1.2k`` style. Negative values render with a leading minus.
 
-    USD-only for now. Revisit when multi-currency arrives.
-    """
-    if usd is None:
-        return EM_DASH
-    value = Decimal(str(usd)) if not isinstance(usd, Decimal) else usd
+def _format_known_cost(value: Decimal) -> str:
+    """Render a cost that is known to be complete."""
     if value < 0:
-        return "-" + format_cost(-value)
+        return "-" + _format_known_cost(-value)
     if value == 0:
         return "$0.00"
     if value < Decimal("0.01"):
@@ -50,6 +44,35 @@ def format_cost(usd: float | Decimal | int | None) -> str:
     if value >= Decimal("1000"):
         return f"${value / 1000:.1f}k"
     return f"${value:.2f}"
+
+
+def format_cost(usd: float | Decimal | int | None, unpriced_count: int = 0) -> str:
+    """Format a USD cost, saying so when the figure is incomplete.
+
+    Sub-cent values render as ``"<$0.01"`` (we don't pretend cents below the
+    smallest payable unit are meaningful). Values at or above ``$1000`` use the
+    ``$1.2k`` style. Negative values render with a leading minus.
+
+    ``unpriced_count`` is how many observations carried no usable rate and so
+    contributed nothing to ``usd``. It is not decoration: without it a total of
+    zero reads as "this was free" when it actually means "we could not price
+    this", which is exactly how unpriced codex runs rendered as ``$0.00`` all
+    the way to the dashboard (issue #890, ADR-067 D5). A non-zero count with a
+    non-zero total means the figure is a real lower bound, not the total.
+
+    Mirrors ``formatCostWithCoverage`` in ``apps/syn-cli-node/src/output/format.ts``
+    so the API and the CLI render the same three states.
+
+    USD-only for now. Revisit when multi-currency arrives.
+    """
+    if usd is None:
+        return EM_DASH
+    value = Decimal(str(usd)) if not isinstance(usd, Decimal) else usd
+    if unpriced_count <= 0:
+        return _format_known_cost(value)
+    if value <= 0:
+        return UNPRICED
+    return f">={_format_known_cost(value)} (partial)"
 
 
 def format_duration_seconds(seconds: float | int | None) -> str:
