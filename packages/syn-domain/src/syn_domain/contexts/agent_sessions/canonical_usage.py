@@ -72,14 +72,25 @@ turn_usage AS (
     WHERE event_type = '{TOKEN_USAGE}'
     GROUP BY session_id, data->>'model'
 ),
+priced_summary AS (
+    -- A summary of all zeroes is an ABSENCE of usage, not a measurement of
+    -- none, so it must not supersede anything. Seen on live data: a run that
+    -- produced no result event records the accumulator in Lane 1 and zeroes
+    -- here, because AgentExecutionHandler resolves the aggregate's totals
+    -- with a `result_x or accumulated_x` fallback but writes this row from
+    -- the RAW result fields. Letting those zeroes win reports real work as
+    -- free - the silently-cheap failure this module exists to prevent.
+    SELECT * FROM summary_usage
+    WHERE input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens > 0
+),
 canonical_usage AS (
     -- The summary SUPERSEDES the per-turn rows for a session; it never adds
     -- to them. Unioning both would report the authoritative output plus the
     -- placeholders it replaces.
-    SELECT * FROM summary_usage
+    SELECT * FROM priced_summary
     UNION ALL
     SELECT * FROM turn_usage
-    WHERE session_id NOT IN (SELECT session_id FROM summary_usage)
+    WHERE session_id NOT IN (SELECT session_id FROM priced_summary)
 )
 """
 """Per-(session, model) canonical usage.

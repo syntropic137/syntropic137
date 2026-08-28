@@ -256,3 +256,60 @@ class TestHeatmapPrefersVendorReportedCost:
         breakdown = _bucket_for_today(buckets).breakdown
         assert breakdown["cost_usd"] > 0.0
         assert breakdown["unpriced_tokens"] == 0.0
+
+
+class TestEmptySummaryDoesNotEraseRealUsage:
+    async def test_all_zero_summary_falls_back_to_the_turn_rows(self, event_store, execution_id):
+        """A summary of zeroes is an ABSENCE of usage, not a measurement of none.
+
+        Found on live data: two sessions carry a session_summary whose four
+        token fields are all 0 while their token_usage rows hold real work.
+        The cause is upstream - AgentExecutionHandler resolves the aggregate's
+        totals with a per-field ``result_x or accumulated_x`` fallback but
+        writes the summary from the RAW result fields, so a run that produced
+        no result event records the accumulator in Lane 1 and zeroes in Lane 2.
+
+        Letting that summary supersede the turn rows reports the session as
+        free, which is the silently-cheap failure this whole change exists to
+        remove. Superseding requires the summary to actually carry usage.
+        """
+        from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery import (
+            TimescaleHeatmapQuery,
+        )
+
+        session_id = str(uuid4())
+        await event_store.record_observation(
+            session_id=session_id,
+            observation_type=TOKEN_USAGE,
+            data={
+                "input_tokens": 18,
+                "output_tokens": 5,
+                "cache_creation_tokens": 4_521,
+                "cache_read_tokens": 58_654,
+                "model": _MODEL,
+            },
+            execution_id=execution_id,
+        )
+        await event_store.record_observation(
+            session_id=session_id,
+            observation_type=SESSION_SUMMARY,
+            data={
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+                "total_cost_usd": None,
+                "model": _MODEL,
+            },
+            execution_id=execution_id,
+        )
+
+        query = TimescaleHeatmapQuery(event_store.pool)
+        buckets = await query.query(
+            start=date.today(), end=date.today(), execution_ids={execution_id}
+        )
+
+        breakdown = _bucket_for_today(buckets).breakdown
+        assert breakdown["cache_read_tokens"] == 58_654
+        assert breakdown["input_tokens"] == 18
+        assert breakdown["tokens"] == 63_198
