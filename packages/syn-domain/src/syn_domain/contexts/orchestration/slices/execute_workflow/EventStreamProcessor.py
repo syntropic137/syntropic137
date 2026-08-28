@@ -201,6 +201,17 @@ class StreamResult:
     # reported about itself.
     delegation_attempts: int = 0
     delegation_successes: int = 0
+    #: The session id the HARNESS chose for this phase's own run, read off its
+    #: stream. A different namespace from the platform id this processor was
+    #: constructed with: the platform mints its id before the agent starts, so
+    #: the two can never be derived from one another.
+    #:
+    #: This exists so the delegate import can dedup by LOOKUP. The filesystem
+    #: sweep reports every session a phase produced, all keyed by harness id,
+    #: and without this the leader is indistinguishable from its delegates -
+    #: which is what forced the old classify-by-agent-name inference, and what
+    #: made a claude phase delegating to claude unattributable (#895).
+    leader_native_session_id: str | None = None
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
@@ -253,6 +264,7 @@ class EventStreamProcessor:
         self._execution_id = execution_id
         self._phase_id = phase_id
         self._session_id = session_id
+        self._leader_native_session_id: str | None = None
         self._workspace_id = workspace_id
         self._agent_model = agent_model
 
@@ -367,6 +379,7 @@ class EventStreamProcessor:
             error_reason=self._error_reason,
             delegation_attempts=self._delegation_attempts,
             delegation_successes=self._delegation_successes,
+            leader_native_session_id=self._leader_native_session_id,
         )
 
     async def _process_line(
@@ -472,6 +485,16 @@ class EventStreamProcessor:
 
         cli_type = cli_event.get("type", "")
         logger.debug("CLI event type: %s", cli_type)
+
+        # FIRST id wins, and later lines are ignored even though claude repeats
+        # session_id on every one. Last-wins would be a live hazard: anything
+        # that ever put another session's line on this stream would rebind the
+        # leader at the end of the run, and the import would then treat the
+        # real leader as a delegate and bill it twice.
+        if self._leader_native_session_id is None:
+            announced = cli_event.get("session_id")
+            if isinstance(announced, str) and announced.strip():
+                self._leader_native_session_id = announced
 
         task_result: dict[str, Any] | None = None
 
