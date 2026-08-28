@@ -265,6 +265,7 @@ services:
     tmpfs:
       - /tmp
       - /home/syn/.config  # 1Password CLI needs writable config dir on read-only FS
+      - /home/syn/.sigstore  # cosign writes a TUF trust cache here BEFORE it can verify anything
     deploy:
       resources:
         limits:
