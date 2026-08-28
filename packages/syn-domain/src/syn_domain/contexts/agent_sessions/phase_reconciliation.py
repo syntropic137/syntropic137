@@ -97,9 +97,9 @@ class PhaseReconciliation:
         value means "ask again", not "nothing to do"; a caller that finalises
         on it turns the race into a silent undercount.
 
-        The capture observation carries an accepted count, which is the only
-        thing that separates "not yet" from "genuinely never arrived". This
-        property hands the caller the ids; the count belongs to the caller.
+        Capture CONFIRMED these sessions, so one the store cannot return yet
+        is late rather than absent. What ends the wait is an explicit retry
+        bound, not a counter - see ``assess_import_readiness``.
         """
         return self._delegates_with(RetryDisposition.MISSING)
 

@@ -107,25 +107,25 @@ class TestTheRoundTrip:
         result = await resolve_delegate_usage(store, session.session_id)
 
         assert isinstance(result, PricedUsage)
-        # The WHOLE value, not one bucket. Asserting a single field leaves a
-        # test that still passes when the other buckets are dropped or
-        # zeroed, which is the exact defect this recovery exists to catch.
+        # Every field as a LITERAL from the recorded fixture. Asserting one
+        # bucket leaves a test that passes when the others are dropped - and
+        # the version this replaces was no better: it built the expected value
+        # out of `result` for five of its six fields, so it was shaped like a
+        # whole-value check while verifying a single number. It would have
+        # passed with cache_read of 1 instead of 28340.
         assert result == PricedUsage(
-            model=result.model,
+            model="claude-sonnet-4-6",
             uncached_input_tokens=7,
-            cache_read_tokens=result.cache_read_tokens,
-            cache_creation_tokens=result.cache_creation_tokens,
-            output_tokens=result.output_tokens,
-            message_count=result.message_count,
+            cache_read_tokens=28340,
+            cache_creation_tokens=56843,
+            output_tokens=214,
+            message_count=3,
         )
-        assert result.cache_read_tokens > 0
-        assert result.output_tokens > 0
-        assert result.total_tokens == (
-            result.uncached_input_tokens
-            + result.cache_read_tokens
-            + result.cache_creation_tokens
-            + result.output_tokens
-        )
+        # The buckets are disjoint by construction, so the total is their sum.
+        # Stated separately because the total is the number that reaches a
+        # cost report, and arriving at it with right parts and a wrong total
+        # is exactly what the codex running-total trap produces.
+        assert result.total_tokens == 85404
 
 
 @pytest.mark.unit

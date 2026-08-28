@@ -427,6 +427,24 @@ async def test_no_session_is_ever_silently_dropped(
             "s-a",
             id="contradictory-id",
         ),
+        pytest.param(
+            "codex",
+            [("real-leader", "Codex "), ("child", "Codex")],
+            "real-leader",
+            id="trailing-space-near-miss",
+        ),
+        pytest.param(
+            "codex",
+            [("real-leader", "codex-cli"), ("child", "Codex")],
+            "real-leader",
+            id="image-manifest-near-miss",
+        ),
+        pytest.param(
+            "codex",
+            [("real-leader", "\uff23odex"), ("child", "Codex")],
+            "real-leader",
+            id="fullwidth-near-miss",
+        ),
     ],
 )
 async def test_the_already_priced_session_is_never_fetched(

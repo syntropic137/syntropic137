@@ -6,8 +6,9 @@ silent: it imports nothing and reports success. This module is the one place
 that difference is decided, so the decision is a value that can be asserted
 rather than a branch buried in a processor.
 
-The capture observation's ``accepted`` counter is the only evidence available
-that separates "not yet" from "never arrived".
+The captured session ids are the authority for what exists: capture CONFIRMED
+them, so a delegate the store cannot yet return is late rather than absent.
+What ends the wait is an explicit retry bound, not a counter.
 """
 
 from __future__ import annotations
@@ -62,58 +63,78 @@ def _phase(*delegates: DelegateCost, leader: str | None = "s-leader") -> PhaseRe
 
 @pytest.mark.unit
 class TestTheRaceIsNotMistakenForCompletion:
-    def test_an_absent_delegate_with_capture_still_pending_says_wait(self) -> None:
+    def test_a_missing_delegate_waits_while_budget_remains(self) -> None:
         """The silent failure this module exists to prevent.
 
-        The phase has three sessions: a leader and two delegates, which is
-        what capture accepted. The store has produced two of them. The third
-        is in flight, not missing, and importing now would finalise the phase
-        below its true cost.
-
-        The count includes the LEADER, because capture counts every session it
-        accepted and does not distinguish which one led.
+        Capture confirmed the delegate, so the store not returning it yet
+        means late, not absent. Finalising here reports the phase at less than
+        its true cost, and the shortfall is invisible afterwards.
         """
         readiness = assess_import_readiness(
-            reconciliation=_phase(_priced("s-a"), _absent("s-b")), accepted_count=3
+            reconciliation=_phase(_priced("s-a"), _absent("s-b")), attempts_remaining=3
         )
 
         assert readiness is ImportReadiness.WAIT
 
-    def test_all_delegates_absent_says_wait_not_nothing_to_do(self) -> None:
+    def test_all_delegates_missing_waits(self) -> None:
         """The exact shape observed in practice: query the instant the
-        execution completes and the store returns zero sessions.
+        execution completes and the store returns nothing at all.
         """
-        readiness = assess_import_readiness(reconciliation=_phase(_absent("s-a")), accepted_count=2)
+        readiness = assess_import_readiness(
+            reconciliation=_phase(_absent("s-a")), attempts_remaining=3
+        )
 
         assert readiness is ImportReadiness.WAIT
 
-    def test_every_delegate_priced_says_ready(self) -> None:
-        readiness = assess_import_readiness(reconciliation=_phase(_priced("s-a")), accepted_count=2)
+    def test_every_delegate_priced_is_ready(self) -> None:
+        readiness = assess_import_readiness(
+            reconciliation=_phase(_priced("s-a")), attempts_remaining=3
+        )
 
         assert readiness is ImportReadiness.READY
 
 
 @pytest.mark.unit
 class TestWaitingDoesNotBecomeForever:
-    def test_an_absent_delegate_the_capture_never_promised_says_ready(self) -> None:
-        """Retrying forever is its own bug.
+    """Retrying forever is its own bug, so the wait is bounded and exhaustion
+    is a state a caller can act on.
+    """
 
-        Capture accepted 1 session, the leader's, so nothing further is
-        coming. The absent delegate genuinely never arrived, and the phase
-        must be allowed to finalise carrying that gap rather than retry until
-        something gives up.
+    def test_a_spent_budget_exhausts_rather_than_waiting(self) -> None:
+        readiness = assess_import_readiness(
+            reconciliation=_phase(_absent("s-a")), attempts_remaining=0
+        )
+
+        assert readiness is ImportReadiness.EXHAUSTED
+
+    def test_a_negative_budget_exhausts(self) -> None:
+        readiness = assess_import_readiness(
+            reconciliation=_phase(_absent("s-a")), attempts_remaining=-1
+        )
+
+        assert readiness is ImportReadiness.EXHAUSTED
+
+    def test_exhausted_is_not_ready(self) -> None:
+        """The distinction an operator depends on. READY says this phase's
+        cost is complete; EXHAUSTED says it is known to be short. Collapsing
+        them turns a reported gap back into a silent one.
         """
-        readiness = assess_import_readiness(reconciliation=_phase(_absent("s-a")), accepted_count=1)
+        exhausted = assess_import_readiness(
+            reconciliation=_phase(_absent("s-a")), attempts_remaining=0
+        )
+        complete = assess_import_readiness(
+            reconciliation=_phase(_priced("s-a")), attempts_remaining=0
+        )
 
-        assert readiness is ImportReadiness.READY
+        assert exhausted is not complete
+        assert complete is ImportReadiness.READY
 
     def test_an_unreadable_delegate_never_waits(self) -> None:
         """Present but unparseable. Asking again cannot change the answer, so
-        this must not be confused with the race no matter what the counter
-        says.
+        it must not hold the phase open however much budget remains.
         """
         readiness = assess_import_readiness(
-            reconciliation=_phase(_unreadable("s-a")), accepted_count=5
+            reconciliation=_phase(_unreadable("s-a")), attempts_remaining=99
         )
 
         assert readiness is ImportReadiness.READY
@@ -122,53 +143,28 @@ class TestWaitingDoesNotBecomeForever:
 @pytest.mark.unit
 class TestPhasesWithNothingToImport:
     def test_a_phase_that_delegated_nothing_is_ready(self) -> None:
-        readiness = assess_import_readiness(reconciliation=_phase(), accepted_count=1)
+        readiness = assess_import_readiness(reconciliation=_phase(), attempts_remaining=3)
 
         assert readiness is ImportReadiness.READY
 
     def test_an_unattributable_phase_is_ready_not_waiting(self) -> None:
         """Unattributable is a settled verdict, not a pending one. Waiting on
-        it would retry a phase whose sessions will never become classifiable
-        by re-reading the store.
+        it would retry a phase whose sessions cannot become classifiable by
+        re-reading the store.
         """
         reconciliation = PhaseReconciliation(
             leader_session_id=None, delegates=(), unattributable=("s-a", "s-b")
         )
 
-        readiness = assess_import_readiness(reconciliation=reconciliation, accepted_count=2)
+        readiness = assess_import_readiness(reconciliation=reconciliation, attempts_remaining=3)
 
         assert readiness is ImportReadiness.READY
 
 
 @pytest.mark.unit
-class TestTheCounterIsTreatedAsUntrusted:
-    def test_a_missing_counter_still_waits_on_an_absent_delegate(self) -> None:
-        """When the capture reports no count, the evidence that would end the
-        wait is unavailable. Erring toward WAIT keeps a retryable gap
-        retryable; erring toward READY would finalise it silently, and the
-        caller bounds retries anyway.
-        """
-        readiness = assess_import_readiness(
-            reconciliation=_phase(_absent("s-a")), accepted_count=None
-        )
-
-        assert readiness is ImportReadiness.WAIT
-
-    def test_a_nonsensical_counter_does_not_wait_forever(self) -> None:
-        """A count below what the store already produced cannot be describing
-        more sessions to come.
-        """
-        readiness = assess_import_readiness(
-            reconciliation=_phase(_priced("s-a"), _absent("s-b")), accepted_count=0
-        )
-
-        assert readiness is ImportReadiness.READY
-
-
-@pytest.mark.unit
-class TestATransientFailureIsNotRetiredByCounting:
-    """A failed lookup and an empty answer are both retryable, but they end
-    for different reasons, and only one of them can be counted away.
+class TestATransientFailureIsTreatedLikeAMissingOne:
+    """Both are recoverable and neither can be settled by counting, so both
+    hold the phase open until the budget runs out.
     """
 
     def _transient(self, session_id: str) -> DelegateCost:
@@ -180,26 +176,21 @@ class TestATransientFailureIsNotRetiredByCounting:
             ),
         )
 
-    def test_a_failed_lookup_waits_even_when_the_count_is_satisfied(self) -> None:
-        """The distinction that makes three states necessary rather than two.
-
-        Capture accepted 2 and the store has produced 2, so a MISSING delegate
-        here would correctly be counted away and finalised. But this delegate
-        is not missing - the call never completed, and a call that never
-        completed says nothing about how many sessions exist. Counting must
-        not be allowed to declare it settled, or a reset connection silently
-        costs a real delegate its price.
-        """
+    def test_a_failed_lookup_waits(self) -> None:
         readiness = assess_import_readiness(
             reconciliation=_phase(_priced("s-a"), self._transient("s-b")),
-            accepted_count=2,
+            attempts_remaining=3,
         )
 
         assert readiness is ImportReadiness.WAIT
 
-    def test_a_failed_lookup_waits_with_no_count_at_all(self) -> None:
+    def test_a_failed_lookup_exhausts_rather_than_spinning(self) -> None:
+        """A deterministic adapter error looks transient from here and would
+        otherwise retry forever. The bound is what makes classifying broadly
+        safe: a misjudged error costs a few attempts, then a visible gap.
+        """
         readiness = assess_import_readiness(
-            reconciliation=_phase(self._transient("s-a")), accepted_count=None
+            reconciliation=_phase(self._transient("s-a")), attempts_remaining=0
         )
 
-        assert readiness is ImportReadiness.WAIT
+        assert readiness is ImportReadiness.EXHAUSTED

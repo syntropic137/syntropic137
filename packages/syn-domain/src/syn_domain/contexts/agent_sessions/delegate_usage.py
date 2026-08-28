@@ -86,8 +86,9 @@ async def resolve_delegate_usage(store: SessionStorePort, session_id: str) -> Us
         #
         # MISSING rather than merely unpriced: capture lands after the
         # execution reports completed, so this same branch covers both "the
-        # transcript is on its way" and "it never arrived". Only the caller,
-        # holding the capture's accepted count, can tell those apart.
+        # transcript is on its way" and "it never arrived". Capture confirmed
+        # the session, so a caller retries under a bound rather than treating
+        # this as settled.
         return UnpricedUsage(
             f"no stored session for {session_id!r}", retry=RetryDisposition.MISSING
         )

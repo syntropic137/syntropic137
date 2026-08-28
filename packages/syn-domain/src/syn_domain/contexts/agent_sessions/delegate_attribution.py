@@ -43,6 +43,13 @@ _AGENT_BY_PROVIDER: dict[str, str] = {
     AgentProvider.CODEX.value: "Codex",
 }
 
+#: Every agent spelling the store is known to emit.
+#:
+#: Used as a WHITELIST: a session whose agent is not exactly one of these
+#: makes the whole phase unattributable. See ``_has_unrecognised_agent`` for
+#: why an unknown label must not be read as "therefore a delegate".
+_KNOWN_AGENTS: frozenset[str] = frozenset(_AGENT_BY_PROVIDER.values())
+
 
 class SessionRole(StrEnum):
     """What one stored session was to its phase."""
@@ -90,33 +97,44 @@ def _agent_by_session(sessions: Sequence[tuple[str, str]]) -> dict[str, str] | N
     return collapsed
 
 
+def _has_unrecognised_agent(agent_by_session: dict[str, str]) -> bool:
+    """Whether any session names an agent that is not exactly a known one.
+
+    This is the GENERAL form of a bug first found as a casing problem, and
+    patching the casing alone left the class open. The failure: a phase
+    declaring codex with [("real-leader", "Codex "), ("child", "Codex")]. Only
+    the child matched the known spelling exactly, so it became the LEADER and
+    the real leader was classified a DELEGATE - then fetched and priced,
+    doubling part of the execution total.
+
+    A trailing space did that. So did a fullwidth character, and so did
+    ``"codex-cli"``, which is the workspace image manifest's own spelling of
+    the same provider. Chasing those one at a time means the next unknown
+    spelling reopens it, because any label that is not the leader's is
+    otherwise taken to be a delegate BY ELIMINATION.
+
+    So the rule is a whitelist rather than a normalisation: every agent must
+    be exactly a name the store is known to emit, or the phase is refused. A
+    session we cannot identify must never make another session a delegate.
+    """
+    return not set(agent_by_session.values()) <= _KNOWN_AGENTS
+
+
 def _sole_leader(agent_by_session: dict[str, str], leader_agent: str) -> str | None:
     """The one session recorded as the phase's own agent, or None.
 
-    None covers three refusals that all mean the same thing downstream: no
-    candidate (the assumption that the leader is present has failed), several
-    candidates (we cannot tell which was the phase's own agent), or an
-    ambiguity that only casing conceals.
+    None covers two refusals that mean the same thing downstream: no candidate
+    (the assumption that the leader is present has failed), or several (we
+    cannot tell which was the phase's own agent, and importing the wrong one
+    prices the session already billed).
 
-    That last one is the subtle case, and exact matching alone is NOT the
-    conservative choice. For a phase declaring codex with sessions
-    [("real-leader", "codex"), ("child", "Codex")], only the child matches
-    exactly, so it would become the leader and the REAL leader would be
-    classified a delegate - then fetched and priced. So a near-match is
-    treated as ambiguity rather than as a non-match: if relaxing case would
-    change which sessions are candidates, there is no sole leader.
+    Every agent reaching here is already an exactly-known spelling, so this
+    compares exactly and has no near-misses left to reason about.
     """
-    candidates = {
+    candidates = [
         session_id for session_id, agent in agent_by_session.items() if agent == leader_agent
-    }
-    relaxed = {
-        session_id
-        for session_id, agent in agent_by_session.items()
-        if agent.casefold() == leader_agent.casefold()
-    }
-    if relaxed != candidates or len(candidates) != 1:
-        return None
-    return next(iter(candidates))
+    ]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def classify_phase_sessions(
@@ -145,7 +163,7 @@ def classify_phase_sessions(
         return refuse_all()
 
     agent_by_session = _agent_by_session(sessions)
-    if agent_by_session is None:
+    if agent_by_session is None or _has_unrecognised_agent(agent_by_session):
         return refuse_all()
 
     leader = _sole_leader(agent_by_session, leader_agent)

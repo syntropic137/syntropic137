@@ -339,6 +339,56 @@ class TestCaseVariationCannotPromoteADelegate:
 
         assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
 
+    @pytest.mark.parametrize(
+        "near_miss",
+        [
+            pytest.param("codex", id="lowercase"),
+            pytest.param("CODEX", id="uppercase"),
+            pytest.param("Codex ", id="trailing-space"),
+            pytest.param(" Codex", id="leading-space"),
+            pytest.param("Codex\t", id="trailing-tab"),
+            pytest.param("\uff23odex", id="fullwidth-C"),
+            pytest.param("codex-cli", id="image-manifest-spelling"),
+            pytest.param("Codex-CLI", id="unknown-variant"),
+        ],
+    )
+    def test_no_near_miss_can_promote_a_delegate(self, near_miss: str) -> None:
+        """The GENERAL class, not the casing instance.
+
+        Each of these sits beside an EXACT "Codex" row. Under plain exact
+        matching the exact row became the leader and the near-miss row - the
+        real leader - became a priced delegate. Casing was only the first
+        spelling found; a trailing space, a fullwidth character and
+        "codex-cli" (the workspace image manifest's own spelling) all did it
+        too. Whitelisting known agents closes the class rather than each
+        instance.
+        """
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[
+                _session("real-leader", near_miss),
+                _session("child", "Codex"),
+            ],
+        )
+
+        assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
+
+    def test_an_unrecognised_agent_refuses_rather_than_becoming_a_delegate(
+        self,
+    ) -> None:
+        """An unknown label must not become a delegate BY ELIMINATION.
+
+        A future harness the store learns to emit would otherwise be priced as
+        a delegate of whichever known agent happened to be present, which is a
+        guess wearing a number.
+        """
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[_session("s-codex", "Codex"), _session("s-x", "GeminiCLI")],
+        )
+
+        assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
+
     def test_a_cased_variant_alone_refuses(self) -> None:
         """No exact match at all. Still refused rather than promoted: a fuzzy
         match that guesses right most of the time is how the leader eventually

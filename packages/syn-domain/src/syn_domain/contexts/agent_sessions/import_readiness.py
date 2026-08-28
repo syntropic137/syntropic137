@@ -6,10 +6,23 @@ held two. A reader that treats that emptiness as "nothing to import" reports
 success having imported nothing, and the resulting undercount looks exactly
 like a phase that never delegated.
 
-So "the store does not have it" has two meanings, and this module is the one
-place they are separated. It is a pure decision over values, deliberately not
-a branch inside a processor, so the race can be asserted in a unit test
-instead of reproduced against a live store.
+So "the store does not have it" has two meanings, and this module separates
+them. It is a pure decision over values, deliberately not a branch inside a
+processor, so the race can be asserted in a unit test rather than reproduced
+against a live store.
+
+WHY THIS DOES NOT COUNT CAPTURE'S ``accepted`` COUNTER. An earlier version
+compared what the store had produced against that counter and treated it as a
+promised total. It is the exporter's tally, reported beside separate tallies
+for discovered, uploaded, failed and rejected, and it is not a count of
+distinct sessions - so reading it as one is wrong in BOTH directions. It can
+finalise a phase whose delegate is still becoming readable, and it can wait
+for a total that the set of distinct sessions will never reach.
+
+The captured session ids are the authority instead, and they are already in
+hand. Capture CONFIRMED those sessions, so a delegate the store cannot yet
+return is late rather than absent, and only an explicit bound should end that
+wait.
 """
 
 from __future__ import annotations
@@ -27,60 +40,55 @@ class ImportReadiness(StrEnum):
     """Whether this phase's delegate costs can be committed now."""
 
     READY = "ready"
-    """Everything that is coming has arrived. Import and finalise."""
+    """Nothing is outstanding. Import and finalise."""
 
     WAIT = "wait"
-    """Capture is still in flight. Ask again rather than finalising a phase at
-    less than its true cost."""
+    """Capture is still landing, and budget to wait for it remains.
+
+    NOT advisory. A caller must not emit the phase's cost while this stands:
+    doing so finalises a number it already knows is short, and the shortfall
+    is invisible afterwards.
+    """
+
+    EXHAUSTED = "exhausted"
+    """Still outstanding, but the retry budget is spent.
+
+    Finalise carrying a VISIBLE gap rather than retrying forever. Distinct
+    from READY because the two mean opposite things to an operator: READY says
+    this phase's cost is complete, EXHAUSTED says it is known to be short and
+    names which sessions are missing.
+    """
 
 
 def assess_import_readiness(
-    reconciliation: PhaseReconciliation, accepted_count: int | None
+    reconciliation: PhaseReconciliation, attempts_remaining: int
 ) -> ImportReadiness:
-    """Decide whether to import this phase's delegates or ask again later.
+    """Decide whether to import this phase's delegates, wait, or give up.
 
     Args:
         reconciliation: What the store could tell us about the phase's
             sessions right now.
-        accepted_count: The capture observation's count of sessions it
-            accepted for this phase, or None when the capture did not report
-            one. This is the ONLY evidence separating "the transcript is on
-            its way" from "it never arrived"; nothing else here can tell the
-            two apart.
-    """
-    # A failed lookup is retried on its own terms. No capture counter can
-    # retire it, because a call that never completed says nothing about how
-    # many sessions exist - so counting must not be allowed to declare it
-    # settled.
-    if reconciliation.transient_delegate_ids:
-        return ImportReadiness.WAIT
+        attempts_remaining: How many further attempts the caller is willing to
+            make. Zero or fewer means this is the last word.
 
-    absent = reconciliation.missing_delegate_ids
-    if not absent:
-        # Nothing outstanding. Delegates that are present-but-unreadable, and
-        # sessions that are unattributable, are settled verdicts rather than
-        # pending ones: re-reading the store will not change either, and
-        # waiting on them would retry forever.
+    Returns:
+        READY when nothing is outstanding, WAIT while something recoverable
+        is, and EXHAUSTED when something is still outstanding but the budget
+        is gone.
+    """
+    # Present-but-unreadable delegates and unattributable sessions are settled
+    # verdicts, not pending ones: re-reading the store cannot change either,
+    # so they never hold a phase open however much budget remains.
+    outstanding = reconciliation.missing_delegate_ids + reconciliation.transient_delegate_ids
+    if not outstanding:
         return ImportReadiness.READY
 
-    if accepted_count is None:
-        # The evidence that would end the wait is unavailable. Err toward WAIT,
-        # which keeps a retryable gap retryable, rather than toward finalising
-        # it silently. Retries are bounded by the caller, so this cannot spin
-        # indefinitely on its own.
+    # Both outstanding kinds are recoverable and neither can be resolved by
+    # counting. A MISSING delegate was CONFIRMED by capture, so it is late
+    # rather than absent. A TRANSIENT one never got an answer at all, and a
+    # call that did not complete says nothing about what exists. The bound is
+    # what ends either, and it is the caller's to spend.
+    if attempts_remaining > 0:
         return ImportReadiness.WAIT
 
-    # Capture promised a number of sessions. If the store has already produced
-    # at least that many, nothing further is coming and the absent ones truly
-    # never arrived: let the phase finalise carrying the gap rather than retry
-    # until something gives up. A count below what we have seen is nonsensical
-    # and gets the same treatment, since it cannot be describing more to come.
-    # Counted against the LEADER too, because capture counts every session it
-    # accepted without distinguishing which one led. Unattributable sessions
-    # are not in this sum: a phase is either classified or refused whole, so
-    # when there are absent delegates there are no unattributable ids beside
-    # them.
-    present_delegates = len(reconciliation.delegates) - len(absent)
-    leader_present = 1 if reconciliation.leader_session_id is not None else 0
-    accounted = present_delegates + leader_present
-    return ImportReadiness.READY if accounted >= accepted_count else ImportReadiness.WAIT
+    return ImportReadiness.EXHAUSTED

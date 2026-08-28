@@ -113,8 +113,8 @@ class RetryDisposition(StrEnum):
 
     Capture lands AFTER an execution reports completed, so a reader arriving
     promptly sees an empty store for sessions that appear seconds later. This
-    ends when the capture's accepted count is satisfied - only that counter
-    separates "on its way" from "never arrived".
+    Capture confirmed the session, so this means late rather than absent, and
+    an explicit retry bound is what ends the wait.
     """
 
     TRANSIENT = "transient"
