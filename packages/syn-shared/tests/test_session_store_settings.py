@@ -336,3 +336,36 @@ def test_a_separate_read_token_wins() -> None:
 
 def test_no_tokens_at_all_is_none_not_an_error() -> None:
     assert SessionStoreSettings(url="http://s").effective_read_token is None
+
+
+def test_a_whitespace_only_read_token_falls_back() -> None:
+    """The hole cross-model review pointed at (#931).
+
+    An empty string was already safe - SecretStr("") is falsy - but "   " is
+    TRUTHY while stripping to nothing, so an object-truthiness check sends it
+    as the bearer credential. Every read then 401s, which is classified
+    TRANSIENT, so it reads as a store outage that will clear on retry rather
+    than as a bad credential. It never clears.
+    """
+    settings = SessionStoreSettings(url="http://s", auth_token="write", read_token="   ")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "write"
+
+
+def test_an_empty_read_token_falls_back_as_env_example_generates_it() -> None:
+    """.env.example emits `SYN_SESSION_STORE_READ_TOKEN=`, so this is the
+    shape most deployments will actually have."""
+    settings = SessionStoreSettings(url="http://s", auth_token="write", read_token="")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "write"
+
+
+def test_a_padded_read_token_is_stripped_not_rejected() -> None:
+    """A stray space around a REAL token would be sent in the header."""
+    settings = SessionStoreSettings(url="http://s", auth_token="write", read_token="  r  ")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "r"
+

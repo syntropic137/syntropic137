@@ -176,7 +176,7 @@ class SessionStoreSettings(BaseSettings):
         ),
     )
 
-    @field_validator("url", "auth_token", mode="before")
+    @field_validator("url", "auth_token", "read_token", mode="before")
     @classmethod
     def _empty_str_to_none(cls, v: object) -> object:
         """Treat an empty/whitespace-only env var as unset.
@@ -189,7 +189,7 @@ class SessionStoreSettings(BaseSettings):
             return None
         return v
 
-    @field_validator("url", "auth_token", mode="before")
+    @field_validator("url", "auth_token", "read_token", mode="before")
     @classmethod
     def _strip_surrounding_whitespace(cls, v: object) -> object:
         """Trim whitespace a human left around a hand-pasted value.
@@ -333,4 +333,11 @@ class SessionStoreSettings(BaseSettings):
         as a retry loop rather than as an error, which is the hardest kind to
         notice.
         """
-        return self.read_token or self.auth_token
+        # Compares the VALUE, not the object. A whitespace-only token strips
+        # to empty but its SecretStr is still truthy, so an object-truthiness
+        # check would send "   " as the bearer credential and 401 every read -
+        # which is classified TRANSIENT, so it would look like a store outage
+        # and retry forever rather than reporting a bad credential.
+        if self.read_token is not None and self.read_token.get_secret_value().strip():
+            return self.read_token
+        return self.auth_token
