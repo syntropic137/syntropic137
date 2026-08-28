@@ -133,6 +133,18 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
+      # preflight also runs `vsa validate`, and `vsa` comes from the
+      # event-sourcing-platform submodule rather than the runner image. Without
+      # this the recipe dies at exit 127 - the SAME failure mode the pnpm note
+      # below describes, arriving from the other missing toolchain. The
+      # cache-key-suffix keeps this job's cache distinct from the lint job's so
+      # neither can serve the other a binary built from a different submodule
+      # pin (see the poka-yoke note in the action itself).
+      - name: Setup VSA CLI
+        uses: ./.github/actions/setup-vsa
+        with:
+          cache-key-suffix: fitness
+
       # preflight includes codegen-check, and codegen shells out to pnpm in
       # three workspaces. Without this the whole target dies at exit 127 and
       # the failure names the recipe rather than the missing toolchain.
