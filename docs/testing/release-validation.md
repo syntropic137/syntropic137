@@ -597,9 +597,29 @@ operating in polling-only mode. This affects which triggers can fire.
 
 ```bash
 syn health
-# Check for webhook status in the health response, or:
-curl -s http://localhost:8137/health | jq .
+curl -s http://localhost:<port>/api/v1/health | jq .
 ```
+
+> **Neither of these reports webhook or polling state.** Measured 2026-08-27:
+> `syn health` prints only event-store and subscription lines, and
+> `/api/v1/health` returns exactly `{status, mode, subscription, codex_auth}`.
+> There is no webhook field to read. Use `/health` (no `/api/v1`) and you get the
+> SPA's HTML 200, which looks like a passing check and is not one.
+>
+> Until a webhook-status field exists, determine the mode from the API logs
+> instead - the poller announces itself at startup:
+>
+> ```bash
+> docker logs <api-container> 2>&1 | grep -iE 'poller|polling'
+> #   Poller cursor store initialized (ADR-060)
+> #   Loaded N poller cursor(s) from database
+> #   GitHub event poller started
+> ```
+>
+> `Loaded 0 poller cursor(s)` plus an empty `SYN_GITHUB_APP_PRIVATE_KEY_FILE`
+> means the poller is running with nothing to poll: no App credentials, so no
+> installation, so no repos. **Every trigger section below is then unrunnable,
+> not passing.** Do not record them as green.
 
 **If no Cloudflare Tunnel is configured → polling-only mode.**
 
@@ -1084,7 +1104,10 @@ syn artifacts content <artifact-id>
 
 ```bash
 echo "validation probe" > /tmp/syn-probe.txt
-syn artifacts create --file /tmp/syn-probe.txt --type report
+# NOTE: there is no --file flag. `create` takes content inline, and --workflow
+# is REQUIRED (omitting it fails with "Missing --workflow").
+syn artifacts create --workflow <workflow-id> --content "probe-content-12345" \
+  --type text --title "validation probe"
 syn artifacts list
 syn artifacts show <artifact-id>
 syn artifacts content <artifact-id>
@@ -1311,9 +1334,14 @@ stage credentials differently, delegate through different skills, and emit
 different stream schemas, so claude-leads and codex-leads are genuinely separate
 code paths. A single round-trip has repeatedly passed while its mirror was broken.
 
-Each leader must delegate **twice**: once to a subagent of its own kind, and once
-to the opposite harness. Same-kind delegation is the cheap common case;
-cross-harness is where credential staging and stream parsing actually break.
+Cross-harness delegation is where credential staging and stream parsing actually
+break, and it is what the two workflows below cover.
+
+> **Same-kind delegation is NOT covered by any workflow file.** An earlier
+> revision of this section asked each leader to delegate twice, once to its own
+> kind. `workflows/examples/` contains only the two cross-harness files, so that
+> instruction was unrunnable as written. If same-kind coverage is wanted, the
+> workflows have to be authored first.
 
 | Workflow file | Leader | Delegates to | Verified |
 |---|---|---|---|
