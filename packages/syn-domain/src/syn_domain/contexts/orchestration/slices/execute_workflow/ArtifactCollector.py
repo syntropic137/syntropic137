@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.artifacts import ArtifactType
@@ -81,6 +81,44 @@ class CollectedArtifacts:
 
     artifact_ids: list[str]
     first_content: str | None
+
+
+#: DIRECTORY names that hold machine-generated build output (issue #919).
+#:
+#: Deliberately narrow, and narrower than the first draft of this fix. Anything
+#: under artifacts/output/ was explicitly designated a deliverable by the
+#: workflow that wrote it, so the asymmetry is severe: keeping junk is
+#: annoying and recoverable, DROPPING a real artifact is silent data loss on
+#: the output path with nothing to notice it. A broader list would have eaten
+#: a node_modules snapshot, a packaged .venv, or a `.git` directory shipped
+#: deliberately as a reproducible repo, all of which are plausible outputs.
+#:
+#: So this covers only what was actually MEASURED as a problem: 28
+#: .pytest_cache and 16 __pycache__ entries out of 98 artifacts. If another
+#: kind of junk shows up in a real run, measure it and add it then.
+_IGNORED_DIRECTORY_SEGMENTS: Final[frozenset[str]] = frozenset(
+    {
+        "__pycache__",
+        ".pytest_cache",
+    }
+)
+
+
+def _is_collectable(artifact_path: str) -> bool:
+    """Whether a collected path is a deliverable rather than build junk.
+
+    Matches PARENT directory segments only, never the final filename. A file
+    literally named ``__pycache__`` is a file somebody chose to emit, and this
+    cannot tell a directory from a filename by string alone, so it does not
+    try: only the segments that are unambiguously directories are considered.
+
+    Measured before this existed: 44 of 98 artifacts, 45% of the store, were
+    build caches. The cost was not storage. The list is ordered oldest-first,
+    so the junk pushed real outputs off the first page and hid the very
+    deliverables someone opened the list to find.
+    """
+    parent_segments = artifact_path.split("/")[:-1]
+    return not any(segment in _IGNORED_DIRECTORY_SEGMENTS for segment in parent_segments)
 
 
 class ArtifactCollector:
@@ -190,9 +228,10 @@ class ArtifactCollector:
         Returns:
             CollectedArtifacts with IDs and first artifact content for injection.
         """
-        artifacts = await workspace.collect_files(
+        collected = await workspace.collect_files(
             patterns=["artifacts/output/**/*"],
         )
+        artifacts = [(path, body) for path, body in collected if _is_collectable(path)]
 
         artifact_ids: list[str] = []
         first_content: str | None = None
@@ -231,7 +270,13 @@ class ArtifactCollector:
     ) -> list[str]:
         """Collect partial artifacts during interrupt. Never raises."""
         try:
-            partial_artifacts = await workspace.collect_files(patterns=["artifacts/output/**/*"])
+            # Same filter as the happy path: collect_partial is the interrupt
+            # route and shares the pattern, so fixing only the other site would
+            # leave every cancelled run still sweeping junk (issue #919).
+            partial_collected = await workspace.collect_files(patterns=["artifacts/output/**/*"])
+            partial_artifacts = [
+                (path, body) for path, body in partial_collected if _is_collectable(path)
+            ]
             artifact_ids: list[str] = []
             for artifact_path, artifact_content in partial_artifacts:
                 artifact_id = str(uuid4())
