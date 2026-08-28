@@ -147,6 +147,16 @@ class RepositoryConfig(BaseModel):
     ref: str = Field(default="main")
 
 
+#: Input names a workflow may NOT declare, because the execute API refuses them.
+#:
+#: ADR-063 made repository identity typed on ``repos[]`` rather than smuggled
+#: through ``inputs``. The API rejects these at its boundary - but nothing
+#: stopped a workflow DECLARING one, and the dashboard renders declared inputs.
+#: The result was a form field that could never be submitted by any value
+#: (#942). Defined here and imported by the API so the two cannot drift.
+RESERVED_INPUT_NAMES: frozenset[str] = frozenset({"repos", "repository"})
+
+
 class InputYamlDefinition(BaseModel):
     """Input declaration as parsed from YAML.
 
@@ -417,6 +427,30 @@ class WorkflowDefinition(BaseModel):
         for entry in value:
             expanded.extend(expand_skill_entry(entry))
         return expanded
+
+    @field_validator("inputs")
+    @classmethod
+    def reject_reserved_input_names(
+        cls, inputs: list[InputYamlDefinition]
+    ) -> list[InputYamlDefinition]:
+        """A workflow must not declare an input the execute API will refuse.
+
+        Caught here rather than at run time because the dashboard renders
+        declared inputs: a reserved name becomes a field a user can fill and
+        can never submit. Failing at definition time also covers workflows
+        installed from the marketplace, which nobody reviews by hand.
+        """
+        offending = sorted({i.name for i in inputs} & RESERVED_INPUT_NAMES)
+        if offending:
+            names = ", ".join(repr(n) for n in offending)
+            msg = (
+                f"input name(s) {names} are reserved: repositories are passed in "
+                "the typed 'repos' array (CLI: -R <owner/repo>), never as an "
+                "input. A workflow declaring one renders a form field the API "
+                "always rejects."
+            )
+            raise ValueError(msg)
+        return inputs
 
     @field_validator("phases")
     @classmethod

@@ -1004,10 +1004,19 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-env-example check-plugin-schemas
+preflight: lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-env-example check-plugin-schemas check-workflows
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here (run separately): unit tests (just test),"
     @echo "   dashboard build, CLI checks, integration, security scanning."
+
+# Validate every workflow YAML against WorkflowDefinition.
+#
+# The schema pipeline already generated workflow.schema.json from the model and
+# drift-checked it - but nothing ran the repo's own workflow FILES through it,
+# so a workflow could declare a shape the platform rejects and reach the
+# dashboard as an unsubmittable form field (#942).
+check-workflows:
+    uv run python scripts/check_workflow_definitions.py
 
 # Codegen drift, detected by what codegen CHANGES rather than a hardcoded list.
 #
