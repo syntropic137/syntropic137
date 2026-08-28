@@ -243,6 +243,29 @@ async def _write_one_delegate(
     )
 
 
+def _refusal_if_leader_unknown(
+    captured: tuple[str, ...],
+    leader_native_session_id: str | None,
+    attempts_remaining: int,
+) -> DelegateImport | None:
+    """An early result when there is nothing to do, or nothing safe to do.
+
+    An empty sweep is simply nothing. A sweep whose leader cannot be identified
+    is a REFUSAL: importing everything would bill the leader twice and importing
+    nothing would silently drop real delegates, so it does neither and says so.
+    """
+    if not captured:
+        return DelegateImport(imported=(), retry_ids=(), attempts_remaining=attempts_remaining)
+    if leader_native_session_id is None or leader_native_session_id not in captured:
+        return DelegateImport(
+            imported=(),
+            retry_ids=(),
+            attempts_remaining=attempts_remaining,
+            leader_missing_from_sweep=True,
+        )
+    return None
+
+
 async def import_phase_delegates(
     store: SessionStorePort,
     recorder: DelegateUsageRecorder,
@@ -269,19 +292,9 @@ async def import_phase_delegates(
             last word, and any still-unreadable delegate becomes a named gap.
     """
     captured = tuple(dict.fromkeys(i for i in captured_session_ids if i and i.strip()))
-    if not captured:
-        return DelegateImport(imported=(), retry_ids=(), attempts_remaining=attempts_remaining)
-
-    if leader_native_session_id is None or leader_native_session_id not in captured:
-        # Refusing, not guessing. Without a known leader every id is a
-        # candidate: importing all of them bills the leader twice, importing
-        # none silently drops real delegates. Both are worse than saying so.
-        return DelegateImport(
-            imported=(),
-            retry_ids=(),
-            attempts_remaining=attempts_remaining,
-            leader_missing_from_sweep=True,
-        )
+    refusal = _refusal_if_leader_unknown(captured, leader_native_session_id, attempts_remaining)
+    if refusal is not None:
+        return refusal
 
     imported: list[ImportedDelegate] = []
     retry_ids: list[str] = []
@@ -311,87 +324,6 @@ async def import_phase_delegates(
         if _is_retryable(usage):
             retry_ids.append(harness_id)
         imported.append(written)
-
-    return DelegateImport(
-        imported=tuple(imported),
-        retry_ids=tuple(retry_ids),
-        attempts_remaining=attempts_remaining,
-    )
-
-    if leader_native_session_id is None or leader_native_session_id not in captured:
-        # Refusing, not guessing. Without a known leader every id is a
-        # candidate: importing all of them bills the leader twice, importing
-        # none silently drops real delegates. Both are worse than saying so.
-        return DelegateImport(
-            imported=(),
-            retry_ids=(),
-            attempts_remaining=attempts_remaining,
-            leader_missing_from_sweep=True,
-        )
-
-    imported: list[ImportedDelegate] = []
-    retry_ids: list[str] = []
-    for harness_id in captured:
-        if harness_id == leader_native_session_id:
-            continue
-
-        usage = await resolve_delegate_usage(store, harness_id)
-        if _is_retryable(usage) and attempts_remaining > 0:
-            # Held back rather than written as a zero. Writing it now would
-            # finalise a delegate the very next attempt could have priced.
-            retry_ids.append(harness_id)
-            continue
-
-        priced_usage, reason = _split(usage)
-
-        charge = await _unbilled_portion(ledger, execution_id, harness_id, priced_usage)
-        if charge is _NOTHING_LEFT_TO_BILL:
-            continue
-        if isinstance(charge, tuple):
-            priced_usage, ledger_reason = charge
-            reason = ledger_reason or reason
-        # uuid5 of the harness id, so a re-run addresses the SAME session
-        # rather than minting a second one.
-        #
-        # That is NOT full idempotency, and this comment used to claim it was.
-        # `agent_events` is append-only with no uniqueness constraint, so a
-        # second import writes a second pair of rows under the same session id
-        # and the cost queries SUM them. Same id, doubled tokens (#933).
-        #
-        # What keeps it correct today: exactly one import per phase. The
-        # retry budget is spent (attempts_remaining=0) and the finalise and
-        # teardown paths are mutually exclusive, since finalisation pops the
-        # workspace context manager before teardown iterates. A crash between
-        # the write and the phase completing is the case that is NOT covered.
-        platform_id = platform_session_id_for(harness_id)
-        await recorder.record_delegate_usage(
-            session_id=platform_id,
-            usage=priced_usage,
-            unpriced_reason=reason,
-            execution_id=execution_id,
-            phase_id=phase_id,
-            workspace_id=workspace_id,
-        )
-        priced = priced_usage is not None
-        if ledger is not None and priced and isinstance(usage, PricedUsage):
-            # The CUMULATIVE figure, not the delta just written: the mark
-            # answers "how much of this session has been charged", and the next
-            # import compares its own cumulative total against it.
-            #
-            # AFTER the write, deliberately. A mark that ran ahead of what was
-            # actually recorded would make a crash between the two look like
-            # spend that had already been billed, and it would never be.
-            await ImportLedger(ledger).commit(execution_id, harness_id, usage)
-        if _is_retryable(usage):
-            retry_ids.append(harness_id)
-        imported.append(
-            ImportedDelegate(
-                harness_session_id=harness_id,
-                platform_session_id=platform_id,
-                priced=priced,
-                reason=reason,
-            )
-        )
 
     return DelegateImport(
         imported=tuple(imported),
