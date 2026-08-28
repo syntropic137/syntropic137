@@ -41,7 +41,11 @@ def generate_projection_subscriptions(manifest: dict[str, Any]) -> str:
 
     # Get top N events by projection count
     event_counts = {event: len(projs) for event, projs in event_to_projections.items()}
-    top_events = sorted(event_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    # (-count, name): a TOTAL order. Sorting on count alone left ties in
+    # manifest-traversal order, so the same repo regenerated a different
+    # row order from a different manifest and `just docs-sync` - a
+    # MANDATORY pre-PR gate - failed on clean main.
+    top_events = sorted(event_counts.items(), key=lambda x: (-x[1], x[0]))[:10]
 
     # Get unique projections
     unique_projections = set()
@@ -157,8 +161,9 @@ def generate_event_flow_summary(manifest: dict[str, Any]) -> str:
 
     # Build flow summary (top 15 by projection count)
     flows = []
+    # Same total-order rule as above; ties broken by event name.
     for event, projections in sorted(
-        event_to_projections.items(), key=lambda x: len(x[1]), reverse=True
+        event_to_projections.items(), key=lambda x: (-len(x[1]), x[0])
     )[:15]:
         # Try to find which command creates this event (heuristic: event name starts with command)
         likely_command = "?"
