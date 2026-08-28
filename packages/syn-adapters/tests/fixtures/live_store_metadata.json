@@ -1,0 +1,27 @@
+{
+  "_captured": "2026-08-28, live APS-V1-0004 store, real delegated runs",
+  "_why": "Pins the observed asymmetry in metadata.model. It is the MODEL for claude and the PROVIDER for codex. Pricing from this field returns UNPRICED for every codex delegate, because nothing has a rate for 'openai'. The transcript is the authority; this fixture exists so that stops being a claim and becomes an assertion.",
+  "_direction": "Wrong in ONE direction only. A 'metadata usually works' shortcut passes a claude test and ships broken for codex - the wrong thing is only wrong in the case nobody wrote a test for.",
+  "records": {
+    "codex": {
+      "session_id": "01a0472d-0815-79b0-bda7-ea7c9cb51686",
+      "agent": "Codex",
+      "source_format": "codex-rollout-jsonl",
+      "scs_version": "1.0",
+      "metadata": {
+        "model": "openai",
+        "message_count": 11
+      }
+    },
+    "claude": {
+      "session_id": "c5e2715f-0a7a-4dde-a8bd-07369601cc94",
+      "agent": "ClaudeCode",
+      "source_format": "claude-code-jsonl",
+      "scs_version": "1.0",
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "message_count": 5
+      }
+    }
+  }
+}

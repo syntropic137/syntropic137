@@ -132,3 +132,56 @@ def test_refuses_to_construct_without_a_url() -> None:
     silent degradation into pricing nothing."""
     with pytest.raises(ValueError):
         HttpSessionStore("")
+
+
+class TestMetadataModelIsNotThePricingAuthority:
+    """metadata.model is the MODEL for claude and the PROVIDER for codex.
+
+    Captured from live records on 2026-08-28 (fixtures/live_store_metadata.json).
+    Pricing from this field returns UNPRICED for every codex delegate, because
+    nothing has a rate for "openai".
+
+    The reason this needs a test rather than a comment is the DIRECTION of the
+    error: metadata is correct for claude and wrong for codex, so a
+    "metadata usually works" shortcut passes a claude test and ships broken.
+    The wrong thing is only wrong in the case nobody wrote a test for.
+    """
+
+    @staticmethod
+    def _records() -> dict:
+        import pathlib
+
+        p = pathlib.Path(__file__).parent / "fixtures" / "live_store_metadata.json"
+        return json.loads(p.read_text())["records"]
+
+    def test_codex_metadata_reports_a_provider_not_a_model(self) -> None:
+        codex = self._records()["codex"]
+        assert codex["metadata"]["model"] == "openai", (
+            "if the store starts reporting a real model here, this guard should "
+            "be revisited rather than silently relied upon"
+        )
+        assert codex["agent"] == "Codex"
+
+    def test_claude_metadata_reports_a_real_model_which_is_the_trap(self) -> None:
+        claude = self._records()["claude"]
+        assert claude["metadata"]["model"] == "claude-sonnet-4-6", (
+            "metadata being RIGHT here is what makes it dangerous: a claude-only "
+            "test of a metadata shortcut passes"
+        )
+
+    @pytest.mark.asyncio
+    async def test_adapter_surfaces_metadata_model_without_pricing_from_it(self) -> None:
+        """The adapter reports the field faithfully; it must not substitute the
+        transcript's model, because the caller decides which is authoritative."""
+        codex = self._records()["codex"]
+        record = {
+            "session_id": codex["session_id"],
+            "source_format": codex["source_format"],
+            "raw": [{"type": "session_meta", "payload": {}}],
+            "metadata": {"model": codex["metadata"]["model"]},
+        }
+        s = await _store(lambda _: httpx.Response(200, json=record)).fetch_session(
+            codex["session_id"]
+        )
+        assert s is not None
+        assert s.model == "openai", "reported as-is; the transcript is what prices"
