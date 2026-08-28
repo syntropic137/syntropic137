@@ -127,13 +127,10 @@ location /assets/ {
 }
 
 
-# SPA routing (dashboard — root). This is the credential-bearing path on the
-# tunnel port, so it carries the origin-side brute-force backstop (see the
-# `auth` zone in 00-rate-limit.conf). Static assets live under /assets/ and are
-# exempt, so this does not throttle normal page loads.
+# SPA routing (dashboard — root). The brute-force backstop is applied at the
+# 8081 server scope (nginx.conf), so it covers this and every other Basic-Auth
+# path without also throttling the loopback-only port 80. Nothing to add here.
 location / {
-    limit_req zone=auth burst=20 nodelay;
-    limit_req_status 429;
     try_files $uri $uri/ /index.html;
 }
 
