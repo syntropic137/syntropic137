@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.agent_sessions.transcript_usage import PricedUsage
 
 from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
 from syn_domain.contexts.agent_sessions.delegate_usage import StoredSession
@@ -43,18 +47,19 @@ class _Store:
 
 @dataclass
 class _Writer:
-    written: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+    written: list[tuple[str, PricedUsage | None, str | None]] = field(default_factory=list)
 
-    async def record_observation(
+    async def record_delegate_usage(
         self,
+        *,
         session_id: str,
-        observation_type: str,
-        data: dict[str, object],
-        execution_id: str | None = None,
-        phase_id: str | None = None,
-        workspace_id: str | None = None,
+        usage: PricedUsage | None,
+        unpriced_reason: str | None,
+        execution_id: str,
+        phase_id: str,
+        workspace_id: str | None,
     ) -> None:
-        self.written.append((session_id, data))
+        self.written.append((session_id, usage, unpriced_reason))
 
 
 async def _run(
@@ -82,7 +87,7 @@ class TestTheLeaderIsNeverWritten:
 
         result = await _run(store, writer, leader="s-lead", captured=["s-lead", "s-del"])
 
-        assert [sid for sid, _ in writer.written] == [platform_session_id_for("s-del")]
+        assert [sid for sid, _, _ in writer.written] == [platform_session_id_for("s-del")]
         assert "s-lead" not in store.fetched
         assert [d.harness_session_id for d in result.imported] == ["s-del"]
 
@@ -108,9 +113,10 @@ class TestTheHoleTheOldDesignHad:
         result = await _run(store, writer, leader="s-a", captured=["s-a", "s-b"])
 
         assert len(writer.written) == 1
-        session_id, data = writer.written[0]
+        session_id, usage, _ = writer.written[0]
         assert session_id == platform_session_id_for("s-b")
-        assert data["output_tokens"] == 42
+        assert usage is not None
+        assert usage.output_tokens == 42
         assert result.imported[0].priced
 
 
@@ -166,9 +172,9 @@ class TestAnUnpriceableDelegateStaysVisible:
         )
 
         assert len(writer.written) == 1
-        _, data = writer.written[0]
-        assert data["output_tokens"] == 0
-        assert data["unpriced_reason"]
+        _, usage, reason = writer.written[0]
+        assert usage is None
+        assert reason
         assert result.exhausted
         assert result.may_finalise
         assert not result.imported[0].priced
@@ -185,4 +191,4 @@ class TestReimportIsIdempotentByConstruction:
         await _run(store, first, leader="s-lead", captured=["s-lead", "s-del"])
         await _run(store, second, leader="s-lead", captured=["s-lead", "s-del"])
 
-        assert [s for s, _ in first.written] == [s for s, _ in second.written]
+        assert [s for s, _, _ in first.written] == [s for s, _, _ in second.written]

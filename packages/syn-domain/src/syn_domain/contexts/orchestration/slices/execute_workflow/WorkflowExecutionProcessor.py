@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
+from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+    ObservationType,
+)
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -83,6 +86,7 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
+    from syn_domain.contexts.agent_sessions.transcript_usage import PricedUsage
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
@@ -118,6 +122,52 @@ class _DispatchContext:
     """
 
     current_phase_id: str | None = None
+
+
+class _DelegateUsageRecorder:
+    """Shapes a recovered delegate cost into a TOKEN_USAGE observation.
+
+    Lives here rather than in the domain module because this is the layer that
+    already knows the observation payload's field names. Keeping that knowledge
+    on one side of the seam means a telemetry-schema rename breaks loudly here
+    instead of silently unpricing delegates.
+    """
+
+    def __init__(self, writer: ObservabilityRecorder) -> None:
+        self._writer = writer
+
+    async def record_delegate_usage(
+        self,
+        *,
+        session_id: str,
+        usage: PricedUsage | None,
+        unpriced_reason: str | None,
+        execution_id: str,
+        phase_id: str,
+        workspace_id: str | None,
+    ) -> None:
+        # Zeroes carrying a reason, never an omission: an unpriceable delegate
+        # has to stay visible as a gap rather than vanish into "never ran".
+        data = {
+            "input_tokens": usage.uncached_input_tokens if usage else 0,
+            "output_tokens": usage.output_tokens if usage else 0,
+            "cache_creation_tokens": usage.cache_creation_tokens if usage else 0,
+            "cache_read_tokens": usage.cache_read_tokens if usage else 0,
+            "model": usage.model if usage else None,
+            "delegated": True,
+            # Only present when there IS a reason, so its presence alone marks
+            # a delegate that could not be priced.
+            **({"unpriced_reason": unpriced_reason} if unpriced_reason else {}),
+        }
+
+        await self._writer.record_observation(
+            session_id=session_id,
+            observation_type=ObservationType.TOKEN_USAGE,
+            data=data,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace_id,
+        )
 
 
 class WorkflowExecutionProcessor:
@@ -921,7 +971,7 @@ class WorkflowExecutionProcessor:
         try:
             outcome = await import_phase_delegates(
                 self._session_store,
-                self._observability_writer,
+                _DelegateUsageRecorder(self._observability_writer),
                 leader_native_session_id=self._phase_leader_native_ids.get(phase_id),
                 captured_session_ids=captured_ids,
                 execution_id=execution_id,

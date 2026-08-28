@@ -38,9 +38,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from syn_domain.contexts.agent_sessions.delegate_usage import resolve_delegate_usage
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
-    ObservationType,
-)
 from syn_domain.contexts.agent_sessions.import_identity import platform_session_id_for
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     PricedUsage,
@@ -56,23 +53,32 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DelegateImport",
+    "DelegateUsageRecorder",
     "ImportedDelegate",
-    "ObservationWriter",
     "import_phase_delegates",
 ]
 
 
-class ObservationWriter(Protocol):
-    """The observability lane's write side, narrowed to what this needs."""
+class DelegateUsageRecorder(Protocol):
+    """Where a recovered delegate cost goes.
 
-    async def record_observation(
+    Deliberately NOT the observability writer's own signature. That port takes
+    an untyped payload dict, and a domain module that builds one has to know
+    the observation's field names - so a rename in the telemetry schema would
+    silently stop pricing delegates while every test kept passing.
+
+    This asks for the numbers instead and lets the adapter shape them.
+    """
+
+    async def record_delegate_usage(
         self,
+        *,
         session_id: str,
-        observation_type: str,
-        data: dict[str, object],
-        execution_id: str | None = None,
-        phase_id: str | None = None,
-        workspace_id: str | None = None,
+        usage: PricedUsage | None,
+        unpriced_reason: str | None,
+        execution_id: str,
+        phase_id: str,
+        workspace_id: str | None,
     ) -> None: ...
 
 
@@ -121,42 +127,18 @@ class DelegateImport:
         return bool(self.retry_ids) and self.attempts_remaining <= 0
 
 
-def _observation_for(usage: UsageResult) -> tuple[dict[str, object], bool, str | None]:
-    """Turn one delegate's usage into the payload to record."""
-    if isinstance(usage, PricedUsage):
-        # The four buckets are disjoint by construction, so they map straight
-        # across. Any summing here would be a second home for the
-        # double-counting bug this module exists to avoid.
-        return (
-            {
-                "input_tokens": usage.uncached_input_tokens,
-                "output_tokens": usage.output_tokens,
-                "cache_creation_tokens": usage.cache_creation_tokens,
-                "cache_read_tokens": usage.cache_read_tokens,
-                "model": usage.model,
-                "delegated": True,
-            },
-            True,
-            None,
-        )
+def _split(usage: UsageResult) -> tuple[PricedUsage | None, str | None]:
+    """Separate a priced result from an unpriceable one and its reason.
 
-    reason = usage.reason if isinstance(usage, UnpricedUsage) else "transcript carried no usage"
-    # Zeroes WITH a reason, never an omission. A delegate that is present and
-    # unpriceable has to stay visible; dropping it makes it identical to a
-    # delegate that never ran, which is the invisibility this issue is about.
-    return (
-        {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cache_creation_tokens": 0,
-            "cache_read_tokens": 0,
-            "model": None,
-            "delegated": True,
-            "unpriced_reason": reason,
-        },
-        False,
-        reason,
-    )
+    An unpriceable delegate keeps its reason and is still recorded. Dropping it
+    would make it identical to a delegate that never ran, which is exactly the
+    invisibility this issue exists to end.
+    """
+    if isinstance(usage, PricedUsage):
+        return usage, None
+    if isinstance(usage, UnpricedUsage):
+        return None, usage.reason
+    return None, "transcript carried no usage"
 
 
 def _is_retryable(usage: UsageResult) -> bool:
@@ -166,7 +148,7 @@ def _is_retryable(usage: UsageResult) -> bool:
 
 async def import_phase_delegates(
     store: SessionStorePort,
-    writer: ObservationWriter,
+    recorder: DelegateUsageRecorder,
     *,
     leader_native_session_id: str | None,
     captured_session_ids: Sequence[str],
@@ -179,7 +161,7 @@ async def import_phase_delegates(
 
     Args:
         store: Where delegated transcripts are read back from.
-        writer: The observability lane's write side.
+        recorder: Where a recovered delegate cost is recorded.
         leader_native_session_id: The id the phase's own harness announced on
             its stream. ``None`` when the stream never announced one, in which
             case nothing is imported - see below.
@@ -216,19 +198,20 @@ async def import_phase_delegates(
             retry_ids.append(harness_id)
             continue
 
-        data, priced, reason = _observation_for(usage)
+        priced_usage, reason = _split(usage)
         # uuid5 of the harness id, so a re-run addresses the SAME session
         # rather than minting a second one carrying the same tokens. That is
         # what makes this safe to retry and safe to resume after a crash.
         platform_id = platform_session_id_for(harness_id)
-        await writer.record_observation(
+        await recorder.record_delegate_usage(
             session_id=platform_id,
-            observation_type=ObservationType.TOKEN_USAGE.value,
-            data=data,
+            usage=priced_usage,
+            unpriced_reason=reason,
             execution_id=execution_id,
             phase_id=phase_id,
             workspace_id=workspace_id,
         )
+        priced = priced_usage is not None
         if _is_retryable(usage):
             retry_ids.append(harness_id)
         imported.append(
