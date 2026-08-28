@@ -1,4 +1,11 @@
-{"type":"assistant","message":{"id":"msg_1","model":"claude-haiku-4-5","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":500,"cache_read_input_tokens":0}}}
-{"type":"user","message":{"content":"next"}}
-{"type":"assistant","message":{"id":"msg_2","model":"claude-haiku-4-5","usage":{"input_tokens":30,"output_tokens":15,"cache_creation_input_tokens":0,"cache_read_input_tokens":600}}}
-{"type":"assistant","message":{"id":"msg_3","model":"claude-haiku-4-5","usage":{"input_tokens":40,"output_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":600}}}
+{"type": "queue-operation"}
+{"type": "queue-operation"}
+{"type": "user"}
+{"type": "attachment"}
+{"type": "ai-title"}
+{"type": "assistant", "message": {"id": "msg_011CeUDx47ThzPY7HiusPTCN", "model": "claude-sonnet-4-6", "usage": {"input_tokens": 3, "cache_creation_input_tokens": 28340, "cache_read_input_tokens": 0, "output_tokens": 83, "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0}, "service_tier": "standard", "cache_creation": {"ephemeral_1h_input_tokens": 28340, "ephemeral_5m_input_tokens": 0}, "inference_geo": "", "iterations": [{"input_tokens": 3, "output_tokens": 83, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 28340, "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 28340}, "type": "message"}], "speed": "standard"}}}
+{"type": "assistant", "message": {"id": "msg_011CeUDx47ThzPY7HiusPTCN", "model": "claude-sonnet-4-6", "usage": {"input_tokens": 3, "cache_creation_input_tokens": 28340, "cache_read_input_tokens": 0, "output_tokens": 83, "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0}, "service_tier": "standard", "cache_creation": {"ephemeral_1h_input_tokens": 28340, "ephemeral_5m_input_tokens": 0}, "inference_geo": "", "iterations": [{"input_tokens": 3, "output_tokens": 83, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 28340, "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 28340}, "type": "message"}], "speed": "standard"}}}
+{"type": "user"}
+{"type": "assistant", "message": {"id": "msg_011CeUDxLBbRgLjA6euMuPvn", "model": "claude-sonnet-4-6", "usage": {"input_tokens": 1, "cache_creation_input_tokens": 163, "cache_read_input_tokens": 28340, "output_tokens": 48, "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0}, "service_tier": "standard", "cache_creation": {"ephemeral_1h_input_tokens": 163, "ephemeral_5m_input_tokens": 0}, "inference_geo": "", "iterations": [{"input_tokens": 1, "output_tokens": 48, "cache_read_input_tokens": 28340, "cache_creation_input_tokens": 163, "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 163}, "type": "message"}], "speed": "standard"}}}
+{"type": "last-prompt"}
+{"type": "ai-title"}

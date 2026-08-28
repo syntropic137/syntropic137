@@ -1,36 +1,46 @@
 """Token usage recovered from a STORED transcript (issue #895).
 
-WHY THIS LIVES HERE rather than in agentic-primitives, given the boundary rule
-in AGENTS.md: this parses a stored document identified by its ``source_format``
-under APS-V1-0004, not a live CLI's interface. syn137 implements the receiving
-end of that standard, and a store that cannot index its own content is not a
-store. The contract is the recorded format, which is versioned and named, not
-whatever the CLI is doing this week.
+WHY THIS LIVES HERE, given the boundary rule in AGENTS.md: this parses a
+stored document identified by its ``source_format`` under APS-V1-0004, not a
+live CLI's interface. syn137 implements the receiving end of that standard,
+and a store that cannot index its own content is not a store.
 
-THE TWO HARNESSES ARE INVERTED, and this is the trap under all the others:
+THE HARNESSES DO NOT SHARE SEMANTICS, and a shared "billable input" property
+cannot express both. That mistake priced a real Claude delegate at ZERO input
+tokens, which is the silently-cheap failure this issue exists to remove,
+reintroduced one layer up. So each parser normalises into the SAME canonical
+buckets at parse time, and nothing downstream re-derives them:
 
-    claude-code-jsonl   per-message DELTAS  -> SUM them
-    codex rollout       running TOTALS      -> take the LAST
+    codex rollout      input_tokens INCLUDES cached_input_tokens
+                       -> uncached = input - cached
+    claude-code-jsonl  input_tokens EXCLUDES cache reads; independent buckets
+                       -> uncached = input
 
-Apply either rule to the other harness and you get a number nobody would
-question. Verified on real transcripts: summing a codex rollout's running
-totals overcounted by 2.5x on one session and 4.7x on another, and I reported
-12,206 for a session whose true total is 49,654 by reading the FIRST running
-total instead of the last.
+The proof that they differ, from a real stored Claude delegate:
+``input_tokens=7`` while ``cache_read_input_tokens=28340``. Under codex
+semantics cached is a subset of input, so cached can never exceed it. Here it
+is four thousand times larger. Subtracting is not imprecise, it is
+definitionally wrong.
+
+The two also differ in how usage accumulates:
+
+    claude   per-message DELTAS   -> SUM them
+    codex    running TOTALS       -> take the LAST
+
+Verified by reading the FIRST running total out of a real rollout and getting
+12,206 for a session whose true total is 49,654.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import pairwise
 
-#: A codex rollout is a JSON array of records; a claude transcript is JSONL
-#: text. Typed as the two real shapes rather than Any, so a caller passing the
-#: wrong one is a type error rather than a zero.
 type RolloutRecord = Mapping[str, object]
-type RolloutDocument = list[RolloutRecord]
+type RolloutDocument = Sequence[RolloutRecord]
 type StoredTranscript = RolloutDocument | str
 
 
@@ -46,59 +56,127 @@ class SourceFormat(StrEnum):
 
 
 @dataclass(frozen=True)
-class TranscriptUsage:
-    """Token usage for one stored session.
+class PricedUsage:
+    """Usage in canonical buckets, safe to price.
 
-    ``has_usage`` is separate from the counts on purpose. A transcript that
-    carries no usage and one that genuinely used zero tokens are different
-    facts, and collapsing them reports an unparsed delegation as a free one.
+    Every field is an INDEPENDENT bucket. Nothing here is a subset of anything
+    else, whichever harness produced it, which is the whole point of
+    normalising at parse time.
     """
 
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_creation_tokens: int = 0
-    cache_read_tokens: int = 0
-    total_tokens: int = 0
-    model: str | None = None
-    message_count: int = 0
-    has_usage: bool = False
-
-    is_self_consistent: bool = True
-    """Whether the numbers agree with each other.
-
-    A stored format can MOVE under a fixed ``source_format`` string: a CLI
-    upgrade can rename or restructure fields while the store still labels the
-    document 'rollout'. When that happens a parser does not fail, it silently
-    returns a plausible smaller number, which is the exact failure this work
-    exists to remove.
-
-    So the arithmetic is checked rather than assumed. Where a format states its
-    own total, that total must equal the parts. A False here means the parse is
-    not trustworthy and the caller must treat the session as unpriced rather
-    than cheap.
-    """
+    model: str | None
+    uncached_input_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    output_tokens: int
+    message_count: int
 
     @property
-    def billable_input_tokens(self) -> int:
-        """Input tokens excluding the cached portion.
+    def total_tokens(self) -> int:
+        """Sum of the four buckets. Safe precisely because they are disjoint."""
+        return (
+            self.uncached_input_tokens
+            + self.cache_read_tokens
+            + self.cache_creation_tokens
+            + self.output_tokens
+        )
 
-        For codex, ``cached_input_tokens`` is a SUBSET of ``input_tokens``,
-        verified arithmetically: input 49250 + output 404 == total 49654, with
-        cached 45056 sitting inside the input figure. Adding them together
-        double-counts, and the inflated number still looks plausible.
-        """
-        return max(self.input_tokens - self.cache_read_tokens, 0)
 
+@dataclass(frozen=True)
+class NoUsage:
+    """The transcript carried no usage at all.
 
-def _as_int(value: object) -> int:
-    """Coerce a JSON number to int, treating anything else as absent.
-
-    A stored transcript is external data. If a CLI upgrade turns a count into
-    a string or null, this must read as zero rather than raise: the caller
-    then sees an unpriceable session, which is recoverable, instead of an
-    exception that loses the whole import.
+    Distinct from a session that used nothing. Collapsing the two reports an
+    unparsed delegation as a free one.
     """
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+@dataclass(frozen=True)
+class UnpricedUsage:
+    """The parse cannot be trusted, so it exposes NO counters.
+
+    Deliberately carries no token fields. An advisory flag beside plausible
+    numbers is not enough: a caller reads the numbers. The only safe shape is
+    one where there is nothing to read, so an untrustworthy parse becomes a
+    visible gap rather than a confident undercount.
+    """
+
+    reason: str
+
+
+type UsageResult = PricedUsage | NoUsage | UnpricedUsage
+
+
+def _as_count(value: object) -> int | None:
+    """A non-negative token count, or None if this is not one.
+
+    Returns None rather than 0 for anything unexpected. Collapsing a moved or
+    renamed field into zero is what makes a broken parse look cheap instead of
+    broken.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 0 else None
+
+
+def _counts(source: Mapping[str, object], fields: Sequence[str]) -> list[int] | None:
+    """Read every named count, or None if any is MISSING or malformed.
+
+    A missing field is not a zero. Defaulting it to zero is what let an empty
+    usage object read as a free delegation: every count came back 0, the
+    arithmetic reconciled trivially, and the result looked priceable. Absence
+    of a field we require means the shape is not what we think it is.
+    """
+    out: list[int] = []
+    for name in fields:
+        if name not in source:
+            return None
+        count = _as_count(source[name])
+        if count is None:
+            return None
+        out.append(count)
+    return out
+
+
+_CODEX_FIELDS = ("input_tokens", "output_tokens", "cached_input_tokens", "total_tokens")
+_CLAUDE_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+)
+
+
+@dataclass(frozen=True)
+class _CodexSnapshot:
+    """One cumulative reading from a rollout."""
+
+    input_tokens: int
+    output_tokens: int
+    cached_input_tokens: int
+    total_tokens: int
+    cache_write_tokens: int
+
+
+def _codex_snapshot(record: RolloutRecord) -> _CodexSnapshot | None:
+    if record.get("type") != "event_msg":
+        return None
+    payload = record.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+    info = payload.get("info")
+    if not isinstance(info, Mapping):
+        return None
+    usage = info.get("total_token_usage")
+    if not isinstance(usage, Mapping):
+        return None
+    counts = _counts(usage, _CODEX_FIELDS)
+    if counts is None:
+        return None
+    # Absent today. Read anyway: codex 0.150.1 adds it on the stdout side, and
+    # an ignored cache-write field is an UNDERCOUNT.
+    cache_write = _as_count(usage.get("cache_write_input_tokens", 0)) or 0
+    return _CodexSnapshot(counts[0], counts[1], counts[2], counts[3], cache_write)
 
 
 def _codex_model(record: RolloutRecord) -> str | None:
@@ -112,134 +190,203 @@ def _codex_model(record: RolloutRecord) -> str | None:
     return model if isinstance(model, str) else None
 
 
-def _codex_running_total(record: RolloutRecord) -> Mapping[str, object] | None:
-    """This record's cumulative usage, if it carries one."""
-    if record.get("type") != "event_msg":
-        return None
+def _codex_invariant_broken(snapshots: Sequence[_CodexSnapshot]) -> str | None:
+    """Why this rollout cannot be trusted, or None if it holds together.
+
+    Each check names an assumption the pricing rests on. If one stops holding,
+    the schema has moved under a fixed source_format, and the danger is not a
+    crash: it is a smaller plausible number that reads as a cheap delegation.
+    """
+    final = snapshots[-1]
+
+    # The rollout states its own total, so the parts must reconcile to it.
+    if final.input_tokens + final.output_tokens != final.total_tokens:
+        return "stated total does not equal its parts"
+
+    # cached is a SUBSET of input, which is what makes uncached = input - cached
+    # correct. Claude's buckets are independent and that subtraction would be
+    # definitionally wrong there, so this is the check keeping them apart.
+    if final.cached_input_tokens > final.input_tokens:
+        return "cached input exceeds input"
+
+    # Cumulative readings only ever grow. A decrease means these are not
+    # cumulative, and last-wins would then be the wrong rule entirely.
+    for earlier, later in pairwise(snapshots):
+        if (
+            later.input_tokens < earlier.input_tokens
+            or later.output_tokens < earlier.output_tokens
+            or later.total_tokens < earlier.total_tokens
+        ):
+            return "cumulative totals decreased"
+
+    return None
+
+
+def _codex_usage_shaped(record: RolloutRecord) -> bool:
+    """Whether this record LOOKS like it carries usage.
+
+    Used to tell "no usage here" from "usage we could not read". Only the
+    second is a moved schema, and only the second must refuse to price.
+    """
     payload = record.get("payload")
     if not isinstance(payload, Mapping):
-        return None
+        return False
     info = payload.get("info")
-    if not isinstance(info, Mapping):
-        return None
-    usage = info.get("total_token_usage")
-    return usage if isinstance(usage, Mapping) else None
+    return isinstance(info, Mapping) and "total_token_usage" in info
 
 
-def _codex_usage(document: RolloutDocument) -> TranscriptUsage:
-    """Read the LAST running total from a codex rollout.
+@dataclass(frozen=True)
+class _CodexScan:
+    """What one pass over a rollout found."""
 
-    ``total_token_usage`` is cumulative, so the final one IS the session total.
-    Summing them across events multiplies the answer by roughly the turn count:
-    123,496 against a true 49,654 on the recorded fixture.
-    """
+    model: str | None
+    snapshots: list[_CodexSnapshot]
+    saw_unreadable: bool
+
+
+def _scan_codex(document: RolloutDocument) -> _CodexScan:
     model: str | None = None
-    latest: Mapping[str, object] | None = None
-    turns = 0
+    snapshots: list[_CodexSnapshot] = []
+    saw_unreadable = False
 
     for record in document:
         if not isinstance(record, Mapping):
             continue
         model = _codex_model(record) or model
-        usage = _codex_running_total(record)
-        if usage is not None:
-            latest = usage
-            turns += 1
+        if record.get("type") != "event_msg":
+            continue
+        snapshot = _codex_snapshot(record)
+        if snapshot is not None:
+            snapshots.append(snapshot)
+        elif _codex_usage_shaped(record):
+            saw_unreadable = True
 
-    if latest is None:
-        return TranscriptUsage(model=model)
+    return _CodexScan(model, snapshots, saw_unreadable)
 
-    input_tokens = _as_int(latest.get("input_tokens"))
-    output_tokens = _as_int(latest.get("output_tokens"))
-    cached = _as_int(latest.get("cached_input_tokens"))
-    stated_total = _as_int(latest.get("total_tokens"))
-    # Read rather than ignore. A rollout does not carry this today, but codex
-    # 0.150.1 adds cache_write_input_tokens on the stdout side, and an ignored
-    # cache-write field is an UNDERCOUNT, which is the direction this work
-    # keeps failing in. Reading it now costs nothing and fails safe if the
-    # rollout gains it later.
-    cache_write = _as_int(latest.get("cache_write_input_tokens"))
 
-    # The rollout states its own total, so the parts must reconcile to it. If a
-    # CLI upgrade moves this schema while the store still calls it 'rollout',
-    # this is what notices, instead of us reporting a confidently wrong figure.
-    consistent = (input_tokens + output_tokens) == stated_total and cached <= input_tokens
+def _codex_usage(document: RolloutDocument) -> UsageResult:
+    """Take the LAST cumulative reading from a codex rollout, having checked it.
 
-    return TranscriptUsage(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cache_creation_tokens=cache_write,
-        # A rollout's cached figure is the cached READ portion, and it is a
-        # subset of input_tokens rather than an addition to it.
-        cache_read_tokens=cached,
-        total_tokens=stated_total,
-        model=model,
-        message_count=turns,
-        has_usage=True,
-        is_self_consistent=consistent,
+    Summing the readings multiplies the answer by roughly the turn count:
+    123,496 against a true 49,654 on the recorded fixture.
+    """
+    scan = _scan_codex(document)
+
+    if scan.saw_unreadable:
+        # Shaped like usage but unreadable: a moved schema, not an absence.
+        # Refusing is the difference between "unpriced" and "free".
+        return UnpricedUsage("total_token_usage present but unreadable")
+    if not scan.snapshots:
+        return NoUsage()
+
+    broken = _codex_invariant_broken(scan.snapshots)
+    if broken is not None:
+        return UnpricedUsage(broken)
+
+    final = scan.snapshots[-1]
+    return PricedUsage(
+        model=scan.model,
+        # input INCLUDES cached, so the uncached remainder is the billable part.
+        uncached_input_tokens=final.input_tokens - final.cached_input_tokens,
+        cache_read_tokens=final.cached_input_tokens,
+        cache_creation_tokens=final.cache_write_tokens,
+        output_tokens=final.output_tokens,
+        message_count=len(scan.snapshots),
     )
 
 
-def _claude_usage(document: str) -> TranscriptUsage:
+@dataclass(frozen=True)
+class _Unreadable:
+    """Distinguishes "this line carries no usage" from "this line carries
+    usage we cannot read". The first is normal; the second means the total is
+    no longer knowable, so it must not be summed as if it were complete.
+
+    A distinct type rather than a bare object() so the type checker can narrow
+    it, and so a caller cannot accidentally treat it as data.
+    """
+
+
+_UNREADABLE = _Unreadable()
+
+
+def _claude_entry(record: object) -> tuple[list[int], str | None] | _Unreadable | None:
+    """This line's usage counts and model, None if it carries none."""
+    if not isinstance(record, Mapping):
+        return None
+    message = record.get("message")
+    if not isinstance(message, Mapping):
+        return None
+    usage = message.get("usage")
+    if not isinstance(usage, Mapping):
+        return None
+    counts = _counts(usage, _CLAUDE_FIELDS)
+    if counts is None:
+        return _UNREADABLE
+    model = message.get("model")
+    return counts, model if isinstance(model, str) else None
+
+
+def _claude_usage(document: str) -> UsageResult:
     """Sum per-message deltas from a claude-code JSONL transcript.
 
-    Each assistant message carries its OWN usage, not a running total, so the
-    session total is their sum. Taking the last would report only the final
-    turn, which for a long delegation is a small fraction of the truth.
+    Claude's ``input_tokens`` EXCLUDES cache reads; the buckets are
+    independent. Subtracting a cache read from it, as codex requires, drives a
+    real transcript to zero input: one measured delegate reported input 7
+    against cache_read 28,340.
     """
-    totals = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
-    model: str | None = None
+    totals = [0, 0, 0, 0]
+    models: set[str] = set()
     messages = 0
 
     for line in document.splitlines():
-        line = line.strip()
-        if not line:
+        stripped = line.strip()
+        if not stripped:
             continue
         try:
-            record = json.loads(line)
+            record = json.loads(stripped)
         except (json.JSONDecodeError, ValueError):
-            # A truncated final line is normal for a killed run. Skipping it
-            # loses one message; raising would lose the whole session.
+            # A transcript is a record of what happened. A line we cannot read
+            # may have carried usage, so the total is no longer knowable and
+            # saying so beats reporting the rest as if it were complete.
+            return UnpricedUsage("transcript contains an unreadable line")
+        entry = _claude_entry(record)
+        if isinstance(entry, _Unreadable):
+            return UnpricedUsage("usage present but unreadable")
+        if entry is None:
             continue
-        message = record.get("message") if isinstance(record, dict) else None
-        if not isinstance(message, dict):
-            continue
-        usage = message.get("usage")
-        if not isinstance(usage, dict):
-            continue
-        candidate = message.get("model")
-        model = candidate if isinstance(candidate, str) else model
+        counts, model = entry
+        if model is not None:
+            models.add(model)
         messages += 1
-        totals["input"] += _as_int(usage.get("input_tokens"))
-        totals["output"] += _as_int(usage.get("output_tokens"))
-        totals["cache_creation"] += _as_int(usage.get("cache_creation_input_tokens"))
-        totals["cache_read"] += _as_int(usage.get("cache_read_input_tokens"))
+        totals = [running + delta for running, delta in zip(totals, counts, strict=True)]
 
     if messages == 0:
-        return TranscriptUsage(model=model)
+        return NoUsage()
+    if len(models) > 1:
+        # Tokens aggregate but a model does not. Billing a mixed transcript at
+        # whichever model happened to be last is a silent mispricing, and
+        # delegates can switch model mid-session.
+        return UnpricedUsage(f"transcript spans multiple models: {sorted(models)}")
 
-    return TranscriptUsage(
-        input_tokens=totals["input"],
-        output_tokens=totals["output"],
-        cache_creation_tokens=totals["cache_creation"],
-        cache_read_tokens=totals["cache_read"],
-        total_tokens=totals["input"] + totals["output"],
-        model=model,
+    return PricedUsage(
+        model=next(iter(models), None),
+        # Independent bucket. NOT reduced by cache reads.
+        uncached_input_tokens=totals[0],
+        cache_read_tokens=totals[3],
+        cache_creation_tokens=totals[2],
+        output_tokens=totals[1],
         message_count=messages,
-        has_usage=True,
     )
 
 
-def extract_usage(source_format: SourceFormat, document: StoredTranscript) -> TranscriptUsage:
+def extract_usage(source_format: SourceFormat, document: StoredTranscript) -> UsageResult:
     """Recover token usage from a stored transcript.
 
     Raises:
-        ValueError: for a format this does not know. Deliberate: returning a
-            zeroed result for an unrecognised format would report an unparsed
-            delegation as a free one, which is the failure this work exists to
-            remove rather than relocate.
+        ValueError: for a format this does not know. Deliberate: a zeroed
+            result would report an unparsed delegation as a free one.
     """
-    if source_format == SourceFormat.CODEX_ROLLOUT and isinstance(document, list):
+    if source_format == SourceFormat.CODEX_ROLLOUT and not isinstance(document, str):
         return _codex_usage(document)
     if source_format == SourceFormat.CLAUDE_CODE_JSONL and isinstance(document, str):
         return _claude_usage(document)
