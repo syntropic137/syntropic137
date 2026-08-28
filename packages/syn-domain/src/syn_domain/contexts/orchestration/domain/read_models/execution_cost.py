@@ -106,6 +106,15 @@ class ExecutionCost:
     not a corruption.
     """
 
+    models_by_phase: dict[str, dict[str, Decimal]] = field(default_factory=dict)
+    """What each MODEL cost within a phase.
+
+    Since #895 a phase can contain more than one session: a delegated run is
+    priced under its own session id but the same phase_id. ``cost_by_phase``
+    can only say what the phase cost in total; this says which model spent it,
+    which is the number that decides whether more fan-out is affordable.
+    """
+
     unpriced_by_phase: dict[str, int] = field(default_factory=dict)
     """Per-phase count of observations that could not be priced.
 
@@ -196,6 +205,10 @@ class ExecutionCost:
             turns=data.get("turns", 0),
             duration_ms=data.get("duration_ms", 0),
             cost_by_phase=_coerce_decimal_dict(data.get("cost_by_phase")),
+            models_by_phase={
+                phase: _coerce_decimal_dict(models)
+                for phase, models in (data.get("models_by_phase") or {}).items()
+            },
             unpriced_by_phase=dict(data.get("unpriced_by_phase") or {}),
             cost_by_model=_coerce_decimal_dict(data.get("cost_by_model")),
             cost_by_tool=_coerce_decimal_dict(data.get("cost_by_tool")),
@@ -224,6 +237,10 @@ class ExecutionCost:
             "turns": self.turns,
             "duration_ms": self.duration_ms,
             "cost_by_phase": {k: str(v) for k, v in self.cost_by_phase.items()},
+            "models_by_phase": {
+                phase: {m: str(c) for m, c in models.items()}
+                for phase, models in self.models_by_phase.items()
+            },
             "unpriced_by_phase": dict(self.unpriced_by_phase),
             "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},
             "cost_by_tool": {k: str(v) for k, v in self.cost_by_tool.items()},

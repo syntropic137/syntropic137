@@ -10,7 +10,7 @@ Pattern follows TimescaleSessionCostQuery from the session_cost slice.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -404,6 +404,17 @@ class PhaseCosts:
     cost_by_phase: dict[str, Decimal]
     unpriced_by_phase: dict[str, int]
 
+    models_by_phase: dict[str, dict[str, Decimal]] = field(default_factory=dict)
+    """What each MODEL cost within a phase.
+
+    A phase can run more than one model: since #895 a delegated session is
+    priced under its own session id but the same phase_id, so a codex phase
+    that hands work to claude has two. The rows arrive already split by model -
+    this keeps that dimension instead of collapsing it, because "the phase cost
+    $0.22" and "claude was $0.03 of it" answer different questions, and the
+    second is the one that says whether more fan-out is affordable.
+    """
+
 
 def price_phase_rows(rows: Sequence[asyncpg.Record], cost_calculator: CostCalculator) -> PhaseCosts:
     """Accumulate per-phase cost from split (phase, model, priced?) groups.
@@ -428,6 +439,7 @@ def price_phase_rows(rows: Sequence[asyncpg.Record], cost_calculator: CostCalcul
     """
     costs: dict[str, Decimal] = {}
     unpriced: dict[str, int] = {}
+    by_model: dict[str, dict[str, Decimal]] = {}
     for row in rows:
         phase_id = row["phase_id"] or UNATTRIBUTED_PHASE_ID
         priced = _price_session_summary_row(row, _extract_group_tokens(row), cost_calculator)
@@ -435,7 +447,12 @@ def price_phase_rows(rows: Sequence[asyncpg.Record], cost_calculator: CostCalcul
             unpriced[phase_id] = unpriced.get(phase_id, 0) + priced.unpriced_count
             continue
         costs[phase_id] = costs.get(phase_id, Decimal("0")) + priced.cost
-    return PhaseCosts(cost_by_phase=costs, unpriced_by_phase=unpriced)
+        if priced.model:
+            phase_models = by_model.setdefault(phase_id, {})
+            phase_models[priced.model] = phase_models.get(priced.model, Decimal("0")) + priced.cost
+    return PhaseCosts(
+        cost_by_phase=costs, unpriced_by_phase=unpriced, models_by_phase=by_model
+    )
 
 
 def price_grouped_session_summary(
@@ -655,6 +672,7 @@ class TimescaleExecutionCostQuery:
             turns=turn_count,
             duration_ms=duration_ms,
             cost_by_phase=phase_costs.cost_by_phase,
+            models_by_phase=phase_costs.models_by_phase,
             unpriced_by_phase=phase_costs.unpriced_by_phase,
             cost_by_model=cost_by_model,
             unpriced_observation_count=unpriced_observation_count,

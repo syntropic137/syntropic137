@@ -11,9 +11,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from syn_adapters.session_store.http_store import HttpSessionStore
 from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
@@ -27,7 +31,7 @@ LEADER = "01a0472d-0815-79b0-bda7-ea7c9cb51686"
 DELEGATE = "01a04903-c2f9-7de3-a83f-7791cbc1a002"
 
 
-def _live_records() -> dict[str, dict[str, object]]:
+def _live_records() -> Mapping[str, Mapping[str, object]]:
     return json.loads((_FIXTURES / "live_store_metadata.json").read_text())["records"]
 
 
@@ -52,7 +56,7 @@ class _Recorder:
         self.calls.append((session_id, usage, unpriced_reason))
 
 
-def _serving(bodies: dict[str, dict[str, object]]) -> HttpSessionStore:
+def _serving(bodies: Mapping[str, Mapping[str, object]]) -> HttpSessionStore:
     def handler(request: httpx.Request) -> httpx.Response:
         sid = request.url.path.rsplit("/", 1)[-1]
         if sid not in bodies:
