@@ -24,6 +24,13 @@ fi
 
 # --- Shared locations (included by both server blocks) ---
 cat > "$AUTH_DIR/locations.conf" <<'LOCATIONS'
+# Keep redirects relative. nginx auto-appends a trailing slash for prefix
+# locations (e.g. /api/v1 -> /api/v1/) and by default builds an absolute URL
+# from the listen port and scheme, leaking the internal :8081 port and
+# downgrading https->http in the Location header. Relative redirects avoid both.
+absolute_redirect off;
+port_in_redirect off;
+
 # GitHub webhook endpoint — NO auth (uses HMAC signature verification)
 location = /api/v1/webhooks/github {
     auth_basic off;
@@ -101,8 +108,10 @@ location /api/v1/stream {
     chunked_transfer_encoding off;
 }
 
-# Health check — no auth
-location /health {
+# Health check — no auth. Exact match on /health and /healthz only: a prefix
+# location would leave everything under /health* (e.g. /healthfoo) unauthenticated,
+# so any future route mounted there would silently inherit the auth bypass.
+location ~ ^/healthz?$ {
     auth_basic off;
     access_log off;
     return 200 "healthy\n";
@@ -118,8 +127,13 @@ location /assets/ {
 }
 
 
-# SPA routing (dashboard — root)
+# SPA routing (dashboard — root). This is the credential-bearing path on the
+# tunnel port, so it carries the origin-side brute-force backstop (see the
+# `auth` zone in 00-rate-limit.conf). Static assets live under /assets/ and are
+# exempt, so this does not throttle normal page loads.
 location / {
+    limit_req zone=auth burst=20 nodelay;
+    limit_req_status 429;
     try_files $uri $uri/ /index.html;
 }
 
