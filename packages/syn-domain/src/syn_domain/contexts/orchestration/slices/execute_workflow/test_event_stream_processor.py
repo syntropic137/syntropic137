@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker i
 from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
 )
+from syn_shared.control import ControlSignalType
 
 
 async def _lines_to_stream(*lines: str) -> AsyncIterator[str]:
@@ -373,9 +374,6 @@ class TestEventStreamProcessor:
             signal_type: object
             reason: str
 
-        class FakeSignalType:
-            CANCEL = "cancel"
-
         class FakeController:
             def __init__(self) -> None:
                 self.check_count = 0
@@ -385,41 +383,32 @@ class TestEventStreamProcessor:
                 # Return cancel on 2nd check (after 20 lines)
                 if self.check_count >= 2:
                     return FakeSignal(
-                        signal_type=FakeSignalType.CANCEL,
+                        signal_type=ControlSignalType.CANCEL,
                         reason="user requested",
                     )
                 return None
 
-        # Patch ControlSignalType for the import inside the processor
-        import syn_adapters.control.commands as ctrl_mod
+        controller = FakeController()
+        proc = EventStreamProcessor(
+            tokens=TokenAccumulator(),
+            subagents=SubagentTracker(),
+            observability=None,
+            controller=controller,  # type: ignore[arg-type]
+            execution_id="exec-1",
+            phase_id="phase-1",
+            session_id="session-1",
+            workspace_id=None,
+            agent_model="claude",
+        )
 
-        original = ctrl_mod.ControlSignalType
-        ctrl_mod.ControlSignalType = FakeSignalType  # type: ignore[assignment,misc]
-
-        try:
-            controller = FakeController()
-            proc = EventStreamProcessor(
-                tokens=TokenAccumulator(),
-                subagents=SubagentTracker(),
-                observability=None,
-                controller=controller,  # type: ignore[arg-type]
-                execution_id="exec-1",
-                phase_id="phase-1",
-                session_id="session-1",
-                workspace_id=None,
-                agent_model="claude",
-            )
-
-            # Generate 30 lines — cancel should trigger at line 20
-            lines = [f"line-{i}" for i in range(30)]
-            ws = MockWorkspace()
-            result = await proc.process_stream(_lines_to_stream(*lines), ws)
-            assert result.interrupt_requested
-            assert result.interrupt_reason == "user requested"
-            assert ws.interrupted
-            assert result.line_count == 20  # Stopped at line 20
-        finally:
-            ctrl_mod.ControlSignalType = original
+        # Generate 30 lines — cancel should trigger at line 20
+        lines = [f"line-{i}" for i in range(30)]
+        ws = MockWorkspace()
+        result = await proc.process_stream(_lines_to_stream(*lines), ws)
+        assert result.interrupt_requested
+        assert result.interrupt_reason == "user requested"
+        assert ws.interrupted
+        assert result.line_count == 20  # Stopped at line 20
 
 
 class TestExtractErrorReason:
