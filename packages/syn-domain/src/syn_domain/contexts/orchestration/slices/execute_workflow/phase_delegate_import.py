@@ -14,9 +14,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+from syn_domain.contexts.agent_sessions import (
     ObservationType,
+    import_phase_delegates,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture import (
     capture_phase_session,
@@ -37,8 +37,7 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import (
         ManagedWorkspace,
     )
-    from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
-    from syn_domain.contexts.agent_sessions.transcript_usage import PricedUsage
+    from syn_domain.contexts.agent_sessions import PricedUsage, SessionStorePort
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
         StreamResult,

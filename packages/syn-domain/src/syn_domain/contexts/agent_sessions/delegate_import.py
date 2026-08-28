@@ -200,8 +200,18 @@ async def import_phase_delegates(
 
         priced_usage, reason = _split(usage)
         # uuid5 of the harness id, so a re-run addresses the SAME session
-        # rather than minting a second one carrying the same tokens. That is
-        # what makes this safe to retry and safe to resume after a crash.
+        # rather than minting a second one.
+        #
+        # That is NOT full idempotency, and this comment used to claim it was.
+        # `agent_events` is append-only with no uniqueness constraint, so a
+        # second import writes a second pair of rows under the same session id
+        # and the cost queries SUM them. Same id, doubled tokens (#933).
+        #
+        # What keeps it correct today: exactly one import per phase. The
+        # retry budget is spent (attempts_remaining=0) and the finalise and
+        # teardown paths are mutually exclusive, since finalisation pops the
+        # workspace context manager before teardown iterates. A crash between
+        # the write and the phase completing is the case that is NOT covered.
         platform_id = platform_session_id_for(harness_id)
         await recorder.record_delegate_usage(
             session_id=platform_id,

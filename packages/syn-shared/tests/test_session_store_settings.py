@@ -368,4 +368,3 @@ def test_a_padded_read_token_is_stripped_not_rejected() -> None:
     token = settings.effective_read_token
     assert token is not None
     assert token.get_secret_value() == "r"
-

@@ -33,10 +33,10 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from syn_domain.contexts.agent_sessions.delegate_usage import StoredSession
+from syn_domain.contexts.agent_sessions import StoredSession
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions.transcript_usage import StoredTranscript
+    from syn_domain.contexts.agent_sessions import StoredTranscript
 
 logger = logging.getLogger(__name__)
 

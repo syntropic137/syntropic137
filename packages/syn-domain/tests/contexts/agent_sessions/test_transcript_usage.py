@@ -571,4 +571,3 @@ class TestClaudeRepeatsOneResponseAcrossContentBlocks:
         usage = extract_usage("claude-code-jsonl", anonymous + "\n" + anonymous)
         assert isinstance(usage, PricedUsage)
         assert usage.output_tokens == 20
-
