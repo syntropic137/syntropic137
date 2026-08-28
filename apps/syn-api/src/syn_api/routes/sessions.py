@@ -85,6 +85,13 @@ class SessionSummaryResponse(BaseModel):
     workflow_name: str | None = None
     execution_id: str | None = None
     phase_id: str | None
+    #: The session that delegated to this one, when it is a delegate (#895).
+    #: None for a leader - a leader genuinely has no parent, and defaulting
+    #: this to the session's own id would make the chain unwalkable rather
+    #: than terminating it.
+    parent_session_id: str | None = None
+    #: The top of the delegation chain. Equals ``id`` for a leader.
+    root_session_id: str | None = None
     phase_display: str | None = None
     status: str
     agent_provider: str | None
@@ -162,6 +169,13 @@ class SessionResponse(BaseModel):
     workflow_name: str | None = None
     execution_id: str | None = None
     phase_id: str | None
+    #: The session that delegated to this one, when it is a delegate (#895).
+    #: None for a leader - a leader genuinely has no parent, and defaulting
+    #: this to the session's own id would make the chain unwalkable rather
+    #: than terminating it.
+    parent_session_id: str | None = None
+    #: The top of the delegation chain. Equals ``id`` for a leader.
+    root_session_id: str | None = None
     phase_display: str | None = None
     milestone_id: str | None
     agent_provider: str | None
@@ -594,6 +608,8 @@ def _build_session_summary_response(
         workflow_name=workflow_name,
         execution_id=s.execution_id,
         phase_id=s.phase_id,
+        parent_session_id=s.parent_session_id,
+        root_session_id=s.root_session_id,
         phase_display=format_phase(s.phase_id),
         status=s.status,
         agent_provider=s.agent_type,
@@ -718,6 +734,8 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         workflow_name=detail.workflow_name,
         execution_id=detail.execution_id,
         phase_id=detail.phase_id,
+        parent_session_id=detail.parent_session_id,
+        root_session_id=detail.root_session_id,
         phase_display=format_phase(detail.phase_id),
         milestone_id=None,
         agent_provider=detail.agent_type,

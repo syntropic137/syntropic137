@@ -124,3 +124,56 @@ async def test_the_ROUTE_carries_lineage_from_the_projection() -> None:
         "is the exact defect this PR fixes, and no model-level test sees it"
     )
     assert sessions[0].root_session_id == "leader-1"
+
+
+class TestLineageReachesTheWire:
+    """The assertion that catches what every test above missed.
+
+    My first attempt added the fields to `SessionSummary`/`SessionDetail` in
+    types.py and tested those. Both passed, and both mutation-tested clean. But
+    the HTTP surface is served by `SessionSummaryResponse` and `SessionResponse`
+    defined in routes/sessions.py, so the change reached no client at all: the
+    OpenAPI spec had `SessionSummaryResponse` with no lineage, and the generated
+    CLI and dashboard types had nothing.
+
+    Testing the model I edited could not tell me I had edited the wrong model.
+    Only asserting against the SERVED schema can.
+    """
+
+    @staticmethod
+    def _spec() -> dict:
+        import json
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[3]
+        return json.loads((root / "apps" / "syn-docs" / "openapi.json").read_text())
+
+    @pytest.mark.parametrize("schema", ["SessionSummaryResponse", "SessionResponse"])
+    def test_served_schema_carries_lineage(self, schema: str) -> None:
+        props = self._spec()["components"]["schemas"][schema]["properties"]
+        assert "parent_session_id" in props, (
+            f"{schema} is what the HTTP API actually returns. A field present on "
+            "an internal model and absent here reaches no client (#895)."
+        )
+        assert "root_session_id" in props
+
+    @pytest.mark.parametrize(
+        "generated",
+        [
+            "apps/syn-cli-node/src/generated/api-types.ts",
+            "apps/syn-dashboard-ui/src/generated/api-types.ts",
+        ],
+    )
+    def test_generated_client_types_carry_lineage(self, generated: str) -> None:
+        """Guards the codegen step, not the model.
+
+        These are regenerated from the spec, so a change that skips codegen
+        leaves clients typed without the field while the API returns it - and
+        the drift is invisible from the Python side.
+        """
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[3]
+        text = (root / generated).read_text()
+        assert "parent_session_id" in text, f"{generated} is stale; run `just codegen`"
+        assert "root_session_id" in text
