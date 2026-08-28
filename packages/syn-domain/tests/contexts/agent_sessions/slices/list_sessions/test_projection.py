@@ -53,6 +53,7 @@ def _session_started_event(session_id: str, parent_session_id: str | None = None
     }
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_on_session_started_persists_parent_and_root_session_id() -> None:
     """on_session_started persists parent_session_id and root_session_id from event data."""
@@ -69,6 +70,7 @@ async def test_on_session_started_persists_parent_and_root_session_id() -> None:
     assert summaries[0].root_session_id == "parent-1"
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_on_session_started_without_parent_yields_none() -> None:
     """A top-level session (no parent) persists None for parent_session_id."""
@@ -82,6 +84,7 @@ async def test_on_session_started_without_parent_yields_none() -> None:
     assert summaries[0].root_session_id == "parent-1"
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_query_filters_by_parent_session_id() -> None:
     """query(parent_session_id=...) returns only that parent's children."""
