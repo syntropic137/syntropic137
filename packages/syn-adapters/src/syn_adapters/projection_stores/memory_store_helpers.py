@@ -21,16 +21,29 @@ def apply_filters(
 
 
 def apply_sorting(results: list[dict[str, Any]], order_by: str | None) -> list[dict[str, Any]]:
-    """Sort results by field name, with optional '-' prefix for descending."""
+    """Sort results by field name, with optional '-' prefix for descending.
+
+    Rows MISSING the sort field always go last, in both directions, matching
+    the ``NULLS LAST`` this store's Postgres counterpart now emits. The two
+    must agree: a test passing against the in-memory store and a production
+    query behaving differently is worse than either bug alone.
+
+    The previous implementation folded the is-None flag into the sort key and
+    then reversed the whole tuple, so descending put missing values FIRST. That
+    is issue #920 - artifacts predating ArtifactCreated v4 have a null
+    ``created_at``, and ``-created_at`` ranked every one of them above every
+    artifact created since, pushing the newest off the first page. Partitioning
+    rather than key-folding is what keeps direction and null-placement
+    independent.
+    """
     if not order_by:
         return results
     descending = order_by.startswith("-")
     field_name = order_by.lstrip("-")
-    return sorted(
-        results,
-        key=lambda x: (x.get(field_name) is None, x.get(field_name) or ""),
-        reverse=descending,
-    )
+    present = [r for r in results if r.get(field_name) is not None]
+    missing = [r for r in results if r.get(field_name) is None]
+    present.sort(key=lambda x: x[field_name], reverse=descending)
+    return present + missing
 
 
 def apply_pagination(
