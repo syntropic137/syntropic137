@@ -230,6 +230,58 @@ class TestAnUntrustworthyParseExposesNoNumbers:
             extract_usage(SourceFormat.CODEX_ROLLOUT, [{"type": "session_meta"}]), NoUsage
         )
 
-    def test_an_unknown_source_format_is_refused(self) -> None:
-        with pytest.raises(ValueError, match="unsupported"):
-            extract_usage("some-future-harness", "")  # type: ignore[arg-type]
+    def test_an_unknown_source_format_degrades_rather_than_raising(self) -> None:
+        """One unrecognised session must not fail the import of every session
+        beside it. A new harness, or a literal drifting the way
+        codex-rollout-jsonl did, should be a gap and not an outage.
+        """
+        result = extract_usage("some-future-harness", "")
+
+        assert isinstance(result, UnpricedUsage)
+        assert "some-future-harness" in result.reason
+
+
+@pytest.mark.unit
+class TestFormatLiteralsMatchTheStore:
+    """The literals belong to the store, so they are pinned to real records.
+
+    Naming the codex format after its informal name gave "rollout", which
+    matched nothing: every real codex transcript reports
+    "codex-rollout-jsonl". Unit tests did not catch it because they passed the
+    literal the code expected, so they agreed with the implementation rather
+    than with the store.
+
+    This fixture is metadata captured from live store records, so drift in
+    EITHER direction fails: ours changing, or the store's.
+    """
+
+    def _recorded(self) -> list[dict[str, str]]:
+        return json.loads((_FIXTURES / "store_source_formats.json").read_text())
+
+    def test_every_recorded_format_is_one_we_dispatch_on(self) -> None:
+        known = {fmt.value for fmt in SourceFormat}
+        recorded = {row["source_format"] for row in self._recorded()}
+
+        assert recorded <= known, f"store emits formats we cannot read: {recorded - known}"
+
+    def test_the_codex_literal_is_the_store_value_not_the_informal_name(self) -> None:
+        codex = next(r for r in self._recorded() if r["agent"] == "Codex")
+
+        assert SourceFormat.CODEX_ROLLOUT.value == codex["source_format"]
+        assert SourceFormat.CODEX_ROLLOUT.value != "rollout"
+
+    def test_the_claude_literal_matches_too(self) -> None:
+        claude = next(r for r in self._recorded() if r["agent"] == "ClaudeCode")
+
+        assert SourceFormat.CLAUDE_CODE_JSONL.value == claude["source_format"]
+
+    def test_a_real_codex_format_string_actually_dispatches(self) -> None:
+        """End to end on the value the store hands us, not the one we assume.
+
+        Before the fix this raised ValueError for every real codex transcript.
+        """
+        codex = next(r for r in self._recorded() if r["agent"] == "Codex")
+
+        result = extract_usage(codex["source_format"], _codex_document())
+
+        assert isinstance(result, PricedUsage)

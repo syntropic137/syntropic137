@@ -47,12 +47,16 @@ type StoredTranscript = RolloutDocument | str
 class SourceFormat(StrEnum):
     """Stored transcript formats this can read.
 
-    Values match the ``source_format`` a conforming store records, so an
-    unrecognised one is a format we have not taught it rather than a guess.
+    THESE LITERALS ARE THE STORE'S, NOT OURS. They must equal the
+    ``source_format`` a conforming store actually records, and the only way to
+    know that is to read a real record. Naming the codex one after the format's
+    informal name gave ``"rollout"``, which matched nothing: every real codex
+    transcript reports ``"codex-rollout-jsonl"``. A test pins both against
+    metadata captured from live records so drift in either direction fails.
     """
 
     CLAUDE_CODE_JSONL = "claude-code-jsonl"
-    CODEX_ROLLOUT = "rollout"
+    CODEX_ROLLOUT = "codex-rollout-jsonl"
 
 
 @dataclass(frozen=True)
@@ -379,17 +383,24 @@ def _claude_usage(document: str) -> UsageResult:
     )
 
 
-def extract_usage(source_format: SourceFormat, document: StoredTranscript) -> UsageResult:
+def extract_usage(source_format: str, document: StoredTranscript) -> UsageResult:
     """Recover token usage from a stored transcript.
 
-    Raises:
-        ValueError: for a format this does not know. Deliberate: a zeroed
-            result would report an unparsed delegation as a free one.
+    Takes ``source_format`` as a plain ``str`` because that is what it IS: a
+    value arriving from external data, not a choice this code makes.
+
+    An unrecognised format returns ``UnpricedUsage`` rather than raising. It
+    used to raise, which contradicted the principle the rest of this module
+    implements: a malformed transcript already degrades one session to
+    unpriced rather than failing, and an unknown format should degrade the
+    same way. Raising turns one unrecognised session into a failed import of
+    every session beside it, so a new harness, or one literal drifting as
+    ``codex-rollout-jsonl`` did, becomes an outage instead of a gap.
     """
     if source_format == SourceFormat.CODEX_ROLLOUT and not isinstance(document, str):
         return _codex_usage(document)
     if source_format == SourceFormat.CLAUDE_CODE_JSONL and isinstance(document, str):
         return _claude_usage(document)
 
-    msg = f"unsupported source_format: {source_format!r}"
-    raise ValueError(msg)
+    known = sorted(fmt.value for fmt in SourceFormat)
+    return UnpricedUsage(f"unsupported source_format {source_format!r}; known: {known}")
