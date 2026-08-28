@@ -30,7 +30,7 @@ pytestmark = pytest.mark.unit
 
 @dataclass
 class _Writer:
-    seen: list[tuple[str, str, dict[str, object]]] = field(default_factory=list)
+    seen: list[tuple[str, str, Mapping[str, object]]] = field(default_factory=list)
 
     async def record_observation(
         self,
