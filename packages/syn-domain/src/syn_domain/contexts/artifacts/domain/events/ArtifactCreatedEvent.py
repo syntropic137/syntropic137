@@ -19,7 +19,12 @@ class ArtifactCreatedEvent(DomainEvent):
 
     v2: Added execution_id to link artifacts to specific workflow execution runs.
     v3: Added storage_uri for two-tier storage (ADR-012).
-    v4: Added created_at (issue #920).
+    v4: Added created_at (issue #920). NOTE the version string here is
+    decorator metadata only - it does not set ``DomainEvent.schema_version``,
+    and the gRPC serializer writes ``event_version=1`` regardless. Deserialization
+    resolves on event TYPE and ignores the stored version, so no upcaster runs
+    (and v2/v3 shipped the same way). A new optional field with a default is
+    safe under that scheme; a REQUIRED field or a renamed one would not be.
 
     WHY v4 CARRIES ITS OWN TIMESTAMP. ``DomainEvent`` declares no timestamp -
     ``event_type`` and ``schema_version`` are ClassVars, and the envelope's time
@@ -35,9 +40,17 @@ class ArtifactCreatedEvent(DomainEvent):
     order and a newly created artifact landed on the LAST page. It read as data
     loss; nothing was lost.
 
-    Artifacts created before v4 keep a null ``created_at``. That is deliberate:
-    the time was never recorded, and inventing one from replay or ingest would
-    fabricate a fact the event store does not contain.
+    Artifacts created before v4 keep a null ``created_at``. That is deliberate,
+    but the reason is narrower than "the time was never recorded": the wire
+    metadata DOES carry ``timestamp_unix_ms``. It is unreachable on the read
+    path. ``_proto_to_envelope`` builds ``EventMetadata`` without a timestamp,
+    so the field falls back to ``datetime.now(UTC)`` and a replayed event
+    reports DECODE time rather than event time - plausible, current, and wrong.
+    Backfilling from that would stamp every historical artifact with the moment
+    of the rebuild.
+
+    Recovering the real times therefore needs the decoder fixed as well as the
+    dispatcher (#924), not just the dispatcher.
     """
 
     # Identity
