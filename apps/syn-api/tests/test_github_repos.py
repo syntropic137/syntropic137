@@ -39,13 +39,14 @@ async def test_single_installation() -> None:
     mock_client.list_accessible_repos = AsyncMock(return_value=raw_repos)
 
     with (
-        patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
+        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
         patch(
             "syn_adapters.github.client.get_github_client",
             return_value=mock_client,
         ),
     ):
         result = await list_accessible_repos(installation_id="inst-1")
+        mock_ensure.assert_awaited_once()
 
     assert isinstance(result, Ok)
     assert len(result.value) == 2
@@ -73,7 +74,7 @@ async def test_all_installations_aggregated() -> None:
     )
 
     with (
-        patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
+        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
         patch(
             "syn_adapters.github.client.get_github_client",
             return_value=mock_client,
@@ -84,6 +85,7 @@ async def test_all_installations_aggregated() -> None:
         ),
     ):
         result = await list_accessible_repos(installation_id=None)
+        mock_ensure.assert_awaited_once()
 
     assert isinstance(result, Ok)
     # Repo 2 appears in both installations — should be deduplicated
@@ -101,13 +103,14 @@ async def test_auth_error_maps_to_err() -> None:
     mock_client.list_accessible_repos = AsyncMock(side_effect=GitHubAuthError("bad token"))
 
     with (
-        patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
+        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
         patch(
             "syn_adapters.github.client.get_github_client",
             return_value=mock_client,
         ),
     ):
         result = await list_accessible_repos(installation_id="inst-1")
+        mock_ensure.assert_awaited_once()
 
     assert isinstance(result, Err)
     assert result.error == GitHubError.AUTH_REQUIRED
@@ -122,13 +125,14 @@ async def test_rate_limit_maps_to_err() -> None:
     mock_client.list_accessible_repos = AsyncMock(side_effect=GitHubRateLimitError("rate limited"))
 
     with (
-        patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
+        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
         patch(
             "syn_adapters.github.client.get_github_client",
             return_value=mock_client,
         ),
     ):
         result = await list_accessible_repos(installation_id="inst-1")
+        mock_ensure.assert_awaited_once()
 
     assert isinstance(result, Err)
     assert result.error == GitHubError.RATE_LIMITED
@@ -143,13 +147,14 @@ async def test_include_private_false_filters() -> None:
     mock_client.list_accessible_repos = AsyncMock(return_value=raw_repos)
 
     with (
-        patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
+        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
         patch(
             "syn_adapters.github.client.get_github_client",
             return_value=mock_client,
         ),
     ):
         result = await list_accessible_repos(installation_id="inst-1", include_private=False)
+        mock_ensure.assert_awaited_once()
 
     assert isinstance(result, Ok)
     assert len(result.value) == 2
@@ -221,7 +226,7 @@ async def test_empty_projection_triggers_github_api_sync() -> None:
     mock_projection.upsert_from_github_api = AsyncMock(return_value=synced_inst)
 
     with (
-        patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
+        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
         patch("syn_adapters.github.client.get_github_client", return_value=mock_client),
         patch(
             "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
@@ -229,6 +234,7 @@ async def test_empty_projection_triggers_github_api_sync() -> None:
         ),
     ):
         result = await list_accessible_repos(installation_id=None)
+        mock_ensure.assert_awaited_once()
 
     mock_client.list_installations.assert_awaited_once()
     assert isinstance(result, Ok)
@@ -256,7 +262,7 @@ async def test_stale_projection_triggers_refresh() -> None:
     mock_projection.upsert_from_github_api = AsyncMock(return_value=fresh_inst)
 
     with (
-        patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
+        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
         patch("syn_adapters.github.client.get_github_client", return_value=mock_client),
         patch(
             "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
@@ -265,6 +271,7 @@ async def test_stale_projection_triggers_refresh() -> None:
     ):
         await list_accessible_repos(installation_id=None)
 
+    mock_ensure.assert_awaited_once()
     mock_client.list_installations.assert_awaited_once()
 
 
@@ -282,7 +289,7 @@ async def test_fresh_projection_skips_refresh() -> None:
     mock_projection.get_all_active = AsyncMock(return_value=[fresh_inst])
 
     with (
-        patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
+        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
         patch("syn_adapters.github.client.get_github_client", return_value=mock_client),
         patch(
             "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
@@ -291,6 +298,7 @@ async def test_fresh_projection_skips_refresh() -> None:
     ):
         await list_accessible_repos(installation_id=None)
 
+    mock_ensure.assert_awaited_once()
     mock_client.list_installations.assert_not_awaited()
 
 
@@ -304,7 +312,7 @@ async def test_sync_failure_returns_empty_gracefully() -> None:
     mock_projection.get_all_active = AsyncMock(return_value=[])
 
     with (
-        patch("syn_api._wiring.ensure_connected", new_callable=AsyncMock),
+        patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock) as mock_ensure,
         patch("syn_adapters.github.client.get_github_client", return_value=mock_client),
         patch(
             "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
@@ -312,6 +320,11 @@ async def test_sync_failure_returns_empty_gracefully() -> None:
         ),
     ):
         result = await list_accessible_repos(installation_id=None)
+        mock_ensure.assert_awaited_once()
 
+    # Ok([]) alone is vacuous here: an empty projection produces [] whether or
+    # not the sync ran at all. Assert the failing call actually happened, so the
+    # test proves the FAILURE path was exercised rather than skipped.
+    mock_client.list_installations.assert_awaited_once_with()
     assert isinstance(result, Ok)
     assert result.value == []
