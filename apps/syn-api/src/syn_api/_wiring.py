@@ -72,13 +72,13 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
         ShowClaudePluginHandler,
     )
+    from syn_shared.settings.config import Settings
     from syn_shared.settings.github import GitHubAppSettings
 
 from syn_adapters.conversations import get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
 from syn_adapters.session_store import HttpSessionStore
-from syn_shared.settings.config import Settings
 from syn_adapters.storage import (
     connect_event_store,
     disconnect_event_store,
