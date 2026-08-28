@@ -433,12 +433,10 @@ from `syn_shared.settings.constants` (Python) or `constants.ts` (TypeScript).
 CI failures that could have been caught locally waste 8–10 minutes per round-trip and block the release chain. Always run these before pushing:
 
 ```bash
-just fitness         # BOTH halves: thresholds AND the ci/fitness invariants
-                     # (`fitness-check` alone skips cross-context and ES checks,
-                     #  which is how #931 shipped 3 violations past a green local run)
-just docs-sync       # catches codegen drift (CLI types, OpenAPI spec, API docs)
-uv run ruff check .  # catches lint and import order issues
-uv run ruff format --check .  # catches formatting
+just preflight       # EVERY gate CI runs, from the same justfile target CI
+                     # and the pre-push hook both call. If a check is not in
+                     # `preflight` it is not enforced before push - add new
+                     # gates there, never to CI alone (#931).
 ```
 
 Or run `just qa` for the full suite (slower but catches everything including tests).

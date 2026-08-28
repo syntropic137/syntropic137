@@ -1,25 +1,14 @@
 #!/usr/bin/env bash
 # Pre-push hook — catches the most common CI failures locally before they waste a round-trip.
-# Fast checks only (~30s). Full suite: just qa
+# Runs `just preflight` - the same target CI runs. Slower than the old
+# hand-rolled list, and it catches what that list could not.
 set -euo pipefail
 
-echo "▶ pre-push: ruff format check..."
-uv run ruff format --check apps/ packages/ 2>/dev/null
-
-echo "▶ pre-push: ruff lint..."
-uv run ruff check apps/ packages/ 2>/dev/null
-
-echo "▶ pre-push: architectural fitness..."
-just fitness-check
-
-echo "▶ pre-push: codegen drift check..."
-just codegen > /dev/null 2>&1
-if ! git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null; then
-  git restore apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts 2>/dev/null || true
-  echo "❌ Codegen drift: API types or docs are stale. Run 'just codegen' and commit the changes."
-  exit 1
-fi
-echo "✓ Codegen up to date"
+# ONE target, shared with CI and the AGENTS.md checklist. This hook used to
+# carry its own list and ran only the THRESHOLD half of fitness, so
+# cross-context and ES invariant failures could only surface after a push.
+echo "▶ pre-push: preflight (every CI gate)..."
+just preflight
 
 echo "▶ pre-push: em dash check in docs..."
 if grep -rq $'\xe2\x80\x94' apps/syn-docs/content/ 2>/dev/null; then

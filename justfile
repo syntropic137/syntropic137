@@ -987,6 +987,43 @@ fitness-invariants:
     uv run pytest ci/fitness/ -v --tb=short -m architecture
     @echo "✅ Invariant checks passed"
 
+# Everything CI gates on, in ONE place.
+#
+# CI, the pre-push hook and the AGENTS.md checklist all call this target. They
+# used to carry three independently-maintained lists, and they drifted:
+# check-compose, check-default-workspace-image and check-plugin-schemas were
+# reachable from no local recipe at all, the hook ran only the THRESHOLD half
+# of fitness, and generated-file drift was invisible locally. PR #931 hit three
+# of those in a single push.
+#
+# Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
+# if a `just` target CI runs is not in this closure.
+preflight: lint format-check fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-env-example check-plugin-schemas
+    @echo "✅ preflight: every CI gate passed locally"
+
+# Codegen drift, detected by what codegen CHANGES rather than a hardcoded list.
+#
+# Snapshots the dirty set, runs codegen, compares. A hardcoded path list (what
+# the hook used) silently stops covering any artifact added later - that is how
+# a stale .env.example reached CI. Diffing the whole tree instead would flag the
+# author's own work in progress, so the DELTA is what matters.
+codegen-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    before=$(mktemp)
+    git status --porcelain > "$before"
+    just codegen > /dev/null 2>&1
+    after=$(mktemp)
+    git status --porcelain > "$after"
+    if ! diff -q "$before" "$after" > /dev/null; then
+        echo "❌ Codegen drift. Run 'just codegen' and commit these:"
+        diff "$before" "$after" | grep '^>' | sed 's/^> /   /'
+        rm -f "$before" "$after"
+        exit 1
+    fi
+    rm -f "$before" "$after"
+    echo "✓ Codegen up to date"
+
 # All fitness checks
 fitness: fitness-check fitness-invariants
 

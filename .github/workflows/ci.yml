@@ -133,23 +133,13 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
-      - name: Code quality thresholds (APSS)
-        run: just fitness-check
-
-      - name: Structural & ES invariants
-        run: just fitness-invariants
-
-      - name: Published compose consistency
-        run: just check-compose
-
-      - name: Compose overlay validation
-        run: just check-compose-overlays
-
-      - name: Check plugin schemas are in sync
-        run: just check-plugin-schemas
-
-      - name: Check .env.example is in sync
-        run: just check-env-example
+      # ONE list, shared with the pre-push hook and the AGENTS.md checklist.
+      # Enumerating the checks here as separate steps is what let CI and local
+      # drift: three of them were reachable from no local recipe at all, so
+      # they could only fail after a push (#931). Add new gates to `preflight`
+      # in the justfile, never here.
+      - name: Preflight (every gate, same target the hook runs)
+        run: just preflight
 
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
