@@ -262,3 +262,58 @@ async def test_cancel_signal_interrupts() -> None:
     assert workspace.interrupted is True
     assert result.interrupt_requested is True
     assert result.interrupt_reason == "user requested stop"
+
+
+@pytest.mark.asyncio
+async def test_cancel_with_no_reason_still_interrupts() -> None:
+    """#918: a cancel with no reason text is still a cancel, codex side.
+
+    ``test_cancel_signal_interrupts`` above sends ``reason="user requested
+    stop"`` and passes both before and after the fix, because
+    ``interrupt_requested`` used to be derived as ``interrupt_reason is not
+    None``. The default CLI path - ``syn control cancel <id> --force`` with no
+    ``-r`` - sends no reason at all, so the flag evaluated False and the
+    workflow continued to its remaining phases.
+    """
+    from syn_shared.control import ControlSignalType
+
+    class _SpyWorkspace:
+        last_stream_exit_code = 0
+
+        def __init__(self) -> None:
+            self.interrupted = False
+
+        async def interrupt(self) -> bool:
+            self.interrupted = True
+            return True
+
+    class _Signal:
+        signal_type = ControlSignalType.CANCEL
+        reason = None  # what the CLI actually sends without -r
+
+    class _FakeController:
+        async def check_signal(self, execution_id: str) -> _Signal:
+            return _Signal()
+
+    async def _many_lines() -> AsyncIterator[str]:
+        for _ in range(11):
+            yield '{"type":"turn.started"}'
+
+    processor = CodexStreamProcessor(
+        tokens=TokenAccumulator(),
+        collector=_RecordingCollector(),
+        controller=_FakeController(),  # type: ignore[arg-type]
+        execution_id="exec-1",
+        phase_id="p1",
+        session_id="s1",
+        agent_model="gpt-5.6",
+    )
+    workspace = _SpyWorkspace()
+
+    result = await processor.process_stream(_many_lines(), workspace)
+
+    assert workspace.interrupted is True
+    assert result.interrupt_requested is True, (
+        "a cancel without a reason must still request interrupt (#918)"
+    )
+    assert result.interrupt_reason is None

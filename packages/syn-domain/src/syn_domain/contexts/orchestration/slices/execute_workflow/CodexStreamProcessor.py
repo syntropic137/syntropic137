@@ -353,6 +353,7 @@ class CodexStreamProcessor:
         started_at = time.monotonic()
         conversation_lines: list[str] = []
         line_count = 0
+        interrupt_requested = False
         interrupt_reason: str | None = None
 
         async for line in stream:
@@ -363,6 +364,7 @@ class CodexStreamProcessor:
             poll = await self._cancel_poller.check(line_count)
             if poll.should_interrupt:
                 await workspace.interrupt()
+                interrupt_requested = True
                 interrupt_reason = poll.reason
                 break
 
@@ -402,7 +404,7 @@ class CodexStreamProcessor:
 
         return StreamResult(
             line_count=line_count,
-            interrupt_requested=interrupt_reason is not None,
+            interrupt_requested=interrupt_requested,
             interrupt_reason=interrupt_reason,
             agent_task_result=None,
             conversation_lines=conversation_lines,
