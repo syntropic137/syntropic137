@@ -124,6 +124,20 @@ class SessionStoreSettings(BaseSettings):
         ),
     )
 
+    read_token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Read token for the session store, used to fetch a delegated "
+            "session's transcript back so its cost can be attributed. "
+            "SEPARATE from the write token because a conforming store may scope "
+            "the two differently - a write-only token returns 401 on reads, and "
+            "every delegate then looks like a transient store outage rather "
+            "than an auth failure. Falls back to SYN_SESSION_STORE_AUTH_TOKEN "
+            "when unset, which is correct for a store that issues one token "
+            "carrying both scopes. Handled as a credential."
+        ),
+    )
+
     label: str = Field(
         default="",
         description=(
@@ -162,7 +176,7 @@ class SessionStoreSettings(BaseSettings):
         ),
     )
 
-    @field_validator("url", "auth_token", mode="before")
+    @field_validator("url", "auth_token", "read_token", mode="before")
     @classmethod
     def _empty_str_to_none(cls, v: object) -> object:
         """Treat an empty/whitespace-only env var as unset.
@@ -175,7 +189,7 @@ class SessionStoreSettings(BaseSettings):
             return None
         return v
 
-    @field_validator("url", "auth_token", mode="before")
+    @field_validator("url", "auth_token", "read_token", mode="before")
     @classmethod
     def _strip_surrounding_whitespace(cls, v: object) -> object:
         """Trim whitespace a human left around a hand-pasted value.
@@ -309,3 +323,21 @@ class SessionStoreSettings(BaseSettings):
         if self.auth_token is None:
             return ""
         return self.auth_token.get_secret_value()
+
+    @property
+    def effective_read_token(self) -> SecretStr | None:
+        """The token to use for READS.
+
+        A property rather than a caller-side ``or`` because there are two
+        tokens and only one of them works for reading; picking wrongly fails
+        as a retry loop rather than as an error, which is the hardest kind to
+        notice.
+        """
+        # Compares the VALUE, not the object. A whitespace-only token strips
+        # to empty but its SecretStr is still truthy, so an object-truthiness
+        # check would send "   " as the bearer credential and 401 every read -
+        # which is classified TRANSIENT, so it would look like a store outage
+        # and retry forever rather than reporting a bad credential.
+        if self.read_token is not None and self.read_token.get_secret_value().strip():
+            return self.read_token
+        return self.auth_token

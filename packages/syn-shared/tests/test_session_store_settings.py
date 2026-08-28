@@ -312,3 +312,59 @@ class TestTheStoreLabel:
         """The whole point is that an operator sets this per deployment."""
         with patch.dict(os.environ, {"SYN_SESSION_STORE_LABEL": "tenant-a"}):
             assert SessionStoreSettings(url="https://s").display_label == "tenant-a"
+
+
+def test_a_store_with_one_token_still_works() -> None:
+    """Falls back, so a store issuing a single dual-scope token needs no
+    extra configuration."""
+    settings = SessionStoreSettings(url="http://s", auth_token="both")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "both"
+
+
+def test_a_separate_read_token_wins() -> None:
+    """The case that matters: a write-only token returns 401 on reads, which
+    is classified as a TRANSIENT store fault - so every delegate retries
+    forever and none is ever priced. The failure looks like an outage rather
+    than a misconfiguration, which is why this needs its own setting (#895)."""
+    settings = SessionStoreSettings(url="http://s", auth_token="write", read_token="read")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "read"
+
+
+def test_no_tokens_at_all_is_none_not_an_error() -> None:
+    assert SessionStoreSettings(url="http://s").effective_read_token is None
+
+
+def test_a_whitespace_only_read_token_falls_back() -> None:
+    """The hole cross-model review pointed at (#931).
+
+    An empty string was already safe - SecretStr("") is falsy - but "   " is
+    TRUTHY while stripping to nothing, so an object-truthiness check sends it
+    as the bearer credential. Every read then 401s, which is classified
+    TRANSIENT, so it reads as a store outage that will clear on retry rather
+    than as a bad credential. It never clears.
+    """
+    settings = SessionStoreSettings(url="http://s", auth_token="write", read_token="   ")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "write"
+
+
+def test_an_empty_read_token_falls_back_as_env_example_generates_it() -> None:
+    """.env.example emits `SYN_SESSION_STORE_READ_TOKEN=`, so this is the
+    shape most deployments will actually have."""
+    settings = SessionStoreSettings(url="http://s", auth_token="write", read_token="")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "write"
+
+
+def test_a_padded_read_token_is_stripped_not_rejected() -> None:
+    """A stray space around a REAL token would be sent in the header."""
+    settings = SessionStoreSettings(url="http://s", auth_token="write", read_token="  r  ")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "r"

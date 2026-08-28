@@ -524,6 +524,14 @@ async def _enrich_costs(
         phase_cost = exec_cost.cost_by_phase.get(phase.phase_id)
         if phase_cost is not None:
             phase.cost_usd = phase_cost
+        # The per-model split comes from the SAME source as cost_usd, so the
+        # parts add up to the whole. The earlier value was looked up by the
+        # phase's own session id, which since #895 is only the LEADER: a codex
+        # phase that delegated to claude showed the right total beside a
+        # breakdown that named only codex, and the difference was invisible.
+        phase_models = exec_cost.models_by_phase.get(phase.phase_id)
+        if phase_models:
+            phase.cost_by_model = dict(phase_models)
         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
 
     return _EnrichedExecutionCost(

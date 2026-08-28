@@ -45,6 +45,11 @@ from syn_domain.contexts.agent_sessions._shared import (
     SessionStatus,
     TokenMetrics,
 )
+from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
+from syn_domain.contexts.agent_sessions.delegate_usage import (
+    SessionStorePort,
+    StoredSession,
+)
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
@@ -80,6 +85,10 @@ from syn_domain.contexts.agent_sessions.slices.start_session import (
 from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler import (
     StartSessionHandler,
 )
+from syn_domain.contexts.agent_sessions.transcript_usage import (
+    PricedUsage,
+    StoredTranscript,
+)
 
 __all__ = [
     "AgentSessionAggregate",
@@ -90,14 +99,19 @@ __all__ = [
     "OperationRecord",
     "OperationRecordedEvent",
     "OperationType",
+    "PricedUsage",
     "RecordOperationCommand",
     "SessionCompletedEvent",
     "SessionCostQueryService",
     "SessionStartedEvent",
     "SessionStatus",
+    "SessionStorePort",
     "StartSessionCommand",
     "StartSessionHandler",
+    "StoredSession",
+    "StoredTranscript",
     "TokenMetrics",
+    "import_phase_delegates",
     "record_error",
     "record_message_request",
     "record_message_response",

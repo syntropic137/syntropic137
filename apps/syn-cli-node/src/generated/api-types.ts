@@ -4097,6 +4097,10 @@ export interface components {
             execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
+            /** Parent Session Id */
+            parent_session_id?: string | null;
+            /** Root Session Id */
+            root_session_id?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Milestone Id */
@@ -4229,6 +4233,10 @@ export interface components {
             execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
+            /** Parent Session Id */
+            parent_session_id?: string | null;
+            /** Root Session Id */
+            root_session_id?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Status */

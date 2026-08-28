@@ -72,11 +72,13 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
         ShowClaudePluginHandler,
     )
+    from syn_shared.settings.config import Settings
     from syn_shared.settings.github import GitHubAppSettings
 
 from syn_adapters.conversations import get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
+from syn_adapters.session_store import HttpSessionStore
 from syn_adapters.storage import (
     connect_event_store,
     disconnect_event_store,
@@ -119,6 +121,27 @@ async def disconnect() -> None:
 def get_projection_mgr() -> ProjectionManager:
     """Return the singleton ProjectionManager."""
     return get_projection_manager()
+
+
+def _build_session_store(settings: Settings) -> HttpSessionStore | None:
+    """The read side of the session store, or None when it is not configured.
+
+    Returns None rather than raising: the store is opt-in, and a deployment
+    without one simply imports no delegate cost. Failing startup over an
+    optional telemetry source would trade a partial cost figure for no platform
+    at all.
+    """
+    store = settings.session_store
+    if not store.is_enabled or not store.url:
+        return None
+
+    # The READ token: this client only ever fetches. Handing it the write
+    # token yields 401 on every fetch against a store that scopes the two
+    # separately, and a 401 is classified as transient - so every delegate
+    # would retry forever and none would ever be priced.
+    read_token = store.effective_read_token
+    token = read_token.get_secret_value() if read_token else None
+    return HttpSessionStore(base_url=store.url, auth_token=token)
 
 
 def _build_workspace_telemetry_env() -> dict[str, str]:
@@ -220,6 +243,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         claude_plugin_materializer=claude_plugin_materializer,
         skill_materializer=skill_materializer,
         session_capture=session_capture,
+        session_store=_build_session_store(_settings),
     )
 
 

@@ -987,6 +987,51 @@ fitness-invariants:
     uv run pytest ci/fitness/ -v --tb=short -m architecture
     @echo "✅ Invariant checks passed"
 
+# Every STATIC CI gate, in ONE place.
+#
+# NOT a claim that CI ran entirely: unit tests, the dashboard build, CLI checks,
+# integration and security scanning run in their own jobs and are not here. The
+# earlier wording said "every CI gate", which was false and is exactly the kind
+# of overstatement that makes a green check untrustworthy. `just qa` is the
+# fuller local sweep; this is the fast one a hook can run.
+#
+# CI, the pre-push hook and the AGENTS.md checklist all call this target. They
+# used to carry three independently-maintained lists, and they drifted:
+# check-compose, check-default-workspace-image and check-plugin-schemas were
+# reachable from no local recipe at all, the hook ran only the THRESHOLD half
+# of fitness, and generated-file drift was invisible locally. PR #931 hit three
+# of those in a single push.
+#
+# Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
+# if a `just` target CI runs is not in this closure.
+preflight: lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-env-example check-plugin-schemas
+    @echo "✅ preflight: every STATIC CI gate passed locally"
+    @echo "   Not covered here (run separately): unit tests (just test),"
+    @echo "   dashboard build, CLI checks, integration, security scanning."
+
+# Codegen drift, detected by what codegen CHANGES rather than a hardcoded list.
+#
+# Snapshots the dirty set, runs codegen, compares. A hardcoded path list (what
+# the hook used) silently stops covering any artifact added later - that is how
+# a stale .env.example reached CI. Diffing the whole tree instead would flag the
+# author's own work in progress, so the DELTA is what matters.
+codegen-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    before=$(mktemp)
+    git status --porcelain > "$before"
+    just codegen > /dev/null 2>&1
+    after=$(mktemp)
+    git status --porcelain > "$after"
+    if ! diff -q "$before" "$after" > /dev/null; then
+        echo "❌ Codegen drift. Run 'just codegen' and commit these:"
+        diff "$before" "$after" | grep '^>' | sed 's/^> /   /'
+        rm -f "$before" "$after"
+        exit 1
+    fi
+    rm -f "$before" "$after"
+    echo "✓ Codegen up to date"
+
 # All fitness checks
 fitness: fitness-check fitness-invariants
 
@@ -1473,7 +1518,11 @@ docs-regen: diagram docs-gen
 
 # Regenerate all derived artifacts and fail if any are uncommitted.
 # Runs `just codegen` once, then checks architecture docs, CLI docs, and API artifacts.
-docs-sync:
+# `check-env-example` belongs here: .env.example is GENERATED from the
+# Settings classes, so it drifts exactly like the OpenAPI spec and the CLI
+# types this recipe already guards. It was previously reachable from no
+# local recipe at all, so a stale file could only be caught by CI (#931).
+docs-sync: check-env-example
     @echo "🔄 Regenerating architecture documentation..."
     @uv run python scripts/generate-architecture-docs.py > /tmp/docs-gen.txt 2>&1
     @if git diff --quiet docs/architecture/projection-subscriptions.md docs/architecture/event-flows/README.md README.md 2>/dev/null; then \
