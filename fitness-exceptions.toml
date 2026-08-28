@@ -43,8 +43,8 @@ issue = "#624"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 760
-issue = "#768"  # grew absorbing 769's _DispatchContext, the stale-COLLECT_ARTIFACTS skip guard, #772's skill_materializer wiring, and the session-capture probe hook (the probe body lives in phase_capture.py; what remains here is the port, the per-phase session id, and the calls that must sit before teardown on both the finalize path and the cancel/failure path); a split is still owed
+value = 763
+issue = "#768"  # #895 added a session-store dep, its per-phase state and the call that fills it - about 6 lines that cannot be removed without removing the feature. Paid for FOUR ways down first, so the file is structurally better than when the 760 budget was set: the delegate import and its payload shaping moved to phase_delegate_import.py, the cancel/failure teardown loop went with it, conversation recording moved to phase_conversation.py, and the observation payload left the domain entirely. Roughly 200 lines out. What remains is the split this note has always owed: run/_handle_run_agent/_handle_complete_phase are still the bulk and still belong elsewhere.
 
 [max-loc-file."apps.syn-api.src.syn_api._wiring"]
 value = 1200

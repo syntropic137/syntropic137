@@ -25,6 +25,7 @@ from syn_shared.events import SESSION_SUMMARY
 from syn_shared.pricing import price_tokens
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from contextlib import AbstractAsyncContextManager
 
     from syn_adapters.workspace_backends.agentic.capture_result import (
@@ -53,8 +54,81 @@ __all__ = [
 ]
 
 
+def _token_fields(usage: PricedUsage | None) -> Mapping[str, object]:
+    """The four disjoint buckets, or zeroes when nothing could be priced.
+
+    Two branches rather than a ternary per field: an unpriceable delegate is a
+    different CASE, not five independent fallbacks, and writing it that way is
+    what let a five-way conditional grow to complexity 17.
+    """
+    if usage is None:
+        return {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 0,
+            "model": None,
+        }
+    return {
+        "input_tokens": usage.uncached_input_tokens,
+        "output_tokens": usage.output_tokens,
+        "cache_creation_tokens": usage.cache_creation_tokens,
+        "cache_read_tokens": usage.cache_read_tokens,
+        "model": usage.model,
+    }
+
+
+def _summary_fields(usage: PricedUsage | None) -> Mapping[str, object]:
+    """Summary totals under the names the cost projection reads.
+
+    ``num_turns`` and ``duration_ms`` are explicitly None: a delegate is
+    reconstructed from a stored transcript, never watched live, and 0 would
+    read as "ran, took no time, took no turns".
+    """
+    base = {"num_turns": None, "duration_ms": None, "delegated": True}
+    if usage is None:
+        return {
+            **base,
+            "model": None,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+        }
+    return {
+        **base,
+        "model": usage.model,
+        "total_input_tokens": usage.uncached_input_tokens,
+        "total_output_tokens": usage.output_tokens,
+        "cache_read_tokens": usage.cache_read_tokens,
+        "cache_creation_tokens": usage.cache_creation_tokens,
+    }
+
+
+def _delegate_cost(usage: PricedUsage | None, session_id: str) -> float | None:
+    """Price a delegate, or None when there is nothing priceable.
+
+    Goes through ``price_tokens``, the documented single cost entry point, so
+    the rate table stays the one authority and an unknown model produces a
+    greppable warning rather than a silent zero.
+    """
+    if usage is None:
+        return None
+    priced = price_tokens(
+        usage.model,
+        usage.uncached_input_tokens,
+        usage.output_tokens,
+        cache_creation=usage.cache_creation_tokens,
+        cache_read=usage.cache_read_tokens,
+        context=f"delegate {session_id}",
+    )
+    if not priced.is_priced or priced.cost is None:
+        return None
+    return float(priced.cost)
+
+
 class DelegateUsageRecorder:
-    """Shapes a recovered delegate cost into a TOKEN_USAGE observation.
+    """Shapes a recovered delegate cost into the observations the read path needs.
 
     Lives here rather than in the domain module because this is the layer that
     already knows the observation payload's field names. Keeping that knowledge
@@ -75,80 +149,38 @@ class DelegateUsageRecorder:
         phase_id: str,
         workspace_id: str | None,
     ) -> None:
-        # Zeroes carrying a reason, never an omission: an unpriceable delegate
-        # has to stay visible as a gap rather than vanish into "never ran".
-        data = {
-            "input_tokens": usage.uncached_input_tokens if usage else 0,
-            "output_tokens": usage.output_tokens if usage else 0,
-            "cache_creation_tokens": usage.cache_creation_tokens if usage else 0,
-            "cache_read_tokens": usage.cache_read_tokens if usage else 0,
-            "model": usage.model if usage else None,
-            "delegated": True,
-            # Only present when there IS a reason, so its presence alone marks
-            # a delegate that could not be priced.
-            **({"unpriced_reason": unpriced_reason} if unpriced_reason else {}),
-        }
+        """Write BOTH observations a delegate needs to become visible.
 
-        await self._writer.record_observation(
-            session_id=session_id,
-            observation_type=ObservationType.TOKEN_USAGE,
-            data=data,
-            execution_id=execution_id,
-            phase_id=phase_id,
-            workspace_id=workspace_id,
-        )
+        token_usage alone is not enough, and that is not obvious: verified on a
+        live run, the delegate's token_usage landed perfectly and the execution
+        total did not move by a cent. ExecutionCostProjection.on_session_summary
+        is what adds cost; token_usage is only a fallback for sessions still in
+        progress. A delegate has no summary of its own - it was never a platform
+        session - so one is minted here.
+        """
+        # Present only when there IS a reason, so its presence alone marks a
+        # delegate that could not be priced. Zeroes carrying a reason, never an
+        # omission: a dropped delegate is indistinguishable from one that never
+        # ran, which is the invisibility this whole issue is about.
+        reason_field = {"unpriced_reason": unpriced_reason} if unpriced_reason else {}
+        cost = _delegate_cost(usage, session_id)
+        # Omitted when unpriceable, deliberately. The projection then counts the
+        # delegate's TOKENS with no cost, which reads as a visible gap rather
+        # than as work that was free.
+        cost_field = {"total_cost_usd": cost} if cost is not None else {}
 
-        # ALSO a session_summary, because token_usage alone is invisible to the
-        # cost read path. Verified on a live run: the delegate's token_usage
-        # landed correctly and the execution total did not move, because
-        # ExecutionCostProjection.on_session_summary is what adds cost and
-        # token_usage is only a fallback for sessions still in progress.
-        #
-        # A delegate has no summary of its own - it was never a platform
-        # session - so this is where one is minted for it.
-        priced = (
-            price_tokens(
-                usage.model,
-                usage.uncached_input_tokens,
-                usage.output_tokens,
-                cache_creation=usage.cache_creation_tokens,
-                cache_read=usage.cache_read_tokens,
-                context=f"delegate {session_id}",
+        for observation_type, fields in (
+            (ObservationType.TOKEN_USAGE, {**_token_fields(usage), "delegated": True}),
+            (SESSION_SUMMARY, {**_summary_fields(usage), **cost_field}),
+        ):
+            await self._writer.record_observation(
+                session_id=session_id,
+                observation_type=observation_type,
+                data={**fields, **reason_field},
+                execution_id=execution_id,
+                phase_id=phase_id,
+                workspace_id=workspace_id,
             )
-            if usage is not None
-            else None
-        )
-        summary = {
-            "model": usage.model if usage else None,
-            "total_input_tokens": usage.uncached_input_tokens if usage else 0,
-            "total_output_tokens": usage.output_tokens if usage else 0,
-            "cache_read_tokens": usage.cache_read_tokens if usage else 0,
-            "cache_creation_tokens": usage.cache_creation_tokens if usage else 0,
-            # A delegate reports neither: it is reconstructed from a stored
-            # transcript, not watched live. Explicit None beats 0, which would
-            # read as "ran, took no time, took no turns".
-            "num_turns": None,
-            "duration_ms": None,
-            "delegated": True,
-            # Omitted when unpriced, deliberately. The projection then counts
-            # the delegate's TOKENS with no cost, which reads as a visible gap
-            # rather than as work that was free.
-            **(
-                {"total_cost_usd": float(priced.cost)}
-                if priced is not None and priced.is_priced and priced.cost is not None
-                else {}
-            ),
-            **({"unpriced_reason": unpriced_reason} if unpriced_reason else {}),
-        }
-
-        await self._writer.record_observation(
-            session_id=session_id,
-            observation_type=SESSION_SUMMARY,
-            data=summary,
-            execution_id=execution_id,
-            phase_id=phase_id,
-            workspace_id=workspace_id,
-        )
 
 
 async def import_delegates_for_phase(

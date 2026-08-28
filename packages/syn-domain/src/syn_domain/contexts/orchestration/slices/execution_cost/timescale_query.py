@@ -450,9 +450,7 @@ def price_phase_rows(rows: Sequence[asyncpg.Record], cost_calculator: CostCalcul
         if priced.model:
             phase_models = by_model.setdefault(phase_id, {})
             phase_models[priced.model] = phase_models.get(priced.model, Decimal("0")) + priced.cost
-    return PhaseCosts(
-        cost_by_phase=costs, unpriced_by_phase=unpriced, models_by_phase=by_model
-    )
+    return PhaseCosts(cost_by_phase=costs, unpriced_by_phase=unpriced, models_by_phase=by_model)
 
 
 def price_grouped_session_summary(
