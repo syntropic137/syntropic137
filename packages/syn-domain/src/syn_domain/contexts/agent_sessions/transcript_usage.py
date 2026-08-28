@@ -95,6 +95,37 @@ class NoUsage:
     """
 
 
+class RetryDisposition(StrEnum):
+    """Whether re-reading could change an unpriced verdict.
+
+    Three states rather than a boolean, because "the store does not have it"
+    and "the store could not be reached" are both retryable but end for
+    different reasons, and conflating either with a permanent failure is how
+    this fails silently.
+    """
+
+    PERMANENT = "permanent"
+    """Asking again cannot help. The transcript is present and unreadable, the
+    format is unsupported, or the record contradicts itself."""
+
+    MISSING = "missing"
+    """The store does not have this session YET.
+
+    Capture lands AFTER an execution reports completed, so a reader arriving
+    promptly sees an empty store for sessions that appear seconds later. This
+    ends when the capture's accepted count is satisfied - only that counter
+    separates "on its way" from "never arrived".
+    """
+
+    TRANSIENT = "transient"
+    """The store could not be reached or answered badly.
+
+    Distinct from MISSING because no capture counter can retire it: a reset
+    connection says nothing about how many sessions exist, so it must be
+    retried on its own terms rather than resolved by counting.
+    """
+
+
 @dataclass(frozen=True)
 class UnpricedUsage:
     """The parse cannot be trusted, so it exposes NO counters.
@@ -107,19 +138,14 @@ class UnpricedUsage:
 
     reason: str
 
-    absent: bool = False
-    """True when the store simply does not have this session.
+    retry: RetryDisposition = RetryDisposition.PERMANENT
+    """Whether asking again could ever produce a different answer.
 
     A TYPED discriminator rather than a caller matching on ``reason`` prose,
-    because the two cases it separates need opposite handling and prose drifts
-    without a test noticing.
-
-    Capture lands AFTER an execution reports completed, so a reader arriving
-    promptly sees an empty store for sessions that appear seconds later.
-    Absent therefore means "not yet, ask again", while every other unpriced
-    reason means "asking again will not help". Conflating them makes the race
-    fail silently: the import reads nothing, imports nothing, and reports
-    success.
+    because the cases need opposite handling and prose drifts without a test
+    noticing. Defaulting to PERMANENT means a new unpriced branch has to opt
+    IN to being retried, so the mistake a careless addition makes is a visible
+    gap rather than an endless retry loop.
     """
 
 

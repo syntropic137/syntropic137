@@ -15,6 +15,7 @@ depends on which endpoint the caller happened to use.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ from syn_domain.contexts.agent_sessions.delegate_usage import (
 )
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     PricedUsage,
+    RetryDisposition,
     UnpricedUsage,
 )
 
@@ -105,7 +107,25 @@ class TestTheRoundTrip:
         result = await resolve_delegate_usage(store, session.session_id)
 
         assert isinstance(result, PricedUsage)
-        assert result.uncached_input_tokens == 7
+        # The WHOLE value, not one bucket. Asserting a single field leaves a
+        # test that still passes when the other buckets are dropped or
+        # zeroed, which is the exact defect this recovery exists to catch.
+        assert result == PricedUsage(
+            model=result.model,
+            uncached_input_tokens=7,
+            cache_read_tokens=result.cache_read_tokens,
+            cache_creation_tokens=result.cache_creation_tokens,
+            output_tokens=result.output_tokens,
+            message_count=result.message_count,
+        )
+        assert result.cache_read_tokens > 0
+        assert result.output_tokens > 0
+        assert result.total_tokens == (
+            result.uncached_input_tokens
+            + result.cache_read_tokens
+            + result.cache_creation_tokens
+            + result.output_tokens
+        )
 
 
 @pytest.mark.unit
@@ -122,6 +142,10 @@ class TestAMissingSessionIsNotAFreeOne:
 
         assert isinstance(result, UnpricedUsage)
         assert "never-uploaded" in result.reason
+        # The retry signal is asserted, not just the unpriced verdict. Without
+        # this the test passes with the WRONG disposition, and a wrong
+        # disposition is what turns the capture race into a silent undercount.
+        assert result.retry is RetryDisposition.MISSING
 
     @pytest.mark.asyncio
     async def test_a_store_that_raises_is_unpriced_not_fatal(self) -> None:
@@ -136,3 +160,78 @@ class TestAMissingSessionIsNotAFreeOne:
 
         assert isinstance(result, UnpricedUsage)
         assert "connection reset" in result.reason
+
+
+@pytest.mark.unit
+class TestTheStoreIsNotTrustedToAnswerTheRightQuestion:
+    """A store that returns a DIFFERENT session than the one asked for.
+
+    This is the shortest path to the failure the whole design exists to
+    prevent: if a stale or faulty adapter hands back the LEADER's record when
+    asked for a delegate, the leader's transcript gets priced under the
+    delegate's attribution and the execution total doubles part of itself.
+    Cheap to check, and the check is worth more than its cost.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_mismatched_record_is_refused(self) -> None:
+        leader = _stored("ClaudeCode", _claude_raw())
+        wrong_answer = replace(leader, session_id="the-leader")
+
+        class _ConfusedStore:
+            async def fetch_session(self, session_id: str) -> StoredSession | None:
+                return wrong_answer
+
+        result = await resolve_delegate_usage(_ConfusedStore(), "the-delegate")
+
+        assert isinstance(result, UnpricedUsage)
+        assert "the-leader" in result.reason
+        assert "the-delegate" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_a_mismatched_record_exposes_no_counters(self) -> None:
+        """Refused, not merely flagged. An advisory flag beside usable numbers
+        is not enough, because a caller reads the numbers.
+        """
+        leader = _stored("ClaudeCode", _claude_raw())
+
+        class _ConfusedStore:
+            async def fetch_session(self, session_id: str) -> StoredSession | None:
+                return replace(leader, session_id="the-leader")
+
+        result = await resolve_delegate_usage(_ConfusedStore(), "the-delegate")
+
+        assert not isinstance(result, PricedUsage)
+
+    @pytest.mark.asyncio
+    async def test_a_mismatched_record_is_never_retried(self) -> None:
+        """A store that answers the wrong question will answer it the same way
+        again, so retrying only delays the gap becoming visible.
+        """
+        leader = _stored("ClaudeCode", _claude_raw())
+
+        class _ConfusedStore:
+            async def fetch_session(self, session_id: str) -> StoredSession | None:
+                return replace(leader, session_id="the-leader")
+
+        result = await resolve_delegate_usage(_ConfusedStore(), "the-delegate")
+
+        assert isinstance(result, UnpricedUsage)
+        assert result.retry is RetryDisposition.PERMANENT
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_failed_lookup_is_transient_not_permanent() -> None:
+    """A reset connection is the textbook retryable failure. Marking it
+    permanent discards a recoverable cost for the life of the execution.
+    """
+
+    class _BrokenStore:
+        async def fetch_session(self, session_id: str) -> StoredSession | None:
+            raise ConnectionError("connection reset by peer")
+
+    result = await resolve_delegate_usage(_BrokenStore(), "s-a")
+
+    assert isinstance(result, UnpricedUsage)
+    assert result.retry is RetryDisposition.TRANSIENT

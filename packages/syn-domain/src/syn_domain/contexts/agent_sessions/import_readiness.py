@@ -48,7 +48,14 @@ def assess_import_readiness(
             its way" from "it never arrived"; nothing else here can tell the
             two apart.
     """
-    absent = reconciliation.absent_delegate_ids
+    # A failed lookup is retried on its own terms. No capture counter can
+    # retire it, because a call that never completed says nothing about how
+    # many sessions exist - so counting must not be allowed to declare it
+    # settled.
+    if reconciliation.transient_delegate_ids:
+        return ImportReadiness.WAIT
+
+    absent = reconciliation.missing_delegate_ids
     if not absent:
         # Nothing outstanding. Delegates that are present-but-unreadable, and
         # sessions that are unattributable, are settled verdicts rather than

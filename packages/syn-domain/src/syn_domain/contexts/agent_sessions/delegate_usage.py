@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from syn_domain.contexts.agent_sessions.transcript_usage import (
+    RetryDisposition,
     StoredTranscript,
     UnpricedUsage,
     UsageResult,
@@ -64,19 +65,42 @@ async def resolve_delegate_usage(store: SessionStorePort, session_id: str) -> Us
         session = await store.fetch_session(session_id)
     except Exception as exc:
         # Deliberately broad. Anything the transport can raise, from a reset
-        # connection to a malformed response, means the same thing here: this
-        # session's cost is unknown, and the sessions beside it are not.
-        return UnpricedUsage(f"store lookup failed for {session_id!r}: {exc}")
+        # connection to a malformed response, leaves this session's cost
+        # unknown while the sessions beside it stay knowable.
+        #
+        # TRANSIENT, not permanent: a reset connection or a timeout is exactly
+        # the kind of failure that a second attempt resolves, and marking it
+        # "do not retry" would discard a recoverable cost for the lifetime of
+        # the execution. It is also not MISSING - no capture counter can
+        # retire it, because a failed call says nothing about how many
+        # sessions exist.
+        return UnpricedUsage(
+            f"store lookup failed for {session_id!r}: {exc}",
+            retry=RetryDisposition.TRANSIENT,
+        )
 
     if session is None:
         # Absent is not free. A delegate may have run and cost money while its
         # transcript never reached the store, and saying "unknown" is the only
         # honest answer available.
         #
-        # Flagged absent rather than merely unpriced: capture lands after the
+        # MISSING rather than merely unpriced: capture lands after the
         # execution reports completed, so this same branch covers both "the
         # transcript is on its way" and "it never arrived". Only the caller,
         # holding the capture's accepted count, can tell those apart.
-        return UnpricedUsage(f"no stored session for {session_id!r}", absent=True)
+        return UnpricedUsage(
+            f"no stored session for {session_id!r}", retry=RetryDisposition.MISSING
+        )
+
+    if session.session_id != session_id:
+        # The store answered with a DIFFERENT session than the one asked for.
+        # Never trust it: the record handed back could be the leader's, and
+        # pricing it under a delegate's attribution is precisely the double
+        # count this design exists to prevent. Permanent, because a store that
+        # answers the wrong question will answer it the same way again.
+        return UnpricedUsage(
+            f"store returned session {session.session_id!r} when asked for {session_id!r}",
+            retry=RetryDisposition.PERMANENT,
+        )
 
     return extract_usage(session.source_format, session.raw)

@@ -161,13 +161,24 @@ class TestTheVocabulariesItBridgesStayPinned:
     sides to the real sources.
     """
 
-    def test_provider_keys_match_the_workflow_definition_literal(self) -> None:
-        """The declared-provider side, pinned to its source of truth.
+    def test_provider_keys_cover_every_known_provider(self) -> None:
+        """The declared-provider side, pinned to the CANONICAL vocabulary.
 
-        ``AgentYamlDefinition.provider`` is a ``Literal`` in the orchestration
-        context. Importing it here would couple two bounded contexts, so the
-        value is copied and this test guards the copy. A new provider added
-        there turns this red instead of silently going unpriced.
+        ``syn_shared.agents.AgentProvider`` is the shared enum of known
+        production providers, and it is what the module now keys off. A
+        provider added there without an agent name here would leave that
+        harness silently unpriced, so it turns this red instead.
+        """
+        from syn_shared.agents import AgentProvider
+
+        assert {p.value for p in AgentProvider} == set(_AGENT_BY_PROVIDER)
+
+    def test_provider_keys_match_the_workflow_definition_literal(self) -> None:
+        """The same side, pinned to the SECOND place it is spelled out.
+
+        ``AgentYamlDefinition.provider`` is an independent ``Literal`` in the
+        orchestration context, and the two can drift from each other. Guarding
+        both means a provider added to either place is visible here.
         """
         from typing import get_args
 
@@ -304,17 +315,80 @@ class TestRepeatedIdsInTheCapture:
 
 
 @pytest.mark.unit
-def test_agent_matching_is_exact_and_fails_safe() -> None:
-    """A differently-cased agent name is not a match.
-
-    Loosening this would be the wrong instinct: a fuzzy match that guesses
-    right most of the time is how the leader eventually gets priced. Exact
-    matching means an unrecognised spelling costs an undercount, which is the
-    direction this whole module errs in.
+class TestCaseVariationCannotPromoteADelegate:
+    """The sharpest hole in this module, and the one place where exact
+    matching alone is NOT the conservative choice.
     """
-    roles = classify_phase_sessions(
-        phase_provider="codex",
-        sessions=[_session("s-x", "codex"), _session("s-a", "ClaudeCode")],
-    )
 
-    assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
+    def test_a_cased_variant_beside_an_exact_match_refuses(self) -> None:
+        """The failure this module exists to prevent, reached by casing alone.
+
+        The phase declares codex. The real leader is recorded ``codex`` and a
+        same-harness child ``Codex``. Under exact matching only the CHILD is a
+        candidate, so it becomes the leader and the real leader is classified
+        a delegate - then fetched and priced. Treating a near-match as
+        ambiguity rather than as a non-match is what closes it.
+        """
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[
+                _session("actual-leader", "codex"),
+                _session("same-harness-child", "Codex"),
+            ],
+        )
+
+        assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
+
+    def test_a_cased_variant_alone_refuses(self) -> None:
+        """No exact match at all. Still refused rather than promoted: a fuzzy
+        match that guesses right most of the time is how the leader eventually
+        gets priced.
+        """
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[_session("s-x", "codex"), _session("s-a", "ClaudeCode")],
+        )
+
+        assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
+
+    def test_an_exactly_spelled_phase_is_unaffected(self) -> None:
+        """The relaxation must not refuse ordinary well-formed captures."""
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[_session("s-codex", "Codex"), _session("s-claude", "ClaudeCode")],
+        )
+
+        assert roles["s-codex"] is SessionRole.LEADER
+        assert roles["s-claude"] is SessionRole.DELEGATE
+
+
+@pytest.mark.unit
+class TestMalformedIdsRefuseThePhase:
+    """A blank id reaches the store as an empty key. It also means the capture
+    is malformed, so its account of the phase's other sessions is not worth
+    trusting either.
+    """
+
+    def test_a_blank_session_id_refuses_the_phase(self) -> None:
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[_session("", "Codex"), _session("s-a", "ClaudeCode")],
+        )
+
+        assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
+
+    def test_a_whitespace_session_id_refuses_the_phase(self) -> None:
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[_session("   ", "Codex"), _session("s-a", "ClaudeCode")],
+        )
+
+        assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
+
+    def test_a_blank_agent_refuses_the_phase(self) -> None:
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[_session("s-codex", "Codex"), _session("s-a", "")],
+        )
+
+        assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}

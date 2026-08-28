@@ -24,6 +24,7 @@ from syn_domain.contexts.agent_sessions.phase_reconciliation import (
 )
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     PricedUsage,
+    RetryDisposition,
     UnpricedUsage,
 )
 
@@ -45,7 +46,9 @@ def _priced(session_id: str) -> DelegateCost:
 def _absent(session_id: str) -> DelegateCost:
     return DelegateCost(
         session_id=session_id,
-        usage=UnpricedUsage(f"no stored session for {session_id!r}", absent=True),
+        usage=UnpricedUsage(
+            f"no stored session for {session_id!r}", retry=RetryDisposition.MISSING
+        ),
     )
 
 
@@ -160,3 +163,43 @@ class TestTheCounterIsTreatedAsUntrusted:
         )
 
         assert readiness is ImportReadiness.READY
+
+
+@pytest.mark.unit
+class TestATransientFailureIsNotRetiredByCounting:
+    """A failed lookup and an empty answer are both retryable, but they end
+    for different reasons, and only one of them can be counted away.
+    """
+
+    def _transient(self, session_id: str) -> DelegateCost:
+        return DelegateCost(
+            session_id=session_id,
+            usage=UnpricedUsage(
+                "store lookup failed: connection reset",
+                retry=RetryDisposition.TRANSIENT,
+            ),
+        )
+
+    def test_a_failed_lookup_waits_even_when_the_count_is_satisfied(self) -> None:
+        """The distinction that makes three states necessary rather than two.
+
+        Capture accepted 2 and the store has produced 2, so a MISSING delegate
+        here would correctly be counted away and finalised. But this delegate
+        is not missing - the call never completed, and a call that never
+        completed says nothing about how many sessions exist. Counting must
+        not be allowed to declare it settled, or a reset connection silently
+        costs a real delegate its price.
+        """
+        readiness = assess_import_readiness(
+            reconciliation=_phase(_priced("s-a"), self._transient("s-b")),
+            accepted_count=2,
+        )
+
+        assert readiness is ImportReadiness.WAIT
+
+    def test_a_failed_lookup_waits_with_no_count_at_all(self) -> None:
+        readiness = assess_import_readiness(
+            reconciliation=_phase(self._transient("s-a")), accepted_count=None
+        )
+
+        assert readiness is ImportReadiness.WAIT

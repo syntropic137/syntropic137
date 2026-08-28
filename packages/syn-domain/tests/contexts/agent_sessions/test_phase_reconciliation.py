@@ -269,7 +269,7 @@ class TestTooEarlyIsDistinguishableFromAbsent:
             sessions=[("s-codex", "Codex"), ("s-a", "ClaudeCode")],
         )
 
-        assert result.absent_delegate_ids == ("s-a",)
+        assert result.missing_delegate_ids == ("s-a",)
 
     async def test_an_unreadable_delegate_is_not_flagged_absent(self) -> None:
         """The distinction that makes the flag worth having.
@@ -295,7 +295,7 @@ class TestTooEarlyIsDistinguishableFromAbsent:
         )
 
         assert isinstance(result.delegates[0].usage, UnpricedUsage)
-        assert result.absent_delegate_ids == ()
+        assert result.missing_delegate_ids == ()
 
     async def test_a_priced_delegate_is_not_flagged_absent(self) -> None:
         store = FakeStore({"s-a": _claude_session("s-a", 100)})
@@ -306,7 +306,7 @@ class TestTooEarlyIsDistinguishableFromAbsent:
             sessions=[("s-codex", "Codex"), ("s-a", "ClaudeCode")],
         )
 
-        assert result.absent_delegate_ids == ()
+        assert result.missing_delegate_ids == ()
 
     async def test_the_early_read_is_not_mistaken_for_a_finished_one(self) -> None:
         """The race itself, played out against one store.
@@ -321,14 +321,126 @@ class TestTooEarlyIsDistinguishableFromAbsent:
         early = await reconcile_phase_delegates(
             store=store, phase_provider="codex", sessions=sessions
         )
-        assert early.absent_delegate_ids == ("s-a",)
+        assert early.missing_delegate_ids == ("s-a",)
 
         store.arrives(_claude_session("s-a", 400))
 
         later = await reconcile_phase_delegates(
             store=store, phase_provider="codex", sessions=sessions
         )
-        assert later.absent_delegate_ids == ()
+        assert later.missing_delegate_ids == ()
         usage = later.delegates[0].usage
         assert isinstance(usage, PricedUsage)
         assert usage.output_tokens == 400
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("provider", "sessions"),
+    [
+        pytest.param(
+            "codex",
+            [("s-codex", "Codex"), ("s-a", "ClaudeCode")],
+            id="ordinary-cross-harness",
+        ),
+        pytest.param(
+            "codex",
+            [("s-codex", "Codex"), ("s-codex", "Codex"), ("s-a", "ClaudeCode")],
+            id="repeated-leader",
+        ),
+        pytest.param(
+            "codex",
+            [("s-codex", "Codex"), ("s-a", "ClaudeCode"), ("s-a", "ClaudeCode")],
+            id="repeated-delegate",
+        ),
+        pytest.param(
+            "codex",
+            [("s-a", "Codex"), ("s-a", "ClaudeCode")],
+            id="contradictory-id",
+        ),
+        pytest.param(
+            "codex",
+            [("actual-leader", "codex"), ("child", "Codex")],
+            id="case-variant",
+        ),
+        pytest.param(
+            "claude",
+            [("s-a", "ClaudeCode"), ("s-b", "ClaudeCode")],
+            id="same-harness-fanout",
+        ),
+        pytest.param(
+            "gemini",
+            [("s-a", "ClaudeCode"), ("s-b", "Codex")],
+            id="unknown-provider",
+        ),
+    ],
+)
+async def test_no_session_is_ever_silently_dropped(
+    provider: str, sessions: list[tuple[str, str]]
+) -> None:
+    """Totality, across the malformed captures and not just the tidy ones.
+
+    Every distinct captured id must come back as the leader, a delegate, or
+    unattributable. A dropped session is indistinguishable from a phase that
+    never delegated, which turns unpriced work into invisible work.
+
+    Parametrized over duplicates, contradictions and case variants because the
+    original version of this test used only distinct well-formed ids and
+    therefore could not have detected duplicate-id collapse at all.
+    """
+    result = await reconcile_phase_delegates(
+        store=FakeStore(), phase_provider=provider, sessions=sessions
+    )
+
+    accounted = {d.session_id for d in result.delegates} | set(result.unattributable)
+    if result.leader_session_id is not None:
+        accounted.add(result.leader_session_id)
+
+    assert accounted == {session_id for session_id, _ in sessions}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("provider", "sessions", "already_priced"),
+    [
+        pytest.param(
+            "codex",
+            [("s-codex", "Codex"), ("s-a", "ClaudeCode")],
+            "s-codex",
+            id="ordinary-cross-harness",
+        ),
+        pytest.param(
+            "codex",
+            [("s-codex", "Codex"), ("s-codex", "Codex"), ("s-a", "ClaudeCode")],
+            "s-codex",
+            id="repeated-leader",
+        ),
+        pytest.param(
+            "codex",
+            [("actual-leader", "codex"), ("child", "Codex")],
+            "actual-leader",
+            id="case-variant",
+        ),
+        pytest.param(
+            "codex",
+            [("s-a", "Codex"), ("s-a", "ClaudeCode")],
+            "s-a",
+            id="contradictory-id",
+        ),
+    ],
+)
+async def test_the_already_priced_session_is_never_fetched(
+    provider: str, sessions: list[tuple[str, str]], already_priced: str
+) -> None:
+    """The one invariant this whole design exists to hold, stated once and
+    checked across every capture shape that could break it.
+
+    ``already_priced`` names the session the platform has ALREADY recorded
+    token_usage rows for. If it is ever fetched, it can be priced, and the
+    execution total doubles part of itself.
+    """
+    store = FakeStore()
+
+    await reconcile_phase_delegates(store=store, phase_provider=provider, sessions=sessions)
+
+    assert already_priced not in store.requested

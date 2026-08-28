@@ -28,7 +28,10 @@ from syn_domain.contexts.agent_sessions.delegate_attribution import (
     classify_phase_sessions,
 )
 from syn_domain.contexts.agent_sessions.delegate_usage import resolve_delegate_usage
-from syn_domain.contexts.agent_sessions.transcript_usage import UnpricedUsage
+from syn_domain.contexts.agent_sessions.transcript_usage import (
+    RetryDisposition,
+    UnpricedUsage,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -67,24 +70,38 @@ class PhaseReconciliation:
     dropped.
     """
 
+    def _delegates_with(self, disposition: RetryDisposition) -> tuple[str, ...]:
+        return tuple(
+            delegate.session_id
+            for delegate in self.delegates
+            if isinstance(delegate.usage, UnpricedUsage) and delegate.usage.retry is disposition
+        )
+
     @property
-    def absent_delegate_ids(self) -> tuple[str, ...]:
+    def transient_delegate_ids(self) -> tuple[str, ...]:
+        """Delegates whose lookup FAILED rather than came back empty.
+
+        Kept apart from the missing ones because no capture counter can
+        retire these: a reset connection says nothing about how many sessions
+        exist, so counting cannot decide when to stop retrying them.
+        """
+        return self._delegates_with(RetryDisposition.TRANSIENT)
+
+    @property
+    def missing_delegate_ids(self) -> tuple[str, ...]:
         """Delegates the store did not have, which may simply be TOO EARLY.
 
-        Capture lands after an execution reports completed: a reader arriving
-        promptly sees an empty store for sessions that appear seconds later.
-        So a non-empty value here means "ask again", not "nothing to do", and
-        a caller that finalises on it turns the race into a silent undercount.
+        The store answered, and said it does not have them. Capture lands
+        after an execution reports completed, so a reader arriving promptly
+        sees exactly this for sessions that appear seconds later. A non-empty
+        value means "ask again", not "nothing to do"; a caller that finalises
+        on it turns the race into a silent undercount.
 
         The capture observation carries an accepted count, which is the only
         thing that separates "not yet" from "genuinely never arrived". This
         property hands the caller the ids; the count belongs to the caller.
         """
-        return tuple(
-            delegate.session_id
-            for delegate in self.delegates
-            if isinstance(delegate.usage, UnpricedUsage) and delegate.usage.absent
-        )
+        return self._delegates_with(RetryDisposition.MISSING)
 
 
 async def reconcile_phase_delegates(
