@@ -250,10 +250,14 @@ async def import_phase_delegates(
             workspace_id=workspace_id,
         )
         priced = priced_usage is not None
-        if ledger is not None and priced:
-            # AFTER the write: the mark must never run ahead of what was
-            # actually recorded, or a crash between the two silently drops
-            # spend that then looks already-billed.
+        if ledger is not None and priced and isinstance(usage, PricedUsage):
+            # The CUMULATIVE figure, not the delta just written: the mark
+            # answers "how much of this session has been charged", and the next
+            # import compares its own cumulative total against it.
+            #
+            # AFTER the write, deliberately. A mark that ran ahead of what was
+            # actually recorded would make a crash between the two look like
+            # spend that had already been billed, and it would never be.
             await ImportLedger(ledger).commit(execution_id, harness_id, usage)
         if _is_retryable(usage):
             retry_ids.append(harness_id)

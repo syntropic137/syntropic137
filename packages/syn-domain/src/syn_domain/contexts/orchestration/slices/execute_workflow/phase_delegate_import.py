@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         ManagedWorkspace,
     )
     from syn_domain.contexts.agent_sessions import PricedUsage, SessionStorePort
+    from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
         StreamResult,
@@ -208,6 +209,7 @@ async def import_delegates_for_phase(
     phase_id: str,
     execution_id: str,
     workspace_id: str | None = None,
+    ledger: ImportLedgerPort | None = None,
 ) -> None:
     """Price the sessions this phase produced that nobody billed.
 
@@ -247,6 +249,11 @@ async def import_delegates_for_phase(
             # phase open for; anything still unreadable is written as a
             # named gap instead.
             attempts_remaining=0,
+            # None means no ledger is wired, and the caller then keeps the
+            # cross-phase and re-import double counts (#933, #936). Passing it
+            # is the point; it is optional only so call sites can migrate
+            # independently of the durable adapter (#938).
+            ledger=ledger,
         )
     except Exception:
         logger.exception(
@@ -316,6 +323,7 @@ async def capture_and_import_phase(
     leader_native_ids: dict[tuple[str, str], str],
     session_id: str,
     phase_id: str,
+    ledger: ImportLedgerPort | None = None,
 ) -> None:
     """Probe for this phase's sessions, then price the ones nobody billed.
 
@@ -346,6 +354,7 @@ async def capture_and_import_phase(
         # None on every call, so every delegate observation lost its
         # workspace linkage - invisible because getattr has a default.
         workspace_id=getattr(workspace, "workspace_id", None),
+        ledger=ledger,
     )
 
 
