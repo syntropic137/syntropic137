@@ -34,11 +34,12 @@ says so.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 from syn_domain.contexts.agent_sessions.delegate_usage import resolve_delegate_usage
 from syn_domain.contexts.agent_sessions.import_identity import platform_session_id_for
+from syn_domain.contexts.agent_sessions.import_ledger import ImportLedger
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     PricedUsage,
     RetryDisposition,
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
+    from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.agent_sessions.transcript_usage import UsageResult
 
 __all__ = [
@@ -156,6 +158,7 @@ async def import_phase_delegates(
     phase_id: str,
     workspace_id: str | None = None,
     attempts_remaining: int,
+    ledger: ImportLedgerPort | None = None,
 ) -> DelegateImport:
     """Price every captured session except the leader's.
 
@@ -199,6 +202,31 @@ async def import_phase_delegates(
             continue
 
         priced_usage, reason = _split(usage)
+
+        # What this execution has NOT already been charged for. A harness
+        # session can be captured by more than one phase - it is resumed, and
+        # its transcript is CUMULATIVE - and a phase can be imported twice
+        # after a crash. Both write under the same derived session id, and the
+        # cost queries sum. Charging the delta is what makes those safe
+        # (#933, #936).
+        if ledger is not None and priced_usage is not None:
+            book = ImportLedger(ledger)
+            delta, ledger_reason = await book.unbilled_delta(execution_id, harness_id, priced_usage)
+            if ledger_reason:
+                reason = ledger_reason
+                priced_usage = None
+            elif delta.is_nothing:
+                # Already billed in full and the transcript has not moved.
+                # Recording it again is the double count.
+                continue
+            else:
+                priced_usage = replace(
+                    priced_usage,
+                    uncached_input_tokens=delta.uncached_input_tokens,
+                    cache_read_tokens=delta.cache_read_tokens,
+                    cache_creation_tokens=delta.cache_creation_tokens,
+                    output_tokens=delta.output_tokens,
+                )
         # uuid5 of the harness id, so a re-run addresses the SAME session
         # rather than minting a second one.
         #
@@ -222,6 +250,11 @@ async def import_phase_delegates(
             workspace_id=workspace_id,
         )
         priced = priced_usage is not None
+        if ledger is not None and priced:
+            # AFTER the write: the mark must never run ahead of what was
+            # actually recorded, or a crash between the two silently drops
+            # spend that then looks already-billed.
+            await ImportLedger(ledger).commit(execution_id, harness_id, usage)
         if _is_retryable(usage):
             retry_ids.append(harness_id)
         imported.append(
