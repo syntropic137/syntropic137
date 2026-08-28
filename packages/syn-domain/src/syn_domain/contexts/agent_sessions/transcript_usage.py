@@ -443,8 +443,10 @@ class _Unreadable:
 _UNREADABLE = _Unreadable()
 
 
-def _claude_entry(record: object) -> tuple[list[int], str | None] | _Unreadable | None:
-    """This line's usage counts and model, None if it carries none."""
+def _claude_entry(
+    record: object,
+) -> tuple[list[int], str | None, str | None] | _Unreadable | None:
+    """This line's usage counts, model and message id; None if it carries none."""
     if not isinstance(record, Mapping):
         return None
     message = record.get("message")
@@ -457,7 +459,12 @@ def _claude_entry(record: object) -> tuple[list[int], str | None] | _Unreadable 
     if counts is None:
         return _UNREADABLE
     model = message.get("model")
-    return counts, model if isinstance(model, str) else None
+    message_id = message.get("id")
+    return (
+        counts,
+        model if isinstance(model, str) else None,
+        message_id if isinstance(message_id, str) and message_id.strip() else None,
+    )
 
 
 def _claude_usage(document: str) -> UsageResult:
@@ -471,6 +478,7 @@ def _claude_usage(document: str) -> UsageResult:
     totals = [0, 0, 0, 0]
     models: set[str] = set()
     messages = 0
+    seen: dict[str, tuple[list[int], str | None]] = {}
 
     for line in document.splitlines():
         stripped = line.strip()
@@ -488,7 +496,27 @@ def _claude_usage(document: str) -> UsageResult:
             return UnpricedUsage("usage present but unreadable")
         if entry is None:
             continue
-        counts, model = entry
+        counts, model, message_id = entry
+        if message_id is not None:
+            previous = seen.get(message_id)
+            if previous is not None:
+                if previous == (counts, model):
+                    # The same response's next content block. Already counted.
+                    # Claude emits one assistant record PER CONTENT BLOCK and
+                    # repeats that response's identical usage on each; summing
+                    # them multiplies a turn by its block count. The live
+                    # stream processor has always deduplicated this way (#695)
+                    # and this parser reads the same data off disk, so it must
+                    # apply the same rule or a stored transcript prices higher
+                    # than the stream it came from.
+                    continue
+                # Same id, DIFFERENT numbers: the transcript contradicts
+                # itself. First-wins would hide that, and a quietly wrong
+                # total is worse than a visible refusal.
+                return UnpricedUsage(f"message {message_id} appears twice with different usage")
+            seen[message_id] = (counts, model)
+        # Entries with NO id stay independent: nothing identifies them as
+        # repeats, so dropping them would undercount a real turn.
         if model is not None:
             models.add(model)
         messages += 1
