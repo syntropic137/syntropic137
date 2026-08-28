@@ -1441,6 +1441,44 @@ docker exec <workspace> env | grep -E 'ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN
 - [ ] A **pure codex** phase has NO `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` in its env (cross-provider isolation)
 - [ ] No credential appears in container logs or process argv
 
+### Session store: metadata.model is not the pricing authority
+
+`metadata.model` on a stored record is the **MODEL** for claude and the
+**PROVIDER** for codex. Measured 2026-08-28 on live records:
+
+```
+codex   01a0472d  agent="Codex"       metadata.model = "openai"
+claude  c5e2715f  agent="ClaudeCode"  metadata.model = "claude-sonnet-4-6"
+```
+
+Pricing from that field returns UNPRICED for every codex delegate, because
+nothing has a rate for `"openai"`. The **transcript** is the authority.
+
+**Why this is a validation step and not only a unit test.** The adapter's tests
+pin this against a recorded fixture, so they document the asymmetry but cannot
+notice the store changing - a test that reads a recorded value never sees the
+world move underneath it. This check talks to the live store, which is the only
+place the drift is observable:
+
+```bash
+for id in <codex-session-id> <claude-session-id>; do
+  curl -s "$SYN_SESSION_STORE_URL/v1/sessions/$id" \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); \
+        print(d['agent'], '->', (d.get('metadata') or {}).get('model'))"
+done
+```
+
+- [ ] A codex record still reports a provider-shaped value, not a model
+- [ ] If it now reports a real model, that is a **finding**, not a fix: an
+      advisory field silently becoming correct is how it gets promoted to an
+      authority without anyone deciding to. Re-check what reads it before
+      relying on it.
+
+> **The direction is the trap.** metadata is CORRECT for claude and wrong for
+> codex, so a "metadata usually works" shortcut passes a claude test and ships
+> broken. The failure then looks like a pricing-table gap, and the tempting fix
+> is to add a rate for `"openai"` rather than to read the transcript.
+
 ### Delegation matrix - both leaders, both directions (costs tokens)
 
 **Run BOTH.** One direction passing does not imply the other. The two harnesses
