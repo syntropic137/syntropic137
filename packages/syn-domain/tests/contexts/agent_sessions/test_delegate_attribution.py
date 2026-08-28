@@ -226,3 +226,95 @@ def test_a_foreign_provider_vocabulary_fails_safe() -> None:
     )
 
     assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
+
+
+@pytest.mark.unit
+class TestRepeatedIdsInTheCapture:
+    """A capture tuple is not guaranteed to hold distinct ids, and the two
+    ways it can repeat one pull in opposite directions.
+    """
+
+    def test_the_same_session_listed_twice_is_still_one_leader(self) -> None:
+        """A repeat must not be mistaken for a rival candidate.
+
+        One session named twice is still one session. Counting the repeat as a
+        second candidate leader refuses a phase that is perfectly
+        determinable, which costs a real delegate its price for no reason.
+        """
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[
+                _session("s-codex", "Codex"),
+                _session("s-codex", "Codex"),
+                _session("s-claude", "ClaudeCode"),
+            ],
+        )
+
+        assert roles["s-codex"] is SessionRole.LEADER
+        assert roles["s-claude"] is SessionRole.DELEGATE
+
+    def test_a_repeated_delegate_is_priced_once(self) -> None:
+        """The result is keyed by session id, so a repeat cannot become two
+        delegates and be charged twice.
+        """
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[
+                _session("s-codex", "Codex"),
+                _session("s-claude", "ClaudeCode"),
+                _session("s-claude", "ClaudeCode"),
+            ],
+        )
+
+        assert roles == {
+            "s-codex": SessionRole.LEADER,
+            "s-claude": SessionRole.DELEGATE,
+        }
+
+    def test_one_id_with_two_different_agents_refuses(self) -> None:
+        """Contradictory data must not resolve to a confident answer.
+
+        The same session cannot have been two different harnesses. Something
+        upstream is wrong, and the one thing that must not happen is quietly
+        picking whichever row came last and treating the result as known.
+        """
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[_session("s-a", "Codex"), _session("s-a", "ClaudeCode")],
+        )
+
+        assert roles == {"s-a": SessionRole.UNATTRIBUTABLE}
+
+    def test_one_contradictory_id_refuses_the_whole_phase(self) -> None:
+        """Its neighbours are refused too. If the capture is contradictory
+        about one session, its account of the others is not trustworthy
+        either, and pricing a delegate on that basis risks pricing the leader.
+        """
+        roles = classify_phase_sessions(
+            phase_provider="codex",
+            sessions=[
+                _session("s-a", "Codex"),
+                _session("s-a", "ClaudeCode"),
+                _session("s-b", "ClaudeCode"),
+            ],
+        )
+
+        assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
+        assert set(roles) == {"s-a", "s-b"}
+
+
+@pytest.mark.unit
+def test_agent_matching_is_exact_and_fails_safe() -> None:
+    """A differently-cased agent name is not a match.
+
+    Loosening this would be the wrong instinct: a fuzzy match that guesses
+    right most of the time is how the leader eventually gets priced. Exact
+    matching means an unrecognised spelling costs an undercount, which is the
+    direction this whole module errs in.
+    """
+    roles = classify_phase_sessions(
+        phase_provider="codex",
+        sessions=[_session("s-x", "codex"), _session("s-a", "ClaudeCode")],
+    )
+
+    assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}

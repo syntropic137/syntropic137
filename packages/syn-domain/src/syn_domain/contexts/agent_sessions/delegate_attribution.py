@@ -73,20 +73,41 @@ def classify_phase_sessions(
     if not sessions:
         return {}
 
+    def refuse_all() -> dict[str, SessionRole]:
+        return {session_id: SessionRole.UNATTRIBUTABLE for session_id, _ in sessions}
+
     leader_agent = _AGENT_BY_PROVIDER.get(phase_provider)
     if leader_agent is None:
         # An unknown provider means the discriminator does not apply, so every
         # id is a guess.
-        return {session_id: SessionRole.UNATTRIBUTABLE for session_id, _ in sessions}
+        return refuse_all()
 
-    candidates = [session_id for session_id, agent in sessions if agent == leader_agent]
+    # A capture tuple is not guaranteed to hold distinct ids, and the two ways
+    # it can repeat one pull in opposite directions. The same id listed twice
+    # with the SAME agent is one session named twice, and must not be counted
+    # as a rival candidate. The same id with DIFFERENT agents is contradictory:
+    # a session cannot have been two harnesses, so something upstream is wrong
+    # and the phase is refused rather than resolved by whichever row came last.
+    agent_by_session: dict[str, str] = {}
+    for session_id, agent in sessions:
+        seen = agent_by_session.setdefault(session_id, agent)
+        if seen != agent:
+            # Its neighbours go too: if the capture contradicts itself about
+            # one session, its account of the others is not trustworthy
+            # either, and pricing a delegate on that basis risks pricing the
+            # leader.
+            return refuse_all()
+
+    candidates = [
+        session_id for session_id, agent in agent_by_session.items() if agent == leader_agent
+    ]
 
     # Exactly one candidate leader, or none of this is safe. Zero means the
     # assumption that the leader is present has failed. More than one means we
     # cannot tell which was the phase's own agent, and importing the wrong one
     # double-counts the session already priced.
     if len(candidates) != 1:
-        return {session_id: SessionRole.UNATTRIBUTABLE for session_id, _ in sessions}
+        return refuse_all()
 
     leader = candidates[0]
     return {
