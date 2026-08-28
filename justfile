@@ -1473,7 +1473,11 @@ docs-regen: diagram docs-gen
 
 # Regenerate all derived artifacts and fail if any are uncommitted.
 # Runs `just codegen` once, then checks architecture docs, CLI docs, and API artifacts.
-docs-sync:
+# `check-env-example` belongs here: .env.example is GENERATED from the
+# Settings classes, so it drifts exactly like the OpenAPI spec and the CLI
+# types this recipe already guards. It was previously reachable from no
+# local recipe at all, so a stale file could only be caught by CI (#931).
+docs-sync: check-env-example
     @echo "🔄 Regenerating architecture documentation..."
     @uv run python scripts/generate-architecture-docs.py > /tmp/docs-gen.txt 2>&1
     @if git diff --quiet docs/architecture/projection-subscriptions.md docs/architecture/event-flows/README.md README.md 2>/dev/null; then \
