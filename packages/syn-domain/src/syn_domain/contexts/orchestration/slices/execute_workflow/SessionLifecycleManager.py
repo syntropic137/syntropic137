@@ -18,8 +18,12 @@ from syn_domain.contexts.agent_sessions import (
     SessionStatus,
     StartSessionCommand,
 )
+from syn_shared.events import SESSION_SUMMARY
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+        ObservabilityRecorder,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
         SessionRepository,
     )
@@ -44,8 +48,10 @@ class SessionLifecycleManager:
         agent_provider: str,
         agent_model: str | None,
         repos: list[str] | None = None,
+        observability: ObservabilityRecorder | None = None,
     ) -> None:
         self._repo = repository
+        self._observability = observability
         self._session_id = session_id
         self._session: AgentSessionAggregate | None = None
         self._workflow_id = workflow_id
@@ -58,6 +64,51 @@ class SessionLifecycleManager:
     @property
     def session(self) -> AgentSessionAggregate | None:
         return self._session
+
+    async def _record_terminal_summary(self, status: str, error_message: str) -> None:
+        """Leave an observable trace for a session that produced no telemetry.
+
+        A run that dies before the agent starts emits no token_usage and no
+        summary of its own, so it existed only in the domain lane - countable
+        there, invisible everywhere else, and absent from the dashboard
+        entirely. Recording a zero-token summary makes the failure a FACT that
+        every read path already knows how to consume, rather than something
+        each consumer has to learn to infer from an absence.
+
+        Zero tokens here is a measurement, not a placeholder: the agent
+        genuinely never ran. `status` distinguishes it from a session that did
+        work, so nothing prices it as free work.
+
+        Secondary failures are swallowed. This runs on the error path; losing
+        the domain-lane completion because telemetry was unreachable would
+        trade a visibility gap for a correctness one.
+        """
+        if self._observability is None:
+            return
+        try:
+            await self._observability.record_observation(
+                session_id=self._session_id,
+                observation_type=SESSION_SUMMARY,
+                data={
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "total_tokens": 0,
+                    "total_cost_usd": 0,
+                    "status": status,
+                    "error_message": error_message,
+                    "model": self._agent_model,
+                },
+                execution_id=self._execution_id,
+                phase_id=self._phase_id,
+            )
+        except Exception as obs_err:
+            logger.warning(
+                "Failed to record terminal summary for session %s: %s",
+                self._session_id,
+                obs_err,
+            )
 
     async def start(self) -> None:
         """Create and persist a new session aggregate. No-op if repo is None."""
@@ -129,6 +180,7 @@ class SessionLifecycleManager:
             )
             self._session.complete_session(complete_cmd)
             await self._repo.save(self._session)
+            await self._record_terminal_summary("failed", error_message)
             logger.debug("Session completed: %s (failed: %s)", self._session_id, error_message)
         except Exception as session_err:
             logger.warning("Failed to complete session %s: %s", self._session_id, session_err)
@@ -147,6 +199,7 @@ class SessionLifecycleManager:
             )
             self._session.complete_session(complete_cmd)
             await self._repo.save(self._session)
+            await self._record_terminal_summary("cancelled", reason)
             logger.debug("Session completed (cancelled): %s", self._session_id)
         except Exception as sess_err:
             logger.warning(

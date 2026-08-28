@@ -180,7 +180,7 @@ async def get_metrics_endpoint(
     m = result.value
     phases = await _build_phase_metrics(workflow_id) if workflow_id else []
 
-    # Tokens and cost come from the ONE canonical usage definition, the same
+    # Tokens, cost and session count come from the ONE canonical definition, the same
     # one the activity heatmap reads (#932). They previously came from Lane 1
     # SessionCompleted events while the heatmap read Lane 2 observations, so
     # the two cards quoted 9,151,116 tokens beside 10,002,629 for the same
@@ -192,7 +192,11 @@ async def get_metrics_endpoint(
         total_workflows=m.total_workflows,
         completed_workflows=m.completed_workflows,
         failed_workflows=m.failed_workflows,
-        total_sessions=m.total_sessions,
+        # Sessions come from the canonical source too. Counting them in the
+        # projection instead meant the card saw every FAILED session but no
+        # DELEGATE session, while the heatmap saw every delegate and no
+        # failure - two honest counts of two different populations.
+        total_sessions=totals.sessions,
         total_input_tokens=totals.input_tokens,
         total_output_tokens=totals.output_tokens,
         total_cache_creation_tokens=totals.cache_creation_tokens,

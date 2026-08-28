@@ -51,6 +51,11 @@ ORDER BY day
 # One session, one square: counted on the day it started rather than on every
 # day it emitted an observation. Summing COUNT(DISTINCT session_id) per day
 # double-counted any session that crossed midnight.
+#
+# Counted from session_start, which covers EVERY observed session - including
+# one that produced no tokens because it failed during setup. Counting from
+# canonical_usage instead would drop those, reintroducing the split between
+# this number and the metric card's.
 _SESSIONS_QUERY = f"""
 WITH {_SCOPED_EVENTS},
 {CANONICAL_SESSION_USAGE_CTE}

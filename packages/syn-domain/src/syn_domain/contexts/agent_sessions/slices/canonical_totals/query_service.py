@@ -55,10 +55,14 @@ FROM canonical_usage
 GROUP BY model, (vendor_cost_usd IS NULL)
 """
 
-_SESSION_COUNT_QUERY = f"""
-WITH {_SCOPED_EVENTS},
-{CANONICAL_SESSION_USAGE_CTE}
-SELECT COUNT(DISTINCT session_id) AS sessions FROM canonical_usage
+# Counts every session the canonical source knows about, including ones that
+# produced no tokens. `canonical_usage` only carries sessions with usage rows,
+# so a session that failed before the agent ran would be missed by counting
+# there - which is exactly how two different session counts arose.
+_SESSION_COUNT_QUERY = """
+SELECT COUNT(DISTINCT session_id) AS sessions
+FROM agent_events
+{execution_filter}
 """
 
 
