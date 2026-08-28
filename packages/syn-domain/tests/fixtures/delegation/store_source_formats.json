@@ -1,0 +1,12 @@
+[
+ {
+  "agent": "Codex",
+  "source_format": "codex-rollout-jsonl",
+  "scs_version": "1.0"
+ },
+ {
+  "agent": "ClaudeCode",
+  "source_format": "claude-code-jsonl",
+  "scs_version": "1.0"
+ }
+]
