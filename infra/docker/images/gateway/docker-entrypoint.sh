@@ -67,7 +67,13 @@ location /api/v1/ {
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
+    # A location with its own limit_req does NOT inherit the server-scope auth
+    # backstop, so declare it here too: /api/v1/ is Basic-Auth-protected and must
+    # not fall back to the looser api-zone rate for credential guessing. Both
+    # zones apply; the more restrictive wins per request. The webhook location
+    # below is unauthenticated (HMAC-verified), so it keeps only its own zone.
     limit_req zone=api burst=50 nodelay;
+    limit_req zone=auth burst=20 nodelay;
     limit_req_status 429;
 }
 
