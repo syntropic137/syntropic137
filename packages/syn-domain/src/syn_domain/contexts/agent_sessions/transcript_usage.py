@@ -151,18 +151,79 @@ _CLAUDE_FIELDS = (
 )
 
 
+#: Any of these appearing on an event's ``info`` means the record is in the
+#: business of reporting tokens. If one is present and total_token_usage
+#: cannot be read, the schema has moved and the record must be REFUSED rather
+#: than skipped: skipping returns the preceding cumulative total as if it were
+#: current, which reports a long session at an early turn's cost.
+_USAGE_MARKERS = ("total_token_usage", "last_token_usage", "token_usage", "usage")
+
+
+def _looks_like_usage(info: Mapping[str, object]) -> bool:
+    return any(marker in info for marker in _USAGE_MARKERS)
+
+
 @dataclass(frozen=True)
 class _CodexSnapshot:
-    """One cumulative reading from a rollout."""
+    """One cumulative reading from a rollout, with its per-turn delta."""
 
     input_tokens: int
     output_tokens: int
     cached_input_tokens: int
+    reasoning_output_tokens: int
     total_tokens: int
     cache_write_tokens: int
+    delta_total_tokens: int | None
+    """This turn's own total from last_token_usage, if it carried one.
+
+    Parsed so the independent invariant sum(deltas) == final cumulative total
+    can actually be checked. Without it, "cumulative" was an assumption rather
+    than something verified.
+    """
 
 
-def _codex_snapshot(record: RolloutRecord) -> _CodexSnapshot | None:
+def _optional_count(source: Mapping[str, object], name: str) -> int | None | _Unreadable:
+    """A count that may legitimately be absent.
+
+    Three outcomes, and collapsing any two of them is how a number goes wrong:
+    absent (None, fine), readable (the value), or PRESENT AND MALFORMED
+    (_Unreadable). ``_as_count(...) or 0`` collapsed the third into zero, which
+    silently underprices, and cache_write is exactly the field the CLI bump
+    just added.
+    """
+    if name not in source:
+        return None
+    count = _as_count(source[name])
+    return _UNREADABLE if count is None else count
+
+
+def _optional_counts(source: Mapping[str, object], names: Sequence[str]) -> list[int] | _Unreadable:
+    """Read counts that may be absent, refusing any that are present but bad."""
+    out: list[int] = []
+    for name in names:
+        read = _optional_count(source, name)
+        if isinstance(read, _Unreadable):
+            return _UNREADABLE
+        out.append(read or 0)
+    return out
+
+
+def _delta_total(info: Mapping[str, object]) -> int | None | _Unreadable:
+    """This turn's own total, for the independent sum(deltas) check."""
+    delta = info.get("last_token_usage")
+    if not isinstance(delta, Mapping):
+        return None
+    return _optional_count(delta, "total_tokens")
+
+
+def _codex_snapshot(record: RolloutRecord) -> _CodexSnapshot | None | _Unreadable:
+    """This record's cumulative reading.
+
+    Returns _UNREADABLE when the record LOOKS like it carries usage but cannot
+    be read, so a restructured record is refused rather than skipped. Skipping
+    it silently returns the PRECEDING total as if it were current, which is the
+    stale-value failure with a new trigger.
+    """
     if record.get("type") != "event_msg":
         return None
     payload = record.get("payload")
@@ -171,16 +232,31 @@ def _codex_snapshot(record: RolloutRecord) -> _CodexSnapshot | None:
     info = payload.get("info")
     if not isinstance(info, Mapping):
         return None
+    if not _looks_like_usage(info):
+        return None
+
     usage = info.get("total_token_usage")
     if not isinstance(usage, Mapping):
-        return None
+        return _UNREADABLE
     counts = _counts(usage, _CODEX_FIELDS)
     if counts is None:
-        return None
-    # Absent today. Read anyway: codex 0.150.1 adds it on the stdout side, and
-    # an ignored cache-write field is an UNDERCOUNT.
-    cache_write = _as_count(usage.get("cache_write_input_tokens", 0)) or 0
-    return _CodexSnapshot(counts[0], counts[1], counts[2], counts[3], cache_write)
+        return _UNREADABLE
+
+    optional = _optional_counts(usage, ("cache_write_input_tokens", "reasoning_output_tokens"))
+    delta_total = _delta_total(info)
+    if isinstance(optional, _Unreadable) or isinstance(delta_total, _Unreadable):
+        return _UNREADABLE
+    cache_write, reasoning = optional
+
+    return _CodexSnapshot(
+        input_tokens=counts[0],
+        output_tokens=counts[1],
+        cached_input_tokens=counts[2],
+        reasoning_output_tokens=reasoning,
+        total_tokens=counts[3],
+        cache_write_tokens=cache_write,
+        delta_total_tokens=delta_total,
+    )
 
 
 def _codex_model(record: RolloutRecord) -> str | None:
@@ -213,59 +289,67 @@ def _codex_invariant_broken(snapshots: Sequence[_CodexSnapshot]) -> str | None:
     if final.cached_input_tokens > final.input_tokens:
         return "cached input exceeds input"
 
-    # Cumulative readings only ever grow. A decrease means these are not
-    # cumulative, and last-wins would then be the wrong rule entirely.
+    # Cumulative readings only ever grow, in EVERY component. Checking only
+    # input/output/total let a cached-only decrease through, and cached is the
+    # component the codex subtraction depends on.
     for earlier, later in pairwise(snapshots):
-        if (
-            later.input_tokens < earlier.input_tokens
-            or later.output_tokens < earlier.output_tokens
-            or later.total_tokens < earlier.total_tokens
+        if any(
+            getattr(later, field) < getattr(earlier, field)
+            for field in (
+                "input_tokens",
+                "output_tokens",
+                "cached_input_tokens",
+                "reasoning_output_tokens",
+                "cache_write_tokens",
+                "total_tokens",
+            )
         ):
             return "cumulative totals decreased"
 
+    # INDEPENDENT CHECK: per-turn deltas must sum to the final cumulative
+    # total. This is the one invariant not derivable from the cumulative
+    # figures themselves, so it is the only thing that can catch a cumulative
+    # series that is internally tidy but wrong.
+    deltas = [s.delta_total_tokens for s in snapshots]
+    if all(delta is not None for delta in deltas):
+        summed = sum(delta for delta in deltas if delta is not None)
+        if summed != final.total_tokens:
+            return f"per-turn deltas sum to {summed}, final total says {final.total_tokens}"
+
+    # reasoning is a SUBSET of output, as cached is of input.
+    if final.reasoning_output_tokens > final.output_tokens:
+        return "reasoning output exceeds output"
+
     return None
-
-
-def _codex_usage_shaped(record: RolloutRecord) -> bool:
-    """Whether this record LOOKS like it carries usage.
-
-    Used to tell "no usage here" from "usage we could not read". Only the
-    second is a moved schema, and only the second must refuse to price.
-    """
-    payload = record.get("payload")
-    if not isinstance(payload, Mapping):
-        return False
-    info = payload.get("info")
-    return isinstance(info, Mapping) and "total_token_usage" in info
 
 
 @dataclass(frozen=True)
 class _CodexScan:
     """What one pass over a rollout found."""
 
-    model: str | None
+    models: set[str]
     snapshots: list[_CodexSnapshot]
     saw_unreadable: bool
 
 
 def _scan_codex(document: RolloutDocument) -> _CodexScan:
-    model: str | None = None
+    models: set[str] = set()
     snapshots: list[_CodexSnapshot] = []
     saw_unreadable = False
 
     for record in document:
         if not isinstance(record, Mapping):
             continue
-        model = _codex_model(record) or model
-        if record.get("type") != "event_msg":
-            continue
+        model = _codex_model(record)
+        if model is not None:
+            models.add(model)
         snapshot = _codex_snapshot(record)
-        if snapshot is not None:
-            snapshots.append(snapshot)
-        elif _codex_usage_shaped(record):
+        if isinstance(snapshot, _Unreadable):
             saw_unreadable = True
+        elif snapshot is not None:
+            snapshots.append(snapshot)
 
-    return _CodexScan(model, snapshots, saw_unreadable)
+    return _CodexScan(models, snapshots, saw_unreadable)
 
 
 def _codex_usage(document: RolloutDocument) -> UsageResult:
@@ -279,9 +363,14 @@ def _codex_usage(document: RolloutDocument) -> UsageResult:
     if scan.saw_unreadable:
         # Shaped like usage but unreadable: a moved schema, not an absence.
         # Refusing is the difference between "unpriced" and "free".
-        return UnpricedUsage("total_token_usage present but unreadable")
+        return UnpricedUsage("usage-bearing record present but unreadable")
     if not scan.snapshots:
         return NoUsage()
+    if len(scan.models) > 1:
+        # Matches the claude path. The two harnesses previously disagreed on
+        # the same hazard: claude refused a mixed-model transcript while codex
+        # billed the whole session at whichever model came last.
+        return UnpricedUsage(f"transcript spans multiple models: {sorted(scan.models)}")
 
     broken = _codex_invariant_broken(scan.snapshots)
     if broken is not None:
@@ -289,7 +378,7 @@ def _codex_usage(document: RolloutDocument) -> UsageResult:
 
     final = scan.snapshots[-1]
     return PricedUsage(
-        model=scan.model,
+        model=next(iter(scan.models), None),
         # input INCLUDES cached, so the uncached remainder is the billable part.
         uncached_input_tokens=final.input_tokens - final.cached_input_tokens,
         cache_read_tokens=final.cached_input_tokens,

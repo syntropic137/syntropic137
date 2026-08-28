@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -28,6 +29,9 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
     UnpricedUsage,
     extract_usage,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, MutableMapping
 
 _FIXTURES = Path(__file__).parents[2] / "fixtures" / "delegation"
 
@@ -352,3 +356,140 @@ class TestTheRetrievalPathTheCallerWillActuallyUse:
         result = extract_usage(self._store_format("Codex"), "{not json")
 
         assert isinstance(result, UnpricedUsage)
+
+
+def _codex_event(
+    *,
+    inp: int,
+    out: int,
+    cached: int,
+    total: int,
+    delta: int | None = None,
+    extra: Mapping[str, object] | None = None,
+) -> RolloutRecord:
+    usage: MutableMapping[str, object] = {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "cached_input_tokens": cached,
+        "total_tokens": total,
+    }
+    if extra:
+        usage.update(extra)
+    info: MutableMapping[str, object] = {"total_token_usage": usage}
+    if delta is not None:
+        info["last_token_usage"] = {"total_tokens": delta}
+    return {"type": "event_msg", "payload": {"info": info}}
+
+
+@pytest.mark.unit
+class TestTheAdversarialCasesThatPreviouslyPriced:
+    """Three cases that returned PricedUsage with numbers that were wrong.
+
+    Each is a way for the arithmetic to look tidy while the answer is stale,
+    truncated or underpriced. All three underreport, which is the direction
+    every failure in this issue has gone.
+    """
+
+    def test_a_restructured_final_record_is_refused_not_skipped(self) -> None:
+        """The stale-total failure with a new trigger.
+
+        A final record whose usage key moved was IGNORED, so the preceding
+        cumulative total was returned as though it were current: a long
+        session priced at an early turn's cost, which is the 12,206-against-
+        49,654 error wearing different clothes.
+        """
+        document = [
+            _codex_event(inp=100, out=10, cached=0, total=110),
+            # same record shape, usage relocated under a renamed key
+            {"type": "event_msg", "payload": {"info": {"token_usage": {"total_tokens": 999}}}},
+        ]
+
+        result = extract_usage(SourceFormat.CODEX_ROLLOUT, document)
+
+        assert isinstance(result, UnpricedUsage)
+
+    def test_a_cached_only_decrease_is_refused(self) -> None:
+        """Monotonicity previously covered input, output and total only.
+
+        cached is precisely the component the codex subtraction depends on, so
+        it was the one component whose corruption changed the billable figure
+        while every checked number still rose.
+        """
+        document = [
+            _codex_event(inp=100, out=10, cached=90, total=110),
+            _codex_event(inp=200, out=20, cached=5, total=220),
+        ]
+
+        result = extract_usage(SourceFormat.CODEX_ROLLOUT, document)
+
+        assert isinstance(result, UnpricedUsage)
+        assert "decreased" in result.reason
+
+    def test_a_malformed_cache_write_is_refused_not_zeroed(self) -> None:
+        """`_as_count(...) or 0` turned a malformed value into zero.
+
+        cache_write is the field the CLI bump just added on the codex side, so
+        it is both new and the most likely to arrive in an unexpected shape.
+        Zeroing it underprices silently.
+        """
+        document = [
+            _codex_event(
+                inp=100,
+                out=10,
+                cached=0,
+                total=110,
+                extra={"cache_write_input_tokens": "not-a-number"},
+            )
+        ]
+
+        result = extract_usage(SourceFormat.CODEX_ROLLOUT, document)
+
+        assert isinstance(result, UnpricedUsage)
+
+    def test_an_absent_cache_write_is_still_fine(self) -> None:
+        """Guards the guard: absent and malformed must not be conflated, or
+        every rollout today would refuse to price.
+        """
+        result = extract_usage(SourceFormat.CODEX_ROLLOUT, _codex_document())
+
+        assert isinstance(result, PricedUsage)
+
+    def test_deltas_that_disagree_with_the_final_total_are_refused(self) -> None:
+        """The one invariant not derivable from the cumulative series itself.
+
+        A cumulative sequence can be internally tidy and still wrong; only the
+        per-turn deltas can contradict it independently.
+        """
+        document = [
+            _codex_event(inp=100, out=10, cached=0, total=110, delta=110),
+            _codex_event(inp=200, out=20, cached=0, total=220, delta=999),
+        ]
+
+        result = extract_usage(SourceFormat.CODEX_ROLLOUT, document)
+
+        assert isinstance(result, UnpricedUsage)
+        assert "deltas sum" in result.reason
+
+    def test_deltas_that_agree_still_price(self) -> None:
+        document = [
+            _codex_event(inp=100, out=10, cached=0, total=110, delta=110),
+            _codex_event(inp=200, out=20, cached=0, total=220, delta=110),
+        ]
+
+        assert isinstance(extract_usage(SourceFormat.CODEX_ROLLOUT, document), PricedUsage)
+
+    def test_mixed_model_codex_is_refused_like_claude(self) -> None:
+        """The harnesses disagreed on the same hazard: claude refused, codex
+        billed everything at whichever model came last.
+        """
+        document = [
+            {"type": "turn_context", "payload": {"model": "model-a"}},
+            _codex_event(inp=100, out=10, cached=0, total=110),
+            {"type": "turn_context", "payload": {"model": "model-b"}},
+            _codex_event(inp=200, out=20, cached=0, total=220),
+        ]
+
+        result = extract_usage(SourceFormat.CODEX_ROLLOUT, document)
+
+        assert isinstance(result, UnpricedUsage)
+        assert "multiple models" in result.reason
