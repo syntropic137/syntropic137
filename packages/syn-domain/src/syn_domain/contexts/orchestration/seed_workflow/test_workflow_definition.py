@@ -560,6 +560,11 @@ def test_mixed_workflow_with_claude_and_codex_parses() -> None:
     assert [p.provider for p in domain_phases] == ["claude", "codex"]
 
 
+#: The model every shipped codex example declares. Named once so the examples
+#: and the guard below cannot drift apart silently.
+CODEX_EXAMPLE_MODEL = "gpt-5.6-sol"
+
+
 def test_codex_demo_example_yaml_loads_and_validates() -> None:
     """workflows/examples/codex-demo.yaml is schema-valid and loads via from_file()."""
     repo_root = Path(__file__).resolve().parents[7]
@@ -574,9 +579,48 @@ def test_codex_demo_example_yaml_loads_and_validates() -> None:
     phase = definition.phases[0]
     assert phase.agent is not None
     assert phase.agent.provider == "codex"
-    # No model override: codex uses its ChatGPT-account default (a claude-style
-    # id like "gpt-5.6" is rejected by codex, so codex-demo.yaml omits it).
-    assert phase.agent.model is None
+    # A concrete model id is REQUIRED, not optional: an unnamed model leaves the
+    # run unpriced, which is the whole reason it was declared here. The older
+    # comment claimed codex rejects an explicit id; that was true of a
+    # claude-style "gpt-5.6", and "gpt-5.6-sol" is accepted under ChatGPT auth.
+    assert phase.agent.model == CODEX_EXAMPLE_MODEL
 
     domain_phase = definition.get_domain_phases()[0]
     assert domain_phase.provider == "codex"
+
+
+@pytest.mark.parametrize(
+    "example",
+    [
+        "codex-demo.yaml",
+        "codex-delegates-to-claude.yaml",
+        "multi-agent-programmatic.yaml",
+    ],
+)
+def test_every_shipped_codex_example_declares_a_model(example: str) -> None:
+    """Every codex phase we ship names its model, so example runs are priced.
+
+    A codex phase with no model resolves to an account default that the cost
+    pipeline cannot attribute, so the run completes and reports no cost. That
+    failure is silent, and it lands on the examples people copy first.
+
+    Only ONE of these three files was covered when the model pins were added,
+    and that gap is why the pin and its assertion drifted apart. This walks all
+    of them, so an example that loses its pin fails here rather than in
+    somebody's cost report.
+    """
+    repo_root = Path(__file__).resolve().parents[7]
+    definition = WorkflowDefinition.from_file(repo_root / "workflows" / "examples" / example)
+
+    codex_phases = [
+        phase
+        for phase in definition.phases
+        if phase.agent is not None and phase.agent.provider == "codex"
+    ]
+
+    assert codex_phases, f"{example} declares no codex phase; this guard has rotted"
+    for phase in codex_phases:
+        assert phase.agent is not None
+        assert phase.agent.model == CODEX_EXAMPLE_MODEL, (
+            f"{example} phase {phase.id!r} has no model pin, so its runs go unpriced"
+        )
