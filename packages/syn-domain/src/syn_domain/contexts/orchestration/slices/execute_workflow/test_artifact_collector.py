@@ -191,3 +191,122 @@ class TestArtifactCollector:
             output_artifact_type="text",
         )
         assert result == []
+
+
+@pytest.mark.unit
+class TestBuildJunkIsNotCollected:
+    """Build junk must not become artifacts (issue #919).
+
+    Measured on the dev stack: 44 of 98 artifacts (45%) were .pytest_cache or
+    __pycache__. It is not merely noise. It pushes real deliverables off the
+    first page of `syn artifacts list`, so the junk actively hides the outputs
+    someone came to read, and it grows with every workflow that runs a test
+    suite, which is most of them.
+    """
+
+    @pytest.mark.asyncio
+    async def test_pytest_cache_and_pycache_are_skipped(self) -> None:
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(
+            collected_files=[
+                ("artifacts/output/result.md", b"# Result"),
+                ("artifacts/output/.pytest_cache/CACHEDIR.TAG", b"Signature: 8a477f5"),
+                ("artifacts/output/.pytest_cache/v/cache/nodeids", b"[]"),
+                ("artifacts/output/__pycache__/mod.cpython-314.pyc", b"\x00\x00"),
+                ("artifacts/output/pkg/__pycache__/other.pyc", b"\x00\x00"),
+                ("artifacts/output/data.json", b'{"key": "value"}'),
+            ]
+        )
+
+        result = await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Test Phase",
+            output_artifact_type="markdown",
+        )
+
+        assert len(result.artifact_ids) == 2
+        assert len(repo.saved) == 2
+
+    @pytest.mark.asyncio
+    async def test_the_first_real_output_is_still_the_injected_content(self) -> None:
+        """first_content feeds the next phase. If junk sorts ahead of the real
+        output, the next phase is handed a .pyc instead of the deliverable.
+        """
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(
+            collected_files=[
+                ("artifacts/output/.pytest_cache/CACHEDIR.TAG", b"Signature: 8a477f5"),
+                ("artifacts/output/result.md", b"# Real Result"),
+            ]
+        )
+
+        result = await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Test Phase",
+            output_artifact_type="markdown",
+        )
+
+        assert result.first_content == "# Real Result"
+
+    @pytest.mark.asyncio
+    async def test_partial_collection_skips_junk_too(self) -> None:
+        """collect_partial is the interrupt path and uses the same pattern, so
+        it inherits the same defect. Fixing only the happy path would leave
+        every cancelled run still sweeping junk.
+        """
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(
+            collected_files=[
+                ("artifacts/output/partial.md", b"# Partial"),
+                ("artifacts/output/__pycache__/x.pyc", b"\x00"),
+            ]
+        )
+
+        ids = await collector.collect_partial(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Test Phase",
+            output_artifact_type="markdown",
+        )
+
+        assert len(ids) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_legitimate_file_is_not_skipped_by_a_substring_match(self) -> None:
+        """Guards the guard. Matching on a bare substring would drop a real
+        deliverable whose name merely contains an ignored token.
+        """
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(
+            collected_files=[
+                ("artifacts/output/how-we-fixed-the-pytest-cache.md", b"# Notes"),
+                ("artifacts/output/pycache-design.md", b"# Design"),
+            ]
+        )
+
+        result = await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Test Phase",
+            output_artifact_type="markdown",
+        )
+
+        assert len(result.artifact_ids) == 2

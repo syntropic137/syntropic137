@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.artifacts import ArtifactType
@@ -81,6 +81,37 @@ class CollectedArtifacts:
 
     artifact_ids: list[str]
     first_content: str | None
+
+
+#: Directory names that hold machine-generated build output rather than
+#: deliverables (issue #919). Matched as a whole PATH SEGMENT, never as a
+#: substring: a real artifact called `how-we-fixed-the-pytest-cache.md` must
+#: still be collected.
+_IGNORED_PATH_SEGMENTS: Final[frozenset[str]] = frozenset(
+    {
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".git",
+        ".venv",
+        "node_modules",
+        ".tox",
+        ".cache",
+    }
+)
+
+
+def _is_collectable(artifact_path: str) -> bool:
+    """Whether a collected path is a deliverable rather than build junk.
+
+    Measured on the dev stack before this existed: 44 of 98 artifacts, 45% of
+    the store, were .pytest_cache and __pycache__. The cost is not storage. The
+    list is ordered oldest-first, so the junk pushed real outputs off the first
+    page and actively hid the deliverables someone came to read, and it grows
+    with every workflow that runs a test suite.
+    """
+    return not any(segment in _IGNORED_PATH_SEGMENTS for segment in artifact_path.split("/"))
 
 
 class ArtifactCollector:
@@ -190,9 +221,10 @@ class ArtifactCollector:
         Returns:
             CollectedArtifacts with IDs and first artifact content for injection.
         """
-        artifacts = await workspace.collect_files(
+        collected = await workspace.collect_files(
             patterns=["artifacts/output/**/*"],
         )
+        artifacts = [(path, body) for path, body in collected if _is_collectable(path)]
 
         artifact_ids: list[str] = []
         first_content: str | None = None
@@ -231,7 +263,13 @@ class ArtifactCollector:
     ) -> list[str]:
         """Collect partial artifacts during interrupt. Never raises."""
         try:
-            partial_artifacts = await workspace.collect_files(patterns=["artifacts/output/**/*"])
+            # Same filter as the happy path: collect_partial is the interrupt
+            # route and shares the pattern, so fixing only the other site would
+            # leave every cancelled run still sweeping junk (issue #919).
+            partial_collected = await workspace.collect_files(patterns=["artifacts/output/**/*"])
+            partial_artifacts = [
+                (path, body) for path, body in partial_collected if _is_collectable(path)
+            ]
             artifact_ids: list[str] = []
             for artifact_path, artifact_content in partial_artifacts:
                 artifact_id = str(uuid4())
