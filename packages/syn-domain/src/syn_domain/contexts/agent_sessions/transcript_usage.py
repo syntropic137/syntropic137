@@ -383,6 +383,27 @@ def _claude_usage(document: str) -> UsageResult:
     )
 
 
+def _as_rollout(document: StoredTranscript) -> RolloutDocument | None:
+    """A rollout, whether it arrived parsed or as the JSON text of one.
+
+    WHY BOTH: the store serves a rollout from ``GET /v1/sessions/<id>/raw`` as
+    ``application/json``, so a caller reading ``response.json()`` gets a list
+    while one reading ``response.text`` gets a string. Accepting only the list
+    meant the obvious caller priced every Claude session correctly and marked
+    every CODEX session unpriced, with no exception and no failing test: half
+    the delegate cost quietly missing, which is this bug one layer out.
+
+    Parsing here removes the footgun rather than documenting it.
+    """
+    if not isinstance(document, str):
+        return document
+    try:
+        parsed = json.loads(document)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, list) else None
+
+
 def extract_usage(source_format: str, document: StoredTranscript) -> UsageResult:
     """Recover token usage from a stored transcript.
 
@@ -397,9 +418,20 @@ def extract_usage(source_format: str, document: StoredTranscript) -> UsageResult
     every session beside it, so a new harness, or one literal drifting as
     ``codex-rollout-jsonl`` did, becomes an outage instead of a gap.
     """
-    if source_format == SourceFormat.CODEX_ROLLOUT and not isinstance(document, str):
-        return _codex_usage(document)
-    if source_format == SourceFormat.CLAUDE_CODE_JSONL and isinstance(document, str):
+    if source_format == SourceFormat.CODEX_ROLLOUT:
+        rollout = _as_rollout(document)
+        if rollout is None:
+            return UnpricedUsage("codex transcript is neither a record list nor JSON text")
+        return _codex_usage(rollout)
+
+    if source_format == SourceFormat.CLAUDE_CODE_JSONL:
+        if not isinstance(document, str):
+            # Names the actual mismatch. An earlier version reported this as an
+            # unsupported format and listed that same format as known, in one
+            # sentence, sending the reader after the wrong thing entirely.
+            return UnpricedUsage(
+                f"{source_format!r} expects JSONL text, got {type(document).__name__}"
+            )
         return _claude_usage(document)
 
     known = sorted(fmt.value for fmt in SourceFormat)

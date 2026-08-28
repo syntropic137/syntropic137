@@ -285,3 +285,70 @@ class TestFormatLiteralsMatchTheStore:
         result = extract_usage(codex["source_format"], _codex_document())
 
         assert isinstance(result, PricedUsage)
+
+
+@pytest.mark.unit
+class TestTheRetrievalPathTheCallerWillActuallyUse:
+    """Exercises how the store hands data over, not how we wish it did.
+
+    Nothing tested the retrieval path before, and that gap hid two defects in
+    consecutive rounds: a format literal that matched no real record, and a
+    document type the store does not produce. Both times the code was
+    self-consistent and disagreed with the store.
+
+    GET /v1/sessions/<id>/raw serves application/json, so a caller reading
+    response.json() gets a list and one reading response.text gets a string.
+    Both must work, or whichever caller guesses wrong silently loses a
+    harness.
+    """
+
+    def _store_format(self, agent: str) -> str:
+        recorded = json.loads((_FIXTURES / "store_source_formats.json").read_text())
+        return next(r["source_format"] for r in recorded if r["agent"] == agent)
+
+    def test_codex_priced_from_parsed_json(self) -> None:
+        result = extract_usage(self._store_format("Codex"), _codex_document())
+
+        assert isinstance(result, PricedUsage)
+
+    def test_codex_priced_from_raw_text(self) -> None:
+        """The failure that would have silently halved delegate cost: a caller
+        reading response.text got UnpricedUsage for every codex session.
+        """
+        as_text = json.dumps(_codex_document())
+
+        result = extract_usage(self._store_format("Codex"), as_text)
+
+        assert isinstance(result, PricedUsage)
+
+    def test_both_routes_agree(self) -> None:
+        """Same transcript, two ways of reading it, one answer. Otherwise the
+        cost depends on how the caller happened to deserialise.
+        """
+        parsed = extract_usage(self._store_format("Codex"), _codex_document())
+        as_text = extract_usage(self._store_format("Codex"), json.dumps(_codex_document()))
+
+        assert parsed == as_text
+
+    def test_claude_priced_from_raw_text(self) -> None:
+        result = extract_usage(self._store_format("ClaudeCode"), _claude_document())
+
+        assert isinstance(result, PricedUsage)
+
+    def test_a_wrong_document_type_names_the_type_not_the_format(self) -> None:
+        """The message must point at the real problem.
+
+        It previously called the format unsupported AND listed it as known, in
+        one sentence, which sent a reader after source_format when the format
+        was fine. The code's explanation of an error is not the error.
+        """
+        result = extract_usage(self._store_format("ClaudeCode"), [{"type": "session_meta"}])
+
+        assert isinstance(result, UnpricedUsage)
+        assert "expects JSONL text" in result.reason
+        assert "unsupported" not in result.reason
+
+    def test_unparseable_codex_text_is_unpriced_not_free(self) -> None:
+        result = extract_usage(self._store_format("Codex"), "{not json")
+
+        assert isinstance(result, UnpricedUsage)
