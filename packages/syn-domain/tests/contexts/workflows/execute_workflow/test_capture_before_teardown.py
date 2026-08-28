@@ -98,7 +98,7 @@ def _processor(capture: object, workspace: object, cm: object) -> WorkflowExecut
     # so the import is a no-op and cannot mask the ordering under test.
     p._session_store = None  # type: ignore[attr-defined]
     p._observability_writer = None  # type: ignore[attr-defined]
-    p._phase_leader_native_ids = {}  # type: ignore[attr-defined]
+    p._phase_leader_native_ids = {}  # type: ignore[attr-defined]  # keyed (execution_id, phase_id)
     return p
 
 

@@ -1,6 +1,7 @@
 """The platform session id a delegated harness session imports as (#895).
 
-Idempotency rests entirely on this. The import processor runs more than once -
+Stable IDENTITY rests entirely on this - which is NOT the same as
+idempotent writes; see #933 and the note in delegate_import.py. The import processor runs more than once -
 it retries under a bound, and it re-runs after a crash - so "have I already
 imported this delegate?" must be answerable without asking anything. Deriving
 the id makes the answer structural: a second import addresses the SAME

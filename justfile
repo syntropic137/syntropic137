@@ -987,7 +987,13 @@ fitness-invariants:
     uv run pytest ci/fitness/ -v --tb=short -m architecture
     @echo "✅ Invariant checks passed"
 
-# Everything CI gates on, in ONE place.
+# Every STATIC CI gate, in ONE place.
+#
+# NOT a claim that CI ran entirely: unit tests, the dashboard build, CLI checks,
+# integration and security scanning run in their own jobs and are not here. The
+# earlier wording said "every CI gate", which was false and is exactly the kind
+# of overstatement that makes a green check untrustworthy. `just qa` is the
+# fuller local sweep; this is the fast one a hook can run.
 #
 # CI, the pre-push hook and the AGENTS.md checklist all call this target. They
 # used to carry three independently-maintained lists, and they drifted:
@@ -998,8 +1004,10 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: lint format-check fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-env-example check-plugin-schemas
-    @echo "✅ preflight: every CI gate passed locally"
+preflight: lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-env-example check-plugin-schemas
+    @echo "✅ preflight: every STATIC CI gate passed locally"
+    @echo "   Not covered here (run separately): unit tests (just test),"
+    @echo "   dashboard build, CLI checks, integration, security scanning."
 
 # Codegen drift, detected by what codegen CHANGES rather than a hardcoded list.
 #

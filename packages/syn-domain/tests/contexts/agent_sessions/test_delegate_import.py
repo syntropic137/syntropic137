@@ -180,7 +180,7 @@ class TestAnUnpriceableDelegateStaysVisible:
         assert not result.imported[0].priced
 
 
-class TestReimportIsIdempotentByConstruction:
+class TestReimportDerivesTheSameIdentity:
     async def test_the_same_delegate_derives_the_same_platform_id(self) -> None:
         store = _Store(
             {"s-lead": _claude_session("s-lead", 1), "s-del": _claude_session("s-del", 9)}

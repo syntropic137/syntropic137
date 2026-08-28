@@ -433,10 +433,12 @@ from `syn_shared.settings.constants` (Python) or `constants.ts` (TypeScript).
 CI failures that could have been caught locally waste 8–10 minutes per round-trip and block the release chain. Always run these before pushing:
 
 ```bash
-just preflight       # EVERY gate CI runs, from the same justfile target CI
-                     # and the pre-push hook both call. If a check is not in
-                     # `preflight` it is not enforced before push - add new
-                     # gates there, never to CI alone (#931).
+just preflight       # Every STATIC CI gate, from the same justfile target CI
+                     # and the pre-push hook both call. Add new static gates
+                     # there, never to CI alone (#931).
+                     # NOT covered: unit tests, dashboard build, CLI checks,
+                     # integration, security scanning. Run `just qa` for the
+                     # fuller local sweep before a release PR.
 ```
 
 Or run `just qa` for the full suite (slower but catches everything including tests).

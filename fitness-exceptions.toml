@@ -43,8 +43,8 @@ issue = "#624"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 763
-issue = "#768"  # #895 added a session-store dep, its per-phase state and the call that fills it - about 6 lines that cannot be removed without removing the feature. Paid for FOUR ways down first, so the file is structurally better than when the 760 budget was set: the delegate import and its payload shaping moved to phase_delegate_import.py, the cancel/failure teardown loop went with it, conversation recording moved to phase_conversation.py, and the observation payload left the domain entirely. Roughly 200 lines out. What remains is the split this note has always owed: run/_handle_run_agent/_handle_complete_phase are still the bulk and still belong elsewhere.
+value = 773
+issue = "#934"  # 760 -> 763 for #895's session-store dep, then -> 773 for the concurrency fix cross-model review found: the leader-id map was processor-instance state keyed by phase_id alone, on a processor the dispatcher SHARES across runs, so two concurrent executions of one workflow could read each other's leader and silently import no delegate. Paid down four ways first (delegate import, teardown loop, conversation recording, observation payload - about 200 lines out) and the pop was pushed into phase_delegate_import rather than kept here. What remains is run/_handle_run_agent/_handle_complete_phase, ~250 lines that genuinely belong elsewhere; #934 tracks that split. Raising a debt ceiling twice in one PR is not good practice - the alternative was blocking a correctness fix on an unrelated refactor next to a release, which is worse.
 
 [max-loc-file."apps.syn-api.src.syn_api._wiring"]
 value = 1200

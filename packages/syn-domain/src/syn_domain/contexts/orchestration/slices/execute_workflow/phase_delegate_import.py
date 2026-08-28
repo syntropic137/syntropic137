@@ -12,7 +12,8 @@ here also keeps the domain module free of the telemetry schema.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from syn_domain.contexts.agent_sessions import (
     ObservationType,
@@ -44,6 +45,12 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+#: Namespace for the coverage-gap marker. Fixed forever, and deliberately NOT
+#: the delegate namespace: a marker must never be mistaken for a priced session.
+_COVERAGE_GAP_NAMESPACE: Final[UUID] = uuid5(
+    NAMESPACE_URL, "https://syntropic137.dev/delegate-coverage-gap"
+)
 
 __all__ = [
     "DelegateUsageRecorder",
@@ -124,6 +131,16 @@ def _delegate_cost(usage: PricedUsage | None, session_id: str) -> float | None:
     if not priced.is_priced or priced.cost is None:
         return None
     return float(priced.cost)
+
+
+def _coverage_gap_session_id(execution_id: str, phase_id: str) -> str:
+    """A stable id for the marker recorded when the leader cannot be identified.
+
+    Derived, not minted, so a phase re-processed after a crash addresses the
+    same marker rather than accumulating one per attempt. Namespaced separately
+    from delegate ids so it can never collide with a real session.
+    """
+    return str(uuid5(_COVERAGE_GAP_NAMESPACE, f"{execution_id}/{phase_id}"))
 
 
 class DelegateUsageRecorder:
@@ -238,6 +255,36 @@ async def import_delegates_for_phase(
         return
 
     if outcome.leader_missing_from_sweep:
+        # A LOG IS NOT A SIGNAL. Without a durable record the phase reports a
+        # total that looks complete while delegates it captured went unpriced -
+        # the "undercount that looks finished" this module exists to prevent.
+        #
+        # Zero tokens and no model: contributes no cost, and prices as UNPRICED,
+        # so ExecutionCostProjection increments unpriced_observation_count and
+        # unpriced_by_phase. The API already renders that as incomplete
+        # coverage rather than as a phase that spent nothing (#890).
+        await writer.record_observation(
+            session_id=_coverage_gap_session_id(execution_id, phase_id),
+            observation_type=ObservationType.TOKEN_USAGE,
+            data={
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+                "model": None,
+                "delegated": True,
+                "coverage_incomplete": True,
+                "captured_session_count": len(captured_ids),
+                "unpriced_reason": (
+                    "the phase's own leader session id is not among the captured "
+                    "ids, so delegates cannot be told from the leader"
+                ),
+            },
+            execution_id=execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace_id,
+        )
+
         # Loud on purpose. The leader's id came off its own stream and the
         # sweep confirmed the session set, so a mismatch means one of those
         # two contracts moved - and every id is then a candidate, so
@@ -266,11 +313,16 @@ async def capture_and_import_phase(
     *,
     session_store: SessionStorePort | None,
     writer: ObservabilityRecorder | None,
-    leader_native_session_id: str | None,
+    leader_native_ids: dict[tuple[str, str], str],
     session_id: str,
     phase_id: str,
 ) -> None:
     """Probe for this phase's sessions, then price the ones nobody billed.
+
+    Takes the leader MAP rather than a resolved id, and pops from it, so the
+    (execution_id, phase_id) key convention lives in one module instead of at
+    every call site. Popping also means a completed phase leaves nothing for a
+    later run of the same phase id to pick up.
 
     One function because the two are one step with one ordering rule: both must
     happen while the container is still up. The processor calls this from the
@@ -278,6 +330,8 @@ async def capture_and_import_phase(
     is what stops those two drifting - a cancelled phase that skipped the
     import would be understated in a way nothing downstream could detect.
     """
+    execution_id = getattr(workspace, "execution_id", "") or ""
+    leader_native_session_id = leader_native_ids.pop((execution_id, phase_id), None)
     capture = await capture_phase_session(
         capture_port, workspace, session_id=session_id, phase_id=phase_id
     )
@@ -287,8 +341,11 @@ async def capture_and_import_phase(
         writer=writer,
         leader_native_session_id=leader_native_session_id,
         phase_id=phase_id,
-        execution_id=getattr(workspace, "execution_id", "") or "",
-        workspace_id=getattr(workspace, "id", None),
+        execution_id=execution_id,
+        # ManagedWorkspace names this workspace_id. `id` silently returned
+        # None on every call, so every delegate observation lost its
+        # workspace linkage - invisible because getattr has a default.
+        workspace_id=getattr(workspace, "workspace_id", None),
     )
 
 
@@ -298,7 +355,7 @@ async def close_phase_workspaces(
     workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]],
     workspaces: dict[str, ManagedWorkspace],
     session_ids: dict[str, str],
-    leader_native_ids: dict[str, str],
+    leader_native_ids: dict[tuple[str, str], str],
     capture_port: SessionCapturePort | None,
     session_store: SessionStorePort | None,
     writer: ObservabilityRecorder | None,
@@ -316,7 +373,7 @@ async def close_phase_workspaces(
             workspaces.get(phase_id),
             session_store=session_store,
             writer=writer,
-            leader_native_session_id=leader_native_ids.get(phase_id),
+            leader_native_ids=leader_native_ids,
             session_id=session_ids.get(phase_id, ""),
             phase_id=phase_id,
         )
@@ -331,16 +388,21 @@ async def close_phase_workspaces(
 
 
 def remember_leader_native_id(
-    leader_native_ids: dict[str, str],
-    phase_id: str,
+    leader_native_ids: dict[tuple[str, str], str],
+    key: tuple[str, str],
     stream_result: StreamResult,
 ) -> None:
     """Record the id this phase's own harness announced, if it announced one.
 
+    ``key`` is (execution_id, phase_id). Phase id alone is NOT unique: the
+    processor is shared across concurrent dispatches, so two runs of the same
+    workflow would overwrite each other's leader and each could then subtract
+    a session that is not in its own sweep.
+
     A blank or absent id is not stored. Storing one would make every phase that
-    announced nothing share a single key, and the import would then subtract
-    the wrong session from the sweep.
+    announced nothing share a key, and the import would subtract the wrong
+    session from the sweep.
     """
     announced = stream_result.leader_native_session_id
     if announced:
-        leader_native_ids[phase_id] = announced
+        leader_native_ids[key] = announced

@@ -177,8 +177,16 @@ class WorkflowExecutionProcessor:
         # Per-phase so _finalize_phase can attribute the capture.
         self._phase_session_ids: dict[str, str] = {}
         #: The id each phase's own harness announced on its stream, which is
-        #: what the delegate import subtracts from the sweep. Keyed by phase.
-        self._phase_leader_native_ids: dict[str, str] = {}
+        #: what the delegate import subtracts from the sweep.
+        #:
+        #: Keyed by (execution_id, phase_id), NOT phase_id alone. This
+        #: processor is shared across concurrent dispatches - see
+        #: _DispatchContext above - so two runs of the same workflow share a
+        #: phase id. A phase-only key lets one run read the OTHER run's leader,
+        #: and a leader id absent from this run's sweep takes the refusal path:
+        #: no delegate imported, only a log line. Popped on success so a
+        #: completed phase leaves nothing behind.
+        self._phase_leader_native_ids: dict[tuple[str, str], str] = {}
         self._phase_tokens: dict[str, TokenAccumulator] = {}
         self._phase_auth_tokens: dict[
             str, tuple[int, int, int, int]
@@ -622,7 +630,7 @@ class WorkflowExecutionProcessor:
             session_id=session_id,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
-            workspace_id=getattr(workspace, "id", None),
+            workspace_id=getattr(workspace, "workspace_id", None),
             agent_model=phase.agent_config.model,
         )
         result = await self._get_agent_handler().handle(
@@ -638,7 +646,9 @@ class WorkflowExecutionProcessor:
         )
 
         remember_leader_native_id(
-            self._phase_leader_native_ids, todo.phase_id, result.stream_result
+            self._phase_leader_native_ids,
+            (todo.execution_id, todo.phase_id),
+            result.stream_result,
         )
 
         await record_phase_conversation(
@@ -851,7 +861,7 @@ class WorkflowExecutionProcessor:
             workspace,
             session_store=self._session_store,
             writer=self._observability_writer,
-            leader_native_session_id=self._phase_leader_native_ids.get(phase_id),
+            leader_native_ids=self._phase_leader_native_ids,
             session_id=session_id,
             phase_id=phase_id,
         )
