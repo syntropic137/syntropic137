@@ -475,6 +475,13 @@ class SessionSummary(BaseModel):
     workflow_id: str | None = None
     execution_id: str | None = None
     phase_id: str | None = None
+    #: The session that delegated to this one, when it is a delegate (#895).
+    #: Present in the domain read model and previously dropped at this boundary,
+    #: so a caller could not tell a delegate from a leader - the linkage existed
+    #: and nothing could read it.
+    parent_session_id: str | None = None
+    #: The top of the delegation chain. Equal to ``id`` for a leader.
+    root_session_id: str | None = None
     status: str = ""
     agent_type: str = ""
     repos: list[str] = Field(default_factory=list)
@@ -791,6 +798,13 @@ class SessionDetail(BaseModel):
     workflow_name: str | None = None
     execution_id: str | None = None
     phase_id: str | None = None
+    #: The session that delegated to this one, when it is a delegate (#895).
+    #: Present in the domain read model and previously dropped at this boundary,
+    #: so a caller could not tell a delegate from a leader - the linkage existed
+    #: and nothing could read it.
+    parent_session_id: str | None = None
+    #: The top of the delegation chain. Equal to ``id`` for a leader.
+    root_session_id: str | None = None
     agent_type: str = ""
     status: str = ""
     workspace_path: str | None = None
