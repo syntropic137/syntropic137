@@ -4,6 +4,7 @@
   "pages": [
     "index",
     "artifacts",
+    "claude-plugin",
     "config",
     "control",
     "conversations",
@@ -18,6 +19,7 @@
     "org",
     "repo",
     "sessions",
+    "skill",
     "system",
     "triggers",
     "watch",

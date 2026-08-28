@@ -110,6 +110,14 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_detail", "on_workflow_template_created"),
         ("dashboard_metrics", "on_workflow_template_created"),
     ],
+    # WHY (issue #822): a reinstall emits Updated, not Created. Without these
+    # the read models keep serving the definition from the first install, so
+    # the upsert looks like a no-op to the CLI and dashboard. dashboard_metrics
+    # is deliberately absent: an update is not a new template.
+    "WorkflowTemplateUpdated": [
+        ("workflow_list", "on_workflow_template_updated"),
+        ("workflow_detail", "on_workflow_template_updated"),
+    ],
     "WorkflowTemplateArchived": [
         ("workflow_list", "on_workflow_template_archived"),
     ],
@@ -218,6 +226,23 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "SessionCostFinalized": [
         ("session_cost", "on_session_cost_finalized"),
         ("execution_cost", "on_session_cost_finalized"),
+    ],
+    # Claude plugin injection (issue #726)
+    "ClaudePluginRegistered": [
+        ("claude_plugin_lock", "on_claude_plugin_registered"),
+    ],
+    "GlobalClaudePluginAdded": [
+        ("global_claude_plugins", "on_global_claude_plugin_added"),
+    ],
+    "GlobalClaudePluginRemoved": [
+        ("global_claude_plugins", "on_global_claude_plugin_removed"),
+    ],
+    # Skill injection (issue #772). Without this entry the skill_lock read
+    # model is never updated on the synchronous path, so a skill registers
+    # into the event store and then reads back as unregistered - which breaks
+    # both the install-time cache check and run-time resolution.
+    "SkillRegistered": [
+        ("skill_lock", "on_skill_registered"),
     ],
 }
 

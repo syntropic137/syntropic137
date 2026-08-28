@@ -9,17 +9,34 @@ inputs:
     description: "The research topic"
     required: true
 
+# Workflow-scope skills apply to EVERY phase in this workflow.
+# "./skills/repo-conventions" is a VENDORED skill: the directory ships inside
+# this plugin. `syn workflow install` reads the tree, hashes it with sha256,
+# and rewrites this entry to a pinned mapping before uploading the definition.
+skills:
+  - ./skills/repo-conventions
+
 phases:
   - id: investigate
     name: Investigate
     order: 1
     execution_type: sequential
+    model: haiku
     prompt_file: phases/investigate.md
     output_artifacts: [findings]
+    # Phase-scope skills are ADDED to the workflow-scope list, so this phase
+    # gets two skills. "anthropics/skills/doc-coauthoring@<sha>" is an EXTERNAL
+    # skill: org/repo/skill-name@version, cloned at install time and pinned by
+    # commit sha. "@latest" is rejected by design.
+    skills:
+      - anthropics/skills/doc-coauthoring@3b3fad96af16a10759d930941b4520ba0c40edae
 
   - id: summarize
     name: Summarize
     order: 2
     execution_type: sequential
+    model: haiku
     prompt_file: shared://summarize
     output_artifacts: [summary]
+    # No phase-scope skills: this phase gets only the workflow-scope
+    # repo-conventions skill. The divergence from `investigate` is the point.

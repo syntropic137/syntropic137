@@ -8,7 +8,13 @@ the actual stack topology.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+import pytest
 
 from syn_shared.settings.constants import (
     DEFAULT_DEV_API_URL,
@@ -21,19 +27,29 @@ from syn_shared.settings.dev_tooling import DevToolingSettings, get_dev_api_url
 from syn_shared.settings.infra import InfraSettings
 
 
+@pytest.mark.unit
 class TestGetDevApiUrl:
     """get_dev_api_url() is the single entry point for dev tool API URLs."""
 
-    def test_default_is_dev_port(self) -> None:
-        """Default must point at the dev stack (9137), never selfhost (8137)."""
+    def test_default_is_dev_port(self, tmp_path: Path, monkeypatch) -> None:
+        """Default must point at the dev stack (9137), never selfhost (8137).
+
+        Runs from an empty directory. Clearing os.environ is not enough:
+        DevToolingSettings also reads a .env file, so on any machine with a
+        populated repo .env this asserted against the developer's DEV__API_URL
+        rather than the default. It passed in CI, where no .env exists, and
+        failed locally - a test that only holds where nobody looks at it.
+        """
+        monkeypatch.chdir(tmp_path)
         with patch.dict(os.environ, {}, clear=True):
             url = get_dev_api_url()
         assert url == DEFAULT_DEV_API_URL
         assert str(DEV_API_HOST_PORT) in url
         assert str(SELFHOST_GATEWAY_PORT) not in url
 
-    def test_env_override(self) -> None:
+    def test_env_override(self, tmp_path: Path, monkeypatch) -> None:
         """DEV__API_URL env var takes precedence over the default."""
+        monkeypatch.chdir(tmp_path)
         with patch.dict(os.environ, {"DEV__API_URL": "http://remote:4000"}, clear=True):
             url = get_dev_api_url()
         assert url == "http://remote:4000"
@@ -45,6 +61,7 @@ class TestGetDevApiUrl:
         assert settings.api_url == DEFAULT_DEV_API_URL
 
 
+@pytest.mark.unit
 class TestPortConstants:
     """Port constants must stay in sync with the stack topology."""
 
@@ -57,6 +74,7 @@ class TestPortConstants:
         assert f":{SELFHOST_GATEWAY_PORT}" in DEFAULT_SELFHOST_API_URL
 
 
+@pytest.mark.unit
 class TestSynPublicHostname:
     """SYN_PUBLIC_HOSTNAME replaced SYN_DOMAIN - guard the rename."""
 

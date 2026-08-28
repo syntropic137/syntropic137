@@ -115,26 +115,60 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
+      # Key the cache on the submodule commit, not Cargo.lock. An APSS bump can
+      # change Rust sources, manifests, or the [[bin]] target name without
+      # touching Cargo.lock, and a Cargo.lock-keyed cache would then restore
+      # binaries built from a different revision. `git rev-parse HEAD:<path>`
+      # reads the gitlink, so any bump invalidates the cache exactly.
+      - name: Resolve APSS submodule commit
+        id: apss-commit
+        run: echo "sha=$(git rev-parse HEAD:lib/agent-paradise-standards-system)" >> "$GITHUB_OUTPUT"
+
       - name: Cache APS CLI binary
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: lib/agent-paradise-standards-system/target/release
-          key: aps-cli-${{ runner.os }}-${{ hashFiles('lib/agent-paradise-standards-system/Cargo.lock') }}
+          key: aps-cli-${{ runner.os }}-${{ steps.apss-commit.outputs.sha }}
 
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
-      - name: Code quality thresholds (APSS)
-        run: just fitness-check
+      # preflight also runs `vsa validate`, and `vsa` comes from the
+      # event-sourcing-platform submodule rather than the runner image. Without
+      # this the recipe dies at exit 127 - the SAME failure mode the pnpm note
+      # below describes, arriving from the other missing toolchain. The
+      # cache-key-suffix keeps this job's cache distinct from the lint job's so
+      # neither can serve the other a binary built from a different submodule
+      # pin (see the poka-yoke note in the action itself).
+      - name: Setup VSA CLI
+        uses: ./.github/actions/setup-vsa
+        with:
+          cache-key-suffix: fitness
 
-      - name: Structural & ES invariants
-        run: just fitness-invariants
+      # preflight includes codegen-check, and codegen shells out to pnpm in
+      # three workspaces. Without this the whole target dies at exit 127 and
+      # the failure names the recipe rather than the missing toolchain.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
 
-      - name: Published compose consistency
-        run: just check-compose
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
 
-      - name: Compose overlay validation
-        run: just check-compose-overlays
+      - name: Install workspace deps for codegen
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # ONE list, shared with the pre-push hook and the AGENTS.md checklist.
+      # Enumerating the checks here as separate steps is what let CI and local
+      # drift: three of them were reachable from no local recipe at all, so
+      # they could only fail after a push (#931). Add new gates to `preflight`
+      # in the justfile, never here.
+      - name: Preflight (every gate, same target the hook runs)
+        run: just preflight
 
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
@@ -186,11 +220,14 @@ jobs:
     name: Python Integration Tests
     runs-on: ubuntu-latest
     # Run on: weekly cron, main branch pushes, manual dispatch
-    # Skip on: feature branch PRs (unit tests are sufficient for fast iteration)
+    # Tiering: feature-branch PRs stay fast on unit tests alone; integration
+    # runs on the weekly cron, on main, and - critically - on release PRs, which
+    # are the last chance to catch a regression before it ships.
     if: >-
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'release')
 
     services:
       timescaledb:
@@ -410,6 +447,73 @@ jobs:
           echo "✅ All submodules properly initialized"
 
   #############################################################################
+  # DEFAULT WORKSPACE IMAGE - execute the image every deployment actually pulls
+  #
+  # The rest of CI never runs it. workspace-build/_workspace-check build a LOCAL
+  # claude-cli image for the dev loop, and e2e-container builds claude-cli too,
+  # so after the default moved to omni nothing executed the pinned digest.
+  #
+  # This probes THROUGH /opt/agentic/entrypoint.sh rather than around it: an
+  # entrypoint regression reaching a published image is the documented incident
+  # that motivated digest pinning, and --entrypoint <bin> would sail past it.
+  #
+  # Pulls a multi-GB image, so it is path-filtered to changes that can alter
+  # which image is pulled. It is in ci-success's needs list, so when it runs it
+  # blocks.
+  #############################################################################
+
+  default-workspace-image:
+    name: Default Workspace Image
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the path filter below diffs against the base ref, and a
+      # shallow clone has no merge base with it. The first version of this job
+      # used the default depth, the diff failed with "no merge base", the else
+      # branch ran, and the job reported "pin cannot have changed" and passed -
+      # a false green in the gate written to catch false greens.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
+          # The recipe resolves the pin by importing syn_shared, and this repo's
+          # uv workspace has editable members inside lib/agentic-primitives, so
+          # `uv run` cannot resolve the environment without them.
+          submodules: true
+
+      - name: Check whether the pinned default could have changed
+        id: filter
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --quiet origin "${{ github.base_ref }}"
+          # FAIL CLOSED. If the diff cannot be computed we do not know whether
+          # the pin moved, and "we do not know" must mean run the check, not
+          # skip it. Only a diff that succeeds AND matches nothing may skip.
+          if ! CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" 2>&1); then
+            echo "::warning::Could not diff against origin/${{ github.base_ref }} ($CHANGED). Running the check rather than assuming the pin is unchanged."
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if echo "$CHANGED" | grep -qE 'workspace_images\.py|justfile|\.github/workflows/ci\.yml'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Pin provably unchanged in this diff; skipping the image pull."
+          fi
+
+      - name: Install uv
+        if: steps.filter.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install just
+        if: steps.filter.outputs.run == 'true'
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+
+      - name: Probe the pinned default image through its entrypoint
+        if: steps.filter.outputs.run == 'true'
+        run: just check-default-workspace-image
+
+  #############################################################################
   # OSV VULNERABILITY SCAN - Supply chain security (ISS-259)
   #
   # Google's OSV Scanner checks all lock files against the OSV database
@@ -476,11 +580,30 @@ jobs:
               --ignore-vuln GHSA-p423-j2cm-9vmq \
               --ignore-vuln GHSA-6w46-j5rx-g56g \
               --ignore-vuln GHSA-mj87-hwqh-73pj \
+              --ignore-vuln GHSA-65pc-fj4g-8rjx \
+              --ignore-vuln PYSEC-2026-179 \
+              --ignore-vuln PYSEC-2026-175 \
+              --ignore-vuln PYSEC-2026-177 \
+              --ignore-vuln PYSEC-2026-178 \
+              --ignore-vuln GHSA-pp6c-gr5w-3c5g \
+              --ignore-vuln PYSEC-2026-161 \
+              --ignore-vuln PYSEC-2026-142 \
+              --ignore-vuln PYSEC-2026-141 \
+              --ignore-vuln GHSA-4xgf-cpjx-pc3j \
+              --ignore-vuln PYSEC-2026-3552 \
               -r /dev/stdin
+          # TODO(#805): remove --ignore-vuln PYSEC-2026-3552 once cryptography 50.0.0 resolves through uv (published, but absent from the simple index)
           # TODO(#345): remove --ignore-vuln once pygments releases a fix
+          # TODO(#776): remove --ignore-vuln GHSA-4xgf-cpjx-pc3j once pydantic-settings 2.14.2 is on PyPI (secrets_nested_subdir symlink escape; feature unused here)
           # TODO(#634): remove --ignore-vuln once cryptography 46.0.7 is available on PyPI
           # TODO(#678): remove --ignore-vuln GHSA-6w46-j5rx-g56g once pytest 9.0.3 is available on PyPI
           # TODO(#696): remove --ignore-vuln GHSA-mj87-hwqh-73pj once python-multipart 0.0.26 is available on PyPI
+          # TODO(#766): June 2026 audit allowlist — remove each as the upstream fix lands in uv.lock:
+          #   - GHSA-65pc-fj4g-8rjx (idna >= 3.15)
+          #   - PYSEC-2026-179 / 175 / 177 / 178 (pyjwt >= 2.13.0)
+          #   - GHSA-pp6c-gr5w-3c5g (python-multipart >= 0.0.27)
+          #   - PYSEC-2026-161 (starlette >= 1.0.1)
+          #   - PYSEC-2026-142 / 141 (urllib3 >= 2.7.0)
 
   #############################################################################
   # DEPENDENCY REVIEW - Block new CVE-laden packages on PRs (ISS-259)
@@ -519,6 +642,7 @@ jobs:
       - cli-node
       - docs-site
       - submodule-check
+      - default-workspace-image
       - osv-scan
       - pip-audit
       - dependency-review
@@ -540,10 +664,28 @@ jobs:
             exit 1
           fi
 
-          # Integration tests only required on PRs
-          if [[ "${{ github.event_name }}" == "pull_request" ]] && \
-             [[ "${{ needs.python-integration-tests.result }}" == "failure" ]]; then
+          # Integration tests: whenever they RAN, they must have passed.
+          #
+          # This used to read `event_name == 'pull_request' && result == failure`,
+          # which was the exact inverse of the job's own `if:` - the job never ran
+          # on a PR, so the check could never fire, and on the runs where it DID
+          # execute (weekly cron, main, dispatch) nothing required it. A failing
+          # integration test could not fail any gate. See
+          # docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md
+          #
+          # Keyed on the result, not the trigger: `skipped` is a deliberate tier
+          # choice on feature-branch PRs, `failure` is never acceptable.
+          if [[ "${{ needs.python-integration-tests.result }}" == "failure" ]]; then
             echo "❌ Integration tests failed"
+            exit 1
+          fi
+
+          # A release PR must not ship on unit tests alone. If integration did
+          # not actually run here, that is a misconfiguration, not a pass.
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "release" ]] && \
+             [[ "${{ needs.python-integration-tests.result }}" != "success" ]]; then
+            echo "❌ Release PR requires integration tests to RUN and pass"
+            echo "   (result: ${{ needs.python-integration-tests.result }})"
             exit 1
           fi
 

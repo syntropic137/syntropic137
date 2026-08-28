@@ -259,6 +259,15 @@ def create_coordinator_service(
         WorkflowExecutionListProjection,
     )
     from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
+    from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins.projection import (
+        GlobalClaudePluginsProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection import (
+        ClaudePluginLockProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockProjection,
+    )
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,
     )
@@ -273,7 +282,7 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
-    # Create all checkpointed projections (21 total)
+    # Create all checkpointed projections (24 total - bumped for #772)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -311,6 +320,11 @@ def create_coordinator_service(
             ToolTimelineAdapter(ToolTimelineProjection(projection_store)),
             ExecutionCostAdapter(ExecutionCostProjection(projection_store, pool=pool)),
             SessionCostAdapter(create_session_cost_projection(projection_store)),
+            # --- Claude plugin injection (issue #726) ---
+            ClaudePluginLockProjection(projection_store),
+            GlobalClaudePluginsProjection(projection_store),
+            # --- Skill injection (issue #772) ---
+            SkillLockProjection(projection_store),
         ],
     )
 

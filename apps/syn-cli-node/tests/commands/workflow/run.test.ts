@@ -34,6 +34,9 @@ describe("workflow run commands", () => {
     it("starts a workflow execution", async () => {
       // First call resolves the workflow, second fetches detail, third triggers execution
       mockFetch
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880);
+        // a prefix or absent id misses, then it falls back to the list.
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
           jsonResponse({
             workflows: [
@@ -76,6 +79,9 @@ describe("workflow run commands", () => {
 
     it("supports dry-run mode", async () => {
       mockFetch
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880);
+        // a prefix or absent id misses, then it falls back to the list.
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
           jsonResponse({
             workflows: [
@@ -107,11 +113,15 @@ describe("workflow run commands", () => {
       const out = stdout();
       expect(out).toContain("DRY RUN");
       // Should not have made a third fetch call (no execution) — 2 calls: list + detail
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      // +1: resolveWorkflow probes the detail endpoint first (issue #880)
+      expect(mockFetch).toHaveBeenCalledTimes(3);
     });
 
     it("rejects execution when required inputs are missing", async () => {
       mockFetch
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880);
+        // a prefix or absent id misses, then it falls back to the list.
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
           jsonResponse({
             workflows: [
@@ -207,6 +217,8 @@ describe("workflow run commands", () => {
             created_at: "2026-01-01T00:00:00Z",
           }),
         )
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880)
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         // 2) resolveWorkflow list
         .mockResolvedValueOnce(
           jsonResponse({
@@ -241,7 +253,7 @@ describe("workflow run commands", () => {
       expect(lookupReq.url).toContain("/repos/repo-abc");
 
       // The execute call (#4) must carry the resolved full_name, not repo-abc
-      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const executeReq = mockFetch.mock.calls[4]![0] as Request;
       expect(executeReq.url).toContain("/workflows/wf-run-ref-1/execute");
       const body = JSON.parse(await executeReq.clone().text());
       expect(body.repos).toEqual(["acme/widgets"]);
@@ -249,6 +261,9 @@ describe("workflow run commands", () => {
 
     it("passes owner/repo straight through without lookup", async () => {
       mockFetch
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880);
+        // a prefix or absent id misses, then it falls back to the list.
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
           jsonResponse({
             workflows: [
@@ -275,12 +290,13 @@ describe("workflow run commands", () => {
         values: { repo: ["acme/widgets"] },
       });
 
-      // No /repos/ lookup — 3 calls: workflows list, detail, execute
-      expect(mockFetch).toHaveBeenCalledTimes(3);
+      // No /repos/ lookup. 4 calls: detail probe (issue #880), workflows
+      // list, detail, execute.
+      expect(mockFetch).toHaveBeenCalledTimes(4);
       const urls = mockFetch.mock.calls.map((c: unknown[]) => (c[0] as Request).url);
       expect(urls.some((u: string) => u.includes("/repos/"))).toBe(false);
 
-      const executeReq = mockFetch.mock.calls[2]![0] as Request;
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
       const body = JSON.parse(await executeReq.clone().text());
       expect(body.repos).toEqual(["acme/widgets"]);
     });
@@ -303,6 +319,8 @@ describe("workflow run commands", () => {
             created_at: "2026-01-01T00:00:00Z",
           }),
         )
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880)
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         // 2) resolveWorkflow list
         .mockResolvedValueOnce(
           jsonResponse({
@@ -340,7 +358,7 @@ describe("workflow run commands", () => {
       expect(urls.some((u: string) => u.includes("/repos/other"))).toBe(false);
 
       // Execute body carries both: resolved full_name from lookup, then passthrough slug
-      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const executeReq = mockFetch.mock.calls[4]![0] as Request;
       const body = JSON.parse(await executeReq.clone().text());
       expect(body.repos).toEqual(["acme/widgets", "other/widgets"]);
     });
@@ -379,6 +397,9 @@ describe("workflow run commands", () => {
 
     it("fails loud when API returns status!=started", async () => {
       mockFetch
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880);
+        // a prefix or absent id misses, then it falls back to the list.
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
           jsonResponse({
             workflows: [
@@ -410,6 +431,9 @@ describe("workflow run commands", () => {
     it("renders execution history table", async () => {
       // First call resolves the workflow, second call gets runs
       mockFetch
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880);
+        // a prefix or absent id misses, then it falls back to the list.
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
           jsonResponse({
             workflows: [
@@ -450,6 +474,9 @@ describe("workflow run commands", () => {
 
     it("shows empty message when no executions", async () => {
       mockFetch
+        // resolveWorkflow probes GET /workflows/{id} first (issue #880);
+        // a prefix or absent id misses, then it falls back to the list.
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
           jsonResponse({
             workflows: [

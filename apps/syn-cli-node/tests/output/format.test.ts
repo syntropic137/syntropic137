@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCost,
+  formatCostWithCoverage,
   formatDuration,
   formatStatus,
   formatTimestamp,
@@ -102,5 +103,36 @@ describe("statusStyle", () => {
 describe("formatStatus", () => {
   it("returns plain text for unknown status", () => {
     expect(formatStatus("whatever")).toBe("whatever");
+  });
+});
+
+describe("formatCostWithCoverage", () => {
+  // A $0.00 cost is ambiguous: genuinely free, or a model we could not price?
+  // These cases pin the distinction (ADR-067 D5).
+  it.each([
+    // cost,            unpriced, expected
+    ["0", 0, "$0.0000"],
+    ["0", undefined, "$0.0000"],
+    ["0", 3, "unpriced"],
+    [0, 3, "unpriced"],
+    ["0.199515", 0, "$0.20"],
+    ["0.199515", 2, ">=$0.20 (partial)"],
+    [1.5, 1, ">=$1.50 (partial)"],
+  ])("formats cost=%s unpriced=%s as %s", (cost, unpriced, expected) => {
+    expect(formatCostWithCoverage(cost as number | string, unpriced as number | undefined)).toBe(
+      expected,
+    );
+  });
+
+  // Malformed input must never be laundered into a confident label. `!NaN` is
+  // true, so a naive falsy check would render "not-a-number" as "unpriced".
+  it.each([
+    ["not-a-number", 3],
+    ["not-a-number", 0],
+    [NaN, 3],
+    [NaN, 0],
+    [-1, 0],
+  ])("reports unknown for malformed cost=%s unpriced=%s", (cost, unpriced) => {
+    expect(formatCostWithCoverage(cost as number | string, unpriced as number)).toBe("unknown");
   });
 });

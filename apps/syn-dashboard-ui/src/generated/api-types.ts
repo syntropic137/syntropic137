@@ -173,6 +173,13 @@ export interface paths {
          *     intended for scripted bulk installation (e.g. renaming a template
          *     on install). They are *not* a second source of truth for fields
          *     that live in the YAML.
+         *
+         *     ``version``, ``source_digest`` and ``force`` carry install provenance
+         *     and policy (issue #822). ``syn workflow install`` supplies the package
+         *     version and the resolved commit SHA; reinstalling a matching version is
+         *     refused with 409 unless ``force`` is set, and a matching version that
+         *     resolves to a different digest is refused regardless of how it looks,
+         *     because that is the signature of a republished version.
          */
         post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
         delete?: never;
@@ -513,6 +520,227 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/claude-plugins/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Claude Plugin Endpoint
+         * @description Register a plugin by uploading the cloned tree (Phase A redesign).
+         *
+         *     The CLI clones the source locally, parses the manifest, and POSTs the tree
+         *     contents here. The API decodes the base64 file contents, computes the
+         *     sha256 over the normalized tree, uploads to storage, and dispatches a
+         *     ``RegisterClaudePluginCommand`` against the existing aggregate. Idempotent
+         *     on re-submission of the same ``(source_url, version, name)``.
+         */
+        post: operations["register_claude_plugin_endpoint_claude_plugins_registrations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/global": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Global Claude Plugins Endpoint
+         * @description List currently-active global claude plugins (sorted by name).
+         */
+        get: operations["list_global_claude_plugins_endpoint_claude_plugins_global_get"];
+        put?: never;
+        /**
+         * Add Global Claude Plugin Endpoint
+         * @description Add an already-registered plugin to the global registry.
+         *
+         *     Looks up ``(name, version)`` in the lock projection and dispatches the add
+         *     command. Returns 404 with ``error_code=claude_plugin_not_registered`` if the
+         *     plugin has not been registered yet.
+         */
+        post: operations["add_global_claude_plugin_endpoint_claude_plugins_global_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/global/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Global Claude Plugin Endpoint
+         * @description Remove a plugin from the global registry by display name.
+         *
+         *     The underlying lock entry is left in place so any workflow that pinned the
+         *     same ``(source_url, version)`` continues to resolve.
+         */
+        delete: operations["remove_global_claude_plugin_endpoint_claude_plugins_global__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Claude Plugins Endpoint
+         * @description List every entry currently in the lock projection.
+         */
+        get: operations["list_claude_plugins_endpoint_claude_plugins_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/{name}/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show Claude Plugin Endpoint
+         * @description Look up a single lock entry by display name and version.
+         */
+        get: operations["show_claude_plugin_endpoint_claude_plugins__name___version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Skills
+         * @description List every registered skill (issue #826).
+         *
+         *     Reads the ``skill_lock`` projection, the same read model run-time
+         *     resolution uses, so what this reports is what a run would resolve.
+         */
+        get: operations["list_skills_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Storage Stats
+         * @description Report how much space registered skill trees occupy.
+         *
+         *     Eviction is deliberately not implemented, so size is made observable
+         *     rather than assumed small.
+         */
+        get: operations["get_skill_storage_stats_skills_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lookup Skill Registration
+         * @description Report whether this skill triple is already registered.
+         *
+         *     WHY a read surface exists: the skills API had only a write endpoint, so a
+         *     caller could not distinguish an already-stored skill from a new one without
+         *     uploading the whole tree. The returned sha is the cache key.
+         */
+        get: operations["lookup_skill_registration_skills_registrations_get"];
+        put?: never;
+        /**
+         * Register Skill Endpoint
+         * @description Register a skill by uploading the cloned tree (issue #772).
+         *
+         *     The CLI clones the source locally and POSTs the tree contents here. The
+         *     API decodes the base64 file contents, computes the sha256 over the
+         *     normalized tree, uploads to storage, and dispatches a
+         *     ``RegisterSkillCommand`` against the existing aggregate. Idempotent on
+         *     re-submission of the same ``(source_url, version, skill_name)``.
+         */
+        post: operations["register_skill_endpoint_skills_registrations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/by-name/{skill_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Detail
+         * @description Every registration sharing a skill name (issue #826).
+         *
+         *     A name is not unique - the same skill can be pinned at several versions,
+         *     and two sources can publish the same name - so all matches are returned
+         *     rather than an arbitrary one.
+         */
+        get: operations["get_skill_detail_skills_by_name__skill_name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/metrics": {
         parameters: {
             query?: never;
@@ -525,6 +753,26 @@ export interface paths {
          * @description Get aggregated metrics across all workflows or for a specific workflow.
          */
         get: operations["get_metrics_endpoint_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/capture/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Capture Status
+         * @description Recorded session-capture verdicts, newest first.
+         */
+        get: operations["get_capture_status_capture_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1542,6 +1790,21 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AddGlobalClaudePluginRequest
+         * @description Request body for ``POST /claude-plugins/global`` (Phase A redesign).
+         *
+         *     Takes the display name plus version of an already-registered plugin. The
+         *     handler looks the entry up in the lock projection and refuses to add
+         *     anything that has not been registered first via
+         *     ``POST /claude-plugins/registrations``.
+         */
+        AddGlobalClaudePluginRequest: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+        };
+        /**
          * ArtifactActionResponse
          * @description Response for artifact update/delete actions.
          */
@@ -1652,6 +1915,117 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * CaptureStatusEntry
+         * @description One recorded session-capture verdict.
+         *
+         *     Mirrors the observation the workspace adapter writes on the observability
+         *     lane. The observed fields are None exactly when something went wrong, which
+         *     is when a backfill needs them most - so the expected values are carried
+         *     alongside rather than in place of them.
+         */
+        CaptureStatusEntry: {
+            /** Session Id */
+            session_id: string;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Recorded At */
+            recorded_at?: string | null;
+            /** State */
+            state: string;
+            /** Needs Backfill */
+            needs_backfill: boolean;
+            /** Partition */
+            partition?: string | null;
+            /** Expected Deployment */
+            expected_deployment?: string | null;
+            /** Origin Deployment */
+            origin_deployment?: string | null;
+            /** Agent Session Ids */
+            agent_session_ids?: string[] | null;
+        };
+        /**
+         * CaptureStatusResponse
+         * @description Recorded capture verdicts, newest first.
+         */
+        CaptureStatusResponse: {
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Needs Backfill Count
+             * @default 0
+             */
+            needs_backfill_count: number;
+            /**
+             * Unattributable Count
+             * @default 0
+             */
+            unattributable_count: number;
+            /**
+             * Scanned
+             * @default 0
+             */
+            scanned: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Entries */
+            entries?: components["schemas"]["CaptureStatusEntry"][];
+        };
+        /**
+         * ClaudePluginFileEntry
+         * @description One file in the uploaded plugin tree (``POST /claude-plugins/registrations``).
+         *
+         *     ``content_b64`` is the base64-encoded byte content; the API decodes it back
+         *     into raw bytes before hashing/uploading. base64 keeps binary-safe payloads
+         *     inside the JSON envelope without forcing the caller to choose an encoding.
+         */
+        ClaudePluginFileEntry: {
+            /** Rel Path */
+            rel_path: string;
+            /** Content B64 */
+            content_b64: string;
+        };
+        /**
+         * ClaudePluginLockListResponse
+         * @description List of every entry currently in the claude plugin lock projection.
+         */
+        ClaudePluginLockListResponse: {
+            /** Plugins */
+            plugins?: components["schemas"]["ClaudePluginLockResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * ClaudePluginLockResponse
+         * @description A single lock entry (one ``(source_url, version)`` pair).
+         */
+        ClaudePluginLockResponse: {
+            /** Name */
+            name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+            /** Registered At */
+            registered_at?: string | null;
         };
         /**
          * ConditionRequest
@@ -1930,6 +2304,22 @@ export interface components {
              * @default true
              */
             requires_repos: boolean;
+            /**
+             * Version
+             * @description Package version being installed (issue #822). Recorded on the template so an execution can be traced to the version that produced it. Reinstalling a matching version is refused unless force is set.
+             */
+            version?: string | null;
+            /**
+             * Source Digest
+             * @description Resolved source commit SHA for the package content (issue #822). A matching version resolving to a different digest is refused: that is the signature of a republished version.
+             */
+            source_digest?: string | null;
+            /**
+             * Force
+             * @description Overwrite an already-installed matching version.
+             * @default false
+             */
+            force: boolean;
         };
         /** CreateWorkflowResponse */
         CreateWorkflowResponse: {
@@ -2064,7 +2454,7 @@ export interface components {
              */
             session_count: number;
             /** Session Ids */
-            session_ids?: string[];
+            session_ids?: string[] | null;
             /**
              * Total Cost Usd
              * @default 0
@@ -2124,6 +2514,10 @@ export interface components {
             cost_by_phase?: {
                 [key: string]: string;
             };
+            /** Unpriced By Phase */
+            unpriced_by_phase?: {
+                [key: string]: number;
+            };
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
@@ -2137,6 +2531,11 @@ export interface components {
              * @default false
              */
             is_complete: boolean;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Started At */
             started_at?: string | null;
             /** Completed At */
@@ -2173,6 +2572,11 @@ export interface components {
              * @default 0
              */
             total_cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /**
              * Total Duration Seconds
              * @default 0
@@ -2351,9 +2755,14 @@ export interface components {
             total_cost_usd: string;
             /**
              * Total Cost Display
-             * @default $0.00
+             * @default —
              */
             total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Duration Seconds */
             duration_seconds?: number | null;
             /**
@@ -2513,6 +2922,35 @@ export interface components {
             installation_id: string;
         };
         /**
+         * GlobalClaudePluginListResponse
+         * @description List of currently-registered global claude plugins.
+         */
+        GlobalClaudePluginListResponse: {
+            /** Plugins */
+            plugins?: components["schemas"]["GlobalClaudePluginResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * GlobalClaudePluginResponse
+         * @description A single entry in the global claude plugin registry.
+         */
+        GlobalClaudePluginResponse: {
+            /** Name */
+            name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Added At */
+            added_at?: string | null;
+        };
+        /**
          * GlobalCostResponse
          * @description Global cost breakdown across all repos.
          */
@@ -2552,6 +2990,16 @@ export interface components {
              * @default 0
              */
             total_output_tokens: number;
+            /**
+             * Total Cache Creation Tokens
+             * @default 0
+             */
+            total_cache_creation_tokens: number;
+            /**
+             * Total Cache Read Tokens
+             * @default 0
+             */
+            total_cache_read_tokens: number;
             /** Cost By Repo */
             cost_by_repo?: {
                 [key: string]: string;
@@ -2848,6 +3296,8 @@ export interface components {
             argument_hint?: string | null;
             /** Model */
             model?: string | null;
+            /** Provider */
+            provider?: string | null;
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
@@ -2881,6 +3331,11 @@ export interface components {
              * @default 0
              */
             cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Started At */
             started_at?: string | null;
             /** Completed At */
@@ -2957,6 +3412,53 @@ export interface components {
             success: boolean;
         };
         /**
+         * RegisterClaudePluginRequest
+         * @description Request body for ``POST /claude-plugins/registrations`` (Phase A).
+         *
+         *     The CLI uploads the entire plugin tree inline alongside the parsed manifest;
+         *     the API hashes the normalized tree, stores it via the storage port, and
+         *     persists the registration aggregate. Idempotent on existing
+         *     ``(source_url, version, name)`` (re-uploading is a safe no-op).
+         */
+        RegisterClaudePluginRequest: {
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Name
+             * @description Display name override; when omitted the manifest's ``name`` is used.
+             */
+            name?: string | null;
+            /**
+             * Manifest
+             * @description Pre-parsed contents of .claude-plugin/plugin.json.
+             */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /**
+             * Files
+             * @description Every file in the plugin tree (base64-encoded).
+             */
+            files: components["schemas"]["ClaudePluginFileEntry"][];
+        };
+        /**
+         * RegisterClaudePluginResponse
+         * @description Response payload for ``POST /claude-plugins/registrations``.
+         */
+        RegisterClaudePluginResponse: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /**
+             * Sha256
+             * @description Content-addressed sha of the normalized tree.
+             */
+            sha256: string;
+        };
+        /**
          * RegisterRepoRequest
          * @description Request body for registering a new repo.
          */
@@ -3005,6 +3507,33 @@ export interface components {
             created_by: string;
         };
         /**
+         * RegisterSkillRequest
+         * @description Request body for ``POST /skills/registrations`` (issue #772).
+         *
+         *     The CLI uploads the entire skill tree inline; the API hashes the
+         *     normalized tree, stores it via the storage port, and persists the
+         *     registration aggregate. Idempotent on existing
+         *     ``(source_url, version, skill_name)``. Unlike claude plugins, there is no
+         *     caller-supplied manifest: the SKILL.md frontmatter at the tree root is the
+         *     manifest.
+         */
+        RegisterSkillRequest: {
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Skill Name
+             * @description Display name override; when omitted the SKILL.md frontmatter's 'name' is used.
+             */
+            skill_name?: string | null;
+            /**
+             * Files
+             * @description Every file in the skill tree (base64-encoded).
+             */
+            files: components["schemas"]["SkillFilePayload"][];
+        };
+        /**
          * RegisterTriggerRequest
          * @description Request body for registering a new trigger rule.
          */
@@ -3034,6 +3563,16 @@ export interface components {
              * @default api
              */
             created_by: string;
+        };
+        /**
+         * RemoveGlobalClaudePluginResponse
+         * @description Confirmation payload for ``DELETE /claude-plugins/global/{name}``.
+         */
+        RemoveGlobalClaudePluginResponse: {
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
         };
         /**
          * RepoActionResponse
@@ -3510,6 +4049,11 @@ export interface components {
                 [key: string]: string;
             };
             /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /**
              * Is Finalized
              * @default false
              */
@@ -3553,6 +4097,10 @@ export interface components {
             execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
+            /** Parent Session Id */
+            parent_session_id?: string | null;
+            /** Root Session Id */
+            root_session_id?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Milestone Id */
@@ -3628,9 +4176,14 @@ export interface components {
             total_cost_usd: string;
             /**
              * Total Cost Display
-             * @default $0.00
+             * @default —
              */
             total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
@@ -3680,6 +4233,10 @@ export interface components {
             execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
+            /** Parent Session Id */
+            parent_session_id?: string | null;
+            /** Root Session Id */
+            root_session_id?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Status */
@@ -3731,9 +4288,14 @@ export interface components {
             total_cost_usd: string;
             /**
              * Total Cost Display
-             * @default $0.00
+             * @default —
              */
             total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Duration Seconds */
             duration_seconds?: number | null;
             /**
@@ -3783,6 +4345,147 @@ export interface components {
              * @default 0
              */
             cache_read_tokens: number;
+        };
+        /**
+         * SkillDetailResponse
+         * @description Every registration sharing one skill name.
+         *
+         *     A name is not unique: the same skill can be pinned at several versions, and
+         *     two sources can publish the same name. All of them are returned so the
+         *     caller can tell which pin a workflow actually resolves to.
+         */
+        SkillDetailResponse: {
+            /** Skill Name */
+            skill_name: string;
+            /** Registrations */
+            registrations?: components["schemas"]["SkillRegistrationSummary"][];
+        };
+        /**
+         * SkillFilePayload
+         * @description One file in the uploaded skill tree (``POST /skills/registrations``).
+         *
+         *     Mirrors ``ClaudePluginFileEntry``. ``content_base64`` is the base64-encoded
+         *     byte content; the API decodes it back into raw bytes before hashing and
+         *     uploading.
+         */
+        SkillFilePayload: {
+            /** Rel Path */
+            rel_path: string;
+            /** Content Base64 */
+            content_base64: string;
+        };
+        /**
+         * SkillListResponse
+         * @description Every registered skill.
+         */
+        SkillListResponse: {
+            /** Skills */
+            skills?: components["schemas"]["SkillRegistrationSummary"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * SkillRegistrationLookupResponse
+         * @description Whether a (source_url, version, skill_name) triple is already registered.
+         *
+         *     Lets the CLI skip uploading a skill tree it has already stored. The sha is
+         *     the cache key: identical content always resolves to the same hash, so a hit
+         *     here means zero network work for the caller.
+         */
+        SkillRegistrationLookupResponse: {
+            /** Registered */
+            registered: boolean;
+            /** Resolved Sha */
+            resolved_sha?: string | null;
+        };
+        /**
+         * SkillRegistrationResponse
+         * @description Response payload for ``POST /skills/registrations``.
+         */
+        SkillRegistrationResponse: {
+            /** Skill Name */
+            skill_name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Resolved Sha
+             * @description Content-addressed sha of the normalized tree.
+             */
+            resolved_sha: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+        };
+        /**
+         * SkillRegistrationSummary
+         * @description One registered skill, as the lock projection holds it.
+         *
+         *     Carries the full identity triple plus the content hash, because that is
+         *     exactly what makes a ``SkillNotRegistered`` failure actionable: the caller
+         *     can see which of the three fields does not match what a workflow declared.
+         */
+        SkillRegistrationSummary: {
+            /** Skill Name */
+            skill_name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Resolved Sha
+             * @description Content-addressed sha of the normalized tree.
+             */
+            resolved_sha: string;
+            /**
+             * Resolved Sha Display
+             * @description First 12 characters of resolved_sha, for display in narrow columns.
+             */
+            resolved_sha_display: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+            /**
+             * Registered At
+             * Format: date-time
+             * @description UTC; clients format for their locale.
+             */
+            registered_at: string;
+        };
+        /**
+         * SkillStorageStatsResponse
+         * @description Size of the content-addressed skill store.
+         *
+         *     Skill storage grows monotonically: registration is keyed by content hash
+         *     and nothing removes old trees (skills-distribution spec D6, eviction is
+         *     deliberately not implemented). This endpoint exists so that decision stays
+         *     a measured one rather than an assumption.
+         */
+        SkillStorageStatsResponse: {
+            /**
+             * Object Count
+             * @default 0
+             */
+            object_count: number;
+            /**
+             * Total Bytes
+             * @default 0
+             */
+            total_bytes: number;
+            /**
+             * Skill Count
+             * @description Distinct skill trees, not files.
+             * @default 0
+             */
+            skill_count: number;
+            /**
+             * Truncated
+             * @description True if the backend returned a partial listing, so the counts are floors.
+             * @default false
+             */
+            truncated: boolean;
         };
         /**
          * StateResponse
@@ -4394,6 +5097,8 @@ export interface components {
             prompt_template: string;
             /** Model */
             model?: string | null;
+            /** Provider */
+            provider?: string | null;
             /** Timeout Seconds */
             timeout_seconds?: number | null;
             /** Allowed Tools */
@@ -4459,7 +5164,7 @@ export interface components {
             filename: string;
             /**
              * File
-             * @description Deprecated — file paths are no longer supported. Use 'content' instead.
+             * @description Deprecated; file paths are no longer supported. Use 'content' instead.
              */
             file?: string | null;
         };
@@ -4790,7 +5495,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Conflict — workflow has active executions or is already archived */
+            /** @description Conflict; workflow has active executions or is already archived */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4978,6 +5683,9 @@ export interface operations {
             query?: {
                 name?: string | null;
                 workflow_id?: string | null;
+                version?: string | null;
+                source_digest?: string | null;
+                force?: boolean;
             };
             header?: never;
             path?: never;
@@ -5647,6 +6355,367 @@ export interface operations {
             };
         };
     };
+    register_claude_plugin_endpoint_claude_plugins_registrations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterClaudePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisterClaudePluginResponse"];
+                };
+            };
+            /** @description Malformed file payload (bad base64, missing fields) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Plugin tree exceeds the size or file-count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Manifest missing, malformed, or unsafe file path in the tree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_global_claude_plugins_endpoint_claude_plugins_global_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalClaudePluginListResponse"];
+                };
+            };
+        };
+    };
+    add_global_claude_plugin_endpoint_claude_plugins_global_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddGlobalClaudePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalClaudePluginResponse"];
+                };
+            };
+            /** @description Plugin not registered; register via /registrations first */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_global_claude_plugin_endpoint_claude_plugins_global__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoveGlobalClaudePluginResponse"];
+                };
+            };
+            /** @description Plugin not present in the global registry */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_claude_plugins_endpoint_claude_plugins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudePluginLockListResponse"];
+                };
+            };
+        };
+    };
+    show_claude_plugin_endpoint_claude_plugins__name___version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudePluginLockResponse"];
+                };
+            };
+            /** @description No lock entry for the given (name, version) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_skills_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillListResponse"];
+                };
+            };
+        };
+    };
+    get_skill_storage_stats_skills_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillStorageStatsResponse"];
+                };
+            };
+        };
+    };
+    lookup_skill_registration_skills_registrations_get: {
+        parameters: {
+            query: {
+                /** @description Skill source repository URL */
+                source_url: string;
+                /** @description Pinned version (tag, branch, or commit) */
+                version: string;
+                /** @description Skill name as declared or overridden */
+                skill_name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillRegistrationLookupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_skill_endpoint_skills_registrations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterSkillRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillRegistrationResponse"];
+                };
+            };
+            /** @description Malformed file payload (bad base64, missing fields) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Skill tree exceeds the size or file-count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Manifest missing, malformed, or unsafe file path in the tree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_skill_detail_skills_by_name__skill_name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetailResponse"];
+                };
+            };
+            /** @description No skill registered under that name */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_metrics_endpoint_metrics_get: {
         parameters: {
             query?: {
@@ -5666,6 +6735,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_capture_status_capture_status_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Return only sessions whose transcripts did not reach the store. */
+                needs_backfill?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5851,7 +6953,7 @@ export interface operations {
             query?: {
                 /** @description Include phase/model/tool breakdowns */
                 include_breakdown?: boolean;
-                /** @description Include list of session IDs */
+                /** @description Include list of session IDs (unbounded; null when omitted) */
                 include_session_ids?: boolean;
             };
             header?: never;

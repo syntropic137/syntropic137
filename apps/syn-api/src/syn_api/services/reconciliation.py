@@ -38,6 +38,50 @@ async def cleanup_orphaned_containers() -> None:
     await _docker_rm("name=agentic-ws-", "workspace")
 
 
+async def _docker_stop_bounded(ids: list[str], label: str) -> None:
+    """Best-effort graceful stop so capability finalizers get their signal path.
+
+    Separated from _docker_rm so neither function has to carry both the stop
+    policy and the removal policy; together they exceeded the cyclomatic budget.
+
+    Never raises and never blocks reaping: the caller force-removes regardless.
+    What it must NOT do is stay quiet, because a swallowed stop failure is
+    exactly the silent capture loss the stop exists to prevent.
+    """
+    stop_first = await asyncio.create_subprocess_exec(
+        "docker",
+        "stop",
+        "-t",
+        "5",
+        *ids,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _, stop_err = await asyncio.wait_for(stop_first.communicate(), timeout=20)
+    except TimeoutError:
+        stop_first.kill()
+        await stop_first.wait()
+        logger.warning(
+            "docker stop timed out after 20s for %d %s container(s); forcing "
+            "removal, any pending session capture in them is lost",
+            len(ids),
+            label,
+        )
+        return
+
+    if stop_first.returncode != 0:
+        logger.warning(
+            "docker stop exited %s for %s container(s) %s; forcing removal. "
+            "Finalizers may not have run, so any pending session capture in "
+            "them is lost. stderr: %s",
+            stop_first.returncode,
+            label,
+            ids,
+            (stop_err or b"").decode(errors="replace")[:500].strip(),
+        )
+
+
 async def _docker_rm(filter_arg: str, label: str) -> None:
     """Find and force-remove Docker containers matching *filter_arg*.
 
@@ -64,6 +108,9 @@ async def _docker_rm(filter_arg: str, label: str) -> None:
             return
 
         logger.warning("Stopping %d orphaned %s container(s): %s", len(ids), label, ids)
+
+        await _docker_stop_bounded(ids, label)
+
         stop_proc = await asyncio.create_subprocess_exec(
             "docker",
             "rm",
@@ -77,7 +124,23 @@ async def _docker_rm(filter_arg: str, label: str) -> None:
         except TimeoutError:
             stop_proc.kill()
             await stop_proc.wait()
+            logger.warning(
+                "docker rm -f timed out for %d %s container(s); they may still exist",
+                len(ids),
+                label,
+            )
             return
-        logger.info("Removed %d orphaned %s container(s)", len(ids), label)
+        # Only claim removal when it actually succeeded. Reporting "Removed N"
+        # off the back of an unchecked return code is how an operator concludes
+        # cleanup worked while containers are still running.
+        if stop_proc.returncode == 0:
+            logger.info("Removed %d orphaned %s container(s)", len(ids), label)
+        else:
+            logger.warning(
+                "docker rm -f exited %s for %s container(s) %s; some may still exist",
+                stop_proc.returncode,
+                label,
+                ids,
+            )
     except Exception:
         logger.debug("Container cleanup skipped for %s (docker may not be available)", label)

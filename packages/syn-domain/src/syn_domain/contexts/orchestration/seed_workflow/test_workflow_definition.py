@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -68,6 +69,7 @@ def test_parse_valid_workflow_yaml() -> None:
     assert len(definition.phases) == 2
 
 
+@pytest.mark.unit
 def test_parse_phases() -> None:
     """Test parsing phase definitions."""
     definition = WorkflowDefinition.from_yaml(VALID_WORKFLOW_YAML)
@@ -85,6 +87,7 @@ def test_parse_phases() -> None:
     assert phase2.input_artifacts == ["output_1"]
 
 
+@pytest.mark.unit
 def test_convert_phases_to_domain() -> None:
     """Test converting phases to domain PhaseDefinition objects."""
     definition = WorkflowDefinition.from_yaml(VALID_WORKFLOW_YAML)
@@ -96,6 +99,7 @@ def test_convert_phases_to_domain() -> None:
     assert domain_phases[0].output_artifact_types == ["output_1"]
 
 
+@pytest.mark.unit
 def test_validate_workflow_yaml_valid() -> None:
     """Test validation of valid workflow YAML."""
     is_valid, error = validate_workflow_yaml(VALID_WORKFLOW_YAML)
@@ -103,6 +107,7 @@ def test_validate_workflow_yaml_valid() -> None:
     assert error is None
 
 
+@pytest.mark.unit
 def test_validate_workflow_yaml_invalid() -> None:
     """Test validation of invalid workflow YAML."""
     invalid_yaml = """
@@ -115,6 +120,7 @@ def test_validate_workflow_yaml_invalid() -> None:
     assert error is not None
 
 
+@pytest.mark.unit
 def test_parse_minimal_workflow() -> None:
     """Test parsing a minimal valid workflow."""
     minimal_yaml = """
@@ -131,6 +137,7 @@ def test_parse_minimal_workflow() -> None:
     assert definition.classification == WorkflowClassification.STANDARD  # Default
 
 
+@pytest.mark.unit
 def test_duplicate_phase_ids_rejected() -> None:
     """Test that duplicate phase IDs are rejected."""
     invalid_yaml = """
@@ -148,6 +155,7 @@ def test_duplicate_phase_ids_rejected() -> None:
         WorkflowDefinition.from_yaml(invalid_yaml)
 
 
+@pytest.mark.unit
 def test_duplicate_phase_orders_rejected() -> None:
     """Test that duplicate phase orders are rejected."""
     invalid_yaml = """
@@ -165,6 +173,7 @@ def test_duplicate_phase_orders_rejected() -> None:
         WorkflowDefinition.from_yaml(invalid_yaml)
 
 
+@pytest.mark.unit
 def test_load_from_file() -> None:
     """Test loading workflow from a file."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -179,6 +188,7 @@ def test_load_from_file() -> None:
         path.unlink()
 
 
+@pytest.mark.unit
 def test_load_workflow_definitions_from_directory() -> None:
     """Test loading multiple workflows from a directory."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -208,6 +218,7 @@ phases:
         assert ids == {"workflow-1", "workflow-2"}
 
 
+@pytest.mark.unit
 def test_load_from_nonexistent_directory() -> None:
     """Test loading from a non-existent directory raises error."""
     with pytest.raises(FileNotFoundError):
@@ -219,6 +230,7 @@ def test_load_from_nonexistent_directory() -> None:
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_load_from_file_with_prompt_file() -> None:
     """End-to-end: YAML with prompt_file resolves .md content."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -262,6 +274,7 @@ def test_load_from_file_with_prompt_file() -> None:
         assert domain_phases[0].model == "sonnet"
 
 
+@pytest.mark.unit
 def test_load_workflow_definitions_with_prompt_files() -> None:
     """Directory with mixed inline and .md-referenced workflows all load."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -306,6 +319,7 @@ def test_load_workflow_definitions_with_prompt_files() -> None:
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_from_file_empty_yaml(tmp_path: Path) -> None:
     """Empty YAML file raises ValueError about root mapping."""
     yaml_file = tmp_path / "workflow.yaml"
@@ -315,6 +329,7 @@ def test_from_file_empty_yaml(tmp_path: Path) -> None:
         WorkflowDefinition.from_file(yaml_file)
 
 
+@pytest.mark.unit
 def test_from_file_list_yaml(tmp_path: Path) -> None:
     """YAML list at root raises ValueError about root mapping."""
     yaml_file = tmp_path / "workflow.yaml"
@@ -324,9 +339,314 @@ def test_from_file_list_yaml(tmp_path: Path) -> None:
         WorkflowDefinition.from_file(yaml_file)
 
 
+@pytest.mark.unit
 def test_validate_empty_yaml_with_base_dir(tmp_path: Path) -> None:
     """validate_workflow_yaml with empty content and base_dir returns error."""
     is_valid, error = validate_workflow_yaml("", base_dir=tmp_path)
     assert is_valid is False
     assert error is not None
     assert "must be a mapping" in error
+
+
+# =============================================================================
+# Per-phase agent block Tests
+# =============================================================================
+
+AGENT_BLOCK_WORKFLOW_YAML = """
+id: agent-block-wf
+name: Agent Block Workflow
+requires_repos: false
+
+phases:
+  - id: codex-phase
+    name: Codex Phase
+    order: 1
+    agent:
+      provider: codex
+      model: gpt-5.6
+    prompt_template: Reply with OK.
+
+  - id: standard
+    name: Standard Phase
+    order: 2
+    prompt_template: Summarize the result.
+"""
+
+
+@pytest.mark.unit
+def test_parse_agent_block() -> None:
+    """agent.provider / agent.model are parsed from the YAML phase."""
+    definition = WorkflowDefinition.from_yaml(AGENT_BLOCK_WORKFLOW_YAML)
+
+    codex_phase = definition.phases[0]
+    assert codex_phase.agent is not None
+    assert codex_phase.agent.provider == "codex"
+    assert codex_phase.agent.model == "gpt-5.6"
+
+    standard = definition.phases[1]
+    assert standard.agent is None
+
+
+@pytest.mark.unit
+def test_agent_block_reaches_domain_phase() -> None:
+    """to_domain() threads agent.provider and agent.model fallback through."""
+    definition = WorkflowDefinition.from_yaml(AGENT_BLOCK_WORKFLOW_YAML)
+    domain_phases = definition.get_domain_phases()
+
+    assert domain_phases[0].provider == "codex"
+    assert domain_phases[0].model == "gpt-5.6"  # agent.model fallback
+
+    assert domain_phases[1].provider is None
+    assert domain_phases[1].model is None
+
+
+@pytest.mark.unit
+def test_top_level_model_wins_over_agent_model() -> None:
+    """Top-level phase model takes precedence over agent.model."""
+    yaml_content = """
+id: model-precedence-wf
+name: Model Precedence Workflow
+requires_repos: false
+
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    model: opus
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_template: Do the thing.
+"""
+    definition = WorkflowDefinition.from_yaml(yaml_content)
+    domain_phase = definition.get_domain_phases()[0]
+    assert domain_phase.model == "opus"
+    assert domain_phase.provider == "claude"
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_agent_provider_reaches_executable_phase() -> None:
+    """agent.provider flows into ExecutablePhase.agent_config.provider."""
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
+    )
+
+    definition = WorkflowDefinition.from_yaml(AGENT_BLOCK_WORKFLOW_YAML)
+
+    class _StubTemplate:
+        phases = definition.get_domain_phases()
+        claude_plugins = ()
+        skills = ()
+
+    handler = ExecuteWorkflowHandler(
+        processor=MagicMock(),
+        workflow_repository=MagicMock(),
+    )
+    executable = await handler._get_executable_phases(_StubTemplate())  # type: ignore[arg-type]
+
+    assert executable[0].agent_config.provider == "codex"
+    assert executable[0].agent_config.model == "gpt-5.6"
+
+    # Default phase keeps the default provider (claude -p path).
+    assert executable[1].agent_config.provider == "claude"
+
+
+@pytest.mark.unit
+def test_agent_block_rejects_unknown_provider() -> None:
+    """A provider typo fails at parse time instead of after provisioning."""
+    bad_provider = """
+id: bad-provider-wf
+name: Bad Provider Workflow
+requires_repos: false
+
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    agent:
+      provider: codez
+    prompt_template: Do the thing.
+"""
+    with pytest.raises(ValueError, match="provider"):
+        WorkflowDefinition.from_yaml(bad_provider)
+
+
+@pytest.mark.unit
+def test_agent_block_rejects_the_removed_interactive_provider() -> None:
+    """A stale workflow naming the removed tmux path fails LOUDLY at parse.
+
+    Silently remapping it to `claude` would change what the phase does
+    (it was authored against an interactive REPL) without telling anyone,
+    so the error names the removal and the replacement providers.
+    """
+    stale = """
+id: stale-interactive-wf
+name: Stale Interactive Workflow
+requires_repos: false
+
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    agent:
+      provider: claude-interactive
+    prompt_template: Do the thing.
+"""
+    with pytest.raises(ValueError, match="has been removed"):
+        WorkflowDefinition.from_yaml(stale)
+
+
+CODEX_WORKFLOW_YAML = """
+id: codex-wf
+name: Codex Workflow
+requires_repos: false
+
+phases:
+  - id: codex-phase
+    name: Codex Phase
+    order: 1
+    agent:
+      provider: codex
+    prompt_template: Reply with OK.
+"""
+
+
+@pytest.mark.unit
+def test_agent_block_parses_codex_provider() -> None:
+    """agent.provider: codex parses and threads through to the domain phase."""
+    definition = WorkflowDefinition.from_yaml(CODEX_WORKFLOW_YAML)
+
+    phase = definition.phases[0]
+    assert phase.agent is not None
+    assert phase.agent.provider == "codex"
+
+    domain_phase = definition.get_domain_phases()[0]
+    assert domain_phase.provider == "codex"
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_codex_provider_reaches_executable_phase() -> None:
+    """A codex phase round-trips to an executable phase with provider=codex."""
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
+    )
+
+    definition = WorkflowDefinition.from_yaml(CODEX_WORKFLOW_YAML)
+
+    class _StubTemplate:
+        phases = definition.get_domain_phases()
+        claude_plugins = ()
+        skills = ()  # #772: _get_executable_phases reads workflow.skills
+
+    handler = ExecuteWorkflowHandler(
+        processor=MagicMock(),
+        workflow_repository=MagicMock(),
+    )
+    executable = await handler._get_executable_phases(_StubTemplate())  # type: ignore[arg-type]
+
+    assert executable[0].agent_config.provider == "codex"
+
+
+# =============================================================================
+# Mixed-workflow back-compat (codex bridge demo, Task 9)
+# =============================================================================
+
+MIXED_PROVIDER_WORKFLOW_YAML = """
+id: mixed-provider-wf
+name: Mixed Provider Workflow
+requires_repos: false
+
+phases:
+  - id: claude-phase
+    name: Claude Phase
+    order: 1
+    agent:
+      provider: claude
+    prompt_template: Reply with CLAUDE_OK.
+
+  - id: codex-phase
+    name: Codex Phase
+    order: 2
+    agent:
+      provider: codex
+    prompt_template: Reply with CODEX_OK.
+"""
+
+
+@pytest.mark.unit
+def test_mixed_workflow_with_claude_and_codex_parses() -> None:
+    """A workflow mixing both headless providers parses without error."""
+    definition = WorkflowDefinition.from_yaml(MIXED_PROVIDER_WORKFLOW_YAML)
+
+    domain_phases = definition.get_domain_phases()
+    assert [p.provider for p in domain_phases] == ["claude", "codex"]
+
+
+#: The model every shipped codex example declares. Named once so the examples
+#: and the guard below cannot drift apart silently.
+CODEX_EXAMPLE_MODEL = "gpt-5.6-sol"
+
+
+@pytest.mark.unit
+def test_codex_demo_example_yaml_loads_and_validates() -> None:
+    """workflows/examples/codex-demo.yaml is schema-valid and loads via from_file()."""
+    repo_root = Path(__file__).resolve().parents[7]
+    demo_path = repo_root / "workflows" / "examples" / "codex-demo.yaml"
+
+    definition = WorkflowDefinition.from_file(demo_path)
+
+    assert definition.id == "codex-demo-workflow-v1"
+    assert definition.requires_repos is False
+    assert len(definition.phases) == 1
+
+    phase = definition.phases[0]
+    assert phase.agent is not None
+    assert phase.agent.provider == "codex"
+    # A concrete model id is REQUIRED, not optional: an unnamed model leaves the
+    # run unpriced, which is the whole reason it was declared here. The older
+    # comment claimed codex rejects an explicit id; that was true of a
+    # claude-style "gpt-5.6", and "gpt-5.6-sol" is accepted under ChatGPT auth.
+    assert phase.agent.model == CODEX_EXAMPLE_MODEL
+
+    domain_phase = definition.get_domain_phases()[0]
+    assert domain_phase.provider == "codex"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "example",
+    [
+        "codex-demo.yaml",
+        "codex-delegates-to-claude.yaml",
+        "multi-agent-programmatic.yaml",
+    ],
+)
+def test_every_shipped_codex_example_declares_a_model(example: str) -> None:
+    """Every codex phase we ship names its model, so example runs are priced.
+
+    A codex phase with no model resolves to an account default that the cost
+    pipeline cannot attribute, so the run completes and reports no cost. That
+    failure is silent, and it lands on the examples people copy first.
+
+    Only ONE of these three files was covered when the model pins were added,
+    and that gap is why the pin and its assertion drifted apart. This walks all
+    of them, so an example that loses its pin fails here rather than in
+    somebody's cost report.
+    """
+    repo_root = Path(__file__).resolve().parents[7]
+    definition = WorkflowDefinition.from_file(repo_root / "workflows" / "examples" / example)
+
+    codex_phases = [
+        phase
+        for phase in definition.phases
+        if phase.agent is not None and phase.agent.provider == "codex"
+    ]
+
+    assert codex_phases, f"{example} declares no codex phase; this guard has rotted"
+    for phase in codex_phases:
+        assert phase.agent is not None
+        assert phase.agent.model == CODEX_EXAMPLE_MODEL, (
+            f"{example} phase {phase.id!r} has no model pin, so its runs go unpriced"
+        )

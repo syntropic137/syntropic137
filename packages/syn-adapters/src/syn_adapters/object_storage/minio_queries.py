@@ -28,9 +28,18 @@ def _list_objects_sync(
     prefix: str,
     max_keys: int,
 ) -> list[StorageObject]:
-    """Synchronous helper to collect StorageObjects from MinIO iterator."""
+    """Synchronous helper to collect StorageObjects from MinIO iterator.
+
+    WHY recursive=True: MinIO defaults to a directory-style listing, which
+    returns synthetic zero-byte "common prefix" entries for anything nested
+    under the prefix instead of the objects themselves. Callers here want the
+    objects, and every key this codebase stores is nested (for example
+    ``skills/sha256-<hash>/files/SKILL.md``), so the default silently yields
+    one zero-byte entry per directory. The local-filesystem adapter already
+    walks recursively, so this also restores parity between the two backends.
+    """
     objects: list[StorageObject] = []
-    for obj in client.list_objects(bucket_name, prefix=prefix):
+    for obj in client.list_objects(bucket_name, prefix=prefix, recursive=True):
         if len(objects) >= max_keys:
             break
         objects.append(

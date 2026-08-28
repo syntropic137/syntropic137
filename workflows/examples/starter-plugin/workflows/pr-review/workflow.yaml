@@ -9,17 +9,29 @@ inputs:
     description: "PR number or URL to review"
     required: true
 
+# No workflow-scope skills here. Each phase decides for itself, which is the
+# other half of the per-phase story: compare with workflows/research/.
+
 phases:
   - id: review
     name: Code Review
     order: 1
     execution_type: sequential
+    model: haiku
     prompt_file: phases/review.md
     output_artifacts: [review_comments]
+    # Same VENDORED skill as the research workflow. It is registered once:
+    # identity is (source_url, version, skill_name), and the version is the
+    # content hash, so a second declaration of identical bytes is a cache hit.
+    skills:
+      - ./skills/repo-conventions
 
   - id: summarize
     name: Summarize
     order: 2
     execution_type: sequential
+    model: haiku
     prompt_file: shared://summarize
     output_artifacts: [summary]
+    # Declares no skills at any scope, so nothing is installed for this phase.
+    # A skill-less phase is a valid phase.

@@ -105,7 +105,7 @@ export const listMarketplaceCommand: CommandDef = {
 
     if (Object.keys(config.registries).length === 0) {
       printDim("No marketplaces registered.");
-      printDim("Add one with: syn marketplace add syntropic137/workflow-library");
+      printDim("Add one with: syn marketplace add syntropic137/syntropic137-marketplace");
       return;
     }
 

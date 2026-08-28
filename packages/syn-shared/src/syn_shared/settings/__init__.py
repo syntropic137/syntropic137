@@ -34,6 +34,7 @@ Environment Variables:
     SYN_GIT_* - Git identity and credentials
     SYN_GITHUB_* - GitHub App configuration
     SYN_LOGGING_* - Container logging configuration
+    SYN_SESSION_STORE_* - Central session store (opt-in, default off)
     SYN_STORAGE_* - Object storage configuration
 """
 
@@ -55,7 +56,17 @@ from syn_shared.settings.github import (
     get_github_settings,
     reset_github_settings,
 )
+from syn_shared.settings.image_verification import (
+    AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
+    GITHUB_ACTIONS_OIDC_ISSUER,
+    ImageVerificationSettings,
+)
 from syn_shared.settings.infra import InfraSettings
+from syn_shared.settings.session_store import (
+    DEFAULT_SPOOL_DIR,
+    SESHMAGIC_PROVIDER,
+    SessionStoreSettings,
+)
 from syn_shared.settings.storage import (
     StorageProvider,
     StorageSettings,
@@ -77,7 +88,11 @@ from syn_shared.settings.workspace_security import (
 )
 
 __all__ = [
+    "AGENTIC_PRIMITIVES_IDENTITY_REGEXP",
+    "DEFAULT_SPOOL_DIR",
     "DEFAULT_WORKSPACE_IMAGE",
+    "GITHUB_ACTIONS_OIDC_ISSUER",
+    "SESHMAGIC_PROVIDER",
     "AppEnvironment",
     "CloudProvider",
     "ContainerLoggingSettings",
@@ -85,8 +100,10 @@ __all__ = [
     "GitHubAppSettings",
     "GitIdentityResolver",
     "GitIdentitySettings",
+    "ImageVerificationSettings",
     "InfraSettings",
     "IsolationBackend",
+    "SessionStoreSettings",
     "Settings",
     "StorageProvider",
     "StorageSettings",

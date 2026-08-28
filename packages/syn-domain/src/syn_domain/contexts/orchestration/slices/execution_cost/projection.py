@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 from syn_domain.contexts.agent_sessions import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
-from syn_shared.pricing import get_model_pricing
+from syn_shared.pricing import PricedAmount, price_tokens
 
 
 def _get_or_create(existing: dict[str, Any] | None, execution_id: str) -> ExecutionCost:
@@ -54,10 +54,40 @@ def _calculate_token_cost(
     cache_creation: int,
     cache_read: int,
     model: str | None = None,
-) -> Decimal:
-    """Calculate token cost from counts using model-specific pricing."""
-    pricing = get_model_pricing(model or "")
-    return pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
+) -> PricedAmount:
+    """Calculate token cost from counts using model-specific pricing.
+
+    Delegates to ``price_tokens``, the one pricing entry point. This used to
+    re-implement the same resolve-or-give-up rule locally and return a
+    ``(cost, priced)`` tuple, which meant the rule lived in two places and the
+    unpriced WARNING fired from only one of them. An unknown or missing model
+    MUST NOT be priced as any real model (issue #788), and MUST NOT be reported
+    as a zero that reads like free work (issue #890).
+    """
+    return price_tokens(model, input_tokens, output_tokens, cache_creation, cache_read)
+
+
+def _attribute_to_phase(
+    execution_cost: ExecutionCost,
+    phase_id: str | None,
+    token_cost: Decimal,
+    priced: bool,
+) -> None:
+    """Attribute one observation to its phase, as cost or as missing coverage.
+
+    An unpriced observation must NOT add ``Decimal("0")`` to ``cost_by_phase``:
+    that creates an entry asserting the phase cost nothing, which is the exact
+    ambiguity #890 removes. It goes to ``unpriced_by_phase`` instead.
+    """
+    if not phase_id:
+        return
+    if priced:
+        current = execution_cost.cost_by_phase.get(phase_id, Decimal("0"))
+        execution_cost.cost_by_phase[phase_id] = current + token_cost
+        return
+    execution_cost.unpriced_by_phase[phase_id] = (
+        execution_cost.unpriced_by_phase.get(phase_id, 0) + 1
+    )
 
 
 def _apply_token_usage(
@@ -77,19 +107,19 @@ def _apply_token_usage(
     execution_cost.cache_read_tokens += cache_read
 
     model = data.get("model")
-    token_cost = _calculate_token_cost(
+    priced = _calculate_token_cost(
         input_tokens, output_tokens, cache_creation, cache_read, model=model
     )
+    token_cost = priced.cost if priced.cost is not None else Decimal("0")
     execution_cost.token_cost_usd += token_cost
     execution_cost.total_cost_usd += token_cost
-    if model:
+    if not priced.is_priced:
+        execution_cost.unpriced_observation_count += 1
+    if model and priced.is_priced:
         current = execution_cost.cost_by_model.get(model, Decimal("0"))
         execution_cost.cost_by_model[model] = current + token_cost
 
-    phase_id = event_data.get("phase_id")
-    if phase_id:
-        current = execution_cost.cost_by_phase.get(phase_id, Decimal("0"))
-        execution_cost.cost_by_phase[phase_id] = current + token_cost
+    _attribute_to_phase(execution_cost, event_data.get("phase_id"), token_cost, priced.is_priced)
 
     execution_cost.turns += 1
 

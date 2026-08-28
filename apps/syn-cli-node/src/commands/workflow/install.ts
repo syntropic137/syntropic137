@@ -7,7 +7,6 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { api, unwrap } from "../../client/typed.js";
 import { printError, printSuccess, print, printDim } from "../../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 import { formatTimestamp } from "../../output/format.js";
@@ -23,8 +22,13 @@ import {
   scaffoldSinglePackage,
   scaffoldMultiPackage,
 } from "../../packages/resolver.js";
-import { gitClone, makeTempDir, removeTempDir } from "../../packages/git.js";
-import { resolvePluginByName, getGitHeadSha } from "../../marketplace/client.js";
+import { removeTempDir } from "../../packages/git.js";
+import { resolveFromMarketplace } from "../../marketplace/client.js";
+import { runClaudePluginPreflight } from "../../packages/claude-plugin-preflight.js";
+import { postYaml } from "../../client/yaml-upload.js";
+import { findInstallation, pruneWorkflows } from "./prune.js";
+import type { PostYamlOptions } from "../../client/yaml-upload.js";
+import { runSkillPreflight } from "../../packages/skill-preflight.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,41 +57,27 @@ export async function tryMarketplaceResolution(
   gitSha: string | null;
   effectiveRef: string;
 } | null> {
-  const result = await resolvePluginByName(source);
-  if (result === null) return null;
+  // WHY (#726): the marketplace resolver is now artifact-agnostic; the
+  // workflow-specific work (resolving the package into a list of workflows)
+  // happens here, after the directory is on disk.
+  const resolved = await resolveFromMarketplace(source, ref);
+  if (resolved === null) return null;
 
-  const [regName, entry, plugin] = result;
-  const effectiveRef = ref !== "main" ? ref : entry.ref;
-  const url = `https://github.com/${entry.repo}.git`;
+  print(
+    `Found ${style(resolved.entry.name, BOLD)} in marketplace ${style(resolved.registryName, CYAN)}`,
+  );
+  print(`Cloning ...@${resolved.resolvedRef} (already done)`);
 
-  // Validate plugin source path
-  if (plugin.source.startsWith("/") || plugin.source.includes("..")) {
-    throw new Error(`Unsafe plugin source path in marketplace: ${plugin.source}`);
-  }
-
-  print(`Found ${style(plugin.name, BOLD)} in marketplace ${style(regName, CYAN)}`);
-  print(`Cloning ${style(entry.repo, CYAN)}@${effectiveRef}...`);
-
-  // Clone only — don't resolve at repo root (marketplace root != plugin root)
-  const tmpdir = makeTempDir("syn-pkg-");
-  try {
-    await gitClone(url, effectiveRef, tmpdir);
-  } catch (err) {
-    removeTempDir(tmpdir);
-    throw err;
-  }
-
-  // Resolve from plugin's subdirectory
-  const subdir = path.resolve(tmpdir, plugin.source.replace(/^\.\//, ""));
-  if (!subdir.startsWith(tmpdir)) {
-    removeTempDir(tmpdir);
-    throw new Error(`Plugin source path escapes repository: ${plugin.source}`);
-  }
-
-  const { manifest, workflows } = resolvePackage(subdir);
-  const gitSha = await getGitHeadSha(entry.repo, effectiveRef);
-
-  return { packagePath: subdir, manifest, workflows, tmpdir, marketplaceSource: regName, gitSha, effectiveRef };
+  const { manifest, workflows } = resolvePackage(resolved.packagePath);
+  return {
+    packagePath: resolved.packagePath,
+    manifest,
+    workflows,
+    tmpdir: resolved.tmpdir,
+    marketplaceSource: resolved.registryName,
+    gitSha: resolved.gitSha,
+    effectiveRef: resolved.resolvedRef,
+  };
 }
 
 export async function resolveSource(
@@ -98,51 +88,121 @@ export async function resolveSource(
   manifest: PluginManifest | null;
   workflows: ResolvedWorkflow[];
   tmpdir: string | null;
+  gitSha: string | null;
 }> {
   const { resolved, isRemote } = parseSource(source);
 
   if (isRemote) {
     print(`Cloning ${style(resolved, CYAN)}@${ref}...`);
-    const { tmpdir, manifest, workflows } = await resolveFromGit(resolved, ref);
-    return { packagePath: tmpdir, manifest, workflows, tmpdir };
+    const { tmpdir, manifest, workflows, gitSha } = await resolveFromGit(resolved, ref);
+    return { packagePath: tmpdir, manifest, workflows, tmpdir, gitSha };
   }
 
+  // A local path has no commit to report, so it declares no digest rather
+  // than an empty one. The server distinguishes the two (issue #822).
   const packagePath = path.resolve(resolved);
   const { manifest, workflows } = resolvePackage(packagePath);
-  return { packagePath, manifest, workflows, tmpdir: null };
+  return { packagePath, manifest, workflows, tmpdir: null, gitSha: null };
+}
+
+
+/**
+ * Install provenance sent to the API (issue #822).
+ *
+ * `version` and `sourceDigest` are what let the server refuse a silent
+ * overwrite and detect a republished version. `sourceDigest` is nullable
+ * because a local path install has no resolved commit to report.
+ */
+export interface InstallProvenance {
+  version?: string;
+  sourceDigest?: string | null;
+  force?: boolean;
+}
+
+
+/**
+ * Map install provenance onto the query-string options postYaml understands.
+ *
+ * WHY these are sent at all (issue #822): the server records the package
+ * version and resolved commit SHA on the template, refuses a reinstall of a
+ * version already installed unless force is set, and refuses a matching
+ * version that resolves to a different digest. Not sending them left every
+ * one of those guards inert, so same-version reinstalls and republished
+ * packages overwrote silently.
+ *
+ * Absent fields are omitted rather than sent empty: the server distinguishes
+ * "declares no version" from "declares this version", and refuses an install
+ * that would erase provenance it already holds.
+ */
+function provenanceOptions(provenance: InstallProvenance): Partial<PostYamlOptions> {
+  const options: Partial<PostYamlOptions> = {};
+  if (provenance.version !== undefined) options.version = provenance.version;
+  if (provenance.sourceDigest) options.sourceDigest = provenance.sourceDigest;
+  if (provenance.force === true) options.force = true;
+  return options;
 }
 
 export async function installWorkflowsViaApi(
   workflows: ResolvedWorkflow[],
+  provenance: InstallProvenance = {},
 ): Promise<InstalledWorkflowRef[]> {
   const installed: InstalledWorkflowRef[] = [];
   for (let i = 0; i < workflows.length; i++) {
     const wf = workflows[i]!;
     process.stdout.write(`  [${i + 1}/${workflows.length}] Creating ${style(wf.name, BOLD)}... `);
     try {
-      const data = unwrap(
-        await api.POST("/workflows", {
-          body: {
-            name: wf.name,
-            workflow_type: wf.workflow_type,
-            classification: wf.classification ?? "standard",
-            repository_url: wf.repository_url,
-            repository_ref: wf.repository_ref,
-            description: wf.description ?? null,
-            project_name: wf.project_name ?? null,
-            requires_repos: wf.requires_repos,
-            phases: wf.phases,
-            input_declarations: wf.input_declarations,
-          },
-        }),
-        "Failed to create workflow",
-      );
+      // WHY from-yaml rather than a hand-built JSON body: the old body named
+      // each field explicitly, so every key it did not name was silently
+      // dropped on install - `skills:` and `claude_plugins:` among them, and
+      // whatever field is added next. Uploading the resolved definition lets
+      // the server own every YAML semantic (ADR-058 requires_repos inference
+      // included), which is what `syn workflow create --from` already does.
+      //
+      // workflowId preserves the stable id declared in workflow.yaml. Without
+      // it the server mints a fresh uuid on every install, so `syn workflow
+      // run <yaml-id>` cannot resolve and re-installing the same package
+      // silently piles up duplicates.
+      const data = await postYaml(Buffer.from(JSON.stringify(wf.definition), "utf-8"), {
+        name: wf.name,
+        workflowId: wf.id,
+        contentType: "application/json",
+        errorLabel: "workflow install",
+        ...provenanceOptions(provenance),
+      });
       const wfId = data.id;
-      print(`${style("done", GREEN)} (id: ${wfId})`);
+      // WHY the two outcomes read differently (issue #822): the server
+      // reports status="unchanged" when the definition it already holds is
+      // identical, and writes no event. Printing "done" for both would hide
+      // the distinction that makes a rerun safe to trust.
+      const unchanged = data.status === "unchanged";
+      print(unchanged ? style("already installed", DIM) : `${style("done", GREEN)} (id: ${wfId})`);
       installed.push({ id: wfId, name: wf.name });
     } catch (err) {
       print(style("failed", "\x1b[31m"));
-      if (err instanceof Error) printError(err.message);
+      // WHY the reason is not printed here (issue #822): it is carried in the
+      // thrown CLIError below and the top-level CLI renders that. Printing it
+      // in both places put the same refusal on stderr twice.
+      // WHY rethrow rather than collect and continue: swallowing this left the
+      // package half-installed while the command still printed
+      // "Installed N workflow(s)" and recorded the install, so a user had no
+      // signal that a workflow they asked for is missing. The workflows
+      // created before this point still exist - install is not transactional
+      // server-side - so the message says so rather than implying a clean
+      // rollback.
+      // WHY the reason is repeated here (issue #822): the server's refusal is
+      // the actionable half - "version 0.3.0 is already installed, pass
+      // --force" or a digest mismatch naming a possible republish. It was
+      // only reaching stderr via printError above, so the thrown error, which
+      // is what a caller or a CI log surfaces, said just "Failed to create".
+      const reason = err instanceof Error ? `\n  ${err.message}` : "";
+      throw new CLIError(
+        `Failed to create workflow '${wf.name}' (${i + 1} of ${workflows.length}).${reason}\n` +
+          (installed.length > 0
+            ? `  ${installed.length} workflow(s) were already created and remain installed: ` +
+              `${installed.map((w) => w.name).join(", ")}.\n` +
+              "  Fix the error and re-run to finish, or remove them with `syn workflow delete`."
+            : "  No workflows were installed."),
+      );
     }
   }
   return installed;
@@ -159,6 +219,11 @@ export const installCommand: CommandDef = {
   options: {
     ref: { type: "string", description: "Git branch/tag to clone", default: "main" },
     "dry-run": { type: "boolean", short: "n", description: "Validate without installing", default: false },
+    force: {
+      type: "boolean",
+      description: "Reinstall a version that is already installed, overwriting it",
+      default: false,
+    },
   },
   handler: async (parsed: ParsedArgs) => {
     const source = parsed.positionals[0];
@@ -169,6 +234,7 @@ export const installCommand: CommandDef = {
 
     const ref = (parsed.values["ref"] as string | undefined) ?? "main";
     const dryRun = parsed.values["dry-run"] === true;
+    const force = parsed.values["force"] === true;
 
     // Try marketplace first for bare names
     let packagePath: string;
@@ -185,10 +251,10 @@ export const installCommand: CommandDef = {
         if (mktResult !== null) {
           ({ packagePath, manifest, workflows, tmpdir, marketplaceSource, gitSha, effectiveRef } = mktResult);
         } else {
-          ({ packagePath, manifest, workflows, tmpdir } = await resolveSource(source, ref));
+          ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(source, ref));
         }
       } else {
-        ({ packagePath, manifest, workflows, tmpdir } = await resolveSource(source, ref));
+        ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(source, ref));
       }
     } catch (err) {
       printError(err instanceof Error ? err.message : String(err));
@@ -213,11 +279,67 @@ export const installCommand: CommandDef = {
         return;
       }
 
-      const installedRefs = await installWorkflowsViaApi(workflows);
+      // WHY (#726 Phase B): if any workflow YAML declares `claude_plugins:`,
+      // resolve them BEFORE we mutate the API. This keeps install atomic
+      // from the user's perspective without requiring the API to do git work.
+      await runClaudePluginPreflight(packagePath);
+
+      // WHY here: same reasoning as the claude-plugin preflight above. A
+      // workflow declaring `skills:` used to install cleanly and then fail at
+      // execution with SkillNotRegistered, after the user had committed to a
+      // run. This also pins bundled refs in the definitions about to be
+      // uploaded, so both preflights must precede installWorkflowsViaApi.
+      await runSkillPreflight(packagePath, workflows);
+
+      const installedRefs = await installWorkflowsViaApi(workflows, {
+        version: pkgVersion,
+        sourceDigest: gitSha,
+        force,
+      });
 
       if (installedRefs.length === 0) {
         printError("No workflows were installed");
         throw new CLIError("Install failed", 1);
+      }
+
+      // WHY install prunes too (issue #822): a newer-version install now
+      // succeeds as an upsert and replaces the registry record. Without this,
+      // a workflow the new version dropped stays live on the server while its
+      // ref disappears from the registry, so nothing local names it any more.
+      // Before install became an upsert this was unreachable, because the
+      // second install just failed.
+      const priorRecord = findInstallation(pkgName);
+      if (priorRecord !== null) {
+        const liveIds = new Set(installedRefs.map((w) => w.id));
+        const orphans = priorRecord.workflows.filter((w) => !liveIds.has(w.id));
+        if (orphans.length > 0) {
+          print(`\n${style("Removing workflows no longer in the package...", BOLD)}`);
+          const prune = await pruneWorkflows(orphans);
+          // WHY this records the failures and exits non-zero, matching update
+          // (issue #822): printing a warning and then writing a record that
+          // contains only installedRefs drops the still-live workflows from
+          // the registry, which is the orphan this prune exists to prevent.
+          if (prune.failed.length > 0) {
+            recordInstallation({
+              packageName: pkgName,
+              packageVersion: pkgVersion,
+              source,
+              sourceRef: effectiveRef,
+              format: fmt,
+              workflows: [...installedRefs, ...prune.failed],
+              marketplaceSource,
+              gitSha,
+            });
+            printError(
+              `Installed, but ${prune.failed.length} workflow(s) from the previous version ` +
+                "could not be archived and remain active: " +
+                `${prune.failed.map((w) => w.name).join(", ")}. ` +
+                "They are still tracked. Re-run install, or remove them with " +
+                "`syn workflow delete`.",
+            );
+            throw new CLIError("Partial install", 1);
+          }
+        }
       }
 
       recordInstallation({

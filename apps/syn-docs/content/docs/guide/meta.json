@@ -10,6 +10,8 @@
     "---Build---",
     "plugins",
     "workflows",
+    "skills",
+    "claude-plugins",
     "triggers",
     "claude-code-plugin",
     "github-integration",

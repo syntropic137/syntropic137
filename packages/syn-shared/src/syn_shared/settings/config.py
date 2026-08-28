@@ -9,6 +9,7 @@ See ADR-004: Environment Configuration with Pydantic Settings.
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated
@@ -16,10 +17,14 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
+
 if TYPE_CHECKING:
     from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.github import GitHubAppSettings
+    from syn_shared.settings.image_verification import ImageVerificationSettings
     from syn_shared.settings.polling import PollingSettings
+    from syn_shared.settings.session_store import SessionStoreSettings
     from syn_shared.settings.storage import StorageSettings
     from syn_shared.settings.workspace import (
         ContainerLoggingSettings,
@@ -56,6 +61,12 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",  # Ignore extra env vars
+        # Pydantic embeds the offending INPUT in ValidationError by default
+        # (`input_value='{"tokens":"sk-..."`). Several fields here are secrets,
+        # so a malformed credential would print part of itself into startup
+        # logs. A validator writing a careful message is not enough - the
+        # framework appends the input regardless.
+        hide_input_in_errors=True,
     )
 
     # =========================================================================
@@ -252,6 +263,80 @@ class Settings(BaseSettings):
             "for agent execution."
         ),
     )
+
+    codex_auth_json: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Full contents of Codex ~/.codex/auth.json for ChatGPT subscription auth. "
+            "Injected file-only during setup and never passed through argv or logs."
+        ),
+    )
+
+    @field_validator("codex_auth_json", mode="after")
+    @classmethod
+    def _normalise_codex_auth_json(cls, value: SecretStr | None) -> SecretStr | None:
+        """Repair paste-mangled codex auth, and reject it if it is not JSON.
+
+        This credential is a ~4KB single-line JSON blob that a human moves by
+        hand into a secret store. Editors mangle it in predictable ways, and the
+        result is a credential that LOOKS present and then fails deep inside
+        workspace provisioning - the worst possible failure shape for a secret.
+
+        Observed in the wild (2026-08-17): pasting into a 1Password text field
+        produced CSV quoting - the whole value wrapped in `"` with every inner
+        quote doubled (`""auth_mode""`). Also common: surrounding single quotes
+        carried over from a `.env` line, and stray whitespace or newlines.
+
+        So: normalise the manglings we can recognise, then VALIDATE. An
+        unparseable credential raises here, at settings load, naming the problem
+        - rather than surfacing as an opaque codex provisioning failure with no
+        indication that the secret is the cause.
+        """
+        if value is None:
+            return None
+
+        raw = value.get_secret_value().strip()
+        if not raw:
+            return None
+
+        # Surrounding quotes from a .env line or a quoting editor.
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
+            raw = raw[1:-1]
+            # CSV convention doubles inner quotes when it wraps a value.
+            if '""' in raw:
+                raw = raw.replace('""', '"')
+
+        def _reject_non_standard(constant: str) -> object:
+            # json accepts NaN/Infinity/-Infinity, which are NOT valid JSON and
+            # which codex would choke on. Reject rather than silently pass them.
+            msg = f"{ENV_CODEX_AUTH_JSON} contains the non-standard JSON literal {constant!r}"
+            raise ValueError(msg)
+
+        try:
+            parsed = json.loads(raw, parse_constant=_reject_non_standard)
+        except json.JSONDecodeError as exc:
+            msg = (
+                f"{ENV_CODEX_AUTH_JSON} is not valid JSON ({exc.msg} at position "
+                f"{exc.pos}). It must be the exact contents of ~/.codex/auth.json "
+                "on a single line. If it was pasted into a secret store, the "
+                "editor may have quote-escaped it; re-copy with "
+                "`just codex-auth-clip` and paste into a password/concealed field."
+            )
+            raise ValueError(msg) from exc
+
+        if not isinstance(parsed, dict):
+            msg = f"{ENV_CODEX_AUTH_JSON} must be a JSON object, got {type(parsed).__name__}"
+            raise ValueError(msg)
+
+        # Return the normalised SOURCE TEXT, not a re-serialisation of `parsed`.
+        #
+        # A json.loads/json.dumps round trip is lossy in ways that matter for a
+        # credential: large integers lose precision through float
+        # (9007199254740993 -> ...992), duplicate keys collapse, unicode
+        # escaping changes, and key order is not guaranteed to be preserved by
+        # every producer. `parsed` exists only to prove the text is a JSON
+        # object; the bytes we hand downstream stay the caller's.
+        return SecretStr(raw)
 
     default_agent_timeout_seconds: int = Field(
         default=300,
@@ -501,6 +586,40 @@ class Settings(BaseSettings):
         from syn_shared.settings.storage import StorageSettings
 
         return StorageSettings()
+
+    # =========================================================================
+    # CENTRAL SESSION STORE (SeshMagic capture) - opt-in, default OFF
+    # =========================================================================
+
+    @property
+    def session_store(self) -> SessionStoreSettings:
+        """Get central session-store settings.
+
+        Returns a SessionStoreSettings instance configured from
+        SYN_SESSION_STORE_* env vars. Disabled unless SYN_SESSION_STORE_URL is
+        set; when disabled, nothing at all is injected into workspace
+        containers.
+        """
+        from syn_shared.settings.session_store import SessionStoreSettings
+
+        return SessionStoreSettings()
+
+    # =========================================================================
+    # WORKSPACE IMAGE SIGNATURE VERIFICATION - on by default, fails closed
+    # =========================================================================
+
+    @property
+    def image_verification(self) -> ImageVerificationSettings:
+        """Get workspace image signature verification settings.
+
+        Returns an ImageVerificationSettings instance configured from
+        SYN_IMAGE_VERIFY_* env vars. Enabled by default: a remote workspace
+        image must carry a valid cosign keyless signature from the expected
+        publishing workflow before a container is created.
+        """
+        from syn_shared.settings.image_verification import ImageVerificationSettings
+
+        return ImageVerificationSettings()
 
     # =========================================================================
     # DEVELOPMENT TOOLING

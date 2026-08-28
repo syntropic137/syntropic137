@@ -213,6 +213,61 @@ Run `just gen-env` to regenerate `.env.example` after any Settings change.
   (double underscore matches Pydantic Settings `env_prefix`)
 - Infrastructure env vars use the **`SYN_`** prefix
 
+### 13. Workspace Capability Settings (central session store)
+
+Some settings are not consumed by Syntropic137 at all. They are a **contract
+supplied to a capability that runs inside the workspace container**, shipped by
+the agentic-primitives image. Central session capture is the first of these and
+sets the pattern.
+
+Two namespaces, deliberately distinct:
+
+| Namespace | Owner | Read by |
+| --- | --- | --- |
+| `SYN_SESSION_STORE_*` | this repo, a `BaseSettings` class like any other | the API, at provision time |
+| `AGENTIC_SESSION_STORE_*` | agentic-primitives (ADR-040 capability contract) | the capability, inside the container |
+
+The API translates the first into the second when it creates a workspace. It
+never captures anything itself.
+
+**Rules for a settings group of this kind:**
+
+1. **Opt-in, and completely off by default.** Syntropic137 must stay deployable
+   by an operator with no such service. When `SYN_SESSION_STORE_URL` is unset,
+   **no** capability variable is written into the container - not
+   `PROVIDER=none`, not an empty value. Absence and "explicitly disabled" are
+   different, and only absence guarantees the container behaves exactly as it
+   did before the feature existed.
+2. **The foreign contract's variable names are declared once**, in
+   `syn_shared.env_constants`, with a test rejecting a bare literal anywhere
+   else. These names are owned by another repo; a typo is not a local bug.
+3. **Credentials stay `SecretStr` and are read only at the injection point.**
+   Never logged, never in an exception message, and never written to a
+   container label, since labels are readable via `docker inspect`.
+4. **Identifiers passed through are sanitised, not trusted.** The partition is
+   a relative `<execution_id>/<workspace_id>`; the capability hard-fails an
+   absolute path or `..`.
+
+#### Resolution order, and why the vault "just works"
+
+A field of this group needs **no code change to configure**. The API image
+bakes the `op` CLI and `resolve_op_secrets()` runs before `Settings()` is
+constructed, injecting **every field** on the `syntropic137-config` item keyed
+by its label. So adding `SYN_SESSION_STORE_URL` as a vault field is sufficient.
+
+Two consequences worth stating, because both have bitten:
+
+- **An empty value in `.env` does not win over the vault.** Injection skips only
+  a *truthy* existing value, so the `SYN_SESSION_STORE_URL=` that ships in
+  `.env.example` still resolves from 1Password.
+- **A compose overlay that enumerates variables individually breaks this.**
+  `op_resolver` derives a **per-vault** token name from `APP_ENVIRONMENT`
+  (`syn137-beta` -> `OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA`). An overlay passing
+  only the generic `OP_SERVICE_ACCOUNT_TOKEN` leaves that stack unable to read
+  its own vault, and every vault-only setting silently stays at its default.
+  Prefer `env_file` over enumeration; if you must enumerate, forward the
+  per-vault names too.
+
 ## Consequences
 
 ### Positive

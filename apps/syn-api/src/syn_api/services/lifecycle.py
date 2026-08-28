@@ -30,6 +30,13 @@ from syn_api.services.credentials import validate_credentials
 from syn_api.services.reconciliation import cleanup_orphaned_containers, reconcile_orphaned_sessions
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import Err, LifecycleError, Ok, Result
+from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
+from syn_shared.settings.session_store import (
+    ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_LABEL,
+    ENV_SYN_SESSION_STORE_URL,
+    SessionStoreSettings,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -65,6 +72,8 @@ class DegradedReason(StrEnum):
     """
 
     ARTIFACT_STORAGE = "artifact_storage"
+    CLAUDE_PLUGIN_STORAGE = "claude_plugin_storage"
+    SKILL_STORAGE = "skill_storage"
     CONVERSATION_STORAGE = "conversation_storage"
     SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
     EVENT_POLLER = "event_poller"
@@ -179,6 +188,25 @@ async def startup(
     if not skip_validation and not settings.uses_in_memory_stores:
         validate_credentials(_state.degraded_reasons)
 
+    # SEPARATE guards, deliberately. Sharing one meant a failure in the first
+    # diagnostic silently suppressed the second - and there is a test that
+    # makes the capture posture raise on purpose, so the concurrency warning
+    # would have been skipped on exactly the startup someone was debugging.
+    # Diagnostics must never become a startup prerequisite, and they must not
+    # become each other's prerequisite either.
+    #
+    # No exception object and no exc_info on either: a settings error can echo
+    # its input, and the input here may be the write token.
+    try:
+        _log_session_capture_posture(settings.session_store, settings.app_environment)
+    except Exception:
+        logger.warning("Could not determine session capture posture at startup.")
+
+    try:
+        _log_execution_concurrency_posture(settings.polling.max_concurrent_dispatches)
+    except Exception:
+        logger.warning("Could not determine execution concurrency posture at startup.")
+
     if settings.is_test:
         return Ok({"mode": "full"})
 
@@ -252,11 +280,149 @@ async def health_check() -> Result[dict, LifecycleError]:
         response["degraded_reasons"] = _state.degraded_reasons
 
     _enrich_subscription_health(response, mode)
+    _enrich_codex_auth_health(response)
 
     return Ok(response)
 
 
+def _enrich_codex_auth_health(response: dict) -> None:
+    """Add codex credential freshness to the health payload.
+
+    WHY HERE: a stale codex credential is invisible until a phase fails, and the
+    failure names no credential. Every instance holds its own copy and expires
+    independently, so this has to be reported per instance rather than centrally,
+    which is exactly what a health endpoint is for.
+
+    Never raises. A freshness hint that can take /health down is worse than no
+    hint, so any failure degrades to omitting the block.
+    """
+    try:
+        from syn_shared.codex_auth_status import describe_codex_auth
+        from syn_shared.settings import get_settings
+
+        secret = get_settings().codex_auth_json
+        status = describe_codex_auth(secret.get_secret_value() if secret else None)
+        response["codex_auth"] = status.model_dump(mode="json")
+        if status.needs_attention:
+            response.setdefault("warnings", []).append(status.detail)
+    except Exception:
+        logger.debug("codex auth freshness probe failed", exc_info=True)
+
+
 # ── Private helpers ─────────────────────────────────────────────────
+
+
+def _log_execution_concurrency_posture(max_concurrent: int) -> None:
+    """Say so when this deployment runs workflows concurrently.
+
+    Beside the capture posture and for the same reason: an operator should
+    learn a risky posture at startup rather than from its consequences.
+
+    Emitted HERE, once, rather than while constructing the dispatcher. In the
+    dispatcher it fired only if construction got that far, was skipped
+    entirely on the test and offline startup paths, and could repeat on every
+    subscription-recovery attempt. Posture is a property of the settings, so it
+    is reported where the settings are read.
+
+    Concurrent executions are not isolated from each other (#865): they share
+    the processor instance holding their per-run state, so one can read
+    another's inputs and finish successfully against the wrong target, and one
+    execution's cancellation tears down the others' containers.
+    """
+    if max_concurrent <= 1:
+        return
+
+    logger.warning(
+        "%s is %d, so workflow executions can run concurrently. They are NOT "
+        "yet isolated from each other (#865): concurrent executions can read "
+        "each other's inputs and finish against the wrong target, and one "
+        "execution's cancellation tears down the others' containers. Set it "
+        "to 1 until that is fixed.",
+        ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES,
+        max_concurrent,
+    )
+
+
+def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
+    """Say once, at startup, how session capture is CONFIGURED.
+
+    Configuration only. Nothing here contacts the store, so this reports what
+    was asked for, not what works - a reachable store, a valid token and a
+    writable spool are all still unproven at this point. The wording says
+    "configured" for that reason; claiming capture is working and being wrong
+    would make this line worse than silence.
+
+    Capture is a per-workspace concern, so its posture was previously only
+    observable after a workflow ran: the unauthenticated warning fired at
+    provisioning, and an operator who never started one saw nothing.
+
+    NO PART OF THE STORE URL IS LOGGED. Not the raw value, and not a
+    sanitised scheme/host/port either: every one of those components is
+    operator-supplied, so a token pasted into the host, the scheme, or a
+    numeric port would land in the record. An invariant with a "unless the
+    operator did something odd" clause is not an invariant, and this one has
+    to hold absolutely because the alternative is a credential in a log
+    aggregator.
+
+    What identifies the destination instead is the DEPLOYMENT, which is
+    derived from AppEnvironment and cannot contain a secret, plus the operator's
+    own SYN_SESSION_STORE_LABEL when one is declared. The label exists because
+    the deployment separates ENVIRONMENTS but not tenants within one: two stores
+    differing only by URL path produce an identical posture line without it
+    (#849). It is declared non-secret by the operator rather than derived from a
+    value that may not be, which is why it can be logged when no part of the URL
+    can.
+    """
+    from syn_adapters.workspace_backends.agentic.session_store_env import (
+        deployment_identity,
+    )
+
+    if not store.is_enabled:
+        logger.info(
+            "Session capture is OFF (no %s configured). Workflows run "
+            "normally; no transcripts are exported.",
+            ENV_SYN_SESSION_STORE_URL,
+        )
+        return
+
+    deployment = deployment_identity(app_environment)
+    label = store.display_label
+    destination = f"{deployment} (store: {label})" if label else deployment
+
+    if store.has_unusable_label:
+        # Value-free on purpose. Whatever was set is probably not what the
+        # operator believed they set, and echoing it here is exactly how a
+        # mis-pasted URL or token reaches the log this line exists to keep
+        # clean.
+        logger.warning(
+            "%s is set to something that is not a usable label (ASCII letters, "
+            "digits, dot, underscore and hyphen, up to 64 characters). It is "
+            "being ignored and is not repeated here in case it is not what you "
+            "meant to set. Capture is unaffected.",
+            ENV_SYN_SESSION_STORE_LABEL,
+        )
+
+    if store.is_unauthenticated:
+        logger.warning(
+            "Session capture is configured for %s (%s is set) but there is NO "
+            "write token (%s). If the store requires authentication this fails "
+            "at finalize with 401, AFTER the workspace has run, and the "
+            "exporter suppresses the cause to avoid leaking the credential. "
+            "Set the token, or ignore this if the store is deliberately open.",
+            destination,
+            ENV_SYN_SESSION_STORE_URL,
+            ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+        )
+        return
+
+    logger.info(
+        "Session capture is configured for %s (%s and a write token are set). "
+        "Not yet verified: the next workflow is the first runtime check, so "
+        "confirm its capture outcome - only CAPTURED proves the store was "
+        "actually reachable and writable.",
+        destination,
+        ENV_SYN_SESSION_STORE_URL,
+    )
 
 
 async def _init_event_store() -> Result[None, LifecycleError]:
@@ -324,6 +490,24 @@ async def _init_artifact_storage(state: LifecycleState) -> None:  # noqa: ARG001
     storage = await get_artifact_storage()
     await storage.ensure_ready()
     logger.info("Artifact storage bucket verified")
+
+
+async def _init_claude_plugin_storage(state: LifecycleState) -> None:  # noqa: ARG001
+    """Ensure claude plugin storage bucket exists at startup (issue #726)."""
+    from syn_adapters.storage.claude_plugin_storage.factory import get_claude_plugin_storage
+
+    storage = await get_claude_plugin_storage()
+    await storage.ensure_ready()
+    logger.info("Claude plugin storage bucket verified")
+
+
+async def _init_skill_storage(state: LifecycleState) -> None:  # noqa: ARG001
+    """Ensure skill storage bucket exists at startup (issue #772, ADR-012)."""
+    from syn_adapters.storage.skill_storage.factory import get_skill_storage
+
+    storage = await get_skill_storage()
+    await storage.ensure_ready()
+    logger.info("Skill storage bucket verified")
 
 
 async def _init_conversation_storage(state: LifecycleState) -> None:
@@ -537,6 +721,16 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
     _ServiceEntry(
         reason=DegradedReason.ARTIFACT_STORAGE,
         init_fn=_init_artifact_storage,
+        recoverable=True,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.CLAUDE_PLUGIN_STORAGE,
+        init_fn=_init_claude_plugin_storage,
+        recoverable=True,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.SKILL_STORAGE,
+        init_fn=_init_skill_storage,
         recoverable=True,
     ),
     _ServiceEntry(

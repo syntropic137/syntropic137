@@ -1,0 +1,183 @@
+---
+title: Claude Plugins in Workflows
+description: Declare Claude Code plugins per workflow and per phase so the agent inside each workspace sees exactly the skills it needs.
+---
+
+<Callout type="warn">
+  **Use [Skills](/docs/guide/skills) instead.** Workflow-declared Claude plugins
+  work only for Claude: `--plugin-dir` is a Claude CLI flag, so a Codex or Gemini
+  phase receives nothing. Skills are the harness-agnostic replacement and are what
+  `syn workflow install` registers automatically.
+
+  This page is kept for reference. The hooks and guardrails you rely on are
+  unaffected either way: those are baked into the workspace image as platform
+  plugins, not declared per workflow. See
+  [the two-layer model](/docs/guide/skills#two-layers-and-why-it-matters).
+</Callout>
+
+Workflows can declare a curated set of Claude Code plugins that the agent
+running each phase should see. The platform fetches the plugin source once,
+content-addresses the result in object storage, and (in a follow-up release)
+materializes the resolved plugin set into each workspace at setup time.
+
+This page covers the workflow author's view: the YAML field, the CLI
+commands, error modes, and reproducibility guarantees. Implementation detail
+lives in [ADR-065](https://github.com/syntropic137/syntropic137/blob/main/docs/adrs/ADR-065-claude-plugin-injection.md)
+and the gating issue is
+[#726](https://github.com/syntropic137/syntropic137/issues/726).
+
+## Why this exists
+
+Without workflow-scoped plugins, every workspace sees only the four
+plugins baked into the base image (`sdlc`, `workspace`, `observability`,
+`git`). New plugins ship through a dogfooded loop: the leverage-points
+review workflow needs `software-leverage-points`; future workflows will
+declare their own plugin dependencies. Shipping the dependency alongside
+the workflow definition makes the workflow self-contained.
+
+## YAML schema
+
+Two new fields, both optional and additive:
+
+- `claude_plugins:` at the workflow root - every phase sees these plugins.
+- `claude_plugins:` on a phase - additive on top of the workflow scope.
+
+```yaml
+id: review-leverage-points
+name: Leverage Points Review
+type: review
+
+claude_plugins:
+  - syntropic137/software-leverage-points@5.0.7
+
+phases:
+  - id: synthesize
+    name: Synthesize
+    order: 1
+    prompt_template: "Review the diff against software-leverage-points."
+    claude_plugins:
+      - obra/superpowers@2.1.0
+```
+
+### Reference forms
+
+A `claude_plugins:` entry accepts three input forms; the platform
+normalizes all three to a single `(source_url, version, name)` lock key.
+
+| Form | Example |
+|---|---|
+| GitHub shorthand | `syntropic137/software-leverage-points@5.0.7` |
+| Full URL | `https://gitlab.com/example/extra.git@1.0.0` |
+| Verbose mapping | `{ source: github.com/obra/superpowers, version: 2.1.0, name: superpowers }` |
+
+The verbose form lets you override the display name. Identity is
+`(source_url, version, name)`: the same plugin declared at workflow and
+phase scope deduplicates cleanly, while the same source registered under
+two different names produces two distinct lock entries.
+
+### What is rejected
+
+- `@latest` and any unpinned reference. Pinning by tag, branch, or sha is
+  required for reproducibility; the lockfile is the point.
+- References to private sources without credentials. Authenticated fetch
+  is on the roadmap; today, point at public mirrors.
+
+### Conflict resolution
+
+When the same plugin name appears at multiple scopes with different
+versions, **the innermost scope wins**: phase > workflow > global. Every
+override is logged at INFO so the resolution is observable.
+
+## CLI
+
+The `syn claude-plugin` command group installs new plugins, manages the
+global registry, and inspects the lock projection. Per ADR-066 the CLI does
+all `git clone` work locally and POSTs structured payloads to the API; the
+API container has no git tooling and never shells out.
+
+```bash
+# Clone the plugin locally and register it with the platform.
+syn claude-plugin install syntropic137/software-leverage-points@5.0.7
+
+# Same as above, plus enable globally so every workflow sees it.
+syn claude-plugin install syntropic137/software-leverage-points@5.0.7 --global
+
+# Promote an already-registered (name, version) pair into the global set.
+syn claude-plugin global add software-leverage-points 5.0.7
+
+# List active globals.
+syn claude-plugin global list
+
+# Remove a global registration. The lock entry stays in place so any
+# workflow that pinned the same (source_url, version, name) keeps resolving.
+syn claude-plugin global remove software-leverage-points
+
+# List every entry in the lock projection (workflow-fetched and global).
+syn claude-plugin list
+
+# Show the lock detail for a specific (name, version) pair.
+syn claude-plugin show software-leverage-points 5.0.7
+```
+
+`syn claude-plugin --help` prints the full subcommand list with examples.
+
+> **Note (#726 Phase B):** the `global add` subcommand now takes
+> `<name> <version>` of an already-registered plugin. The previous
+> `global add <ref>` shortcut has been replaced by
+> `install <ref> --global`, which runs the clone + register + global-enable
+> sequence in one step.
+
+## Resolution lifecycle
+
+1. **Workflow install.** When you run `syn workflow install <package>`, the
+   CLI parses every workflow YAML it finds, collects `claude_plugins:`
+   references, and runs a pre-flight: each missing reference is cloned
+   locally and registered via `POST /claude-plugins/registrations` BEFORE
+   any workflow is created. References already in the lock are skipped.
+2. **Lock hit.** The existing `(resolved_sha, tree_storage_prefix)` is
+   reused; nothing else happens.
+3. **Lock miss.** The CLI clones the source at the pinned version, walks
+   the tree, and uploads every file (base64-encoded) inline. The API
+   computes a sha256 over the normalized tree, persists each file to the
+   `claude-plugins` MinIO bucket, and emits a `ClaudePluginRegisteredEvent`.
+   The lock projection picks it up.
+4. **Failure.** If any pre-flight step fails, the install aborts BEFORE any
+   workflow is created. There is no partial state.
+
+## Error codes
+
+The API returns these error codes when a reference cannot be resolved:
+
+| `error_code` | Meaning |
+|---|---|
+| `claude_plugin_unreachable` | Source URL did not respond or returned 404 |
+| `claude_plugin_version_not_found` | Tag, branch, or sha not present in the source |
+| `claude_plugin_manifest_missing` | Tree has no `.claude-plugin/plugin.json` |
+| `claude_plugin_manifest_invalid` | `plugin.json` failed to parse |
+| `claude_plugin_auth_required` | Source needs credentials (not yet supported) |
+
+The CLI surfaces these directly so you can fix the YAML and retry without
+parsing log output.
+
+## Configuration
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SYN_STORAGE_CLAUDE_PLUGIN_BUCKET_NAME` | `claude-plugins` | MinIO bucket for materialized plugin trees |
+| `DEV__WORKFLOW_FAIL_ON_PLUGIN_NOT_REGISTERED` | `true` | When seeding workflows from disk, fail boot on an unregistered plugin reference. Set to `false` in dev/CI to log and skip. |
+
+## Status and roadmap
+
+This feature lands in two stages:
+
+- **PR1 (this release).** Dormant plumbing. Workflows can declare
+  `claude_plugins:`, the CLI commands work, and the lock projection fills
+  up. Workspaces still see only the baked-in plugin set.
+- **PR2 (follow-up).** The materialization step. The resolved plugin set
+  is written into `<workspace>/.syn-plugins/<plugin>/` and the agent is
+  invoked with `--plugin-dir` flags pointing at each one. Behavior change
+  only takes effect when a workflow declares `claude_plugins:` or a
+  global plugin is registered.
+
+Org-level and system-level scopes are tracked in
+[#761](https://github.com/syntropic137/syntropic137/issues/761).

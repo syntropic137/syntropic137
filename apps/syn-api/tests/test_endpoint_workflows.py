@@ -14,6 +14,9 @@ from syn_api.routes.workflows.commands import (
     validate_yaml_endpoint,
 )
 from syn_api.types import Err, Ok, WorkflowError, WorkflowValidation
+from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+    InstallOutcome,
+)
 
 # --- create_workflow_endpoint ---
 
@@ -22,7 +25,7 @@ async def test_create_workflow_endpoint_success() -> None:
     with patch(
         "syn_api.routes.workflows.commands.create_workflow",
         new_callable=AsyncMock,
-        return_value=Ok("wf-abc-123"),
+        return_value=Ok(InstallOutcome(workflow_id="wf-abc-123", changed=True)),
     ):
         result = await create_workflow_endpoint(CreateWorkflowRequest(name="My Workflow"))
     assert result.id == "wf-abc-123"
@@ -35,7 +38,7 @@ async def test_create_workflow_endpoint_with_all_fields() -> None:
     with patch(
         "syn_api.routes.workflows.commands.create_workflow",
         new_callable=AsyncMock,
-        return_value=Ok("wf-full"),
+        return_value=Ok(InstallOutcome(workflow_id="wf-full", changed=True)),
     ) as mock_create:
         result = await create_workflow_endpoint(
             CreateWorkflowRequest(
@@ -212,3 +215,17 @@ async def test_delete_workflow_endpoint_already_archived() -> None:
     ):
         await delete_workflow_endpoint("wf-old")
     assert exc_info.value.status_code == 409
+
+
+def test_update_phase_request_rejects_unsupported_provider() -> None:
+    """The phase-update request validates provider against AgentProvider (codex review)."""
+    import pytest
+    from pydantic import ValidationError
+
+    from syn_api.routes.workflows.commands import UpdatePhasePromptRequest
+
+    with pytest.raises(ValidationError):
+        UpdatePhasePromptRequest(prompt_template="x", provider="not-a-provider")
+    # valid providers are accepted
+    assert UpdatePhasePromptRequest(prompt_template="x", provider="codex").provider == "codex"
+    assert UpdatePhasePromptRequest(prompt_template="x", provider=None).provider is None

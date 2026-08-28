@@ -11,6 +11,7 @@ Two layers of coverage:
 
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,12 @@ from syn_api.routes.workflows.commands import (
     create_workflow_from_yaml_endpoint,
 )
 from syn_api.types import Ok
+
+# WHY a module-level marker: CI runs only `pytest -m unit` and
+# `pytest -m integration`, so an unmarked test is collected locally and
+# never runs in CI. These use in-memory adapters and no external
+# services, so they are unit tests.
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Shared test-request builder (no TestClient needed — the endpoint reads
@@ -231,10 +238,36 @@ async def test_service_rejects_malformed_yaml() -> None:
 
 
 async def test_endpoint_rejects_wrong_content_type() -> None:
-    request = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/json")
+    request = _make_request(body=WITH_REPO_YAML.encode(), content_type="text/plain")
     with pytest.raises(HTTPException) as exc_info:
         await create_workflow_from_yaml_endpoint(request)
     assert exc_info.value.status_code == 415
+
+
+async def test_endpoint_accepts_a_json_body_because_json_is_a_yaml_subset() -> None:
+    """`syn workflow install` uploads the resolved definition as JSON.
+
+    The CLI parses each plugin's workflow.yaml, resolves prompt_file refs
+    against the package directory, and uploads the resulting document. It has
+    no YAML emitter (and hand-rolling one around arbitrary prompt bodies is
+    exactly where emitters go wrong), so it serializes with JSON.stringify.
+    Every JSON document is a valid YAML document, and the parser here is
+    yaml.safe_load, so this costs the endpoint nothing.
+    """
+    body = json.dumps(
+        {
+            "id": "json-body-test",
+            "name": "JSON Body",
+            "type": "research",
+            "phases": [{"id": "one", "name": "One", "order": 1, "prompt_template": "Do it."}],
+        }
+    ).encode()
+
+    request = _make_request(body=body, content_type="application/json")
+    response = await create_workflow_from_yaml_endpoint(request, workflow_id="json-body-test")
+
+    assert response.status == "created"
+    assert response.name == "JSON Body"
 
 
 async def test_endpoint_rejects_missing_content_type() -> None:
@@ -320,16 +353,65 @@ async def test_endpoint_workflow_id_query_param_overrides_yaml_id() -> None:
     assert response.id == "custom-id"
 
 
-async def test_endpoint_surfaces_handler_error_as_400() -> None:
-    # Creating the same workflow twice must fail with Err → 400.
+async def test_endpoint_upserts_when_the_same_workflow_is_posted_twice() -> None:
+    """Reinstalling must update in place (issue #822).
+
+    This previously asserted a 400. That assertion encoded the bug: posting
+    the same package twice is the normal update path, and failing it is what
+    made `syn workflow install` unusable after the first run.
+    """
     request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
     first = await create_workflow_from_yaml_endpoint(request_a)
     assert first.status == "created"
 
     request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    second = await create_workflow_from_yaml_endpoint(request_b)
+    assert second.id == first.id
+
+
+async def test_endpoint_refuses_changed_content_under_same_version_with_409() -> None:
+    """Changed content under an unchanged version is never a silent overwrite.
+
+    Identity is decided by comparing the stored definition to the incoming
+    one, so this fires on the content actually differing rather than on a
+    digest the caller supplied (issue #822).
+    """
+    request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    await create_workflow_from_yaml_endpoint(request_a, version="0.3.0")
+
+    request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
     with pytest.raises(HTTPException) as exc_info:
-        await create_workflow_from_yaml_endpoint(request_b)
-    assert exc_info.value.status_code == 400
+        await create_workflow_from_yaml_endpoint(request_b, name="Renamed", version="0.3.0")
+
+    assert exc_info.value.status_code == 409
+    detail = str(exc_info.value.detail)
+    assert "already installed" in detail
+    # The event-store internal must never reach a user (issue #822).
+    assert "Concurrency conflict" not in detail
+
+
+async def test_endpoint_force_reinstalls_matching_version() -> None:
+    """--force is the documented escape hatch (issue #822)."""
+    request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    first = await create_workflow_from_yaml_endpoint(request_a, version="0.3.0")
+
+    request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    second = await create_workflow_from_yaml_endpoint(request_b, version="0.3.0", force=True)
+
+    assert second.id == first.id
+
+
+async def test_endpoint_refuses_matching_version_with_changed_digest() -> None:
+    """Republished content under an unchanged version is refused loudly (issue #822)."""
+    request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    await create_workflow_from_yaml_endpoint(request_a, version="0.3.0", source_digest="aaa111")
+
+    request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    with pytest.raises(HTTPException) as exc_info:
+        await create_workflow_from_yaml_endpoint(request_b, version="0.3.0", source_digest="bbb222")
+
+    assert exc_info.value.status_code == 409
+    assert "different source" in str(exc_info.value.detail)
 
 
 async def test_endpoint_round_trip_preserves_classification_repo_and_requires_repos() -> None:
@@ -343,3 +425,25 @@ async def test_endpoint_round_trip_preserves_classification_repo_and_requires_re
     assert created.classification == "complex"
     assert created.repository_url == "https://github.com/acme/widgets"
     assert created.requires_repos is False
+
+
+async def test_endpoint_identical_reinstall_succeeds_as_unchanged() -> None:
+    """A byte-identical reinstall is a no-op, not a 409 (issue #822).
+
+    Exit 0 here is what makes `syn workflow install` safe to run
+    unconditionally from a script or a CI step: under the refusal behaviour
+    every rerun of an unchanged pipeline failed.
+    """
+    request_a = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    first = await create_workflow_from_yaml_endpoint(
+        request_a, version="0.3.0", source_digest="aaa111"
+    )
+    assert first.status == "created"
+
+    request_b = _make_request(body=WITH_REPO_YAML.encode(), content_type="application/yaml")
+    second = await create_workflow_from_yaml_endpoint(
+        request_b, version="0.3.0", source_digest="aaa111"
+    )
+
+    assert second.id == first.id
+    assert second.status == "unchanged"

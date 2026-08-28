@@ -50,7 +50,7 @@ If all prerequisites pass:
 - Otherwise: run `just dev`
 
 After starting, report:
-- Dashboard UI: http://localhost:5173
+- Dashboard UI: http://localhost:9137
 - Dashboard API: http://localhost:8137/docs
 - Run `just dev-logs` to see output
 - Run `just dev-stop` when done

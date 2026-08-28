@@ -12,6 +12,32 @@ Usage:
     )
 """
 
+from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
+    ClaudePluginError,
+    ClaudePluginInvalidName,
+    ClaudePluginInvalidPath,
+    ClaudePluginManifestInvalid,
+    ClaudePluginManifestMissing,
+    ClaudePluginNotRegistered,
+    ClaudePluginVersionHashMismatch,
+)
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
+    ClaudePluginRef,
+)
+from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
+    ResolvedClaudePlugin,
+)
+from syn_domain.contexts.orchestration._shared.resolved_skill import (
+    ResolvedSkill,
+)
+from syn_domain.contexts.orchestration._shared.skill_errors import (
+    SkillError,
+    SkillInvalidName,
+    SkillNotRegistered,
+)
+from syn_domain.contexts.orchestration._shared.skill_ref import (
+    SkillRef,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     validate_workflow_yaml,
@@ -37,6 +63,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+    WorkflowTemplateConflictError,
+    WorkflowTemplateDigestMismatchError,
+    WorkflowTemplateProvenanceStrippedError,
+    WorkflowTemplateVersionAlreadyInstalledError,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
 )
@@ -55,6 +87,7 @@ from syn_domain.contexts.orchestration.domain.commands import (
     InjectTokensCommand,
     TerminateWorkspaceCommand,
     UpdatePhasePromptCommand,
+    UpdateWorkflowTemplateCommand,
 )
 from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveWorkflowTemplateHandler import (
     ArchiveWorkflowTemplateHandler,
@@ -90,6 +123,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt 
 from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
     ExecutionCostQueryService,
 )
+from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
+    GlobalClaudePluginEntry,
+    GlobalClaudePluginNotFoundError,
+)
+from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
+    ClaudePluginNotFoundError,
+)
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
@@ -104,6 +144,16 @@ __all__ = [
     "ArchiveWorkflowTemplateCommand",
     # Handlers
     "ArchiveWorkflowTemplateHandler",
+    # Claude plugin types + errors (issue #726)
+    "ClaudePluginError",
+    "ClaudePluginInvalidName",
+    "ClaudePluginInvalidPath",
+    "ClaudePluginManifestInvalid",
+    "ClaudePluginManifestMissing",
+    "ClaudePluginNotFoundError",
+    "ClaudePluginNotRegistered",
+    "ClaudePluginRef",
+    "ClaudePluginVersionHashMismatch",
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
@@ -116,6 +166,8 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "GlobalClaudePluginEntry",
+    "GlobalClaudePluginNotFoundError",
     # Aggregates
     "HandlerResult",
     # Value objects - workspace
@@ -127,14 +179,21 @@ __all__ = [
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
+    "ResolvedClaudePlugin",
+    "ResolvedSkill",
     "SecurityPolicy",
     "SidecarConfig",
+    "SkillError",
+    "SkillInvalidName",
+    "SkillNotRegistered",
+    "SkillRef",
     "StreamResult",
     "SubagentTracker",
     "TerminateWorkspaceCommand",
     "TokenAccumulator",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowPhaseHandler",
+    "UpdateWorkflowTemplateCommand",
     "WorkflowClassification",
     "WorkflowDefinition",
     "WorkflowExecutionAggregate",
@@ -142,6 +201,10 @@ __all__ = [
     # Errors
     "WorkflowNotFoundError",
     "WorkflowTemplateAggregate",
+    "WorkflowTemplateConflictError",
+    "WorkflowTemplateDigestMismatchError",
+    "WorkflowTemplateProvenanceStrippedError",
+    "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
     "build_command_from_definition",

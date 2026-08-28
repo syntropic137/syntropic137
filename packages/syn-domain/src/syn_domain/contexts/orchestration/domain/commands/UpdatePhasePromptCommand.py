@@ -27,5 +27,6 @@ class UpdatePhasePromptCommand(BaseModel):
 
     # Optional config overrides (None = keep existing value)
     model: str | None = None
+    provider: str | None = None
     timeout_seconds: int | None = None
     allowed_tools: list[str] | None = None

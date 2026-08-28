@@ -14,6 +14,33 @@ export function formatCost(cost: number | string): string {
   return `$${n.toFixed(2)}`;
 }
 
+/**
+ * Format a cost that may be incomplete because some observations had no rate.
+ *
+ * A cost of $0.00 is ambiguous: it can mean "this really was free" or "we could
+ * not price the model that ran". Rendering the second case as a dollar figure is
+ * how unpriced codex runs looked identical to free ones (ADR-067 D5).
+ *
+ * `unpricedCount > 0` means the total omits real work, so show it as partial
+ * rather than as a number a reader would trust.
+ */
+export function formatCostWithCoverage(
+  cost: number | string,
+  unpricedCount: number | undefined,
+): string {
+  const n = typeof cost === "string" ? Number(cost) : cost;
+
+  // A malformed cost must never be laundered into a confident label. `!NaN` is
+  // true, so a naive falsy check would render "not-a-number" as "unpriced".
+  if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return "unknown";
+
+  if (!unpricedCount) return formatCost(n);
+  // Nothing could be priced at all.
+  if (n === 0) return "unpriced";
+  // Some priced, some not: the figure is a real lower bound, not the total.
+  return `>=${formatCost(n)} (partial)`;
+}
+
 export function formatTokens(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;

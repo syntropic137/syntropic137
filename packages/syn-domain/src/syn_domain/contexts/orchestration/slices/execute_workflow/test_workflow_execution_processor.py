@@ -53,6 +53,62 @@ class TestProcessorDispatching:
 
 
 @pytest.mark.unit
+class TestAgentRunnerSelection:
+    """Provider selects the parser runner."""
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("provider", "expected_runner"),
+        [
+            ("claude", "claude"),
+            ("codex", "codex"),
+        ],
+    )
+    async def test_provider_is_forwarded_as_typed_runner(
+        self,
+        provider: str,
+        expected_runner: str,
+    ) -> None:
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        handler = MagicMock()
+        handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
+        processor._agent_handler = handler
+        processor._active_workspaces["p-1"] = MagicMock()
+        processor._active_envs["p-1"] = {}
+        processor._active_cmds["p-1"] = ["agent"]
+        phase = ExecutablePhase(
+            phase_id="p-1",
+            name="Phase 1",
+            order=1,
+            agent_config=AgentConfiguration(provider=provider),
+            prompt_template="do it",
+        )
+
+        with pytest.raises(RuntimeError, match="stop after dispatch"):
+            await processor._handle_run_agent(
+                TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                    session_id="sess-1",
+                ),
+                phase,
+                MagicMock(workflow_id="wf-1"),
+            )
+
+        assert handler.handle.await_args.kwargs["runner"] == expected_runner
+
+
+@pytest.mark.unit
 class TestProcessorTermination:
     """Tests for processor termination."""
 
@@ -340,3 +396,146 @@ class TestProcessorCancellation:
         assert processor._active_cmds == {}
         assert result.status == "cancelled"
         assert result.error_message == "timeout"
+
+
+@pytest.mark.unit
+class TestConcurrentFailureAttribution:
+    """failed_phase_id stays execution-local when one processor instance
+    serves multiple concurrent executions (BackgroundWorkflowDispatcher
+    shares a single processor across up to max_concurrent runs)."""
+
+    @pytest.mark.anyio
+    async def test_failed_phase_id_is_execution_local(self) -> None:
+        """Two concurrent failing executions each attribute the failure to
+        their OWN phase. With the old processor-instance _current_phase_id
+        this deterministically cross-attributed: A is parked until B has
+        dispatched (overwriting the shared field), then A fails.
+        """
+        import asyncio
+
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        processor._execution_repo.save_new = AsyncMock()
+
+        failed_phase_by_execution: dict[str, str | None] = {}
+
+        async def _capture_save(aggregate: object) -> None:
+            for envelope in list(aggregate._uncommitted_events):  # type: ignore[attr-defined]
+                event = envelope.event
+                if type(event).__name__ == "WorkflowFailedEvent":
+                    failed_phase_by_execution[event.execution_id] = event.failed_phase_id
+
+        processor._execution_repo.save = AsyncMock(side_effect=_capture_save)
+
+        b_dispatched = asyncio.Event()
+        a_failed = asyncio.Event()
+
+        class _FailingWorkspaceCM:
+            """Workspace CM whose __aenter__ enforces the racing interleave."""
+
+            def __init__(self, execution_id: str) -> None:
+                self._execution_id = execution_id
+
+            async def __aenter__(self) -> object:
+                if self._execution_id == "exec-a":
+                    # Park A until B has entered dispatch (which, with
+                    # shared instance state, overwrote the current phase).
+                    await asyncio.wait_for(b_dispatched.wait(), timeout=5)
+                    a_failed.set()
+                    raise RuntimeError("boom-a")
+                b_dispatched.set()
+                await asyncio.wait_for(a_failed.wait(), timeout=5)
+                raise RuntimeError("boom-b")
+
+            async def __aexit__(self, *args: object) -> bool:
+                return False
+
+        workspace_service = MagicMock()
+        workspace_service.create_workspace = MagicMock(
+            side_effect=lambda **kwargs: _FailingWorkspaceCM(kwargs["execution_id"])
+        )
+        processor._workspace_service = workspace_service
+
+        result_a, result_b = await asyncio.gather(
+            processor.run(
+                workflow_id="wf-a",
+                workflow_name="A",
+                phases=[
+                    ExecutablePhase(phase_id="phase-a-1", name="A1", order=1, prompt_template="x")
+                ],
+                inputs={},
+                execution_id="exec-a",
+            ),
+            processor.run(
+                workflow_id="wf-b",
+                workflow_name="B",
+                phases=[
+                    ExecutablePhase(phase_id="phase-b-1", name="B1", order=1, prompt_template="x")
+                ],
+                inputs={},
+                execution_id="exec-b",
+            ),
+        )
+
+        assert result_a.status == "failed"
+        assert result_b.status == "failed"
+        assert failed_phase_by_execution["exec-a"] == "phase-a-1"
+        assert failed_phase_by_execution["exec-b"] == "phase-b-1"
+
+
+@pytest.mark.unit
+class TestStaleCollectArtifactsGuard:
+    """Stale COLLECT_ARTIFACTS dispatch for a finalized phase must be a no-op.
+
+    Defense in depth: in-process the projection's monotonic rank +
+    get_pending filtering prevent this dispatch entirely, but a
+    lock-bypassing projection writer (e.g. a future out-of-process
+    consumer on a shared Postgres store) could still resurrect a stale
+    todo. The processor must skip it instead of crashing with KeyError.
+    """
+
+    @pytest.mark.anyio
+    async def test_collect_artifacts_for_finalized_phase_is_skipped(self) -> None:
+        """_handle_collect_artifacts for a phase absent from
+        _active_workspaces returns without raising and emits no aggregate
+        events (the original incident raised KeyError here)."""
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        processor._save_and_sync = AsyncMock()
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.COLLECT_ARTIFACTS,
+            phase_id="p-1",
+            session_id="sess-1",
+        )
+        phase = ExecutablePhase(phase_id="p-1", name="Research", order=1, prompt_template="x")
+        aggregate = MagicMock()
+        all_artifact_ids: list[str] = []
+        phase_outputs: dict[str, str] = {}
+
+        assert "p-1" not in processor._active_workspaces
+
+        await processor._handle_collect_artifacts(
+            todo,
+            phase,
+            aggregate,
+            all_artifact_ids,
+            phase_outputs,
+        )
+
+        aggregate.artifacts_collected.assert_not_called()
+        processor._save_and_sync.assert_not_called()
+        assert all_artifact_ids == []
+        assert phase_outputs == {}
+        assert "p-1" not in processor._phase_artifact_ids

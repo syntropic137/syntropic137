@@ -103,31 +103,11 @@ static_resources:
                             cluster: github_https
                             timeout: 120s
 
-                    # PyPI - passthrough (no credential injection)
-                    - name: pypi
-                      domains:
-                        - "pypi.org"
-                        - "pypi.org:443"
-                        - "files.pythonhosted.org"
-                        - "files.pythonhosted.org:443"
-                      routes:
-                        - match:
-                            prefix: "/"
-                          route:
-                            cluster: pypi
-                            timeout: 60s
-
-                    # npm registry - passthrough (no credential injection)
-                    - name: npmjs
-                      domains:
-                        - "registry.npmjs.org"
-                        - "registry.npmjs.org:443"
-                      routes:
-                        - match:
-                            prefix: "/"
-                          route:
-                            cluster: npmjs
-                            timeout: 60s
+                    # pypi.org / files.pythonhosted.org / registry.npmjs.org
+                    # used to be passthrough virtual hosts here. They were dead
+                    # code: agent containers do not set HTTP_PROXY, so pip/npm
+                    # always hit those hosts direct via agent-net egress. Removed
+                    # to shrink the proxy's stats and TLS-context footprint.
 
                     # Block all other hosts
                     - name: blocked
@@ -279,52 +259,6 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
           sni: github.com
-          common_tls_context:
-            validation_context:
-              trusted_ca:
-                filename: /etc/ssl/certs/ca-certificates.crt
-
-    # PyPI cluster (passthrough, no credential injection) - ISS-43
-    - name: pypi
-      type: STRICT_DNS
-      dns_lookup_family: V4_ONLY
-      load_assignment:
-        cluster_name: pypi
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: pypi.org
-                      port_value: 443
-      transport_socket:
-        name: envoy.transport_sockets.tls
-        typed_config:
-          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
-          sni: pypi.org
-          common_tls_context:
-            validation_context:
-              trusted_ca:
-                filename: /etc/ssl/certs/ca-certificates.crt
-
-    # npm registry cluster (passthrough) - ISS-43
-    - name: npmjs
-      type: STRICT_DNS
-      dns_lookup_family: V4_ONLY
-      load_assignment:
-        cluster_name: npmjs
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: registry.npmjs.org
-                      port_value: 443
-      transport_socket:
-        name: envoy.transport_sockets.tls
-        typed_config:
-          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
-          sni: registry.npmjs.org
           common_tls_context:
             validation_context:
               trusted_ca:

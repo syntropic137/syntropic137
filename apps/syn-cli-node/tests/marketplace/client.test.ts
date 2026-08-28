@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { validateRegistryName, isCacheStale } from "../../src/marketplace/client.js";
+import { MarketplaceIndexSchema } from "../../src/marketplace/models.js";
 
 describe("validateRegistryName", () => {
   it("accepts valid names", () => {
@@ -48,5 +49,32 @@ describe("isCacheStale", () => {
       index: { name: "test", syntropic137: { type: "workflow-marketplace" as const }, plugins: [] },
     };
     expect(isCacheStale(cached)).toBe(true);
+  });
+});
+
+// WHY (#763): the schema must accept a marketplace.json without the
+// `syntropic137` marker so claude-plugin marketplaces (e.g.
+// AgentParadise/agentic-primitives) can be parsed.
+describe("MarketplaceIndexSchema (#763 claude-plugin compat)", () => {
+  it("accepts a marketplace.json without the syntropic137 marker", () => {
+    const parsed = MarketplaceIndexSchema.parse({
+      name: "agentic-primitives",
+      plugins: [
+        { name: "sdlc", source: "./plugins/sdlc", category: "dev" },
+        { name: "research", source: "./plugins/research", category: "dev" },
+      ],
+    });
+    expect(parsed.plugins).toHaveLength(2);
+    expect(parsed.syntropic137).toBeUndefined();
+    expect(parsed.plugins[0]!.name).toBe("sdlc");
+  });
+
+  it("preserves the marker when present (workflow marketplaces)", () => {
+    const parsed = MarketplaceIndexSchema.parse({
+      name: "wf",
+      syntropic137: { type: "workflow-marketplace" },
+      plugins: [],
+    });
+    expect(parsed.syntropic137?.type).toBe("workflow-marketplace");
   });
 });

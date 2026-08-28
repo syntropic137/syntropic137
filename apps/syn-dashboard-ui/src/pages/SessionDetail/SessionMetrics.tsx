@@ -2,7 +2,7 @@ import { Clock, Coins, Wrench } from 'lucide-react'
 import { MetricCard, ModelBreakdown } from '../../components'
 import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { SessionResponse } from '../../types'
-import { formatDurationSeconds } from '../../utils/formatters'
+import { formatCostWithCoverage, formatDurationSeconds } from '../../utils/formatters'
 import { TOOL_EVENT_TYPES } from './sessionConstants'
 
 export function SessionMetrics({
@@ -28,7 +28,10 @@ export function SessionMetrics({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <MetricCard
           title="Total Cost"
-          value={`$${Number(session.total_cost_usd).toFixed(4)}`}
+          value={formatCostWithCoverage(
+            Number(session.total_cost_usd),
+            session.unpriced_observation_count
+          )}
           icon={Coins}
           color="warning"
           scrollToId={hasCostByModel ? 'cost-by-model' : undefined}

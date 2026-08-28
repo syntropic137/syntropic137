@@ -58,6 +58,15 @@ class TokenMetricsProjection:
 
         input_tokens = event_data.get("input_tokens", 0)
         output_tokens = event_data.get("output_tokens", 0)
+        # token_usage events store these as ``cache_*_tokens``; the
+        # ``cache_*_input_tokens`` spelling is the raw Anthropic API naming and
+        # is accepted as a fallback so no producer variant silently reads zero.
+        cache_creation_tokens = event_data.get("cache_creation_tokens") or event_data.get(
+            "cache_creation_input_tokens", 0
+        )
+        cache_read_tokens = event_data.get("cache_read_tokens") or event_data.get(
+            "cache_read_input_tokens", 0
+        )
 
         record = {
             "event_id": event_data.get("event_id", ""),
@@ -66,9 +75,13 @@ class TokenMetricsProjection:
             "timestamp": event_data.get("timestamp"),
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "cache_creation_tokens": event_data.get("cache_creation_input_tokens", 0),
-            "cache_read_tokens": event_data.get("cache_read_input_tokens", 0),
-            "total_tokens": input_tokens + output_tokens,
+            "cache_creation_tokens": cache_creation_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            # All four components (issue #873) - matches the executions read model.
+            "total_tokens": input_tokens
+            + output_tokens
+            + cache_creation_tokens
+            + cache_read_tokens,
         }
 
         # Store by session_id#message_uuid for deduplication

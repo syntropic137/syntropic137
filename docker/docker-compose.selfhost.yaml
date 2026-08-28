@@ -9,6 +9,21 @@
 # See: ADR-034 - Test Infrastructure Architecture
 # See: ADR-060 - On-Demand Environment Creation
 
+# Project name, overriding the base compose default of
+# `syntropic137_${APP_ENVIRONMENT:-development}`. Without this an unset
+# APP_ENVIRONMENT gave a selfhost stack a `syntropic137_development` project
+# while its API reported `selfhost` and its agent network was
+# `syntropic137_selfhost_agent-net` - three names for one stack.
+#
+# To be precise about what the project name governs: container names here are
+# FIXED (`syn137-api` and friends) and every volume is explicitly named
+# (`syn137_db_data`, `syn137_minio_data`, ...), so neither is project-prefixed.
+# What is project-keyed is Compose OWNERSHIP and implicit resources such as the
+# docker-proxy network. That is why renaming the project cannot lose data, but
+# CAN collide on fixed container names when upgrading a stack started under the
+# old project - see the upgrade note in the justfile preflight.
+name: syntropic137_${APP_ENVIRONMENT:-selfhost}
+
 services:
   # ===========================================================================
   # DATABASE
@@ -106,7 +121,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${COLLECTOR_MEMORY_LIMIT:-256m}
+          # Post-tuning target. Pre-tuning collector peaked at 143MB; with
+          # MALLOC_ARENA_MAX=2 + PYTHONMALLOC=malloc + dedup defaults this
+          # drops to 95-110MB under load. 96M leaves slack for OTLP bursts.
+          memory: ${COLLECTOR_MEMORY_LIMIT:-96m}
           cpus: "${COLLECTOR_CPU_LIMIT:-0.25}"
     logging:
       driver: "json-file"
@@ -116,6 +134,42 @@ services:
     networks:
       - syn-internal
       - agent-net  # Workspace containers push OTLP metrics here (receive-only, no secrets)
+
+  # ===========================================================================
+  # ENVOY PROXY
+  # ===========================================================================
+  envoy-proxy:
+    container_name: syn137-envoy-proxy
+    restart: always
+    deploy:
+      resources:
+        limits:
+          # Post-tuning target. --concurrency 2 (set in Dockerfile CMD) brings
+          # Envoy from ~77MB under load down to ~45-50MB. 80m leaves slack.
+          memory: ${ENVOY_MEMORY_LIMIT:-80m}
+          cpus: "${ENVOY_CPU_LIMIT:-0.25}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # TOKEN INJECTOR
+  # ===========================================================================
+  token-injector:
+    container_name: syn137-token-injector
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: ${TOKEN_INJECTOR_MEMORY_LIMIT:-32m}
+          cpus: "${TOKEN_INJECTOR_CPU_LIMIT:-0.1}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
 
   # Definition in docker-compose.yaml; only container_name + production hardening here.
   # Stays on docker-proxy network (from base) - NOT syn-internal. Only API needs access.
@@ -153,9 +207,28 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID:-}
       - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME:-}
-      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
-      # 1Password (optional)
+      # Defaults to `selfhost`, matching selfhost.env.example and
+      # docker-compose.syntropic137.yaml. It used to default to `production`,
+      # so a stack brought up without setting it reported its sessions as
+      # syntropic137__production and derived the wrong 1Password vault - three
+      # files, two answers, and which one you got depended on the compose file
+      # you launched.
+      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-selfhost}
+      # 1Password (optional).
+      # op_resolver derives a PER-VAULT token name from APP_ENVIRONMENT
+      # (syn137-beta -> OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA) and falls back to
+      # the generic name. Passing only the generic one meant a beta or staging
+      # stack could not read its own vault, so every vault-only setting silently
+      # stayed at its default. Forward both.
       - OP_SERVICE_ACCOUNT_TOKEN=${OP_SERVICE_ACCOUNT_TOKEN:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYNTROPIC137=${OP_SERVICE_ACCOUNT_TOKEN_SYNTROPIC137:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD:-}
+      # Central session store (opt-in). Normally resolved from the vault above;
+      # these allow a non-1Password deployment to set them directly.
+      - SYN_SESSION_STORE_URL=${SYN_SESSION_STORE_URL:-}
+      - SYN_SESSION_STORE_AUTH_TOKEN=${SYN_SESSION_STORE_AUTH_TOKEN:-}
       # MinIO (artifact storage) — password read from Docker secret in entrypoint
       - SYN_STORAGE_PROVIDER=minio
       - SYN_STORAGE_MINIO_ENDPOINT=minio:9000
@@ -167,10 +240,13 @@ services:
       # Agent credentials (for workspace containers)
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Codex auth.json contents, staged into ~/.codex/auth.json during setup.
+      # Without this a phase with `agent.provider: codex` fails to provision.
+      - CODEX_AUTH_JSON=${CODEX_AUTH_JSON:-}
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
       - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-${PWD}}/workspaces
-      - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+      - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-selfhost}_agent-net
       # Envoy proxy URL for agent containers (must resolve on agent-net)
       - SYN_PROXY_URL=http://envoy-proxy:8081
     depends_on:
@@ -362,5 +438,5 @@ networks:
     name: syn137_internal
     driver: bridge
   agent-net:
-    name: syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+    name: syntropic137_${APP_ENVIRONMENT:-selfhost}_agent-net
     driver: bridge

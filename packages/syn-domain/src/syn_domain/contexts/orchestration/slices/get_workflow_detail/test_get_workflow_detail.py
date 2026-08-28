@@ -241,6 +241,40 @@ class TestWorkflowPhaseUpdatedProjection:
         assert list(phase.allowed_tools) == ["Bash", "Read", "Write"]
 
     @pytest.mark.asyncio
+    async def test_updates_provider(self, projection: WorkflowDetailProjection):
+        """A provider change must reach the detail projection, not stay stale."""
+        await projection.on_workflow_template_created(
+            {
+                "workflow_id": "wf-1",
+                "name": "Test Workflow",
+                "workflow_type": "research",
+                "classification": "technical",
+                "phases": [
+                    {
+                        "id": "p1",
+                        "name": "Research",
+                        "prompt_template": "Original",
+                        "provider": "claude",
+                        "order": 0,
+                    },
+                ],
+            }
+        )
+
+        await projection.on_workflow_phase_updated(
+            {
+                "workflow_id": "wf-1",
+                "phase_id": "p1",
+                "prompt_template": "Updated",
+                "provider": "codex",
+            }
+        )
+
+        detail = await projection.get_by_id("wf-1")
+        assert detail is not None
+        assert detail.phases[0].provider == "codex"
+
+    @pytest.mark.asyncio
     async def test_preserves_fields_when_none(self, projection: WorkflowDetailProjection):
         """Test projection preserves existing values when optional fields are None."""
         await projection.on_workflow_template_created(
@@ -346,3 +380,48 @@ class TestGetWorkflowDetailHandler:
         query = GetWorkflowDetailQuery(workflow_id="non-existent")
         result = await handler.handle(query)
         assert result is None
+
+
+@pytest.mark.unit
+class TestWorkflowTemplateUpdatedDetail:
+    """Reinstall must rebuild the detail read model (issue #822)."""
+
+    @pytest.mark.asyncio
+    async def test_updated_replaces_phases(self, projection: WorkflowDetailProjection):
+        """A reinstall replaces the definition wholesale, removed phases included."""
+        await projection.on_workflow_template_created(
+            {
+                "workflow_id": "code-review",
+                "name": "Code Review",
+                "phases": [{"phase_id": "p1", "name": "One"}, {"phase_id": "p2", "name": "Two"}],
+            }
+        )
+
+        await projection.on_workflow_template_updated(
+            {
+                "workflow_id": "code-review",
+                "name": "Code Review v2",
+                "phases": [{"phase_id": "p1", "name": "One Renamed"}],
+            }
+        )
+
+        detail = await projection._store.get(projection.PROJECTION_NAME, "code-review")
+        assert detail is not None
+        assert detail["name"] == "Code Review v2"
+        assert len(detail["phases"]) == 1
+        assert detail["phases"][0]["name"] == "One Renamed"
+
+    @pytest.mark.asyncio
+    async def test_updated_preserves_run_history(self, projection: WorkflowDetailProjection):
+        await projection.on_workflow_template_created(
+            {"workflow_id": "code-review", "name": "Code Review", "phases": []}
+        )
+        await projection.on_workflow_execution_started({"workflow_id": "code-review"})
+
+        await projection.on_workflow_template_updated(
+            {"workflow_id": "code-review", "name": "Code Review v2", "phases": []}
+        )
+
+        detail = await projection._store.get(projection.PROJECTION_NAME, "code-review")
+        assert detail is not None
+        assert detail["runs_count"] == 1

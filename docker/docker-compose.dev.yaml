@@ -43,8 +43,10 @@ services:
     build:
       args:
         INCLUDE_DOCKER_CLI: "1"
-    ports:
-      - "9137:8000"
+    # No direct port mapping in dev: the gateway on 9137 is the single
+    # entry point and mirrors production's 8137 (which fronts via nginx
+    # the same way). Use docker exec or a one-off `-p` override if you
+    # need to bypass the gateway for debugging.
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000}"]
@@ -67,6 +69,9 @@ services:
       SYN_GITHUB_WEBHOOK_SECRET: ${SYN_GITHUB_WEBHOOK_SECRET:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Codex auth.json contents for `provider: codex` phases (bridge). Injected
+      # into the agent workspace over the setup phase; scoped to codex phases only.
+      CODEX_AUTH_JSON: ${CODEX_AUTH_JSON:-}
       # Workspace directory configuration for Docker-in-Docker
       # Container path where workspaces are accessible
       SYN_WORKSPACE_CONTAINER_DIR: /workspaces
@@ -112,10 +117,63 @@ services:
     container_name: syn-token-injector
     restart: unless-stopped
 
+  # ─────────────────────────────────────────────────────────────────────
+  # Dev-only: dashboard with Vite HMR. Source mounted from host so file
+  # edits trigger reload; node_modules lives in a named volume so the
+  # baked image's deps are not shadowed by the host mount.
+  # ─────────────────────────────────────────────────────────────────────
+  dashboard-dev:
+    container_name: syn-dashboard-dev
+    build:
+      context: ..
+      dockerfile: apps/syn-dashboard-ui/Dockerfile.dev
+    volumes:
+      # Source mount for HMR. node_modules is shielded by the named volume below.
+      - ../apps/syn-dashboard-ui:/workspace/apps/syn-dashboard-ui
+      - dashboard_node_modules:/workspace/apps/syn-dashboard-ui/node_modules
+      # ui-feedback is a workspace dep; mount source so changes hot-reload too.
+      - ../lib/ui-feedback/packages/ui-feedback-react:/workspace/lib/ui-feedback/packages/ui-feedback-react
+      - ui_feedback_node_modules:/workspace/lib/ui-feedback/packages/ui-feedback-react/node_modules
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Gateway: nginx fronting both the API and the dashboard-dev container.
+  # Mirrors production routing so the CLI works without SYN_NO_PREFIX=1.
+  # The baked-in nginx.conf is overridden with nginx.conf.dev.
+  # ─────────────────────────────────────────────────────────────────────
+  gateway:
+    container_name: syn-gateway
+    build:
+      context: ..
+      dockerfile: infra/docker/images/gateway/Dockerfile
+    # Port convention: 9137 = dev gateway (this), 8137 = production/selfhost
+    # gateway. CLI users point SYN_API_URL at http://localhost:9137 for dev.
+    ports:
+      - "9137:80"
+    volumes:
+      - ../infra/docker/images/gateway/nginx.conf.dev:/etc/nginx/conf.d/default.conf:ro
+      # Vite dev mode emits inline scripts (react-refresh init, HMR client);
+      # the production CSP (script-src 'self') blocks them and the dashboard
+      # white-screens. Mount an empty file over the strict policy in dev.
+      - /dev/null:/etc/nginx/conf.d/security-headers.conf:ro
+    environment:
+      # Dev gateway is unauthenticated; the entrypoint generates an empty
+      # auth.conf when SYN_API_PASSWORD is empty.
+      SYN_API_PASSWORD: ""
+      SYN_API_USER: admin
+    depends_on:
+      api:
+        condition: service_healthy
+      dashboard-dev:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   db_data:
   minio_data:
   redis_data:
+  dashboard_node_modules:
+  ui_feedback_node_modules:
 
 networks:
   default:

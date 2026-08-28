@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Any, Protocol
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
@@ -26,6 +26,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScan
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser import (
     HookEventParser,
+)
+from syn_shared.agents import AgentProvider
+from syn_shared.delegation import (
+    DELEGATION_TARGET_BY_PRIMARY,
+    DelegationTarget,
+    looks_like_delegation_command,
 )
 from syn_shared.events import VALID_EVENT_TYPES
 
@@ -71,16 +77,41 @@ class ObservabilityRecorder(Protocol):
 
 _MAX_ERROR_REASON_LEN = 200
 
-# Well-known Anthropic API error types → human-readable labels
-_API_ERROR_LABELS: dict[str, str] = {
-    "overloaded_error": "API overloaded",
-    "rate_limit_error": "Rate limited",
-    "api_error": "API internal error",
-    "authentication_error": "Authentication failed",
-    "invalid_request_error": "Invalid request",
-    "not_found_error": "Resource not found",
-    "permission_error": "Permission denied",
+
+class ApiErrorType(StrEnum):
+    """Well-known API error ``type`` values a CLI result can carry."""
+
+    OVERLOADED = "overloaded_error"
+    RATE_LIMIT = "rate_limit_error"
+    API = "api_error"
+    AUTHENTICATION = "authentication_error"
+    INVALID_REQUEST = "invalid_request_error"
+    NOT_FOUND = "not_found_error"
+    PERMISSION = "permission_error"
+
+
+# Well-known API error types -> human-readable labels.
+# Public because the codex parser reuses this vocabulary rather than inventing
+# a second one for the same underlying faults (issue #891).
+API_ERROR_LABELS: dict[str, str] = {
+    ApiErrorType.OVERLOADED: "API overloaded",
+    ApiErrorType.RATE_LIMIT: "Rate limited",
+    ApiErrorType.API: "API internal error",
+    ApiErrorType.AUTHENTICATION: "Authentication failed",
+    ApiErrorType.INVALID_REQUEST: "Invalid request",
+    ApiErrorType.NOT_FOUND: "Resource not found",
+    ApiErrorType.PERMISSION: "Permission denied",
 }
+
+
+def api_error_label(error_type: str, http_code: str = "") -> str:
+    """Return the human-readable label for ``error_type``, with optional HTTP code.
+
+    A shared spelling of a fault, so "Authentication failed (HTTP 401)" reads
+    the same whether the claude parser or the codex parser produced it.
+    """
+    label = API_ERROR_LABELS.get(error_type, error_type.replace("_", " "))
+    return f"{label} (HTTP {http_code})" if http_code else label
 
 
 def _http_code_from_prefix(prefix: str) -> str:
@@ -92,10 +123,10 @@ def _format_anthropic_error(error_obj: dict[str, object], prefix: str) -> str:
     """Format a human-readable label from an Anthropic API error dict."""
     error_type = str(error_obj.get("type", ""))
     message = str(error_obj.get("message", ""))
-    label = _API_ERROR_LABELS.get(error_type, error_type.replace("_", " "))
+    label = api_error_label(error_type)
     http_code = _http_code_from_prefix(prefix)
     if http_code:
-        return f"{label} (HTTP {http_code})"
+        return api_error_label(error_type, http_code)
     if message and message.lower() != label.lower():
         return f"{label}: {message}"
     return label
@@ -164,9 +195,29 @@ class StreamResult:
     num_turns: int | None = None
     # Error reason extracted from CLI result event (e.g. "API Error: 529 Overloaded")
     error_reason: str | None = None
+    # #894: How many times the primary agent invoked its declared delegate CLI,
+    # and how many of those invocations actually succeeded. A delegation-enabled
+    # phase with zero SUCCESSES did not do what it declared, whatever the agent
+    # reported about itself.
+    delegation_attempts: int = 0
+    delegation_successes: int = 0
+    #: The session id the HARNESS chose for this phase's own run, read off its
+    #: stream. A different namespace from the platform id this processor was
+    #: constructed with: the platform mints its id before the agent starts, so
+    #: the two can never be derived from one another.
+    #:
+    #: This exists so the delegate import can dedup by LOOKUP. The filesystem
+    #: sweep reports every session a phase produced, all keyed by harness id,
+    #: and without this the leader is indistinguishable from its delegates -
+    #: which is what forced the old classify-by-agent-name inference, and what
+    #: made a claude phase delegating to claude unattributable (#895).
+    leader_native_session_id: str | None = None
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
+
+# This processor drives a CLAUDE primary, so its declared delegate is codex.
+DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CLAUDE]
 
 
 class _LineAction(Enum):
@@ -179,6 +230,11 @@ class _LineAction(Enum):
 @dataclass
 class _LineOutcome:
     action: _LineAction
+    #: True when the line handler decided the run must stop. Carried
+    #: explicitly rather than inferred from ``interrupt_reason``: the reason is
+    #: an OPTIONAL human-readable message, and a cancel sent without one is
+    #: still a cancel (#918).
+    interrupt_requested: bool = False
     interrupt_reason: str | None = None
     task_result: dict[str, Any] | None = None
 
@@ -200,7 +256,7 @@ class EventStreamProcessor:
         phase_id: str,
         session_id: str,
         workspace_id: str | None,
-        agent_model: str,
+        agent_model: str | None,
         collector: ObservabilityCollector | None = None,
     ) -> None:
         self._tokens = tokens
@@ -208,6 +264,7 @@ class EventStreamProcessor:
         self._execution_id = execution_id
         self._phase_id = phase_id
         self._session_id = session_id
+        self._leader_native_session_id: str | None = None
         self._workspace_id = workspace_id
         self._agent_model = agent_model
 
@@ -220,6 +277,16 @@ class EventStreamProcessor:
         self._result_duration_ms: int | None = None
         self._result_num_turns: int | None = None
         self._error_reason: str | None = None
+
+        # #894: A claude phase delegates to `codex exec`. Track the tool_use_ids
+        # of those invocations so the tool_result can tell "tried and failed"
+        # apart from "tried and succeeded".
+        self._delegation_tool_use_ids: set[str] = set()
+        # A tool_result can be replayed for the same tool_use_id; dedup so the
+        # same delegation is not counted twice.
+        self._delegation_completed_ids: set[str] = set()
+        self._delegation_attempts: int = 0
+        self._delegation_successes: int = 0
 
         # #695: Dedup usage by message.id. Claude CLI emits one assistant event per
         # content block (text, tool_use, etc.) for a single API response, each carrying
@@ -272,6 +339,7 @@ class EventStreamProcessor:
         """
         conversation_lines: list[str] = []
         line_count = 0
+        interrupt_requested = False
         interrupt_reason: str | None = None
         agent_task_result: dict[str, Any] | None = None
 
@@ -283,6 +351,7 @@ class EventStreamProcessor:
             if outcome.task_result is not None:
                 agent_task_result = outcome.task_result
             if outcome.action is _LineAction.BREAK:
+                interrupt_requested = outcome.interrupt_requested
                 interrupt_reason = outcome.interrupt_reason
                 break
 
@@ -296,7 +365,7 @@ class EventStreamProcessor:
 
         return StreamResult(
             line_count=line_count,
-            interrupt_requested=interrupt_reason is not None,
+            interrupt_requested=interrupt_requested,
             interrupt_reason=interrupt_reason,
             agent_task_result=agent_task_result,
             conversation_lines=conversation_lines,
@@ -308,6 +377,9 @@ class EventStreamProcessor:
             duration_ms=self._result_duration_ms,
             num_turns=self._result_num_turns,
             error_reason=self._error_reason,
+            delegation_attempts=self._delegation_attempts,
+            delegation_successes=self._delegation_successes,
+            leader_native_session_id=self._leader_native_session_id,
         )
 
     async def _process_line(
@@ -322,7 +394,11 @@ class EventStreamProcessor:
         poll = await self._cancel_poller.check(line_count)
         if poll.should_interrupt:
             await workspace.interrupt()
-            return _LineOutcome(action=_LineAction.BREAK, interrupt_reason=poll.reason)
+            return _LineOutcome(
+                action=_LineAction.BREAK,
+                interrupt_requested=True,
+                interrupt_reason=poll.reason,
+            )
 
         hook_events = self._hook_parser.parse(line)
         if hook_events:
@@ -409,6 +485,16 @@ class EventStreamProcessor:
 
         cli_type = cli_event.get("type", "")
         logger.debug("CLI event type: %s", cli_type)
+
+        # FIRST id wins, and later lines are ignored even though claude repeats
+        # session_id on every one. Last-wins would be a live hazard: anything
+        # that ever put another session's line on this stream would rebind the
+        # leader at the end of the run, and the import would then treat the
+        # real leader as a delegate and bill it twice.
+        if self._leader_native_session_id is None:
+            announced = cli_event.get("session_id")
+            if isinstance(announced, str) and announced.strip():
+                self._leader_native_session_id = announced
 
         task_result: dict[str, Any] | None = None
 
@@ -541,6 +627,8 @@ class EventStreamProcessor:
         # Cache tool_name for enriching tool_result events
         self._subagents.register_tool_use(tool_use_id, tool_name)
 
+        self._note_delegation_attempt(tool_use_id, tool_input.get("command"))
+
         await self._collector.record_tool_started(
             tool_name=tool_name,
             tool_use_id=tool_use_id,
@@ -552,6 +640,23 @@ class EventStreamProcessor:
         if tool_name in _SUBAGENT_TOOL_NAMES and tool_use_id:
             event = self._subagents.on_task_started(tool_use_id, tool_input)
             await self._collector.record_subagent_started(event.agent_name, tool_use_id)
+
+    def _note_delegation_attempt(self, tool_use_id: str, command: object) -> None:
+        """Record a tool_use that invokes the declared delegate CLI (#894).
+
+        Keyed off the ``command`` the tool was given, not the tool NAME: the
+        command text is what the harness actually ran, and it is the one part
+        of a delegation the primary agent cannot misreport.
+        """
+        if not isinstance(command, str):
+            return
+        if not looks_like_delegation_command(command, DELEGATION_TARGET):
+            return
+        if tool_use_id in self._delegation_tool_use_ids:
+            return
+        self._delegation_tool_use_ids.add(tool_use_id)
+        self._delegation_attempts += 1
+        logger.info("Delegation invocation detected (tool_use_id=%s)", tool_use_id)
 
     async def _handle_user_event(self, cli_event: dict[str, Any]) -> None:
         """Handle user event — process tool results."""
@@ -579,6 +684,14 @@ class EventStreamProcessor:
         # Scan tool output for embedded git hook JSONL (ADR-043)
         if tool_content:
             await self._embedded_scanner.scan_and_record(str(tool_content), tool_name)
+
+        if (
+            tool_use_id in self._delegation_tool_use_ids
+            and not is_error
+            and tool_use_id not in self._delegation_completed_ids
+        ):
+            self._delegation_completed_ids.add(tool_use_id)
+            self._delegation_successes += 1
 
         # Record tool completion
         await self._collector.record_tool_completed(

@@ -171,6 +171,7 @@ onboard-dev *flags:
         eval "$(uv run python scripts/resolve_infra_env.py)"
         # Derive vault name
         case "${APP_ENVIRONMENT:-development}" in
+            selfhost)    _VAULT="syntropic137" ;;
             development) _VAULT="syn137-dev" ;;
             production)  _VAULT="syn137-prod" ;;
             beta)        _VAULT="syn137-beta" ;;
@@ -185,12 +186,12 @@ onboard-dev *flags:
         # Audit each secret: show status (in .env, missing, needs vault)
         _HAS_VALUES=""
         _MISSING=""
-        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
+        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON; do
             _VAL="${!_VAR:-}"
             if [ -n "$_VAL" ]; then
                 # Show redacted for secrets, full for non-secrets
                 case "$_VAR" in
-                    *KEY*|*SECRET*|*TOKEN*|*PASSWORD*)
+                    *KEY*|*SECRET*|*TOKEN*|*PASSWORD*|*AUTH_JSON*)
                         _DISPLAY="${_VAL:0:4}****${_VAL: -4}"
                         ;;
                     *)
@@ -216,6 +217,7 @@ onboard-dev *flags:
                     ANTHROPIC_API_KEY)   echo "     $_VAR — needed if not using CLAUDE_CODE_OAUTH_TOKEN" ;;
                     CLAUDE_CODE_OAUTH_TOKEN) echo "     $_VAR — needed if not using ANTHROPIC_API_KEY" ;;
                     CLOUDFLARE_TUNNEL_TOKEN) echo "     $_VAR — needed only for selfhost (just selfhost-up-tunnel)" ;;
+                    CODEX_AUTH_JSON) echo "     $_VAR — needed for codex-runner workflow phases (just codex-auth-clip)" ;;
                 esac
             done
             echo ""
@@ -265,7 +267,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# Try edit first; if item doesn't exist, create it"
                 echo -n "op item edit \"$_ITEM\" --vault \"$_VAULT\""
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         echo " \\"
@@ -275,7 +277,7 @@ onboard-dev *flags:
                 echo " 2>/dev/null \\"
                 echo "|| op item create --category=login --title=\"$_ITEM\" --vault=\"$_VAULT\" \\"
                 _FIRST=true
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         if [ "$_FIRST" = true ]; then _FIRST=false; else echo " \\"; fi
@@ -289,7 +291,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# --- Clean secret values from .env files (keep keys with empty values) ---"
                 echo "echo '🧹 Cleaning secret values from .env files...'"
-                echo "_ROOT_SECRETS=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN)"
+                echo "_ROOT_SECRETS=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CODEX_AUTH_JSON)"
                 echo "for _KEY in \"\${_ROOT_SECRETS[@]}\"; do"
                 echo "  if grep -q \"^\${_KEY}=\" .env 2>/dev/null; then"
                 echo "    sed -i.bak \"s|^\${_KEY}=.*|# \${_KEY}= # managed by 1Password|\" .env && rm -f .env.bak"
@@ -398,9 +400,10 @@ dev: _workspace-check
     echo ""
     echo "✅ Full development stack ready!"
     echo ""
-    echo "   🌐 Dashboard:    http://localhost:5173"
+    echo "   🌐 Dashboard:    http://localhost:9137"
     echo "   🚀 Backend API:  http://localhost:9137"
     echo "   📊 API Docs:     http://localhost:9137/docs"
+    echo "      (5173 is the raw Vite server: UI loads, but API calls return SPA HTML with a 200 instead of JSON)"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -470,9 +473,10 @@ dev-fresh: _workspace-check
     echo ""
     echo "✅ Fresh development environment ready!"
     echo ""
-    echo "   🌐 Dashboard:    http://localhost:5173"
+    echo "   🌐 Dashboard:    http://localhost:9137"
     echo "   🚀 Backend API:  http://localhost:9137"
     echo "   📊 API Docs:     http://localhost:9137/docs"
+    echo "      (5173 is the raw Vite server: UI loads, but API calls return SPA HTML with a 200 instead of JSON)"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -631,6 +635,51 @@ workspace-build:
 workspace-versions:
     @echo "📦 Workspace image versions:"
     @docker images agentic-workspace-claude-cli | head -20
+
+# Smoke-test the image every deployment ACTUALLY pulls.
+#
+# workspace-build and _workspace-check above build and validate a LOCAL
+# claude-cli image for the dev inner loop. That is not the default: the default
+# is DEFAULT_WORKSPACE_IMAGE, a signed GHCR digest, and until this recipe
+# existed nothing local or in CI ever ran it. Preflight could be green while the
+# pinned image was missing, unsigned, or unable to start a harness - and the
+# failure would surface at workspace provision, far from the pin.
+#
+# Both harnesses are required, not just one: omni's contract is that it hosts
+# claude AND codex, and its manifest treats a single working harness as broken
+# rather than degraded.
+check-default-workspace-image:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IMAGE="$(uv run python -c 'from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE; print(DEFAULT_WORKSPACE_IMAGE)')"
+    echo "🔎 Default workspace image: $IMAGE"
+    docker pull --quiet "$IMAGE" >/dev/null
+    FAILED=0
+    # Probe THROUGH the image's entrypoint, not around it. `--entrypoint <bin>`
+    # would prove the binaries exist while bypassing /opt/agentic/entrypoint.sh,
+    # which is what configures the workspace and launches the command - and an
+    # entrypoint regression reaching :latest is the documented incident that
+    # motivated digest pinning in the first place. A check that cannot catch the
+    # regression it exists for is worse than no check.
+    for probe in claude codex skills; do
+        if OUT=$(docker run --rm "$IMAGE" "$probe" --version 2>&1); then
+            # The entrypoint logs plugin discovery before handing off, so the
+            # version is the LAST line, not the whole output.
+            echo "  ✅ $probe: $(echo "$OUT" | tail -1)"
+        else
+            echo "  ❌ $probe: FAILED"
+            echo "$OUT" | sed 's/^/       /'
+            FAILED=1
+        fi
+    done
+    if [ "$FAILED" -ne 0 ]; then
+        echo ""
+        echo "The pinned default workspace image cannot run a required harness."
+        echo "Fix the pin in packages/syn-shared/src/syn_shared/settings/workspace_images.py"
+        echo "or the upstream image, before releasing."
+        exit 1
+    fi
+    echo "✅ Default workspace image runs claude, codex, and skills"
 
 # --- Testing ---
 
@@ -908,6 +957,14 @@ check-untyped-dicts:
         print("\nRatchet exceeded! Reduce untyped dicts or lower value in fitness-exceptions.toml.")
         sys.exit(1)
 
+# Ratchet: tests that no CI job selects, and disarmed (xfail) guards.
+# CI runs `pytest -m unit`, so an unmarked test is collected by nothing and can
+# fail on main indefinitely behind a green check. Budgets live in
+# fitness-exceptions.toml [test-markers.*]; both must ratchet to 0.
+# See docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md
+check-test-markers:
+    @uv run python scripts/check_test_markers.py
+
 # Run type checker (strict mode)
 typecheck:
     uv run pyright
@@ -917,11 +974,11 @@ validate-domain-events:
     uv run python scripts/validate_domain_events.py
 
 # Check architecture fitness thresholds (APSS-based, reads .topology/metrics/)
-fitness-check: aps-build check-untyped-dicts
+fitness-check: aps-build check-untyped-dicts check-test-markers
     # Always regenerate topology before checking — never validate against stale data
     just topology-analyze
     @echo "Checking architecture fitness thresholds..."
-    {{_aps_bin}} run fitness validate .
+    {{_aps_bin}} run architecture-fitness validate .
     @echo "✅ Fitness threshold checks passed"
 
 # Check structural & ES invariants (pytest-based, AST analysis)
@@ -929,6 +986,51 @@ fitness-invariants:
     @echo "Checking structural & ES invariants..."
     uv run pytest ci/fitness/ -v --tb=short -m architecture
     @echo "✅ Invariant checks passed"
+
+# Every STATIC CI gate, in ONE place.
+#
+# NOT a claim that CI ran entirely: unit tests, the dashboard build, CLI checks,
+# integration and security scanning run in their own jobs and are not here. The
+# earlier wording said "every CI gate", which was false and is exactly the kind
+# of overstatement that makes a green check untrustworthy. `just qa` is the
+# fuller local sweep; this is the fast one a hook can run.
+#
+# CI, the pre-push hook and the AGENTS.md checklist all call this target. They
+# used to carry three independently-maintained lists, and they drifted:
+# check-compose, check-default-workspace-image and check-plugin-schemas were
+# reachable from no local recipe at all, the hook ran only the THRESHOLD half
+# of fitness, and generated-file drift was invisible locally. PR #931 hit three
+# of those in a single push.
+#
+# Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
+# if a `just` target CI runs is not in this closure.
+preflight: lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-env-example check-plugin-schemas
+    @echo "✅ preflight: every STATIC CI gate passed locally"
+    @echo "   Not covered here (run separately): unit tests (just test),"
+    @echo "   dashboard build, CLI checks, integration, security scanning."
+
+# Codegen drift, detected by what codegen CHANGES rather than a hardcoded list.
+#
+# Snapshots the dirty set, runs codegen, compares. A hardcoded path list (what
+# the hook used) silently stops covering any artifact added later - that is how
+# a stale .env.example reached CI. Diffing the whole tree instead would flag the
+# author's own work in progress, so the DELTA is what matters.
+codegen-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    before=$(mktemp)
+    git status --porcelain > "$before"
+    just codegen > /dev/null 2>&1
+    after=$(mktemp)
+    git status --porcelain > "$after"
+    if ! diff -q "$before" "$after" > /dev/null; then
+        echo "❌ Codegen drift. Run 'just codegen' and commit these:"
+        diff "$before" "$after" | grep '^>' | sed 's/^> /   /'
+        rm -f "$before" "$after"
+        exit 1
+    fi
+    rm -f "$before" "$after"
+    echo "✓ Codegen up to date"
 
 # All fitness checks
 fitness: fitness-check fitness-invariants
@@ -946,28 +1048,29 @@ vsa-validate:
 
 # --- Topology (APS Code Topology Standard) ---
 
-# Path to APS CLI binary
-_aps_bin := "lib/agent-paradise-standards-system/target/release/aps"
+# Path to APS CLI binary.
+# `aps-build` compiles the `aps-cli` package, whose [[bin]] target is named
+# `apss-dev` (the monorepo dev binary). The per-project composed CLI that
+# `apss install` produces at .apss/bin/apss is NOT built here - see #807.
+_aps_bin := "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-# Build APS CLI (cached — only rebuilds when source changes)
+# Build APS CLI. Always delegate freshness to cargo - a shell guard keyed on
+# Cargo.lock mtime misses APSS source, manifest, and [[bin]]-name changes, so it
+# happily reuses a binary compiled from a different submodule revision.
 aps-build:
-    @if [ ! -f {{_aps_bin}} ] || [ lib/agent-paradise-standards-system/Cargo.lock -nt {{_aps_bin}} ]; then \
-        echo "🔨 Building APS CLI..."; \
-        cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli; \
-    else \
-        echo "✅ APS CLI already built"; \
-    fi
+    @echo "🔨 Building APS CLI..."
+    cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
 
 # Regenerate .topology/ artifacts from current codebase
 topology-analyze: aps-build
     @echo "🔍 Analyzing codebase topology..."
-    {{_aps_bin}} run topology analyze . --output .topology --seed 42
+    {{_aps_bin}} run code-topology analyze . --output .topology --seed 42
     @echo "✅ Topology artifacts generated"
 
 # Generate CodeCity and 3D visualizations
 topology-viz: aps-build
     @echo "🎨 Generating topology visualizations..."
-    {{_aps_bin}} run topology viz .topology --type all --output .topology/viz/
+    {{_aps_bin}} run code-topology viz .topology --type all --output .topology/viz/
     @echo "✅ Visualizations generated in .topology/viz/"
 
 # Full topology regeneration (analyze + visualize)
@@ -1061,6 +1164,75 @@ _selfhost-preflight:
     # --- Workspaces directory ---
     mkdir -p workspaces
     echo "  ✅ workspaces/"
+
+    # --- Stale compose project (upgrade hazard) ---
+    # The selfhost overlay uses FIXED container names (syn137-api and friends),
+    # so if those containers are owned by a DIFFERENT compose project than the
+    # one this invocation will create, `up` collides on the name instead of
+    # recreating them.
+    #
+    # Compared against the TARGET project, not a hardcoded list of old ones.
+    # An earlier version treated syntropic137_production as always-stale, which
+    # permanently blocked a legitimate APP_ENVIRONMENT=production selfhost
+    # stack from restarting: its own containers looked stale to it.
+    #
+    # Set difference via filters only - docker's --format uses Go templates
+    # whose braces collide with just's interpolation.
+    #
+    # Volumes are explicitly named (syn137_db_data and friends) and are never
+    # project-prefixed, so this is a rename to perform, not data to migrate.
+    TARGET_PROJECT="syntropic137_${APP_ENVIRONMENT}"
+    _all=$(docker ps -aq --filter 'name=^syn137-' 2>/dev/null | sort)
+    _mine=$(docker ps -aq --filter 'name=^syn137-' \
+        --filter "label=com.docker.compose.project=${TARGET_PROJECT}" 2>/dev/null | sort)
+    _stray=$(comm -23 <(printf '%s\n' "$_all") <(printf '%s\n' "$_mine") | grep -v '^$' || true)
+
+    if [ -n "$_stray" ]; then
+        # Name the owning tier so the recovery command is exact. Probing known
+        # tiers avoids a Go-template `docker inspect`.
+        _owner=""
+        for _tier in development production selfhost beta staging; do
+            if [ -n "$(docker ps -aq --filter 'name=^syn137-' \
+                --filter "label=com.docker.compose.project=syntropic137_${_tier}" 2>/dev/null)" ]; then
+                _owner="${_tier}"
+                break
+            fi
+        done
+        echo "  ❌ Selfhost containers (syn137-*) belong to a different compose project"
+        echo "     This invocation targets: ${TARGET_PROJECT}"
+        echo "     Starting now would collide on those fixed container names."
+        echo ""
+        if [ -n "$_owner" ]; then
+            echo "     Stop the old project first. Data volumes are explicitly"
+            echo "     named and are NOT removed by this:"
+            echo ""
+            echo "       APP_ENVIRONMENT=${_owner} docker compose \\"
+            echo "         -p syntropic137_${_owner} \\"
+            echo "         -f docker/docker-compose.yaml \\"
+            echo "         -f docker/docker-compose.selfhost.yaml \\"
+            echo "         down --remove-orphans"
+            echo ""
+            echo "     Containers are removed by their project label, so they"
+            echo "     all go; --remove-orphans catches extras such as"
+            echo "     syn137-cloudflared."
+            echo ""
+            echo "     A stale agent network may remain, because the old stack"
+            echo "     created it under a name the current files no longer"
+            echo "     derive. Check and remove once nothing is attached:"
+            echo "       docker network ls --filter 'name=syntropic137_.*_agent-net'"
+            echo "       docker network rm <name>"
+        else
+            echo "     Could not determine the owning project. Inspect with:"
+            echo "       docker ps -a --filter 'name=^syn137-'"
+        fi
+        echo ""
+        echo "     Do this while no workflow executions are running: agent"
+        echo "     containers on the old agent network cannot reach the"
+        echo "     recreated envoy-proxy on the new one."
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "  ✅ No selfhost containers under a stale compose project"
+    fi
 
     if [ "$ERRORS" -gt 0 ]; then
         echo ""
@@ -1237,6 +1409,7 @@ secrets-store-token:
     if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
     # Derive vault from APP_ENVIRONMENT
     case "${APP_ENVIRONMENT:-}" in
+        selfhost)    _OP_VAULT="syntropic137" ;;
         development) _OP_VAULT="syn137-dev" ;;
         production)  _OP_VAULT="syn137-prod" ;;
         beta)        _OP_VAULT="syn137-beta" ;;
@@ -1275,6 +1448,7 @@ secrets-delete-token:
     if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
     # Derive vault from APP_ENVIRONMENT
     case "${APP_ENVIRONMENT:-}" in
+        selfhost)    _OP_VAULT="syntropic137" ;;
         development) _OP_VAULT="syn137-dev" ;;
         production)  _OP_VAULT="syn137-prod" ;;
         beta)        _OP_VAULT="syn137-beta" ;;
@@ -1344,7 +1518,11 @@ docs-regen: diagram docs-gen
 
 # Regenerate all derived artifacts and fail if any are uncommitted.
 # Runs `just codegen` once, then checks architecture docs, CLI docs, and API artifacts.
-docs-sync:
+# `check-env-example` belongs here: .env.example is GENERATED from the
+# Settings classes, so it drifts exactly like the OpenAPI spec and the CLI
+# types this recipe already guards. It was previously reachable from no
+# local recipe at all, so a stale file could only be caught by CI (#931).
+docs-sync: check-env-example
     @echo "🔄 Regenerating architecture documentation..."
     @uv run python scripts/generate-architecture-docs.py > /tmp/docs-gen.txt 2>&1
     @if git diff --quiet docs/architecture/projection-subscriptions.md docs/architecture/event-flows/README.md README.md 2>/dev/null; then \
@@ -1383,6 +1561,8 @@ codegen: docs-cli-gen
     cd apps/syn-cli-node && pnpm run generate:types
     @echo "📄 Generating Dashboard TypeScript types..."
     cd apps/syn-dashboard-ui && pnpm run generate:types
+    @echo "📄 Exporting plugin JSON schemas..."
+    uv run python scripts/export_plugin_schemas.py
     @echo "✅ All generated artifacts up to date"
 
 # Build docs site (codegen + Next.js build, for deployment)
@@ -1421,6 +1601,30 @@ submodules-update:
 gen-env:
     uv run python scripts/generate_env_example.py
 
+# Re-mint the codex credential and install it, end to end.
+# A ChatGPT account has ONE credential lineage: `codex login` revokes whatever
+# was there, including the copy this deployment holds. So re-minting and
+# re-installing are one operation, not two, and skipping the rebuild leaves the
+# old value live because container env is fixed at create time.
+codex-reauth:
+    @echo "This revokes the CURRENT codex credential everywhere it is installed."
+    @echo "Anything else using it will fail until it receives the new value."
+    @printf "Continue? [y/N] " && read -r ans && [ "$ans" = "y" ] || { echo "aborted"; exit 1; }
+    codex login
+    uv run python scripts/codex_auth_install.py
+    @echo ""
+    @echo "Installed to .env. Now rebuild so containers pick it up:"
+    @echo "  just dev-down && just dev"
+
+# Report how long the configured codex credential has left.
+codex-auth-status:
+    @uv run python scripts/codex_auth_install.py --status-only
+
+# Copy local ~/.codex/auth.json (compacted) to clipboard for 1Password or .env.
+# Pass --dotenv for a ready-to-paste `CODEX_AUTH_JSON='...'` .env line.
+codex-auth-clip *flags:
+    uv run python scripts/copy_codex_auth.py {{flags}}
+
 # Generate published Docker Compose (docker-compose.syntropic137.yaml) from base + selfhost
 gen-compose:
     uv run python scripts/generate_published_compose.py
@@ -1428,6 +1632,28 @@ gen-compose:
 # Check published compose is up to date (CI mode -- fails if stale)
 check-compose:
     uv run python scripts/generate_published_compose.py --check
+
+# Plugin JSON schemas must match the Pydantic models. These are what third-party
+# plugin authors validate against, so drift ships a schema that rejects features
+# the release actually supports.
+check-plugin-schemas:
+    uv run python scripts/export_plugin_schemas.py --check
+
+# .env.example is generated from the Settings classes. Drift means the file
+# operators copy documents values the code no longer uses - which is how a stale
+# workspace image digest shipped in it while the pin had already moved.
+check-env-example:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    uv run python scripts/generate_env_example.py >/dev/null
+    if git diff --quiet .env.example infra/.env.example; then
+        echo "OK: .env.example is up to date"
+    else
+        echo "ERROR: .env.example is out of sync with the Settings classes"
+        echo "Run: just gen-env"
+        git diff --stat .env.example infra/.env.example
+        exit 1
+    fi
 
 # Validate all Docker Compose overlay combinations parse correctly
 check-compose-overlays:
@@ -1523,7 +1749,7 @@ deps-audit-py:
     echo "=== Python Dependency Audit ==="
     uv tool install pip-audit==2.7.3 --quiet
     uv export --format requirements-txt --no-hashes --frozen --quiet \
-        | uv tool run pip-audit --disable-pip -r /dev/stdin
+        | uv tool run pip-audit --disable-pip --no-deps -r /dev/stdin
 
 # Audit Node.js dependencies via OSV Scanner (same tool as CI)
 deps-audit-npm:
@@ -1606,6 +1832,10 @@ _ensure-env:
         cp infra/.env.example infra/.env; \
         echo "📝 Created infra/.env from infra/.env.example"; \
     fi
+
+# Report config health + WHERE each value came from (shell/.env/1Password). Adds session capture, which dev-doctor never checks
+doctor *ARGS:
+    @uv run python scripts/doctor.py {{ARGS}}
 
 # Check .env for common misconfigurations and warn loudly
 _env-check: _ensure-env

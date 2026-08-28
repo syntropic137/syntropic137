@@ -244,3 +244,101 @@ class TestListWorkflowsHandler:
         results = await handler.handle(query)
 
         assert results == []
+
+
+@pytest.mark.unit
+class TestWorkflowTemplateUpdatedProjection:
+    """Reinstall must refresh the read model (issue #822).
+
+    Without a handler for WorkflowTemplateUpdated the aggregate upserts
+    correctly while the list keeps serving the first install's definition, so
+    a successful reinstall looks like a no-op to the CLI and dashboard.
+    """
+
+    @pytest.mark.asyncio
+    async def test_updated_refreshes_the_summary(self, projection: WorkflowListProjection):
+        await projection.on_workflow_template_created(
+            {
+                "workflow_id": "code-review",
+                "name": "Code Review",
+                "workflow_type": "review",
+                "classification": "standard",
+                "phases": [{"phase_id": "p1"}],
+            }
+        )
+
+        await projection.on_workflow_template_updated(
+            {
+                "workflow_id": "code-review",
+                "name": "Code Review v2",
+                "workflow_type": "review",
+                "classification": "standard",
+                "phases": [{"phase_id": "p1"}, {"phase_id": "p2"}],
+            }
+        )
+
+        summary = await projection._store.get(projection.PROJECTION_NAME, "code-review")
+        assert summary is not None
+        assert summary["name"] == "Code Review v2"
+        assert summary["phase_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_updated_preserves_run_history(self, projection: WorkflowListProjection):
+        """Runs belong to the template, not to a particular definition."""
+        await projection.on_workflow_template_created(
+            {
+                "workflow_id": "code-review",
+                "name": "Code Review",
+                "workflow_type": "review",
+                "classification": "standard",
+                "phases": [],
+            }
+        )
+        await projection.on_workflow_execution_started({"workflow_id": "code-review"})
+        await projection.on_workflow_execution_started({"workflow_id": "code-review"})
+
+        await projection.on_workflow_template_updated(
+            {
+                "workflow_id": "code-review",
+                "name": "Code Review v2",
+                "workflow_type": "review",
+                "classification": "standard",
+                "phases": [],
+            }
+        )
+
+        summary = await projection._store.get(projection.PROJECTION_NAME, "code-review")
+        assert summary is not None
+        assert summary["runs_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_updated_unarchives(self, projection: WorkflowListProjection):
+        """Reinstalling brings back a template a failed update had archived."""
+        await projection.on_workflow_template_created(
+            {
+                "workflow_id": "code-review",
+                "name": "Code Review",
+                "workflow_type": "review",
+                "classification": "standard",
+                "phases": [],
+            }
+        )
+        await projection.on_workflow_template_archived({"workflow_id": "code-review"})
+
+        archived = await projection._store.get(projection.PROJECTION_NAME, "code-review")
+        assert archived is not None
+        assert archived["is_archived"] is True
+
+        await projection.on_workflow_template_updated(
+            {
+                "workflow_id": "code-review",
+                "name": "Code Review",
+                "workflow_type": "review",
+                "classification": "standard",
+                "phases": [],
+            }
+        )
+
+        restored = await projection._store.get(projection.PROJECTION_NAME, "code-review")
+        assert restored is not None
+        assert restored["is_archived"] is False

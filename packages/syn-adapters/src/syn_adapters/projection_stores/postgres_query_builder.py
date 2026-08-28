@@ -34,12 +34,23 @@ def _build_where_clause(
 
 
 def _build_order_clause(order_by: str | None) -> str:
-    """Build an ORDER BY clause from an optional sort specifier."""
+    """Build an ORDER BY clause from an optional sort specifier.
+
+    NULLS LAST ON BOTH DIRECTIONS, and it is not cosmetic. Postgres defaults
+    ``DESC`` to ``NULLS FIRST``, so a projection where some rows predate a field
+    puts every row MISSING that field ahead of every row that has it. With
+    enough legacy rows the newest record is pushed off the first page entirely,
+    which reads to a user as the write having failed.
+
+    That is issue #920: artifacts created before ArtifactCreated v4 carry a null
+    ``created_at``, and ``-created_at`` sorted them above every artifact created
+    since. Rows that cannot answer the sort must not outrank rows that can.
+    """
     if not order_by:
         return " ORDER BY updated_at DESC"
     if order_by.startswith("-"):
-        return f" ORDER BY data->>'{order_by[1:]}' DESC"
-    return f" ORDER BY data->>'{order_by}' ASC"
+        return f" ORDER BY data->>'{order_by[1:]}' DESC NULLS LAST"
+    return f" ORDER BY data->>'{order_by}' ASC NULLS LAST"
 
 
 def build_query(

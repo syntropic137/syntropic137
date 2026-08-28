@@ -9,6 +9,10 @@ on:
       - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
       - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"
+      # A digest bump changes which image every deployment runs, so it must
+      # trigger the workflow that exercises workspace images.
+      - "packages/syn-shared/src/syn_shared/settings/workspace_images.py"
+      - "scripts/e2e_agent_in_container_test.py"
   pull_request:
     paths:
       - "packages/syn-adapters/src/syn_adapters/workspaces/**"
@@ -16,6 +20,10 @@ on:
       - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
       - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"
+      # A digest bump changes which image every deployment runs, so it must
+      # trigger the workflow that exercises workspace images.
+      - "packages/syn-shared/src/syn_shared/settings/workspace_images.py"
+      - "scripts/e2e_agent_in_container_test.py"
   workflow_dispatch:
     inputs:
       run_full_e2e:
@@ -59,11 +67,15 @@ jobs:
         run: |
           uv run scripts/build-provider.py claude-cli --tag agentic-workspace-claude-cli:latest
 
-      - name: Verify image
+      - name: Verify image through its entrypoint
         run: |
-          # Use --entrypoint to bypass node base image entrypoint
-          docker run --rm --entrypoint python3 agentic-workspace-claude-cli:latest --version
-          docker run --rm --entrypoint claude agentic-workspace-claude-cli:latest --version || echo "Claude CLI check (optional)"
+          # Probe THROUGH /opt/agentic/entrypoint.sh, not around it. The previous
+          # --entrypoint form proved a binary existed while bypassing the startup
+          # path that actually configures the workspace, so an entrypoint
+          # regression passed. The `|| echo` on the claude probe also made that
+          # check unconditionally green; a failure now fails the job.
+          docker run --rm agentic-workspace-claude-cli:latest python3 --version
+          docker run --rm agentic-workspace-claude-cli:latest claude --version
 
   #############################################################################
   # E2E CONTAINER TEST - Full integration (manual trigger only)
@@ -97,7 +109,6 @@ jobs:
           # Build workspace image via build-provider.py (stages required context)
           cd lib/agentic-primitives && uv run scripts/build-provider.py claude-cli --tag agentic-workspace-claude-cli:latest && cd ../..
           uv run python scripts/e2e_agent_in_container_test.py
-        continue-on-error: true
 
   #############################################################################
   # SUMMARY

@@ -212,13 +212,52 @@ class TestGetDefaultIsolationBackend:
         assert backend == IsolationBackend.GVISOR
 
 
+@pytest.mark.unit
 class TestWorkspaceImages:
     """Test workspace image registry (workspace_images.py)."""
 
     def test_default_image_is_ghcr(self) -> None:
         """Default image should reference GHCR, not a local-only name."""
         assert DEFAULT_WORKSPACE_IMAGE.startswith("ghcr.io/")
-        assert "agentic-workspace-claude-cli" in DEFAULT_WORKSPACE_IMAGE
+        assert "omni-agent-workspace" in DEFAULT_WORKSPACE_IMAGE
+
+    def test_default_image_is_digest_pinned(self) -> None:
+        """The default image must be immutable: a digest, never a tag.
+
+        This is the whole point of the pin. A tag can be repointed by the
+        publisher at any time, so a tag default means every upstream merge
+        silently changes what we run.
+        """
+        from syn_shared.settings.workspace_images import (
+            PINNED_DIGESTS,
+            WorkspaceImageProvider,
+        )
+
+        repository, separator, digest = DEFAULT_WORKSPACE_IMAGE.partition("@")
+        assert separator == "@", f"{DEFAULT_WORKSPACE_IMAGE} is not digest-pinned"
+        assert digest.startswith("sha256:")
+        assert ":" not in repository, "digest reference must not also carry a tag"
+        assert digest == PINNED_DIGESTS[WorkspaceImageProvider.OMNI_AGENT]
+
+    def test_no_pinned_digest_is_a_tag(self) -> None:
+        """Every pinned digest must be a well-formed sha256 hex digest."""
+        import re
+
+        from syn_shared.settings.workspace_images import PINNED_DIGESTS
+
+        for provider, digest in PINNED_DIGESTS.items():
+            assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest), (
+                f"{provider.value} pin is not a sha256 digest: {digest}"
+            )
+
+    def test_every_provider_has_a_pin(self) -> None:
+        """A provider without a pin would silently fall back to nothing usable."""
+        from syn_shared.settings.workspace_images import (
+            PINNED_DIGESTS,
+            WorkspaceImageProvider,
+        )
+
+        assert set(PINNED_DIGESTS) == set(WorkspaceImageProvider)
 
     def test_workspace_image_ref_builds_correct_ref(self) -> None:
         """workspace_image_ref should build a fully-qualified image reference."""
@@ -229,6 +268,22 @@ class TestWorkspaceImages:
 
         ref = workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI, "2.1.76")
         assert ref == "ghcr.io/agentparadise/agentic-workspace-claude-cli:2.1.76"
+
+    def test_workspace_image_ref_rejects_tag_and_digest(self) -> None:
+        """Supplying both a tag and a digest is ambiguous, so it is an error."""
+        import pytest
+
+        from syn_shared.settings.workspace_images import (
+            WorkspaceImageProvider,
+            workspace_image_ref,
+        )
+
+        with pytest.raises(ValueError, match="not both"):
+            workspace_image_ref(
+                WorkspaceImageProvider.CLAUDE_CLI,
+                "latest",
+                digest="sha256:" + "0" * 64,
+            )
 
     def test_workspace_image_ref_custom_registry(self) -> None:
         """workspace_image_ref should support custom registry/owner."""

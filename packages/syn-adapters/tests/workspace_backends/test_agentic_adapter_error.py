@@ -12,6 +12,24 @@ from syn_adapters.workspace_backends.agentic.adapter import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _stub_image_verification() -> object:
+    """Stub the supply-chain gate; these tests are about error surfacing.
+
+    `test:latest` is deliberately not a verifiable reference. The gate's own
+    behaviour is covered in tests/workspace_backends/test_image_verification.py.
+    """
+
+    async def _passthrough(image_ref: str) -> str:
+        return image_ref
+
+    with patch(
+        "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+        side_effect=_passthrough,
+    ) as stub:
+        yield stub
+
+
 @pytest.mark.asyncio
 async def test_provision_failure_surfaces_real_message() -> None:
     """Underlying docker error must propagate as WorkspaceProvisionError with context.

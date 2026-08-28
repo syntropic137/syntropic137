@@ -383,6 +383,7 @@ class PhaseDefinitionResponse(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     argument_hint: str | None = None
     model: str | None = None
+    provider: str | None = None
     execution_type: str = "sequential"
     max_tokens: int | None = None
     input_artifact_types: list[str] = Field(default_factory=list)
@@ -428,6 +429,11 @@ class ExecutionSummary(BaseModel):
     total_cache_creation_tokens: int = 0
     total_cache_read_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     tool_call_count: int = 0
     error_message: str | None = None
     repos: list[str]
@@ -448,6 +454,11 @@ class ExecutionDetail(BaseModel):
     total_cache_creation_tokens: int = 0
     total_cache_read_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
@@ -464,6 +475,13 @@ class SessionSummary(BaseModel):
     workflow_id: str | None = None
     execution_id: str | None = None
     phase_id: str | None = None
+    #: The session that delegated to this one, when it is a delegate (#895).
+    #: Present in the domain read model and previously dropped at this boundary,
+    #: so a caller could not tell a delegate from a leader - the linkage existed
+    #: and nothing could read it.
+    parent_session_id: str | None = None
+    #: The top of the delegation chain. Equal to ``id`` for a leader.
+    root_session_id: str | None = None
     status: str = ""
     agent_type: str = ""
     repos: list[str] = Field(default_factory=list)
@@ -712,11 +730,21 @@ class PhaseExecution(BaseModel):
     status: str
     session_id: str | None = None
     artifact_id: str | None = None
+    # Why a failed phase reports the reason it failed (#891): the projection
+    # already writes error_message onto the phase record, and the HTTP model
+    # already declares the field. This intermediate model was the one hop that
+    # dropped it, so every failed phase surfaced error_message: null.
+    error_message: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     cost_usd: Decimal = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     duration_seconds: float | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -735,6 +763,11 @@ class ExecutionDetailFull(BaseModel):
     phases: list[PhaseExecution] = Field(default_factory=list)
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     started_at: datetime | str | None = None
     completed_at: datetime | str | None = None
     error_message: str | None = None
@@ -765,6 +798,13 @@ class SessionDetail(BaseModel):
     workflow_name: str | None = None
     execution_id: str | None = None
     phase_id: str | None = None
+    #: The session that delegated to this one, when it is a delegate (#895).
+    #: Present in the domain read model and previously dropped at this boundary,
+    #: so a caller could not tell a delegate from a leader - the linkage existed
+    #: and nothing could read it.
+    parent_session_id: str | None = None
+    #: The top of the delegation chain. Equal to ``id`` for a leader.
+    root_session_id: str | None = None
     agent_type: str = ""
     status: str = ""
     workspace_path: str | None = None
@@ -775,6 +815,11 @@ class SessionDetail(BaseModel):
     cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations that carried no usable rate and so added nothing to the total.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
     agent_model: str | None = None
     cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
     operations: list[ToolOperation] = Field(default_factory=list)
@@ -839,6 +884,12 @@ class SessionCostData(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    """Sum of input, output, cache creation and cache read tokens (issue #873).
+
+    Means the same thing as ``total_tokens`` on the executions read model.
+    Excluding the cache components undercounted this by up to ~68x while
+    cost stayed correct, because pricing reads the cache fields directly.
+    """
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     tool_calls: int = 0
@@ -846,6 +897,8 @@ class SessionCostData(BaseModel):
     duration_ms: int = 0
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate; non-zero means cost is INCOMPLETE."""
     is_finalized: bool = False
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -859,14 +912,41 @@ class ExecutionCostData(BaseModel):
     session_count: int = 0
     session_ids: list[str] = Field(default_factory=list)
     total_cost_usd: Decimal = Decimal("0")
+    token_cost_usd: Decimal = Decimal("0")
+    compute_cost_usd: Decimal = Decimal("0")
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    """Sum of input, output, cache creation and cache read tokens (issue #873).
+
+    Must equal ``total_tokens`` on ``/api/v1/executions/{id}`` for the same
+    execution.
+    """
+    # These four were absent from this DTO, so the query service computed them
+    # correctly and the mapping silently dropped them - the response then fell
+    # back to its `= 0` defaults. An execution reported 0 cache reads and 0 tool
+    # calls while its own sessions reported 144,640 and 11.
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    tool_calls: int = 0
+    turns: int = 0
     duration_ms: float = 0.0
     cost_by_phase: dict = Field(default_factory=dict)
+    unpriced_by_phase: dict = Field(default_factory=dict)
+    """Per-phase count of observations that could not be priced.
+
+    A phase absent from ``cost_by_phase`` but present here cost an unknown
+    amount; a phase in neither genuinely had no spend (#890).
+    """
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate, so they contributed no cost.
+
+    Non-zero means the reported cost is INCOMPLETE, not that work was free.
+    Surfaced so a client can render "unpriced" rather than "$0.00" (ADR-067 D5).
+    """
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -878,6 +958,7 @@ class CostSummary(BaseModel):
     total_sessions: int = 0
     total_executions: int = 0
     total_tokens: int = 0
+    """Sum of all four token components across executions (issue #873)."""
     total_tool_calls: int = 0
     top_models: list[dict] = Field(default_factory=list)
     top_sessions: list[dict] = Field(default_factory=list)
@@ -1358,8 +1439,11 @@ class GlobalCostResponse(BaseModel):
     organization_id: str = ""
     total_cost_usd: str = "0"
     total_tokens: int = 0
+    """Sum of input, output, cache creation and cache read tokens (issue #873)."""
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
     cost_by_repo: dict[str, str] = Field(default_factory=dict)
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
     cost_by_model: dict[str, str] = Field(default_factory=dict)
@@ -1409,6 +1493,90 @@ class ToolTimelineResponse(BaseModel):
     executions: list[ToolTimelineEntry] = Field(default_factory=list)
 
 
+class CaptureStatusEntry(BaseModel):
+    """One recorded session-capture verdict.
+
+    Mirrors the observation the workspace adapter writes on the observability
+    lane. The observed fields are None exactly when something went wrong, which
+    is when a backfill needs them most - so the expected values are carried
+    alongside rather than in place of them.
+    """
+
+    session_id: str
+    execution_id: str | None = None
+    phase_id: str | None = None
+    workspace_id: str | None = None
+    recorded_at: datetime | None = None
+
+    state: str
+    """captured, incomplete, failed, unknown or disabled.
+
+    Lowercase, matching the recorded CaptureState values. Anything this build
+    cannot recognise is reported as "unknown" rather than echoed back.
+    """
+
+    needs_backfill: bool
+    """Derived from the state, never read from the stored flag.
+
+    True for anything except a settled verdict, so a state that cannot be
+    trusted asks for a retry. A re-sent transcript is a no-op (the store dedups
+    on content hash); a skipped one is lost permanently.
+    """
+
+    partition: str | None = None
+    """The spool partition this execution wrote to: what a retry needs to find
+    the transcripts again."""
+
+    expected_deployment: str | None = None
+    origin_deployment: str | None = None
+
+    agent_session_ids: list[str] | None = None
+    """The agent-native session ids the store confirmed for this phase.
+
+    A phase has MANY. `session_id` above is the uuid4 syn137 assigns per phase
+    run; these are the ids the AGENTS chose for themselves, and one phase yields
+    several whenever it delegates - a codex phase handing work to claude, a
+    subagent, a resumed thread. The host never passes its id to the agent, so
+    the two namespaces are disjoint and this field is the only thing relating
+    them.
+
+    Use it to fetch a phase's transcripts from the session store, which keys on
+    the agent-native id.
+
+    null means the exporter did not report them (its result schema predates the
+    `sessions` array), which is NOT the same as [] meaning it confirmed none.
+    """
+
+
+class CaptureStatusResponse(BaseModel):
+    """Recorded capture verdicts, newest first."""
+
+    total: int = 0
+    """How many entries this response contains, after any filter."""
+
+    needs_backfill_count: int = 0
+    """How many of the scanned verdicts need a backfill, before any filter."""
+
+    unattributable_count: int = 0
+    """Scanned verdicts with no session id, which cannot be acted on.
+
+    Reported rather than dropped: a response that omitted them could read as
+    all-clear while a failure sat unattributable in the store.
+    """
+
+    scanned: int = 0
+    """How many stored verdicts were examined to build this response."""
+
+    truncated: bool = False
+    """True when the scan filled its limit, so older verdicts may exist.
+
+    The limit is applied by the database BEFORE the needs_backfill filter, so
+    an empty backlog on a truncated scan does NOT mean there is no backlog.
+    """
+
+    entries: list[CaptureStatusEntry] = Field(default_factory=list)
+
+
 class SessionTokenMetrics(BaseModel):
     """Token usage metrics for a session."""
 
@@ -1444,3 +1612,274 @@ class SSEHealthResponse(BaseModel):
     status: str
     active_executions: int | None = None
     active_connections: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# Claude plugin response models (issue #726)
+# ---------------------------------------------------------------------------
+
+
+class AddGlobalClaudePluginRequest(BaseModel):
+    """Request body for ``POST /claude-plugins/global`` (Phase A redesign).
+
+    Takes the display name plus version of an already-registered plugin. The
+    handler looks the entry up in the lock projection and refuses to add
+    anything that has not been registered first via
+    ``POST /claude-plugins/registrations``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(..., min_length=1)
+    version: str = Field(..., min_length=1)
+
+
+class ClaudePluginFileEntry(BaseModel):
+    """One file in the uploaded plugin tree (``POST /claude-plugins/registrations``).
+
+    ``content_b64`` is the base64-encoded byte content; the API decodes it back
+    into raw bytes before hashing/uploading. base64 keeps binary-safe payloads
+    inside the JSON envelope without forcing the caller to choose an encoding.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rel_path: str = Field(..., min_length=1)
+    content_b64: str
+
+
+class RegisterClaudePluginRequest(BaseModel):
+    """Request body for ``POST /claude-plugins/registrations`` (Phase A).
+
+    The CLI uploads the entire plugin tree inline alongside the parsed manifest;
+    the API hashes the normalized tree, stores it via the storage port, and
+    persists the registration aggregate. Idempotent on existing
+    ``(source_url, version, name)`` (re-uploading is a safe no-op).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_url: str = Field(..., min_length=1)
+    version: str = Field(..., min_length=1)
+    name: str | None = Field(
+        default=None,
+        description=("Display name override; when omitted the manifest's ``name`` is used."),
+    )
+    manifest: dict[str, object] = Field(
+        ..., description="Pre-parsed contents of .claude-plugin/plugin.json."
+    )
+    files: list[ClaudePluginFileEntry] = Field(
+        ..., min_length=1, description="Every file in the plugin tree (base64-encoded)."
+    )
+
+
+class RegisterClaudePluginResponse(BaseModel):
+    """Response payload for ``POST /claude-plugins/registrations``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    version: str
+    sha256: str = Field(..., description="Content-addressed sha of the normalized tree.")
+
+
+class GlobalClaudePluginResponse(BaseModel):
+    """A single entry in the global claude plugin registry."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    source_url: str
+    version: str
+    resolved_sha: str
+    added_at: datetime | None = None
+
+
+class GlobalClaudePluginListResponse(BaseModel):
+    """List of currently-registered global claude plugins."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    plugins: list[GlobalClaudePluginResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class ClaudePluginLockResponse(BaseModel):
+    """A single lock entry (one ``(source_url, version)`` pair)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    source_url: str
+    version: str
+    resolved_sha: str
+    tree_storage_prefix: str
+    registered_at: datetime | None = None
+
+
+class ClaudePluginLockListResponse(BaseModel):
+    """List of every entry currently in the claude plugin lock projection."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    plugins: list[ClaudePluginLockResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class RemoveGlobalClaudePluginResponse(BaseModel):
+    """Confirmation payload for ``DELETE /claude-plugins/global/{name}``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    status: str
+
+
+# ---------------------------------------------------------------------------
+# Skill response models (issue #772)
+# ---------------------------------------------------------------------------
+
+
+class SkillFilePayload(BaseModel):
+    """One file in the uploaded skill tree (``POST /skills/registrations``).
+
+    Mirrors ``ClaudePluginFileEntry``. ``content_base64`` is the base64-encoded
+    byte content; the API decodes it back into raw bytes before hashing and
+    uploading.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rel_path: str = Field(..., min_length=1, max_length=1024)
+    # WHY 96_000_000: comfortably above the legitimate per-tree decoded-size
+    # cap (MAX_SKILL_TREE_BYTES = 50 MiB in routes/skills.py) once base64
+    # expansion (~4/3) is accounted for, so the decoded-size check in
+    # `_decode_files` stays the meaningful gate -- this field bound only
+    # stops a client from forcing pydantic to hold an unbounded string
+    # before that check ever runs.
+    content_base64: str = Field(..., max_length=96_000_000)
+
+
+class RegisterSkillRequest(BaseModel):
+    """Request body for ``POST /skills/registrations`` (issue #772).
+
+    The CLI uploads the entire skill tree inline; the API hashes the
+    normalized tree, stores it via the storage port, and persists the
+    registration aggregate. Idempotent on existing
+    ``(source_url, version, skill_name)``. Unlike claude plugins, there is no
+    caller-supplied manifest: the SKILL.md frontmatter at the tree root is the
+    manifest.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_url: str = Field(..., min_length=1, max_length=2048)
+    version: str = Field(..., min_length=1, max_length=256)
+    skill_name: str | None = Field(
+        default=None,
+        max_length=256,
+        description=(
+            "Display name override; when omitted the SKILL.md frontmatter's 'name' is used."
+        ),
+    )
+    # WHY max_length=10_000: matches MAX_SKILL_TREE_FILES in routes/skills.py
+    # -- the route already rejects a longer list at runtime (413), but a
+    # matching model bound rejects it at validation time (422) before the
+    # request body is even fully materialized into domain objects.
+    files: list[SkillFilePayload] = Field(
+        ...,
+        min_length=1,
+        max_length=10_000,
+        description="Every file in the skill tree (base64-encoded).",
+    )
+
+
+class SkillRegistrationResponse(BaseModel):
+    """Response payload for ``POST /skills/registrations``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skill_name: str
+    source_url: str
+    version: str
+    resolved_sha: str = Field(..., description="Content-addressed sha of the normalized tree.")
+    tree_storage_prefix: str
+
+
+class SkillRegistrationLookupResponse(BaseModel):
+    """Whether a (source_url, version, skill_name) triple is already registered.
+
+    Lets the CLI skip uploading a skill tree it has already stored. The sha is
+    the cache key: identical content always resolves to the same hash, so a hit
+    here means zero network work for the caller.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    registered: bool
+    resolved_sha: str | None = None
+
+
+class SkillRegistrationSummary(BaseModel):
+    """One registered skill, as the lock projection holds it.
+
+    Carries the full identity triple plus the content hash, because that is
+    exactly what makes a ``SkillNotRegistered`` failure actionable: the caller
+    can see which of the three fields does not match what a workflow declared.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skill_name: str
+    source_url: str
+    version: str
+    resolved_sha: str = Field(..., description="Content-addressed sha of the normalized tree.")
+    resolved_sha_display: str = Field(
+        ...,
+        description="First 12 characters of resolved_sha, for display in narrow columns.",
+    )
+    tree_storage_prefix: str
+    registered_at: datetime = Field(..., description="UTC; clients format for their locale.")
+
+
+class SkillListResponse(BaseModel):
+    """Every registered skill."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skills: list[SkillRegistrationSummary] = Field(default_factory=list)
+    total: int = 0
+
+
+class SkillDetailResponse(BaseModel):
+    """Every registration sharing one skill name.
+
+    A name is not unique: the same skill can be pinned at several versions, and
+    two sources can publish the same name. All of them are returned so the
+    caller can tell which pin a workflow actually resolves to.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    skill_name: str
+    registrations: list[SkillRegistrationSummary] = Field(default_factory=list)
+
+
+class SkillStorageStatsResponse(BaseModel):
+    """Size of the content-addressed skill store.
+
+    Skill storage grows monotonically: registration is keyed by content hash
+    and nothing removes old trees (skills-distribution spec D6, eviction is
+    deliberately not implemented). This endpoint exists so that decision stays
+    a measured one rather than an assumption.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    object_count: int = 0
+    total_bytes: int = 0
+    skill_count: int = Field(default=0, description="Distinct skill trees, not files.")
+    truncated: bool = Field(
+        default=False,
+        description="True if the backend returned a partial listing, so the counts are floors.",
+    )

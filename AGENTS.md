@@ -50,6 +50,39 @@ Both are our own projects - we dogfood them. If something needs fixing, push the
 - **agentic-primitives**: Agent event recording/playback, Claude CLI/SDK adapters, workspace isolation providers
 - **event-sourcing-platform**: Rust event store, Python SDK, VSA validation CLI, projection framework
 
+#### Where does this change belong?
+
+The boundary is harness knowledge vs domain meaning, and there is a test for it:
+
+> **If it changes when Anthropic or OpenAI ships a new CLI version, it belongs
+> in agentic-primitives. If it changes when we decide what a cost, a session or
+> an execution IS, it belongs here.**
+
+| agentic-primitives | Syntropic137 |
+|---|---|
+| Stream and transcript formats, where a harness puts its session id | Domain events, aggregates, what a session means |
+| Anything baked into the workspace image, including binaries agents call | Pricing, execution totals, attribution |
+| Workspace isolation, capture capabilities, delegation skills | Projections, the API, the read path |
+
+Harness specifics live beside the existing `harnesses/{claude,codex}` adapters
+in `agentic_isolation`, which already normalize to `HarnessTranscript` and
+`TranscriptExtractionResult`. Extend those rather than adding a parallel path,
+and never reimplement a harness detail here: it will drift the moment that CLI
+changes, and the drift is silent.
+
+**Depend on a port, not on a format.** When this repo needs something
+harness-specific, define a Protocol here and let agentic-primitives satisfy it.
+That keeps the domain testable against a double and stops CLI details leaking
+into the domain model.
+
+**The split has a real delivery cost, so plan for it.** A change in
+agentic-primitives reaches a running workspace only after: merge -> image
+build -> the protected `release` channel -> a `PINNED_DIGESTS` bump here.
+Pushing to `main` publishes `:edge` only, which is explicitly unreviewed and is
+NOT what consumers pull. So put as little in the submodule as genuinely needs
+to be there, and define the contract first so work on both sides can proceed in
+parallel instead of serialising behind the image.
+
 ## Non-Negotiable Rules
 
 ### Type Safety (ADR-001 s6, ADR-032)
@@ -400,10 +433,12 @@ from `syn_shared.settings.constants` (Python) or `constants.ts` (TypeScript).
 CI failures that could have been caught locally waste 8–10 minutes per round-trip and block the release chain. Always run these before pushing:
 
 ```bash
-just fitness-check   # catches cognitive/cyclomatic violations before CI does
-just docs-sync       # catches codegen drift (CLI types, OpenAPI spec, API docs)
-uv run ruff check .  # catches lint and import order issues
-uv run ruff format --check .  # catches formatting
+just preflight       # Every STATIC CI gate, from the same justfile target CI
+                     # and the pre-push hook both call. Add new static gates
+                     # there, never to CI alone (#931).
+                     # NOT covered: unit tests, dashboard build, CLI checks,
+                     # integration, security scanning. Run `just qa` for the
+                     # fuller local sweep before a release PR.
 ```
 
 Or run `just qa` for the full suite (slower but catches everything including tests).

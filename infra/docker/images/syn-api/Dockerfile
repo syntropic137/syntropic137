@@ -70,10 +70,19 @@ FROM python:3.12-slim AS runtime
 ARG INCLUDE_DOCKER_CLI=0
 # Optional: 1Password CLI for secret resolution at startup (op_resolver.py)
 ARG INCLUDE_OP_CLI=0
+# NOT optional: cosign. Workspace image signature verification defaults to ON
+# (ImageVerificationSettings.enabled) and FAILS CLOSED - a missing cosign binary
+# raises ImageVerificationError and no workspace is created. Without this the
+# API image cannot provision a single workspace. syn_adapters'
+# image_verification supports cosign v2 and v3; it needs at least v2 for
+# --certificate-identity-regexp.
+ARG COSIGN_VERSION=3.1.3
 RUN set -e; \
-    NEEDS_CURL=0; \
-    if [ "$INCLUDE_DOCKER_CLI" = "1" ] || [ "$INCLUDE_OP_CLI" = "1" ]; then NEEDS_CURL=1; fi; \
-    if [ "$NEEDS_CURL" = "1" ]; then apt-get update && apt-get install -y --no-install-recommends curl; fi; \
+    NEEDS_CURL=1; \
+    apt-get update && apt-get install -y --no-install-recommends curl; \
+    curl -fsSL "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-$(dpkg --print-architecture)" \
+      -o /usr/local/bin/cosign && chmod 755 /usr/local/bin/cosign; \
+    /usr/local/bin/cosign version; \
     if [ "$INCLUDE_DOCKER_CLI" = "1" ]; then \
       curl -fsSL "https://download.docker.com/linux/static/stable/$(uname -m)/docker-29.2.1.tgz" | \
         tar xz --strip-components=1 -C /usr/local/bin docker/docker; \

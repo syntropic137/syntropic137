@@ -3,7 +3,26 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Final
+
+UNATTRIBUTED_PHASE_ID: Final[str] = "unattributed"
+
+UNATTRIBUTED_MODEL: Final[str] = "unattributed-model"
+"""Bucket for cost that is AUTHORITATIVE but names no model.
+
+A session_summary can carry an SDK-reported ``total_cost_usd`` with no model
+id. That cost is real and counts toward the phase total, so omitting it from
+the per-model breakdown makes the parts sum to less than the whole - the exact
+reconciliation failure #812 fixed for phases and this restores for models.
+"""
+"""Bucket for cost that belongs to an execution but to no particular phase.
+
+``agent_events.phase_id`` is nullable, so a session_summary can be recorded
+against an execution without a phase. The execution total counts that spend;
+if the per-phase breakdown silently skipped it, the parts would not add up
+to the whole (issue #812). Naming the bucket keeps the breakdown honest and
+the gap visible instead of invisible.
+"""
 
 
 def _coerce_decimal(value: str | Decimal | int | float | None, default: str = "0") -> Decimal:
@@ -87,13 +106,47 @@ class ExecutionCost:
 
     # Breakdowns
     cost_by_phase: dict[str, Decimal] = field(default_factory=dict)
-    """Cost breakdown by phase."""
+    """Cost breakdown by phase.
+
+    Spend that cannot be attributed to a phase is bucketed under
+    ``UNATTRIBUTED_PHASE_ID`` rather than dropped, so this breakdown always
+    reconciles with ``total_cost_usd`` (issue #812). ``phase_id`` is
+    nullable on ``agent_events``, so phase-less summaries are a real state,
+    not a corruption.
+    """
+
+    models_by_phase: dict[str, dict[str, Decimal]] = field(default_factory=dict)
+    """What each MODEL cost within a phase.
+
+    Since #895 a phase can contain more than one session: a delegated run is
+    priced under its own session id but the same phase_id. ``cost_by_phase``
+    can only say what the phase cost in total; this says which model spent it,
+    which is the number that decides whether more fan-out is affordable.
+    """
+
+    unpriced_by_phase: dict[str, int] = field(default_factory=dict)
+    """Per-phase count of observations that could not be priced.
+
+    ``cost_by_phase`` can only say "this phase cost $X". It has no way to say
+    "we do not know what this phase cost", so an unpriced phase either vanished
+    from the breakdown or showed up as ``$0.00`` - the same ambiguity #890 fixes
+    at the execution level, one level down. A phase listed here contributed real
+    work that carries no rate.
+    """
 
     cost_by_model: dict[str, Decimal] = field(default_factory=dict)
     """Cost breakdown by model."""
 
     cost_by_tool: dict[str, Decimal] = field(default_factory=dict)
     """Cost breakdown by tool."""
+
+    unpriced_observation_count: int = 0
+    """Count of TOKEN_USAGE observations whose model was unknown/missing.
+
+    These contribute zero cost to ``total_cost_usd`` (never priced as a
+    default/guessed model - see issue #788). A non-zero count means the
+    total is incomplete, not confidently wrong.
+    """
 
     # Status
     is_complete: bool = False
@@ -107,8 +160,40 @@ class ExecutionCost:
 
     @property
     def total_tokens(self) -> int:
-        """Total tokens (input + output)."""
-        return self.input_tokens + self.output_tokens
+        """Total tokens (input + output + cache creation + cache read).
+
+        All four components are summed so this agrees with the executions
+        read model, which reports the same figure under the same name
+        (issue #873). Cost is unaffected: pricing reads the four component
+        fields directly and never goes through this property.
+        """
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_tokens
+            + self.cache_read_tokens
+        )
+
+    @property
+    def has_cost_data(self) -> bool:
+        """Whether this record carries cost data worth preferring over a fallback.
+
+        Deliberately NOT ``total_tokens > 0``. ``total_tokens`` is a DISPLAY
+        figure that grew to include cache tokens in issue #873; wiring dollar
+        selection to it would let a cache-only record (input == output == 0)
+        newly satisfy the gate and flip the reported dollar figure from the
+        caller's fallback to ``total_cost_usd``. #873 was a display fix that
+        was required to move no dollars, so the availability predicate keeps
+        the input + output shape it had before that change.
+
+        ``is_complete`` would be the better long-term predicate but is not a
+        drop-in: it is False for an execution still running, and the API
+        enriches in-progress executions today. Swapping to it would change
+        behaviour for live executions, which is a separate decision from this
+        one. ``unpriced_observation_count`` measures confidence in the total,
+        not whether a total exists, so it does not answer this question either.
+        """
+        return self.input_tokens + self.output_tokens > 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExecutionCost":
@@ -129,8 +214,14 @@ class ExecutionCost:
             turns=data.get("turns", 0),
             duration_ms=data.get("duration_ms", 0),
             cost_by_phase=_coerce_decimal_dict(data.get("cost_by_phase")),
+            models_by_phase={
+                phase: _coerce_decimal_dict(models)
+                for phase, models in (data.get("models_by_phase") or {}).items()
+            },
+            unpriced_by_phase=dict(data.get("unpriced_by_phase") or {}),
             cost_by_model=_coerce_decimal_dict(data.get("cost_by_model")),
             cost_by_tool=_coerce_decimal_dict(data.get("cost_by_tool")),
+            unpriced_observation_count=data.get("unpriced_observation_count", 0),
             is_complete=data.get("is_complete", False),
             started_at=_coerce_datetime(data.get("started_at")),
             completed_at=_coerce_datetime(data.get("completed_at")),
@@ -155,8 +246,14 @@ class ExecutionCost:
             "turns": self.turns,
             "duration_ms": self.duration_ms,
             "cost_by_phase": {k: str(v) for k, v in self.cost_by_phase.items()},
+            "models_by_phase": {
+                phase: {m: str(c) for m, c in models.items()}
+                for phase, models in self.models_by_phase.items()
+            },
+            "unpriced_by_phase": dict(self.unpriced_by_phase),
             "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},
             "cost_by_tool": {k: str(v) for k, v in self.cost_by_tool.items()},
+            "unpriced_observation_count": self.unpriced_observation_count,
             "is_complete": self.is_complete,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,

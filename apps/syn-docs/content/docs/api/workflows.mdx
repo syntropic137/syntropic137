@@ -82,17 +82,38 @@ _openapi:
         heading: validate-yaml-endpoint
       - content: Update a workflow phase's prompt template and optional config.
         heading: update-phase-prompt-endpoint
-      - content: |-
+      - content: >-
           Create a workflow template by uploading raw YAML.
 
+
           The CLI (`syn workflow create --from <file>`) POSTs the file bytes
+
           here. Every semantic field (name, classification, repository,
+
           phases, inputs, requires_repos) comes from the YAML itself.
 
+
           Query-string ``name`` and ``workflow_id`` are optional overrides
+
           intended for scripted bulk installation (e.g. renaming a template
+
           on install). They are *not* a second source of truth for fields
+
           that live in the YAML.
+
+
+          ``version``, ``source_digest`` and ``force`` carry install provenance
+
+          and policy (issue #822). ``syn workflow install`` supplies the package
+
+          version and the resolved commit SHA; reinstalling a matching version
+          is
+
+          refused with 409 unless ``force`` is set, and a matching version that
+
+          resolves to a different digest is refused regardless of how it looks,
+
+          because that is the signature of a republished version.
         heading: create-workflow-from-yaml-endpoint
 ---
 

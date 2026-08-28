@@ -28,6 +28,13 @@ class StartSessionCommand(BaseModel):
     phase_id: str = Field(..., description="Phase within the workflow")
     milestone_id: str | None = Field(default=None, description="Optional milestone")
 
+    parent_session_id: str | None = Field(
+        default=None, description="Parent session that delegated this sub-agent run"
+    )
+    root_session_id: str | None = Field(
+        default=None, description="Root of the delegation tree (self for top-level)"
+    )
+
     # Agent info
     agent_provider: str = Field(..., description="Agent provider (claude, openai, mock)")
     agent_model: str | None = Field(default=None, description="Specific model used")

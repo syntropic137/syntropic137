@@ -70,7 +70,7 @@ class ObservabilityCollector:
         execution_id: str,
         phase_id: str,
         workspace_id: str | None,
-        agent_model: str,
+        agent_model: str | None,
     ) -> None:
         self._writer = writer
         self._session_id = session_id
@@ -260,19 +260,21 @@ class ObservabilityCollector:
         if self._writer is None:
             return
 
+        data = {
+            "total_cost_usd": total_cost_usd,
+            "total_input_tokens": input_tokens,
+            "total_output_tokens": output_tokens,
+            "cache_creation_tokens": cache_creation,
+            "cache_read_tokens": cache_read,
+            "num_turns": num_turns,
+            "duration_ms": duration_ms,
+            "model": self._agent_model,
+        }
+
         await self._writer.record_observation(
             session_id=self._session_id,
             observation_type=SESSION_SUMMARY,
-            data={
-                "total_cost_usd": total_cost_usd,
-                "total_input_tokens": input_tokens,
-                "total_output_tokens": output_tokens,
-                "cache_creation_tokens": cache_creation,
-                "cache_read_tokens": cache_read,
-                "num_turns": num_turns,
-                "duration_ms": duration_ms,
-                "model": self._agent_model,
-            },
+            data=data,
             execution_id=self._execution_id,
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,

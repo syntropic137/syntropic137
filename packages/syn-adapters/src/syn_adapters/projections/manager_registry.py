@@ -30,6 +30,15 @@ from syn_domain.contexts.orchestration.slices.list_executions import (
     WorkflowExecutionListProjection,
 )
 from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
+from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins.projection import (
+    GlobalClaudePluginsProjection,
+)
+from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection import (
+    ClaudePluginLockProjection,
+)
+from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+    SkillLockProjection,
+)
 from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
     WorkflowPhaseMetricsProjection,
 )
@@ -158,6 +167,11 @@ def build_projection_registry(store: ProjectionStoreProtocol) -> dict[str, Any]:
         "repo_cost": _create_repo_cost_projection(store),
         # Processor to-do list (ISS-196) — store-backed for crash resilience (ISS-222)
         "execution_todo": ExecutionTodoProjection(store=store),
+        # Claude plugin injection (issue #726) - lock + global registry read models
+        "claude_plugin_lock": ClaudePluginLockProjection(store),
+        "global_claude_plugins": GlobalClaudePluginsProjection(store),
+        # Skill injection (issue #772) - lock read model, mirrors claude_plugin_lock
+        "skill_lock": SkillLockProjection(store),
         # Real-time projection for SSE push (doesn't use store)
         "realtime": get_realtime_projection(),
     }

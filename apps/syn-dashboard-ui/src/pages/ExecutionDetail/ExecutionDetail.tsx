@@ -16,7 +16,7 @@ import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
 import { useExecutionData } from '../../hooks'
 import type { ExecutionDetailResponse } from '../../types'
-import { formatDurationFromRange } from '../../utils/formatters'
+import { formatCostWithCoverage, formatDurationFromRange } from '../../utils/formatters'
 import { ArtifactSection } from './ArtifactSection'
 import { PhaseTimeline } from './PhaseTimeline'
 
@@ -161,7 +161,10 @@ function ExecutionMetricsGrid({
       />
       <MetricCard
         title="Total Cost"
-        value={`$${Number(execution.total_cost_usd).toFixed(4)}`}
+        value={formatCostWithCoverage(
+          Number(execution.total_cost_usd),
+          execution.unpriced_observation_count
+        )}
         icon={DollarSign}
         color="warning"
         scrollToId={hasCostByModel ? 'cost-by-model' : undefined}

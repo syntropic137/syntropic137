@@ -8,11 +8,11 @@ The ``test_hexagonal_purity`` and ``test_cross_context_public_api``
 fitness functions enforce both directions of the boundary at CI time.
 """
 
-from syn_domain.contexts.github.ports.checks_api_port import (
+from syn_domain.contexts.github.ports.ChecksApiPort import (
     ChecksAPIResult,
     GitHubChecksAPIPort,
 )
-from syn_domain.contexts.github.ports.events_api_port import (
+from syn_domain.contexts.github.ports.EventsApiPort import (
     EventsAPIResult,
     GitHubEventsAPIPort,
 )

@@ -11,6 +11,8 @@ import type { CommandGroup } from "./framework/command.js";
 
 // Command groups (alphabetical)
 import { artifactsGroup } from "./commands/artifacts.js";
+import { claudePluginGroup } from "./commands/claude-plugin/index.js";
+import { skillGroup } from "./commands/skill/index.js";
 import { configGroup } from "./commands/config.js";
 import { controlGroup } from "./commands/control.js";
 import { conversationsGroup } from "./commands/conversations.js";
@@ -38,6 +40,7 @@ import { runCommand } from "./commands/workflow/run.js";
 /** All command groups, registered in alphabetical order. */
 export const commandGroups: readonly CommandGroup[] = [
   artifactsGroup,
+  claudePluginGroup,
   configGroup,
   controlGroup,
   conversationsGroup,
@@ -52,6 +55,7 @@ export const commandGroups: readonly CommandGroup[] = [
   orgGroup,
   repoGroup,
   sessionsGroup,
+  skillGroup,
   systemGroup,
   triggersGroup,
   watchGroup,

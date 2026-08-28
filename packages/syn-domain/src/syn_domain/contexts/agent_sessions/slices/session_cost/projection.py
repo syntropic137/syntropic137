@@ -180,19 +180,22 @@ class SessionCostProjection:
         session_cost.cache_creation_tokens += cache_creation
         session_cost.cache_read_tokens += cache_read
 
-        # Calculate cost using CostCalculator
-        token_cost = self._cost_calculator.calculate_token_cost(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_creation=cache_creation,
-            cache_read=cache_read,
-        )
+        # Resolve pricing STRICTLY: an unknown/missing model contributes
+        # zero cost, never a guessed default model's price (issue #788).
+        model = data.get("model")
+        pricing = self._cost_calculator.resolve_pricing(model)
+        if pricing is None:
+            token_cost = Decimal("0")
+            session_cost.unpriced_observation_count += 1
+        else:
+            token_cost = pricing.calculate_cost(
+                input_tokens, output_tokens, cache_creation, cache_read
+            )
         session_cost.token_cost_usd += token_cost
         session_cost.total_cost_usd += token_cost
 
-        # Update cost by model
-        model = data.get("model")
-        if model:
+        # Update cost by model (only for observations we could actually price)
+        if model and pricing is not None:
             current = session_cost.cost_by_model.get(model, Decimal("0"))
             session_cost.cost_by_model[model] = current + token_cost
 

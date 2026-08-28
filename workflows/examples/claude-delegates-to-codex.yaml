@@ -1,0 +1,50 @@
+id: claude-delegates-to-codex
+name: Claude delegates a subtask to Codex
+description: A claude-primary phase that shells out to `codex exec` one-shot (opt-in delegation).
+type: research
+classification: simple
+requires_repos: false
+
+# WHY this exists as a counterpart to codex-delegates-to-claude.yaml: the
+# delegation matrix has two directions and only one was covered by a shipped
+# example, so the claude-leads path was never exercised by validation. A
+# harness-neutral platform has to prove both, not assume symmetry.
+
+phases:
+  - id: plan-and-delegate
+    name: Claude plans, delegates implementation to Codex
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - text
+    max_tokens: 4096
+    timeout_seconds: 600
+    agent:
+      provider: claude
+      allow_delegation: true
+      model: haiku
+    prompt_template: |
+      Write a one-line spec for a function is_palindrome(s: str) -> bool that
+      ignores case and non-alphanumeric characters. Then delegate the
+      implementation to Codex with one shell command:
+
+      `codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -C /workspace
+      "Create palindrome.py implementing is_palindrome(s: str) -> bool that
+      ignores case and non-alphanumerics. Print DONE when the file exists."
+      < /dev/null`
+
+      Two things that will break this if you change them:
+
+      - `< /dev/null`. codex exec waits on stdin forever without it.
+      - `--dangerously-bypass-approvals-and-sandbox`, NOT `-s workspace-write`.
+        Codex sandboxes itself with bubblewrap, and bubblewrap cannot create a
+        user namespace inside a Docker container:
+          bwrap: No permissions to create a new namespace, likely because the
+          kernel does not allow non-privileged user namespaces.
+        Every sandboxed write then fails with "Failed to write file". The flag
+        name sounds alarming but this is the case its own docs describe: the
+        workspace container IS the sandbox, so codex sandboxing inside it is
+        both redundant and broken.
+
+      Then print Codex's output and a one-line summary of what was built.

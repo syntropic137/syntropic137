@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 from typing import TYPE_CHECKING
 
 from agentic_isolation import (
@@ -23,6 +24,18 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_from_workspace,
     copy_files_to_workspace,
 )
+from syn_adapters.workspace_backends.agentic.session_store_env import (
+    apply_session_store_env,
+    deployment_identity,
+)
+
+# Re-exported for backward compatibility (issue #771 item 7): the canonical
+# definition lives in `syn_adapters.workspace_backends.errors` so it can be
+# raised/imported without depending on this Docker-specific module. Existing
+# `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
+# working unchanged.
+from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
     ENV_SYN_AGENT_NETWORK,
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
@@ -38,17 +51,11 @@ if TYPE_CHECKING:
         IsolationConfig,
         IsolationHandle,
     )
+    from syn_shared.settings.session_store import SessionStoreSettings
 
 logger = logging.getLogger(__name__)
 
-
-class WorkspaceProvisionError(RuntimeError):
-    """Raised when Docker-backed workspace provisioning fails.
-
-    Wraps the underlying error with execution/workspace context so the
-    `_fail_execution` path in the workflow processor can surface an
-    actionable message through to the CLI (instead of "Unknown error").
-    """
+__all__ = ["AgenticIsolationAdapter", "WorkspaceProvisionError"]
 
 
 class AgenticIsolationAdapter:
@@ -71,6 +78,7 @@ class AgenticIsolationAdapter:
         security: SecurityConfig | None = None,
         workspace_container_dir: str | None = None,
         workspace_host_dir: str | None = None,
+        session_store: SessionStoreSettings | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -79,6 +87,9 @@ class AgenticIsolationAdapter:
             security: Security configuration (defaults to production)
             workspace_container_dir: Path inside orchestrator container (for file I/O)
             workspace_host_dir: Path on Docker host (for volume mounts)
+            session_store: Central session-store settings. Defaults to
+                ``get_settings().session_store``, which is DISABLED unless
+                ``SYN_SESSION_STORE_URL`` is configured.
 
         When running inside a container, both paths are needed:
         - container_dir: where this process writes files (/workspaces)
@@ -89,6 +100,16 @@ class AgenticIsolationAdapter:
 
         self._default_image = default_image
         self._security = security or SecurityConfig.production()
+
+        # Central session store (SeshMagic). Resolved from the settings object
+        # rather than os.environ so the credential stays a SecretStr all the way
+        # to the point of injection. Disabled by default — see
+        # `session_store_env.build_session_store_env`.
+        if session_store is None:
+            from syn_shared.settings import get_settings
+
+            session_store = get_settings().session_store
+        self._session_store = session_store
 
         # Get paths from env or args
         container_dir = workspace_container_dir or os.environ.get(
@@ -117,6 +138,56 @@ class AgenticIsolationAdapter:
         """Check if Docker is available."""
         return WorkspaceDockerProvider.is_available()
 
+    def _build_environment(self, config: IsolationConfig) -> dict[str, str]:
+        """Build the container environment, including the session-store block."""
+        # Central session-store capture (SeshMagic). The capability lives in the
+        # workspace image and activates purely from these variables; Syn137 only
+        # supplies the contract.
+        #
+        # OPT-IN, DEFAULT OFF: when no store URL is configured this STRIPS the
+        # reserved AGENTIC_SESSION_STORE_* keys and adds nothing, so a
+        # self-hoster with no SeshMagic instance gets a container environment
+        # byte-identical to before this integration existed — including when a
+        # caller passes those keys itself via `extra_environment`. The opt-in
+        # switch must not be defeatable from the public workspace API.
+        #
+        # When enabled the adapter's values win over any caller-supplied value of
+        # the same name: URL, token, partition and tags are derived from host
+        # settings and THIS execution, and must not be redirectable or spoofable
+        # by a phase's environment block.
+        #
+        # SPOOL is container-local (/spool), deliberately NOT a mounted volume.
+        # Tradeoff: if the container is SIGKILLed before finalize runs, that
+        # session is lost. This is not a regression — today nothing is captured
+        # at all. A persistent volume would fix it but drags in volume lifecycle
+        # management that nobody has designed yet, so it is a deliberate
+        # follow-up rather than an omission.
+        return apply_session_store_env(
+            config.environment or {},
+            self._session_store,
+            execution_id=config.execution_id,
+            workspace_id=config.workspace_id,
+            workflow_id=config.workflow_id,
+            phase_id=config.phase_id,
+            # Which Syn137 deployment produced this session. Without it every
+            # workspace across dev, beta and prod is indistinguishable in the
+            # corpus: the envelope's own origin.environment is the runtime
+            # CLASS, which is the same value for all of them.
+            deployment=self._deployment_identity(),
+        )
+
+    @staticmethod
+    def _deployment_identity() -> str:
+        """``syntropic137__<app_environment>`` for this deployment.
+
+        Imported locally, matching how session-store settings are resolved above:
+        syn_shared settings resolve 1Password at first construction, so importing
+        at module scope would make that a side effect of importing the adapter.
+        """
+        from syn_shared.settings import get_settings
+
+        return deployment_identity(str(get_settings().app_environment))
+
     async def create(self, config: IsolationConfig) -> IsolationHandle:
         """Create an isolated workspace container.
 
@@ -132,15 +203,35 @@ class AgenticIsolationAdapter:
             IsolationHandle,
         )
 
+        environment = self._build_environment(config)
+
         # Map Syn137 config to agentic_isolation config
         # ISS-43: Network is set on the provider (default_network in __init__),
         # not on WorkspaceConfig. Containers join agent-net to reach the shared
         # Envoy proxy but cannot reach the internet directly.
+        #
+        # NOTE: the session-store write token is in `environment` only. It must
+        # never be copied into `labels` — labels are readable by anyone who can
+        # run `docker inspect`.
+        image = config.image or self._default_image
+
+        # Supply-chain gate: verify the cosign signature of the exact image
+        # reference we are about to run, before any container exists. Raises
+        # ImageVerificationError (a WorkspaceProvisionError) on failure, so an
+        # unverified image never reaches the provider.
+        #
+        # The RETURN VALUE is what runs, not `image`. For a digest-pinned
+        # registry reference they are the same string; for an explicitly
+        # permitted local image the return value is that image's immutable
+        # local image ID, so Docker cannot pull or retag something else in
+        # between. See image_verification for the full policy.
+        image = await verify_image_async(image)
+
         ws_config = WorkspaceConfig(
             provider="docker",
-            image=config.image or self._default_image,
+            image=image,
             working_dir="/workspace",
-            environment=dict(config.environment) if config.environment else {},
+            environment=environment,
             labels={
                 "syn.execution_id": config.execution_id,
                 "syn.workspace_id": config.workspace_id,
@@ -227,8 +318,20 @@ class AgenticIsolationAdapter:
                 stderr="Workspace not found",
             )
 
-        # Join command list into shell command
-        cmd_str = " ".join(command)
+        # QUOTED join, not a bare one. The provider hands the result to
+        # `sh -c`, so every element has to survive as its own argument.
+        #
+        # `" ".join(...)` silently reassociated them. ["sh", "-c", "test -e X"]
+        # became `sh -c test -e X`, which runs `test` with NO operands and
+        # therefore always exits 1. The staged-codex-credential check in
+        # setup_phase.py is exactly that shape: it reads "credential gone" on
+        # every run and its fail-closed branch could never execute. Proven in a
+        # container - `sh -c test -e /tmp/exists` exits 1 for a file that
+        # exists, `sh -c 'test -e /tmp/exists'` exits 0.
+        #
+        # shlex.join is identical for simple argv (no metacharacters, nothing
+        # to quote) and only differs where the old behaviour was wrong.
+        cmd_str = shlex.join(command)
 
         result = await self._provider.execute(
             workspace,  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary

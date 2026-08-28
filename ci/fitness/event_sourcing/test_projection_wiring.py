@@ -84,6 +84,17 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.orchestration.slices.list_workflows import (
         WorkflowListProjection,
     )
+
+    # Claude plugin injection (issue #726)
+    from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins.projection import (
+        GlobalClaudePluginsProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection import (
+        ClaudePluginLockProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockProjection,
+    )
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,
     )
@@ -133,13 +144,18 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         ToolTimelineAdapter(ToolTimelineProjection(dummy)),
         ExecutionCostAdapter(ExecutionCostProjection(dummy)),
         SessionCostAdapter(SessionCostProjection(dummy)),
+        # Claude plugin injection (issue #726)
+        ClaudePluginLockProjection(dummy),
+        GlobalClaudePluginsProjection(dummy),
+        # Skill injection (issue #772) - mirrors coordinator_service registration
+        SkillLockProjection(dummy),
     ]
 
 
 # Expected count — update when adding/removing projections from the coordinator.
 # If this fails, you added or removed a projection. Update _EXPECTED_COUNT
 # and the list in _get_coordinator_projections() above.
-_EXPECTED_COUNT = 21
+_EXPECTED_COUNT = 24
 
 
 # ---------------------------------------------------------------------------

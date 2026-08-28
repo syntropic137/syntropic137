@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker i
 from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
 )
+from syn_shared.control import ControlSignalType
 
 
 async def _lines_to_stream(*lines: str) -> AsyncIterator[str]:
@@ -373,9 +374,6 @@ class TestEventStreamProcessor:
             signal_type: object
             reason: str
 
-        class FakeSignalType:
-            CANCEL = "cancel"
-
         class FakeController:
             def __init__(self) -> None:
                 self.check_count = 0
@@ -385,41 +383,32 @@ class TestEventStreamProcessor:
                 # Return cancel on 2nd check (after 20 lines)
                 if self.check_count >= 2:
                     return FakeSignal(
-                        signal_type=FakeSignalType.CANCEL,
+                        signal_type=ControlSignalType.CANCEL,
                         reason="user requested",
                     )
                 return None
 
-        # Patch ControlSignalType for the import inside the processor
-        import syn_adapters.control.commands as ctrl_mod
+        controller = FakeController()
+        proc = EventStreamProcessor(
+            tokens=TokenAccumulator(),
+            subagents=SubagentTracker(),
+            observability=None,
+            controller=controller,  # type: ignore[arg-type]
+            execution_id="exec-1",
+            phase_id="phase-1",
+            session_id="session-1",
+            workspace_id=None,
+            agent_model="claude",
+        )
 
-        original = ctrl_mod.ControlSignalType
-        ctrl_mod.ControlSignalType = FakeSignalType  # type: ignore[assignment,misc]
-
-        try:
-            controller = FakeController()
-            proc = EventStreamProcessor(
-                tokens=TokenAccumulator(),
-                subagents=SubagentTracker(),
-                observability=None,
-                controller=controller,  # type: ignore[arg-type]
-                execution_id="exec-1",
-                phase_id="phase-1",
-                session_id="session-1",
-                workspace_id=None,
-                agent_model="claude",
-            )
-
-            # Generate 30 lines — cancel should trigger at line 20
-            lines = [f"line-{i}" for i in range(30)]
-            ws = MockWorkspace()
-            result = await proc.process_stream(_lines_to_stream(*lines), ws)
-            assert result.interrupt_requested
-            assert result.interrupt_reason == "user requested"
-            assert ws.interrupted
-            assert result.line_count == 20  # Stopped at line 20
-        finally:
-            ctrl_mod.ControlSignalType = original
+        # Generate 30 lines — cancel should trigger at line 20
+        lines = [f"line-{i}" for i in range(30)]
+        ws = MockWorkspace()
+        result = await proc.process_stream(_lines_to_stream(*lines), ws)
+        assert result.interrupt_requested
+        assert result.interrupt_reason == "user requested"
+        assert ws.interrupted
+        assert result.line_count == 20  # Stopped at line 20
 
 
 class TestExtractErrorReason:
@@ -477,3 +466,69 @@ class TestExtractErrorReason:
         """When the label and message say the same thing, don't repeat it."""
         raw = '{"type":"error","error":{"type":"overloaded_error","message":"API overloaded"}}'
         assert _extract_error_reason(raw) == "API overloaded"
+
+
+class TestCancelWithoutReason:
+    """#918: a cancel carrying no reason text is still a cancel.
+
+    `interrupt_requested` was derived as `interrupt_reason is not None`, so the
+    flag was gated on an OPTIONAL human-readable message. `syn control cancel
+    <id> --force` sends no reason unless `-r` is passed, so signal.reason was
+    None, the flag evaluated False, and WorkflowExecutionProcessor took the
+    SUCCESS path: no CancelExecutionCommand, no ExecutionCancelledEvent, phase
+    recorded success=True, and the workflow ran its remaining phases.
+
+    Measured on exec-d71bd8678ea4: cancelled 25s into phase 1 of 3, all three
+    phases completed and the execution billed $0.13 in full.
+
+    A test written WITH a reason string passes both before and after the fix.
+    Only the no-reason case distinguishes them, which is why it is the case
+    that was missing.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancel_with_no_reason_still_requests_interrupt(self) -> None:
+        from dataclasses import dataclass as dc
+
+        from syn_shared.control import ControlSignalType
+
+        @dc
+        class FakeSignal:
+            signal_type: object
+            reason: str | None = None  # the default CLI path sends nothing
+
+        class FakeController:
+            def __init__(self) -> None:
+                self.check_count = 0
+
+            async def check_signal(self, _execution_id: str) -> object | None:
+                self.check_count += 1
+                if self.check_count >= 2:
+                    return FakeSignal(signal_type=ControlSignalType.CANCEL)
+                return None
+
+        proc = EventStreamProcessor(
+            tokens=TokenAccumulator(),
+            subagents=SubagentTracker(),
+            observability=None,
+            controller=FakeController(),  # type: ignore[arg-type]
+            execution_id="exec-1",
+            phase_id="phase-1",
+            session_id="session-1",
+            workspace_id=None,
+            agent_model="claude",
+        )
+
+        ws = MockWorkspace()
+        result = await proc.process_stream(_lines_to_stream(*[f"line-{i}" for i in range(30)]), ws)
+
+        # The flag must be True even though reason is None. Without this the
+        # processor treats the phase as a clean success and runs the rest of
+        # the workflow.
+        assert result.interrupt_requested, (
+            "a cancel without a reason string must still request interrupt; "
+            "gating the flag on an optional message is #918"
+        )
+        assert result.interrupt_reason is None, "no reason was sent, so none is reported"
+        assert ws.interrupted
+        assert result.line_count == 20

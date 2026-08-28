@@ -16,7 +16,7 @@ import re as _re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from syn_domain.contexts.github.ports.events_api_port import (
+from syn_domain.contexts.github.ports.EventsApiPort import (
     EventsAPIResult,
     GitHubEventsAPIPort,
 )

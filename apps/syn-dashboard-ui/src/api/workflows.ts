@@ -46,6 +46,7 @@ export interface ExecuteWorkflowResponse {
 export interface UpdatePhasePromptRequest {
   prompt_template: string
   model?: string | null
+  provider?: string | null
   timeout_seconds?: number | null
   allowed_tools?: string[] | null
 }

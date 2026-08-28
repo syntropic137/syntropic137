@@ -32,13 +32,56 @@ sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
+from syn_shared.settings.image_verification import (  # noqa: E402
+    ImageVerificationSettings,
+)
 from syn_shared.settings.infra import InfraSettings  # noqa: E402
+from syn_shared.settings.session_store import SessionStoreSettings  # noqa: E402
+from syn_shared.settings.storage import StorageSettings  # noqa: E402
 from syn_shared.settings.workspace import (  # noqa: E402
     ContainerLoggingSettings,
     GitIdentitySettings,
     WorkspaceSecuritySettings,
     WorkspaceSettings,
 )
+
+# THE ONLY QUOTING LAYER IN THIS FILE.
+#
+# `just` loads .env through dotenvy. A value dotenvy rejects breaks EVERY just
+# recipe - including the pre-push hook, which then stops gating silently. That
+# has happened twice: once from a bare regex default (cosign certificate
+# identity, which contains `(`, `|` and `$`), and once from a fix that quoted
+# only three of six emit sites.
+#
+# "Quote only when the value looks dangerous" is what produced both failures,
+# because the danger set is never complete: apostrophes, double quotes, a
+# leading quote character and embedded newlines all escaped it. So there is no
+# danger set any more. Every non-empty value is single-quoted, unconditionally.
+#
+# Single quotes and not double quotes: dotenvy performs variable SUBSTITUTION
+# inside double quotes, so a literal `$HOME` would silently change on load.
+# Only single quotes suppress it. Empirically, dotenvy also rejects a
+# backslash-escaped backtick inside double quotes outright, so the
+# double-quoted form is not even universally parseable.
+#
+# `'"'"'` is the standard way to put an apostrophe inside a single-quoted
+# string: close, emit a double-quoted apostrophe, reopen. Both POSIX shell and
+# dotenvy concatenate the adjacent parts. (python-dotenv does not implement
+# that concatenation; no current default contains an apostrophe, and dotenvy
+# is the parser whose failure takes the whole build down.)
+_APOSTROPHE_ESCAPE = "'\"'\"'"
+
+
+def serialize_dotenv_value(value: str) -> str:
+    """Serialize a RAW SEMANTIC value into the right-hand side of a .env line.
+
+    The input is the value itself, never a pre-quoted lexical string. The
+    output round-trips back to exactly that value under dotenvy and POSIX
+    shell. Callers must not add quotes of their own.
+    """
+    if value == "":
+        return ""
+    return "'" + value.replace("'", _APOSTROPHE_ESCAPE) + "'"
 
 
 def get_env_var_name(field_name: str, prefix: str = "") -> str:
@@ -73,6 +116,9 @@ def get_default_value(field_info: FieldInfo) -> str:
     if isinstance(default, list | tuple):
         return ""  # Empty for complex defaults
 
+    # Returns the RAW value. Quoting is serialize_dotenv_value's job and only
+    # its job - a second quoting layer here is what let `"$HOME"` reach the
+    # file as a substitutable double-quoted string.
     return str(default)
 
 
@@ -179,7 +225,7 @@ def generate_settings_section(
         if is_secret_type(field_type):
             lines.append(f"{env_name}=")
         else:
-            lines.append(f"{env_name}={default}")
+            lines.append(f"{env_name}={serialize_dotenv_value(default)}")
 
         lines.append("")
 
@@ -314,7 +360,7 @@ def generate_env_example() -> str:
             if is_secret_type(field_type):
                 lines.append(f"{env_name}=")
             else:
-                lines.append(f"{env_name}={default}")
+                lines.append(f"{env_name}={serialize_dotenv_value(default)}")
 
             lines.append("")
 
@@ -351,6 +397,19 @@ def generate_env_example() -> str:
         )
     )
 
+    # Workspace image signature verification (SYN_IMAGE_VERIFY_* prefix).
+    # ON by default and fails closed: a remote workspace image must carry a
+    # valid cosign keyless signature from the agentic-primitives publishing
+    # workflow before a container is created.
+    lines.extend(
+        generate_settings_section(
+            ImageVerificationSettings,
+            "WORKSPACE IMAGE SIGNATURE VERIFICATION (cosign keyless)",
+            prefix="SYN_IMAGE_VERIFY_",
+            description="Verification is ON by default and fails closed. Requires cosign v2 on PATH.",
+        )
+    )
+
     # Add Workspace Security Settings (SYN_SECURITY_* prefix)
     lines.extend(
         generate_settings_section(
@@ -368,6 +427,34 @@ def generate_env_example() -> str:
             "GIT IDENTITY FOR WORKSPACE COMMITS",
             prefix="SYN_GIT_",
             description="Git identity for agent commits. Prefer GitHub App for authentication.",
+        )
+    )
+
+    # WHY: StorageSettings holds the new claude_plugins MinIO bucket name
+    # (issue #726). The composed Settings.storage property reads from
+    # SYN_STORAGE_* env vars, so they need to be discoverable in .env.example.
+    lines.extend(
+        generate_settings_section(
+            StorageSettings,
+            "OBJECT STORAGE (MinIO / artifacts / claude plugins)",
+            prefix="SYN_STORAGE_",
+            description="MinIO buckets and credentials. See ADR-012 (artifacts) and issue #726 (claude plugins).",
+        )
+    )
+
+    # Central session store (SYN_SESSION_STORE_* prefix).
+    # OPT-IN, DEFAULT OFF: leaving SYN_SESSION_STORE_URL empty means no
+    # session-store variable is injected into workspace containers at all, so
+    # self-hosters with no SeshMagic instance are unaffected.
+    lines.extend(
+        generate_settings_section(
+            SessionStoreSettings,
+            "CENTRAL SESSION STORE (SeshMagic) - OPT-IN, DEFAULT OFF",
+            prefix="SYN_SESSION_STORE_",
+            description=(
+                "Forward agent sessions to a central SeshMagic store. "
+                "Leave SYN_SESSION_STORE_URL empty to disable entirely (the default)."
+            ),
         )
     )
 
@@ -473,10 +560,14 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, li
             template_keys.add(key)
 
             if key in existing_vars:
-                # Preserve existing value
+                # Preserve the existing assignment VERBATIM. parse_env_file
+                # returns the lexical text as written, quotes included, so
+                # re-serializing it would quote the quotes. Never mix lexical
+                # strings with raw values.
                 output_lines.append(f"{key}={existing_vars[key]}")
             else:
-                # Add new variable with default (empty for secrets)
+                # .env.example was written by serialize_dotenv_value, so this
+                # right-hand side is already correctly serialized. Copy it.
                 output_lines.append(f"{key}={default_value}")
                 new_vars.append(key)
         else:
@@ -500,6 +591,7 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, li
             ]
         )
         for key in sorted(extra_vars):
+            # Verbatim, for the same reason as above: these came off disk.
             output_lines.append(f"{key}={existing_vars[key]}")
         output_lines.append("")
 
@@ -606,7 +698,7 @@ def generate_infra_env_example() -> str:
                 desc_lines = format_description(description)
                 lines.extend(desc_lines)
 
-            lines.append(f"{env_name}={default}")
+            lines.append(f"{env_name}={serialize_dotenv_value(default)}")
             lines.append("")
 
     return "\n".join(lines)

@@ -1,4 +1,4 @@
-"""Internal composition root — wires adapters to domain handlers.
+"""Internal composition root - wires adapters to domain handlers.
 
 Consolidates the duplicated factory-call patterns from CLI and dashboard
 into a single location. All v1 module functions use these helpers to
@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -19,7 +19,16 @@ if TYPE_CHECKING:
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.events.store import AgentEventStore
     from syn_adapters.projections.realtime import RealTimeProjection
+    from syn_adapters.storage.claude_plugin_storage.memory import InMemoryClaudePluginStorage
+    from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
+    from syn_adapters.storage.repositories import RepositoryAdapter
+    from syn_adapters.storage.skill_storage.memory import InMemorySkillStorage
+    from syn_adapters.storage.skill_storage.minio import MinioSkillStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
+    from syn_api.services.claude_plugin_materializer import ClaudePluginMaterializer
+    from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
+    from syn_api.services.skill_materializer import SkillMaterializer
+    from syn_api.services.skill_resolution_service import SkillResolutionService
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
@@ -29,17 +38,47 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+    from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
+        ClaudePluginRegistrationAggregate,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_global_claude_plugin_registry.GlobalClaudePluginRegistryAggregate import (
+        GlobalClaudePluginRegistryAggregate,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
         ExecuteWorkflowHandler,
     )
+    from syn_domain.contexts.orchestration.slices.list_claude_plugins import (
+        ListClaudePluginsHandler,
+    )
+    from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
+        AddGlobalClaudePluginHandler,
+        GlobalClaudePluginsProjection,
+        ListGlobalClaudePluginsHandler,
+        RemoveGlobalClaudePluginHandler,
+    )
+    from syn_domain.contexts.orchestration.slices.register_claude_plugin import (
+        RegisterClaudePluginHandler,
+    )
+    from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection import (
+        ClaudePluginLockProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.register_skill import RegisterSkillHandler
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
+        ShowClaudePluginHandler,
+    )
+    from syn_shared.settings.config import Settings
     from syn_shared.settings.github import GitHubAppSettings
 
 from syn_adapters.conversations import get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
+from syn_adapters.session_store import HttpSessionStore
 from syn_adapters.storage import (
     connect_event_store,
     disconnect_event_store,
@@ -57,6 +96,12 @@ from syn_adapters.storage.repositories import (
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
+from syn_shared.agents import (
+    AgentProvider,
+    ModelAlias,
+    UnsupportedAgentProviderError,
+    require_executable_provider,
+)
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -78,6 +123,27 @@ def get_projection_mgr() -> ProjectionManager:
     return get_projection_manager()
 
 
+def _build_session_store(settings: Settings) -> HttpSessionStore | None:
+    """The read side of the session store, or None when it is not configured.
+
+    Returns None rather than raising: the store is opt-in, and a deployment
+    without one simply imports no delegate cost. Failing startup over an
+    optional telemetry source would trade a partial cost figure for no platform
+    at all.
+    """
+    store = settings.session_store
+    if not store.is_enabled or not store.url:
+        return None
+
+    # The READ token: this client only ever fetches. Handing it the write
+    # token yields 401 on every fetch against a store that scopes the two
+    # separately, and a 401 is classified as transient - so every delegate
+    # would retry forever and none would ever be priced.
+    read_token = store.effective_read_token
+    token = read_token.get_secret_value() if read_token else None
+    return HttpSessionStore(base_url=store.url, auth_token=token)
+
+
 def _build_workspace_telemetry_env() -> dict[str, str]:
     """Build OTel env vars to inject into workspace containers.
 
@@ -85,7 +151,7 @@ def _build_workspace_telemetry_env() -> dict[str, str]:
     token/cost metrics and API-level events flow through the two-channel
     observability pipeline (plugin hooks + OTel). See ADR-056.
 
-    Returns empty dict if collector_url is not set — OTel silently no-ops
+    Returns empty dict if collector_url is not set; OTel silently no-ops
     inside the container (CLAUDE_CODE_ENABLE_TELEMETRY is already baked into
     the workspace image as a default, so no-endpoint is a graceful fallback).
     """
@@ -103,7 +169,7 @@ def _build_workspace_telemetry_env() -> dict[str, str]:
 async def get_execution_processor() -> WorkflowExecutionProcessor:
     """Wire up WorkflowExecutionProcessor with all dependencies (ISS-196).
 
-    Replaces the old get_execution_engine() — uses the Processor To-Do List
+    Replaces the old get_execution_engine(); uses the Processor To-Do List
     pattern instead of the imperative WorkflowExecutionEngine.
     """
     event_store = get_event_store()
@@ -122,7 +188,41 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     )
     from syn_shared.settings.workspace import WorkspaceSettings
 
-    ws_config = WorkspaceServiceConfig(image=WorkspaceSettings().docker_image)
+    ws_settings = WorkspaceSettings()
+    # The workspace service is the Docker headless path: claude -p and
+    # codex exec both run there, keeping the stream-json pipeline, Envoy
+    # token accounting, and telemetry.
+    ws_config = WorkspaceServiceConfig(image=ws_settings.docker_image)
+
+    # WHY (issue #726, PR2): the materializer turns ResolvedClaudePlugin
+    # entries on each phase into workspace files; the processor passes it
+    # through to ``WorkspaceProvisionHandler`` per dispatch.
+    claude_plugin_materializer = await get_claude_plugin_materializer()
+
+    # WHY (issue #772): mirrors the claude-plugin materializer above; turns
+    # ResolvedSkill entries on each phase into workspace files, then the
+    # processor threads it through to WorkspaceProvisionHandler per dispatch.
+    skill_materializer = await get_skill_materializer()
+
+    # Session capture (APS-V1-0004). Off unless a store URL is configured, and
+    # off is the DEFAULT: no deployment gains a dependency on a store it never
+    # asked for. When on, the processor probes each workspace before teardown
+    # and records the verdict on the observability lane.
+    #
+    # `event_store` is the same recorder the rest of Lane 2 writes through, so
+    # the capture indicator lands beside the telemetry it explains rather than
+    # in a store of its own.
+    from syn_adapters.workspace_backends.agentic.session_capture_service import (
+        SessionCaptureService,
+    )
+    from syn_shared.settings import get_settings
+
+    _settings = get_settings()
+    session_capture = SessionCaptureService(
+        _settings.session_store,
+        _settings.app_environment,
+        event_store,
+    )
 
     return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
@@ -138,8 +238,12 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         observability_writer=event_store,
         controller=get_controller(),
         prompt_builder=_build_workspace_prompt,
-        command_builder=_build_claude_command,
+        command_builder=_build_agent_command,
         todo_projection=ExecutionTodoProjection(store=get_projection_store()),
+        claude_plugin_materializer=claude_plugin_materializer,
+        skill_materializer=skill_materializer,
+        session_capture=session_capture,
+        session_store=_build_session_store(_settings),
     )
 
 
@@ -148,7 +252,20 @@ def _build_claude_command(
     prompt: str,
 ) -> list[str]:
     """Build the Claude CLI command for agent execution."""
+    # `AgentConfiguration.model` is `str | None` because a codex phase can
+    # leave it unset (see syn_shared.agents.DEFAULT_CLAUDE_MODEL).
+    # A claude-provider phase always resolves a concrete model (the domain
+    # default "haiku" when the YAML omits `model:`), so `None` here would
+    # indicate a construction bug elsewhere, not a real "unset" case worth
+    # silently tolerating - fail loudly instead of forwarding `--model None`.
     model = phase.agent_config.model
+    if model is None:
+        msg = (
+            f"Claude phase '{phase.phase_id}' resolved to a None model - "
+            "AgentConfiguration.model should always default to a claude "
+            "alias for provider='claude'."
+        )
+        raise ValueError(msg)
     cmd = [
         "claude",
         "--model",
@@ -166,6 +283,66 @@ def _build_claude_command(
             cmd.extend(["--allowedTools", tool])
 
     return cmd
+
+
+# Claude CLI model aliases (the AgentConfiguration.model default is "haiku").
+# Codex rejects these ("model not supported when using Codex with a ChatGPT
+# account"), so we must NOT forward a Claude model to `codex exec` - codex uses
+# its own account default instead. TODO(#780): resolve/validate a real codex
+# model for accurate cost labelling on codex phases.
+_CLAUDE_MODEL_ALIASES = frozenset(ModelAlias)
+
+
+def _is_codex_model(model: str | None) -> TypeGuard[str]:
+    """True only for a model id worth forwarding to `codex exec --model`."""
+    if model is None:
+        return False
+    lowered = model.lower()
+    return lowered not in _CLAUDE_MODEL_ALIASES and not lowered.startswith("claude")
+
+
+def _build_codex_command(prompt: str, model: str | None) -> list[str]:
+    """Build the Codex CLI command for agent execution.
+
+    A codex phase inherits the domain default model ("haiku", a Claude alias)
+    unless the YAML sets one. We only forward `--model` when it is a genuine
+    codex/OpenAI model id; otherwise codex selects its ChatGPT-account default.
+    """
+    cmd = [
+        "codex",
+        "exec",
+        "--json",
+        "--sandbox",
+        "danger-full-access",
+        "--skip-git-repo-check",
+    ]
+    if _is_codex_model(model):
+        cmd.extend(["--model", model])
+    cmd.append(prompt)
+    return cmd
+
+
+def _build_agent_command(
+    phase: ExecutablePhase,
+    prompt: str,
+) -> list[str]:
+    """Build the command selected by the phase provider.
+
+    Exhaustive on purpose: every known provider is named, and anything else
+    raises. The previous ``return _build_claude_command(...)`` fall-through
+    meant an unknown or removed provider - a stored ``claude-interactive``
+    template rehydrated from history, say - quietly ran as headless Claude and
+    reported success.
+    """
+    provider = require_executable_provider(
+        phase.agent_config.provider,
+        phase_id=phase.phase_id,
+    )
+    if provider is AgentProvider.CODEX:
+        return _build_codex_command(prompt, phase.agent_config.model)
+    if provider is AgentProvider.CLAUDE:
+        return _build_claude_command(phase, prompt)
+    raise UnsupportedAgentProviderError(provider, phase_id=phase.phase_id)
 
 
 def _owner_repo_from_url(url: str | None) -> str:
@@ -301,7 +478,7 @@ class _InMemoryAggregateRepository:
     interface required by domain handlers, so we provide a minimal implementation.
 
     Uses ``Any`` deliberately: this is a generic test double that stores
-    arbitrary aggregates — concrete types are only known at call sites.
+    arbitrary aggregates; concrete types are only known at call sites.
     """
 
     def __init__(self) -> None:
@@ -351,7 +528,7 @@ def get_trigger_store():
 
 
 # ---------------------------------------------------------------------------
-# Event pipeline (ISS-386) — dedup + unified ingestion
+# Event pipeline (ISS-386) - dedup + unified ingestion
 # ---------------------------------------------------------------------------
 
 _event_pipeline_singleton: object | None = None
@@ -413,7 +590,7 @@ def _create_dedup_adapter() -> DedupPort:
                 return PostgresDedupAdapter(pool, ttl_days=ttl_days)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
         except Exception:
             logger.warning(
-                "Postgres dedup unavailable — falling back to Redis",
+                "Postgres dedup unavailable; falling back to Redis",
                 exc_info=True,
             )
 
@@ -539,7 +716,7 @@ async def sync_published_events_to_projections() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 additions — execution control, events, conversations, etc.
+# Phase 3 additions - execution control, events, conversations, etc.
 # ---------------------------------------------------------------------------
 
 
@@ -550,7 +727,7 @@ def get_controller() -> ExecutionController:
     """Return a singleton ExecutionController for pause/resume/cancel/inject.
 
     Returns the same instance on every call so the execution engine and API
-    endpoints share the same signal queue — signals enqueued by an HTTP
+    endpoints share the same signal queue; signals enqueued by an HTTP
     endpoint are visible to the engine polling in the same process.
 
     Uses a Redis-backed signal queue (REDIS_URL env var, defaults to
@@ -582,7 +759,7 @@ def get_controller() -> ExecutionController:
         logger.info("ExecutionController using Redis signal queue (%s)", redis_url)
     except Exception:
         logger.warning(
-            "Redis unavailable (%s) — control signals (pause/cancel/resume) will not work",
+            "Redis unavailable (%s); control signals (pause/cancel/resume) will not work",
             redis_url,
             exc_info=True,
         )
@@ -607,7 +784,13 @@ class BackgroundWorkflowDispatcher:
     - Semaphore-bounded concurrency (Phase A2)
     """
 
-    def __init__(self, handler: ExecuteWorkflowHandler, max_concurrent: int = 5) -> None:
+    def __init__(self, handler: ExecuteWorkflowHandler, max_concurrent: int = 1) -> None:
+        """`max_concurrent` defaults to 1 for the same reason the setting does.
+
+        A caller that omits it used to get 5, which quietly reintroduced the
+        unsafe value the setting exists to avoid (#865). The safe value has to
+        be the one you get by saying nothing.
+        """
         self._handler = handler
         self._tasks: set[asyncio.Task[None]] = set()
         self._semaphore = asyncio.Semaphore(max_concurrent)
@@ -678,15 +861,39 @@ class BackgroundWorkflowDispatcher:
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
 
-async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
-    """Create a BackgroundWorkflowDispatcher backed by the processor."""
+async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
+    """Single composition root for ExecuteWorkflowHandler.
+
+    Both the synchronous POST /workflows/{id}/execute route and the
+    background dispatcher path go through this. Keeping the construction
+    in one place prevents drift like #726's missed phase_plugin_resolver
+    wiring, where one path materialized claude plugins into workspaces and
+    the other silently skipped them.
+
+    WHY (issue #726): bind the resolution service's per-phase resolver so
+    ``ExecuteWorkflowHandler`` populates ``ExecutablePhase.claude_plugins``
+    with lock-resolved entries before dispatch reaches the processor.
+
+    WHY (issue #772): mirrors the claude plugin wiring for skills -- binds
+    ``SkillResolutionService.resolve_for_phase`` so
+    ``ExecutablePhase.skills`` is populated the same way.
+    """
     from syn_domain.contexts.orchestration import ExecuteWorkflowHandler
 
     processor = await get_execution_processor()
-    handler = ExecuteWorkflowHandler(
+    resolution_service = await get_claude_plugin_resolution_service()
+    skill_resolution_service = await get_skill_resolution_service()
+    return ExecuteWorkflowHandler(
         processor=processor,
         workflow_repository=get_workflow_repository(),
+        phase_plugin_resolver=resolution_service.resolve_for_phase,
+        phase_skill_resolver=skill_resolution_service.resolve_for_phase,
     )
+
+
+async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
+    """Create a BackgroundWorkflowDispatcher backed by the processor."""
+    handler = await get_execute_workflow_handler()
     from syn_shared.settings import get_settings
 
     max_concurrent = get_settings().polling.max_concurrent_dispatches
@@ -714,7 +921,7 @@ def get_event_store_instance() -> AgentEventStore:
 def get_session_cost_query():
     """Return a SessionCostQueryService backed by TimescaleDB.
 
-    Read-only service for session cost data — separates reads from
+    Read-only service for session cost data; separates reads from
     the write-side projection. See #532.
 
     Raises:
@@ -725,7 +932,7 @@ def get_session_cost_query():
     pool = get_event_store_instance().pool
     if pool is None:
         raise RuntimeError(
-            "TimescaleDB pool is not initialized — ensure_connected() must be called first"
+            "TimescaleDB pool is not initialized; ensure_connected() must be called first"
         )
     return SessionCostQueryService(pool=pool)
 
@@ -733,7 +940,7 @@ def get_session_cost_query():
 def get_execution_cost_query():
     """Return an ExecutionCostQueryService backed by TimescaleDB.
 
-    Read-only service for execution cost data — separates reads from
+    Read-only service for execution cost data; separates reads from
     the write-side projection. See #532.
 
     Raises:
@@ -744,7 +951,7 @@ def get_execution_cost_query():
     pool = get_event_store_instance().pool
     if pool is None:
         raise RuntimeError(
-            "TimescaleDB pool is not initialized — ensure_connected() must be called first"
+            "TimescaleDB pool is not initialized; ensure_connected() must be called first"
         )
     return ExecutionCostQueryService(pool=pool)
 
@@ -807,3 +1014,395 @@ def get_github_settings() -> GitHubAppSettings:
     from syn_shared.settings.github import get_github_settings as _get
 
     return _get()
+
+
+# ---------------------------------------------------------------------------
+# Claude plugin injection (issue #726)
+#
+# See ADR-066: the API tier holds storage + repository wiring only. After the
+# Phase A redesign there is no fetcher in the API container -- the CLI clones
+# locally and uploads the tree contents inline. Production storage is MinIO;
+# tests/offline (``settings.uses_in_memory_stores``) use the in-memory adapter
+# guarded by ``InMemoryAdapter``.
+#
+# Why singletons: the lock + global projections are coordinator-owned read
+# models with internal store handles; instantiating fresh per request would
+# leak handles. The handlers themselves are cheap to build but follow the
+# same singleton pattern as other slices for consistency.
+# ---------------------------------------------------------------------------
+
+
+# WHY each singleton is typed with the concrete handler/projection class:
+# the wiring layer is the trust boundary that builds these collaborators, so
+# downstream callers (route handlers, services) get precise types and never
+# need ``# type: ignore`` at use sites. See feedback_no_any_in_plumbing.
+_claude_plugin_storage_singleton: MinioClaudePluginStorage | InMemoryClaudePluginStorage | None = (
+    None
+)
+_register_claude_plugin_handler_singleton: RegisterClaudePluginHandler | None = None
+_add_global_claude_plugin_handler_singleton: AddGlobalClaudePluginHandler | None = None
+_remove_global_claude_plugin_handler_singleton: RemoveGlobalClaudePluginHandler | None = None
+_list_global_claude_plugins_handler_singleton: ListGlobalClaudePluginsHandler | None = None
+_list_claude_plugins_handler_singleton: ListClaudePluginsHandler | None = None
+_show_claude_plugin_handler_singleton: ShowClaudePluginHandler | None = None
+_claude_plugin_resolution_service_singleton: ClaudePluginResolutionService | None = None
+_claude_plugin_materializer_singleton: ClaudePluginMaterializer | None = None
+
+
+def _claude_plugin_registration_repository() -> RepositoryAdapter[
+    ClaudePluginRegistrationAggregate
+]:
+    """Repository for ``ClaudePluginRegistrationAggregate``.
+
+    Always returns the durable ``RepositoryAdapter``; in test/offline mode the
+    underlying ESP client is the in-memory MemoryEventStoreClient, so the
+    adapter still publishes events through the InMemoryEventPublisher and
+    ``sync_published_events_to_projections()`` can dispatch them to the
+    lock projection. The Phase 5 slice unit tests still use the bare
+    ``InMemoryClaudePluginRegistrationRepository`` directly (no event-store
+    plumbing needed there).
+    """
+    from syn_adapters.storage.repositories import (
+        get_claude_plugin_registration_repository as _durable,
+    )
+
+    return _durable()
+
+
+def _global_claude_plugin_registry_repository() -> RepositoryAdapter[
+    GlobalClaudePluginRegistryAggregate
+]:
+    """Repository for ``GlobalClaudePluginRegistryAggregate`` (singleton aggregate)."""
+    from syn_adapters.storage.repositories import (
+        get_global_claude_plugin_registry_repository as _durable,
+    )
+
+    return _durable()
+
+
+async def get_claude_plugin_storage() -> MinioClaudePluginStorage | InMemoryClaudePluginStorage:
+    """Return the claude plugin tree storage adapter (MinIO in prod, in-memory in tests)."""
+    global _claude_plugin_storage_singleton
+    if _claude_plugin_storage_singleton is not None:
+        return _claude_plugin_storage_singleton
+
+    from syn_shared.settings import get_settings
+
+    if get_settings().uses_in_memory_stores:
+        from syn_adapters.storage.claude_plugin_storage.factory import (
+            get_test_claude_plugin_storage,
+        )
+
+        _claude_plugin_storage_singleton = get_test_claude_plugin_storage()
+        return _claude_plugin_storage_singleton
+
+    from syn_adapters.storage.claude_plugin_storage.factory import (
+        get_claude_plugin_storage as _prod,
+    )
+
+    _claude_plugin_storage_singleton = await _prod()
+    return _claude_plugin_storage_singleton
+
+
+def get_claude_plugin_lock_projection() -> ClaudePluginLockProjection:
+    """Return the claude_plugin_lock projection from the shared registry.
+
+    Critical: route reads + sync_published_events_to_projections writes MUST
+    use the same projection instance, otherwise events written by the manager
+    are invisible to the route. The projection registry is the single owner.
+    """
+    from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection import (
+        ClaudePluginLockProjection,
+    )
+
+    projection = get_projection_manager().get_projection("claude_plugin_lock")
+    # WHY assert: ProjectionManager.get_projection returns Any for heterogeneity;
+    # narrow it once at the wiring boundary so callers see the precise type.
+    assert isinstance(projection, ClaudePluginLockProjection)
+    return projection
+
+
+def get_global_claude_plugins_projection() -> GlobalClaudePluginsProjection:
+    """Return the global_claude_plugins projection from the shared registry."""
+    from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins.projection import (
+        GlobalClaudePluginsProjection,
+    )
+
+    projection = get_projection_manager().get_projection("global_claude_plugins")
+    assert isinstance(projection, GlobalClaudePluginsProjection)
+    return projection
+
+
+async def get_register_claude_plugin_handler() -> RegisterClaudePluginHandler:
+    """Return the ``RegisterClaudePluginHandler`` composed from storage + repo.
+
+    No fetcher dependency after the #726 Phase A redesign; the CLI uploads the
+    pre-cloned tree contents inline.
+    """
+    global _register_claude_plugin_handler_singleton
+    if _register_claude_plugin_handler_singleton is not None:
+        return _register_claude_plugin_handler_singleton
+
+    from syn_domain.contexts.orchestration.slices.register_claude_plugin import (
+        RegisterClaudePluginHandler,
+    )
+
+    _register_claude_plugin_handler_singleton = RegisterClaudePluginHandler(
+        storage=await get_claude_plugin_storage(),
+        repo=_claude_plugin_registration_repository(),
+    )
+    return _register_claude_plugin_handler_singleton
+
+
+async def get_add_global_claude_plugin_handler() -> AddGlobalClaudePluginHandler:
+    """Return the ``AddGlobalClaudePluginHandler``.
+
+    Phase A redesign: depends on the lock projection rather than the register
+    handler. Refuses to add anything that has not been registered first.
+    """
+    global _add_global_claude_plugin_handler_singleton
+    if _add_global_claude_plugin_handler_singleton is not None:
+        return _add_global_claude_plugin_handler_singleton
+
+    from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
+        AddGlobalClaudePluginHandler,
+    )
+
+    _add_global_claude_plugin_handler_singleton = AddGlobalClaudePluginHandler(
+        repo=_global_claude_plugin_registry_repository(),
+        lock_projection=get_claude_plugin_lock_projection(),
+    )
+    return _add_global_claude_plugin_handler_singleton
+
+
+def get_remove_global_claude_plugin_handler() -> RemoveGlobalClaudePluginHandler:
+    """Return the ``RemoveGlobalClaudePluginHandler``."""
+    global _remove_global_claude_plugin_handler_singleton
+    if _remove_global_claude_plugin_handler_singleton is not None:
+        return _remove_global_claude_plugin_handler_singleton
+
+    from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
+        RemoveGlobalClaudePluginHandler,
+    )
+
+    _remove_global_claude_plugin_handler_singleton = RemoveGlobalClaudePluginHandler(
+        repo=_global_claude_plugin_registry_repository(),
+    )
+    return _remove_global_claude_plugin_handler_singleton
+
+
+def get_list_global_claude_plugins_handler() -> ListGlobalClaudePluginsHandler:
+    """Return the ``ListGlobalClaudePluginsHandler``."""
+    global _list_global_claude_plugins_handler_singleton
+    if _list_global_claude_plugins_handler_singleton is not None:
+        return _list_global_claude_plugins_handler_singleton
+
+    from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
+        ListGlobalClaudePluginsHandler,
+    )
+
+    _list_global_claude_plugins_handler_singleton = ListGlobalClaudePluginsHandler(
+        projection=get_global_claude_plugins_projection(),
+    )
+    return _list_global_claude_plugins_handler_singleton
+
+
+def get_list_claude_plugins_handler() -> ListClaudePluginsHandler:
+    """Return the ``ListClaudePluginsHandler`` (lock projection scan)."""
+    global _list_claude_plugins_handler_singleton
+    if _list_claude_plugins_handler_singleton is not None:
+        return _list_claude_plugins_handler_singleton
+
+    from syn_domain.contexts.orchestration.slices.list_claude_plugins import (
+        ListClaudePluginsHandler,
+    )
+
+    _list_claude_plugins_handler_singleton = ListClaudePluginsHandler(
+        projection=get_claude_plugin_lock_projection(),
+    )
+    return _list_claude_plugins_handler_singleton
+
+
+def get_show_claude_plugin_handler() -> ShowClaudePluginHandler:
+    """Return the ``ShowClaudePluginHandler`` (lock projection by name+version)."""
+    global _show_claude_plugin_handler_singleton
+    if _show_claude_plugin_handler_singleton is not None:
+        return _show_claude_plugin_handler_singleton
+
+    from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
+        ShowClaudePluginHandler,
+    )
+
+    _show_claude_plugin_handler_singleton = ShowClaudePluginHandler(
+        projection=get_claude_plugin_lock_projection(),
+    )
+    return _show_claude_plugin_handler_singleton
+
+
+async def get_claude_plugin_resolution_service() -> ClaudePluginResolutionService:
+    """Return the ``ClaudePluginResolutionService`` used by the workflow install path.
+
+    Phase A redesign: validate-only; no register handler dependency.
+    """
+    global _claude_plugin_resolution_service_singleton
+    if _claude_plugin_resolution_service_singleton is not None:
+        return _claude_plugin_resolution_service_singleton
+
+    from syn_api.services.claude_plugin_resolution_service import (
+        ClaudePluginResolutionService,
+    )
+
+    _claude_plugin_resolution_service_singleton = ClaudePluginResolutionService(
+        lock_projection=get_claude_plugin_lock_projection(),
+        global_projection=get_global_claude_plugins_projection(),
+    )
+    return _claude_plugin_resolution_service_singleton
+
+
+async def get_claude_plugin_materializer() -> ClaudePluginMaterializer:
+    """Return the process-wide ``ClaudePluginMaterializer`` (issue #726, PR2).
+
+    Construction is async because the storage singleton is async; the
+    materializer itself is stateless apart from its LRU cache.
+    """
+    global _claude_plugin_materializer_singleton
+    if _claude_plugin_materializer_singleton is not None:
+        return _claude_plugin_materializer_singleton
+
+    from syn_api.services.claude_plugin_materializer import ClaudePluginMaterializer
+
+    storage = await get_claude_plugin_storage()
+    _claude_plugin_materializer_singleton = ClaudePluginMaterializer(storage=storage)
+    return _claude_plugin_materializer_singleton
+
+
+def reset_claude_plugin_singletons() -> None:
+    """Reset every claude-plugin singleton (test isolation only)."""
+    global _claude_plugin_storage_singleton
+    global _register_claude_plugin_handler_singleton
+    global _add_global_claude_plugin_handler_singleton
+    global _remove_global_claude_plugin_handler_singleton
+    global _list_global_claude_plugins_handler_singleton
+    global _list_claude_plugins_handler_singleton
+    global _show_claude_plugin_handler_singleton
+    global _claude_plugin_resolution_service_singleton
+    global _claude_plugin_materializer_singleton
+
+    _claude_plugin_storage_singleton = None
+    _register_claude_plugin_handler_singleton = None
+    _add_global_claude_plugin_handler_singleton = None
+    _remove_global_claude_plugin_handler_singleton = None
+    _list_global_claude_plugins_handler_singleton = None
+    _list_claude_plugins_handler_singleton = None
+    _show_claude_plugin_handler_singleton = None
+    _claude_plugin_resolution_service_singleton = None
+    _claude_plugin_materializer_singleton = None
+
+
+# ── Skill wiring (issue #772) ───────────────────────────────────────
+#
+# Mirrors the claude-plugin wiring block above. Skills have no global scope
+# in this plan, so there is no global-registry projection/handler here.
+
+_skill_storage_singleton: MinioSkillStorage | InMemorySkillStorage | None = None
+_register_skill_handler_singleton: RegisterSkillHandler | None = None
+_skill_resolution_service_singleton: SkillResolutionService | None = None
+_skill_materializer_singleton: SkillMaterializer | None = None
+
+
+async def get_skill_storage() -> MinioSkillStorage | InMemorySkillStorage:
+    """Get the configured skill storage adapter (production singleton)."""
+    global _skill_storage_singleton
+    if _skill_storage_singleton is not None:
+        return _skill_storage_singleton
+
+    from syn_shared.settings import get_settings
+
+    if get_settings().uses_in_memory_stores:
+        from syn_adapters.storage.skill_storage.factory import get_test_skill_storage
+
+        _skill_storage_singleton = get_test_skill_storage()
+        return _skill_storage_singleton
+
+    from syn_adapters.storage.skill_storage.factory import get_skill_storage as _prod
+
+    _skill_storage_singleton = await _prod()
+    return _skill_storage_singleton
+
+
+def get_skill_lock_projection() -> SkillLockProjection:
+    """Return the skill_lock projection from the shared registry.
+
+    WHY assert isinstance: the projection manager stores projections keyed by
+    name as ``CheckpointedProjection``; the concrete type is only known at
+    this call site, so an isinstance check keeps every downstream caller
+    fully typed without ``# type: ignore`` (see feedback_no_any_in_plumbing).
+    """
+    from syn_domain.contexts.orchestration.slices.register_skill.projection import (
+        SkillLockProjection,
+    )
+
+    projection = get_projection_manager().get_projection("skill_lock")
+    assert isinstance(projection, SkillLockProjection)
+    return projection
+
+
+async def get_register_skill_handler() -> RegisterSkillHandler:
+    """Return the process-wide ``RegisterSkillHandler`` singleton (issue #772)."""
+    global _register_skill_handler_singleton
+    if _register_skill_handler_singleton is not None:
+        return _register_skill_handler_singleton
+
+    from syn_adapters.storage.repositories import get_skill_registration_repository
+    from syn_domain.contexts.orchestration.slices.register_skill import RegisterSkillHandler
+
+    _register_skill_handler_singleton = RegisterSkillHandler(
+        storage=await get_skill_storage(),
+        repo=get_skill_registration_repository(),
+    )
+    return _register_skill_handler_singleton
+
+
+async def get_skill_resolution_service() -> SkillResolutionService:
+    """Return the process-wide ``SkillResolutionService`` singleton (issue #772)."""
+    global _skill_resolution_service_singleton
+    if _skill_resolution_service_singleton is not None:
+        return _skill_resolution_service_singleton
+
+    from syn_api.services.skill_resolution_service import SkillResolutionService
+
+    _skill_resolution_service_singleton = SkillResolutionService(
+        lock_projection=get_skill_lock_projection(),
+    )
+    return _skill_resolution_service_singleton
+
+
+async def get_skill_materializer() -> SkillMaterializer:
+    """Return the process-wide ``SkillMaterializer`` (issue #772).
+
+    Mirrors ``get_claude_plugin_materializer``: construction is async because
+    the storage singleton is async; the materializer itself is stateless
+    apart from its LRU cache.
+    """
+    global _skill_materializer_singleton
+    if _skill_materializer_singleton is not None:
+        return _skill_materializer_singleton
+
+    from syn_api.services.skill_materializer import SkillMaterializer
+
+    storage = await get_skill_storage()
+    _skill_materializer_singleton = SkillMaterializer(storage=storage)
+    return _skill_materializer_singleton
+
+
+def reset_skill_singletons() -> None:
+    """Reset every skill singleton (test isolation only)."""
+    global _skill_storage_singleton
+    global _register_skill_handler_singleton
+    global _skill_resolution_service_singleton
+    global _skill_materializer_singleton
+
+    _skill_storage_singleton = None
+    _register_skill_handler_singleton = None
+    _skill_resolution_service_singleton = None
+    _skill_materializer_singleton = None

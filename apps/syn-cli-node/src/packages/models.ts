@@ -10,7 +10,11 @@ export type PackageFormat = (typeof PackageFormat)[keyof typeof PackageFormat];
 export const PluginManifestSchema = z.object({
   manifest_version: z.number().default(1),
   name: z.string().min(1),
-  version: z.string().default("0.1.0"),
+  // WHY min(1) (issue #822): an empty version passes a truthiness check on
+  // the way out, so the query param is omitted and the install silently takes
+  // the unversioned overwrite path. The policy is only as good as the version
+  // being present.
+  version: z.string().trim().min(1, "manifest version must not be empty").default("0.1.0"),
   description: z.string().nullish(),
   author: z.string().nullish(),
   license: z.string().nullish(),
@@ -60,4 +64,14 @@ export interface ResolvedWorkflow {
   requires_repos: boolean;
   input_declarations: Record<string, unknown>[];
   source_path: string;
+  /**
+   * The whole workflow document, with `prompt_file:` refs already resolved.
+   *
+   * WHY this exists alongside the named fields above: install uploads this to
+   * `/workflows/from-yaml`, where the server owns every YAML semantic. The
+   * named fields are a lossy projection kept for local preview and the
+   * install registry - anything the projection does not name (skills,
+   * claude_plugins, and whatever is added next) survives only here.
+   */
+  definition: Record<string, unknown>;
 }

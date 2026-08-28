@@ -6,11 +6,12 @@ HTTP endpoints wire the service functions to ``@router.post()`` routes.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from syn_api._wiring import (
     ensure_connected,
@@ -26,6 +27,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
+from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
@@ -34,6 +36,11 @@ if TYPE_CHECKING:
         WorkflowClassification,
         WorkflowType,
     )
+    from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+        InstallOutcome,
+    )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
@@ -127,8 +134,11 @@ async def create_workflow(
     workflow_id: str | None = None,
     repos: list[str] | None = None,
     requires_repos: bool = True,
-) -> Result[str, WorkflowError]:
-    """Create a new workflow template.
+    version: str | None = None,
+    source_digest: str | None = None,
+    force: bool = False,
+) -> Result[InstallOutcome, WorkflowError]:
+    """Create or update a workflow template (install upsert, issue #822).
 
     Args:
         name: Workflow name.
@@ -141,13 +151,21 @@ async def create_workflow(
         phases: Optional list of phase definitions. Defaults to a single initial phase.
         input_declarations: Optional list of input declarations.
         workflow_id: Optional client-supplied ID. Auto-generated if omitted.
+        version: Package version being installed, recorded for provenance.
+        source_digest: Resolved source commit SHA, recorded for provenance.
+        force: Overwrite an already-installed matching version.
 
     Returns:
-        Ok(workflow_id) on success, Err(WorkflowError) on failure.
+        Ok(InstallOutcome) on success, Err(WorkflowError) on failure. The
+        outcome reports whether anything actually changed: a byte-identical
+        reinstall is a successful no-op (issue #822).
     """
+    from event_sourcing import ConcurrencyConflictError, StreamAlreadyExistsError
+
     from syn_domain.contexts.orchestration import (
         CreateWorkflowTemplateCommand,
         CreateWorkflowTemplateHandler,
+        WorkflowTemplateConflictError,
     )
 
     command = CreateWorkflowTemplateCommand(
@@ -163,6 +181,9 @@ async def create_workflow(
         input_declarations=_build_input_declarations(input_declarations),
         repos=repos or [],
         requires_repos=requires_repos,
+        version=version,
+        source_digest=source_digest,
+        force=force,
     )
 
     await ensure_connected()
@@ -174,10 +195,25 @@ async def create_workflow(
     )
 
     try:
-        workflow_id = await handler.handle(command)
+        outcome = await handler.handle(command)
         await sync_published_events_to_projections()
-        return Ok(workflow_id)
-    except Exception as e:
+        return Ok(outcome)
+    except WorkflowTemplateConflictError as e:
+        # Domain conflict (already installed / digest mismatch). Carries a
+        # user-facing message; never event-store wording. Maps to HTTP 409.
+        return Err(WorkflowError.ALREADY_EXISTS, message=str(e))
+    except (ConcurrencyConflictError, StreamAlreadyExistsError) as e:
+        # A genuine concurrent install of the same id. Also a 409, but the
+        # event-store text is replaced with something actionable (issue #822).
+        logger.warning("Concurrent install of workflow %s: %s", command.aggregate_id, e)
+        return Err(
+            WorkflowError.ALREADY_EXISTS,
+            message=(
+                f"Workflow '{command.aggregate_id}' was modified by another request "
+                f"while this install was in flight. Retry the install."
+            ),
+        )
+    except ValueError as e:
         return Err(WorkflowError.INVALID_INPUT, message=str(e))
 
 
@@ -305,6 +341,28 @@ class CreateWorkflowRequest(BaseModel):
             "Set to false for research or analysis workflows that don't need repos."
         ),
     )
+    version: str | None = Field(
+        default=None,
+        max_length=100,
+        description=(
+            "Package version being installed (issue #822). Recorded on the template "
+            "so an execution can be traced to the version that produced it. "
+            "Reinstalling a matching version is refused unless force is set."
+        ),
+    )
+    source_digest: str | None = Field(
+        default=None,
+        max_length=100,
+        description=(
+            "Resolved source commit SHA for the package content (issue #822). "
+            "A matching version resolving to a different digest is refused: that is "
+            "the signature of a republished version."
+        ),
+    )
+    force: bool = Field(
+        default=False,
+        description="Overwrite an already-installed matching version.",
+    )
 
 
 class ValidateYamlRequest(BaseModel):
@@ -313,7 +371,7 @@ class ValidateYamlRequest(BaseModel):
     filename: str = Field(default="workflow.yaml", description="Original filename (informational)")
     file: str | None = Field(
         default=None,
-        description="Deprecated — file paths are no longer supported. Use 'content' instead.",
+        description="Deprecated; file paths are no longer supported. Use 'content' instead.",
     )
 
 
@@ -321,8 +379,23 @@ class UpdatePhasePromptRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     prompt_template: str = Field(..., min_length=1)
     model: str | None = None
+    provider: str | None = None
     timeout_seconds: int | None = None
     allowed_tools: list[str] | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, value: str | None) -> str | None:
+        """Reject unsupported provider values at the API boundary.
+
+        Without this an unknown provider (typo) persists, then execution silently
+        falls through to the Claude path while telemetry reports the bad value.
+        """
+        if value is not None and value not in set(AgentProvider):
+            allowed = ", ".join(sorted(AgentProvider))
+            msg = f"provider must be one of: {allowed}"
+            raise ValueError(msg)
+        return value
 
 
 # =============================================================================
@@ -375,19 +448,25 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
         workflow_id=body.id,
         repos=list(body.repos),
         requires_repos=body.requires_repos,
+        version=body.version,
+        source_digest=body.source_digest,
+        force=body.force,
     )
 
     if isinstance(result, Err):
-        raise HTTPException(status_code=400, detail=result.message)
+        # A conflict is not bad input: the request was well formed and the
+        # server refused it against existing state (issue #822).
+        status_code = 409 if result.error == WorkflowError.ALREADY_EXISTS else 400
+        raise HTTPException(status_code=status_code, detail=result.message)
 
     return CreateWorkflowResponse(
-        id=result.value,
+        id=result.value.workflow_id,
         name=body.name,
         workflow_type=body.workflow_type,
         classification=body.classification,
         repository_url=body.repository_url,
         requires_repos=body.requires_repos,
-        status="created",
+        status="created" if result.value.changed else "unchanged",
     )
 
 
@@ -434,7 +513,7 @@ class DeleteWorkflowResponse(BaseModel):
     summary="Archive (soft-delete) a workflow template",
     responses={
         404: {"description": "Workflow template not found"},
-        409: {"description": "Conflict — workflow has active executions or is already archived"},
+        409: {"description": "Conflict; workflow has active executions or is already archived"},
     },
 )
 async def delete_workflow_endpoint(workflow_id: str) -> DeleteWorkflowResponse:
@@ -465,6 +544,7 @@ async def update_phase_prompt(
     phase_id: str,
     prompt_template: str,
     model: str | None = None,
+    provider: str | None = None,
     timeout_seconds: int | None = None,
     allowed_tools: list[str] | None = None,
 ) -> Result[str, WorkflowError]:
@@ -491,6 +571,7 @@ async def update_phase_prompt(
         phase_id=phase_id,
         prompt_template=prompt_template,
         model=model,
+        provider=provider,
         timeout_seconds=timeout_seconds,
         allowed_tools=allowed_tools,
     )
@@ -526,6 +607,7 @@ async def update_phase_prompt_endpoint(
         phase_id=phase_id,
         prompt_template=body.prompt_template,
         model=body.model,
+        provider=body.provider,
         timeout_seconds=body.timeout_seconds,
         allowed_tools=body.allowed_tools,
     )
@@ -542,7 +624,7 @@ async def update_phase_prompt_endpoint(
 
 
 # =============================================================================
-# YAML Upload (thin wrapper — server owns parsing)
+# YAML Upload (thin wrapper; server owns parsing)
 # =============================================================================
 
 
@@ -552,9 +634,17 @@ _ACCEPTED_YAML_CONTENT_TYPES = frozenset(
         "application/x-yaml",
         "text/yaml",
         "text/x-yaml",
+        # WHY json: every JSON document is a valid YAML document, and the
+        # parser below is yaml.safe_load either way. `syn workflow install`
+        # uploads a RESOLVED definition (prompt_file refs already inlined
+        # against the package directory), which it must serialize itself; it
+        # has no YAML emitter, and hand-rolling one around arbitrary prompt
+        # bodies is where emitters get subtly wrong. Accepting JSON costs this
+        # endpoint nothing and keeps the CLI dependency-free.
+        "application/json",
     }
 )
-_MAX_YAML_BYTES = 1 * 1024 * 1024  # 1 MiB — workflow definitions are small
+_MAX_YAML_BYTES = 1 * 1024 * 1024  # 1 MiB; workflow definitions are small
 
 
 class _YamlCreateOutcome(BaseModel):
@@ -567,6 +657,8 @@ class _YamlCreateOutcome(BaseModel):
     classification: str
     repository_url: str
     requires_repos: bool
+    changed: bool = True
+    """False when the package was already installed byte-identical (#822)."""
 
 
 async def create_workflow_from_yaml(
@@ -574,6 +666,9 @@ async def create_workflow_from_yaml(
     *,
     workflow_id_override: str | None = None,
     name_override: str | None = None,
+    version: str | None = None,
+    source_digest: str | None = None,
+    force: bool = False,
 ) -> Result[_YamlCreateOutcome, WorkflowError]:
     """Create a workflow template from raw YAML content.
 
@@ -582,14 +677,21 @@ async def create_workflow_from_yaml(
     ``name`` and ``workflow_id`` when supplied.
 
     Raises ``ValueError`` on malformed YAML or unresolved ``prompt_file:``
-    references (no base_dir is available server-side).
+    references (no base_dir is available server-side). Raises
+    ``ClaudePluginError`` (any subclass) if a referenced claude plugin is
+    not yet present in the lock projection -- per the #726 Phase A design
+    the API does not fetch; the CLI must register plugins via
+    ``POST /claude-plugins/registrations`` first. The endpoint wrapper maps
+    both error families to the right HTTP status.
     """
     import yaml
-    from event_sourcing.core.errors import StreamAlreadyExistsError
+    from event_sourcing.core.errors import ConcurrencyConflictError, StreamAlreadyExistsError
 
+    from syn_api._wiring import get_claude_plugin_resolution_service
     from syn_domain.contexts.orchestration import (
         CreateWorkflowTemplateHandler,
         WorkflowDefinition,
+        WorkflowTemplateConflictError,
         build_command_from_definition,
     )
 
@@ -597,10 +699,22 @@ async def create_workflow_from_yaml(
         definition = WorkflowDefinition.from_yaml(yaml_content)
     except yaml.YAMLError as e:
         raise ValueError(f"Malformed YAML: {e}") from e
+
+    # Implicit fetch: any claude_plugins ref the YAML declares must be
+    # present in the lock projection before we register the workflow.
+    # ClaudePluginError subclasses propagate to the endpoint wrapper, which
+    # translates them to HTTP 422 with a stable error_code. The workflow is
+    # NOT registered if any plugin fetch fails (no partial state).
+    resolution_service = await get_claude_plugin_resolution_service()
+    await resolution_service.ensure_registered(definition)
+
     command = build_command_from_definition(
         definition,
         workflow_id_override=workflow_id_override,
         name_override=name_override,
+        version=version,
+        source_digest=source_digest,
+        force=force,
     )
 
     await ensure_connected()
@@ -614,13 +728,27 @@ async def create_workflow_from_yaml(
     # store. Both are user-input problems. Anything else is a bug or
     # infrastructure failure and should propagate as a 500.
     try:
-        workflow_id = await handler.handle(command)
-    except (ValueError, StreamAlreadyExistsError) as e:
+        outcome = await handler.handle(command)
+    except WorkflowTemplateConflictError as e:
+        # Already installed / republished digest. A refusal against existing
+        # state, not bad input, so it maps to 409 (issue #822).
+        return Err(WorkflowError.ALREADY_EXISTS, message=str(e))
+    except (ConcurrencyConflictError, StreamAlreadyExistsError) as e:
+        logger.warning("Concurrent install of workflow %s: %s", command.aggregate_id, e)
+        return Err(
+            WorkflowError.ALREADY_EXISTS,
+            message=(
+                f"Workflow '{command.aggregate_id}' was modified by another request "
+                f"while this install was in flight. Retry the install."
+            ),
+        )
+    except ValueError as e:
         return Err(WorkflowError.INVALID_INPUT, message=str(e))
     await sync_published_events_to_projections()
     return Ok(
         _YamlCreateOutcome(
-            workflow_id=workflow_id,
+            workflow_id=outcome.workflow_id,
+            changed=outcome.changed,
             name=command.name,
             workflow_type=command.workflow_type.value,
             classification=command.classification.value,
@@ -635,6 +763,9 @@ async def create_workflow_from_yaml_endpoint(
     request: Request,
     name: str | None = None,
     workflow_id: str | None = None,
+    version: str | None = None,
+    source_digest: str | None = None,
+    force: bool = False,
 ) -> CreateWorkflowResponse:
     """Create a workflow template by uploading raw YAML.
 
@@ -646,6 +777,13 @@ async def create_workflow_from_yaml_endpoint(
     intended for scripted bulk installation (e.g. renaming a template
     on install). They are *not* a second source of truth for fields
     that live in the YAML.
+
+    ``version``, ``source_digest`` and ``force`` carry install provenance
+    and policy (issue #822). ``syn workflow install`` supplies the package
+    version and the resolved commit SHA; reinstalling a matching version is
+    refused with 409 unless ``force`` is set, and a matching version that
+    resolves to a different digest is refused regardless of how it looks,
+    because that is the signature of a republished version.
     """
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type not in _ACCEPTED_YAML_CONTENT_TYPES:
@@ -669,17 +807,32 @@ async def create_workflow_from_yaml_endpoint(
     except UnicodeDecodeError as e:
         raise HTTPException(status_code=400, detail=f"YAML body is not valid UTF-8: {e}") from e
 
+    from syn_api.services.claude_plugin_error_mapping import (
+        http_exception_for_claude_plugin_error,
+    )
+    from syn_domain.contexts.orchestration import (
+        ClaudePluginError,
+    )
+
     try:
         result = await create_workflow_from_yaml(
             yaml_content,
             workflow_id_override=workflow_id,
             name_override=name,
+            version=version,
+            source_digest=source_digest,
+            force=force,
         )
+    except ClaudePluginError as e:
+        # Stable error_code (claude_plugin_unreachable, etc.) so CLI/dashboard
+        # can render actionable messages without string sniffing.
+        raise http_exception_for_claude_plugin_error(e) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid workflow YAML: {e}") from e
 
     if isinstance(result, Err):
-        raise HTTPException(status_code=400, detail=result.message)
+        status_code = 409 if result.error == WorkflowError.ALREADY_EXISTS else 400
+        raise HTTPException(status_code=status_code, detail=result.message)
 
     outcome = result.value
     return CreateWorkflowResponse(
@@ -689,5 +842,5 @@ async def create_workflow_from_yaml_endpoint(
         classification=outcome.classification,
         repository_url=outcome.repository_url,
         requires_repos=outcome.requires_repos,
-        status="created",
+        status="created" if outcome.changed else "unchanged",
     )

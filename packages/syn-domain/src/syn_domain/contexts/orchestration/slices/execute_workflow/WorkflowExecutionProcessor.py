@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -27,9 +28,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import (
-    ConversationRecorder,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
@@ -38,10 +36,19 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Artifact
     ArtifactCollectionHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+    ProvisionResult,
     WorkspaceProvisionHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
     ObservabilityCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
+    record_phase_conversation,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
+    capture_and_import_phase,
+    close_phase_workspaces,
+    remember_leader_native_id,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import (
     PhaseResultBuilder,
@@ -52,6 +59,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     CommandBuilder,
     ExecutionRepository,
     PromptBuilder,
+    Runner,
     SessionRepository,
     TodoProjection,
     WorkflowExecutionResult,  # re-exported for backward compatibility
@@ -59,15 +67,20 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
+from syn_shared.agents import runner_for_provider
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
+    from syn_adapters.workspace_backends.agentic.session_capture_service import (
+        SessionCapturePort,
+    )
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
@@ -77,11 +90,32 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+        ClaudePluginMaterializerProtocol,
+        SkillMaterializerProtocol,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
         TokenAccumulator,
     )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _DispatchContext:
+    """Execution-local dispatch state, created per run().
+
+    D3 fix (stress 2026-06-10), hardened for concurrent dispatch: tracks
+    the phase currently being dispatched so a workflow-level failure can
+    mark the inner phase record as ``failed`` instead of stranding it at
+    ``running``. Carried as a per-run object (not processor instance
+    state) because BackgroundWorkflowDispatcher shares one processor
+    across up to max_concurrent executions; instance state would let a
+    concurrent execution overwrite the value and _fail_execution would
+    emit a failed_phase_id belonging to a different execution.
+    """
+
+    current_phase_id: str | None = None
 
 
 class WorkflowExecutionProcessor:
@@ -102,6 +136,10 @@ class WorkflowExecutionProcessor:
         command_builder: CommandBuilder,
         todo_projection: TodoProjection | None = None,
         agent_handler: AgentHandlerProtocol | None = None,
+        claude_plugin_materializer: ClaudePluginMaterializerProtocol | None = None,
+        skill_materializer: SkillMaterializerProtocol | None = None,
+        session_capture: SessionCapturePort | None = None,
+        session_store: SessionStorePort | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -117,12 +155,38 @@ class WorkflowExecutionProcessor:
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
         self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
+        # WHY (issue #726, PR2): the materializer is the optional collaborator
+        # that turns ResolvedClaudePlugin entries on the phase into workspace
+        # files. Wired through to ``WorkspaceProvisionHandler`` per call.
+        self._claude_plugin_materializer = claude_plugin_materializer
+        # WHY (#772): mirrors claude_plugin_materializer above but for skills; handler hard-fails (no silent skip) on unmatched skills
+        self._skill_materializer = skill_materializer
+        # None means capture is OFF, not broken: a deployment with no store
+        # configured must behave identically to one from before this existed.
+        self._session_capture = session_capture
+        # Where a delegate's transcript is read back from. Optional because a
+        # deployment without a session store simply imports no delegates; it
+        # must never be a reason a phase fails.
+        self._session_store = session_store
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
         self._active_envs: dict[str, dict[str, str]] = {}
         self._active_cmds: dict[str, list[str]] = {}
         self._session_managers: dict[str, SessionLifecycleManager] = {}
+        # Per-phase so _finalize_phase can attribute the capture.
+        self._phase_session_ids: dict[str, str] = {}
+        #: The id each phase's own harness announced on its stream, which is
+        #: what the delegate import subtracts from the sweep.
+        #:
+        #: Keyed by (execution_id, phase_id), NOT phase_id alone. This
+        #: processor is shared across concurrent dispatches - see
+        #: _DispatchContext above - so two runs of the same workflow share a
+        #: phase id. A phase-only key lets one run read the OTHER run's leader,
+        #: and a leader id absent from this run's sweep takes the refusal path:
+        #: no delegate imported, only a log line. Popped on success so a
+        #: completed phase leaves nothing behind.
+        self._phase_leader_native_ids: dict[tuple[str, str], str] = {}
         self._phase_tokens: dict[str, TokenAccumulator] = {}
         self._phase_auth_tokens: dict[
             str, tuple[int, int, int, int]
@@ -178,6 +242,7 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str] = []
         completed_phase_ids: list[str] = []
         phase_outputs: dict[str, str] = {}
+        dispatch_ctx = _DispatchContext()
 
         try:
             await self._drain_todo_list(
@@ -189,6 +254,7 @@ class WorkflowExecutionProcessor:
                 completed_phase_ids=completed_phase_ids,
                 phase_outputs=phase_outputs,
                 repos=repos,
+                dispatch_ctx=dispatch_ctx,
             )
             if aggregate.status == ExecutionStatus.CANCELLED:
                 return await self._cancel_execution(
@@ -209,6 +275,12 @@ class WorkflowExecutionProcessor:
                 started_at,
             )
         except Exception as e:
+            logger.exception(
+                "Workflow execution failed (exec=%s, workflow=%s): %s",
+                execution_id,
+                workflow_id,
+                e,
+            )
             return await self._fail_execution(
                 e,
                 aggregate,
@@ -219,6 +291,7 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids,
                 completed_phase_ids,
                 started_at,
+                failed_phase_id=dispatch_ctx.current_phase_id,
             )
 
     async def _drain_todo_list(
@@ -231,6 +304,7 @@ class WorkflowExecutionProcessor:
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
         repos: list[RepositoryRef] | None,
+        dispatch_ctx: _DispatchContext,
     ) -> None:
         """Process to-do items until the list is empty (all phases done or cancelled)."""
         while True:
@@ -246,6 +320,7 @@ class WorkflowExecutionProcessor:
                 completed_phase_ids=completed_phase_ids,
                 phase_outputs=phase_outputs,
                 repos=repos,
+                dispatch_ctx=dispatch_ctx,
             )
 
     async def _dispatch(
@@ -258,10 +333,16 @@ class WorkflowExecutionProcessor:
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
         repos: list[RepositoryRef] | None,
+        dispatch_ctx: _DispatchContext,
     ) -> None:
         """Dispatch a single to-do item to its handler."""
         assert todo.phase_id is not None
         phase = phase_map[todo.phase_id]
+        # D3 (stress 2026-06-10): record the phase under dispatch so
+        # _fail_execution can attribute a workflow-level failure to a
+        # real phase id and unstrand the inner phase record. Stored on
+        # the per-run _DispatchContext, never on the shared processor.
+        dispatch_ctx.current_phase_id = todo.phase_id
         if todo.action == TodoAction.PROVISION_WORKSPACE:
             await self._handle_provision(
                 todo,
@@ -289,6 +370,9 @@ class WorkflowExecutionProcessor:
                 phase_results,
                 completed_phase_ids,
             )
+            # The phase finished cleanly; a later workflow-level failure
+            # (between phases) must not be attributed to it.
+            dispatch_ctx.current_phase_id = None
 
     async def _cancel_execution(
         self,
@@ -308,12 +392,7 @@ class WorkflowExecutionProcessor:
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_cancelled(reason=reason)
         self._session_managers.clear()
-        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
-            try:
-                await workspace_cm.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("Error cleaning up workspace during cancel")
-        self._active_workspace_cms.clear()
+        await self._close_phase_workspace_cms(context="cancel")
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
@@ -376,17 +455,18 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
         started_at: datetime,
+        failed_phase_id: str | None = None,
     ) -> WorkflowExecutionResult:
-        """Close open sessions, save failure event, and return failed result."""
+        """Close open sessions, save failure event, and return failed result.
+
+        ``failed_phase_id`` comes from the run's own _DispatchContext so
+        it always belongs to THIS execution, even with concurrent runs
+        sharing the processor instance.
+        """
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_failure(error_message=str(error))
         self._session_managers.clear()
-        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
-            try:
-                await workspace_cm.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("Error cleaning up workspace during failure")
-        self._active_workspace_cms.clear()
+        await self._close_phase_workspace_cms(context="failure")
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
@@ -394,7 +474,7 @@ class WorkflowExecutionProcessor:
             execution_id=execution_id,
             error=str(error),
             error_type=type(error).__name__,
-            failed_phase_id=None,
+            failed_phase_id=failed_phase_id,
             completed_phases=len(completed_phase_ids),
             total_phases=len(phases),
         )
@@ -413,6 +493,19 @@ class WorkflowExecutionProcessor:
             artifact_ids=all_artifact_ids,
             metrics=ExecutionMetrics.from_results(phase_results),
             error_message=str(error),
+        )
+
+    async def _close_phase_workspace_cms(self, context: str) -> None:
+        """Close per-phase workspace context managers and clear per-phase state."""
+        await close_phase_workspaces(
+            context,
+            workspace_cms=self._active_workspace_cms,
+            workspaces=self._active_workspaces,
+            session_ids=self._phase_session_ids,
+            leader_native_ids=self._phase_leader_native_ids,
+            capture_port=self._session_capture,
+            session_store=self._session_store,
+            writer=self._observability_writer,
         )
 
     async def _handle_provision(
@@ -451,21 +544,49 @@ class WorkflowExecutionProcessor:
         self._session_managers[todo.phase_id] = session_mgr
         self._phase_started_at[todo.phase_id] = datetime.now(UTC)
 
+        # ADR-063: convert typed RepositoryRef → HTTPS URL at the workspace seam.
+        repo_urls = [r.https_url for r in (repos or [])]
+        result = await self._provision_workspace(
+            todo=todo,
+            phase=phase,
+            aggregate=aggregate,
+            session_id=session_id,
+            repo_urls=repo_urls,
+            completed_phase_ids=completed_phase_ids,
+            phase_outputs=phase_outputs,
+        )
+        self._active_workspaces[todo.phase_id] = result.workspace
+        self._active_workspace_cms[todo.phase_id] = result.workspace_cm
+        self._active_envs[todo.phase_id] = result.agent_env
+        self._active_cmds[todo.phase_id] = result.claude_cmd
+        aggregate.provision_workspace_completed(result.command)
+        await self._save_and_sync(aggregate)
+
+    async def _provision_workspace(
+        self,
+        *,
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        aggregate: WorkflowExecutionAggregate,
+        session_id: str,
+        repo_urls: list[str],
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+    ) -> ProvisionResult:
+        """Provision this phase's own workspace and build its ProvisionResult."""
+        provision_handler = WorkspaceProvisionHandler(
+            workspace_service=self._workspace_service,
+            prompt_builder=self._prompt_builder,
+            command_builder=self._command_builder,
+            claude_plugin_materializer=self._claude_plugin_materializer,
+            skill_materializer=self._skill_materializer,
+        )
         artifacts = ArtifactCollector(
             self._artifact_repo,
             self._artifact_content_storage,
             self._artifact_query,
         )
-        provision_handler = WorkspaceProvisionHandler(
-            workspace_service=self._workspace_service,
-            prompt_builder=self._prompt_builder,
-            command_builder=self._command_builder,
-        )
-        # ADR-063: convert typed RepositoryRef → HTTPS URL at the workspace seam.
-        # WorkspaceProvisionHandler consumes URLs (git clone, secret hydration);
-        # the typed value object stops here.
-        repo_urls = [r.https_url for r in (repos or [])]
-        result = await provision_handler.handle(
+        return await provision_handler.handle(
             todo=todo,
             phase=phase,
             workflow_id=aggregate.workflow_id or "",
@@ -476,13 +597,6 @@ class WorkflowExecutionProcessor:
             phase_outputs=phase_outputs,
             inputs=self._inputs,
         )
-
-        self._active_workspaces[todo.phase_id] = result.workspace
-        self._active_workspace_cms[todo.phase_id] = result.workspace_cm
-        self._active_envs[todo.phase_id] = result.agent_env
-        self._active_cmds[todo.phase_id] = result.claude_cmd
-        aggregate.provision_workspace_completed(result.command)
-        await self._save_and_sync(aggregate)
 
     def _get_agent_handler(self) -> AgentHandlerProtocol:
         """Return the injected handler, or create a fresh real one (default behaviour)."""
@@ -502,15 +616,21 @@ class WorkflowExecutionProcessor:
         agent_env = self._active_envs[todo.phase_id]
         claude_cmd = self._active_cmds[todo.phase_id]
         session_id = todo.session_id or ""
+        self._phase_session_ids[todo.phase_id] = session_id
         workflow_id = aggregate.workflow_id or ""
         timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
+        # Raises on an unknown or removed provider instead of defaulting to
+        # the claude parser. The execution boundary
+        # (_build_agent_config_from_phase) already rejected it, so reaching
+        # that raise means a new entry point skipped the gate.
+        runner: Runner = runner_for_provider(phase.agent_config.provider, phase_id=phase.phase_id)
 
         collector = ObservabilityCollector(
             writer=self._observability_writer,
             session_id=session_id,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
-            workspace_id=getattr(workspace, "id", None),
+            workspace_id=getattr(workspace, "workspace_id", None),
             agent_model=phase.agent_config.model,
         )
         result = await self._get_agent_handler().handle(
@@ -522,20 +642,24 @@ class WorkflowExecutionProcessor:
             agent_model=phase.agent_config.model,
             timeout_seconds=timeout,
             collector=collector,
+            runner=runner,
         )
 
-        recorder = ConversationRecorder(self._conversation_storage)
-        await recorder.store(
+        remember_leader_native_id(
+            self._phase_leader_native_ids,
+            (todo.execution_id, todo.phase_id),
+            result.stream_result,
+        )
+
+        await record_phase_conversation(
+            self._conversation_storage,
+            result,
             session_id=session_id,
-            lines=result.stream_result.conversation_lines,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             workflow_id=workflow_id,
             model=phase.agent_config.model,
-            input_tokens=result.tokens.input_tokens,
-            output_tokens=result.tokens.output_tokens,
             started_at=self._phase_started_at.get(todo.phase_id, datetime.now(UTC)),
-            success=result.command.exit_code == 0,
         )
         self._phase_tokens[todo.phase_id] = result.tokens
         # Store authoritative totals from CLI result event (includes cache tokens)
@@ -590,7 +714,22 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Dispatch COLLECT_ARTIFACTS."""
         assert todo.phase_id is not None
-        workspace = self._active_workspaces[todo.phase_id]
+        workspace = self._active_workspaces.get(todo.phase_id)
+        if workspace is None:
+            # Defense in depth: in-process this branch is unreachable
+            # (_finalize_phase pops _active_workspaces only after
+            # on_phase_completed locks the phase at rank 99, and
+            # get_pending filters stale items), but a lock-bypassing
+            # projection writer (e.g. a future out-of-process consumer on
+            # a shared Postgres store) could resurrect a stale todo.
+            # Skip it instead of crashing the workflow with KeyError.
+            logger.warning(
+                "Skipping stale COLLECT_ARTIFACTS for finalized phase %s "
+                "(execution %s): no active workspace",
+                todo.phase_id,
+                todo.execution_id,
+            )
+            return
         artifacts = ArtifactCollector(
             self._artifact_repo,
             self._artifact_content_storage,
@@ -709,10 +848,24 @@ class WorkflowExecutionProcessor:
                 source="processor",
             )
 
-        self._active_workspaces.pop(phase_id, None)
+        workspace = self._active_workspaces.pop(phase_id, None)
+        session_id = self._phase_session_ids.pop(phase_id, "")
         self._active_envs.pop(phase_id, None)
         self._active_cmds.pop(phase_id, None)
         workspace_cm = self._active_workspace_cms.pop(phase_id, None)
+
+        # BEFORE teardown: once the container is gone so is the spool, and a
+        # later probe cannot tell "stored" from "lost forever".
+        await capture_and_import_phase(
+            self._session_capture,
+            workspace,
+            session_store=self._session_store,
+            writer=self._observability_writer,
+            leader_native_ids=self._phase_leader_native_ids,
+            session_id=session_id,
+            phase_id=phase_id,
+        )
+
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
 

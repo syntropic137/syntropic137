@@ -261,3 +261,55 @@ class TestProjectionStoreProtocol:
         ]
         for method in required_methods:
             assert hasattr(ProjectionStoreProtocol, method)
+
+
+class TestNullOrderingIsLast:
+    """#920: rows that cannot answer the sort must not outrank rows that can.
+
+    Postgres defaults ``ORDER BY ... DESC`` to ``NULLS FIRST``, and the
+    in-memory store reproduced that by folding the is-None flag into a reversed
+    sort key. Either way, every row MISSING the sort field ranked above every
+    row that had it.
+
+    Concretely: artifacts created before ArtifactCreated v4 carry a null
+    ``created_at``. With ~100 of them in the store, a newly created artifact
+    sorted by ``-created_at`` landed on the LAST page. To a user that is
+    indistinguishable from the write having failed.
+
+    The aggregate-level test for #920 asserts the timestamp is now stamped. It
+    cannot catch this, because the defect lives in the store's ordering rather
+    than in the event.
+    """
+
+    def test_memory_store_puts_missing_values_last_in_both_directions(self) -> None:
+        from syn_adapters.projection_stores.memory_store_helpers import apply_sorting
+
+        rows = [
+            {"id": "legacy_a", "created_at": None},
+            {"id": "newest", "created_at": "2026-08-28T00:00:00+00:00"},
+            {"id": "legacy_b", "created_at": None},
+            {"id": "older", "created_at": "2026-08-27T00:00:00+00:00"},
+        ]
+
+        desc = [r["id"] for r in apply_sorting(rows, "-created_at")]
+        assert desc[:2] == ["newest", "older"], (
+            "newest-first must place timestamped rows ahead of legacy nulls; "
+            "a null that outranks a real value is #920"
+        )
+        assert set(desc[2:]) == {"legacy_a", "legacy_b"}
+
+        asc = [r["id"] for r in apply_sorting(rows, "created_at")]
+        assert asc[:2] == ["older", "newest"]
+        assert set(asc[2:]) == {"legacy_a", "legacy_b"}, (
+            "nulls go last in ASCENDING order too; direction and null "
+            "placement must stay independent"
+        )
+
+    def test_postgres_order_clause_declares_nulls_last(self) -> None:
+        """The two stores must agree, or a green test hides a production bug."""
+        from syn_adapters.projection_stores.postgres_query_builder import _build_order_clause
+
+        assert _build_order_clause("-created_at") == (
+            " ORDER BY data->>'created_at' DESC NULLS LAST"
+        )
+        assert _build_order_clause("created_at") == (" ORDER BY data->>'created_at' ASC NULLS LAST")

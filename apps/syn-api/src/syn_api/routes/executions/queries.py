@@ -78,6 +78,7 @@ class _MergedExecutionTotals:
     """Token + cost totals after preferring Lane 2 enrichment over domain values."""
 
     cost: Decimal
+    unpriced_observation_count: int
     input_tokens: int
     output_tokens: int
     cache_creation_tokens: int
@@ -92,6 +93,7 @@ def _merge_totals(
     if enrichment is None:
         return _MergedExecutionTotals(
             cost=Decimal(str(e.total_cost_usd)),
+            unpriced_observation_count=e.unpriced_observation_count,
             input_tokens=e.total_input_tokens,
             output_tokens=e.total_output_tokens,
             cache_creation_tokens=e.total_cache_creation_tokens,
@@ -100,6 +102,7 @@ def _merge_totals(
         )
     return _MergedExecutionTotals(
         cost=enrichment.total_cost_usd,
+        unpriced_observation_count=enrichment.unpriced_observation_count,
         input_tokens=enrichment.input_tokens
         if enrichment.input_tokens is not None
         else e.total_input_tokens,
@@ -147,7 +150,8 @@ def _build_execution_summary_response(
         total_cache_creation_tokens=totals.cache_creation_tokens,
         total_cache_read_tokens=totals.cache_read_tokens,
         total_cost_usd=totals.cost,
-        total_cost_display=format_cost(totals.cost),
+        total_cost_display=format_cost(totals.cost, totals.unpriced_observation_count),
+        unpriced_observation_count=totals.unpriced_observation_count,
         duration_seconds=duration_seconds,
         duration_display=format_duration_seconds(duration_seconds),
         tool_call_count=e.tool_call_count,
@@ -235,6 +239,7 @@ async def _map_phase_detail(
         status=phase.status,
         session_id=phase.session_id,
         artifact_id=phase.artifact_id,
+        error_message=phase.error_message,
         input_tokens=phase.input_tokens,
         output_tokens=phase.output_tokens,
         cache_creation_tokens=sc.cache_creation,
@@ -268,6 +273,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         status=phase.status,
         session_id=phase.session_id,
         artifact_id=phase.artifact_id,
+        error_message=phase.error_message,
         input_tokens=phase.input_tokens,
         output_tokens=phase.output_tokens,
         cache_creation_tokens=phase.cache_creation_tokens,
@@ -278,6 +284,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         + phase.cache_read_tokens,
         duration_seconds=phase.duration_seconds or 0.0,
         cost_usd=Decimal(str(phase.cost_usd)),
+        unpriced_observation_count=phase.unpriced_observation_count,
         started_at=str(phase.started_at) if phase.started_at else None,
         completed_at=str(phase.completed_at) if phase.completed_at else None,
         model=phase.model,
@@ -296,11 +303,20 @@ class _ExecutionEnrichment:
     """
 
     total_cost_usd: Decimal = Decimal("0")
+    unpriced_observation_count: int = 0
+    """Observations Lane 2 could not price; non-zero means the cost is partial."""
     input_tokens: int | None = None
     output_tokens: int | None = None
     cache_creation_tokens: int | None = None
     cache_read_tokens: int | None = None
     total_tokens: int | None = None
+
+
+def _enrichment_for(
+    enrichment: dict[str, _ExecutionEnrichment], execution_id: str
+) -> _ExecutionEnrichment:
+    """Lane 2 enrichment for one execution, or an empty one when it has none."""
+    return enrichment.get(execution_id) or _ExecutionEnrichment()
 
 
 async def _load_execution_enrichment(
@@ -316,9 +332,14 @@ async def _load_execution_enrichment(
             continue
         if ec is None:
             continue
+        # Summed explicitly rather than read from ExecutionCost.total_tokens.
+        # This path and the cost path must arrive at the same number by
+        # independent routes, which is what makes the cross-read-model test in
+        # test_cross_read_model_token_totals.py a real check (issue #873).
         total = ec.input_tokens + ec.output_tokens + ec.cache_creation_tokens + ec.cache_read_tokens
         out[eid] = _ExecutionEnrichment(
             total_cost_usd=ec.total_cost_usd,
+            unpriced_observation_count=ec.unpriced_observation_count,
             input_tokens=ec.input_tokens,
             output_tokens=ec.output_tokens,
             cache_creation_tokens=ec.cache_creation_tokens,
@@ -326,14 +347,6 @@ async def _load_execution_enrichment(
             total_tokens=total,
         )
     return out
-
-
-async def _load_execution_costs(
-    manager: ProjectionManager, execution_ids: list[str]
-) -> dict[str, Decimal]:
-    """Backwards-compat: cost-only view kept for legacy callers."""
-    enriched = await _load_execution_enrichment(manager, execution_ids)
-    return {eid: e.total_cost_usd for eid, e in enriched.items()}
 
 
 async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
@@ -386,7 +399,7 @@ async def list_(
         else {}
     )
     # Enrich each execution's total_cost_usd from the Lane 2 execution_cost projection (#695)
-    cost_by_execution = await _load_execution_costs(
+    cost_by_execution = await _load_execution_enrichment(
         manager, [s.workflow_execution_id for s in domain_summaries]
     )
     return Ok(
@@ -405,7 +418,12 @@ async def list_(
                 total_output_tokens=s.total_output_tokens,
                 total_cache_creation_tokens=s.total_cache_creation_tokens,
                 total_cache_read_tokens=s.total_cache_read_tokens,
-                total_cost_usd=cost_by_execution.get(s.workflow_execution_id, Decimal("0")),
+                total_cost_usd=_enrichment_for(
+                    cost_by_execution, s.workflow_execution_id
+                ).total_cost_usd,
+                unpriced_observation_count=_enrichment_for(
+                    cost_by_execution, s.workflow_execution_id
+                ).unpriced_observation_count,
                 tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
                 error_message=s.error_message,
                 repos=list(s.repos),
@@ -434,7 +452,10 @@ async def get(
 
     with contextlib.suppress(Exception):
         exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
-        if exec_cost is not None and exec_cost.total_tokens > 0:
+        # has_cost_data, not total_tokens > 0: the displayed total grew to
+        # include cache tokens in #873, and gating dollars on it would flip a
+        # cache-only record from the fallback to exec_cost.total_cost_usd.
+        if exec_cost is not None and exec_cost.has_cost_data:
             total_input = exec_cost.input_tokens
             total_output = exec_cost.output_tokens
             total_cache_creation = exec_cost.cache_creation_tokens or total_cache_creation
@@ -464,30 +485,60 @@ async def get(
     )
 
 
+@dataclass
+class _EnrichedExecutionCost:
+    """Execution-level totals from Lane 2, with the coverage of that total."""
+
+    total_tokens: int
+    total_cost_usd: Decimal | str
+    unpriced_observation_count: int = 0
+
+
 async def _enrich_costs(
     execution_id: str,
     manager: object,
     phases: list[PhaseExecution],
     fallback_tokens: int,
     fallback_cost: Decimal | str,
-) -> tuple[int, Decimal | str]:
-    """Enrich execution and phase costs from TimescaleDB (#505)."""
+) -> _EnrichedExecutionCost:
+    """Enrich execution and phase costs from TimescaleDB (#505).
+
+    Carries ``unpriced_observation_count`` alongside the cost, at both the
+    execution and the phase level. Without it the caller receives a number and
+    no way to know whether it covers all the work that ran, which is how a
+    phase we could not price rendered as ``$0.00`` (issue #890).
+    """
     try:
         exec_cost = await manager.execution_cost.get_execution_cost(execution_id)  # type: ignore[attr-defined]
     except Exception:
         logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
-        return fallback_tokens, fallback_cost
+        return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
-    if exec_cost is None or exec_cost.total_tokens == 0:
-        return fallback_tokens, fallback_cost
+    # Availability is decided by has_cost_data (input + output), while the
+    # number displayed below is total_tokens (all four components). Keeping
+    # those two decoupled is what makes #873 a display-only change.
+    if exec_cost is None or not exec_cost.has_cost_data:
+        return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
-    if exec_cost.cost_by_phase:
-        for phase in phases:
-            phase_cost = exec_cost.cost_by_phase.get(phase.phase_id)
-            if phase_cost is not None:
-                phase.cost_usd = phase_cost
+    for phase in phases:
+        phase_cost = exec_cost.cost_by_phase.get(phase.phase_id)
+        if phase_cost is not None:
+            phase.cost_usd = phase_cost
+        # The per-model split comes from the SAME source as cost_usd, so the
+        # parts add up to the whole. The earlier value was looked up by the
+        # phase's own session id, which since #895 is only the LEADER: a codex
+        # phase that delegated to claude showed the right total beside a
+        # breakdown that named only codex, and the difference was invisible.
+        phase_models = exec_cost.models_by_phase.get(phase.phase_id)
+        if phase_models:
+            phase.cost_by_model = dict(phase_models)
+        phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
 
-    return exec_cost.total_tokens, exec_cost.total_cost_usd
+    return _EnrichedExecutionCost(
+        total_tokens=exec_cost.total_tokens,
+        total_cost_usd=exec_cost.total_cost_usd,
+        unpriced_observation_count=exec_cost.unpriced_observation_count,
+    )
 
 
 async def get_detail(
@@ -500,11 +551,16 @@ async def get_detail(
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     phases = [await _map_phase_detail(p, manager) for p in detail.phases]
 
-    total_tokens, total_cost = await _enrich_costs(
+    enriched = await _enrich_costs(
         execution_id,
         manager,
         phases,
-        fallback_tokens=detail.total_input_tokens + detail.total_output_tokens,
+        fallback_tokens=(
+            detail.total_input_tokens
+            + detail.total_output_tokens
+            + detail.total_cache_creation_tokens
+            + detail.total_cache_read_tokens
+        ),
         fallback_cost=Decimal("0"),
     )
 
@@ -515,8 +571,9 @@ async def get_detail(
             workflow_name=detail.workflow_name,
             status=detail.status,
             phases=phases,
-            total_tokens=total_tokens,
-            total_cost_usd=total_cost,
+            total_tokens=enriched.total_tokens,
+            total_cost_usd=enriched.total_cost_usd,
+            unpriced_observation_count=enriched.unpriced_observation_count,
             started_at=detail.started_at,
             completed_at=detail.completed_at,
             error_message=detail.error_message,
@@ -537,7 +594,7 @@ async def list_active(
     )
     active = [s for s in all_execs if s.status in ("running", "paused", "pending")]
     # Enrich cost from Lane 2 execution_cost projection (#695)
-    cost_by_execution = await _load_execution_costs(
+    cost_by_execution = await _load_execution_enrichment(
         manager, [s.workflow_execution_id for s in active]
     )
     return Ok(
@@ -552,7 +609,12 @@ async def list_active(
                 completed_phases=s.completed_phases,
                 total_phases=s.total_phases,
                 total_tokens=s.total_tokens,
-                total_cost_usd=cost_by_execution.get(s.workflow_execution_id, Decimal("0")),
+                total_cost_usd=_enrichment_for(
+                    cost_by_execution, s.workflow_execution_id
+                ).total_cost_usd,
+                unpriced_observation_count=_enrichment_for(
+                    cost_by_execution, s.workflow_execution_id
+                ).unpriced_observation_count,
                 error_message=s.error_message,
                 repos=list(s.repos),
             )
@@ -627,6 +689,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
             total_input + total_output + total_cache_creation + total_cache_read,
         ),
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
+        unpriced_observation_count=detail.unpriced_observation_count,
         artifact_ids=artifact_ids,
         error_message=detail.error_message,
         repos=list(detail.repos),

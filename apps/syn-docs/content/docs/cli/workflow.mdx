@@ -140,6 +140,7 @@ syn workflow install <source> [options]
 |------|------|---------|-------------|
 | `--ref` | `text` | `main` | Git branch/tag to clone |
 | `--dry-run`, `-n` | `boolean` | `false` | Validate without installing |
+| `--force` | `boolean` | `false` | Reinstall a version that is already installed, overwriting it |
 
 ---
 
@@ -293,6 +294,7 @@ syn workflow update <name> [options]
 |------|------|---------|-------------|
 | `--ref` | `text` | --- | Override git ref |
 | `--dry-run`, `-n` | `boolean` | `false` | Check for updates without applying |
+| `--force` | `boolean` | `false` | Reinstall even if the resolved version is already installed |
 
 ---
 

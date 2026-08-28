@@ -111,6 +111,38 @@ phases:
 install time and stored with the workflow. No runtime coupling to the
 library — updating a shared phase only affects future installs.
 
+## Skills (`skills:`)
+
+A workflow can declare agent skills at workflow scope (every phase) and at
+phase scope (that phase only). The lists merge. Two sources are supported:
+
+```yaml
+# Workflow scope: applies to every phase.
+skills:
+  - ./skills/repo-conventions                    # VENDORED: a directory in the plugin
+
+phases:
+  - id: investigate
+    name: Investigate
+    order: 1
+    skills:
+      # EXTERNAL: org/repo/skill-name@version, cloned at install time.
+      - anthropics/skills/doc-coauthoring@3b3fad96af16a10759d930941b4520ba0c40edae
+```
+
+- A vendored skill is a directory containing `SKILL.md`. It has no version of
+  its own, so `syn workflow install` pins it by the sha256 of its file tree and
+  uploads a definition in which every ref is explicitly pinned.
+- An external ref must be pinned to a tag, branch, or commit sha. `@latest` is
+  rejected for reproducibility.
+- Registration identity is `(source_url, version, skill_name)`. A ref whose
+  content hash is already stored performs no upload.
+- A phase that declares skills fails if they cannot be installed. It never runs
+  silently without them.
+
+Worked example, including per-phase divergence:
+[`workflows/examples/starter-plugin/`](../workflows/examples/starter-plugin/README.md).
+
 ## CLI Commands
 
 ### Install

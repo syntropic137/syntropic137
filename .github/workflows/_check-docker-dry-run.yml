@@ -1,21 +1,23 @@
 # =============================================================================
 # Check: Docker Dry-Run
 # =============================================================================
-# Builds all container images MULTI-ARCH (linux/amd64 + linux/arm64) without
-# push, to verify Dockerfiles are valid AND that both target architectures
-# build cleanly. ARM64 cross-builds via QEMU emulation hit different package
-# mirrors than AMD64 native builds and have a different failure profile.
+# Builds container images without push to verify Dockerfiles are valid on
+# every target architecture they ship to. Coverage matches release-containers.yaml:
+#   - Server images (syn-api, syn-gateway, syn-collector, sidecar-proxy,
+#     token-injector): linux/amd64 + linux/arm64
+#   - syn-dashboard-ui: linux/amd64 only (static asset bundle that serves both
+#     archs identically at runtime)
 #
-# Multi-arch was added per #736: v0.25.3 release pipeline failed at the
-# multi-arch publish step on a stale Debian apt source in the envoy base
+# Multi-arch coverage was added per #736: v0.25.3 release pipeline failed at
+# the multi-arch publish step on a stale Debian apt source in the envoy base
 # image, but the PR-time gate had only built AMD64 and passed. Now we catch
 # this class of issue pre-merge.
 #
-# We use NATIVE GitHub-hosted runners (ubuntu-latest for amd64, ubuntu-24.04-arm
-# for arm64), NOT QEMU emulation. Each (image × arch) combination is its own
-# matrix job and builds at native speed, so wall-clock time is roughly the
-# same as the original single-arch gate. ARM64 runners are GA on public
-# repos as of early 2025; this repo is public.
+# Each (image, arch) combination runs as its own matrix job on a NATIVE
+# GitHub-hosted runner (ubuntu-latest for amd64, ubuntu-24.04-arm for arm64).
+# No QEMU emulation - builds run at native speed in parallel, so wall-clock
+# time is roughly the same as the original single-arch gate. ARM64 runners
+# are GA on public repos as of early 2025; this repo is public.
 #
 # Always runs - no path-filter skip logic. Docker layer caching (GHA cache,
 # per-image-and-platform scope) makes unchanged builds near-instant on

@@ -9,7 +9,7 @@ store, which is empty for cost data. See #532 for the architectural rationale.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -24,6 +24,10 @@ from syn_api.types import (
     Result,
     SessionCostData,
 )
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 
 router = APIRouter(prefix="/costs", tags=["costs"])
 
@@ -56,6 +60,11 @@ class SessionCostResponse(BaseModel):
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
     tokens_by_tool: dict[str, int] = Field(default_factory=dict)
     cost_by_tool_tokens: dict[str, str] = Field(default_factory=dict)
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate and so contributed no cost.
+
+    Non-zero means this cost is INCOMPLETE, not that the work was free.
+    """
     is_finalized: bool = False
     started_at: str | None = None
     completed_at: str | None = None
@@ -67,7 +76,12 @@ class ExecutionCostResponse(BaseModel):
     execution_id: str
     workflow_id: str | None = None
     session_count: int = 0
-    session_ids: list[str] = Field(default_factory=list)
+    session_ids: list[str] | None = Field(default_factory=list)
+    """Session IDs, or ``null`` when suppressed via ``include_session_ids=false``.
+
+    Nullable so "not requested" is distinguishable from "none exist"; an empty
+    list beside a non-zero ``session_count`` is a contradiction.
+    """
     total_cost_usd: Decimal = Decimal("0")
     token_cost_usd: Decimal = Decimal("0")
     compute_cost_usd: Decimal = Decimal("0")
@@ -80,9 +94,22 @@ class ExecutionCostResponse(BaseModel):
     turns: int = 0
     duration_ms: float = 0
     cost_by_phase: dict[str, str] = Field(default_factory=dict)
+    unpriced_by_phase: dict[str, int] = Field(default_factory=dict)
+    """Per-phase count of observations that could not be priced.
+
+    A phase listed here but missing from ``cost_by_phase`` cost an UNKNOWN
+    amount; a phase in neither genuinely spent nothing (#890).
+    """
     cost_by_model: dict[str, str] = Field(default_factory=dict)
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
     is_complete: bool = False
+    unpriced_observation_count: int = 0
+    """Observations whose model had no rate and so contributed no cost.
+
+    Non-zero means this cost is INCOMPLETE. Clients must render "unpriced"
+    rather than a dollar figure, because a total that silently omits unpriced
+    work is indistinguishable from genuinely cheap work (ADR-067 D5).
+    """
     started_at: str | None = None
     completed_at: str | None = None
 
@@ -97,6 +124,75 @@ class CostSummaryResponse(BaseModel):
     total_tool_calls: int = 0
     top_models: list[dict[str, Any]] = Field(default_factory=list)
     top_sessions: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# =============================================================================
+# Domain read model -> DTO mappers
+# =============================================================================
+
+
+def session_cost_to_data(c: SessionCost) -> SessionCostData:
+    """Map the SessionCost read model onto the API DTO.
+
+    One mapper shared by every endpoint so ``total_tokens`` cannot mean one
+    thing on the list route and another on the detail route (issue #873).
+    """
+    return SessionCostData(
+        session_id=c.session_id,
+        execution_id=c.execution_id,
+        workflow_id=c.workflow_id,
+        phase_id=c.phase_id,
+        total_cost_usd=Decimal(str(c.total_cost_usd)),
+        token_cost_usd=Decimal(str(c.token_cost_usd)),
+        input_tokens=c.input_tokens,
+        output_tokens=c.output_tokens,
+        total_tokens=c.total_tokens,
+        cache_creation_tokens=c.cache_creation_tokens,
+        cache_read_tokens=c.cache_read_tokens,
+        tool_calls=c.tool_calls,
+        turns=c.turns,
+        duration_ms=int(c.duration_ms),
+        cost_by_model=c.cost_by_model,
+        cost_by_tool=c.cost_by_tool,
+        unpriced_observation_count=c.unpriced_observation_count,
+        is_finalized=c.is_finalized,
+        started_at=c.started_at,
+        completed_at=c.completed_at,
+    )
+
+
+def execution_cost_to_data(c: ExecutionCost) -> ExecutionCostData:
+    """Map the ExecutionCost read model onto the API DTO.
+
+    ``total_tokens`` comes straight from the read model property, which sums
+    all four token components - the same figure the executions read model
+    reports under the same name (issue #873).
+    """
+    return ExecutionCostData(
+        execution_id=c.execution_id,
+        workflow_id=c.workflow_id,
+        session_count=c.session_count,
+        session_ids=c.session_ids,
+        total_cost_usd=Decimal(str(c.total_cost_usd)),
+        token_cost_usd=Decimal(str(c.token_cost_usd)),
+        compute_cost_usd=Decimal(str(c.compute_cost_usd)),
+        input_tokens=c.input_tokens,
+        output_tokens=c.output_tokens,
+        total_tokens=c.total_tokens,
+        cache_creation_tokens=c.cache_creation_tokens,
+        cache_read_tokens=c.cache_read_tokens,
+        tool_calls=c.tool_calls,
+        turns=c.turns,
+        duration_ms=c.duration_ms,
+        cost_by_phase=c.cost_by_phase,
+        unpriced_by_phase=c.unpriced_by_phase,
+        cost_by_model=c.cost_by_model,
+        cost_by_tool=c.cost_by_tool,
+        is_complete=c.is_complete,
+        unpriced_observation_count=c.unpriced_observation_count,
+        started_at=c.started_at,
+        completed_at=c.completed_at,
+    )
 
 
 # =============================================================================
@@ -127,32 +223,7 @@ async def list_session_costs(
             [c for c in all_costs if c.execution_id == execution_id] if execution_id else all_costs
         )
 
-        return Ok(
-            [
-                SessionCostData(
-                    session_id=c.session_id,
-                    execution_id=c.execution_id,
-                    workflow_id=c.workflow_id,
-                    phase_id=c.phase_id,
-                    total_cost_usd=Decimal(str(c.total_cost_usd)),
-                    token_cost_usd=Decimal(str(c.token_cost_usd)),
-                    input_tokens=c.input_tokens,
-                    output_tokens=c.output_tokens,
-                    total_tokens=c.total_tokens,
-                    cache_creation_tokens=c.cache_creation_tokens,
-                    cache_read_tokens=c.cache_read_tokens,
-                    tool_calls=c.tool_calls,
-                    turns=c.turns,
-                    duration_ms=int(c.duration_ms),
-                    cost_by_model=c.cost_by_model,
-                    cost_by_tool=c.cost_by_tool,
-                    is_finalized=c.is_finalized,
-                    started_at=c.started_at,
-                    completed_at=c.completed_at,
-                )
-                for c in costs
-            ]
-        )
+        return Ok([session_cost_to_data(c) for c in costs])
     except Exception as e:
         return Err(MetricsError.QUERY_FAILED, message=str(e))
 
@@ -177,29 +248,7 @@ async def get_session_cost(
         if c is None:
             return Err(MetricsError.NOT_FOUND, message=f"Session {session_id} not found")
 
-        return Ok(
-            SessionCostData(
-                session_id=c.session_id,
-                execution_id=c.execution_id,
-                workflow_id=c.workflow_id,
-                phase_id=c.phase_id,
-                total_cost_usd=Decimal(str(c.total_cost_usd)),
-                token_cost_usd=Decimal(str(c.token_cost_usd)),
-                input_tokens=c.input_tokens,
-                output_tokens=c.output_tokens,
-                total_tokens=c.total_tokens,
-                cache_creation_tokens=c.cache_creation_tokens,
-                cache_read_tokens=c.cache_read_tokens,
-                tool_calls=c.tool_calls,
-                turns=c.turns,
-                duration_ms=int(c.duration_ms),
-                cost_by_model=c.cost_by_model,
-                cost_by_tool=c.cost_by_tool,
-                is_finalized=c.is_finalized,
-                started_at=c.started_at,
-                completed_at=c.completed_at,
-            )
-        )
+        return Ok(session_cost_to_data(c))
     except Exception as e:
         return Err(MetricsError.QUERY_FAILED, message=str(e))
 
@@ -219,28 +268,7 @@ async def list_execution_costs(
         query_svc = get_execution_cost_query()
         costs = await query_svc.list_all(limit=limit)
 
-        return Ok(
-            [
-                ExecutionCostData(
-                    execution_id=c.execution_id,
-                    workflow_id=c.workflow_id,
-                    session_count=c.session_count,
-                    session_ids=c.session_ids,
-                    total_cost_usd=Decimal(str(c.total_cost_usd)),
-                    input_tokens=c.input_tokens,
-                    output_tokens=c.output_tokens,
-                    total_tokens=c.total_tokens,
-                    duration_ms=c.duration_ms,
-                    cost_by_phase=c.cost_by_phase,
-                    cost_by_model=c.cost_by_model,
-                    cost_by_tool=c.cost_by_tool,
-                    is_complete=c.is_complete,
-                    started_at=c.started_at,
-                    completed_at=c.completed_at,
-                )
-                for c in (costs or [])[:limit]
-            ]
-        )
+        return Ok([execution_cost_to_data(c) for c in (costs or [])[:limit]])
     except Exception as e:
         return Err(MetricsError.QUERY_FAILED, message=str(e))
 
@@ -265,25 +293,7 @@ async def get_execution_cost(
         if c is None:
             return Err(MetricsError.NOT_FOUND, message=f"Execution {execution_id} not found")
 
-        return Ok(
-            ExecutionCostData(
-                execution_id=c.execution_id,
-                workflow_id=c.workflow_id,
-                session_count=c.session_count,
-                session_ids=c.session_ids,
-                total_cost_usd=Decimal(str(c.total_cost_usd)),
-                input_tokens=c.input_tokens,
-                output_tokens=c.output_tokens,
-                total_tokens=c.total_tokens,
-                duration_ms=c.duration_ms,
-                cost_by_phase=c.cost_by_phase,
-                cost_by_model=c.cost_by_model,
-                cost_by_tool=c.cost_by_tool,
-                is_complete=c.is_complete,
-                started_at=c.started_at,
-                completed_at=c.completed_at,
-            )
-        )
+        return Ok(execution_cost_to_data(c))
     except Exception as e:
         return Err(MetricsError.QUERY_FAILED, message=str(e))
 
@@ -344,6 +354,7 @@ def _session_cost_to_api(c: SessionCostData) -> SessionCostResponse:
         duration_ms=c.duration_ms,
         cost_by_model={k: str(v) for k, v in (c.cost_by_model or {}).items()},
         cost_by_tool={k: str(v) for k, v in (c.cost_by_tool or {}).items()},
+        unpriced_observation_count=c.unpriced_observation_count,
         is_finalized=c.is_finalized,
         started_at=str(c.started_at) if c.started_at else None,
         completed_at=str(c.completed_at) if c.completed_at else None,
@@ -358,14 +369,22 @@ def _execution_cost_to_api(c: ExecutionCostData) -> ExecutionCostResponse:
         session_count=c.session_count,
         session_ids=c.session_ids or [],
         total_cost_usd=Decimal(str(c.total_cost_usd)),
+        token_cost_usd=Decimal(str(c.token_cost_usd)),
+        compute_cost_usd=Decimal(str(c.compute_cost_usd)),
         input_tokens=c.input_tokens,
         output_tokens=c.output_tokens,
         total_tokens=c.total_tokens,
+        cache_creation_tokens=c.cache_creation_tokens,
+        cache_read_tokens=c.cache_read_tokens,
+        tool_calls=c.tool_calls,
+        turns=c.turns,
         duration_ms=c.duration_ms or 0.0,
         cost_by_phase={k: str(v) for k, v in (c.cost_by_phase or {}).items()},
+        unpriced_by_phase={k: int(v) for k, v in (c.unpriced_by_phase or {}).items()},
         cost_by_model={k: str(v) for k, v in (c.cost_by_model or {}).items()},
         cost_by_tool={k: str(v) for k, v in (c.cost_by_tool or {}).items()},
         is_complete=c.is_complete,
+        unpriced_observation_count=c.unpriced_observation_count,
         started_at=str(c.started_at) if c.started_at else None,
         completed_at=str(c.completed_at) if c.completed_at else None,
     )
@@ -434,7 +453,10 @@ async def list_execution_costs_endpoint(
 async def get_execution_cost_endpoint(
     execution_id: str,
     include_breakdown: bool = Query(True, description="Include phase/model/tool breakdowns"),
-    include_session_ids: bool = Query(False, description="Include list of session IDs"),
+    include_session_ids: bool = Query(
+        False,
+        description="Include list of session IDs (unbounded; null when omitted)",
+    ),
 ) -> ExecutionCostResponse:
     """Get aggregated cost for a workflow execution."""
     from syn_api._wiring import get_projection_mgr
@@ -455,11 +477,20 @@ async def get_execution_cost_endpoint(
     response = _execution_cost_to_api(result.value)
     if not include_breakdown:
         response.cost_by_phase = {}
+        response.unpriced_by_phase = {}
         response.cost_by_model = {}
         response.cost_by_tool = {}
 
     if not include_session_ids:
-        response.session_ids = []
+        # Suppressed, not empty. `session_ids: []` alongside `session_count: 1`
+        # is a contradiction a client cannot interpret - it reads as "this
+        # execution has no sessions" when it means "you did not ask for them".
+        #
+        # The default stays False: ARRAY_AGG(DISTINCT session_id) is unbounded,
+        # and suppression happens AFTER the query, so defaulting to True would
+        # only inflate the payload without saving any database work. `null`
+        # fixes the contradiction; the default keeps the response bounded.
+        response.session_ids = None
 
     return response
 

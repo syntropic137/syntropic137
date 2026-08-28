@@ -17,14 +17,21 @@ semantics) — no runtime coupling to the library.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
+    ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
 from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
+)
+from syn_domain.contexts.orchestration._shared.skill_ref import (
+    SkillRef,
+    expand_skill_entry,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
@@ -32,6 +39,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseExecutionType,
     WorkflowClassification,
 )
+from syn_shared.agents import REMOVED_INTERACTIVE_PROVIDER, AgentProvider
 
 _SHARED_PREFIX = "shared://"
 
@@ -162,6 +170,62 @@ class InputYamlDefinition(BaseModel):
         )
 
 
+class AgentYamlDefinition(BaseModel):
+    """Per-phase ``agent`` block as parsed from YAML.
+
+    Selects which headless agent provider drives the phase (``claude`` for
+    the default ``claude -p`` docker-exec path, ``codex`` for the
+    programmatic ``codex exec`` harness on the same path) and optionally
+    the model.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: Literal["claude", "codex"] | None = None
+    """One of: ``claude`` (default; ``claude -p`` path), ``codex``
+    (programmatic ``codex exec`` harness on the same docker path).
+
+    A ``Literal`` so the exported JSON schema keeps the enum. The REMOVED
+    ``claude-interactive`` value is intercepted BEFORE this type check by
+    ``_reject_removed_provider`` so a stale workflow gets a message naming
+    the removal rather than a bare "Input should be 'claude' or 'codex'"."""
+
+    model: str | None = None
+    """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
+
+    allow_delegation: bool = False
+    """When true, stage BOTH agent auths in this phase's workspace so the
+    primary agent can shell out one-shot to the other CLI (codex -> ``claude
+    -p`` or claude -> ``codex exec``). Headless providers only. Default false
+    preserves single-provider isolation. See
+    docs/superpowers/plans/2026-07-23-codex-claude-delegation.md."""
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def _reject_removed_provider(cls, value: object) -> object:
+        """Fail a workflow that still declares the removed interactive provider.
+
+        ``claude-interactive`` was the interactive-tmux pane path. It was a
+        failed experiment (send race, pane-scrape completion heuristic, empty
+        observability timelines) and has been removed. Rejecting here - rather
+        than silently remapping to ``claude`` - is deliberate: the workflow was
+        authored against an interactive REPL, so quietly running it headless
+        would change what the phase does without telling the author.
+
+        ``mode="before"`` so this fires ahead of the ``Literal`` check and the
+        author sees the removal, not a generic enum error.
+        """
+        if value == REMOVED_INTERACTIVE_PROVIDER:
+            msg = (
+                f"agent.provider={REMOVED_INTERACTIVE_PROVIDER!r} has been removed. "
+                "The interactive-tmux workspace path no longer exists; every phase "
+                f"now runs headless. Use '{AgentProvider.CLAUDE}' (claude -p) or "
+                f"'{AgentProvider.CODEX}' (codex exec) instead."
+            )
+            raise ValueError(msg)
+        return value
+
+
 class PhaseYamlDefinition(BaseModel):
     """Phase definition as parsed from YAML.
 
@@ -191,6 +255,28 @@ class PhaseYamlDefinition(BaseModel):
     argument_hint: str | None = None
     model: str | None = None
 
+    # Per-phase agent provider selection.
+    # ``agent.model`` is a fallback for the top-level ``model`` field.
+    agent: AgentYamlDefinition | None = None
+
+    # Phase-scope claude plugin refs (issue #726). Workflow-scope refs live on
+    # WorkflowDefinition. PR1 carries them through; PR2 resolves them.
+    claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+    # Phase-scope skill refs (issue #772). Additive alongside claude_plugins.
+    # Workflow-scope refs live on WorkflowDefinition; phase scope wins on
+    # identity collision when the two lists are merged at resolution time.
+    skills: list[SkillRef] = Field(default_factory=list)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _expand_skills(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        expanded: list[SkillRef] = []
+        for entry in value:
+            expanded.extend(expand_skill_entry(entry))
+        return expanded
+
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
         """Ensure at most one of prompt_template or prompt_file is set."""
@@ -213,6 +299,14 @@ class PhaseYamlDefinition(BaseModel):
             )
             raise ValueError(msg)
 
+        # Per-phase agent block. When absent, leave provider as None so the
+        # domain default ("claude") applies. Top-level model wins;
+        # agent.model is the fallback.
+        provider = self.agent.provider if self.agent else None
+        agent_model = self.agent.model if self.agent else None
+        allow_delegation = self.agent.allow_delegation if self.agent else False
+        model = self.model or agent_model
+
         return PhaseDefinition(
             phase_id=self.id,
             name=self.name,
@@ -226,7 +320,11 @@ class PhaseYamlDefinition(BaseModel):
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
             argument_hint=self.argument_hint,
-            model=self.model,
+            model=model,
+            provider=provider,
+            allow_delegation=allow_delegation,
+            claude_plugins=tuple(self.claude_plugins),
+            skills=tuple(self.skills),
         )
 
 
@@ -300,6 +398,25 @@ class WorkflowDefinition(BaseModel):
 
     # Phases
     phases: list[PhaseYamlDefinition] = Field(..., min_length=1)
+
+    # Workflow-scope claude plugin refs (issue #726). The Phase 5 resolution
+    # service walks both this list and per-phase refs to populate the lock.
+    claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+    # Workflow-scope skill refs (issue #772). Additive alongside
+    # claude_plugins. The resolution service walks both this list and
+    # per-phase refs to populate the lock, with phase scope winning on
+    # identity collision.
+    skills: list[SkillRef] = Field(default_factory=list)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _expand_skills(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        expanded: list[SkillRef] = []
+        for entry in value:
+            expanded.extend(expand_skill_entry(entry))
+        return expanded
 
     @field_validator("phases")
     @classmethod

@@ -114,7 +114,10 @@ def _noop_command_builder(phase: ExecutablePhase, prompt: str) -> list[str]:
     return ["echo", "smoke-test-agent"]
 
 
-def _make_processor(agent_handler: FakeAgentExecutionHandler) -> WorkflowExecutionProcessor:
+def _make_processor(
+    agent_handler: FakeAgentExecutionHandler,
+    session_capture: object | None = None,
+) -> WorkflowExecutionProcessor:
     """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies."""
     todo_store = InMemoryProjectionStore()
     todo_projection = ExecutionTodoProjection(store=todo_store)
@@ -133,6 +136,7 @@ def _make_processor(agent_handler: FakeAgentExecutionHandler) -> WorkflowExecuti
         command_builder=_noop_command_builder,
         todo_projection=todo_projection,
         agent_handler=agent_handler,
+        session_capture=session_capture,  # type: ignore[arg-type]
     )
 
 
@@ -183,6 +187,36 @@ class TestProcessorSmoke:
             "The cancel signal is being swallowed — check _handle_run_agent and _cancel_execution."
         )
         assert fake.call_count == 1, "Agent handler should have been reached exactly once"
+
+    async def test_cancel_with_NO_reason_returns_cancelled(self) -> None:
+        """#918: a cancel carrying no reason must still cancel, end to end.
+
+        The test above passes a reason, and so did the fake until now. That is
+        precisely why #918 survived: `interrupt_requested` was derived as
+        `interrupt_reason is not None`, so every test that supplied a reason
+        stayed green while the real CLI path - `syn control cancel --force`
+        with no `-r` - was silently ignored and the workflow ran on.
+
+        This drives the whole processor rather than stopping at StreamResult,
+        so it guards the downstream default in WorkflowExecutionProcessor too.
+        """
+        fake = FakeAgentExecutionHandler.cancelled(reason=None)
+        processor = _make_processor(fake)
+
+        result = await processor.run(
+            workflow_id="wf-smoke-003",
+            workflow_name="Smoke Test Workflow",
+            phases=_one_phase_workflow(),
+            inputs={},
+            execution_id="exec-smoke-cancel-noreason",
+        )
+
+        assert result.status == "cancelled", (
+            f"Expected 'cancelled' but got '{result.status}'. A cancel with no "
+            "reason text is still a cancel (#918); deriving the interrupt flag "
+            "from an optional message is what let this run to completion."
+        )
+        assert fake.call_count == 1
 
     async def test_failure_returns_failed(self) -> None:
         """Non-zero exit code with no cancel signal must return status='failed'."""

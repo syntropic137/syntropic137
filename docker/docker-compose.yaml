@@ -69,6 +69,11 @@ services:
       SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
       EVENT_BATCH_SIZE: "100"
       EVENT_BATCH_INTERVAL_MS: "1000"
+      # Cap glibc arenas at 2 (default num_cpus*8 = 128 on a 16-core host).
+      # PYTHONMALLOC=malloc disables pymalloc's small-object pool so the arena
+      # cap actually applies. Saves 15-25MB RSS under load.
+      MALLOC_ARENA_MAX: "2"
+      PYTHONMALLOC: malloc
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -135,6 +140,20 @@ services:
       REDIS_URL: redis://redis:6379/0
       # Docker socket proxy (ISS-164) - all stacks use the same proxy
       DOCKER_HOST: tcp://docker-socket-proxy:2375
+      # Central session store (SeshMagic). Declared HERE, in the base, because
+      # every stack layers on this file - dev, dev-cloudflare, test,
+      # selfhost and ondemand. Declaring it per
+      # overlay is how dev and ondemand ended up unable to capture at all: the
+      # vault resolved both values, `just dev` exported them, and compose then
+      # dropped them because the dev api service never named them.
+      #
+      # An empty URL disables capture, which is a legitimate configuration, so
+      # the failure was indistinguishable from "capture deliberately off".
+      # Keep this in the base so a new overlay inherits it instead of having to
+      # remember it.
+      SYN_SESSION_STORE_URL: ${SYN_SESSION_STORE_URL:-}
+      SYN_SESSION_STORE_AUTH_TOKEN: ${SYN_SESSION_STORE_AUTH_TOKEN:-}
+      SYN_SESSION_STORE_LABEL: ${SYN_SESSION_STORE_LABEL:-}
       # Note: secrets (GitHub App, Anthropic, storage) are injected via
       # overlay files (dev, selfhost, ondemand) using env_file or environment
     depends_on:

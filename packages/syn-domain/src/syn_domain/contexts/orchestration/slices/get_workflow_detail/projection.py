@@ -40,6 +40,7 @@ def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> No
     phase[PhaseFields.PROMPT_TEMPLATE] = event_data.get("prompt_template")
     for event_key, phase_key in (
         ("model", "model"),
+        ("provider", "provider"),
         ("timeout_seconds", PhaseFields.TIMEOUT_SECONDS),
         ("allowed_tools", PhaseFields.ALLOWED_TOOLS),
     ):
@@ -61,7 +62,13 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 6  # Bumped: added requires_repos field (ADR-058 #666)
+    # Deliberately NOT bumped for the agent_id removal (PR #875 review): the
+    # reader addresses stored phase dicts by key, so a version-7 row that still
+    # carries "agent_id" stays readable and the field simply stops surfacing. A
+    # bump would buy nothing and cost a full replay through the coordinator's
+    # non-atomic clear-then-delete-checkpoint sequence, which loses the whole
+    # read model if the process dies between the two steps.
+    VERSION = 7  # v7: surface per-phase provider + apply provider on phase update
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -100,6 +107,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
+                provider=p.get("provider"),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),
@@ -135,6 +143,31 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             requires_repos=event_data.get("requires_repos", True),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
+
+    async def on_workflow_template_updated(self, event_data: dict) -> None:
+        """Handle WorkflowTemplateUpdated - rebuild the detail in place (issue #822).
+
+        A reinstall replaces the definition wholesale, so the detail is rebuilt
+        from the event exactly as create does. Run history is a property of the
+        template, not of the definition, so runs_count and created_at survive.
+        """
+        workflow_id = event_data.get("workflow_id", "")
+        if not workflow_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        await self.on_workflow_template_created(event_data)
+
+        if not existing:
+            return
+
+        rebuilt = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        if not rebuilt:
+            return
+        rebuilt["runs_count"] = existing.get("runs_count", 0)
+        if existing.get("created_at"):
+            rebuilt["created_at"] = existing["created_at"]
+        await self._store.save(self.PROJECTION_NAME, workflow_id, rebuilt)
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted - increment runs_count."""

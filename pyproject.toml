@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.25.4"
+version = "0.26.0"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -28,9 +28,11 @@ all = []
 [dependency-groups]
 dev = [
     "ruff>=0.14.7",
-    "pytest>=9.0.1",
+    "pytest>=9.0.3",
     "pytest-cov>=7.0.0",
     "pytest-asyncio>=1.3.0",
+    # Required by `just test-unit` (`pytest -m unit -n auto`); was undeclared.
+    "pytest-xdist>=3.6.1",
     "psycopg[binary]>=3.3.0",
     "asyncpg>=0.31.0",
     "testcontainers>=4.13.3",
@@ -46,10 +48,11 @@ build-backend = "uv_build"
 [tool.uv]
 # Supply chain safety: only resolve packages published before this date.
 # Bump intentionally when upgrading dependencies: just bump-exclude-newer
-exclude-newer = "2026-04-11T00:00:00Z"
+exclude-newer = "2026-08-20T21:12:36Z"
 constraint-dependencies = [
+    "idna>=3.15",           # PYSEC-2026-215
     "requests>=2.33.0",      # GHSA-gc5v-m9x4-r6x2
-    "urllib3>=2.6.3",        # GHSA-38jv-5279-wg99
+    "urllib3>=2.7.0",        # GHSA-38jv-5279-wg99, PYSEC-2026-141, PYSEC-2026-142
     # pygments: GHSA-5239-wwwm-4pmq has no upstream fix yet (2.19.2 is latest).
 ]
 
@@ -79,6 +82,8 @@ exclude = [
     "lib/",
     ".venv/",
     "__pycache__/",
+    # Separate nested git repo checked out inside this tree; not our code.
+    "markdown-explorer/",
 ]
 
 [tool.ruff.lint]
@@ -135,8 +140,12 @@ testpaths = [
     "packages/syn-domain/tests",
     "packages/syn-domain/src",  # VSA co-located tests
     "packages/syn-adapters/tests",
+    "packages/syn-adapters/src",  # co-located tests, same convention as syn-domain/src
     "packages/syn-shared/tests",
+    "packages/syn-shared/src",  # co-located tests, same convention
+    "packages/syn-tokens/tests",
     "scripts/workflows",
+    "scripts/tests",
     "infra/scripts/tests",
 ]
 pythonpath = [
@@ -145,7 +154,9 @@ pythonpath = [
     "packages/syn-domain/src",
     "packages/syn-adapters/src",
     "packages/syn-shared/src",
+    "packages/syn-tokens/tests",
     "scripts/workflows",
+    "scripts/tests",
     ".",  # infra/scripts importable from repo root
 ]
 python_files = ["test_*.py", "*_test.py"]

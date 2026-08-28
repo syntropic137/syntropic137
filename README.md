@@ -90,7 +90,8 @@ just dev                        # syncs deps, builds containers, seeds data, sta
 
 | Service | URL |
 |---------|-----|
-| Frontend | http://localhost:5173 |
+| Dashboard | http://localhost:9137 |
+| Vite dev server (no API proxy, do not open directly) | http://localhost:5173 |
 | API | http://localhost:8137 |
 | API Docs | http://localhost:8137/docs |
 | MinIO Console | http://localhost:9001 |
@@ -257,6 +258,29 @@ Two `.env` files with strict separation (no variable appears in both):
 
 > [!TIP]
 > Both `.env.example` files are extensively commented with descriptions, defaults, and security notes. Reference them directly for all available configuration options.
+
+## Central Session Capture (optional)
+
+Every agent session can be forwarded to a central SeshMagic session store, so transcripts from every workspace land in one queryable corpus no matter which machine ran them. This is what makes learning loops possible across sessions that did not run under Syntropic137.
+
+**Disabled by default.** Leave `SYN_SESSION_STORE_URL` empty and nothing changes: no capture, no extra dependency, no behaviour difference. A self-hosted deployment with no session store runs exactly as it does today.
+
+To enable, set two values:
+
+```bash
+SYN_SESSION_STORE_URL=http://your-store:18090
+SYN_SESSION_STORE_AUTH_TOKEN=op://syntropic137/session-store/write-token   # or plaintext
+```
+
+Sessions are tagged with `execution_id`, `workspace_id`, `workflow_id`, `phase_id`, and `source:syntropic137`, so any row in the store can be joined back to the execution that produced it. Tag values are percent-encoded, which is a no-op for the slug- and uuid-shaped identifiers that occur in practice but keeps an identifier containing the `,` or `:` framing delimiters recoverable rather than mangled.
+
+The six `AGENTIC_SESSION_STORE_*` variables are reserved by the workspace adapter. They are set from `SYN_SESSION_STORE_*` alone: if a caller supplies one via a phase's environment block it is dropped (with a warning naming the key, never its value), so capture cannot be switched on, redirected, or re-partitioned from workflow input.
+
+> [!NOTE]
+> This is additive and independent of the two stores Syntropic137 already uses: conversation logs in MinIO and the event stream (tool calls, tokens, cost) in TimescaleDB. Both continue to work unchanged whether or not central capture is enabled.
+
+> [!TIP]
+> The spool inside a workspace container is not persisted. If a container is killed before its final sweep runs, that session is not uploaded. Everything else is captured on normal completion.
 
 ## Secrets (1Password)
 

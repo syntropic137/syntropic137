@@ -1,0 +1,631 @@
+"""The AUTHORITATIVE capture verdict, as distinct from the diagnostic one.
+
+`capture_status` reads the finalizer's stderr from inside the workspace, where
+the agent runs as the same user and can print anything the finalizer can. This
+module reads a host-invoked `apss-session-exporter --json`, over a channel the
+agent has no handle on. Everything here exists to keep that distinction from
+eroding into a confident wrong answer.
+
+The documents below are REAL exporter output, captured from v0.3.0 runs against
+a live receiver, not invented shapes. A parser tested against fiction proves
+only that it agrees with whoever wrote the fixture.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from syn_adapters.workspace_backends.agentic.capture_result import (
+    SUPPORTED_SCHEMA_VERSIONS,
+    CaptureExpectations,
+    parse_capture_result,
+)
+from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
+
+# Captured from a real v0.3.0 run against a schema-validating receiver.
+_CLEAN = json.dumps(
+    {
+        "schema_version": 1,
+        "scs_version": "1.0",
+        "captured_everything": True,
+        "store_url": "http://host.docker.internal:8799",
+        "origin": {"environment": "container", "deployment": "syntropic137__dev"},
+        "counters": {
+            "discovered": 1,
+            "skipped_unchanged": 0,
+            "uploaded": 1,
+            "accepted": 1,
+            "duplicate": 0,
+            "rejected": 0,
+            "skipped_oversize": 0,
+            "failed": 0,
+            "unconfirmed": 0,
+        },
+    }
+)
+
+# Captured from a real run against a receiver that rejects every envelope.
+_REJECTED = json.dumps(
+    {
+        "schema_version": 1,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "store_url": "http://127.0.0.1:8793",
+        "origin": {"environment": "container", "deployment": None},
+        "counters": {
+            "discovered": 1,
+            "skipped_unchanged": 0,
+            "uploaded": 1,
+            "accepted": 0,
+            "duplicate": 0,
+            "rejected": 1,
+            "skipped_oversize": 0,
+            "failed": 0,
+            "unconfirmed": 0,
+        },
+    }
+)
+
+# Captured from a real run against an unreachable store.
+_UNREACHABLE = json.dumps(
+    {
+        "schema_version": 1,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "error": "store is not reachable at http://127.0.0.1:1 (is it up? is the URL right?)",
+        "store_url": "http://127.0.0.1:1",
+        "origin": {"environment": "container", "deployment": "syntropic137__dev"},
+    }
+)
+
+
+# Captured from a REAL run of the v2 exporter (branch feat/confirmed-session-ids)
+# against a live receiver that accepted the envelope. This is the document the
+# `sessions` array was added in: note it sits after `counters`, and that every
+# field version 1 defined is unchanged, which is what makes v2 additive.
+_CLEAN_V2 = json.dumps(
+    {
+        "schema_version": 2,
+        "scs_version": "1.0",
+        "captured_everything": True,
+        "store_url": "http://127.0.0.1:8797",
+        "origin": {"environment": "local", "deployment": None},
+        "counters": {
+            "discovered": 1,
+            "skipped_unchanged": 0,
+            "uploaded": 1,
+            "accepted": 1,
+            "duplicate": 0,
+            "rejected": 0,
+            "skipped_oversize": 0,
+            "failed": 0,
+            "unconfirmed": 0,
+        },
+        "sessions": ["11111111-2222-3333-4444-555555555555"],
+    }
+)
+# The other three v2 shapes the exporter really emits, captured the same way.
+# One success document only proves the additive claim for success; schema 2 is
+# about to ship, so the failure shapes need the same evidence.
+#
+# Note both error documents omit `sessions` ENTIRELY rather than sending an
+# empty array. The parser must not require the field, and these hold it to that.
+
+# Store rejected the envelope. exit 3.
+_INCOMPLETE_V2 = json.dumps(
+    {
+        "schema_version": 2,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "store_url": "http://127.0.0.1:8798",
+        "origin": {"environment": "local", "deployment": None},
+        "counters": {
+            "discovered": 1,
+            "skipped_unchanged": 0,
+            "uploaded": 1,
+            "accepted": 0,
+            "duplicate": 0,
+            "rejected": 1,
+            "skipped_oversize": 0,
+            "failed": 0,
+            "unconfirmed": 0,
+        },
+        "sessions": [],
+    }
+)
+
+# Store unreachable. exit 1, counters absent, no `sessions` key.
+_UNREACHABLE_V2 = json.dumps(
+    {
+        "schema_version": 2,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "error": ("store is not reachable at http://127.0.0.1:8799 (is it up? is the URL right?)"),
+        "store_url": "http://127.0.0.1:8799",
+        "origin": {"environment": "local", "deployment": None},
+    }
+)
+
+# Could not even load configuration. exit 1, store_url and origin null.
+_CONFIG_ERROR_V2 = json.dumps(
+    {
+        "schema_version": 2,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "error": "missing required env var SESSION_STORE_URL",
+        "store_url": None,
+        "origin": None,
+    }
+)
+
+_CLEAN_V2_EXPECT = CaptureExpectations(
+    store_url="http://127.0.0.1:8797", deployment=None, expect_sessions=True
+)
+
+#: What the fixtures above were actually produced against. Spelled once so a
+#: test that means to assert a MISMATCH has to say so explicitly.
+_CLEAN_EXPECT = CaptureExpectations(
+    store_url="http://host.docker.internal:8799",
+    deployment="syntropic137__dev",
+    expect_sessions=True,
+)
+_REJECTED_EXPECT = CaptureExpectations(
+    store_url="http://127.0.0.1:8793", deployment=None, expect_sessions=True
+)
+_UNREACHABLE_EXPECT = CaptureExpectations(
+    store_url="http://127.0.0.1:1", deployment="syntropic137__dev", expect_sessions=True
+)
+
+
+def _parse(
+    stdout: str,
+    exit_code: int,
+    *,
+    expectations: CaptureExpectations | None = _CLEAN_EXPECT,
+):
+    """Call the parser, defaulting to the expectations `_CLEAN` was made under.
+
+    The production signature has no default and no unchecked mode: expectations
+    are None exactly when no store is configured. This helper carries a default
+    only so tests that are about something else stay readable; anything
+    asserting a destination mismatch passes its own.
+    """
+    return parse_capture_result(stdout, exit_code, expectations=expectations)
+
+
+@pytest.mark.unit
+class TestTheThreeRealOutcomes:
+    def test_a_clean_sweep_is_captured(self) -> None:
+        out = _parse(_CLEAN, 0)
+        assert out.state is CaptureState.CAPTURED
+        assert not out.needs_backfill
+        assert out.origin_deployment == "syntropic137__dev"
+        assert out.store_url == "http://host.docker.internal:8799"
+
+    def test_a_rejected_sweep_is_incomplete_and_names_the_loss(self) -> None:
+        out = _parse(_REJECTED, 3, expectations=_REJECTED_EXPECT)
+        assert out.state is CaptureState.INCOMPLETE
+        assert out.needs_backfill
+        assert "rejected=1" in (out.reason or "")
+
+    def test_an_unreachable_store_is_failed_and_carries_the_error(self) -> None:
+        out = _parse(_UNREACHABLE, 1, expectations=_UNREACHABLE_EXPECT)
+        assert out.state is CaptureState.FAILED
+        assert out.needs_backfill
+        assert "not reachable" in (out.reason or "")
+
+
+@pytest.mark.unit
+class TestTheVerdictIsNeverGuessed:
+    def test_a_disabled_store_is_not_a_failure(self) -> None:
+        out = _parse("", 0, expectations=None)
+        assert out.state is CaptureState.DISABLED
+        assert not out.needs_backfill
+
+    def test_an_unknown_schema_version_is_refused(self) -> None:
+        # The exporter bumps this on any incompatible change precisely so a
+        # consumer can refuse rather than misread. Guessing would mean reading
+        # a field that may have changed meaning.
+        doc = json.dumps(
+            {
+                "schema_version": max(SUPPORTED_SCHEMA_VERSIONS) + 1,
+                "captured_everything": True,
+            }
+        )
+        out = _parse(doc, 0)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+
+    def test_every_supported_schema_version_is_read_not_refused(self) -> None:
+        # The two ends of this contract deploy independently: the exporter ships
+        # inside the workspace image, syn137 ships on the host. Refusing a
+        # version the exporter legitimately emits turns ordinary rollout skew
+        # into a total capture outage, because a document that will not parse is
+        # indistinguishable here from a capture that did not happen.
+        # Uses a COMPLETE, success-producing document and varies ONLY the
+        # version, so the gate is the sole thing under test. An earlier version
+        # of this test used a bare {schema_version, captured_everything} dict,
+        # which is refused on several other grounds - it would have stayed green
+        # with the version gate deleted outright.
+        # LITERAL versions, not a loop over the production constant. Iterating
+        # the constant makes the test agree with whatever the constant says, so
+        # accidentally widening it to {1, 2, 3} would move the rejection
+        # boundary too and the suite would bless the widening.
+        base = json.loads(_CLEAN_V2)
+        for version in (1, 2):
+            doc = json.dumps({**base, "schema_version": version})
+            out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+            assert out.state is CaptureState.CAPTURED, (
+                f"schema_version {version} is declared supported but produced "
+                f"{out.state}: {out.reason}"
+            )
+
+    @pytest.mark.parametrize(
+        ("document", "exit_code"),
+        [
+            (_CLEAN_V2, 0),
+            (_INCOMPLETE_V2, 3),
+            (_UNREACHABLE_V2, 1),
+            (_CONFIG_ERROR_V2, 1),
+        ],
+        ids=["success", "incomplete", "unreachable", "config-error"],
+    )
+    def test_every_real_v2_shape_reads_the_same_as_its_v1_twin(
+        self, document: str, exit_code: int
+    ) -> None:
+        """The additive claim, tested across all four documents the exporter emits.
+
+        Asserts EQUIVALENCE rather than a hand-written expected state: the same
+        document is parsed twice, differing only in `schema_version`, and both
+        readings must agree. That is exactly what "purely additive" means, and
+        it cannot be satisfied by inventing the answer the parser happens to
+        give - which is how the earlier version-gate tests passed for the wrong
+        reason.
+
+        Both are parsed under identical expectations, so any other mismatch
+        affects the two sides equally and cancels out of the comparison.
+        """
+        as_v1 = json.dumps({**json.loads(document), "schema_version": 1})
+
+        v2 = _parse(document, exit_code, expectations=_CLEAN_V2_EXPECT)
+        v1 = _parse(as_v1, exit_code, expectations=_CLEAN_V2_EXPECT)
+
+        assert v2.state is v1.state
+        assert v2.needs_backfill == v1.needs_backfill
+        assert v2.reason == v1.reason
+        # The v1 twin still CARRIES `sessions`, because only the version was
+        # changed. Reading it anyway would be interpreting a schema 2 field
+        # under schema 1, so the twin must report None while the original
+        # reports whatever it confirmed. Asserting only state/backfill/reason
+        # let a version-unaware parser pass this test unchanged.
+        assert v1.agent_session_ids is None
+
+    def test_a_phase_can_carry_many_agent_session_ids(self) -> None:
+        """One phase, several agent sessions - the shape delegation produces.
+
+        A codex phase that hands work to claude, a subagent, or a resumed
+        thread all leave separate transcripts under the same partition, and the
+        sweep confirms each. syn137's own session id is a per-phase uuid4 the
+        agent never sees, so this list is the ONLY relation between the host's
+        identity for a phase and the ids the agents chose.
+        """
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "sessions": ["sess-codex", "sess-claude", "sess-sub"]})
+
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+
+        assert out.agent_session_ids == ("sess-codex", "sess-claude", "sess-sub")
+
+    def test_a_repeated_id_is_one_session(self) -> None:
+        """The exporter reports a multiset, one entry per confirmed ENVELOPE.
+
+        That multiplicity is meaningful there, because two envelopes can share
+        an id while differing in content. Here the question is which SESSIONS
+        the phase produced, so repeats collapse and order is kept.
+        """
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "sessions": ["a", "b", "a"]})
+
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+
+        assert out.agent_session_ids == ("a", "b")
+
+    def test_no_sessions_array_is_not_an_empty_one(self) -> None:
+        """A schema 1 exporter cannot answer; that is not "confirmed nothing".
+
+        None and () must stay distinguishable or a version skew reads as loss.
+        """
+        v1_doc = _CLEAN
+        assert _parse(v1_doc, 0).agent_session_ids is None
+
+        base = json.loads(_CLEAN_V2)
+        empty = json.dumps({**base, "sessions": []})
+        assert _parse(empty, 0, expectations=_CLEAN_V2_EXPECT).agent_session_ids == ()
+
+    @pytest.mark.parametrize("version", [1, 0, -1])
+    def test_sessions_are_not_read_below_the_schema_that_introduced_them(
+        self, version: int
+    ) -> None:
+        """A document carrying `sessions` at a version that never had it.
+
+        It did not come from an exporter of ours, so interpreting it under
+        schema 2 semantics would mean trusting a shape nobody declared.
+        """
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "schema_version": version, "sessions": ["x"]})
+
+        assert _parse(doc, 0, expectations=_CLEAN_V2_EXPECT).agent_session_ids is None
+
+    def test_a_session_id_that_is_not_a_string_is_dropped(self) -> None:
+        """This came off the wire; a non-string id is a shape we do not know."""
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "sessions": ["ok", 7, None, "", "fine"]})
+
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+
+        assert out.agent_session_ids == ("ok", "fine")
+
+    def test_the_supported_set_is_exactly_what_this_build_claims(self) -> None:
+        # Pins the contract itself. Widening the set is then a deliberate edit
+        # to this line, not something that happens quietly in a refactor.
+        assert frozenset({1, 2}) == SUPPORTED_SCHEMA_VERSIONS
+
+    @pytest.mark.parametrize("version", [-1, 0, 3, 99])
+    def test_an_integer_version_outside_the_set_is_refused(self, version: int) -> None:
+        # Includes 0 and a negative, which a range check (`>= 1`, or worse
+        # `<= max`) would let through. The gate is exact membership and these
+        # hold it to that.
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "schema_version": version})
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "schema_version" in (out.reason or "")
+
+    @pytest.mark.parametrize("lookalike", [True, False, 1.0, 2.0, "1", "2", None])
+    def test_a_version_that_is_not_an_integer_is_refused(self, lookalike: object) -> None:
+        # Python equality makes lookalikes pass a plain membership test: True
+        # equals 1 and 2.0 equals 2, and bool subclasses int, so isinstance
+        # would admit it too. A declared version that is not literally an
+        # integer is a shape this build has no reason to trust.
+        base = json.loads(_CLEAN_V2)
+        doc = json.dumps({**base, "schema_version": lookalike})
+        out = _parse(doc, 0, expectations=_CLEAN_V2_EXPECT)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "schema_version" in (out.reason or "")
+
+    def test_a_version_2_sessions_array_does_not_disturb_the_version_1_reading(
+        self,
+    ) -> None:
+        # Version 2 is purely additive, which is the whole reason it can be
+        # accepted before there is code here to interpret it. The extra field
+        # must be ignored, not mistaken for a counter or read as a failure.
+        #
+        # This is the rollout-order guarantee in test form: an image carrying
+        # the v2 exporter can land while the host still reads it with v1 rules.
+        out = _parse(_CLEAN_V2, 0, expectations=_CLEAN_V2_EXPECT)
+        assert out.state is CaptureState.CAPTURED
+        assert not out.needs_backfill
+
+    def test_no_document_is_not_success(self) -> None:
+        # An exporter older than --json exits 0 and prints a prose line. That
+        # is a misconfiguration, not a capture, and must never read as one.
+        out = _parse("run: discovered=1 uploaded=1 accepted=1 failed=0", 0)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "predate" in (out.reason or "")
+
+    def test_exit_code_contradicting_the_document_is_unknown(self) -> None:
+        # Both come from the same process. If they disagree, something is wrong
+        # with the exporter or the invocation, and preferring whichever says
+        # what we want is exactly how a false verdict gets recorded.
+        out = _parse(_CLEAN, 3)
+        assert out.state is CaptureState.UNKNOWN
+        assert "contradicts" in (out.reason or "")
+
+    def test_a_usage_error_is_our_bug_not_the_stores(self) -> None:
+        out = _parse("", 2)
+        assert out.state is CaptureState.UNKNOWN
+        assert "arguments" in (out.reason or "")
+
+    def test_a_missing_captured_everything_is_unknown(self) -> None:
+        doc = json.dumps({"schema_version": 1, "counters": {"failed": 0}})
+        out = _parse(doc, 0)
+        assert out.state is CaptureState.UNKNOWN
+
+
+@pytest.mark.unit
+class TestParsingIsDefensive:
+    def test_leading_noise_does_not_break_the_verdict(self) -> None:
+        # A wrapper prepending output is a realistic accident. Being strict
+        # about it would turn a cosmetic problem into an unreadable verdict.
+        out = _parse(f"some wrapper noise\n{_CLEAN}", 0)
+        assert out.state is CaptureState.CAPTURED
+
+    def test_non_integer_counters_are_dropped_not_coerced(self) -> None:
+        doc = json.dumps(
+            {
+                "schema_version": 1,
+                "captured_everything": True,
+                "store_url": "http://host.docker.internal:8799",
+                "origin": {"environment": "container", "deployment": "syntropic137__dev"},
+                "counters": {"uploaded": 1, "accepted": "one", "failed": True},
+            }
+        )
+        out = _parse(doc, 0)
+        assert out.counters == {"uploaded": 1}, out.counters
+
+    def test_garbage_is_unknown_rather_than_an_exception(self) -> None:
+        out = _parse("{not json at all", 0)
+        assert out.state is CaptureState.UNKNOWN
+
+
+# What the exporter emits when it cannot even load its configuration: the same
+# envelope, with store_url and origin explicitly null rather than invented.
+_CONFIG_ERROR = json.dumps(
+    {
+        "schema_version": 1,
+        "scs_version": "1.0",
+        "captured_everything": False,
+        "error": "SESSION_STORE_URL is not set",
+        "store_url": None,
+        "origin": None,
+    }
+)
+
+
+@pytest.mark.unit
+class TestSuccessIsHardToReachByAccident:
+    """CAPTURED is the only state that does not set needs_backfill.
+
+    It is the verdict that decides a session is safe to stop worrying about, so
+    every check here exists to make reaching it by accident harder.
+    """
+
+    def test_success_against_the_wrong_store_is_not_captured(self) -> None:
+        # The counters cannot tell a right store from a wrong one, and neither
+        # can the exit code. Only the caller knows where it meant them to go.
+        out = _parse(
+            _CLEAN,
+            0,
+            expectations=CaptureExpectations(
+                store_url="http://the-real-store:8799",
+                deployment="syntropic137__dev",
+                expect_sessions=True,
+            ),
+        )
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "not the configured" in (out.reason or "")
+
+    def test_success_tagged_for_another_deployment_is_not_captured(self) -> None:
+        out = _parse(
+            _CLEAN,
+            0,
+            expectations=CaptureExpectations(
+                store_url="http://host.docker.internal:8799",
+                deployment="syntropic137__prod",
+                expect_sessions=True,
+            ),
+        )
+        assert out.state is CaptureState.UNKNOWN
+        assert "not the expected" in (out.reason or "")
+
+    def test_matching_expectations_still_reads_captured(self) -> None:
+        # The checks must not make CAPTURED unreachable.
+        out = _parse(_CLEAN, 0, expectations=_CLEAN_EXPECT)
+        assert out.state is CaptureState.CAPTURED
+        assert not out.needs_backfill
+
+    @pytest.mark.parametrize("counter", ["rejected", "failed", "skipped_oversize", "unconfirmed"])
+    def test_any_loss_counter_contradicting_success_is_not_captured(self, counter: str) -> None:
+        # Parameterised across all four, because testing one proves only that
+        # the branch exists, not that the set it checks is the right set.
+        doc = json.dumps(
+            {
+                "schema_version": 1,
+                "captured_everything": True,
+                "store_url": "http://host.docker.internal:8799",
+                "origin": {"environment": "container", "deployment": "syntropic137__dev"},
+                "counters": {"discovered": 1, "uploaded": 1, counter: 1},
+            }
+        )
+        out = _parse(doc, 0)
+        assert out.state is CaptureState.UNKNOWN, counter
+        assert out.needs_backfill, counter
+        assert f"{counter}=1" in (out.reason or ""), out.reason
+
+    def test_a_document_with_no_discovered_count_is_not_captured(self) -> None:
+        # "Everything reached the store" is a claim about a set. Without a
+        # discovered count the document cannot say what that set was, so the
+        # claim is unverifiable rather than true.
+        doc = json.dumps(
+            {
+                "schema_version": 1,
+                "captured_everything": True,
+                "store_url": "http://host.docker.internal:8799",
+                "origin": {"environment": "container", "deployment": "syntropic137__dev"},
+                "counters": {"uploaded": 1, "accepted": 1},
+            }
+        )
+        out = _parse(doc, 0)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "discovered" in (out.reason or "")
+
+    def test_a_document_that_contradicts_itself_is_not_captured(self) -> None:
+        # v0.3.0 cannot emit this: it derives both the exit code and the
+        # boolean FROM these counters. The check costs nothing today and fails
+        # closed if the producer gains a bug or this parser drifts from it.
+        doc = json.dumps(
+            {
+                "schema_version": 1,
+                "captured_everything": True,
+                "store_url": "http://host.docker.internal:8799",
+                "origin": {"environment": "container", "deployment": "syntropic137__dev"},
+                "counters": {"discovered": 1, "uploaded": 1, "rejected": 1},
+            }
+        )
+        out = _parse(doc, 0)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "rejected=1" in (out.reason or "")
+
+    def test_a_zero_discovery_sweep_says_so_when_none_were_expected(self) -> None:
+        # A sweep that found nothing is not a failure, but "sessions are in the
+        # store" is not true of it either. The distinction is recorded rather
+        # than flattened, so a caller that expected a session can notice.
+        doc = json.dumps(
+            {
+                "schema_version": 1,
+                "captured_everything": True,
+                "store_url": "http://host.docker.internal:8799",
+                "origin": {"environment": "container", "deployment": "syntropic137__dev"},
+                "counters": {"discovered": 0, "uploaded": 0, "accepted": 0},
+            }
+        )
+        out = _parse(
+            doc,
+            0,
+            expectations=CaptureExpectations(
+                store_url="http://host.docker.internal:8799",
+                deployment="syntropic137__dev",
+                expect_sessions=False,
+            ),
+        )
+        assert out.state is CaptureState.CAPTURED
+        assert not out.needs_backfill
+        assert "discovered=0" in (out.reason or "")
+
+    def test_a_zero_discovery_sweep_is_unknown_when_a_session_was_expected(self) -> None:
+        # The agent-writable spool means "found nothing" can be something
+        # having been removed rather than nothing having happened.
+        doc = json.dumps(
+            {
+                "schema_version": 1,
+                "captured_everything": True,
+                "store_url": "http://host.docker.internal:8799",
+                "origin": {"environment": "container", "deployment": "syntropic137__dev"},
+                "counters": {"discovered": 0, "uploaded": 0, "accepted": 0},
+            }
+        )
+        out = _parse(doc, 0)
+        assert out.state is CaptureState.UNKNOWN
+        assert out.needs_backfill
+        assert "discovered none" in (out.reason or "")
+
+
+@pytest.mark.unit
+class TestConfigurationFailure:
+    def test_a_config_error_is_failed_and_carries_no_invented_destination(self) -> None:
+        out = _parse(_CONFIG_ERROR, 1, expectations=_UNREACHABLE_EXPECT)
+        assert out.state is CaptureState.FAILED
+        assert out.needs_backfill
+        assert "SESSION_STORE_URL" in (out.reason or "")
+        # null rather than "" - an absent destination must not read as a
+        # configured-but-blank one.
+        assert out.store_url is None
+        assert out.origin_environment is None

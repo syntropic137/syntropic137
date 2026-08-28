@@ -28,6 +28,7 @@ from syn_domain.contexts.orchestration import (
     SubagentTracker,
     TokenAccumulator,
 )
+from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         AgentHandlerProtocol,
+        Runner,
     )
 
 
@@ -58,10 +60,13 @@ class FakeAgentExecutionHandler:
         *,
         interrupt: bool = False,
         exit_code: int = 0,
+        interrupt_reason: str | None = "Cancelled by user",
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
+        self._interrupt_reason = interrupt_reason
         self.calls: list[TodoItem] = []
+        self.runners: list[Runner] = []
 
     # ------------------------------------------------------------------
     # Protocol-required method
@@ -74,15 +79,17 @@ class FakeAgentExecutionHandler:
         agent_env: dict[str, str],
         claude_cmd: list[str],
         session_id: str,
-        agent_model: str,
+        agent_model: str | None,
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
+        runner: Runner = AgentRunner.CLAUDE,
     ) -> AgentExecutionResult:
         self.calls.append(todo)
+        self.runners.append(runner)
         stream_result = StreamResult(
             line_count=0,
             interrupt_requested=self._interrupt,
-            interrupt_reason="Cancelled by user" if self._interrupt else None,
+            interrupt_reason=self._interrupt_reason if self._interrupt else None,
             agent_task_result=None,
         )
         command = AgentExecutionCompletedCommand(
@@ -112,9 +119,16 @@ class FakeAgentExecutionHandler:
     # ------------------------------------------------------------------
 
     @classmethod
-    def cancelled(cls) -> FakeAgentExecutionHandler:
-        """Simulates a user-initiated cancel signal (``interrupt_requested=True``)."""
-        return cls(interrupt=True)
+    def cancelled(cls, reason: str | None = "Cancelled by user") -> FakeAgentExecutionHandler:
+        """Simulates a user-initiated cancel signal (``interrupt_requested=True``).
+
+        ``reason=None`` reproduces what ``syn control cancel <id> --force``
+        actually sends without ``-r``. That is the case #918 was: the flag used
+        to be derived from the reason, so a cancel carrying no message was
+        silently dropped. A fake that always supplies a reason cannot exercise
+        it, which is why the default is overridable rather than fixed.
+        """
+        return cls(interrupt=True, interrupt_reason=reason)
 
     @classmethod
     def success(cls) -> FakeAgentExecutionHandler:

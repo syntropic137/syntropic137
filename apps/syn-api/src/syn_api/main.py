@@ -13,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from syn_api.config import get_api_config
 from syn_api.routes import (
     artifacts_router,
+    capture_router,
+    claude_plugins_router,
     conversations_router,
     costs_router,
     events_router,
@@ -24,6 +26,7 @@ from syn_api.routes import (
     organizations_router,
     repos_router,
     sessions_router,
+    skills_router,
     sse_router,
     systems_router,
     triggers_router,
@@ -118,7 +121,10 @@ def create_app() -> FastAPI:
     app.include_router(executions_router)
     app.include_router(sessions_router)
     app.include_router(artifacts_router)
+    app.include_router(claude_plugins_router)
+    app.include_router(skills_router)
     app.include_router(metrics_router)
+    app.include_router(capture_router)
     app.include_router(observability_router)
     app.include_router(costs_router)
     app.include_router(events_router)

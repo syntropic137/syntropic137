@@ -8,6 +8,12 @@ from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
+from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (  # noqa: TC001
+    ClaudePluginRef,
+)
+from syn_domain.contexts.orchestration._shared.skill_ref import (  # noqa: TC001
+    SkillRef,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     InputDeclaration,
     PhaseDefinition,
@@ -56,3 +62,26 @@ class CreateWorkflowTemplateCommand(BaseModel):
     # Execution gate (ADR-058 #666)
     requires_repos: bool = True
     """Whether this workflow requires repository access at execution time."""
+
+    # Workflow-scope claude plugin refs (issue #726, PR2). Per-phase refs are
+    # carried inside ``PhaseDefinition.claude_plugins``; workflow-scope refs
+    # apply to every phase and live here so the aggregate carries the full
+    # declaration through to execute time.
+    claude_plugins: list[ClaudePluginRef] = Field(default_factory=list)
+
+    # Workflow-scope skill refs (issue #772). Additive alongside
+    # claude_plugins; per-phase refs are carried inside
+    # ``PhaseDefinition.skills``. A follow-up task wires this through the
+    # aggregate the same way claude_plugins is wired.
+    skills: list[SkillRef] = Field(default_factory=list)
+
+    # Provenance (issue #822). Recorded at install time so an execution can be
+    # traced back to the package version and source commit that produced it.
+    version: str | None = None
+    """Package version being installed."""
+
+    source_digest: str | None = None
+    """Resolved source commit SHA the definition was built from."""
+
+    force: bool = False
+    """Explicit intent to overwrite an already-installed matching version."""

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { UpdatePhasePromptRequest } from '../../api/workflows'
 import { updatePhasePrompt } from '../../api/workflows'
+import { providerUsesModelField } from '../../constants/agentProviders'
 import type { PhaseDefinition } from '../../types'
 
 type EditorTab = 'write' | 'preview'
@@ -10,6 +11,7 @@ interface PhaseEditorState {
   isEditing: boolean
   editedPrompt: string
   editedModel: string
+  editedProvider: string
   editedTimeout: string
   editedTools: string
   activeTab: EditorTab
@@ -23,6 +25,7 @@ function buildInitialState(phase: PhaseDefinition): PhaseEditorState {
     isEditing: false,
     editedPrompt: phase.prompt_template ?? '',
     editedModel: phase.model ?? '',
+    editedProvider: phase.provider ?? '',
     editedTimeout: String(phase.timeout_seconds ?? ''),
     editedTools: (phase.allowed_tools ?? []).join(', '),
     activeTab: 'write',
@@ -34,9 +37,13 @@ function buildInitialState(phase: PhaseDefinition): PhaseEditorState {
 
 function buildRequest(state: PhaseEditorState): UpdatePhasePromptRequest {
   const toolsList = state.editedTools.split(',').map((t) => t.trim()).filter(Boolean)
+  const provider = state.editedProvider || null
+  // Codex uses its account-default model; never forward a Claude model id to it.
+  const model = provider && !providerUsesModelField(provider) ? null : state.editedModel || null
   return {
     prompt_template: state.editedPrompt,
-    model: state.editedModel || null,
+    model,
+    provider,
     timeout_seconds: state.editedTimeout ? Number(state.editedTimeout) : null,
     allowed_tools: toolsList,
   }
@@ -78,7 +85,7 @@ export function usePhaseEditor(phase: PhaseDefinition, workflowId: string, onSav
     } catch (err) {
       setState((s) => ({ ...s, isSaving: false, error: errorMessage(err) }))
     }
-  }, [state.editedPrompt, state.editedModel, state.editedTimeout, state.editedTools, workflowId, phase.phase_id, onSaved])
+  }, [state.editedPrompt, state.editedModel, state.editedProvider, state.editedTimeout, state.editedTools, workflowId, phase.phase_id, onSaved])
 
   return { ...state, startEditing, cancelEditing, setField, handleSave }
 }

@@ -47,10 +47,12 @@ async def build_images() -> bool:
     """Build Docker images for testing."""
     logger.info("🔨 Building Docker images...")
 
-    # Build workspace image
+    # Build workspace image.
+    # NOT docker/workspace/build.sh - that path does not exist and has not for
+    # some time; this call failed silently under the job's continue-on-error.
     workspace_build = await asyncio.create_subprocess_exec(
-        "bash",
-        "docker/workspace/build.sh",
+        "just",
+        "workspace-build",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -84,7 +86,13 @@ async def build_images() -> bool:
 
 async def check_images_exist() -> tuple[bool, str]:
     """Check if required Docker images exist."""
-    for image in ["syn-workspace:latest", "syn-sidecar:latest"]:
+    # syn-workspace:latest was a third image name that nothing in this repo
+    # ever built, so this check could only ever fail. The workspace image is
+    # whatever DEFAULT_WORKSPACE_IMAGE resolves to, which is the same source of
+    # truth the platform provisions from.
+    from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
+
+    for image in [DEFAULT_WORKSPACE_IMAGE, "syn-sidecar:latest"]:
         proc = await asyncio.create_subprocess_exec(
             "docker",
             "image",

@@ -11,7 +11,7 @@ import {
   RegistryConfigSchema,
   type RegistryEntry,
 } from "./models.js";
-import { gitClone, gitLsRemote, makeTempDir, removeTempDir } from "../packages/git.js";
+import { gitClone, gitHeadSha, gitLsRemote, makeTempDir, removeTempDir } from "../packages/git.js";
 
 const REGISTRIES_PATH = synPath("registries.json");
 const CACHE_DIR = synPath("marketplace", "cache");
@@ -107,12 +107,10 @@ export async function fetchMarketplaceJson(
 
     const index = MarketplaceIndexSchema.parse(data);
 
-    if (index.syntropic137.type !== "workflow-marketplace") {
-      throw new Error(
-        `Expected syntropic137.type='workflow-marketplace', got '${index.syntropic137.type}'`,
-      );
-    }
-
+    // WHY (#763): we no longer enforce a specific syntropic137.type here so
+    // that claude-plugin marketplaces (without the marker, or with a
+    // different type) can be ingested. Callers that need a specific kind
+    // should assert on `index.syntropic137?.type` themselves.
     return index;
   } finally {
     removeTempDir(tmpdir);
@@ -238,4 +236,85 @@ export async function resolvePluginByName(
   return null;
 }
 
-export { gitLsRemote as getGitHeadSha };
+// ---------------------------------------------------------------------------
+// Artifact-agnostic resolver (#726, #763)
+//
+// WHY: both `syn workflow install` and `syn claude-plugin install` accept
+// a bare name and need to resolve it through configured marketplaces. The
+// only artifact-specific bit is what callers do with the resolved
+// directory (parse workflow YAMLs vs. read .claude-plugin/plugin.json),
+// so the resolver itself stops at "here is the local path".
+// ---------------------------------------------------------------------------
+
+export interface ResolvedMarketplaceArtifact {
+  /** Local path to the artifact directory (the plugin or workflow root). */
+  readonly packagePath: string;
+  /** Registry the artifact came from. */
+  readonly registryName: string;
+  /** Full marketplace entry (so caller can read description/tags/etc.). */
+  readonly entry: MarketplacePluginEntry;
+  /** Caller MUST removeTempDir(tmpdir) when done. */
+  readonly tmpdir: string;
+  /** The ref actually used for the clone (caller-provided or entry default). */
+  readonly resolvedRef: string;
+  /** Resolved git sha at the head of the ref, when discoverable. */
+  readonly gitSha: string | null;
+}
+
+export async function resolveFromMarketplace(
+  bareName: string,
+  ref: string | null,
+  registryFilter?: string | null,
+): Promise<ResolvedMarketplaceArtifact | null> {
+  const result = await resolvePluginByName(bareName, registryFilter ?? null);
+  if (result === null) return null;
+
+  const [regName, entry, plugin] = result;
+  // WHY: ref precedence is explicit-ref > entry-pinned-ref > registry default.
+  // null/empty caller ref falls through to the marketplace's own pin.
+  const resolvedRef =
+    ref && ref.trim() !== "" && ref !== "main" ? ref : (plugin.ref ?? entry.ref);
+
+  // Path-traversal guard mirrors the workflow-side check; the marketplace
+  // file is third-party content so we do not trust it.
+  if (plugin.source.startsWith("/") || plugin.source.includes("..")) {
+    throw new Error(`Unsafe plugin source path in marketplace: ${plugin.source}`);
+  }
+
+  const url = `https://github.com/${entry.repo}.git`;
+  const tmpdir = makeTempDir("syn-mkt-art-");
+  try {
+    await gitClone(url, resolvedRef, tmpdir);
+  } catch (err) {
+    removeTempDir(tmpdir);
+    throw err;
+  }
+
+  const subdir = path.resolve(tmpdir, plugin.source.replace(/^\.\//, ""));
+  if (!subdir.startsWith(tmpdir)) {
+    removeTempDir(tmpdir);
+    throw new Error(`Plugin source path escapes repository: ${plugin.source}`);
+  }
+
+  // WHY the clone's HEAD rather than a second ls-remote (issue #822):
+  // ls-remote is a separate round trip, so a ref that moves between the clone
+  // and the query yields a sha for commit B while we installed commit A.
+  // Provenance has to describe the bytes on disk.
+  const gitSha = await gitHeadSha(tmpdir);
+
+  return {
+    packagePath: subdir,
+    registryName: regName,
+    entry: plugin,
+    tmpdir,
+    resolvedRef,
+    gitSha,
+  };
+}
+
+// WHY the rename (issue #822): this was exported as `getGitHeadSha`, which
+// is what it is NOT. It queries the REMOTE ref, it does not read the HEAD of
+// anything we cloned. That name is how a remote-ref sha ended up recorded as
+// the provenance of locally installed bytes. `gitHeadSha` is the one that
+// reads a clone; this one is only safe for "has the remote moved?" checks.
+export { gitLsRemote as getRemoteRefSha };

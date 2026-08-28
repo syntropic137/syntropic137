@@ -15,30 +15,37 @@ import pytest
 from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     DEFAULT_SETUP_SCRIPT,
     SetupPhaseSecrets,
-    _repo_dir_name,
     _repo_full_name,
+    _repo_name,
 )
 
 # =============================================================================
-# _repo_dir_name / _repo_full_name helpers
+# _repo_name / _repo_full_name helpers
 # =============================================================================
+
+
+# Marked at module scope: these files were never COLLECTED before the
+# testpaths change in this commit, so nothing here had a reason to carry a
+# marker. Unmarked now means collected but run by no CI job, which the
+# census gate correctly refuses.
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.unit
 class TestRepoNameExtraction:
-    """Tests for _repo_dir_name and _repo_full_name helpers."""
+    """Tests for _repo_name and _repo_full_name helpers."""
 
     @pytest.mark.parametrize(
         ("url", "expected"),
         [
-            ("https://github.com/org/repo-a.git", "org__repo-a"),
-            ("https://github.com/org/repo-b/", "org__repo-b"),
-            ("https://github.com/org/repo-c", "org__repo-c"),
-            ("https://github.com/org/my.repo.git", "org__my.repo"),
+            ("https://github.com/org/repo-a.git", "repo-a"),
+            ("https://github.com/org/repo-b/", "repo-b"),
+            ("https://github.com/org/repo-c", "repo-c"),
+            ("https://github.com/org/my.repo.git", "my.repo"),
         ],
     )
-    def test_repo_dir_name(self, url: str, expected: str) -> None:
-        assert _repo_dir_name(url) == expected
+    def test_repo_name(self, url: str, expected: str) -> None:
+        assert _repo_name(url) == expected
 
     @pytest.mark.parametrize(
         ("url", "expected"),
@@ -74,7 +81,7 @@ class TestBuildSetupScript:
         )
         script = secrets.build_setup_script()
         assert "git clone" in script
-        assert "/workspace/repos/org__repo-a" in script
+        assert "/workspace/repos/repo-a" in script
         assert "mkdir -p /workspace/repos" in script
 
     def test_single_repo_contains_credential_entry(self) -> None:
@@ -102,8 +109,8 @@ class TestBuildSetupScript:
         )
         script = secrets.build_setup_script()
         assert script.count("git clone") == 2
-        assert "/workspace/repos/org__repo-a" in script
-        assert "/workspace/repos/org__repo-b" in script
+        assert "/workspace/repos/repo-a" in script
+        assert "/workspace/repos/repo-b" in script
 
     def test_multi_repo_has_multiple_credential_lines(self) -> None:
         """Multiple repos each get their own credential entry."""
@@ -132,8 +139,8 @@ class TestBuildSetupScript:
         )
         script = secrets.build_setup_script()
         # Both guards must be present
-        assert '[ -d "/workspace/repos/org__repo-a" ] ||' in script
-        assert '[ -d "/workspace/repos/org__repo-b" ] ||' in script
+        assert '[ -d "/workspace/repos/repo-a" ] ||' in script
+        assert '[ -d "/workspace/repos/repo-b" ] ||' in script
 
     def test_repos_without_tokens_no_credential_lines(self) -> None:
         """Repos with empty repo_tokens get clone lines but no credential block."""

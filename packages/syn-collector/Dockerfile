@@ -44,7 +44,7 @@ COPY packages/syn-collector/ ./packages/syn-collector/
 RUN uv venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-RUN uv pip install "./packages/syn-collector[dev]"
+RUN uv pip install "./packages/syn-collector"
 
 # Runtime stage
 FROM python:3.12-slim AS runtime

@@ -1,7 +1,100 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.18.0/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.26.0/workflow.schema.json",
   "$defs": {
+    "AgentYamlDefinition": {
+      "additionalProperties": false,
+      "description": "Per-phase ``agent`` block as parsed from YAML.\n\nSelects which headless agent provider drives the phase (``claude`` for\nthe default ``claude -p`` docker-exec path, ``codex`` for the\nprogrammatic ``codex exec`` harness on the same path) and optionally\nthe model.",
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "enum": [
+                "claude",
+                "codex"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "allow_delegation": {
+          "default": false,
+          "title": "Allow Delegation",
+          "type": "boolean"
+        }
+      },
+      "title": "AgentYamlDefinition",
+      "type": "object"
+    },
+    "ClaudePluginRef": {
+      "anyOf": [
+        {
+          "description": "Shorthand form: 'org/repo@version' or '<url>@<version>'. '@latest' is rejected.",
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "source"
+              ]
+            },
+            {
+              "required": [
+                "source_url"
+              ]
+            }
+          ],
+          "description": "Verbose mapping form: 'source' (or 'source_url') plus 'version', with an optional 'name' override.",
+          "properties": {
+            "source": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_url": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "version": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "name_overridden": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version, name)`` to match the lock\nprojection key (issue #726). A workflow author who installs the same\nplugin under two different display names produces two distinct lock\nentries -- the materializer needs both to write the right files.",
+      "title": "ClaudePluginRef"
+    },
     "InputYamlDefinition": {
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
       "properties": {
@@ -183,6 +276,31 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentYamlDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "claude_plugins": {
+          "items": {
+            "$ref": "#/$defs/ClaudePluginRef"
+          },
+          "title": "Claude Plugins",
+          "type": "array"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/SkillRef"
+          },
+          "title": "Skills",
+          "type": "array"
         }
       },
       "required": [
@@ -213,6 +331,66 @@
       "title": "RepositoryConfig",
       "type": "object"
     },
+    "SkillRef": {
+      "anyOf": [
+        {
+          "description": "Shorthand form: 'org/repo/skill-name@version' or '<url>@<version>'. '@latest' is rejected.",
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "source"
+              ]
+            },
+            {
+              "required": [
+                "source_url"
+              ]
+            }
+          ],
+          "description": "Verbose mapping form: 'source' (or 'source_url') plus 'version', with an optional 'name' override or 'names' list to expand into multiple refs.",
+          "properties": {
+            "source": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_url": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "version": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "names": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "name_overridden": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A workflow-declared reference to an agent skill (issue #772).\n\nCompared and hashed by ``(source_url, version, skill_name)`` to match\nthe lock projection key. A repo publishing many skills produces one\nref (and one lock entry) per declared skill.",
+      "title": "SkillRef"
+    },
     "WorkflowClassification": {
       "description": "Classification of workflow complexity.",
       "enum": [
@@ -222,19 +400,6 @@
         "epic"
       ],
       "title": "WorkflowClassification",
-      "type": "string"
-    },
-    "WorkflowType": {
-      "description": "Type of workflow execution.",
-      "enum": [
-        "research",
-        "planning",
-        "implementation",
-        "review",
-        "deployment",
-        "custom"
-      ],
-      "title": "WorkflowType",
       "type": "string"
     }
   },
@@ -265,8 +430,9 @@
       "title": "Description"
     },
     "type": {
-      "$ref": "#/$defs/WorkflowType",
-      "default": "custom"
+      "default": "custom",
+      "title": "Type",
+      "type": "string"
     },
     "classification": {
       "$ref": "#/$defs/WorkflowClassification",
@@ -282,6 +448,18 @@
         }
       ],
       "default": null
+    },
+    "requires_repos": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Requires Repos"
     },
     "project_name": {
       "anyOf": [
@@ -308,6 +486,20 @@
       },
       "minItems": 1,
       "title": "Phases",
+      "type": "array"
+    },
+    "claude_plugins": {
+      "items": {
+        "$ref": "#/$defs/ClaudePluginRef"
+      },
+      "title": "Claude Plugins",
+      "type": "array"
+    },
+    "skills": {
+      "items": {
+        "$ref": "#/$defs/SkillRef"
+      },
+      "title": "Skills",
       "type": "array"
     }
   },
