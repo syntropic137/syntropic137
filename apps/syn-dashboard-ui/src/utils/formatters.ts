@@ -87,6 +87,34 @@ export function formatTokens(count: number): string {
   return String(count)
 }
 
+/** Token counts split into the four disjoint buckets the API reports. */
+export interface TokenBreakdown {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+}
+
+/**
+ * Render a token breakdown whose parts add up to the total shown beside it.
+ *
+ * Cache tokens routinely account for over 90% of volume, so an "in / out"
+ * sublabel beneath a total reads as though most of the tokens went missing.
+ * The cached segment is omitted only when there genuinely was no cache
+ * activity, never merely to shorten the label.
+ */
+export function formatTokenBreakdown(breakdown: TokenBreakdown): string {
+  const cached = breakdown.cacheCreationTokens + breakdown.cacheReadTokens
+  const segments = [
+    `${formatTokens(breakdown.inputTokens)} in`,
+    `${formatTokens(breakdown.outputTokens)} out`,
+  ]
+  if (cached > 0) {
+    segments.push(`${formatTokens(cached)} cached`)
+  }
+  return segments.join(' / ')
+}
+
 // Re-export date/time formatters for backwards compatibility
 export {
   formatTime,

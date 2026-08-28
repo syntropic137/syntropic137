@@ -44,23 +44,17 @@ class _FakeRow:
 
 
 def _day_row(day: date) -> _FakeRow:
-    """Row shaped like _METRIC_COLUMNS - no model breakdown here."""
-    return _FakeRow(
-        {
-            "day": day,
-            "sessions": 2,
-            "executions": 1,
-            "commits": 0,
-            "input_tokens": 2_000_000,
-            "output_tokens": 2_000_000,
-            "cache_creation_tokens": 0,
-            "cache_read_tokens": 0,
-        }
-    )
+    """Row shaped like _ACTIVITY_QUERY - activity markers, no tokens."""
+    return _FakeRow({"day": day, "executions": 1, "commits": 0})
+
+
+def _sessions_row(day: date) -> _FakeRow:
+    """Row shaped like _SESSIONS_QUERY - sessions counted on their start day."""
+    return _FakeRow({"day": day, "sessions": 2})
 
 
 def _model_row(day: date, model: str | None) -> _FakeRow:
-    """Row shaped like _MODEL_TOKEN_COLUMNS - one model's totals for the day."""
+    """Row shaped like _USAGE_QUERY - one model's canonical totals for the day."""
     return _FakeRow(
         {
             "day": day,
@@ -74,11 +68,19 @@ def _model_row(day: date, model: str | None) -> _FakeRow:
 
 
 def _make_mock_pool(day_rows: list[_FakeRow], model_rows: list[_FakeRow]) -> MagicMock:
-    """Differentiate the two `conn.fetch` calls by inspecting the query text."""
+    """Differentiate the three `conn.fetch` calls by inspecting the query text.
+
+    Dispatches on each query's SELECT list rather than on a GROUP BY clause:
+    the token query groups by ``day, u.model`` now that usage is joined to
+    session start, and matching on the grouping alone silently returned the
+    wrong rows when that changed.
+    """
 
     async def _fetch(query: str, *_args: object) -> list[_FakeRow]:
-        if "GROUP BY day, model" in query:
+        if "u.model AS model" in query:
             return model_rows
+        if "COUNT(*) AS sessions" in query:
+            return [_sessions_row(row["day"]) for row in day_rows]
         return day_rows
 
     conn = AsyncMock()

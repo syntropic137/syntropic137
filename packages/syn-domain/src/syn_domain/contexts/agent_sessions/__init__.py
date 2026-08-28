@@ -45,6 +45,9 @@ from syn_domain.contexts.agent_sessions._shared import (
     SessionStatus,
     TokenMetrics,
 )
+from syn_domain.contexts.agent_sessions.canonical_usage import (
+    CANONICAL_SESSION_USAGE_CTE,
+)
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
@@ -82,6 +85,7 @@ from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler
 )
 
 __all__ = [
+    "CANONICAL_SESSION_USAGE_CTE",
     "AgentSessionAggregate",
     "CompleteSessionCommand",
     "CompleteSessionHandler",

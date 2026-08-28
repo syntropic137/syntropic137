@@ -10,46 +10,77 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import asyncpg
 
-from syn_domain.contexts.agent_sessions import CostCalculator
+from syn_domain.contexts.agent_sessions import CANONICAL_SESSION_USAGE_CTE, CostCalculator
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     HeatmapDayBucket,
 )
-from syn_shared.events import GIT_COMMIT, TOKEN_USAGE
+from syn_shared.events import GIT_COMMIT
 
-# SQL fragment shared between filtered and unfiltered queries.
-# Metrics are derived from the actual event types in agent_events:
-#   sessions   — distinct session_id values active that day
-#   executions — distinct execution_id values active that day
-#   commits    — count of GIT_COMMIT events
-#   tokens     — broken down by input, output, cache_creation, cache_read
-#
-# Event type literals come from the shared syn_shared.events constants
-# rather than being repeated as magic strings.
-_METRIC_COLUMNS = f"""
-    COUNT(DISTINCT session_id) AS sessions,
-    COUNT(DISTINCT execution_id) AS executions,
-    COUNT(*) FILTER (WHERE event_type = '{GIT_COMMIT}') AS commits,
-    COALESCE(SUM(COALESCE((data->>'input_tokens')::bigint, 0))
-        FILTER (WHERE event_type = '{TOKEN_USAGE}'), 0) AS input_tokens,
-    COALESCE(SUM(COALESCE((data->>'output_tokens')::bigint, 0))
-        FILTER (WHERE event_type = '{TOKEN_USAGE}'), 0) AS output_tokens,
-    COALESCE(SUM(COALESCE((data->>'cache_creation_tokens')::bigint, 0))
-        FILTER (WHERE event_type = '{TOKEN_USAGE}'), 0) AS cache_creation_tokens,
-    COALESCE(SUM(COALESCE((data->>'cache_read_tokens')::bigint, 0))
-        FILTER (WHERE event_type = '{TOKEN_USAGE}'), 0) AS cache_read_tokens
+# Rows narrowed to the caller's window and filters. Every CTE below reads
+# THIS, never agent_events directly, so the filter is applied exactly once.
+_SCOPED_EVENTS = """
+scoped_events AS (
+    SELECT session_id, execution_id, event_type, data, time
+    FROM agent_events
+    WHERE time >= $1::date
+      AND time < ($2::date + interval '1 day')
+      {execution_filter}
+)
 """
 
-# Per-day, per-model token totals. A day's activity can span many sessions
-# on many different models, so cost must be priced per model group rather
-# than summing all tokens for the day and pricing them as a single model
-# (the same class of bug fixed in issue #788 for session/execution cost).
-_MODEL_TOKEN_COLUMNS = """
+_EXECUTION_FILTER = "AND execution_id = ANY($3)"
+
+# Activity markers, bucketed by the time they actually happened.
+#
+# Unlike token usage (see canonical_usage), these are NOT re-attributed to a
+# session's start day. A commit happens at an instant, and an execution that
+# spans days genuinely did work on each of them - showing that is the point
+# of the heatmap. Only usage, which has one authoritative record per session,
+# collapses onto a single square.
+_ACTIVITY_QUERY = f"""
+WITH {_SCOPED_EVENTS}
+SELECT
     time_bucket('1 day', time)::date AS day,
-    data->>'model' AS model,
-    COALESCE(SUM((data->>'input_tokens')::bigint), 0) AS input_tokens,
-    COALESCE(SUM((data->>'output_tokens')::bigint), 0) AS output_tokens,
-    COALESCE(SUM((data->>'cache_creation_tokens')::bigint), 0) AS cache_creation_tokens,
-    COALESCE(SUM((data->>'cache_read_tokens')::bigint), 0) AS cache_read_tokens
+    COUNT(DISTINCT execution_id) AS executions,
+    COUNT(*) FILTER (WHERE event_type = '{GIT_COMMIT}') AS commits
+FROM scoped_events
+GROUP BY day
+ORDER BY day
+"""
+
+# One session, one square: counted on the day it started rather than on every
+# day it emitted an observation. Summing COUNT(DISTINCT session_id) per day
+# double-counted any session that crossed midnight.
+_SESSIONS_QUERY = f"""
+WITH {_SCOPED_EVENTS},
+{CANONICAL_SESSION_USAGE_CTE}
+SELECT started_at::date AS day, COUNT(*) AS sessions
+FROM session_start
+GROUP BY day
+ORDER BY day
+"""
+
+# Canonical per-(day, model) token totals, priced per model group.
+#
+# Grouped by model because a day spans many sessions on many models, and
+# pricing a day's mixed tokens at one model's rate is the #788 bug. Grouped
+# by START day because that is where the session's single authoritative
+# record belongs (see canonical_usage).
+_USAGE_QUERY = f"""
+WITH {_SCOPED_EVENTS},
+{CANONICAL_SESSION_USAGE_CTE}
+SELECT
+    s.started_at::date AS day,
+    u.model AS model,
+    SUM(u.vendor_cost_usd) AS vendor_cost_usd,
+    SUM(u.input_tokens) AS input_tokens,
+    SUM(u.output_tokens) AS output_tokens,
+    SUM(u.cache_creation_tokens) AS cache_creation_tokens,
+    SUM(u.cache_read_tokens) AS cache_read_tokens
+FROM canonical_usage u
+JOIN session_start s ON s.session_id = u.session_id
+GROUP BY day, u.model, (u.vendor_cost_usd IS NULL)
+ORDER BY day
 """
 
 
@@ -65,6 +96,25 @@ class _DayCost:
 
     priced_cost: Decimal = field(default_factory=lambda: Decimal("0"))
     unpriced_tokens: int = 0
+
+
+@dataclass
+class _DayTokens:
+    """A day's canonical token totals, summed across every model group."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+
+    @property
+    def total(self) -> int:
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_tokens
+            + self.cache_read_tokens
+        )
 
 
 _EMPTY_BREAKDOWN: dict[str, float] = {
@@ -88,23 +138,59 @@ class TimescaleHeatmapQuery:
         self._pool = pool
         self._cost_calculator = CostCalculator()
 
-    def _price_by_day_and_model(self, model_rows: list[asyncpg.Record]) -> dict[str, _DayCost]:
-        """Price token_usage rows grouped by (day, model) into per-day costs.
+    @staticmethod
+    def _render(template: str, filtered: bool) -> str:
+        """Bind the optional execution filter into a query template."""
+        return template.format(execution_filter=_EXECUTION_FILTER if filtered else "")
 
-        Each row is one model's token totals for one day. A group whose
-        model is unknown/missing contributes zero cost and its tokens are
-        counted in ``unpriced_tokens`` instead of being priced as a
+    async def _fetch(
+        self,
+        conn: asyncpg.pool.PoolConnectionProxy,
+        template: str,
+        start: date,
+        end: date,
+        execution_ids: set[str] | None,
+    ) -> list[asyncpg.Record]:
+        sql = self._render(template, execution_ids is not None)
+        if execution_ids is not None:
+            return await conn.fetch(sql, start, end, list(execution_ids))
+        return await conn.fetch(sql, start, end)
+
+    def _price_by_day_and_model(
+        self, usage_rows: list[asyncpg.Record]
+    ) -> tuple[dict[str, _DayCost], dict[str, _DayTokens]]:
+        """Price canonical usage rows into per-day cost and per-day token totals.
+
+        Each row is one model's canonical token totals for one day. A group
+        whose model is unknown/missing contributes zero cost and its tokens
+        are counted in ``unpriced_tokens`` instead of being priced as a
         guessed/default model.
         """
         cost_by_day: dict[str, _DayCost] = {}
-        for row in model_rows:
+        tokens_by_day: dict[str, _DayTokens] = {}
+        for row in usage_rows:
             day_str = row["day"].isoformat()
             day_cost = cost_by_day.setdefault(day_str, _DayCost())
+            day_tokens = tokens_by_day.setdefault(day_str, _DayTokens())
 
             input_tokens = int(row["input_tokens"])
             output_tokens = int(row["output_tokens"])
             cache_creation = int(row["cache_creation_tokens"])
             cache_read = int(row["cache_read_tokens"])
+
+            day_tokens.input_tokens += input_tokens
+            day_tokens.output_tokens += output_tokens
+            day_tokens.cache_creation_tokens += cache_creation
+            day_tokens.cache_read_tokens += cache_read
+
+            # The harness's own number wins when it gave one. Recomputing it
+            # would discard billing truth in favour of our pricing table -
+            # which drifts: this session's vendor cost is $0.09440 and the
+            # table reprices it at $0.0921.
+            vendor_cost = row.get("vendor_cost_usd")
+            if vendor_cost is not None:
+                day_cost.priced_cost += Decimal(str(vendor_cost))
+                continue
 
             raw_model = row.get("model")
             model = raw_model if isinstance(raw_model, str) else None
@@ -117,104 +203,26 @@ class TimescaleHeatmapQuery:
             day_cost.priced_cost += pricing.calculate_cost(
                 input_tokens, output_tokens, cache_creation, cache_read
             )
-        return cost_by_day
-
-    async def _fetch_rows(
-        self,
-        conn: asyncpg.pool.PoolConnectionProxy,
-        start: date,
-        end: date,
-        execution_ids: set[str] | None,
-    ) -> list[asyncpg.Record]:
-        """Fetch per-day metric rows (sessions/executions/commits/tokens)."""
-        if execution_ids is not None:
-            return await conn.fetch(
-                f"""
-                SELECT
-                    time_bucket('1 day', time)::date AS day,
-                    {_METRIC_COLUMNS}
-                FROM agent_events
-                WHERE time >= $1::date
-                  AND time < ($2::date + interval '1 day')
-                  AND execution_id = ANY($3)
-                GROUP BY day
-                ORDER BY day
-                """,
-                start,
-                end,
-                list(execution_ids),
-            )
-        return await conn.fetch(
-            f"""
-            SELECT
-                time_bucket('1 day', time)::date AS day,
-                {_METRIC_COLUMNS}
-            FROM agent_events
-            WHERE time >= $1::date
-              AND time < ($2::date + interval '1 day')
-            GROUP BY day
-            ORDER BY day
-            """,
-            start,
-            end,
-        )
-
-    async def _fetch_model_rows(
-        self,
-        conn: asyncpg.pool.PoolConnectionProxy,
-        start: date,
-        end: date,
-        execution_ids: set[str] | None,
-    ) -> list[asyncpg.Record]:
-        """Fetch per-day, per-model token rows for pricing (see ``_MODEL_TOKEN_COLUMNS``)."""
-        if execution_ids is not None:
-            return await conn.fetch(
-                f"""
-                SELECT
-                    {_MODEL_TOKEN_COLUMNS}
-                FROM agent_events
-                WHERE event_type = '{TOKEN_USAGE}'
-                  AND time >= $1::date
-                  AND time < ($2::date + interval '1 day')
-                  AND execution_id = ANY($3)
-                GROUP BY day, model
-                """,
-                start,
-                end,
-                list(execution_ids),
-            )
-        return await conn.fetch(
-            f"""
-            SELECT
-                {_MODEL_TOKEN_COLUMNS}
-            FROM agent_events
-            WHERE event_type = '{TOKEN_USAGE}'
-              AND time >= $1::date
-              AND time < ($2::date + interval '1 day')
-            GROUP BY day, model
-            """,
-            start,
-            end,
-        )
+        return cost_by_day, tokens_by_day
 
     @staticmethod
-    def _build_day_breakdown(row: asyncpg.Record, day_cost: _DayCost) -> dict[str, float]:
-        """Build one day's breakdown dict from a metric row and its priced cost."""
-        input_tokens = int(row["input_tokens"])
-        output_tokens = int(row["output_tokens"])
-        cache_creation = int(row["cache_creation_tokens"])
-        cache_read = int(row["cache_read_tokens"])
-        total_tokens = input_tokens + output_tokens + cache_creation + cache_read
+    def _build_day_breakdown(
+        sessions: int,
+        activity: asyncpg.Record | None,
+        day_tokens: _DayTokens,
+        day_cost: _DayCost,
+    ) -> dict[str, float]:
+        """Build one day's breakdown from its activity, tokens and priced cost."""
         return {
-            "sessions": float(row["sessions"]),
-            "executions": float(row["executions"]),
-            "commits": float(row["commits"]),
+            "sessions": float(sessions),
+            "executions": float(activity["executions"]) if activity else 0.0,
+            "commits": float(activity["commits"]) if activity else 0.0,
             "cost_usd": float(day_cost.priced_cost.quantize(Decimal("0.0001"))),
-            "tokens": float(total_tokens),
-            "input_tokens": float(input_tokens),
-            "output_tokens": float(output_tokens),
-            "cache_creation_tokens": float(cache_creation),
-            "cache_read_tokens": float(cache_read),
+            "tokens": float(day_tokens.total),
+            "input_tokens": float(day_tokens.input_tokens),
+            "output_tokens": float(day_tokens.output_tokens),
+            "cache_creation_tokens": float(day_tokens.cache_creation_tokens),
+            "cache_read_tokens": float(day_tokens.cache_read_tokens),
             "unpriced_tokens": float(day_cost.unpriced_tokens),
         }
 
@@ -236,24 +244,32 @@ class TimescaleHeatmapQuery:
             List of HeatmapDayBucket, one per day (zero-filled).
         """
         async with self._pool.acquire() as conn:
-            rows = await self._fetch_rows(conn, start, end, execution_ids)
-            model_rows = await self._fetch_model_rows(conn, start, end, execution_ids)
+            activity_rows = await self._fetch(conn, _ACTIVITY_QUERY, start, end, execution_ids)
+            session_rows = await self._fetch(conn, _SESSIONS_QUERY, start, end, execution_ids)
+            usage_rows = await self._fetch(conn, _USAGE_QUERY, start, end, execution_ids)
 
-        cost_by_day = self._price_by_day_and_model(model_rows)
-
-        # Build lookup from query results
-        day_data: dict[str, dict[str, float]] = {}
-        for row in rows:
-            day_str = row["day"].isoformat()
-            day_cost = cost_by_day.get(day_str, _DayCost())
-            day_data[day_str] = self._build_day_breakdown(row, day_cost)
+        cost_by_day, tokens_by_day = self._price_by_day_and_model(usage_rows)
+        activity_by_day = {row["day"].isoformat(): row for row in activity_rows}
+        sessions_by_day = {row["day"].isoformat(): int(row["sessions"]) for row in session_rows}
 
         # Zero-fill all days in the range
         buckets: list[HeatmapDayBucket] = []
         current = start
         while current <= end:
             day_str = current.isoformat()
-            breakdown = day_data.get(day_str, dict(_EMPTY_BREAKDOWN))
+            has_data = (
+                day_str in activity_by_day or day_str in sessions_by_day or day_str in tokens_by_day
+            )
+            breakdown = (
+                self._build_day_breakdown(
+                    sessions_by_day.get(day_str, 0),
+                    activity_by_day.get(day_str),
+                    tokens_by_day.get(day_str, _DayTokens()),
+                    cost_by_day.get(day_str, _DayCost()),
+                )
+                if has_data
+                else dict(_EMPTY_BREAKDOWN)
+            )
             buckets.append(
                 HeatmapDayBucket(
                     date=day_str,

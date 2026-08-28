@@ -5,6 +5,7 @@ import { ResponsiveCalendar } from '@nivo/calendar'
 
 import { API_BASE, fetchJSON } from '../../api/base'
 import { Card, CardContent, CardHeader } from '../../components'
+import { formatTokenBreakdown, formatTokens } from '../../utils/formatters'
 
 // --- Types ---
 
@@ -49,12 +50,6 @@ async function getContributionHeatmap(params: {
 }
 
 // --- Helpers ---
-
-function formatCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return n.toLocaleString()
-}
 
 interface YearRange {
   from: string
@@ -103,10 +98,10 @@ function HeatmapTooltip({ day, bucket }: { day: string; bucket: HeatmapDayBucket
       <div className="my-1.5 border-t border-[var(--color-border)]" />
       <div className="space-y-0.5 text-[var(--color-text-secondary)]">
         <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Tokens</div>
-        <TooltipRow label="Input" value={formatCompact(b.input_tokens)} />
-        <TooltipRow label="Output" value={formatCompact(b.output_tokens)} />
-        <TooltipRow label="Cache create" value={formatCompact(b.cache_creation_tokens)} />
-        <TooltipRow label="Cache read" value={formatCompact(b.cache_read_tokens)} />
+        <TooltipRow label="Input" value={formatTokens(b.input_tokens)} />
+        <TooltipRow label="Output" value={formatTokens(b.output_tokens)} />
+        <TooltipRow label="Cache create" value={formatTokens(b.cache_creation_tokens)} />
+        <TooltipRow label="Cache read" value={formatTokens(b.cache_read_tokens)} />
       </div>
       <div className="my-1.5 border-t border-[var(--color-border)]" />
       <div className="flex justify-between">
@@ -163,7 +158,16 @@ function SummaryStats({ days }: { days: HeatmapDayBucket[] }) {
       <StatCard label="Commits" value={String(totals.commits)} />
       <StatCard label="Active days" value={String(totals.active_days)} />
       <StatCard label="Total cost" value={`$${totals.cost_usd.toFixed(2)}`} color="text-emerald-400" />
-      <StatCard label="Total tokens" value={formatCompact(totalTokens)} sublabel={`${formatCompact(totals.input_tokens)} in / ${formatCompact(totals.output_tokens)} out`} />
+      <StatCard
+        label="Total tokens"
+        value={formatTokens(totalTokens)}
+        sublabel={formatTokenBreakdown({
+          inputTokens: totals.input_tokens,
+          outputTokens: totals.output_tokens,
+          cacheCreationTokens: totals.cache_creation_tokens,
+          cacheReadTokens: totals.cache_read_tokens,
+        })}
+      />
     </div>
   )
 }
