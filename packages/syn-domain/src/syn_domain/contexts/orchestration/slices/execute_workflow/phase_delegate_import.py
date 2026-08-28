@@ -21,6 +21,8 @@ from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture import (
     capture_phase_session,
 )
+from syn_shared.events import SESSION_SUMMARY
+from syn_shared.pricing import price_tokens
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -91,6 +93,58 @@ class DelegateUsageRecorder:
             session_id=session_id,
             observation_type=ObservationType.TOKEN_USAGE,
             data=data,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace_id,
+        )
+
+        # ALSO a session_summary, because token_usage alone is invisible to the
+        # cost read path. Verified on a live run: the delegate's token_usage
+        # landed correctly and the execution total did not move, because
+        # ExecutionCostProjection.on_session_summary is what adds cost and
+        # token_usage is only a fallback for sessions still in progress.
+        #
+        # A delegate has no summary of its own - it was never a platform
+        # session - so this is where one is minted for it.
+        priced = (
+            price_tokens(
+                usage.model,
+                usage.uncached_input_tokens,
+                usage.output_tokens,
+                cache_creation=usage.cache_creation_tokens,
+                cache_read=usage.cache_read_tokens,
+                context=f"delegate {session_id}",
+            )
+            if usage is not None
+            else None
+        )
+        summary = {
+            "model": usage.model if usage else None,
+            "total_input_tokens": usage.uncached_input_tokens if usage else 0,
+            "total_output_tokens": usage.output_tokens if usage else 0,
+            "cache_read_tokens": usage.cache_read_tokens if usage else 0,
+            "cache_creation_tokens": usage.cache_creation_tokens if usage else 0,
+            # A delegate reports neither: it is reconstructed from a stored
+            # transcript, not watched live. Explicit None beats 0, which would
+            # read as "ran, took no time, took no turns".
+            "num_turns": None,
+            "duration_ms": None,
+            "delegated": True,
+            # Omitted when unpriced, deliberately. The projection then counts
+            # the delegate's TOKENS with no cost, which reads as a visible gap
+            # rather than as work that was free.
+            **(
+                {"total_cost_usd": float(priced.cost)}
+                if priced is not None and priced.is_priced and priced.cost is not None
+                else {}
+            ),
+            **({"unpriced_reason": unpriced_reason} if unpriced_reason else {}),
+        }
+
+        await self._writer.record_observation(
+            session_id=session_id,
+            observation_type=SESSION_SUMMARY,
+            data=summary,
             execution_id=execution_id,
             phase_id=phase_id,
             workspace_id=workspace_id,
