@@ -395,6 +395,40 @@ claims. Only the second one is a gate.
 
 - [ ] Check runs verified against the head SHA being merged, not the PR summary
 
+### A green check may have run on a commit you never pushed
+
+`gh pr view --json statusCheckRollup` answers for whatever GitHub last saw at
+the PR head. That is not necessarily what you built, and three independent
+signals can all read success while the commit under test never left the laptop:
+
+- a worktree in **detached HEAD** takes a merge commit off-branch
+- `git push` then reports **"Everything up-to-date"** - true, and about a ref
+  you are not on
+- the PR still shows **all checks green**, for the older head
+
+Measured 2026-08-28: local HEAD `1e09f36e`, PR head `6de24458`, and a check
+monitor reporting "ALL GREEN, 28 checks, 0 failures" - for the wrong commit.
+
+**Pin the question to a SHA whenever the answer matters:**
+
+```bash
+gh api repos/syntropic137/syntropic137/commits/<sha>/check-runs
+git status -sb        # "## HEAD (no branch)" means detached
+```
+
+A **422 "No commit found for SHA"** means the commit does not exist remotely.
+Nothing on the PR page tells you that.
+
+- [ ] Before concluding from a green PR, confirm `headRefOid` equals the SHA you
+      actually built, and query check-runs for that SHA
+- [ ] After merging, confirm the merge commit is a real ancestor:
+      `git merge-base --is-ancestor <merge-sha> origin/main`
+
+This is the third shape of one problem, alongside the two already in this
+runbook: a test that cannot fail, a test that is never selected (#928), and a
+check that ran on a different commit. Each is a signal structurally incapable of
+reporting the thing being asked of it, and each reads as success.
+
 ### Cold paths look like outages
 
 A Tailscale route that has not been used recently returns connection failures
