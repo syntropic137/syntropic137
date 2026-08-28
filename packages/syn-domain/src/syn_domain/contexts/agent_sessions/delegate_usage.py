@@ -72,6 +72,11 @@ async def resolve_delegate_usage(store: SessionStorePort, session_id: str) -> Us
         # Absent is not free. A delegate may have run and cost money while its
         # transcript never reached the store, and saying "unknown" is the only
         # honest answer available.
-        return UnpricedUsage(f"no stored session for {session_id!r}")
+        #
+        # Flagged absent rather than merely unpriced: capture lands after the
+        # execution reports completed, so this same branch covers both "the
+        # transcript is on its way" and "it never arrived". Only the caller,
+        # holding the capture's accepted count, can tell those apart.
+        return UnpricedUsage(f"no stored session for {session_id!r}", absent=True)
 
     return extract_usage(session.source_format, session.raw)

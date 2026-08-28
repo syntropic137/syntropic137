@@ -107,6 +107,21 @@ class UnpricedUsage:
 
     reason: str
 
+    absent: bool = False
+    """True when the store simply does not have this session.
+
+    A TYPED discriminator rather than a caller matching on ``reason`` prose,
+    because the two cases it separates need opposite handling and prose drifts
+    without a test noticing.
+
+    Capture lands AFTER an execution reports completed, so a reader arriving
+    promptly sees an empty store for sessions that appear seconds later.
+    Absent therefore means "not yet, ask again", while every other unpriced
+    reason means "asking again will not help". Conflating them makes the race
+    fail silently: the import reads nothing, imports nothing, and reports
+    success.
+    """
+
 
 type UsageResult = PricedUsage | NoUsage | UnpricedUsage
 
