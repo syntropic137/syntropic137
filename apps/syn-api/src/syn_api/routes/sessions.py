@@ -349,6 +349,11 @@ async def list_sessions(
                 workflow_id=s.workflow_id,
                 execution_id=s.execution_id,
                 phase_id=s.phase_id,
+                # #895: the domain read model carries these; this conversion
+                # used to drop them, so delegation lineage died at the API
+                # boundary even once something wrote it.
+                parent_session_id=s.parent_session_id,
+                root_session_id=s.root_session_id,
                 status=s.status,
                 agent_type=s.agent_type,
                 repos=list(s.repos),
