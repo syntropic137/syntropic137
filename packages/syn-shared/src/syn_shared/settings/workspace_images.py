@@ -219,7 +219,7 @@ PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
             "sha256:59777a7c6640d382f8da5b767a03149dc02b1ecf109e6f2bab387b18800d6192"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:83834d632c9218c0b1772e11820c23e703a5304d7c5016ae9a683665f7d5db6f"
+            "sha256:3e88b1c7d8f6ff9648b3337c2220e17e9368aff940ab9fbbebd0d3c9b25bfaed"
         ),
     }
 )
