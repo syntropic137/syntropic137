@@ -11,7 +11,11 @@ from decimal import Decimal
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-from syn_api._wiring import ensure_connected, get_execution_cost_query, get_projection_mgr
+from syn_api._wiring import (
+    ensure_connected,
+    get_canonical_usage_query,
+    get_projection_mgr,
+)
 from syn_api.types import (
     DashboardMetrics,
     Err,
@@ -136,22 +140,25 @@ async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
         return []
 
 
-async def _aggregate_total_cost(workflow_id: str | None) -> Decimal:
-    """Sum total_cost_usd across all executions from the Lane 2 execution_cost query service (#695)."""
-    try:
-        query_svc = get_execution_cost_query()
-        costs = await query_svc.list_all()
-    except Exception:
-        logger.debug("Failed to aggregate execution costs", exc_info=True)
-        return Decimal("0")
+async def _canonical_totals(workflow_id: str | None):
+    """Canonical token/cost totals, narrowed to one workflow when asked.
 
-    if workflow_id is not None:
+    Falls back to empty totals rather than raising: a metrics page that
+    renders zeroes is recoverable, one that 500s is not. The failure is
+    logged rather than swallowed silently.
+    """
+    from syn_domain.contexts.agent_sessions import CanonicalTotals
+
+    try:
+        query_svc = get_canonical_usage_query()
+        if workflow_id is None:
+            return await query_svc.totals()
         manager = get_projection_mgr()
         summaries = await manager.workflow_execution_list.get_by_workflow_id(workflow_id)
-        ids_in_workflow = {s.workflow_execution_id for s in summaries}
-        costs = [c for c in costs if c.execution_id in ids_in_workflow]
-
-    return sum((c.total_cost_usd for c in costs), Decimal("0"))
+        return await query_svc.totals(execution_ids={s.workflow_execution_id for s in summaries})
+    except Exception:
+        logger.warning("Failed to read canonical usage totals", exc_info=True)
+        return CanonicalTotals()
 
 
 @router.get("", response_model=MetricsResponse)
@@ -172,20 +179,26 @@ async def get_metrics_endpoint(
 
     m = result.value
     phases = await _build_phase_metrics(workflow_id) if workflow_id else []
-    total_cost = await _aggregate_total_cost(workflow_id)
+
+    # Tokens and cost come from the ONE canonical usage definition, the same
+    # one the activity heatmap reads (#932). They previously came from Lane 1
+    # SessionCompleted events while the heatmap read Lane 2 observations, so
+    # the two cards quoted 9,151,116 tokens beside 10,002,629 for the same
+    # reality. Workflow/artifact counts stay on the projection: those are
+    # domain lifecycle facts, not observed telemetry.
+    totals = await _canonical_totals(workflow_id)
 
     return MetricsResponse(
         total_workflows=m.total_workflows,
         completed_workflows=m.completed_workflows,
         failed_workflows=m.failed_workflows,
         total_sessions=m.total_sessions,
-        total_input_tokens=m.total_input_tokens,
-        total_output_tokens=m.total_output_tokens,
-        total_cache_creation_tokens=m.total_cache_creation_tokens,
-        total_cache_read_tokens=m.total_cache_read_tokens,
-        total_tokens=m.total_tokens,
-        # Lane 2: cost enriched from execution_cost query service (#695)
-        total_cost_usd=total_cost,
+        total_input_tokens=totals.input_tokens,
+        total_output_tokens=totals.output_tokens,
+        total_cache_creation_tokens=totals.cache_creation_tokens,
+        total_cache_read_tokens=totals.cache_read_tokens,
+        total_tokens=totals.total_tokens,
+        total_cost_usd=totals.cost_usd,
         total_artifacts=m.total_artifacts,
         total_artifact_bytes=m.total_artifact_bytes,
         phases=phases,

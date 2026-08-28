@@ -32,7 +32,15 @@ and belongs on one square, the way a commit does.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import TYPE_CHECKING, Protocol
+
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 
 CANONICAL_SESSION_USAGE_CTE = f"""
 session_start AS (
@@ -103,3 +111,58 @@ mapping each session to its first observation. ``vendor_cost_usd`` is the
 harness's OWN reported cost and is NULL whenever it did not report one -
 codex never does, and a claude session that ended abnormally may not either.
 """
+
+
+class _Pricing(Protocol):
+    def calculate_cost(
+        self, input_tokens: int, output_tokens: int, cache_creation: int, cache_read: int
+    ) -> Decimal: ...
+
+
+class _Calculator(Protocol):
+    def resolve_pricing(self, model: str | None) -> _Pricing | None: ...
+
+
+@dataclass(frozen=True)
+class RowCost:
+    """What one (model, cost-nullness) group of canonical usage costs.
+
+    ``unpriced_tokens`` is non-zero only when the harness reported no cost AND
+    the model could not be resolved. Those tokens are surfaced rather than
+    priced at a guessed rate (issue #788).
+    """
+
+    cost: Decimal
+    unpriced_tokens: int
+
+
+def price_canonical_row(row: Mapping[str, object], calculator: _Calculator) -> RowCost:
+    """Cost one canonical usage row, vendor-reported first.
+
+    THE ONE PLACE this precedence is decided. It was previously re-decided in
+    every cost query, which is how the same sessions came to be quoted at
+    different dollar amounts on one dashboard.
+
+    The harness's own figure wins when it gave one, because that is the
+    billing truth we were handed and our pricing table drifts from it (a real
+    haiku session: vendor $0.09440, table $0.0921). Codex never reports a cost
+    and a claude session that ended abnormally may not either, so tokens
+    remain the fallback - never zero, which would price real work as free.
+    """
+    vendor_cost = row.get("vendor_cost_usd")
+    if vendor_cost is not None:
+        return RowCost(Decimal(str(vendor_cost)), 0)
+
+    input_tokens = int(row["input_tokens"])  # type: ignore[arg-type]
+    output_tokens = int(row["output_tokens"])  # type: ignore[arg-type]
+    cache_creation = int(row["cache_creation_tokens"])  # type: ignore[arg-type]
+    cache_read = int(row["cache_read_tokens"])  # type: ignore[arg-type]
+
+    raw_model = row.get("model")
+    model = raw_model if isinstance(raw_model, str) else None
+    pricing = calculator.resolve_pricing(model)
+    if pricing is None:
+        return RowCost(Decimal("0"), input_tokens + output_tokens + cache_creation + cache_read)
+    return RowCost(
+        pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read), 0
+    )

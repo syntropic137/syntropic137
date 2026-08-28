@@ -932,6 +932,25 @@ def get_execution_cost_query():
     return ExecutionCostQueryService(pool=pool)
 
 
+def get_canonical_usage_query():
+    """Return a CanonicalUsageQueryService backed by TimescaleDB.
+
+    The ONE source the dashboard's totals read, so the metric card and the
+    activity heatmap cannot drift apart again (#932).
+
+    Raises:
+        RuntimeError: If the TimescaleDB pool is not yet initialized.
+    """
+    from syn_domain.contexts.agent_sessions import CanonicalUsageQueryService
+
+    pool = get_event_store_instance().pool
+    if pool is None:
+        raise RuntimeError(
+            "TimescaleDB pool is not initialized; ensure_connected() must be called first"
+        )
+    return CanonicalUsageQueryService(pool=pool)
+
+
 async def get_conversation_store() -> MinioConversationStorage:
     """Return the conversation storage (MinIO-backed)."""
     return await get_conversation_storage()

@@ -1,0 +1,14 @@
+name: canonical_totals
+description: >
+  System-wide token and cost totals read from the one canonical usage
+  definition. No projection: reads Lane 2 observations directly, because the
+  canonical rule (summary supersedes turns, vendor cost beats computed) must
+  be applied at read time so every consumer gets the same answer.
+context: sessions
+type: query
+
+query:
+  name: GetCanonicalTotalsQuery
+  returns: CanonicalTotals
+
+read_model: CanonicalTotals
