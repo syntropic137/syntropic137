@@ -159,6 +159,49 @@ Preflight (sequential - reset stack, install CLI, verify health)
 
 ## 0.0 Gotchas - how a validation run lies to you
 
+### The one rule the rest of this section is instances of
+
+**An instrument that has never been observed failing is not known to be able to
+fail.** Every gotcha below is a case of it, and they were all found the same way:
+by making the thing being checked actually wrong and seeing whether anything
+noticed.
+
+Observing a green result is compatible with two states that look identical from
+outside - the system is fine, or the instrument is blind. Nothing distinguishes
+them except a run in which the thing being checked is genuinely broken.
+
+So, per instrument:
+
+| instrument | how you learn it can fail |
+|---|---|
+| a test | break the code it covers; confirm it goes red |
+| a checker or script | corrupt its input; confirm it reports and exits non-zero |
+| a CI signal | confirm it ran on **your** SHA, and that your test is selected |
+| a health/status field | make the underlying thing unhealthy; confirm it changes |
+
+Six instruments failed this way in a single session on 2026-08-27/28, each
+reading success:
+
+- four tests green on inputs that could not trigger the bug they guarded
+- a CI pipeline green on a suite that never selected the failing test (#928)
+- `git push` reporting "Everything up-to-date" and checks green, for a commit
+  that was never pushed
+- an acceptance checker green on a state it exited before examining
+
+None had been observed failing, so none was known to work.
+
+**Two habits that fall out of this and are worth doing every time:**
+
+1. **A dry run on the healthy case tests nothing.** Watching a checker print the
+   expected words is the same act as watching a suite pass - it is the
+   observation that cannot distinguish the two states. Only the broken-input run
+   is evidence.
+2. **`cmd | tail` returns tail's status, not cmd's.** Exit codes read through a
+   pipe are the pipe's. This bit two people in one session, in opposite
+   directions: once concluding a passing run had failed, once the reverse.
+
+
+
 > Read this before running anything. Every entry below cost real time on
 > 2026-08-21, several of them twice, and each one produces a **confident wrong
 > answer** rather than an error.
