@@ -5,10 +5,15 @@ harness-native id does not exist until the child starts, while the attempt id
 must exist BEFORE launch or a child that dies immediately cannot be attributed
 to anything.
 
-Root is required rather than derived. The aggregate's existing fallback sets
-root = parent when root is omitted, which is right at depth 1 and wrong at
-depth 3: C's root becomes B when the true root is A. Requiring it here means a
-malformed tree cannot be constructed in the first place.
+Root is required ON THIS EVENT rather than derived. The aggregate's fallback
+sets root = parent when root is omitted, which is right at depth 1 and wrong at
+depth 3: C's root becomes B when the true root is A.
+
+Be precise about what that buys, because the first draft of this file
+overstated it: requiring root here closes ONE route. It does not make a
+malformed tree impossible. A caller can still reach StartSessionCommand
+directly with a parent and no root, and an explicitly WRONG root is accepted
+by this event. Enforcing the shape is the invariant owner's job.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from syn_domain.contexts.agent_sessions.domain.events.DelegationBoundEvent impor
 )
 from syn_domain.contexts.agent_sessions.domain.events.DelegationFinishedEvent import (
     DelegationFinishedEvent,
+    DelegationOutcome,
 )
 from syn_domain.contexts.agent_sessions.domain.events.DelegationStartedEvent import (
     DelegationStartedEvent,
@@ -100,15 +106,47 @@ def test_bound_carries_only_the_join() -> None:
 
 
 @pytest.mark.unit
-def test_finished_records_the_delegate_own_status() -> None:
-    """The delegate's exit status, NOT the enclosing shell's. #894 is a phase
+def test_finished_records_the_delegate_own_outcome() -> None:
+    """The delegate's outcome, NOT the enclosing shell's. #894 is a phase
     reporting success because the shell exited zero while the delegation it
     declared never happened.
     """
-    event = DelegationFinishedEvent(delegation_attempt_id=_ATTEMPT, exit_status=1)
+    event = DelegationFinishedEvent(
+        delegation_attempt_id=_ATTEMPT,
+        outcome=DelegationOutcome.FAILED,
+        native_exit_code=1,
+    )
 
     assert event.event_type == "DelegationFinished"
-    assert event.exit_status == 1
+    assert event.outcome is DelegationOutcome.FAILED
+    assert event.native_exit_code == 1
+
+
+@pytest.mark.unit
+def test_outcome_does_not_require_a_process() -> None:
+    """Native same-harness fan-out has no process to exit, and cancellation and
+    timeout have no natural integer either. A bare exit code would have forced
+    every non-shell route to invent one.
+    """
+    event = DelegationFinishedEvent(
+        delegation_attempt_id=_ATTEMPT, outcome=DelegationOutcome.CANCELLED
+    )
+
+    assert event.native_exit_code is None
+
+
+@pytest.mark.unit
+def test_an_identifier_is_stored_verbatim() -> None:
+    """Opaque harness ids must match what the harness emitted, EXACTLY.
+
+    An earlier draft stripped whitespace. That would silently rewrite the join
+    key and make the binding it exists to protect unjoinable, so blankness is
+    rejected without the value being normalised.
+    """
+    padded = " native-id-with-padding "
+    event = DelegationBoundEvent(delegation_attempt_id=_ATTEMPT, harness_session_id=padded)
+
+    assert event.harness_session_id == padded
 
 
 @pytest.mark.unit

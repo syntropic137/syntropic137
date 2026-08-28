@@ -1,48 +1,77 @@
 """DelegationStarted event - a delegated child run was launched (issue #895).
 
-Recorded BEFORE the child produces anything. That ordering is the point: a
-child that dies immediately still leaves a session that can be reported as
-failed, rather than being indistinguishable from a delegation that never
-happened.
+Pure data, per the VSA rule that events import nothing: the blank-identifier
+check is inline rather than shared, and is duplicated across the delegation
+events deliberately.
 """
 
 from __future__ import annotations
 
 from event_sourcing import DomainEvent, event
-
-# Runtime import: Pydantic builds the validator from this annotation, so it
-# cannot live in a TYPE_CHECKING block.
-from syn_domain.contexts.agent_sessions.domain.events._identifiers import (  # noqa: TC001
-    NonBlankId,
-)
+from pydantic import field_validator
 
 
 @event("DelegationStarted", "v1")
 class DelegationStartedEvent(DomainEvent):
-    """A parent session launched a delegated child."""
+    """A parent session launched a delegated child.
 
-    delegation_attempt_id: NonBlankId
-    """Minted by the EDGE ADAPTER before launch, unique platform-wide.
+    WHAT THIS MODEL GUARANTEES: the fields below are present and non-blank.
+    Nothing more. The properties the protocol relies on are stated on each
+    field as REQUIREMENTS ON THE PRODUCER, because a Pydantic model cannot
+    enforce them and describing them as guarantees would mislead whoever
+    implements against this.
+    """
+
+    delegation_attempt_id: str
+    """PRODUCER REQUIREMENT: minted by the edge adapter before it launches the
+    child, and unique platform-wide. Not enforced here; nothing in this model
+    can observe other attempts.
 
     The adapter that mints it also reads that child's stream, so one instance
-    owns both the id and the stream it belongs to. Concurrent children of one
-    provider therefore never need correlating by time or arrival order.
+    owns both the id and the stream it belongs to. That is what makes
+    concurrent children of one provider safe without correlating by time.
     """
 
-    parent_session_id: NonBlankId
+    parent_session_id: str
     """The platform session that delegated."""
 
-    root_session_id: NonBlankId
-    """The top of the delegation tree. REQUIRED, never derived.
+    root_session_id: str
+    """The top of the delegation tree.
 
-    The session aggregate's fallback sets root = parent when root is omitted,
-    which is correct only at depth 1. At depth 3 a child's root becomes its
-    parent rather than the true root, and nothing downstream can detect it.
-    Requiring it here means a malformed tree cannot be built at all.
+    Required on THIS EVENT so it cannot be omitted here. That is a narrower
+    claim than it may look: the session aggregate still has a root = parent
+    fallback for omitted roots, and a caller can still reach
+    StartSessionCommand directly with a parent and no root, or pass a wrong
+    root explicitly. This event closes one route, not the shape.
     """
 
-    child_session_id: NonBlankId
+    child_session_id: str
     """The platform session minted for the child."""
 
-    provider: NonBlankId
-    """Which harness the child runs, for selecting the right adapter later."""
+    provider: str
+    """Which harness the child runs, for selecting the right adapter later.
+    A plain string rather than an enum so a new provider needs no v2."""
+
+    @field_validator(
+        "delegation_attempt_id",
+        "parent_session_id",
+        "root_session_id",
+        "child_session_id",
+        "provider",
+    )
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        """Reject blank ids WITHOUT normalising the value.
+
+        A blank id is worse than a missing one: it satisfies every None check
+        downstream while linking to nothing, so the orphan looks like a
+        successful binding.
+
+        Deliberately does not strip. These are opaque identifiers that must
+        later match a harness-provided string exactly, and silently rewriting
+        one would make the binding it exists to protect unjoinable.
+        """
+        if not value.strip():
+            msg = "identifier must not be blank"
+            raise ValueError(msg)
+        return value
