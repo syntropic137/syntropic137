@@ -135,7 +135,12 @@ def _build_session_store(settings: Settings) -> HttpSessionStore | None:
     if not store.is_enabled or not store.url:
         return None
 
-    token = store.auth_token.get_secret_value() if store.auth_token else None
+    # The READ token: this client only ever fetches. Handing it the write
+    # token yields 401 on every fetch against a store that scopes the two
+    # separately, and a 401 is classified as transient - so every delegate
+    # would retry forever and none would ever be priced.
+    read_token = store.effective_read_token
+    token = read_token.get_secret_value() if read_token else None
     return HttpSessionStore(base_url=store.url, auth_token=token)
 
 

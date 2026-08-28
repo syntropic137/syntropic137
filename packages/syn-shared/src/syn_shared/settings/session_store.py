@@ -124,6 +124,20 @@ class SessionStoreSettings(BaseSettings):
         ),
     )
 
+    read_token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Read token for the session store, used to fetch a delegated "
+            "session's transcript back so its cost can be attributed. "
+            "SEPARATE from the write token because a conforming store may scope "
+            "the two differently - a write-only token returns 401 on reads, and "
+            "every delegate then looks like a transient store outage rather "
+            "than an auth failure. Falls back to SYN_SESSION_STORE_AUTH_TOKEN "
+            "when unset, which is correct for a store that issues one token "
+            "carrying both scopes. Handled as a credential."
+        ),
+    )
+
     label: str = Field(
         default="",
         description=(
@@ -309,3 +323,14 @@ class SessionStoreSettings(BaseSettings):
         if self.auth_token is None:
             return ""
         return self.auth_token.get_secret_value()
+
+    @property
+    def effective_read_token(self) -> SecretStr | None:
+        """The token to use for READS.
+
+        A property rather than a caller-side ``or`` because there are two
+        tokens and only one of them works for reading; picking wrongly fails
+        as a retry loop rather than as an error, which is the hardest kind to
+        notice.
+        """
+        return self.read_token or self.auth_token

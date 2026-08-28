@@ -312,3 +312,27 @@ class TestTheStoreLabel:
         """The whole point is that an operator sets this per deployment."""
         with patch.dict(os.environ, {"SYN_SESSION_STORE_LABEL": "tenant-a"}):
             assert SessionStoreSettings(url="https://s").display_label == "tenant-a"
+
+
+def test_a_store_with_one_token_still_works() -> None:
+    """Falls back, so a store issuing a single dual-scope token needs no
+    extra configuration."""
+    settings = SessionStoreSettings(url="http://s", auth_token="both")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "both"
+
+
+def test_a_separate_read_token_wins() -> None:
+    """The case that matters: a write-only token returns 401 on reads, which
+    is classified as a TRANSIENT store fault - so every delegate retries
+    forever and none is ever priced. The failure looks like an outage rather
+    than a misconfiguration, which is why this needs its own setting (#895)."""
+    settings = SessionStoreSettings(url="http://s", auth_token="write", read_token="read")
+    token = settings.effective_read_token
+    assert token is not None
+    assert token.get_secret_value() == "read"
+
+
+def test_no_tokens_at_all_is_none_not_an_error() -> None:
+    assert SessionStoreSettings(url="http://s").effective_read_token is None
