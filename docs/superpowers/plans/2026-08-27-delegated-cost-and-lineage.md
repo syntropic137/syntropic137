@@ -36,6 +36,14 @@ test double while AP implements the real adapter.
 - API routes must return Pydantic response models; run `just codegen` after any response-model change.
 - **Cost rule, settled by measurement:** cross-harness delegates are separate processes with separate billing and MUST be added to execution totals. Native same-harness sub-agents already emit `token_usage` rows under the parent session and MUST NOT be added again.
 - **The session store is OPT-IN and OFF BY DEFAULT** (`.env:470`, `SYN_SESSION_STORE_URL` empty). Cost and lineage MUST come from the child's live stream, which the edge adapter already reads, and MUST work with the store disabled. The store is enrichment for reconstitution, never the source of record for cost.
+- **RE-VERIFY AT TASK 5, do not carry as settled:** the rule that native
+  sub-agent tokens are already counted rests on `token_usage` rows being
+  attributed to the parent session. A validation run on an interrupted
+  execution showed phase 63,198 tokens against session 0 tokens / 0 turns,
+  which contradicts that premise. Writes are immediate and carry
+  session_id, execution_id and phase_id, so this looks like a read or
+  keying divergence rather than write loss, but it is UNPROVEN. Measure
+  before relying on the no-double-count rule.
 - **Never price from the parent's `tool_result` prose.** Measured on `exec-8104e5611eba` it said 4,598 against a real 12,206: it under-reports ~3x while looking plausible.
 
 ---
