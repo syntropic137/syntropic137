@@ -57,8 +57,9 @@ class _Writer:
         self.written.append((session_id, data))
 
 
-async def _run(store: _Store, writer: _Writer, *, leader: str | None, captured: list[str],
-               attempts: int = 3):
+async def _run(
+    store: _Store, writer: _Writer, *, leader: str | None, captured: list[str], attempts: int = 3
+):
     return await import_phase_delegates(
         store,
         writer,
@@ -74,8 +75,9 @@ class TestTheLeaderIsNeverWritten:
     async def test_the_leader_is_not_written_and_not_even_fetched(self) -> None:
         """The overcount guard. An undercount surfaces as a missing delegate;
         an overcount just looks like expensive work, so nobody reports it."""
-        store = _Store({"s-lead": _claude_session("s-lead", 100),
-                        "s-del": _claude_session("s-del", 7)})
+        store = _Store(
+            {"s-lead": _claude_session("s-lead", 100), "s-del": _claude_session("s-del", 7)}
+        )
         writer = _Writer()
 
         result = await _run(store, writer, leader="s-lead", captured=["s-lead", "s-del"])
@@ -100,8 +102,7 @@ class TestTheHoleTheOldDesignHad:
         """Two sessions, same harness. The classify-by-agent-name design called
         both unattributable and priced neither; this is the case that made the
         rewrite worth doing."""
-        store = _Store({"s-a": _claude_session("s-a", 100),
-                        "s-b": _claude_session("s-b", 42)})
+        store = _Store({"s-a": _claude_session("s-a", 100), "s-b": _claude_session("s-b", 42)})
         writer = _Writer()
 
         result = await _run(store, writer, leader="s-a", captured=["s-a", "s-b"])
@@ -146,8 +147,9 @@ class TestAnUnpriceableDelegateStaysVisible:
         store = _Store({"s-lead": _claude_session("s-lead", 1)})
         writer = _Writer()
 
-        result = await _run(store, writer, leader="s-lead", captured=["s-lead", "s-gone"],
-                            attempts=2)
+        result = await _run(
+            store, writer, leader="s-lead", captured=["s-lead", "s-gone"], attempts=2
+        )
 
         assert writer.written == []
         assert result.retry_ids == ("s-gone",)
@@ -159,8 +161,9 @@ class TestAnUnpriceableDelegateStaysVisible:
         store = _Store({"s-lead": _claude_session("s-lead", 1)})
         writer = _Writer()
 
-        result = await _run(store, writer, leader="s-lead", captured=["s-lead", "s-gone"],
-                            attempts=0)
+        result = await _run(
+            store, writer, leader="s-lead", captured=["s-lead", "s-gone"], attempts=0
+        )
 
         assert len(writer.written) == 1
         _, data = writer.written[0]
@@ -173,8 +176,9 @@ class TestAnUnpriceableDelegateStaysVisible:
 
 class TestReimportIsIdempotentByConstruction:
     async def test_the_same_delegate_derives_the_same_platform_id(self) -> None:
-        store = _Store({"s-lead": _claude_session("s-lead", 1),
-                        "s-del": _claude_session("s-del", 9)})
+        store = _Store(
+            {"s-lead": _claude_session("s-lead", 1), "s-del": _claude_session("s-del", 9)}
+        )
         first = _Writer()
         second = _Writer()
 

@@ -161,10 +161,7 @@ def _observation_for(usage: UsageResult) -> tuple[dict[str, object], bool, str |
 
 def _is_retryable(usage: UsageResult) -> bool:
     """Whether asking the store again could change this answer."""
-    return (
-        isinstance(usage, UnpricedUsage)
-        and usage.retry is not RetryDisposition.PERMANENT
-    )
+    return isinstance(usage, UnpricedUsage) and usage.retry is not RetryDisposition.PERMANENT
 
 
 async def import_phase_delegates(

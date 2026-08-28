@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -72,12 +73,16 @@ if TYPE_CHECKING:
 
     from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
+    from syn_adapters.workspace_backends.agentic.capture_result import (
+        AuthoritativeCapture,
+    )
     from syn_adapters.workspace_backends.agentic.session_capture_service import (
         SessionCapturePort,
     )
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
@@ -136,6 +141,7 @@ class WorkflowExecutionProcessor:
         claude_plugin_materializer: ClaudePluginMaterializerProtocol | None = None,
         skill_materializer: SkillMaterializerProtocol | None = None,
         session_capture: SessionCapturePort | None = None,
+        session_store: SessionStorePort | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -160,6 +166,10 @@ class WorkflowExecutionProcessor:
         # None means capture is OFF, not broken: a deployment with no store
         # configured must behave identically to one from before this existed.
         self._session_capture = session_capture
+        # Where a delegate's transcript is read back from. Optional because a
+        # deployment without a session store simply imports no delegates; it
+        # must never be a reason a phase fails.
+        self._session_store = session_store
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
@@ -168,6 +178,9 @@ class WorkflowExecutionProcessor:
         self._session_managers: dict[str, SessionLifecycleManager] = {}
         # Per-phase so _finalize_phase can attribute the capture.
         self._phase_session_ids: dict[str, str] = {}
+        #: The id each phase's own harness announced on its stream, which is
+        #: what the delegate import subtracts from the sweep. Keyed by phase.
+        self._phase_leader_native_ids: dict[str, str] = {}
         self._phase_tokens: dict[str, TokenAccumulator] = {}
         self._phase_auth_tokens: dict[
             str, tuple[int, int, int, int]
@@ -482,11 +495,21 @@ class WorkflowExecutionProcessor:
             # Probe on the way out of a CANCEL or a FAILURE too. A phase that
             # never reached _finalize_phase still ran an agent, and a failed
             # run is the one whose transcript is most worth having.
-            await capture_phase_session(
+            _ws = self._active_workspaces.get(_pid)
+            capture = await capture_phase_session(
                 self._session_capture,
-                self._active_workspaces.get(_pid),
+                _ws,
                 session_id=self._phase_session_ids.get(_pid, ""),
                 phase_id=_pid,
+            )
+            # A cancelled phase still ran its delegates, and their cost is as
+            # real as a completed phase's. Skipping the import here is what
+            # would leave cancelled executions quietly understated.
+            await self._import_phase_delegates(
+                capture,
+                phase_id=_pid,
+                execution_id=getattr(_ws, "execution_id", "") or "",
+                workspace_id=getattr(_ws, "id", None),
             )
             try:
                 await workspace_cm.__aexit__(None, None, None)
@@ -494,6 +517,7 @@ class WorkflowExecutionProcessor:
                 logger.exception("Error cleaning up workspace during %s", context)
         self._active_workspace_cms.clear()
         self._phase_session_ids.clear()
+        self._phase_leader_native_ids.clear()
 
     async def _handle_provision(
         self,
@@ -631,6 +655,10 @@ class WorkflowExecutionProcessor:
             collector=collector,
             runner=runner,
         )
+
+        leader_native = result.stream_result.leader_native_session_id
+        if leader_native:
+            self._phase_leader_native_ids[todo.phase_id] = leader_native
 
         recorder = ConversationRecorder(self._conversation_storage)
         await recorder.store(
@@ -840,15 +868,99 @@ class WorkflowExecutionProcessor:
 
         # BEFORE teardown: once the container is gone so is the spool, and a
         # later probe cannot tell "stored" from "lost forever".
-        await capture_phase_session(
+        capture = await capture_phase_session(
             self._session_capture,
             workspace,
             session_id=session_id,
             phase_id=phase_id,
         )
+        # Also BEFORE teardown: the import reads from the store, but it needs
+        # the id set the probe just confirmed, and that verdict does not
+        # outlive the container.
+        await self._import_phase_delegates(
+            capture,
+            phase_id=phase_id,
+            execution_id=getattr(workspace, "execution_id", "") or "",
+            workspace_id=getattr(workspace, "id", None),
+        )
 
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
+
+    async def _import_phase_delegates(
+        self,
+        capture: AuthoritativeCapture | None,
+        *,
+        phase_id: str,
+        execution_id: str,
+        workspace_id: str | None = None,
+    ) -> None:
+        """Price the sessions this phase produced that nobody billed.
+
+        Runs on the SAME two paths capture does - normal finalisation and
+        teardown after a cancel or failure - because a phase that was cancelled
+        still ran delegates, and their cost is exactly as real as a completed
+        phase's. Carving that out would leave a class of executions quietly
+        understated.
+
+        Fail-open, like capture: an import that cannot run leaves the phase's
+        own cost intact and unchanged. It must never turn agent work that
+        succeeded into a phase that failed.
+        """
+        # The writer is optional in this processor's constructor, so it has to
+        # be checked here rather than assumed: with no observability lane there
+        # is nowhere to record a delegate's cost, and calling through would
+        # raise inside a teardown path that must not fail a phase.
+        if self._session_store is None or self._observability_writer is None or capture is None:
+            return
+
+        captured_ids = capture.agent_session_ids or ()
+        if not captured_ids:
+            return
+
+        try:
+            outcome = await import_phase_delegates(
+                self._session_store,
+                self._observability_writer,
+                leader_native_session_id=self._phase_leader_native_ids.get(phase_id),
+                captured_session_ids=captured_ids,
+                execution_id=execution_id,
+                phase_id=phase_id,
+                workspace_id=workspace_id,
+                # One pass here. The sweep already CONFIRMED these sessions
+                # reached the store, so a read that misses is a race measured
+                # in tenths of a second rather than a wait worth holding a
+                # phase open for; anything still unreadable is written as a
+                # named gap instead.
+                attempts_remaining=0,
+            )
+        except Exception:
+            logger.exception(
+                "Delegate import failed for phase %s; phase cost stands unchanged", phase_id
+            )
+            return
+
+        if outcome.leader_missing_from_sweep:
+            # Loud on purpose. The leader's id came off its own stream and the
+            # sweep confirmed the session set, so a mismatch means one of those
+            # two contracts moved - and every id is then a candidate, so
+            # importing anything would risk billing the leader twice.
+            logger.error(
+                "Delegate import refused for phase %s: the leader's session id is not among "
+                "the %d captured ids, so delegates cannot be told from the leader. "
+                "No delegate cost was imported for this phase.",
+                phase_id,
+                len(captured_ids),
+            )
+            return
+
+        if outcome.imported:
+            logger.info(
+                "Imported %d delegate session(s) for phase %s (%d priced)",
+                len(outcome.imported),
+                phase_id,
+                sum(1 for d in outcome.imported if d.priced),
+            )
 
     async def _save_new_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:
         """Save a NEW aggregate (fails if stream exists) and sync events.

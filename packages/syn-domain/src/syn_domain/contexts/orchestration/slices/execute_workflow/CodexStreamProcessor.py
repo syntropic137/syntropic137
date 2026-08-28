@@ -533,10 +533,13 @@ class CodexStreamProcessor:
             # FIRST wins, for the same reason as the claude side: a rebind
             # late in a run would make the real leader look like a delegate
             # and bill it a second time.
-            if self._leader_native_session_id is None:
-                announced = event.get("thread_id")
-                if isinstance(announced, str) and announced.strip():
-                    self._leader_native_session_id = announced
+            announced = event.get("thread_id")
+            if (
+                self._leader_native_session_id is None
+                and isinstance(announced, str)
+                and announced.strip()
+            ):
+                self._leader_native_session_id = announced
 
         # "turn.started": no observability call needed.
 
