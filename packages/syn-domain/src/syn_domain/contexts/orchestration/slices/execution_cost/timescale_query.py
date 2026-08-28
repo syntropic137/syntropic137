@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
+    UNATTRIBUTED_MODEL,
     UNATTRIBUTED_PHASE_ID,
     ExecutionCost,
 )
@@ -447,9 +448,13 @@ def price_phase_rows(rows: Sequence[asyncpg.Record], cost_calculator: CostCalcul
             unpriced[phase_id] = unpriced.get(phase_id, 0) + priced.unpriced_count
             continue
         costs[phase_id] = costs.get(phase_id, Decimal("0")) + priced.cost
-        if priced.model:
-            phase_models = by_model.setdefault(phase_id, {})
-            phase_models[priced.model] = phase_models.get(priced.model, Decimal("0")) + priced.cost
+        # A priced row with NO model still spent money. Bucketing it under a
+        # sentinel keeps sum(models_by_phase[p]) == cost_by_phase[p]; dropping
+        # it made the breakdown quietly sum to less than the total it is
+        # supposed to decompose.
+        model = priced.model or UNATTRIBUTED_MODEL
+        phase_models = by_model.setdefault(phase_id, {})
+        phase_models[model] = phase_models.get(model, Decimal("0")) + priced.cost
     return PhaseCosts(cost_by_phase=costs, unpriced_by_phase=unpriced, models_by_phase=by_model)
 
 

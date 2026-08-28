@@ -6,6 +6,15 @@ from decimal import Decimal
 from typing import Any, Final
 
 UNATTRIBUTED_PHASE_ID: Final[str] = "unattributed"
+
+UNATTRIBUTED_MODEL: Final[str] = "unattributed-model"
+"""Bucket for cost that is AUTHORITATIVE but names no model.
+
+A session_summary can carry an SDK-reported ``total_cost_usd`` with no model
+id. That cost is real and counts toward the phase total, so omitting it from
+the per-model breakdown makes the parts sum to less than the whole - the exact
+reconciliation failure #812 fixed for phases and this restores for models.
+"""
 """Bucket for cost that belongs to an execution but to no particular phase.
 
 ``agent_events.phase_id`` is nullable, so a session_summary can be recorded
