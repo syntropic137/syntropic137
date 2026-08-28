@@ -14,9 +14,13 @@ this module refuses rather than guesses when it cannot be.
 
 from __future__ import annotations
 
+import json
+import pathlib
+
 import pytest
 
 from syn_domain.contexts.agent_sessions.delegate_attribution import (
+    _AGENT_BY_PROVIDER,
     SessionRole,
     classify_phase_sessions,
 )
@@ -145,3 +149,80 @@ class TestTheLeaderIsNeverImported:
 
         assert SessionRole.LEADER not in roles.values()
         assert SessionRole.DELEGATE not in roles.values()
+
+
+@pytest.mark.unit
+class TestTheVocabulariesItBridgesStayPinned:
+    """This module is the one place two EXTERNAL vocabularies meet, so drift
+    in either one is silent: the classifier simply stops recognising a leader
+    and every phase becomes unattributable. That fails safe (an undercount,
+    never a double count) but it fails QUIETLY, which is how a whole harness
+    could stop being priced without a single test going red. These pin both
+    sides to the real sources.
+    """
+
+    def test_provider_keys_match_the_workflow_definition_literal(self) -> None:
+        """The declared-provider side, pinned to its source of truth.
+
+        ``AgentYamlDefinition.provider`` is a ``Literal`` in the orchestration
+        context. Importing it here would couple two bounded contexts, so the
+        value is copied and this test guards the copy. A new provider added
+        there turns this red instead of silently going unpriced.
+        """
+        from typing import get_args
+
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            AgentYamlDefinition,
+        )
+
+        def string_literals(annotation: object) -> set[str]:
+            """Collect the string members of a possibly-nested annotation.
+
+            The field is ``Literal["claude", "codex"] | None``, so one
+            ``get_args`` yields the union members rather than the strings.
+            """
+            args = get_args(annotation)
+            if not args:
+                return set()
+            found: set[str] = set()
+            for arg in args:
+                if isinstance(arg, str):
+                    found.add(arg)
+                else:
+                    found |= string_literals(arg)
+            return found
+
+        providers = string_literals(AgentYamlDefinition.model_fields["provider"].annotation)
+
+        assert providers, "the provider Literal was not found; this test has rotted"
+        assert providers == set(_AGENT_BY_PROVIDER)
+
+    def test_agent_names_match_the_recorded_store_values(self) -> None:
+        """The store side, pinned to real redacted records rather than to my
+        memory of what the store emits.
+        """
+        records = json.loads(
+            (
+                pathlib.Path(__file__).parents[2] / "fixtures/delegation/store_session_records.json"
+            ).read_text()
+        )
+        recorded = {record["agent"] for record in records.values()}
+
+        assert recorded == set(_AGENT_BY_PROVIDER.values())
+
+
+@pytest.mark.unit
+def test_a_foreign_provider_vocabulary_fails_safe() -> None:
+    """A caller reaching for the WRONG provider field must not double count.
+
+    The workspace image manifest spells the same provider ``claude-cli``, a
+    third vocabulary. Passing that instead of the phase's declared provider
+    must yield no leader and no delegate, so the mistake costs an undercount
+    rather than importing a session that is already priced.
+    """
+    roles = classify_phase_sessions(
+        phase_provider="claude-cli",
+        sessions=[_session("s-claude", "ClaudeCode"), _session("s-codex", "Codex")],
+    )
+
+    assert set(roles.values()) == {SessionRole.UNATTRIBUTABLE}
