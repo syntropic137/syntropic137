@@ -133,6 +133,23 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
+      # preflight includes codegen-check, and codegen shells out to pnpm in
+      # three workspaces. Without this the whole target dies at exit 127 and
+      # the failure names the recipe rather than the missing toolchain.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install workspace deps for codegen
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
       # ONE list, shared with the pre-push hook and the AGENTS.md checklist.
       # Enumerating the checks here as separate steps is what let CI and local
       # drift: three of them were reachable from no local recipe at all, so
