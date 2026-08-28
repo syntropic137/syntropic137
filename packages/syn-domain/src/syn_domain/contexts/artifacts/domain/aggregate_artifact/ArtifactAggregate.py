@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -196,6 +197,9 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
             is_primary_deliverable=command.is_primary_deliverable,
             derived_from=command.derived_from or [],
             metadata=command.metadata or {},
+            # #920: the event must state its own time. Nothing downstream can
+            # recover it otherwise - handlers get a flat payload, not the envelope.
+            created_at=datetime.now(UTC),
         )
 
         self._apply(event)
