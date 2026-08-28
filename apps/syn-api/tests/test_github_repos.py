@@ -322,5 +322,9 @@ async def test_sync_failure_returns_empty_gracefully() -> None:
         result = await list_accessible_repos(installation_id=None)
         mock_ensure.assert_awaited_once()
 
+    # Ok([]) alone is vacuous here: an empty projection produces [] whether or
+    # not the sync ran at all. Assert the failing call actually happened, so the
+    # test proves the FAILURE path was exercised rather than skipped.
+    mock_client.list_installations.assert_awaited_once_with()
     assert isinstance(result, Ok)
     assert result.value == []
