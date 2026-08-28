@@ -83,21 +83,23 @@ class CollectedArtifacts:
     first_content: str | None
 
 
-#: Directory names that hold machine-generated build output rather than
-#: deliverables (issue #919). Matched as a whole PATH SEGMENT, never as a
-#: substring: a real artifact called `how-we-fixed-the-pytest-cache.md` must
-#: still be collected.
-_IGNORED_PATH_SEGMENTS: Final[frozenset[str]] = frozenset(
+#: DIRECTORY names that hold machine-generated build output (issue #919).
+#:
+#: Deliberately narrow, and narrower than the first draft of this fix. Anything
+#: under artifacts/output/ was explicitly designated a deliverable by the
+#: workflow that wrote it, so the asymmetry is severe: keeping junk is
+#: annoying and recoverable, DROPPING a real artifact is silent data loss on
+#: the output path with nothing to notice it. A broader list would have eaten
+#: a node_modules snapshot, a packaged .venv, or a `.git` directory shipped
+#: deliberately as a reproducible repo, all of which are plausible outputs.
+#:
+#: So this covers only what was actually MEASURED as a problem: 28
+#: .pytest_cache and 16 __pycache__ entries out of 98 artifacts. If another
+#: kind of junk shows up in a real run, measure it and add it then.
+_IGNORED_DIRECTORY_SEGMENTS: Final[frozenset[str]] = frozenset(
     {
         "__pycache__",
         ".pytest_cache",
-        ".ruff_cache",
-        ".mypy_cache",
-        ".git",
-        ".venv",
-        "node_modules",
-        ".tox",
-        ".cache",
     }
 )
 
@@ -105,13 +107,18 @@ _IGNORED_PATH_SEGMENTS: Final[frozenset[str]] = frozenset(
 def _is_collectable(artifact_path: str) -> bool:
     """Whether a collected path is a deliverable rather than build junk.
 
-    Measured on the dev stack before this existed: 44 of 98 artifacts, 45% of
-    the store, were .pytest_cache and __pycache__. The cost is not storage. The
-    list is ordered oldest-first, so the junk pushed real outputs off the first
-    page and actively hid the deliverables someone came to read, and it grows
-    with every workflow that runs a test suite.
+    Matches PARENT directory segments only, never the final filename. A file
+    literally named ``__pycache__`` is a file somebody chose to emit, and this
+    cannot tell a directory from a filename by string alone, so it does not
+    try: only the segments that are unambiguously directories are considered.
+
+    Measured before this existed: 44 of 98 artifacts, 45% of the store, were
+    build caches. The cost was not storage. The list is ordered oldest-first,
+    so the junk pushed real outputs off the first page and hid the very
+    deliverables someone opened the list to find.
     """
-    return not any(segment in _IGNORED_PATH_SEGMENTS for segment in artifact_path.split("/"))
+    parent_segments = artifact_path.split("/")[:-1]
+    return not any(segment in _IGNORED_DIRECTORY_SEGMENTS for segment in parent_segments)
 
 
 class ArtifactCollector:

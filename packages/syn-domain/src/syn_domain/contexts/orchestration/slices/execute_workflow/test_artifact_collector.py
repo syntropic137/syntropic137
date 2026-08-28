@@ -310,3 +310,63 @@ class TestBuildJunkIsNotCollected:
         )
 
         assert len(result.artifact_ids) == 2
+
+    @pytest.mark.asyncio
+    async def test_a_file_named_like_an_ignored_directory_is_kept(self) -> None:
+        """Dropping a real deliverable is silent data loss; keeping junk is not.
+
+        The check cannot tell a directory from a filename by string alone, so
+        it only inspects PARENT segments. A file somebody deliberately emitted
+        and named `__pycache__` is a deliverable, and an earlier draft of this
+        fix would have eaten it.
+        """
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(
+            collected_files=[
+                ("artifacts/output/__pycache__", b"a file, not a directory"),
+                ("artifacts/output/.pytest_cache", b"also a file"),
+            ]
+        )
+
+        result = await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Test Phase",
+            output_artifact_type="text",
+        )
+
+        assert len(result.artifact_ids) == 2
+
+    @pytest.mark.asyncio
+    async def test_plausible_deliverables_are_not_swept(self) -> None:
+        """artifacts/output/ contents were DESIGNATED outputs by the workflow
+        that wrote them. A denylist wide enough to catch every build cache also
+        catches deliberate ones: a dependency-audit snapshot, a packaged
+        environment, a reproducible repo shipped on purpose.
+        """
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(
+            collected_files=[
+                ("artifacts/output/audit/node_modules/left-pad/index.js", b"x"),
+                ("artifacts/output/repro/.git/HEAD", b"ref: refs/heads/main"),
+                ("artifacts/output/env/.venv/pyvenv.cfg", b"home = /usr"),
+                ("artifacts/output/forensics/.cache/entry", b"x"),
+            ]
+        )
+
+        result = await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Test Phase",
+            output_artifact_type="text",
+        )
+
+        assert len(result.artifact_ids) == 4
