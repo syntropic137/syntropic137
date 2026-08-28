@@ -8,10 +8,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
-    ObservationType,
-)
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -32,9 +28,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import (
-    ConversationRecorder,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
@@ -49,8 +42,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
 from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
     ObservabilityCollector,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture import (
-    capture_phase_session,
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
+    record_phase_conversation,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
+    capture_and_import_phase,
+    close_phase_workspaces,
+    remember_leader_native_id,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import (
     PhaseResultBuilder,
@@ -76,9 +74,6 @@ if TYPE_CHECKING:
 
     from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
-    from syn_adapters.workspace_backends.agentic.capture_result import (
-        AuthoritativeCapture,
-    )
     from syn_adapters.workspace_backends.agentic.session_capture_service import (
         SessionCapturePort,
     )
@@ -86,7 +81,6 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
-    from syn_domain.contexts.agent_sessions.transcript_usage import PricedUsage
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
@@ -122,52 +116,6 @@ class _DispatchContext:
     """
 
     current_phase_id: str | None = None
-
-
-class _DelegateUsageRecorder:
-    """Shapes a recovered delegate cost into a TOKEN_USAGE observation.
-
-    Lives here rather than in the domain module because this is the layer that
-    already knows the observation payload's field names. Keeping that knowledge
-    on one side of the seam means a telemetry-schema rename breaks loudly here
-    instead of silently unpricing delegates.
-    """
-
-    def __init__(self, writer: ObservabilityRecorder) -> None:
-        self._writer = writer
-
-    async def record_delegate_usage(
-        self,
-        *,
-        session_id: str,
-        usage: PricedUsage | None,
-        unpriced_reason: str | None,
-        execution_id: str,
-        phase_id: str,
-        workspace_id: str | None,
-    ) -> None:
-        # Zeroes carrying a reason, never an omission: an unpriceable delegate
-        # has to stay visible as a gap rather than vanish into "never ran".
-        data = {
-            "input_tokens": usage.uncached_input_tokens if usage else 0,
-            "output_tokens": usage.output_tokens if usage else 0,
-            "cache_creation_tokens": usage.cache_creation_tokens if usage else 0,
-            "cache_read_tokens": usage.cache_read_tokens if usage else 0,
-            "model": usage.model if usage else None,
-            "delegated": True,
-            # Only present when there IS a reason, so its presence alone marks
-            # a delegate that could not be priced.
-            **({"unpriced_reason": unpriced_reason} if unpriced_reason else {}),
-        }
-
-        await self._writer.record_observation(
-            session_id=session_id,
-            observation_type=ObservationType.TOKEN_USAGE,
-            data=data,
-            execution_id=execution_id,
-            phase_id=phase_id,
-            workspace_id=workspace_id,
-        )
 
 
 class WorkflowExecutionProcessor:
@@ -541,33 +489,16 @@ class WorkflowExecutionProcessor:
 
     async def _close_phase_workspace_cms(self, context: str) -> None:
         """Close per-phase workspace context managers and clear per-phase state."""
-        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
-            # Probe on the way out of a CANCEL or a FAILURE too. A phase that
-            # never reached _finalize_phase still ran an agent, and a failed
-            # run is the one whose transcript is most worth having.
-            _ws = self._active_workspaces.get(_pid)
-            capture = await capture_phase_session(
-                self._session_capture,
-                _ws,
-                session_id=self._phase_session_ids.get(_pid, ""),
-                phase_id=_pid,
-            )
-            # A cancelled phase still ran its delegates, and their cost is as
-            # real as a completed phase's. Skipping the import here is what
-            # would leave cancelled executions quietly understated.
-            await self._import_phase_delegates(
-                capture,
-                phase_id=_pid,
-                execution_id=getattr(_ws, "execution_id", "") or "",
-                workspace_id=getattr(_ws, "id", None),
-            )
-            try:
-                await workspace_cm.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("Error cleaning up workspace during %s", context)
-        self._active_workspace_cms.clear()
-        self._phase_session_ids.clear()
-        self._phase_leader_native_ids.clear()
+        await close_phase_workspaces(
+            context,
+            workspace_cms=self._active_workspace_cms,
+            workspaces=self._active_workspaces,
+            session_ids=self._phase_session_ids,
+            leader_native_ids=self._phase_leader_native_ids,
+            capture_port=self._session_capture,
+            session_store=self._session_store,
+            writer=self._observability_writer,
+        )
 
     async def _handle_provision(
         self,
@@ -706,22 +637,19 @@ class WorkflowExecutionProcessor:
             runner=runner,
         )
 
-        leader_native = result.stream_result.leader_native_session_id
-        if leader_native:
-            self._phase_leader_native_ids[todo.phase_id] = leader_native
+        remember_leader_native_id(
+            self._phase_leader_native_ids, todo.phase_id, result.stream_result
+        )
 
-        recorder = ConversationRecorder(self._conversation_storage)
-        await recorder.store(
+        await record_phase_conversation(
+            self._conversation_storage,
+            result,
             session_id=session_id,
-            lines=result.stream_result.conversation_lines,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             workflow_id=workflow_id,
             model=phase.agent_config.model,
-            input_tokens=result.tokens.input_tokens,
-            output_tokens=result.tokens.output_tokens,
             started_at=self._phase_started_at.get(todo.phase_id, datetime.now(UTC)),
-            success=result.command.exit_code == 0,
         )
         self._phase_tokens[todo.phase_id] = result.tokens
         # Store authoritative totals from CLI result event (includes cache tokens)
@@ -918,99 +846,18 @@ class WorkflowExecutionProcessor:
 
         # BEFORE teardown: once the container is gone so is the spool, and a
         # later probe cannot tell "stored" from "lost forever".
-        capture = await capture_phase_session(
+        await capture_and_import_phase(
             self._session_capture,
             workspace,
+            session_store=self._session_store,
+            writer=self._observability_writer,
+            leader_native_session_id=self._phase_leader_native_ids.get(phase_id),
             session_id=session_id,
             phase_id=phase_id,
-        )
-        # Also BEFORE teardown: the import reads from the store, but it needs
-        # the id set the probe just confirmed, and that verdict does not
-        # outlive the container.
-        await self._import_phase_delegates(
-            capture,
-            phase_id=phase_id,
-            execution_id=getattr(workspace, "execution_id", "") or "",
-            workspace_id=getattr(workspace, "id", None),
         )
 
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
-
-    async def _import_phase_delegates(
-        self,
-        capture: AuthoritativeCapture | None,
-        *,
-        phase_id: str,
-        execution_id: str,
-        workspace_id: str | None = None,
-    ) -> None:
-        """Price the sessions this phase produced that nobody billed.
-
-        Runs on the SAME two paths capture does - normal finalisation and
-        teardown after a cancel or failure - because a phase that was cancelled
-        still ran delegates, and their cost is exactly as real as a completed
-        phase's. Carving that out would leave a class of executions quietly
-        understated.
-
-        Fail-open, like capture: an import that cannot run leaves the phase's
-        own cost intact and unchanged. It must never turn agent work that
-        succeeded into a phase that failed.
-        """
-        # The writer is optional in this processor's constructor, so it has to
-        # be checked here rather than assumed: with no observability lane there
-        # is nowhere to record a delegate's cost, and calling through would
-        # raise inside a teardown path that must not fail a phase.
-        if self._session_store is None or self._observability_writer is None or capture is None:
-            return
-
-        captured_ids = capture.agent_session_ids or ()
-        if not captured_ids:
-            return
-
-        try:
-            outcome = await import_phase_delegates(
-                self._session_store,
-                _DelegateUsageRecorder(self._observability_writer),
-                leader_native_session_id=self._phase_leader_native_ids.get(phase_id),
-                captured_session_ids=captured_ids,
-                execution_id=execution_id,
-                phase_id=phase_id,
-                workspace_id=workspace_id,
-                # One pass here. The sweep already CONFIRMED these sessions
-                # reached the store, so a read that misses is a race measured
-                # in tenths of a second rather than a wait worth holding a
-                # phase open for; anything still unreadable is written as a
-                # named gap instead.
-                attempts_remaining=0,
-            )
-        except Exception:
-            logger.exception(
-                "Delegate import failed for phase %s; phase cost stands unchanged", phase_id
-            )
-            return
-
-        if outcome.leader_missing_from_sweep:
-            # Loud on purpose. The leader's id came off its own stream and the
-            # sweep confirmed the session set, so a mismatch means one of those
-            # two contracts moved - and every id is then a candidate, so
-            # importing anything would risk billing the leader twice.
-            logger.error(
-                "Delegate import refused for phase %s: the leader's session id is not among "
-                "the %d captured ids, so delegates cannot be told from the leader. "
-                "No delegate cost was imported for this phase.",
-                phase_id,
-                len(captured_ids),
-            )
-            return
-
-        if outcome.imported:
-            logger.info(
-                "Imported %d delegate session(s) for phase %s (%d priced)",
-                len(outcome.imported),
-                phase_id,
-                sum(1 for d in outcome.imported if d.priced),
-            )
 
     async def _save_new_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:
         """Save a NEW aggregate (fails if stream exists) and sync events.
