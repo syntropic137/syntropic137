@@ -36,6 +36,40 @@ if TYPE_CHECKING:
     )
 
 
+#: Seconds between import attempts, and how many to make.
+#:
+#: MEASURED, not guessed. Four cross-harness delegation runs on 2026-08-28,
+#: polling the session store from the instant each execution flipped to
+#: completed, gave n=7 capture delays: min 0.02s, median 0.02s, max 0.17s.
+#: Every session appeared in under a second and none failed to appear. The
+#: distribution is FLAT rather than long-tailed - six of seven at 0.02s, one at
+#: 0.17s, and nothing at all between 0.2s and the 150s ceiling that was polled
+#: to. So this is a small-fixed-budget problem, not a hidden-tail one, and the
+#: budget below clears the observed worst case by more than two orders of
+#: magnitude.
+#:
+#: WHAT THE MEASUREMENT DOES NOT COVER, because a number without its scope
+#: invites exactly the over-reading this module has already been bitten by:
+#: n=4 runs, one machine, one local store, one afternoon, and every capture was
+#: a two-session cross-harness one. It says nothing about a loaded store, a
+#: remote store over a slow link, or a 3+ session capture - which does not
+#: exist anywhere in the data yet. Read it as "not slow HERE, by a wide
+#: margin", never as "cannot be slow".
+#:
+#: That is why the retry machinery survives the measurement rather than being
+#: simplified away. 0.02s is an observation, not a guarantee, and a remote
+#: store on a bad link is a real deployment.
+DEFAULT_IMPORT_ATTEMPTS: int = 5
+DEFAULT_IMPORT_RETRY_SECONDS: float = 2.0
+
+#: The slowest capture delay ever measured, in seconds.
+#:
+#: Kept beside the budget so the two cannot drift apart silently: a test
+#: asserts the budget still clears this by a wide margin, so shrinking the
+#: budget below its own evidence turns red rather than passing quietly.
+MEASURED_WORST_CAPTURE_DELAY_SECONDS: float = 0.17
+
+
 class ImportReadiness(StrEnum):
     """Whether this phase's delegate costs can be committed now."""
 

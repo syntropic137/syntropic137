@@ -194,3 +194,53 @@ class TestATransientFailureIsTreatedLikeAMissingOne:
         )
 
         assert readiness is ImportReadiness.EXHAUSTED
+
+
+@pytest.mark.unit
+class TestTheRetryBudgetStaysTiedToItsEvidence:
+    """The budget is a measurement, and a measurement can be edited away.
+
+    These pin it to the observation it came from, so shrinking it below its own
+    evidence turns red rather than passing quietly. That matters more than the
+    exact numbers: the failure this module guards is a phase finalising while
+    recoverable cost was still arriving, and a budget quietly trimmed to zero
+    reintroduces it without touching any logic.
+    """
+
+    def test_the_budget_clears_the_measured_worst_case_by_orders_of_magnitude(
+        self,
+    ) -> None:
+        from syn_domain.contexts.agent_sessions.import_readiness import (
+            DEFAULT_IMPORT_ATTEMPTS,
+            DEFAULT_IMPORT_RETRY_SECONDS,
+            MEASURED_WORST_CAPTURE_DELAY_SECONDS,
+        )
+
+        covered = DEFAULT_IMPORT_ATTEMPTS * DEFAULT_IMPORT_RETRY_SECONDS
+
+        assert covered >= MEASURED_WORST_CAPTURE_DELAY_SECONDS * 50
+
+    def test_the_budget_allows_more_than_one_attempt(self) -> None:
+        """A budget of one is not a retry, it is a single read wearing the
+        word. The capture race is real however fast it currently resolves.
+        """
+        from syn_domain.contexts.agent_sessions.import_readiness import (
+            DEFAULT_IMPORT_ATTEMPTS,
+        )
+
+        assert DEFAULT_IMPORT_ATTEMPTS > 1
+
+    def test_the_default_budget_produces_wait_not_exhausted(self) -> None:
+        """The constants and the decision function must agree: the shipped
+        default must actually buy a retry on a missing delegate.
+        """
+        from syn_domain.contexts.agent_sessions.import_readiness import (
+            DEFAULT_IMPORT_ATTEMPTS,
+        )
+
+        readiness = assess_import_readiness(
+            reconciliation=_phase(_absent("s-a")),
+            attempts_remaining=DEFAULT_IMPORT_ATTEMPTS,
+        )
+
+        assert readiness is ImportReadiness.WAIT
