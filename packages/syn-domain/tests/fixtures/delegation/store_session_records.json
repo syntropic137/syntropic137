@@ -1,0 +1,16 @@
+{
+ "codex": {
+  "session_id": "01a0454b-169b-7952-ac16-944da94056d4",
+  "agent": "Codex",
+  "source_format": "codex-rollout-jsonl",
+  "scs_version": "1.0",
+  "content_hash": "sha256:fbf096ac9ebff08cb7347f0f3b39fb0f6ac0ff54390f71676015fa76e04c08fb"
+ },
+ "claude": {
+  "session_id": "b1e8d05d-49c7-467a-9259-2f94782f5dc1",
+  "agent": "ClaudeCode",
+  "source_format": "claude-code-jsonl",
+  "scs_version": "1.0",
+  "content_hash": "sha256:18cec6820b7925c734f8217c3601a01dcf92239bc25b428b7b5aaee6b77d0b99"
+ }
+}
