@@ -219,6 +219,11 @@ class _LineAction(Enum):
 @dataclass
 class _LineOutcome:
     action: _LineAction
+    #: True when the line handler decided the run must stop. Carried
+    #: explicitly rather than inferred from ``interrupt_reason``: the reason is
+    #: an OPTIONAL human-readable message, and a cancel sent without one is
+    #: still a cancel (#918).
+    interrupt_requested: bool = False
     interrupt_reason: str | None = None
     task_result: dict[str, Any] | None = None
 
@@ -322,6 +327,7 @@ class EventStreamProcessor:
         """
         conversation_lines: list[str] = []
         line_count = 0
+        interrupt_requested = False
         interrupt_reason: str | None = None
         agent_task_result: dict[str, Any] | None = None
 
@@ -333,6 +339,7 @@ class EventStreamProcessor:
             if outcome.task_result is not None:
                 agent_task_result = outcome.task_result
             if outcome.action is _LineAction.BREAK:
+                interrupt_requested = outcome.interrupt_requested
                 interrupt_reason = outcome.interrupt_reason
                 break
 
@@ -346,7 +353,7 @@ class EventStreamProcessor:
 
         return StreamResult(
             line_count=line_count,
-            interrupt_requested=interrupt_reason is not None,
+            interrupt_requested=interrupt_requested,
             interrupt_reason=interrupt_reason,
             agent_task_result=agent_task_result,
             conversation_lines=conversation_lines,
@@ -374,7 +381,11 @@ class EventStreamProcessor:
         poll = await self._cancel_poller.check(line_count)
         if poll.should_interrupt:
             await workspace.interrupt()
-            return _LineOutcome(action=_LineAction.BREAK, interrupt_reason=poll.reason)
+            return _LineOutcome(
+                action=_LineAction.BREAK,
+                interrupt_requested=True,
+                interrupt_reason=poll.reason,
+            )
 
         hook_events = self._hook_parser.parse(line)
         if hook_events:

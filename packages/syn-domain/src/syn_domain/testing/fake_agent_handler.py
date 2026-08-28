@@ -60,9 +60,11 @@ class FakeAgentExecutionHandler:
         *,
         interrupt: bool = False,
         exit_code: int = 0,
+        interrupt_reason: str | None = "Cancelled by user",
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
+        self._interrupt_reason = interrupt_reason
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -87,7 +89,7 @@ class FakeAgentExecutionHandler:
         stream_result = StreamResult(
             line_count=0,
             interrupt_requested=self._interrupt,
-            interrupt_reason="Cancelled by user" if self._interrupt else None,
+            interrupt_reason=self._interrupt_reason if self._interrupt else None,
             agent_task_result=None,
         )
         command = AgentExecutionCompletedCommand(
@@ -117,9 +119,16 @@ class FakeAgentExecutionHandler:
     # ------------------------------------------------------------------
 
     @classmethod
-    def cancelled(cls) -> FakeAgentExecutionHandler:
-        """Simulates a user-initiated cancel signal (``interrupt_requested=True``)."""
-        return cls(interrupt=True)
+    def cancelled(cls, reason: str | None = "Cancelled by user") -> FakeAgentExecutionHandler:
+        """Simulates a user-initiated cancel signal (``interrupt_requested=True``).
+
+        ``reason=None`` reproduces what ``syn control cancel <id> --force``
+        actually sends without ``-r``. That is the case #918 was: the flag used
+        to be derived from the reason, so a cancel carrying no message was
+        silently dropped. A fake that always supplies a reason cannot exercise
+        it, which is why the default is overridable rather than fixed.
+        """
+        return cls(interrupt=True, interrupt_reason=reason)
 
     @classmethod
     def success(cls) -> FakeAgentExecutionHandler:
