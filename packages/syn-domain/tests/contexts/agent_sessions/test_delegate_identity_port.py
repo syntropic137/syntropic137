@@ -1,14 +1,14 @@
 """The port syn137 depends on for harness-native delegate identity (#895).
 
-The double here uses a DELIBERATELY SYNTHETIC line format. It is not codex's
-schema and not Claude's, because encoding a real CLI's format in a domain test
-would make these tests stale when that CLI changes, which is the coupling the
-port exists to prevent. What is asserted is the CONTRACT: what a conforming
-adapter must return, and for which inputs.
+The double here uses a DELIBERATELY SYNTHETIC line format, matching no real
+harness. Encoding a vendor's schema in a domain test would make these tests
+stale when that vendor changes it, which is the coupling the port exists to
+prevent. What is asserted is the CONTRACT: what a conforming adapter must
+return, and for which inputs.
 
 The corresponding correctness test, that each REAL adapter returns the right id
-from recorded CLI output containing malformed lines and misleading id-shaped
-fields, belongs in agentic-primitives, because it changes with CLI formats.
+from recorded output containing malformed lines and misleading id-shaped
+fields, belongs in agentic-primitives, because it changes with those formats.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def test_returns_the_id_from_an_identity_line() -> None:
 @pytest.mark.unit
 def test_only_an_identity_line_is_trusted() -> None:
     """A non-identity line yields nothing EVEN WHEN it carries an id-shaped
-    field. agentic-primitives found that reading an id off any line let an
+    field. This is not hypothetical: reading an id off any line once let an
     unrelated session's id through (#792), binding a child to the wrong parent
     while looking like it worked.
     """

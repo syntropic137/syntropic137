@@ -3,10 +3,9 @@
 WHY this is a port and not an implementation (issue #895): how a harness
 announces its own session id is knowledge about a CLI, not about our domain. It
 changes when a vendor ships a new version, and per the boundary rule in
-AGENTS.md that puts it in agentic-primitives, beside the existing
-``harnesses/{claude,codex}`` adapters which already normalize to
-``HarnessTranscript``. This module deliberately names no CLI, no event type and
-no field: if a format appears here, the abstraction has failed.
+AGENTS.md that puts it in agentic-primitives, beside the harness adapters that
+already normalize to ``HarnessTranscript``. No event type or field name appears
+in this module: if a format appears here, the abstraction has failed.
 
 Depending on this shape rather than on a format has two consequences, and both
 were the reason for choosing it:
@@ -17,11 +16,16 @@ were the reason for choosing it:
    agentic-primitives reaches a workspace only after merge, image build, the
    protected release channel and a ``PINNED_DIGESTS`` bump.
 
-The binding this feeds is two-step by necessity: the platform mints a
-``delegation_attempt_id`` BEFORE launch, and the child's native id does not
-exist until the child starts. Whichever adapter minted the attempt id reads
-that child's own stream, so concurrent children of one provider never need
-correlating by time or arrival order.
+The binding this feeds is two-step by necessity, and OWNERSHIP MATTERS to
+whoever implements against this:
+
+- the EDGE ADAPTER mints a ``delegation_attempt_id`` before it launches the
+  child. Not the domain, not the child;
+- that same adapter reads that child's stream and calls this method.
+
+Because one adapter instance owns both the attempt id and the stream it came
+from, concurrent children of one provider never need correlating by time or
+arrival order.
 """
 
 from __future__ import annotations
