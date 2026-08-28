@@ -1051,14 +1051,51 @@ syn watch activity
 ```bash
 syn control pause <execution-id>
 syn control resume <execution-id>
-# or to stop:
-syn control cancel <execution-id>
-syn control stop <execution-id>
+syn control cancel <execution-id> --force     # --force is REQUIRED
+syn control stop <execution-id> --force       # --force is REQUIRED
 ```
 
-- [ ] Pause/resume works (if execution supports yield points)
-- [ ] Cancel stops the execution cleanly
-- [ ] Stop sends SIGINT for immediate halt
+`cancel` and `stop` both refuse without `--force` (`Error: Use --force to
+confirm ...`). That is a guard, not a bug, but a run that omits it records a
+"cancel" that never happened.
+
+**CANCEL STOPS SUBSEQUENT PHASES, NOT THE RUNNING ONE.** Measured 2026-08-27 on
+`exec-d71bd8678ea4`: the phase that takes the signal continues to its own
+natural end, because `interrupt()` logs
+
+```
+WARNING interrupt(): no container_id on isolation handle, skipping SIGINT
+```
+
+and never signals the container. What cancel does today is prevent the
+remaining phases from starting. Assert that, not "the execution halts".
+
+- [ ] `cancel --force` transitions the execution to `cancelled`, not `completed`
+- [ ] Phases AFTER the cancelled one do not start
+- [ ] The phase that took the signal may still finish; that is #918, still open
+- [ ] Cancel WITHOUT `-r` behaves identically to cancel with one
+
+> **The no-reason case is the one that matters.** Until #926, `interrupt_requested`
+> was derived as `interrupt_reason is not None`, so a cancel carrying no message
+> was silently ignored and the whole workflow ran on and billed in full. Every
+> existing test passed a reason string and was green throughout. A cancel test
+> that passes `-r` cannot tell a working build from a broken one - only the
+> bare `--force` form can.
+>
+> #926 is merged but has NOT yet been confirmed on a live stack; it was verified
+> at unit and processor level. Confirming it end to end is a job for this
+> runbook, not a thing to assume.
+
+**PAUSE IS NOT OBSERVABLE.** `syn control pause` returns 200 and prints
+`Pause signal sent`, and then nothing changes: measured, the execution ran to
+completion 45s later. No field in the execution payload reflects a pending
+pause - there is no `paused`, no `pause_requested`, nothing. A following
+`resume` fails with `Cannot resume execution in state running`, which is a
+correct guard that the API surface gives an operator no way to understand.
+
+- [ ] Record what pause actually does; do not mark it passing because the
+      command returned 0. A 200 and a printed acknowledgement are not evidence
+      the signal was honoured
 
 ### Inject context into running execution
 
