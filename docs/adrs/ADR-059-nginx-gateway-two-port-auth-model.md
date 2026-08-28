@@ -77,7 +77,10 @@ The tunnel connects inside the Docker network and can reach `gateway:8081` direc
 | Password visible in process list or logs | Password lives only in `~/.syntropic137/.env` (mode 0600); never echoed |
 | Docker health checks blocked by auth | Port 80 is unauthenticated; health checks use internal Docker network |
 | Port 8137 exposed to internet | Published as `127.0.0.1:8137:80` — loopback bind, not reachable externally |
-| Brute-force on Basic Auth | Username is `admin` (known); password is 64 hex chars (256 bits entropy) |
+| Brute-force on Basic Auth | Password is 64 hex chars (256 bits entropy); a Cloudflare Rate Limiting rule bans clients that trip repeated 401s at the edge (primary control), and an origin-side `limit_req` (`auth` zone) applied at the port 8081 server scope covers every Basic-Auth path as the backstop. Because a location with its own `limit_req` does not inherit the server-scope one, `/api/v1/` declares the `auth` zone alongside its `api` zone (the unauthenticated webhook keeps only `webhooks`). All key on the real client IP recovered from `CF-Connecting-IP`. |
+| Rate limits keyed to the wrong IP | The `cloudflared` sidecar proxies to `gateway:8081` over the Docker network, so nginx's peer is cloudflared's container IP, not the visitor. `set_real_ip_from 172.16.0.0/12, 10.0.0.0/8` + `real_ip_header CF-Connecting-IP`, placed in the port 8081 server block so the loopback-only port 80 never rewrites addresses, restore the true client so per-client limiting and logs are meaningful. Loopback is not trusted. This blocks EXTERNAL forgery (8081 is never host-published, so the internet cannot reach it directly); a container already compromised inside `syn-internal` could still forge the header, so this is not a substitute for network trust. syn-internal has no pinned subnet, so a Docker install using an address pool outside these ranges would collapse tunnel traffic into one bucket - pinning the cloudflared subnet/IP would fix that and narrow the trust further. |
+| Internal port / scheme leaked in redirects | `absolute_redirect off` + `port_in_redirect off` keep auto-generated redirects (e.g. `/api/v1` -> `/api/v1/`) relative, so the internal `:8081` port and `http://` scheme are never emitted in a `Location` header. |
+| Basic credentials solicited over plaintext HTTP | Cloudflare "Always Use HTTPS" 301s http->https at the edge before the auth challenge; HSTS (`security-headers.conf`) covers repeat browser visits. |
 
 ---
 
@@ -105,9 +108,40 @@ The stub `auth.py` / `AuthContext` placeholder (previously in `apps/syn-api/src/
 
 ---
 
+## Edge Hardening (2026-08-28)
+
+A black-box assessment of a live tunnel found the auth wall intact (every
+application path returns 401; header-injection, path-traversal and verb-tampering
+bypasses all failed) but surfaced four gaps, now closed:
+
+1. **No real brute-force control.** The only rate limits were a 30 r/s DoS
+   throttle on `/api/v1/`, and the rest of the authenticated surface had none.
+   The limits also keyed on the cloudflared container IP (a single shared
+   bucket), not the visitor. Fix: recover the real client IP
+   (`CF-Connecting-IP`, in the 8081 server block), add an `auth`-zone
+   `limit_req` backstop at the 8081 server scope - and, since a location with
+   its own `limit_req` does not inherit it, declare the `auth` zone on
+   `/api/v1/` too - plus a Cloudflare Rate Limiting rule on 401s as the primary
+   control (dashboard step, see checklist below).
+2. **`/health` was a prefix match** with `auth_basic off`, so anything under
+   `/health*` skipped auth. Now an exact regex match on `/health` and `/healthz`.
+3. **Redirect leak.** `/api/v1` and `/ws` 301'd to `http://…:8081/…`, exposing
+   the internal port and downgrading the scheme. Fixed with relative redirects.
+4. **HTTP did not redirect to HTTPS**, so Basic credentials could be solicited
+   over plaintext. Fixed at the Cloudflare edge (dashboard step).
+
+**Cloudflare dashboard steps (not in code):**
+- SSL/TLS → Edge Certificates: "Always Use HTTPS" = On, "Automatic HTTPS Rewrites" = On.
+- Security → Rate Limiting: rule matching path `/*` AND response status `401`,
+  threshold ~10/min per client IP, mitigation block ~15 min.
+
+---
+
 ## References
 
 - `infra/docker/images/gateway/nginx.conf` — nginx config implementing both server blocks
+- `infra/docker/images/gateway/rate-limit.conf` — http-level real-client-IP recovery and rate-limit zones
+- `infra/docker/images/gateway/docker-entrypoint.sh` — generates auth + shared locations (health match, root backstop, relative redirects)
 - `infra/cloudflare/tunnel-config.yaml.example` — tunnel config template (routes to port 8081)
 - `infra/.env.example` — `SYN_API_PASSWORD` documentation
 - ADR-022 — future real authentication design
