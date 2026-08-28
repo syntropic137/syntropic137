@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
     AgentSessionAggregate,
 )
@@ -10,6 +12,7 @@ from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand impo
 )
 
 
+@pytest.mark.unit
 def test_start_session_without_parent_is_its_own_root() -> None:
     """A top-level session (no parent_session_id) is its own root."""
     aggregate = AgentSessionAggregate()
@@ -27,6 +30,7 @@ def test_start_session_without_parent_is_its_own_root() -> None:
     assert event.root_session_id == "session-1"
 
 
+@pytest.mark.unit
 def test_start_session_with_parent_threads_both_ids() -> None:
     """A delegated child session carries parent_session_id and root_session_id."""
     aggregate = AgentSessionAggregate()
@@ -46,6 +50,7 @@ def test_start_session_with_parent_threads_both_ids() -> None:
     assert event.root_session_id == "root-1"
 
 
+@pytest.mark.unit
 def test_start_session_with_parent_and_no_root_defaults_root_to_parent() -> None:
     """Regression guard (#792): a delegated child must never self-root.
 
@@ -70,6 +75,7 @@ def test_start_session_with_parent_and_no_root_defaults_root_to_parent() -> None
     assert event.root_session_id == "parent-2"
 
 
+@pytest.mark.unit
 def test_start_session_with_parent_and_explicit_root_uses_explicit_root() -> None:
     """An explicitly supplied root_session_id always wins, even with a parent set.
 
@@ -93,6 +99,7 @@ def test_start_session_with_parent_and_explicit_root_uses_explicit_root() -> Non
     assert event.root_session_id == "root-of-deep-tree"
 
 
+@pytest.mark.unit
 def test_start_session_without_parent_and_explicit_root_uses_explicit_root() -> None:
     """An explicitly supplied root_session_id wins even for a top-level session."""
     aggregate = AgentSessionAggregate()

@@ -7,11 +7,14 @@ vanishes silently - this guards that hot spot.
 
 from __future__ import annotations
 
+import pytest
+
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
 
 
+@pytest.mark.unit
 def test_parent_session_id_survives_round_trip() -> None:
     """parent_session_id and root_session_id survive a to_dict/from_dict cycle."""
     summary = SessionSummary(
@@ -30,6 +33,7 @@ def test_parent_session_id_survives_round_trip() -> None:
     assert restored.root_session_id == "parent-1"
 
 
+@pytest.mark.unit
 def test_parent_session_id_defaults_to_none_for_legacy_dict() -> None:
     """A legacy dict with neither key yields None for both (tolerant reader)."""
     legacy = {
