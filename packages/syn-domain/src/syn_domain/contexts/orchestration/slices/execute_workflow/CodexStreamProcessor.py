@@ -330,6 +330,7 @@ class CodexStreamProcessor:
         )
         self._totals = _CodexTotals()
         self._error_reason: str | None = None
+        self._leader_native_session_id: str | None = None
         # Held, not applied. An auth error the CLI RECOVERS from (retry, then a
         # normal turn.completed) must not fail an otherwise successful phase,
         # so the candidate is only promoted at end-of-stream and only when no
@@ -418,6 +419,7 @@ class CodexStreamProcessor:
             error_reason=self._error_reason,
             delegation_attempts=self._delegation_attempts,
             delegation_successes=self._delegation_successes,
+            leader_native_session_id=self._leader_native_session_id,
         )
 
     def _estimate_cost(self) -> float | None:
@@ -521,7 +523,25 @@ class CodexStreamProcessor:
             await self._handle_item_completed(event)
         elif event_type == CodexStreamType.TURN_COMPLETED:
             await self._handle_turn_completed(event)
-        # "thread.started" / "turn.started": no observability call needed.
+        elif event_type == CodexStreamType.THREAD_STARTED:
+            # Codex announces its OWN session id here, and it is the same id
+            # the rollout file on disk is keyed by - verified same-run, not
+            # inferred from both being uuidv7. That identity is what lets the
+            # delegate import dedup the leader by lookup instead of guessing
+            # it from agent names (#895).
+            #
+            # FIRST wins, for the same reason as the claude side: a rebind
+            # late in a run would make the real leader look like a delegate
+            # and bill it a second time.
+            announced = event.get("thread_id")
+            if (
+                self._leader_native_session_id is None
+                and isinstance(announced, str)
+                and announced.strip()
+            ):
+                self._leader_native_session_id = announced
+
+        # "turn.started": no observability call needed.
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
         """Handle ``item.started``: only ``command_execution`` starts a tool op.

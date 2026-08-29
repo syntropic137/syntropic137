@@ -93,6 +93,16 @@ def _processor(capture: object, workspace: object, cm: object) -> WorkflowExecut
     p._active_cmds = {}  # type: ignore[attr-defined]
     p._active_workspace_cms = {PHASE: cm}  # type: ignore[attr-defined]
     p._session_capture = capture  # type: ignore[attr-defined]
+    # Delegate import runs on this same path (#895). None here keeps this
+    # test about capture ORDERING: with no store there is nothing to import,
+    # so the import is a no-op and cannot mask the ordering under test.
+    p._session_store = None  # type: ignore[attr-defined]
+    p._observability_writer = None  # type: ignore[attr-defined]
+    p._phase_leader_native_ids = {}  # type: ignore[attr-defined]  # keyed (execution_id, phase_id)
+    # No ledger: these tests are about capture ORDER, not billing. The import
+    # path treats None as "not wired" and bills the full transcript, which is
+    # irrelevant here and exercised in test_import_ledger.py.
+    p._import_ledger = None  # type: ignore[attr-defined]
     return p
 
 

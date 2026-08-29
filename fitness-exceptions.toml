@@ -43,8 +43,8 @@ issue = "#624"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 760
-issue = "#768"  # grew absorbing 769's _DispatchContext, the stale-COLLECT_ARTIFACTS skip guard, #772's skill_materializer wiring, and the session-capture probe hook (the probe body lives in phase_capture.py; what remains here is the port, the per-phase session id, and the calls that must sit before teardown on both the finalize path and the cancel/failure path); a split is still owed
+value = 777
+issue = "#934"  # 760 -> 763 for #895's session-store dep, then -> 773 for the concurrency fix cross-model review found: the leader-id map was processor-instance state keyed by phase_id alone, on a processor the dispatcher SHARES across runs, so two concurrent executions of one workflow could read each other's leader and silently import no delegate. Paid down four ways first (delegate import, teardown loop, conversation recording, observation payload - about 200 lines out) and the pop was pushed into phase_delegate_import rather than kept here. What remains is run/_handle_run_agent/_handle_complete_phase, ~250 lines that genuinely belong elsewhere; #934 tracks that split. Raising a debt ceiling twice in one PR is not good practice - the alternative was blocking a correctness fix on an unrelated refactor next to a release, which is worse. Then 773 -> 777 for #940: wiring the durable import ledger through the processor (one constructor param, one attribute, and the two call sites that must receive it). Same trade as before and deliberately the minimum - four lines, no new responsibility in this class, and the ledger itself lives in syn-adapters. #934 still owns the real split.
 
 [max-loc-file."apps.syn-api.src.syn_api._wiring"]
 value = 1200
@@ -94,7 +94,10 @@ issue = "#673"
 # `unmarked` must ratchet to 0. `xfail` counts disarmed guards: an xfail on a
 # correctness invariant is a disabled alarm, not a known issue.
 [test-markers.unmarked]
-value = 1329
+# Tightened 1329 -> 1169 to remove 160 tests of slack. A ratchet with headroom
+# is not a ratchet: it silently permits exactly the growth it exists to stop.
+# 1169 is the measured census on this commit, so the number can only fall.
+value = 1169
 issue = "#825"
 
 [test-markers.xfail]

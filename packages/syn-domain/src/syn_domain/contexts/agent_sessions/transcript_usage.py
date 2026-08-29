@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum, auto
 from itertools import pairwise
 
 type RolloutRecord = Mapping[str, object]
@@ -443,8 +443,10 @@ class _Unreadable:
 _UNREADABLE = _Unreadable()
 
 
-def _claude_entry(record: object) -> tuple[list[int], str | None] | _Unreadable | None:
-    """This line's usage counts and model, None if it carries none."""
+def _claude_entry(
+    record: object,
+) -> tuple[list[int], str | None, str | None] | _Unreadable | None:
+    """This line's usage counts, model and message id; None if it carries none."""
     if not isinstance(record, Mapping):
         return None
     message = record.get("message")
@@ -457,7 +459,66 @@ def _claude_entry(record: object) -> tuple[list[int], str | None] | _Unreadable 
     if counts is None:
         return _UNREADABLE
     model = message.get("model")
-    return counts, model if isinstance(model, str) else None
+    message_id = message.get("id")
+    return (
+        counts,
+        model if isinstance(model, str) else None,
+        message_id if isinstance(message_id, str) and message_id.strip() else None,
+    )
+
+
+class _Repeat(Enum):
+    """What a message id says about a line that carries usage."""
+
+    NEW = auto()
+
+    ALREADY_COUNTED = auto()
+    """The same response's next CONTENT BLOCK. Claude emits one assistant
+    record per block, each repeating that response's identical usage, so
+    summing them multiplies a turn by its block count. The live stream
+    processor has deduplicated this way since #695."""
+
+    CONTRADICTS = auto()
+    """Same id, DIFFERENT numbers."""
+
+
+def _repeat_verdict(
+    seen: dict[str, tuple[list[int], str | None]],
+    message_id: str | None,
+    counts: list[int],
+    model: str | None,
+) -> _Repeat:
+    """Classify this line against the ids already counted.
+
+    A line with NO id is always NEW: nothing identifies it as a repeat, so
+    dropping it would undercount a real turn.
+    """
+    if message_id is None:
+        return _Repeat.NEW
+    previous = seen.get(message_id)
+    if previous is None:
+        seen[message_id] = (counts, model)
+        return _Repeat.NEW
+    return _Repeat.ALREADY_COUNTED if previous == (counts, model) else _Repeat.CONTRADICTS
+
+
+def _claude_lines(document: str) -> list[object] | UnpricedUsage:
+    """Every non-blank line parsed, or a refusal if any is unreadable.
+
+    A transcript is a record of what happened. A line we cannot read may have
+    carried usage, so the total is no longer knowable, and saying so beats
+    reporting the rest as if it were complete.
+    """
+    records: list[object] = []
+    for line in document.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            records.append(json.loads(stripped))
+        except (json.JSONDecodeError, ValueError):
+            return UnpricedUsage("transcript contains an unreadable line")
+    return records
 
 
 def _claude_usage(document: str) -> UsageResult:
@@ -471,29 +532,40 @@ def _claude_usage(document: str) -> UsageResult:
     totals = [0, 0, 0, 0]
     models: set[str] = set()
     messages = 0
+    seen: dict[str, tuple[list[int], str | None]] = {}
 
-    for line in document.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            record = json.loads(stripped)
-        except (json.JSONDecodeError, ValueError):
-            # A transcript is a record of what happened. A line we cannot read
-            # may have carried usage, so the total is no longer knowable and
-            # saying so beats reporting the rest as if it were complete.
-            return UnpricedUsage("transcript contains an unreadable line")
+    records = _claude_lines(document)
+    if isinstance(records, UnpricedUsage):
+        return records
+
+    for record in records:
         entry = _claude_entry(record)
         if isinstance(entry, _Unreadable):
             return UnpricedUsage("usage present but unreadable")
         if entry is None:
             continue
-        counts, model = entry
+        counts, model, message_id = entry
+        repeat = _repeat_verdict(seen, message_id, counts, model)
+        if repeat is _Repeat.CONTRADICTS:
+            # The transcript contradicts itself. First-wins would hide that,
+            # and a quietly wrong total is worse than a visible refusal.
+            return UnpricedUsage(f"message {message_id} appears twice with different usage")
+        if repeat is _Repeat.ALREADY_COUNTED:
+            continue
         if model is not None:
             models.add(model)
         messages += 1
         totals = [running + delta for running, delta in zip(totals, counts, strict=True)]
 
+    return _claude_result(totals, models, messages)
+
+
+def _claude_result(totals: list[int], models: set[str], messages: int) -> UsageResult:
+    """Turn the accumulated scan into a result.
+
+    Separate from the scan so the two failure shapes - nothing to price, and
+    more than one model - are stated once, where they can be read together.
+    """
     if messages == 0:
         return NoUsage()
     if len(models) > 1:

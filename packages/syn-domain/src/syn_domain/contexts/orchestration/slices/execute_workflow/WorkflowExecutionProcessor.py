@@ -28,9 +28,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import (
-    ConversationRecorder,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
@@ -45,8 +42,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
 from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
     ObservabilityCollector,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture import (
-    capture_phase_session,
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
+    record_phase_conversation,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
+    capture_and_import_phase,
+    close_phase_workspaces,
+    remember_leader_native_id,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import (
     PhaseResultBuilder,
@@ -78,6 +80,8 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
+    from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
@@ -136,6 +140,8 @@ class WorkflowExecutionProcessor:
         claude_plugin_materializer: ClaudePluginMaterializerProtocol | None = None,
         skill_materializer: SkillMaterializerProtocol | None = None,
         session_capture: SessionCapturePort | None = None,
+        session_store: SessionStorePort | None = None,
+        import_ledger: ImportLedgerPort | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -160,6 +166,11 @@ class WorkflowExecutionProcessor:
         # None means capture is OFF, not broken: a deployment with no store
         # configured must behave identically to one from before this existed.
         self._session_capture = session_capture
+        # Where a delegate's transcript is read back from. Optional because a
+        # deployment without a session store simply imports no delegates; it
+        # must never be a reason a phase fails.
+        self._session_store = session_store
+        self._import_ledger = import_ledger
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
@@ -168,6 +179,17 @@ class WorkflowExecutionProcessor:
         self._session_managers: dict[str, SessionLifecycleManager] = {}
         # Per-phase so _finalize_phase can attribute the capture.
         self._phase_session_ids: dict[str, str] = {}
+        #: The id each phase's own harness announced on its stream, which is
+        #: what the delegate import subtracts from the sweep.
+        #:
+        #: Keyed by (execution_id, phase_id), NOT phase_id alone. This
+        #: processor is shared across concurrent dispatches - see
+        #: _DispatchContext above - so two runs of the same workflow share a
+        #: phase id. A phase-only key lets one run read the OTHER run's leader,
+        #: and a leader id absent from this run's sweep takes the refusal path:
+        #: no delegate imported, only a log line. Popped on success so a
+        #: completed phase leaves nothing behind.
+        self._phase_leader_native_ids: dict[tuple[str, str], str] = {}
         self._phase_tokens: dict[str, TokenAccumulator] = {}
         self._phase_auth_tokens: dict[
             str, tuple[int, int, int, int]
@@ -478,22 +500,17 @@ class WorkflowExecutionProcessor:
 
     async def _close_phase_workspace_cms(self, context: str) -> None:
         """Close per-phase workspace context managers and clear per-phase state."""
-        for _pid, workspace_cm in list(self._active_workspace_cms.items()):
-            # Probe on the way out of a CANCEL or a FAILURE too. A phase that
-            # never reached _finalize_phase still ran an agent, and a failed
-            # run is the one whose transcript is most worth having.
-            await capture_phase_session(
-                self._session_capture,
-                self._active_workspaces.get(_pid),
-                session_id=self._phase_session_ids.get(_pid, ""),
-                phase_id=_pid,
-            )
-            try:
-                await workspace_cm.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("Error cleaning up workspace during %s", context)
-        self._active_workspace_cms.clear()
-        self._phase_session_ids.clear()
+        await close_phase_workspaces(
+            context,
+            workspace_cms=self._active_workspace_cms,
+            workspaces=self._active_workspaces,
+            session_ids=self._phase_session_ids,
+            leader_native_ids=self._phase_leader_native_ids,
+            capture_port=self._session_capture,
+            session_store=self._session_store,
+            writer=self._observability_writer,
+            ledger=self._import_ledger,
+        )
 
     async def _handle_provision(
         self,
@@ -620,7 +637,7 @@ class WorkflowExecutionProcessor:
             session_id=session_id,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
-            workspace_id=getattr(workspace, "id", None),
+            workspace_id=getattr(workspace, "workspace_id", None),
             agent_model=phase.agent_config.model,
         )
         result = await self._get_agent_handler().handle(
@@ -635,18 +652,21 @@ class WorkflowExecutionProcessor:
             runner=runner,
         )
 
-        recorder = ConversationRecorder(self._conversation_storage)
-        await recorder.store(
+        remember_leader_native_id(
+            self._phase_leader_native_ids,
+            (todo.execution_id, todo.phase_id),
+            result.stream_result,
+        )
+
+        await record_phase_conversation(
+            self._conversation_storage,
+            result,
             session_id=session_id,
-            lines=result.stream_result.conversation_lines,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             workflow_id=workflow_id,
             model=phase.agent_config.model,
-            input_tokens=result.tokens.input_tokens,
-            output_tokens=result.tokens.output_tokens,
             started_at=self._phase_started_at.get(todo.phase_id, datetime.now(UTC)),
-            success=result.command.exit_code == 0,
         )
         self._phase_tokens[todo.phase_id] = result.tokens
         # Store authoritative totals from CLI result event (includes cache tokens)
@@ -843,11 +863,15 @@ class WorkflowExecutionProcessor:
 
         # BEFORE teardown: once the container is gone so is the spool, and a
         # later probe cannot tell "stored" from "lost forever".
-        await capture_phase_session(
+        await capture_and_import_phase(
             self._session_capture,
             workspace,
+            session_store=self._session_store,
+            writer=self._observability_writer,
+            leader_native_ids=self._phase_leader_native_ids,
             session_id=session_id,
             phase_id=phase_id,
+            ledger=self._import_ledger,
         )
 
         if workspace_cm is not None:

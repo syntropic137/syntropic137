@@ -32,10 +32,6 @@ inputs:
   - name: task
     description: "What changes to make (issue body, change description, etc.)"
     required: true
-  - name: repository
-    description: "Repository URL (owner/repo or full GitHub URL)"
-    required: false
-    default: "https://github.com/syntropic137/sandbox_syn-engineer-beta"
 
 phases:
   - id: create-pr
@@ -54,7 +50,7 @@ phases:
     timeout_seconds: 600
 
     # Tools available for this phase
-    tools:
+    allowed_tools:
       - bash
       - computer
 
@@ -143,7 +139,7 @@ phases:
     max_tokens: 2048
     timeout_seconds: 120
 
-    tools:
+    allowed_tools:
       - bash
 
     prompt_template: |

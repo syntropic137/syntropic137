@@ -29,6 +29,7 @@ from syn_api.types import (
     WorkflowError,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration import RESERVED_INPUT_NAMES
 from syn_shared.agents import (
     AgentProvider,
     UnsupportedAgentProviderError,
@@ -421,7 +422,10 @@ async def execute(
 # -- HTTP Endpoints -----------------------------------------------------------
 
 
-_RESERVED_REPO_INPUT_KEYS: frozenset[str] = frozenset({"repos", "repository"})
+#: Imported rather than redefined: WorkflowDefinition rejects these at
+#: definition time and this rejects them at execute time. Two copies of
+#: the same list is how they drift.
+_RESERVED_REPO_INPUT_KEYS: frozenset[str] = RESERVED_INPUT_NAMES
 
 
 async def _preflight_repos_or_reject(

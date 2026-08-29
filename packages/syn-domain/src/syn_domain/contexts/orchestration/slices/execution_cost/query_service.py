@@ -136,7 +136,9 @@ GROUP BY execution_id, phase_id, data->>'model', ((data->>'total_cost_usd') IS N
 
 def _phase_costs(phase_map: dict[str, PhaseCosts], execution_id: str) -> PhaseCosts:
     """Per-phase breakdown for one execution, empty when it has no phase rows."""
-    return phase_map.get(execution_id) or PhaseCosts(cost_by_phase={}, unpriced_by_phase={})
+    return phase_map.get(execution_id) or PhaseCosts(
+        cost_by_phase={}, unpriced_by_phase={}, models_by_phase={}
+    )
 
 
 class ExecutionCostQueryService:
@@ -294,6 +296,7 @@ class ExecutionCostQueryService:
                 grouped.duration_ms_raw, grouped.started_at, grouped.end_at
             ),
             cost_by_phase=phases.cost_by_phase,
+            models_by_phase=phases.models_by_phase,
             unpriced_by_phase=phases.unpriced_by_phase,
             cost_by_model=grouped.cost_by_model,
             unpriced_observation_count=grouped.unpriced_observation_count,

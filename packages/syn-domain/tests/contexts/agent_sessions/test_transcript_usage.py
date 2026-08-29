@@ -65,7 +65,7 @@ class TestTheHarnessesDoNotShareSemantics:
         usage = _priced(extract_usage(SourceFormat.CLAUDE_CODE_JSONL, _claude_document()))
 
         assert usage.cache_read_tokens > usage.uncached_input_tokens
-        assert usage.uncached_input_tokens == 7
+        assert usage.uncached_input_tokens == 4
 
     def test_codex_input_is_reduced_by_its_cached_subset(self) -> None:
         """Codex's input INCLUDES the cached portion, so billable is the
@@ -84,7 +84,7 @@ class TestTheHarnessesDoNotShareSemantics:
         claude = _priced(extract_usage(SourceFormat.CLAUDE_CODE_JSONL, _claude_document()))
 
         assert codex.total_tokens == 4194 + 45056 + 0 + 404
-        assert claude.total_tokens == 7 + 28340 + 56843 + 214
+        assert claude.total_tokens == 4 + 28340 + 28503 + 131
 
 
 @pytest.mark.unit
@@ -115,13 +115,13 @@ class TestClaudeTranscript:
     def test_sums_per_message_deltas(self) -> None:
         usage = _priced(extract_usage(SourceFormat.CLAUDE_CODE_JSONL, _claude_document()))
 
-        assert usage.output_tokens == 214
-        assert usage.message_count == 3
+        assert usage.output_tokens == 131
+        assert usage.message_count == 2
 
     def test_cache_buckets_are_kept_separate(self) -> None:
         usage = _priced(extract_usage(SourceFormat.CLAUDE_CODE_JSONL, _claude_document()))
 
-        assert usage.cache_creation_tokens == 56843
+        assert usage.cache_creation_tokens == 28503
         assert usage.cache_read_tokens == 28340
 
 
@@ -493,3 +493,81 @@ class TestTheAdversarialCasesThatPreviouslyPriced:
 
         assert isinstance(result, UnpricedUsage)
         assert "multiple models" in result.reason
+
+
+@pytest.mark.unit
+class TestClaudeRepeatsOneResponseAcrossContentBlocks:
+    """Claude emits one assistant record PER CONTENT BLOCK of a single API
+    response, each repeating that response's identical usage. Summing them
+    multiplies a turn by its block count.
+
+    Found by cross-model review of #931: the recorded fixture beside this
+    module contains msg_011CeUDx47ThzPY7HiusPTCN twice, and this parser
+    reported output 214 against a true 131 - 63% high - while five tests
+    agreed with it, because every one had been written from the parser's own
+    output rather than from the transcript.
+    """
+
+    @staticmethod
+    def _line(message_id: str, output: int, model: str = "claude-sonnet-5") -> str:
+        return json.dumps(
+            {
+                "message": {
+                    "id": message_id,
+                    "model": model,
+                    "usage": {
+                        "input_tokens": 5,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                        "output_tokens": output,
+                    },
+                }
+            }
+        )
+
+    def test_a_repeated_message_id_does_not_move_the_total(self) -> None:
+        once = extract_usage("claude-code-jsonl", self._line("msg_a", 10))
+        twice = extract_usage(
+            "claude-code-jsonl", self._line("msg_a", 10) + "\n" + self._line("msg_a", 10)
+        )
+        assert isinstance(once, PricedUsage)
+        assert isinstance(twice, PricedUsage)
+        assert twice == once, "a repeated content block must not be billed again"
+
+    def test_distinct_ids_still_accumulate(self) -> None:
+        """The dedup must not swallow real turns."""
+        usage = extract_usage(
+            "claude-code-jsonl", self._line("msg_a", 10) + "\n" + self._line("msg_b", 7)
+        )
+        assert isinstance(usage, PricedUsage)
+        assert usage.output_tokens == 17
+        assert usage.message_count == 2
+
+    def test_the_same_id_with_different_usage_is_refused(self) -> None:
+        """The transcript contradicts itself. First-wins would hide that, and a
+        quietly wrong total is worse than a visible refusal."""
+        usage = extract_usage(
+            "claude-code-jsonl", self._line("msg_a", 10) + "\n" + self._line("msg_a", 99)
+        )
+        assert isinstance(usage, UnpricedUsage)
+        assert "msg_a" in usage.reason
+
+    def test_entries_without_an_id_stay_independent(self) -> None:
+        """Nothing identifies them as repeats, so dropping them would
+        undercount a real turn."""
+        anonymous = json.dumps(
+            {
+                "message": {
+                    "model": "claude-sonnet-5",
+                    "usage": {
+                        "input_tokens": 5,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                        "output_tokens": 10,
+                    },
+                }
+            }
+        )
+        usage = extract_usage("claude-code-jsonl", anonymous + "\n" + anonymous)
+        assert isinstance(usage, PricedUsage)
+        assert usage.output_tokens == 20

@@ -4097,6 +4097,10 @@ export interface components {
             execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
+            /** Parent Session Id */
+            parent_session_id?: string | null;
+            /** Root Session Id */
+            root_session_id?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Milestone Id */
@@ -4229,6 +4233,10 @@ export interface components {
             execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
+            /** Parent Session Id */
+            parent_session_id?: string | null;
+            /** Root Session Id */
+            root_session_id?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Status */
@@ -5241,10 +5249,7 @@ export interface components {
             repository_url?: string | null;
             /** Repos */
             repos?: string[];
-            /**
-             * Requires Repos
-             * @default true
-             */
+            /** Requires Repos */
             requires_repos: boolean;
         };
         /** WorkflowSummaryResponse */
@@ -5269,10 +5274,7 @@ export interface components {
              * @default false
              */
             is_archived: boolean;
-            /**
-             * Requires Repos
-             * @default true
-             */
+            /** Requires Repos */
             requires_repos: boolean;
         };
         /**

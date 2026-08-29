@@ -115,17 +115,17 @@ class TestTheRoundTrip:
         # passed with cache_read of 1 instead of 28340.
         assert result == PricedUsage(
             model="claude-sonnet-4-6",
-            uncached_input_tokens=7,
+            uncached_input_tokens=4,
             cache_read_tokens=28340,
-            cache_creation_tokens=56843,
-            output_tokens=214,
-            message_count=3,
+            cache_creation_tokens=28503,
+            output_tokens=131,
+            message_count=2,
         )
         # The buckets are disjoint by construction, so the total is their sum.
         # Stated separately because the total is the number that reaches a
         # cost report, and arriving at it with right parts and a wrong total
         # is exactly what the codex running-total trap produces.
-        assert result.total_tokens == 85404
+        assert result.total_tokens == 56978
 
 
 @pytest.mark.unit

@@ -9918,6 +9918,28 @@
             ],
             "title": "Phase Id"
           },
+          "parent_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Session Id"
+          },
+          "root_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Session Id"
+          },
           "phase_display": {
             "anyOf": [
               {
@@ -10204,6 +10226,28 @@
               }
             ],
             "title": "Phase Id"
+          },
+          "parent_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Session Id"
+          },
+          "root_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Session Id"
           },
           "phase_display": {
             "anyOf": [
@@ -12102,8 +12146,7 @@
           },
           "requires_repos": {
             "type": "boolean",
-            "title": "Requires Repos",
-            "default": true
+            "title": "Requires Repos"
           }
         },
         "type": "object",
@@ -12111,7 +12154,8 @@
           "id",
           "name",
           "workflow_type",
-          "classification"
+          "classification",
+          "requires_repos"
         ],
         "title": "WorkflowResponse"
       },
@@ -12156,8 +12200,7 @@
           },
           "requires_repos": {
             "type": "boolean",
-            "title": "Requires Repos",
-            "default": true
+            "title": "Requires Repos"
           }
         },
         "type": "object",
@@ -12165,7 +12208,8 @@
           "id",
           "name",
           "workflow_type",
-          "phase_count"
+          "phase_count",
+          "requires_repos"
         ],
         "title": "WorkflowSummaryResponse"
       },

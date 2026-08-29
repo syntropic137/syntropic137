@@ -6,6 +6,15 @@ from decimal import Decimal
 from typing import Any, Final
 
 UNATTRIBUTED_PHASE_ID: Final[str] = "unattributed"
+
+UNATTRIBUTED_MODEL: Final[str] = "unattributed-model"
+"""Bucket for cost that is AUTHORITATIVE but names no model.
+
+A session_summary can carry an SDK-reported ``total_cost_usd`` with no model
+id. That cost is real and counts toward the phase total, so omitting it from
+the per-model breakdown makes the parts sum to less than the whole - the exact
+reconciliation failure #812 fixed for phases and this restores for models.
+"""
 """Bucket for cost that belongs to an execution but to no particular phase.
 
 ``agent_events.phase_id`` is nullable, so a session_summary can be recorded
@@ -106,6 +115,15 @@ class ExecutionCost:
     not a corruption.
     """
 
+    models_by_phase: dict[str, dict[str, Decimal]] = field(default_factory=dict)
+    """What each MODEL cost within a phase.
+
+    Since #895 a phase can contain more than one session: a delegated run is
+    priced under its own session id but the same phase_id. ``cost_by_phase``
+    can only say what the phase cost in total; this says which model spent it,
+    which is the number that decides whether more fan-out is affordable.
+    """
+
     unpriced_by_phase: dict[str, int] = field(default_factory=dict)
     """Per-phase count of observations that could not be priced.
 
@@ -196,6 +214,10 @@ class ExecutionCost:
             turns=data.get("turns", 0),
             duration_ms=data.get("duration_ms", 0),
             cost_by_phase=_coerce_decimal_dict(data.get("cost_by_phase")),
+            models_by_phase={
+                phase: _coerce_decimal_dict(models)
+                for phase, models in (data.get("models_by_phase") or {}).items()
+            },
             unpriced_by_phase=dict(data.get("unpriced_by_phase") or {}),
             cost_by_model=_coerce_decimal_dict(data.get("cost_by_model")),
             cost_by_tool=_coerce_decimal_dict(data.get("cost_by_tool")),
@@ -224,6 +246,10 @@ class ExecutionCost:
             "turns": self.turns,
             "duration_ms": self.duration_ms,
             "cost_by_phase": {k: str(v) for k, v in self.cost_by_phase.items()},
+            "models_by_phase": {
+                phase: {m: str(c) for m, c in models.items()}
+                for phase, models in self.models_by_phase.items()
+            },
             "unpriced_by_phase": dict(self.unpriced_by_phase),
             "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},
             "cost_by_tool": {k: str(v) for k, v in self.cost_by_tool.items()},
