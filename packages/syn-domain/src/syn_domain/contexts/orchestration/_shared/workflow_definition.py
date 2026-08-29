@@ -141,7 +141,7 @@ def _resolve_phase_prompt_file(
 class RepositoryConfig(BaseModel):
     """Repository configuration for a workflow."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     url: str = Field(..., min_length=1)
     ref: str = Field(default="main")
@@ -153,7 +153,7 @@ class InputYamlDefinition(BaseModel):
     Maps to domain InputDeclaration.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str = Field(..., min_length=1)
     description: str | None = None
@@ -232,7 +232,16 @@ class PhaseYamlDefinition(BaseModel):
     Converts YAML snake_case to domain PhaseDefinition.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        # WHY (#961): a misspelled key used to be accepted and dropped, so a phase
+        # whose `prompt:` should have been `prompt_template:` installed cleanly,
+        # executed, billed, and gave the agent NO instructions -- with every layer
+        # reporting success. Four shipped trigger workflows were also declaring
+        # `tools:` (not `allowed_tools:`), silently discarding their intended tool
+        # allowlist. Rejecting an unknown key is the only signal an author gets.
+        extra="forbid",
+    )
 
     id: str = Field(..., alias="id", min_length=1)
     name: str = Field(..., min_length=1, max_length=255)
@@ -279,7 +288,14 @@ class PhaseYamlDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
-        """Ensure at most one of prompt_template or prompt_file is set."""
+        """Ensure at most one of prompt_template or prompt_file is set.
+
+        NOT enforced here: that at least one is set. A phase with no
+        instructions cannot do useful work and should be rejected, but adding
+        that guard breaks 21 existing tests whose fixtures omit the prompt, so
+        it is split into its own change rather than buried in a PR about
+        unknown keys. Tracked separately.
+        """
         if self.prompt_template is not None and self.prompt_file is not None:
             msg = f"Phase '{self.id}': specify either 'prompt_template' or 'prompt_file', not both"
             raise ValueError(msg)
@@ -373,7 +389,12 @@ class WorkflowDefinition(BaseModel):
     This is the root model for workflow YAML files.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        # Same reasoning as PhaseYamlDefinition (#961): silently dropping an
+        # unknown workflow-level key hides an authoring mistake behind a green run.
+        extra="forbid",
+    )
 
     # Identity
     id: str = Field(..., min_length=1, max_length=100)
@@ -386,6 +407,14 @@ class WorkflowDefinition(BaseModel):
 
     # Repository context
     repository: RepositoryConfig | None = None
+
+    # Multi-repo templates. `CreateWorkflowTemplateCommand.repos` and the
+    # aggregate have carried this since ADR-058, and the docs advertise it
+    # (guide/core-concepts, workspaces/hydration), but the YAML model never
+    # gained the field -- so a documented `repos:` block was silently dropped.
+    # With extra="forbid" that silence becomes a hard error, so the field is
+    # added here rather than deleting the documented capability.
+    repos: list[str] = Field(default_factory=list)
 
     # Execution gate (ADR-058 #666): None = infer from repository presence
     requires_repos: bool | None = None

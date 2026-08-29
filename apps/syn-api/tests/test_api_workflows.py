@@ -9,6 +9,8 @@ import pytest
 
 from syn_api.types import Err, Ok
 
+pytestmark = pytest.mark.unit
+
 # Ensure test environment for in-memory adapters
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -153,7 +155,9 @@ phases:
     name: Research
     order: 1
     description: Research phase
-    agent_type: claude
+    prompt_template: Do the research
+    agent:
+      provider: claude
 """
 
     result = await validate_yaml(yaml_content)
