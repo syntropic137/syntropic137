@@ -94,7 +94,10 @@ issue = "#673"
 # `unmarked` must ratchet to 0. `xfail` counts disarmed guards: an xfail on a
 # correctness invariant is a disabled alarm, not a known issue.
 [test-markers.unmarked]
-value = 1329
+# Tightened 1329 -> 1169 to remove 160 tests of slack. A ratchet with headroom
+# is not a ratchet: it silently permits exactly the growth it exists to stop.
+# 1169 is the measured census on this commit, so the number can only fall.
+value = 1169
 issue = "#825"
 
 [test-markers.xfail]
