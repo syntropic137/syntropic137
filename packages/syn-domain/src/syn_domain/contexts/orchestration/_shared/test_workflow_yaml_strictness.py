@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
+from typing_extensions import TypedDict
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PhaseYamlDefinition,
@@ -26,14 +27,21 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
 pytestmark = pytest.mark.unit
 
 
-def _phase(**overrides: object) -> dict[str, object]:
-    base: dict[str, object] = {
-        "id": "p1",
-        "order": 1,
-        "name": "p1",
-        "prompt_template": "do the thing",
-    }
-    base.update(overrides)
+class _PhaseKwargs(TypedDict, total=False):
+    """Structured phase kwargs, so the fixture is not an untyped dict (ADR-063)."""
+
+    id: str
+    order: int
+    name: str
+    prompt_template: str
+    prompt_file: str
+    allowed_tools: list[str]
+
+
+def _phase(**overrides: object) -> _PhaseKwargs:
+    base = _PhaseKwargs(id="p1", order=1, name="p1", prompt_template="do the thing")
+    for key, value in overrides.items():
+        base[key] = value  # type: ignore[literal-required]  # test builds bad keys on purpose
     return base
 
 
