@@ -12146,8 +12146,7 @@
           },
           "requires_repos": {
             "type": "boolean",
-            "title": "Requires Repos",
-            "default": true
+            "title": "Requires Repos"
           }
         },
         "type": "object",
@@ -12155,7 +12154,8 @@
           "id",
           "name",
           "workflow_type",
-          "classification"
+          "classification",
+          "requires_repos"
         ],
         "title": "WorkflowResponse"
       },
@@ -12200,8 +12200,7 @@
           },
           "requires_repos": {
             "type": "boolean",
-            "title": "Requires Repos",
-            "default": true
+            "title": "Requires Repos"
           }
         },
         "type": "object",
@@ -12209,7 +12208,8 @@
           "id",
           "name",
           "workflow_type",
-          "phase_count"
+          "phase_count",
+          "requires_repos"
         ],
         "title": "WorkflowSummaryResponse"
       },

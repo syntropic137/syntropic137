@@ -43,9 +43,13 @@ repos:
   - https://github.com/acme/web-app
 phases:
   - id: discovery
+    name: Discovery
+    order: 1
     prompt_file: phases/discovery.md
     model: sonnet
   - id: synthesis
+    name: Synthesis
+    order: 2
     prompt_file: phases/synthesis.md
     model: opus
 ```

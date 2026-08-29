@@ -3,6 +3,7 @@
 Extracted from postgres_helpers.py to reduce module cognitive complexity.
 """
 
+import re
 from typing import Any
 
 # Type alias for filter values that can be serialized for JSONB queries
@@ -33,6 +34,9 @@ def _build_where_clause(
     return " WHERE " + " AND ".join(conditions), params
 
 
+_SAFE_FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 def _build_order_clause(order_by: str | None) -> str:
     """Build an ORDER BY clause from an optional sort specifier.
 
@@ -48,9 +52,17 @@ def _build_order_clause(order_by: str | None) -> str:
     """
     if not order_by:
         return " ORDER BY updated_at DESC"
-    if order_by.startswith("-"):
-        return f" ORDER BY data->>'{order_by[1:]}' DESC NULLS LAST"
-    return f" ORDER BY data->>'{order_by}' ASC NULLS LAST"
+    descending = order_by.startswith("-")
+    field = order_by[1:] if descending else order_by
+    # The field is interpolated into SQL, not bound as a parameter -- a JSON key
+    # cannot be a placeholder. No caller passes user input today, but this
+    # function cannot see its callers, so it refuses anything that is not a
+    # plain identifier rather than trusting them.
+    if not _SAFE_FIELD.fullmatch(field):
+        msg = f"unsafe order_by field {field!r}: expected a plain identifier"
+        raise ValueError(msg)
+    direction = "DESC" if descending else "ASC"
+    return f" ORDER BY data->>'{field}' {direction} NULLS LAST"
 
 
 def build_query(

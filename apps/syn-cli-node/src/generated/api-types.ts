@@ -5249,10 +5249,7 @@ export interface components {
             repository_url?: string | null;
             /** Repos */
             repos?: string[];
-            /**
-             * Requires Repos
-             * @default true
-             */
+            /** Requires Repos */
             requires_repos: boolean;
         };
         /** WorkflowSummaryResponse */
@@ -5277,10 +5274,7 @@ export interface components {
              * @default false
              */
             is_archived: boolean;
-            /**
-             * Requires Repos
-             * @default true
-             */
+            /** Requires Repos */
             requires_repos: boolean;
         };
         /**

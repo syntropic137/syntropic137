@@ -160,12 +160,7 @@ class WorkflowListProjection(AutoDispatchProjection):
         Returns:
             List of matching WorkflowSummary objects
         """
-        filters = {}
-        if workflow_type_filter:
-            filters["workflow_type"] = workflow_type_filter
-
-        if not include_archived:
-            filters["is_archived"] = False
+        filters = self._filters(workflow_type_filter, include_archived)
 
         data = await self._store.query(
             self.PROJECTION_NAME,
@@ -175,3 +170,43 @@ class WorkflowListProjection(AutoDispatchProjection):
             offset=offset,
         )
         return [WorkflowSummary.from_dict(d) for d in data]
+
+    @staticmethod
+    def _filters(workflow_type_filter: str | None, include_archived: bool) -> dict[str, str | bool]:
+        """Build the filter map shared by ``query`` and ``count``.
+
+        Shared so the two cannot drift: a total computed under different filters
+        than the page it describes is worse than no total at all.
+        """
+        filters: dict[str, str | bool] = {}
+        if workflow_type_filter:
+            filters["workflow_type"] = workflow_type_filter
+        if not include_archived:
+            filters["is_archived"] = False
+        return filters
+
+    async def count(
+        self,
+        workflow_type_filter: str | None = None,
+        include_archived: bool = False,
+    ) -> int:
+        """Count all matching templates, ignoring pagination.
+
+        ``limit=None`` means unlimited in both the postgres and memory stores,
+        so this counts the whole filtered collection rather than one page.
+
+        COST: this fetches every matching row and takes ``len``, which is O(n)
+        in database work, transfer, and deserialization per request. That is
+        acceptable at the current scale (tens of workflow templates) but it is
+        not the right primitive. The store protocol has no ``count``; adding
+        ``SELECT COUNT(*)`` there touches both adapters and six test doubles,
+        so it is tracked separately rather than bundled into a pagination fix.
+        """
+        filters = self._filters(workflow_type_filter, include_archived)
+        data = await self._store.query(
+            self.PROJECTION_NAME,
+            filters=filters if filters else None,
+            limit=None,
+            offset=0,
+        )
+        return len(data)
