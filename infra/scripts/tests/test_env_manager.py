@@ -21,6 +21,11 @@ import pytest
 # use tmp_path instead of the real repo.
 import infra.scripts.env_manager as em
 
+# CI runs `pytest -m unit`; without this the module collected ZERO tests
+# there. All 50 passed locally the whole time, which is why nobody noticed
+# that the env/secret handling they cover was ungated (#825).
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Slugification
 # ---------------------------------------------------------------------------

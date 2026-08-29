@@ -299,6 +299,7 @@ services:
     tmpfs:
     - /tmp
     - /home/syn/.config
+    - /home/syn/.sigstore:size=16m
     deploy:
       resources:
         limits:

@@ -265,6 +265,10 @@ services:
     tmpfs:
       - /tmp
       - /home/syn/.config  # 1Password CLI needs writable config dir on read-only FS
+      # size= is REQUIRED, not tidiness: an unbounded tmpfs may use up to half of
+      # host RAM, so cache growth could OOM-kill the API on a small box like the
+      # Mini. The sigstore TUF root is a few hundred KB; 16m is generous.
+      - /home/syn/.sigstore:size=16m  # cosign writes a TUF trust cache here BEFORE it can verify anything
     deploy:
       resources:
         limits:

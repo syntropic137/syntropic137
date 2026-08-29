@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
+    from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
@@ -140,6 +141,7 @@ class WorkflowExecutionProcessor:
         skill_materializer: SkillMaterializerProtocol | None = None,
         session_capture: SessionCapturePort | None = None,
         session_store: SessionStorePort | None = None,
+        import_ledger: ImportLedgerPort | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -168,6 +170,7 @@ class WorkflowExecutionProcessor:
         # deployment without a session store simply imports no delegates; it
         # must never be a reason a phase fails.
         self._session_store = session_store
+        self._import_ledger = import_ledger
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
@@ -506,6 +509,7 @@ class WorkflowExecutionProcessor:
             capture_port=self._session_capture,
             session_store=self._session_store,
             writer=self._observability_writer,
+            ledger=self._import_ledger,
         )
 
     async def _handle_provision(
@@ -864,6 +868,7 @@ class WorkflowExecutionProcessor:
             leader_native_ids=self._phase_leader_native_ids,
             session_id=session_id,
             phase_id=phase_id,
+            ledger=self._import_ledger,
         )
 
         if workspace_cm is not None:
