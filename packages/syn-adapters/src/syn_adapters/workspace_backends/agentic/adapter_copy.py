@@ -10,6 +10,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from syn_shared.workspace_paths import WORKSPACE_OUTPUT_DIR_RELATIVE
+
 if TYPE_CHECKING:
     from agentic_isolation import AgenticWorkspace, WorkspaceDockerProvider
 
@@ -212,7 +214,7 @@ async def copy_files_from_workspace(
 
     Args:
         handle: Handle from create()
-        patterns: Glob patterns to match (e.g., ["artifacts/output/**/*"])
+        patterns: Glob patterns to match (e.g., [f"{WORKSPACE_OUTPUT_DIR_RELATIVE}/**/*"])
         base_path: Base path inside container (not used - we read from host mount)
 
     Returns:

@@ -65,17 +65,27 @@ WORKSPACE_SETTINGS_FILE = WORKSPACE_CLAUDE_DIR / "settings.json"
 # Container logs directory
 WORKSPACE_LOGS_DIR = WORKSPACE_ROOT / ".logs"
 
+# Relative path constants for consuming packages building glob patterns
+# These are derived from absolute paths for ergonomic consumption
+# while maintaining a single source of truth via relative_to()
+WORKSPACE_OUTPUT_DIR_RELATIVE = WORKSPACE_OUTPUT_DIR.relative_to(WORKSPACE_ROOT)
+WORKSPACE_INPUT_DIR_RELATIVE = WORKSPACE_INPUT_DIR.relative_to(WORKSPACE_ROOT)
+WORKSPACE_ARTIFACTS_DIR_RELATIVE = WORKSPACE_ARTIFACTS_DIR.relative_to(WORKSPACE_ROOT)
+
 # All exported constants
 __all__ = [
     "WORKSPACE_ANALYTICS_DIR",
     "WORKSPACE_ANALYTICS_FILE",
     "WORKSPACE_ARTIFACTS_DIR",
+    "WORKSPACE_ARTIFACTS_DIR_RELATIVE",
     "WORKSPACE_CLAUDE_DIR",
     "WORKSPACE_CONTEXT_DIR",
     "WORKSPACE_HOOKS_DIR",
     "WORKSPACE_INPUT_DIR",
+    "WORKSPACE_INPUT_DIR_RELATIVE",
     "WORKSPACE_LOGS_DIR",
     "WORKSPACE_OUTPUT_DIR",
+    "WORKSPACE_OUTPUT_DIR_RELATIVE",
     "WORKSPACE_REPOS_DIR",
     "WORKSPACE_ROOT",
     "WORKSPACE_SETTINGS_FILE",

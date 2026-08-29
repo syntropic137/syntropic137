@@ -7,6 +7,8 @@ workspaces. This port defines the contract for workspace creation and management
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Protocol
 
+from syn_shared.workspace_paths import WORKSPACE_OUTPUT_DIR_RELATIVE
+
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service import ManagedWorkspace
 
@@ -62,7 +64,7 @@ class WorkspaceServicePort(Protocol):
                     process_event(line)
 
                 # Collect artifacts
-                artifacts = await ws.collect_files(patterns=["artifacts/output/**/*"])
+                artifacts = await ws.collect_files(patterns=[f"{WORKSPACE_OUTPUT_DIR_RELATIVE}/**/*"])
             # Workspace destroyed here
         """
         ...

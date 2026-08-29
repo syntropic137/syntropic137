@@ -18,6 +18,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from syn_shared.workspace_paths import WORKSPACE_ARTIFACTS_DIR_RELATIVE, WORKSPACE_OUTPUT_DIR_RELATIVE
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -104,7 +106,7 @@ class RecordingEventStreamAdapter:
                 process_event(line)
 
             # Collect workspace files from recording
-            files = adapter.collect_files(patterns=["artifacts/output/**/*"])
+            files = adapter.collect_files(patterns=[f"{WORKSPACE_OUTPUT_DIR_RELATIVE}/**/*"])
 
     Attributes:
         metadata: Recording metadata (cli_version, model, duration, etc.)
@@ -250,7 +252,7 @@ class RecordingEventStreamAdapter:
 
         Returns:
             Dict mapping relative path -> file content.
-            e.g., {"artifacts/output/summary.md": b"# Summary..."}
+            e.g., {f"{WORKSPACE_OUTPUT_DIR_RELATIVE}/summary.md": b"# Summary..."}
 
         Returns empty dict for recordings without workspace files.
         """
@@ -266,18 +268,18 @@ class RecordingEventStreamAdapter:
         returns files from the recording instead of a real container.
 
         Args:
-            patterns: Glob patterns to match (default: ["artifacts/**/*"])
+            patterns: Glob patterns to match (default: [f"{WORKSPACE_ARTIFACTS_DIR_RELATIVE}/**/*"])
 
         Returns:
             List of (relative_path, content) tuples matching the patterns.
 
         Examples:
             >>> adapter = RecordingEventStreamAdapter(Recording.ARTIFACT_WORKFLOW)
-            >>> files = adapter.collect_files(patterns=["artifacts/output/**/*"])
+            >>> files = adapter.collect_files(patterns=[f"{WORKSPACE_OUTPUT_DIR_RELATIVE}/**/*"])
             >>> for path, content in files:
             ...     print(f"{path}: {len(content)} bytes")
         """
-        pats = patterns or ["artifacts/**/*"]
+        pats = patterns or [f"{WORKSPACE_ARTIFACTS_DIR_RELATIVE}/**/*"]
         workspace_files = self.get_workspace_files()
         return [
             (fp, content)
