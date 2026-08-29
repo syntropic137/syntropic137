@@ -267,7 +267,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         # Update with final totals from event if provided.
         #
-        # A ZERO NEVER OVERWRITES A NON-ZERO ACCUMULATION (#969). The totals here
+        # A ZERO DURATION never overwrites a non-zero accumulation (#969); every
+        # other field here stays authoritative. The totals are
         # are accumulated from PhaseCompleted events -- each one an observation of
         # work that actually happened. A completion event claiming 0 while phases
         # reported 33s is self-contradictory, and the accumulated value is the one
