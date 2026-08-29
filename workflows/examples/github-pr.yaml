@@ -46,13 +46,17 @@ phases:
     output_artifacts:
       - pr_metadata
       - changes_summary
-    max_tokens: 8192
     timeout_seconds: 600
 
     # Tools available for this phase
+    # `computer` removed: the workspace image lists it under
+    # `require_enablement`, not `defaults.allowed_tools`, so it was never
+    # granted here regardless. Names are now validated (#964).
     allowed_tools:
-      - bash
-      - computer
+      - Bash
+      - Read
+      - Edit
+      - Write
 
     prompt_template: |
       You are a software engineer with access to git and the GitHub CLI (gh).
@@ -136,11 +140,10 @@ phases:
       - pr_metadata
     output_artifacts:
       - verification_report
-    max_tokens: 2048
     timeout_seconds: 120
 
     allowed_tools:
-      - bash
+      - Bash
 
     prompt_template: |
       You are verifying that the Pull Request was created successfully.

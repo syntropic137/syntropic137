@@ -100,10 +100,9 @@ class TestPhaseDefinitionExtensions:
             name="Test",
             order=1,
             prompt_template="Do something",
-            max_tokens=4096,
         )
         assert phase.prompt_template == "Do something"
-        assert phase.max_tokens == 4096
+        assert phase.max_tokens is None  # rejected at authoring time (#964)
 
 
 # =============================================================================
@@ -433,7 +432,6 @@ phases:
             "---\n"
             "model: opus\n"
             "argument-hint: '[task]'\n"
-            "max-tokens: 8192\n"
             "timeout-seconds: 600\n"
             "allowed-tools: Read, Grep\n"
             "---\n\n"
@@ -454,15 +452,13 @@ phases:
         phase = defn.phases[0]
         assert phase.model == "opus"
         assert phase.argument_hint == "[task]"
-        assert phase.max_tokens == 8192
+        assert phase.max_tokens is None  # rejected at authoring time (#964)
         assert phase.timeout_seconds == 600
         assert phase.allowed_tools == ["Read", "Grep"]
 
     def test_yaml_overrides_frontmatter(self, tmp_path: Path) -> None:
         """YAML phase config takes precedence over .md frontmatter."""
-        (tmp_path / "phase.md").write_text(
-            "---\nmodel: opus\nmax-tokens: 8192\n---\n\nPrompt body.\n"
-        )
+        (tmp_path / "phase.md").write_text("---\nmodel: opus\n---\n\nPrompt body.\n")
         yaml_file = tmp_path / "workflow.yaml"
         yaml_file.write_text(
             "id: test-wf\n"
@@ -478,7 +474,7 @@ phases:
         defn = WorkflowDefinition.from_file(yaml_file)
         phase = defn.phases[0]
         assert phase.model == "sonnet"  # YAML wins
-        assert phase.max_tokens == 8192  # frontmatter fills gap
+        assert phase.max_tokens is None  # rejected at authoring time (#964)
 
     def test_allowed_tools_from_frontmatter(self, tmp_path: Path) -> None:
         """.md allowed-tools flows to domain PhaseDefinition."""
@@ -559,7 +555,6 @@ phases:
     name: Phase 1
     order: 1
     prompt_template: "Do the thing."
-    max_tokens: 4096
 """
         defn = WorkflowDefinition.from_yaml(yaml_content)
         phase = defn.phases[0]

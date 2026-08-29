@@ -32,7 +32,6 @@ phases:
     output_artifacts:
       - subagent_results
       - coordination_summary
-    max_tokens: 8192
     timeout_seconds: 600
     prompt_template: |
       You are a coordination agent demonstrating subagent delegation.
@@ -81,7 +80,6 @@ phases:
       - subagent_results
     output_artifacts:
       - verification_report
-    max_tokens: 2048
     timeout_seconds: 120
     prompt_template: |
       You are a verification agent. Review the coordination phase results.

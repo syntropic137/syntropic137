@@ -23,7 +23,6 @@ phases:
     name: Report skill availability
     order: 1
     execution_type: sequential
-    max_tokens: 2048
     timeout_seconds: 300
     prompt_file: phases/report.md
     agent:

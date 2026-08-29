@@ -53,7 +53,6 @@ phases:
     output_artifacts:
       - research_summary
       - recommendations
-    max_tokens: 4096
     timeout_seconds: 300
     prompt_template: |
       You are a technical writer synthesizing research findings.

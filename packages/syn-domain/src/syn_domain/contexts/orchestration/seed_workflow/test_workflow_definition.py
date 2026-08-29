@@ -39,7 +39,6 @@ phases:
     input_artifacts: []
     output_artifacts:
       - output_1
-    max_tokens: 4096
     timeout_seconds: 300
 
   - id: phase-2
@@ -80,7 +79,9 @@ def test_parse_phases() -> None:
     assert phase1.order == 1
     assert phase1.execution_type == PhaseExecutionType.SEQUENTIAL
     assert phase1.output_artifacts == ["output_1"]
-    assert phase1.max_tokens == 4096
+    # max_tokens intentionally absent: declaring it is now rejected, because
+    # no harness CLI can enforce a token cap (#964).
+    assert phase1.max_tokens is None
 
     phase2 = definition.phases[1]
     assert phase2.execution_type == PhaseExecutionType.HUMAN_IN_LOOP
@@ -240,7 +241,7 @@ def test_load_from_file_with_prompt_file() -> None:
         prompts = dir_path / "prompts"
         prompts.mkdir()
         (prompts / "research.md").write_text(
-            "---\nmodel: sonnet\nmax-tokens: 4096\n---\n\n"
+            "---\nmodel: sonnet\n---\n\n"
             "You are a research assistant.\n\n"
             "## Task\n$ARGUMENTS\n"
         )
@@ -265,7 +266,7 @@ def test_load_from_file_with_prompt_file() -> None:
         assert "research assistant" in phase.prompt_template
         assert "$ARGUMENTS" in phase.prompt_template
         assert phase.model == "sonnet"
-        assert phase.max_tokens == 4096
+        assert phase.max_tokens is None  # rejected at authoring time (#964)
         assert phase.prompt_file is None  # resolved away
 
         # Domain conversion should also work.
