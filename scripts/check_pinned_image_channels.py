@@ -81,6 +81,35 @@ def find_label(image_config: object, label: str) -> str | None:
     return found[0] if found else None
 
 
+#: The submodule whose source builds these images. The pins ship alongside this
+#: exact commit, so the build they came from must BE this commit.
+SUBMODULE_PATH = "lib/agentic-primitives"
+
+
+def submodule_gitlink(path: str = SUBMODULE_PATH) -> str:
+    """The commit this repo vendors for `path`.
+
+    Read from the gitlink rather than the submodule's own checked-out HEAD:
+    a working tree can sit on any commit, but the gitlink is what the repo
+    actually ships, and it is what CI would clone.
+    """
+    result = subprocess.run(
+        ["git", "ls-tree", "HEAD", path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        msg = f"could not read the gitlink for {path}: {result.stderr.strip()[:200]}"
+        raise RuntimeError(msg)
+    # "160000 commit <sha>\t<path>"
+    fields = result.stdout.split()
+    if len(fields) < 3 or fields[1] != "commit":
+        msg = f"{path} is not a submodule gitlink: {result.stdout.strip()[:120]}"
+        raise RuntimeError(msg)
+    return fields[2]
+
+
 def inspect_channel(provider: str, ref: str) -> ImageChannel:
     """Read one image's channel label from the registry."""
     result = subprocess.run(
@@ -147,9 +176,29 @@ def main() -> int:
         print("entry from the same release build.")
         return 1
 
+    # THIRD INVARIANT: that single build must be the submodule we vendor.
+    #
+    # Raised by a codex review of #941: the first two invariants are satisfied
+    # by any self-consistent set of pins, including a set that agrees with
+    # itself and disagrees with the source in lib/. The images carry the
+    # workspace toolchain while the gitlink carries the Python we import from
+    # it, so a mismatch means agents run one commit and the API imports another.
+    revision = revisions.pop() if revisions else None
+    gitlink = submodule_gitlink()
+    if revision != gitlink:
+        print()
+        print("Pinned images were NOT built from the submodule this repo ships:")
+        print(f"  images   built from {revision or '<none>'}")
+        print(f"  {SUBMODULE_PATH} pinned at {gitlink}")
+        print()
+        print("Agents would run one commit while the API imports another.")
+        print("Re-pin from the release build of the commit in the gitlink.")
+        return 1
+
     print(
         f"All {len(results)} pinned workspace image(s) are release-channel, "
-        f"from a single build ({(revisions.pop() if revisions else '<unknown>')[:12]})."
+        f"built from {revision[:12] if revision else '<unknown>'}, "
+        f"matching the {SUBMODULE_PATH} gitlink."
     )
     return 0
 

@@ -9,12 +9,13 @@ be tested, which is the documented lesson from the marker gate.
 from __future__ import annotations
 
 import pytest
-
 from scripts.check_pinned_image_channels import (
     CHANNEL_LABEL,
     REVISION_LABEL,
+    SUBMODULE_PATH,
     ImageChannel,
     find_label,
+    submodule_gitlink,
 )
 
 pytestmark = pytest.mark.unit
@@ -61,3 +62,30 @@ class TestVerdict:
     def test_a_missing_channel_does_not_pass(self) -> None:
         """An unlabelled image must not be treated as approved."""
         assert not ImageChannel("OMNI", "ref", None, None).ok
+
+
+class TestSubmoduleGitlink:
+    """The third invariant, added after a codex review of #941.
+
+    The first two are satisfied by any self-consistent set of pins, including
+    one that agrees with itself and disagrees with the source in lib/.
+    """
+
+    def test_reads_the_commit_out_of_a_gitlink_entry(self) -> None:
+        assert submodule_gitlink(SUBMODULE_PATH) == submodule_gitlink()
+
+    def test_the_real_gitlink_is_a_full_sha(self) -> None:
+        got = submodule_gitlink()
+        assert len(got) == 40, got
+        assert all(c in "0123456789abcdef" for c in got), got
+
+    def test_a_regular_file_is_not_a_gitlink(self) -> None:
+        """`git ls-tree` happily returns a blob line; parsing it as a commit
+        would silently compare the image revision against a file hash."""
+        with pytest.raises(RuntimeError, match="not a submodule gitlink"):
+            submodule_gitlink("justfile")
+
+    def test_a_path_that_does_not_exist_raises(self) -> None:
+        """Empty stdout must fail closed, not read as 'no mismatch'."""
+        with pytest.raises(RuntimeError, match="could not read the gitlink"):
+            submodule_gitlink("no/such/path")
