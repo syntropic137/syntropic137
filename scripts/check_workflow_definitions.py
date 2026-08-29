@@ -19,6 +19,7 @@ import yaml
 from pydantic import ValidationError
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+from syn_domain.contexts.orchestration._shared.yaml_to_command import build_command_from_definition
 
 _ROOT = Path(__file__).resolve().parent.parent
 _ROOTS = ("workflows",)
@@ -50,6 +51,34 @@ def _workflow_files() -> list[Path]:
     return found
 
 
+def validate_file(path: Path) -> str | None:
+    """Validate ONE workflow file to the depth the create endpoint uses.
+
+    Returns the failure reason, or None when the file is acceptable.
+
+    Extracted so tests can drive the real thing. The first version of the test
+    file reimplemented this logic, so reverting the gate to a shallow
+    `model_validate` left every test green - a test suite measuring its own
+    copy of the code rather than the code.
+    """
+    try:
+        # from_file, NOT model_validate(raw): the parse model accepts a
+        # `prompt_file` that does not exist, and the API's create endpoint
+        # then rejects it at conversion with HTTP 400. A gate that stops at
+        # the parse model passes definitions the platform refuses, which is
+        # the exact class it exists to catch.
+        definition = WorkflowDefinition.from_file(path)
+        # Then the SAME conversion the create endpoint runs. Loading is not
+        # validation: an unresolved prompt_file is rejected here, not above.
+        build_command_from_definition(definition)
+    # OSError too: `from_file` raises FileNotFoundError for an unresolved
+    # prompt_file, and letting that escape crashes the gate with a traceback
+    # instead of naming the file and the reason.
+    except (ValidationError, ValueError, OSError) as exc:
+        return str(exc)
+    return None
+
+
 def main() -> int:
     files = _workflow_files()
     if not files:
@@ -75,12 +104,9 @@ def main() -> int:
             # accepts these. Skipped here and covered by the package check.
             continue
         checked += 1
-        try:
-            WorkflowDefinition.model_validate(raw)
-        except ValidationError as exc:
-            first = exc.errors()[0]
-            loc = ".".join(str(p) for p in first.get("loc", ()))
-            failures.append((path, f"{loc}: {first.get('msg')}"))
+        reason = validate_file(path)
+        if reason is not None:
+            failures.append((path, reason))
 
     for path, why in failures:
         print(f"  FAIL {path.relative_to(_ROOT)}\n       {why}")
