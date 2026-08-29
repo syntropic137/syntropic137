@@ -6,6 +6,14 @@ on:
     paths:
       - "packages/syn-adapters/src/syn_adapters/workspaces/**"
       - "packages/syn-domain/src/syn_domain/contexts/workflows/**"
+      # The GITLINK itself, not only paths inside it. A submodule bump changes
+      # exactly one superproject entry - `lib/agentic-primitives` - and a
+      # superproject diff never exposes files inside a submodule, so the two
+      # nested globs below CANNOT match a bump. Verified on PR #941, which
+      # moved the omni-agent Dockerfile (claude-code 2.1.126 -> 2.1.250, codex
+      # 0.144.6 -> 0.150.1) and ran this workflow zero times. The nested globs
+      # stay for in-tree edits during submodule development.
+      - "lib/agentic-primitives"
       - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
       - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"
@@ -17,6 +25,14 @@ on:
     paths:
       - "packages/syn-adapters/src/syn_adapters/workspaces/**"
       - "packages/syn-domain/src/syn_domain/contexts/workflows/**"
+      # The GITLINK itself, not only paths inside it. A submodule bump changes
+      # exactly one superproject entry - `lib/agentic-primitives` - and a
+      # superproject diff never exposes files inside a submodule, so the two
+      # nested globs below CANNOT match a bump. Verified on PR #941, which
+      # moved the omni-agent Dockerfile (claude-code 2.1.126 -> 2.1.250, codex
+      # 0.144.6 -> 0.150.1) and ran this workflow zero times. The nested globs
+      # stay for in-tree edits during submodule development.
+      - "lib/agentic-primitives"
       - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
       - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"
