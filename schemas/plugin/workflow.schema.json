@@ -150,6 +150,7 @@
       "type": "string"
     },
     "PhaseYamlDefinition": {
+      "additionalProperties": false,
       "description": "Phase definition as parsed from YAML.\n\nConverts YAML snake_case to domain PhaseDefinition.",
       "properties": {
         "id": {
@@ -403,6 +404,7 @@
       "type": "string"
     }
   },
+  "additionalProperties": false,
   "description": "Complete workflow definition as parsed from YAML.\n\nThis is the root model for workflow YAML files.",
   "properties": {
     "id": {
