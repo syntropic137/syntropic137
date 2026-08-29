@@ -152,12 +152,8 @@ class TestBuildSetupScript:
             repo_tokens={},
         )
         script = secrets.build_setup_script()
-        assert (
-            'git -C "/workspace/repos/repo-a" submodule update --init --recursive' in script
-        )
-        assert (
-            'git -C "/workspace/repos/repo-b" submodule update --init --recursive' in script
-        )
+        assert 'git -C "/workspace/repos/repo-a" submodule update --init --recursive' in script
+        assert 'git -C "/workspace/repos/repo-b" submodule update --init --recursive' in script
 
     def test_submodule_init_is_non_fatal(self) -> None:
         """A submodule that cannot be fetched must not abort the `set -e` setup script.
@@ -170,9 +166,7 @@ class TestBuildSetupScript:
             repo_tokens={},
         )
         script = secrets.build_setup_script()
-        submodule_line = next(
-            line for line in script.splitlines() if "submodule update" in line
-        )
+        submodule_line = next(line for line in script.splitlines() if "submodule update" in line)
         assert submodule_line.rstrip().count("||") == 1
         assert "WARNING" in submodule_line
 
@@ -188,9 +182,7 @@ class TestBuildSetupScript:
             repo_tokens={},
         )
         script = secrets.build_setup_script()
-        submodule_line = next(
-            line for line in script.splitlines() if "submodule update" in line
-        )
+        submodule_line = next(line for line in script.splitlines() if "submodule update" in line)
         assert not submodule_line.startswith("[ -d ")
 
     def test_repos_without_tokens_no_credential_lines(self) -> None:
