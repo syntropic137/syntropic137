@@ -8,6 +8,8 @@ Run: pytest -m unit packages/syn-adapters/src/syn_adapters/workspace_backends/se
 
 from __future__ import annotations
 
+import shlex
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -139,8 +141,8 @@ class TestBuildSetupScript:
         )
         script = secrets.build_setup_script()
         # Both guards must be present
-        assert '[ -d "/workspace/repos/repo-a" ] ||' in script
-        assert '[ -d "/workspace/repos/repo-b" ] ||' in script
+        assert "[ -d /workspace/repos/repo-a ] ||" in script
+        assert "[ -d /workspace/repos/repo-b ] ||" in script
 
     def test_each_repo_initializes_submodules(self) -> None:
         """Every cloned repo gets a recursive submodule init line."""
@@ -152,8 +154,22 @@ class TestBuildSetupScript:
             repo_tokens={},
         )
         script = secrets.build_setup_script()
-        assert 'git -C "/workspace/repos/repo-a" submodule update --init --recursive' in script
-        assert 'git -C "/workspace/repos/repo-b" submodule update --init --recursive' in script
+        assert "git -C /workspace/repos/repo-a submodule update --init --recursive" in script
+        assert "git -C /workspace/repos/repo-b submodule update --init --recursive" in script
+
+    def test_repo_name_with_shell_metacharacters_is_quoted(self) -> None:
+        """Paths and URLs are shell-quoted, so a hostile repo name cannot break out.
+
+        RepositoryRef restricts owner/name upstream, but SetupPhaseSecrets accepts raw
+        strings; the quoting is enforced here rather than relying on a distant caller.
+        """
+        hostile = 'https://github.com/org/repo";touch /tmp/pwned;"'
+        secrets = SetupPhaseSecrets(repositories=[hostile], repo_tokens={})
+        script = secrets.build_setup_script()
+        assert "touch /tmp/pwned" not in script.replace(shlex.quote(hostile), "")
+        for line in script.splitlines():
+            if "git clone" in line or "submodule update" in line:
+                assert shlex.split(line.split("|| ")[0]) is not None
 
     def test_submodule_init_is_non_fatal(self) -> None:
         """A submodule that cannot be fetched must not abort the `set -e` setup script.

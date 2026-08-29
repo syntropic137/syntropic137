@@ -14,6 +14,8 @@ ensure git picks the right token for each clone.
 
 from __future__ import annotations
 
+import shlex
+
 import logging
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -350,12 +352,20 @@ class SetupPhaseSecrets:
             lines.append("")
             lines.append("# Configure per-repo GitHub credentials (ADR-058)")
             lines.append("git config --global credential.helper store")
+            # Without useHttpPath, git-credential-store ignores the path component and
+            # matches on host alone, so the FIRST github.com entry is handed out for
+            # every github.com request -- including a .gitmodules URL pointing at a
+            # different private repo the installation happens to cover. Verified against
+            # git 2.50.1: an unlisted repo receives the first stored token. Scoping by
+            # path makes an unlisted repo receive nothing instead. (#953)
+            lines.append("git config --global credential.https://github.com.useHttpPath true")
             for url, token in self.repo_tokens.items():
                 full_name = _repo_full_name(url)
-                lines.append(
-                    f'echo "https://x-access-token:{token}@github.com/{full_name}"'
-                    f" >> ~/.git-credentials"
-                )
+                # Path matching is exact, and submodule URLs commonly carry a .git
+                # suffix while canonical clone URLs do not. Store both spellings.
+                for path in (full_name, f"{full_name}.git"):
+                    credential = f"https://x-access-token:{token}@github.com/{path}"
+                    lines.append(f"printf '%s\\n' {shlex.quote(credential)} >> ~/.git-credentials")
             lines.append("chmod 600 ~/.git-credentials")
 
             # gh CLI: use first repo's token
@@ -389,14 +399,27 @@ class SetupPhaseSecrets:
         for url in self.repositories:
             name = _repo_name(url)
             dest = f"/workspace/repos/{name}"
-            lines.append(f'[ -d "{dest}" ] || git clone "{url}" "{dest}"')
+            lines.append(
+                f"[ -d {shlex.quote(dest)} ] || git clone {shlex.quote(url)} {shlex.quote(dest)}"
+            )
             # Outside the guard above: a repo cloned by an earlier setup phase may
             # still have uninitialized submodules. `submodule update --init` is
             # idempotent, so re-running it on a complete checkout is a no-op.
+            #
+            # GIT_ALLOW_PROTOCOL pins the transport allowlist for this command instead
+            # of inheriting it. Current git already defaults ext=never (since 2.12) and
+            # file=user (since the Oct 2022 security releases), but those are defaults
+            # a global config or a future image can move; .gitmodules is controlled by
+            # the cloned repo, so the allowlist is stated rather than assumed.
+            warning = (
+                f"WARNING: submodule init failed for {name}"
+                " (unreachable, unauthorized, or disallowed transport);"
+                " continuing with a partial checkout"
+            )
             lines.append(
-                f'git -C "{dest}" submodule update --init --recursive'
-                f' || echo "WARNING: submodule init failed for {name}'
-                f' (unreachable or unauthorized submodule); continuing with a partial checkout"'
+                f"GIT_ALLOW_PROTOCOL=https git -C {shlex.quote(dest)}"
+                " submodule update --init --recursive"
+                f" || printf '%s\\n' {shlex.quote(warning)} >&2"
             )
 
 
