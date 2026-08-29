@@ -96,6 +96,7 @@
       "title": "ClaudePluginRef"
     },
     "InputYamlDefinition": {
+      "additionalProperties": false,
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
       "properties": {
         "name": {
@@ -313,6 +314,7 @@
       "type": "object"
     },
     "RepositoryConfig": {
+      "additionalProperties": false,
       "description": "Repository configuration for a workflow.",
       "properties": {
         "url": {
@@ -450,6 +452,13 @@
         }
       ],
       "default": null
+    },
+    "repos": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Repos",
+      "type": "array"
     },
     "requires_repos": {
       "anyOf": [

@@ -141,7 +141,7 @@ def _resolve_phase_prompt_file(
 class RepositoryConfig(BaseModel):
     """Repository configuration for a workflow."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     url: str = Field(..., min_length=1)
     ref: str = Field(default="main")
@@ -153,7 +153,7 @@ class InputYamlDefinition(BaseModel):
     Maps to domain InputDeclaration.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str = Field(..., min_length=1)
     description: str | None = None
@@ -407,6 +407,14 @@ class WorkflowDefinition(BaseModel):
 
     # Repository context
     repository: RepositoryConfig | None = None
+
+    # Multi-repo templates. `CreateWorkflowTemplateCommand.repos` and the
+    # aggregate have carried this since ADR-058, and the docs advertise it
+    # (guide/core-concepts, workspaces/hydration), but the YAML model never
+    # gained the field -- so a documented `repos:` block was silently dropped.
+    # With extra="forbid" that silence becomes a hard error, so the field is
+    # added here rather than deleting the documented capability.
+    repos: list[str] = Field(default_factory=list)
 
     # Execution gate (ADR-058 #666): None = infer from repository presence
     requires_repos: bool | None = None
