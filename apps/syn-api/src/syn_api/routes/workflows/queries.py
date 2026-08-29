@@ -505,6 +505,13 @@ async def list_workflows_endpoint(
             created_at=str(s.created_at) if s.created_at else None,
             runs_count=s.runs_count,
             is_archived=s.is_archived,
+            # WHY (#955): omitting this let WorkflowSummaryResponse's `= True`
+            # default answer for every workflow. Measured on a live deployment:
+            # the list reported requires_repos=True for all 36 while the detail
+            # endpoint reported False for 20 of them, and the stored rows agreed
+            # with detail. An agent that lists workflows, sees True, and passes
+            # -R is then told repos are supported when they are not.
+            requires_repos=s.requires_repos,
         )
         for s in result.value
     ]
