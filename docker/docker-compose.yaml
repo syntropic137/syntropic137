@@ -154,6 +154,10 @@ services:
       SYN_SESSION_STORE_URL: ${SYN_SESSION_STORE_URL:-}
       SYN_SESSION_STORE_AUTH_TOKEN: ${SYN_SESSION_STORE_AUTH_TOKEN:-}
       SYN_SESSION_STORE_LABEL: ${SYN_SESSION_STORE_LABEL:-}
+      # Operator escape hatch for pinning a different workspace image (#954).
+      # Safe as ${VAR:-}: WorkspaceSettings treats a blank value as unset and
+      # falls back to DEFAULT_WORKSPACE_IMAGE, so the pin stays in one place.
+      SYN_WORKSPACE_DOCKER_IMAGE: ${SYN_WORKSPACE_DOCKER_IMAGE:-}
       # Note: secrets (GitHub App, Anthropic, storage) are injected via
       # overlay files (dev, selfhost, ondemand) using env_file or environment
     depends_on:

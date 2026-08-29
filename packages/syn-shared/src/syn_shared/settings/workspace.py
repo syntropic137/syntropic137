@@ -119,6 +119,27 @@ class WorkspaceSettings(BaseSettings):
         description="Docker image for Claude agent execution.",
     )
 
+    @field_validator("docker_image", mode="before")
+    @classmethod
+    def _blank_image_means_default(cls, value: object) -> object:
+        """Treat a blank ``SYN_WORKSPACE_DOCKER_IMAGE`` as unset (#954).
+
+        Compose passes optional variables through as ``${VAR:-}``, which reaches
+        the process as an EMPTY STRING rather than an absent variable. Pydantic
+        sees a present value and overrides ``DEFAULT_WORKSPACE_IMAGE`` with
+        ``""``, breaking provisioning for every deployment that does not set the
+        override -- turning a silent no-op into an outage.
+
+        Without this, the only safe compose form is to bake the pinned digest
+        into the generated file, which then drifts from ``PINNED_DIGESTS``.
+        Absorbing the blank here keeps one source of truth for the pin.
+        """
+        if value is None:
+            return DEFAULT_WORKSPACE_IMAGE
+        if isinstance(value, str) and not value.strip():
+            return DEFAULT_WORKSPACE_IMAGE
+        return value
+
     docker_runtime: Literal["runsc", "runc"] = Field(
         default="runsc",
         description="Docker runtime to use (runsc = gVisor, runc = native).",
