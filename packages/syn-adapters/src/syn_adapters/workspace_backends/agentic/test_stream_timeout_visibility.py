@@ -26,6 +26,10 @@ import time
 import pytest
 
 from syn_adapters.workspace_backends.agentic.stream_helpers import _cleanup_process
+from syn_adapters.workspace_backends.agentic.stream_adapter import (
+    _TIMEOUT_EXIT_CODE,
+    _resolve_stream_exit_code,
+)
 from syn_adapters.workspace_backends.agentic.stream_reader import StreamOutcome, read_lines
 
 pytestmark = pytest.mark.unit
@@ -102,3 +106,62 @@ async def test_outcome_is_optional_for_existing_callers() -> None:
     lines = [line async for line in read_lines(proc, 30.0, time.monotonic())]
     await _cleanup_process(proc)
     assert lines == ["x"]
+
+
+class TestResolveStreamExitCode:
+    """The branch that actually fixes the bug.
+
+    A codex review found the earlier tests proved only that `read_lines` sets
+    the flag -- deleting the adapter's forcing branch left every one of them
+    green. These target the decision itself.
+    """
+
+    def test_timeout_with_a_success_status_becomes_the_timeout_code(self) -> None:
+        """The whole bug: docker exec says 0, but the work was cut off."""
+        assert _resolve_stream_exit_code(0, timed_out=True) == _TIMEOUT_EXIT_CODE
+
+    def test_timeout_with_no_status_becomes_the_timeout_code(self) -> None:
+        assert _resolve_stream_exit_code(None, timed_out=True) == _TIMEOUT_EXIT_CODE
+
+    def test_a_clean_stream_is_never_rewritten(self) -> None:
+        assert _resolve_stream_exit_code(0, timed_out=False) == 0
+
+    def test_a_real_failure_status_survives_a_timeout(self) -> None:
+        """A specific status beats a generic 'timed out' - the operator needs it."""
+        assert _resolve_stream_exit_code(137, timed_out=True) == 137
+
+    def test_an_interrupt_status_is_left_alone(self) -> None:
+        """Cancellation is routed by interrupt_requested, never by status.
+
+        130 must reach the cancel path untouched; rewriting it to 124 would turn
+        a user-requested cancel into a phase failure.
+        """
+        assert _resolve_stream_exit_code(130, timed_out=False) == 130
+        assert _resolve_stream_exit_code(130, timed_out=True) == 130
+
+
+class TestPerStreamAttribution:
+    """One adapter serves concurrent executions, so results must not cross.
+
+    `last_exit_code` is adapter-wide: between the adapter setting it and the
+    handler reading it, another stream can overwrite it, and a successful phase
+    would inherit this one's timeout status. Each stream therefore also gets its
+    own copy on its own StreamOutcome.
+    """
+
+    def test_two_outcomes_do_not_share_state(self) -> None:
+        timed_out = StreamOutcome()
+        clean = StreamOutcome()
+
+        timed_out.timed_out = True
+        timed_out.exit_code = _resolve_stream_exit_code(0, timed_out=True)
+        clean.exit_code = _resolve_stream_exit_code(0, timed_out=False)
+
+        assert timed_out.exit_code == _TIMEOUT_EXIT_CODE
+        assert clean.exit_code == 0, "a concurrent clean stream must keep its own status"
+
+    def test_outcome_defaults_are_not_shared_between_instances(self) -> None:
+        """A mutable default would make every stream share one record."""
+        first, second = StreamOutcome(), StreamOutcome()
+        first.timed_out = True
+        assert second.timed_out is False

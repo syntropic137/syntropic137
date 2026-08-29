@@ -33,9 +33,34 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Conventional shell status for "killed by timeout" (128 + SIGTERM equivalent
-#: used by GNU timeout). Any non-zero value works; a recognisable one helps.
+#: GNU ``timeout``'s conventional status for "killed because the time limit
+#: elapsed". NOT 128+SIGTERM, which would be 143. The local isolation provider
+#: already uses 124 for the same meaning, and nothing in the execution path
+#: interprets specific exit codes -- cancellation is driven by
+#: ``interrupt_requested``, not by a status number -- so this cannot be
+#: mistaken for a cancel.
 _TIMEOUT_EXIT_CODE = 124
+
+
+def _resolve_stream_exit_code(exit_code: int | None, *, timed_out: bool) -> int | None:
+    """Return the status a truncated stream should report.
+
+    Pure and module-level so the decision is testable without a container. The
+    branch this replaces lived inline and, as a codex review pointed out, could
+    be deleted with every test still green.
+
+    A timed-out stream that the transport reported as success becomes
+    ``_TIMEOUT_EXIT_CODE``. `docker exec` exits 0 when SIGTERM'd -- verified
+    directly against a real container -- so success cannot be believed here.
+
+    An already-failing status is left ALONE: it is more specific than "timed
+    out" and the operator needs the real one. A stream that was not truncated is
+    never rewritten, which is what keeps cancellation (driven by
+    ``interrupt_requested``, not by a status) out of this path.
+    """
+    if timed_out and not exit_code:
+        return _TIMEOUT_EXIT_CODE
+    return exit_code
 
 
 class AgenticEventStreamAdapter:
@@ -140,18 +165,22 @@ class AgenticEventStreamAdapter:
                 yield line
         finally:
             exit_code = await _cleanup_process(proc)
-            if outcome.timed_out and not exit_code:
-                # The transport lies here: `docker exec` exits 0 on SIGTERM, so a
-                # truncated stream is indistinguishable from a clean one by exit
-                # code alone. Mirrors the codex broken-stream precedent in
-                # AgentExecutionHandler. 124 is the conventional timeout status.
+            if outcome.timed_out and exit_code != _resolve_stream_exit_code(
+                exit_code, timed_out=outcome.timed_out
+            ):
                 logger.error(
-                    "Stream timed out after %.1fs; forcing non-zero exit (container=%s)",
+                    "Stream timed out after %.1fs; reporting exit %d (container=%s)",
                     stream_timeout or -1,
+                    _TIMEOUT_EXIT_CODE,
                     container_name,
                 )
-                exit_code = _TIMEOUT_EXIT_CODE
+            exit_code = _resolve_stream_exit_code(exit_code, timed_out=outcome.timed_out)
             self._last_exit_code = exit_code
+            # Also hand the caller its OWN copy. `_last_exit_code` is adapter-wide
+            # and one adapter is shared across concurrent executions, so between
+            # this assignment and the handler's read another stream can overwrite
+            # it -- and a successful phase would inherit this one's 124.
+            outcome.exit_code = exit_code
             if exit_code and exit_code != 0:
                 logger.warning(
                     "Stream process exited with code %d (container=%s)",
