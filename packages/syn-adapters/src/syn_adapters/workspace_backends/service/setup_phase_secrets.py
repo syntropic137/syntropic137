@@ -372,14 +372,31 @@ class SetupPhaseSecrets:
             lines.append("chmod 600 ~/.config/gh/hosts.yml")
 
     def _append_repo_clones(self, lines: list[str]) -> None:
-        """Append repository clone commands with idempotency guards."""
+        """Append repository clone commands with idempotency guards.
+
+        Submodules are initialized in a separate step rather than via
+        ``git clone --recurse-submodules``. A submodule URL points wherever the
+        repo author put it, which is frequently a repo the installation token
+        does not cover, and the setup script runs under ``set -e`` -- folding
+        the two together would turn one unreachable submodule into a total
+        clone failure for the whole execution. Keeping it separate and
+        tolerant means a repo with an unreachable submodule still lands, and
+        the reason is visible in the setup log.
+        """
         lines.append("")
         lines.append("# Clone repositories (ADR-058)")
         lines.append("mkdir -p /workspace/repos")
         for url in self.repositories:
             name = _repo_name(url)
+            dest = f"/workspace/repos/{name}"
+            lines.append(f'[ -d "{dest}" ] || git clone "{url}" "{dest}"')
+            # Outside the guard above: a repo cloned by an earlier setup phase may
+            # still have uninitialized submodules. `submodule update --init` is
+            # idempotent, so re-running it on a complete checkout is a no-op.
             lines.append(
-                f'[ -d "/workspace/repos/{name}" ] || git clone "{url}" "/workspace/repos/{name}"'
+                f'git -C "{dest}" submodule update --init --recursive'
+                f' || echo "WARNING: submodule init failed for {name}'
+                f' (unreachable or unauthorized submodule); continuing with a partial checkout"'
             )
 
 

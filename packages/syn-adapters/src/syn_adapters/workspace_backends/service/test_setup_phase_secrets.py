@@ -142,6 +142,57 @@ class TestBuildSetupScript:
         assert '[ -d "/workspace/repos/repo-a" ] ||' in script
         assert '[ -d "/workspace/repos/repo-b" ] ||' in script
 
+    def test_each_repo_initializes_submodules(self) -> None:
+        """Every cloned repo gets a recursive submodule init line."""
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/org/repo-a",
+                "https://github.com/org/repo-b",
+            ],
+            repo_tokens={},
+        )
+        script = secrets.build_setup_script()
+        assert (
+            'git -C "/workspace/repos/repo-a" submodule update --init --recursive' in script
+        )
+        assert (
+            'git -C "/workspace/repos/repo-b" submodule update --init --recursive' in script
+        )
+
+    def test_submodule_init_is_non_fatal(self) -> None:
+        """A submodule that cannot be fetched must not abort the `set -e` setup script.
+
+        Submodule URLs resolve to repos the installation token may not cover, so
+        a hard failure here would break cloning for every repo that has one.
+        """
+        secrets = SetupPhaseSecrets(
+            repositories=["https://github.com/org/repo-a"],
+            repo_tokens={},
+        )
+        script = secrets.build_setup_script()
+        submodule_line = next(
+            line for line in script.splitlines() if "submodule update" in line
+        )
+        assert submodule_line.rstrip().count("||") == 1
+        assert "WARNING" in submodule_line
+
+    def test_submodule_init_runs_even_when_repo_already_cloned(self) -> None:
+        """Submodule init sits outside the clone's idempotency guard.
+
+        The clone is skipped when /workspace/repos/<name> already exists (a repeat
+        setup phase), but submodules may still be uninitialized from a partial or
+        older checkout, so the init must not be guarded away with it.
+        """
+        secrets = SetupPhaseSecrets(
+            repositories=["https://github.com/org/repo-a"],
+            repo_tokens={},
+        )
+        script = secrets.build_setup_script()
+        submodule_line = next(
+            line for line in script.splitlines() if "submodule update" in line
+        )
+        assert not submodule_line.startswith("[ -d ")
+
     def test_repos_without_tokens_no_credential_lines(self) -> None:
         """Repos with empty repo_tokens get clone lines but no credential block."""
         secrets = SetupPhaseSecrets(
