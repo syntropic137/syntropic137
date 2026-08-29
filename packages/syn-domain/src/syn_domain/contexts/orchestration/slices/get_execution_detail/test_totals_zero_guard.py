@@ -99,10 +99,16 @@ class TestZeroDoesNotEraseAccumulatedTotals:
         )
         assert (await _row(projection))["total_duration_seconds"] == 0.0
 
-    async def test_the_guard_covers_every_optional_total(
+    async def test_token_totals_stay_authoritative_even_at_zero(
         self, projection: WorkflowExecutionDetailProjection
     ) -> None:
-        """Duration is just the one that showed up live; tokens can drop too."""
+        """The guard is deliberately NARROW.
+
+        A codex review pointed out that `WorkflowCompletedEvent` declares these
+        as required final summary values, so 0 is a legitimate authoritative
+        answer for tokens -- only the duration case is a known contradiction.
+        A blanket truthiness rule would defeat future corrections.
+        """
         await _started(projection)
         await _phase_done(projection)
         await projection.on_workflow_completed(
@@ -115,6 +121,17 @@ class TestZeroDoesNotEraseAccumulatedTotals:
             }
         )
         row = await _row(projection)
-        assert row["total_input_tokens"] == 10
-        assert row["total_output_tokens"] == 3
-        assert row["total_duration_seconds"] == 33.004841
+        assert row["total_input_tokens"] == 0, "tokens: the event is authoritative"
+        assert row["total_output_tokens"] == 0
+        assert row["total_duration_seconds"] == 33.004841, "duration: the zero is suspect"
+
+    async def test_an_empty_artifact_list_is_authoritative(
+        self, projection: WorkflowExecutionDetailProjection
+    ) -> None:
+        """Empty can be the correct final state for a list; it must not be guarded."""
+        await _started(projection)
+        await _phase_done(projection)
+        await projection.on_workflow_completed(
+            {"execution_id": "exec-1", "completed_at": "now", "artifact_ids": []}
+        )
+        assert (await _row(projection))["artifact_ids"] == []

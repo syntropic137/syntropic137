@@ -28,6 +28,9 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.phase_detail 
 #: otherwise; see the zero-guard where these are applied.
 logger = logging.getLogger(__name__)
 
+#: Totals a completion event restates. These are REQUIRED final summary values
+#: on WorkflowCompletedEvent, so 0 / 0.0 / [] are legitimate rather than "not
+#: provided" -- the event is authoritative and overwrites.
 _OPTIONAL_FIELD_NAMES = (
     "total_input_tokens",
     "total_output_tokens",
@@ -36,6 +39,17 @@ _OPTIONAL_FIELD_NAMES = (
     "total_duration_seconds",
     "artifact_ids",
 )
+
+#: The ONE field where a zero is known to be wrong rather than authoritative
+#: (#969). Measured live: the phase reported 33.004841s while the completion
+#: event carried 0.0, and token totals in the SAME event were correct. A zero
+#: duration alongside phases that reported real time is self-contradictory.
+#:
+#: Deliberately NOT a general truthiness rule. `artifact_ids` is a list where
+#: empty can be the correct final state, and the token totals are genuinely
+#: authoritative; a blanket guard would contradict the event contract and
+#: defeat future corrections.
+_ZERO_IS_SUSPECT = "total_duration_seconds"
 
 
 class WorkflowExecutionDetailProjection(AutoDispatchProjection):
@@ -268,7 +282,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             if field not in event_data:
                 continue
             incoming = event_data[field]
-            if not incoming and existing.get(field):
+            if field == _ZERO_IS_SUSPECT and not incoming and existing.get(field):
                 logger.warning(
                     "Ignoring empty %s in completion event for %s; keeping accumulated %s",
                     field,
