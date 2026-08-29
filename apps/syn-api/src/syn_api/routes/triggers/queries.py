@@ -276,6 +276,10 @@ async def list_triggers_endpoint(
                 workflow_name=t.workflow_name,
                 status=str(t.status),
                 fire_count=t.fire_count,
+                # Same omission as #955 one file over: list_triggers() resolves
+                # created_at, and rebuilding the summary here without it let the
+                # model default (None) answer instead.
+                created_at=t.created_at,
             )
             for t in result.value
         ],

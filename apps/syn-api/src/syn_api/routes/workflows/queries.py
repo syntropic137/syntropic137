@@ -41,7 +41,10 @@ class WorkflowSummaryResponse(BaseModel):
     created_at: str | None = None
     runs_count: int = 0
     is_archived: bool = False
-    requires_repos: bool = True
+    # No default (#955): omitting this let the model invent `True` for every
+    # workflow while the stored rows said otherwise. An outward response model
+    # must not manufacture domain truth - make omission a construction error.
+    requires_repos: bool
 
 
 class InputDeclarationModel(BaseModel):
@@ -80,7 +83,7 @@ class WorkflowResponse(BaseModel):
     """Template-level repository URL (single-repo workflows)."""
     repos: list[str] = Field(default_factory=list)
     """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
-    requires_repos: bool = True
+    requires_repos: bool  # required for the same reason as the summary model
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 
@@ -505,6 +508,13 @@ async def list_workflows_endpoint(
             created_at=str(s.created_at) if s.created_at else None,
             runs_count=s.runs_count,
             is_archived=s.is_archived,
+            # WHY (#955): omitting this let WorkflowSummaryResponse's `= True`
+            # default answer for every workflow. Measured on a live deployment:
+            # the list reported requires_repos=True for all 36 while the detail
+            # endpoint reported False for 20 of them, and the stored rows agreed
+            # with detail. An agent that lists workflows, sees True, and passes
+            # -R is then told repos are supported when they are not.
+            requires_repos=s.requires_repos,
         )
         for s in result.value
     ]
