@@ -130,6 +130,31 @@ _state = LifecycleState()
 # ── Public API ──────────────────────────────────────────────────────
 
 
+def _validate_workspace_settings() -> Result[None, LifecycleError]:
+    """Fail startup on invalid workspace settings, rather than degrading (#954).
+
+    `WorkspaceSettings()` is otherwise first constructed inside a degradable
+    service init, whose exception is caught and appended to `degraded_reasons`.
+    Startup then returns Ok, `/health` returns 200 "healthy", and the npx setup
+    flow prints "Services healthy" -- while the workflow dispatcher never
+    started. The operator gets a confident green signal for a broken stack.
+
+    That is the same false-pass this issue is about, one layer further out: an
+    invalid image setting must stop the boot, not quietly remove the ability to
+    run workflows.
+    """
+    from syn_shared.settings.workspace import WorkspaceSettings
+
+    try:
+        WorkspaceSettings()
+    except Exception as exc:
+        # No exc_info and no exception object in the log: settings errors echo
+        # their input, and neighbouring settings carry tokens.
+        logger.error("Workspace settings are invalid; refusing to start: %s", exc)
+        return Err(LifecycleError.VALIDATION_FAILED, message=str(exc))
+    return Ok(None)
+
+
 async def _init_degradable_services(state: LifecycleState) -> None:
     """Initialize all degradable services and start recovery if needed (ADR-057).
 
@@ -215,6 +240,10 @@ async def startup(
         return Ok({"mode": "full"})
 
     # Critical path — abort on failure
+    workspace_result = _validate_workspace_settings()
+    if isinstance(workspace_result, Err):
+        return workspace_result
+
     result = await _init_event_store()
     if isinstance(result, Err):
         return result
