@@ -1,0 +1,56 @@
+id: sdlc-research-plan-v1
+name: "SDLC: Research, Plan, Cross-Model Review, Revise"
+description: >
+  Produce a plan you can trust before any code is written. Claude researches the
+  codebase and drafts a plan, Codex reviews it as a different model, and Claude
+  revises against that review. The deliverable is a plan document, never code.
+type: research
+classification: standard
+requires_repos: true
+
+phases:
+  # Phase ids are load-bearing: a later phase reads an earlier one's output at
+  # artifacts/input/<phase-id>.md, so renaming a phase breaks the phase after it.
+  - id: research-and-plan
+    name: Research the codebase and draft a plan
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/research-and-plan.md
+
+  - id: cross-model-review
+    name: Codex reviews the plan
+    order: 2
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    agent:
+      provider: codex
+      # The CONCRETE model id, not the `gpt-5.6` alias. An unnamed or aliased
+      # model resolves to no rate, and this platform never prices by
+      # substitution - the run would complete and be unpriced (#892).
+      model: gpt-5.6-sol
+    prompt_file: phases/cross-model-review.md
+
+  - id: revise-plan
+    name: Revise the plan against the review
+    order: 3
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/revise-plan.md
