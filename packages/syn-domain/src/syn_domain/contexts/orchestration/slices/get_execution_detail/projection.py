@@ -9,6 +9,7 @@ Uses AutoDispatchProjection (ADR-014) for reliable position tracking.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -21,6 +22,19 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_det
 )
 from syn_domain.contexts.orchestration.slices.get_execution_detail.phase_detail import (
     PhaseDetail,
+)
+
+#: Totals a completion event MAY restate. Accumulated from PhaseCompleted
+#: otherwise; see the zero-guard where these are applied.
+logger = logging.getLogger(__name__)
+
+_OPTIONAL_FIELD_NAMES = (
+    "total_input_tokens",
+    "total_output_tokens",
+    "total_cache_creation_tokens",
+    "total_cache_read_tokens",
+    "total_duration_seconds",
+    "artifact_ids",
 )
 
 
@@ -237,18 +251,32 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         existing["status"] = "completed"
         existing["completed_at"] = event_data.get("completed_at")
 
-        # Update with final totals from event if provided
-        _OPTIONAL_FIELDS = (
-            "total_input_tokens",
-            "total_output_tokens",
-            "total_cache_creation_tokens",
-            "total_cache_read_tokens",
-            "total_duration_seconds",
-            "artifact_ids",
-        )
-        for field in _OPTIONAL_FIELDS:
-            if field in event_data:
-                existing[field] = event_data[field]
+        # Update with final totals from event if provided.
+        #
+        # A ZERO NEVER OVERWRITES A NON-ZERO ACCUMULATION (#969). The totals here
+        # are accumulated from PhaseCompleted events -- each one an observation of
+        # work that actually happened. A completion event claiming 0 while phases
+        # reported 33s is self-contradictory, and the accumulated value is the one
+        # backed by evidence.
+        #
+        # Observed on a live run: the phase reported duration_seconds 33.004841,
+        # the execution reported total_duration_seconds 0.0, because this loop
+        # replaced the correct sum with the event's zero. Tokens survived the same
+        # run, so the event carries some real totals and some empty ones -- which
+        # is exactly the case a blind overwrite handles worst.
+        for field in _OPTIONAL_FIELD_NAMES:
+            if field not in event_data:
+                continue
+            incoming = event_data[field]
+            if not incoming and existing.get(field):
+                logger.warning(
+                    "Ignoring empty %s in completion event for %s; keeping accumulated %s",
+                    field,
+                    execution_id,
+                    existing[field],
+                )
+                continue
+            existing[field] = incoming
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
