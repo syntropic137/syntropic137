@@ -9,11 +9,17 @@ Handles artifact lifecycle within a phase:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
-from syn_domain.contexts.artifacts import ArtifactType
+from syn_domain.contexts.artifacts import ArtifactType, PhaseOutputFile
+from syn_shared.workspace_paths import (
+    WORKSPACE_INPUT_DIR,
+    WORKSPACE_OUTPUT_DIR,
+    WORKSPACE_ROOT,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
@@ -41,6 +47,20 @@ class ExecutionContext(Protocol):
 
 
 logger = logging.getLogger(__name__)
+
+#: ADR-036 workspace layout, expressed RELATIVE to the workspace root because
+#: that is what ``collect_files``/``inject_files`` speak. Derived from the
+#: shared absolute constants rather than re-typed, so a layout change is one
+#: edit in ``syn_shared.workspace_paths`` and not a hunt through string
+#: literals.
+_OUTPUT_DIR_REL: Final[str] = WORKSPACE_OUTPUT_DIR.relative_to(WORKSPACE_ROOT).as_posix()
+_INPUT_DIR_REL: Final[str] = WORKSPACE_INPUT_DIR.relative_to(WORKSPACE_ROOT).as_posix()
+
+#: The glob a phase's deliverables are collected with.
+_OUTPUT_GLOB: Final[str] = f"{_OUTPUT_DIR_REL}/**/*"
+
+#: Extension of the flat single-file alias kept for one release (issue #988).
+_FLAT_ALIAS_SUFFIX: Final[str] = ".md"
 
 
 class ArtifactWorkspace(Protocol):
@@ -77,10 +97,18 @@ def map_artifact_type(type_str: str) -> ArtifactType:
 
 @dataclass(frozen=True)
 class CollectedArtifacts:
-    """Result of collecting artifacts from a workspace."""
+    """Result of collecting artifacts from a workspace.
+
+    ``first_content`` is the phase's PRIMARY deliverable and feeds prompt
+    substitution, which genuinely wants one string. ``files`` is the whole
+    output tree and feeds the workspace handoff, which does not (issue #988).
+    Before #988 only ``first_content`` existed, so the handoff inherited the
+    prompt's shape and silently dropped every file but one.
+    """
 
     artifact_ids: list[str]
     first_content: str | None
+    files: list[PhaseOutputFile] = field(default_factory=list)
 
 
 #: DIRECTORY names that hold machine-generated build output (issue #919).
@@ -157,10 +185,21 @@ class ArtifactCollector:
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
         execution_id: str = "",
+        phase_files: dict[str, list[PhaseOutputFile]] | None = None,
     ) -> None:
         """Inject artifacts using explicit parameters (ISS-196).
 
         Used by WorkspaceProvisionHandler in the Processor To-Do List pattern.
+
+        Args:
+            workspace: The workspace being provisioned for the NEXT phase.
+            completed_phase_ids: Every phase already finished, not just the last.
+            phase_outputs: phase_id -> primary deliverable content. Feeds the
+                flat ``artifacts/input/<phase-id>.md`` alias.
+            execution_id: Used to re-query the projection after a restart.
+            phase_files: phase_id -> that phase's whole output tree (#988).
+                Omitted or missing a phase means "resolve it from the
+                projection", which is the crash-recovery path.
         """
         if not completed_phase_ids:
             return
@@ -168,7 +207,33 @@ class ArtifactCollector:
         resolved = await self._resolve_phase_outputs(
             completed_phase_ids, phase_outputs, execution_id
         )
-        await self._inject_and_log(workspace, resolved, completed_phase_ids)
+        resolved_files = await self._resolve_phase_files(
+            completed_phase_ids, phase_files or {}, execution_id
+        )
+        await self._inject_and_log(workspace, resolved, resolved_files, completed_phase_ids)
+
+    async def _resolve_phase_files(
+        self,
+        completed_phase_ids: list[str],
+        phase_files: dict[str, list[PhaseOutputFile]],
+        execution_id: str,
+    ) -> dict[str, list[PhaseOutputFile]]:
+        """Resolve phase output trees from cache, falling back to the projection.
+
+        Mirrors ``_resolve_phase_outputs``. The fallback matters because the
+        in-process cache dies with the processor; without it a restart would
+        hand the next phase the flat alias only and quietly lose the tree.
+        """
+        resolved = {pid: phase_files[pid] for pid in completed_phase_ids if pid in phase_files}
+        missing = [pid for pid in completed_phase_ids if pid not in resolved]
+        if missing and self._query_service:
+            resolved.update(
+                await self._query_service.get_files_for_phase_injection(
+                    execution_id=execution_id,
+                    completed_phase_ids=missing,
+                )
+            )
+        return resolved
 
     async def _resolve_phase_outputs(
         self,
@@ -187,23 +252,140 @@ class ArtifactCollector:
             resolved.update(projection_outputs)
         return resolved
 
+    @classmethod
+    def _tree_files(
+        cls,
+        resolved_files: dict[str, list[PhaseOutputFile]],
+        seen: set[str],
+    ) -> list[tuple[str, bytes]]:
+        """Every produced file that may safely be injected, as (path, bytes).
+
+        Extracted from `_inject_and_log` rather than inlined: with the
+        containment refusal added, that method crossed the cognitive-complexity
+        threshold. Splitting on "which files are eligible" versus "write them"
+        is the natural seam anyway - the eligibility rules are what carry the
+        security argument and deserve to be readable on their own.
+
+        Mutates `seen` so the flat alias emitted afterwards can skip a path this
+        already claimed.
+        """
+        out: list[tuple[str, bytes]] = []
+        for phase_id, produced_files in resolved_files.items():
+            for produced in produced_files:
+                if produced.source_path is None:
+                    continue  # pre-v5 artifact: no path, alias only
+                path = cls._tree_path(phase_id, produced.source_path)
+                if path is None:
+                    continue  # refused: would escape the workspace
+                if path in seen:
+                    continue
+                seen.add(path)
+                out.append((path, produced.content.encode()))
+        return out
+
     @staticmethod
+    def _tree_path(phase_id: str, source_path: str) -> str | None:
+        """Where a produced file lands in the consuming phase's workspace.
+
+        The phase id namespaces the tree so accumulating every earlier phase
+        cannot collide - two phases may both emit ``deliverable.md``.
+
+        Returns None for anything that would not land strictly beneath the
+        phase's own directory. Both inputs are validated even though the phase
+        id is now constrained at authoring time (`PhaseYamlDefinition.id`),
+        because this is the SINK: `source_path` arrives from the projection on
+        the recovery path, so a row written before that grammar existed - or
+        corrupted since - reaches here without passing it. Validating only at
+        the boundary protects new workflows and not old data.
+
+        A dropped file is visible (the tree is short); an escaped write is not.
+        """
+        # An ABSOLUTE source_path does not escape - joining it collapses the
+        # double slash and it lands under the phase directory as
+        # `<phase-id>/etc/passwd`. Contained, but it silently becomes a nested
+        # file the author never described, under a name they did not choose.
+        # A source_path is by contract relative to the workspace, so an absolute
+        # one means the contract is already broken; refuse rather than reshape.
+        if source_path.startswith("/"):
+            logger.warning(
+                "Refusing to inject %r for phase %r: source paths are workspace-relative",
+                source_path,
+                phase_id,
+            )
+            return None
+
+        relative = source_path.removeprefix(f"{_OUTPUT_DIR_REL}/")
+        candidate = PurePosixPath(f"{_INPUT_DIR_REL}/{phase_id}/{relative}")
+
+        if candidate.is_absolute() or any(part == ".." for part in candidate.parts):
+            logger.warning(
+                "Refusing to inject %r for phase %r: it would escape the workspace",
+                source_path,
+                phase_id,
+            )
+            return None
+        # Belt and braces: even without a literal `..`, the result must still
+        # sit under this phase's directory.
+        expected_root = PurePosixPath(_INPUT_DIR_REL) / phase_id
+        if not candidate.is_relative_to(expected_root):
+            logger.warning(
+                "Refusing to inject %r for phase %r: outside %s",
+                source_path,
+                phase_id,
+                expected_root,
+            )
+            return None
+        return str(candidate)
+
+    @staticmethod
+    def _flat_alias_path(phase_id: str) -> str:
+        """The pre-#988 single-file name, kept as an alias for one release.
+
+        Workflows written against ``artifacts/input/<phase-id>.md`` keep
+        working while authors migrate to the directory form.
+        """
+        return f"{_INPUT_DIR_REL}/{phase_id}{_FLAT_ALIAS_SUFFIX}"
+
+    @classmethod
     async def _inject_and_log(
+        cls,
         workspace: ArtifactWorkspace,
         resolved_outputs: dict[str, str],
+        resolved_files: dict[str, list[PhaseOutputFile]],
         completed_phase_ids: list[str],
     ) -> None:
-        """Inject resolved outputs into workspace and log the result."""
-        files_to_inject = [
-            (f"artifacts/input/{phase_id}.md", content.encode())
-            for phase_id, content in resolved_outputs.items()
-        ]
+        """Inject every earlier phase's output tree, plus the flat alias.
+
+        Two shapes are written per phase (issue #988):
+
+        * ``artifacts/input/<phase-id>/<path under artifacts/output/>`` - one
+          entry per file the phase actually produced.
+        * ``artifacts/input/<phase-id>.md`` - the primary deliverable under the
+          pre-#988 name, so existing workflows keep reading.
+
+        A file whose ``source_path`` is None predates ArtifactCreated v5. Its
+        original path was never recorded, so it gets the flat alias only; the
+        alternative would be inventing a path the author never chose.
+        """
+        files_to_inject: list[tuple[str, bytes]] = []
+        seen: set[str] = set()
+
+        for path, content in cls._tree_files(resolved_files, seen):
+            files_to_inject.append((path, content))
+
+        for phase_id, content in resolved_outputs.items():
+            alias = cls._flat_alias_path(phase_id)
+            if alias in seen:
+                continue
+            seen.add(alias)
+            files_to_inject.append((alias, content.encode()))
+
         if files_to_inject:
             await workspace.inject_files(files_to_inject)
             logger.info(
-                "Injected %d artifact(s) from previous phases: %s",
+                "Injected %d file(s) from previous phases: %s",
                 len(files_to_inject),
-                list(resolved_outputs.keys()),
+                sorted(set(resolved_outputs) | set(resolved_files)),
             )
         elif completed_phase_ids:
             logger.warning(
@@ -229,11 +411,12 @@ class ArtifactCollector:
             CollectedArtifacts with IDs and first artifact content for injection.
         """
         collected = await workspace.collect_files(
-            patterns=["artifacts/output/**/*"],
+            patterns=[_OUTPUT_GLOB],
         )
         artifacts = [(path, body) for path, body in collected if _is_collectable(path)]
 
         artifact_ids: list[str] = []
+        files: list[PhaseOutputFile] = []
         first_content: str | None = None
 
         for artifact_path, artifact_content in artifacts:
@@ -248,14 +431,17 @@ class ArtifactCollector:
                 artifact_type=output_artifact_type,
                 content=content_str,
                 title=f"{phase_name}: {artifact_path}",
+                source_path=artifact_path,
             )
             artifact_ids.append(artifact_id)
+            files.append(PhaseOutputFile(source_path=artifact_path, content=content_str))
             if first_content is None:
                 first_content = content_str
 
         return CollectedArtifacts(
             artifact_ids=artifact_ids,
             first_content=first_content,
+            files=files,
         )
 
     async def collect_partial(
@@ -273,7 +459,7 @@ class ArtifactCollector:
             # Same filter as the happy path: collect_partial is the interrupt
             # route and shares the pattern, so fixing only the other site would
             # leave every cancelled run still sweeping junk (issue #919).
-            partial_collected = await workspace.collect_files(patterns=["artifacts/output/**/*"])
+            partial_collected = await workspace.collect_files(patterns=[_OUTPUT_GLOB])
             partial_artifacts = [
                 (path, body) for path, body in partial_collected if _is_collectable(path)
             ]
@@ -290,6 +476,7 @@ class ArtifactCollector:
                     artifact_type=output_artifact_type,
                     content=content_str,
                     title=f"{phase_name} (partial): {artifact_path}",
+                    source_path=artifact_path,
                 )
                 artifact_ids.append(artifact_id)
             return artifact_ids
@@ -311,8 +498,14 @@ class ArtifactCollector:
         artifact_type: str,
         content: str,
         title: str,
+        source_path: str | None = None,
     ) -> None:
-        """Create and save an artifact with two-tier storage (ADR-012)."""
+        """Create and save an artifact with two-tier storage (ADR-012).
+
+        ``source_path`` is where the file sat under ``artifacts/output/``. It is
+        recorded as a field rather than left implicit in ``title`` so the
+        handoff can rebuild the tree without parsing a display string (#988).
+        """
         from syn_domain.contexts.artifacts import (
             ArtifactAggregate,
             CreateArtifactCommand,
@@ -363,6 +556,7 @@ class ArtifactCollector:
             artifact_type=artifact_type_enum,
             content=content,
             title=title,
+            source_path=source_path,
             storage_uri=storage_uri,
         )
         aggregate.create_artifact(command)

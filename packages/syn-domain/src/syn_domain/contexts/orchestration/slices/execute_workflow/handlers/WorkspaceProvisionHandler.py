@@ -23,6 +23,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
+)
 from syn_shared.agents import AgentProvider, require_executable_provider
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
@@ -328,7 +331,7 @@ class WorkspaceProvisionHandler:
         repos: list[str] | None = None,
         artifacts: ArtifactCollector | None = None,
         completed_phase_ids: list[str] | None = None,
-        phase_outputs: dict[str, str] | None = None,
+        phase_outputs: PhaseOutputCache | None = None,
         inputs: dict[str, object] | None = None,
     ) -> ProvisionResult:
         """Provision workspace for a phase.
@@ -341,11 +344,14 @@ class WorkspaceProvisionHandler:
             repos: Full GitHub URLs to clone and hydrate context from.
             artifacts: Artifact collector for previous-phase injection.
             completed_phase_ids: Phase IDs completed before this one.
-            phase_outputs: Content from previous phase artifacts.
+            phase_outputs: What each previous phase produced - the primary
+                deliverable for prompt substitution, and every file it wrote so
+                the previous phases' output TREES can be rebuilt (#988).
             inputs: Workflow execution inputs dict.
         """
         assert todo.phase_id is not None
 
+        outputs = phase_outputs if phase_outputs is not None else PhaseOutputCache()
         effective_repos = repos or []
         workspace_cm = self._workspace_service.create_workspace(
             execution_id=todo.execution_id,
@@ -371,7 +377,7 @@ class WorkspaceProvisionHandler:
             await self._materialize_and_install_skills(workspace, phase)
             await self._install_baked_delegation_skill(workspace, phase)
             await self._inject_phase_artifacts(
-                workspace, artifacts, completed_phase_ids or [], phase_outputs or {}, todo
+                workspace, artifacts, completed_phase_ids or [], outputs, todo
             )
             return await self._build_provision_result(
                 workspace,
@@ -381,7 +387,7 @@ class WorkspaceProvisionHandler:
                 workflow_id,
                 session_id,
                 effective_repos,
-                phase_outputs or {},
+                outputs.primary,
                 inputs,
             )
         except BaseException as exc:
@@ -527,13 +533,17 @@ class WorkspaceProvisionHandler:
         workspace: ManagedWorkspace,
         artifacts: ArtifactCollector | None,
         completed_ids: list[str],
-        outputs: dict[str, str],
+        outputs: PhaseOutputCache,
         todo: TodoItem,
     ) -> None:
         """Inject artifacts from previous phases into the workspace."""
         if artifacts is not None:
             await artifacts.inject_from_previous_phases_explicit(
-                workspace, completed_ids, outputs, execution_id=todo.execution_id
+                workspace,
+                completed_ids,
+                outputs.primary,
+                execution_id=todo.execution_id,
+                phase_files=outputs.files,
             )
 
     async def _build_provision_result(

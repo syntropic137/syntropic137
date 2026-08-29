@@ -253,7 +253,21 @@ class PhaseYamlDefinition(BaseModel):
         extra="forbid",
     )
 
-    id: str = Field(..., alias="id", min_length=1)
+    # A phase id is INTERPOLATED INTO A FILESYSTEM PATH: outputs from this
+    # phase are injected into the next phase's workspace at
+    # `artifacts/input/<phase-id>/...`. `min_length=1` alone accepted
+    # `../../../tmp/owned`, which escapes the workspace on injection - and with
+    # the Docker backend the write lands on the host beside the mount, not
+    # merely elsewhere inside the container.
+    #
+    # Workflows are installable from a marketplace, so the author of a phase id
+    # is not necessarily the operator running it. That makes this reachable by
+    # an untrusted party, which is what decides the grammar below: an
+    # allowlist, not a `..` denylist. Denylists lose to encoding tricks; a
+    # closed character set does not.
+    id: str = Field(
+        ..., alias="id", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    )
     name: str = Field(..., min_length=1, max_length=255)
     order: int = Field(..., ge=1)
     execution_type: PhaseExecutionType = PhaseExecutionType.SEQUENTIAL

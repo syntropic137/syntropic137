@@ -26,6 +26,7 @@ from syn_domain.contexts.artifacts._shared import (
     ArtifactAggregate,
     ArtifactType,
     ContentType,
+    PhaseOutputFile,
     compute_content_hash,
 )
 from syn_domain.contexts.artifacts.domain.commands.DeleteArtifactCommand import (
@@ -69,6 +70,7 @@ __all__ = [
     "CreateArtifactHandler",
     "DeleteArtifactCommand",
     "ManageArtifactHandler",
+    "PhaseOutputFile",
     "UpdateArtifactCommand",
     "UploadArtifactCommand",
     "compute_content_hash",

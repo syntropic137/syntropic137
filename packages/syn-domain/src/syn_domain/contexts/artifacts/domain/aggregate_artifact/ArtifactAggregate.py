@@ -62,6 +62,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._content_hash: str | None = None
         self._size_bytes: int = 0
         self._title: str | None = None
+        self._source_path: str | None = None  # #988: path under artifacts/output/
         self._storage_uri: str | None = None  # Object storage reference (ADR-012)
         self._is_primary_deliverable: bool = True
         self._is_deleted: bool = False
@@ -125,6 +126,14 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
     def title(self) -> str | None:
         """Get artifact title."""
         return self._title
+
+    @property
+    def source_path(self) -> str | None:
+        """Path this file occupied under the producing workspace's output dir.
+
+        None for artifacts created before ArtifactCreated v5 (issue #988).
+        """
+        return self._source_path
 
     @property
     def is_primary_deliverable(self) -> bool:
@@ -193,6 +202,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
             content_hash=content_hash,
             size_bytes=size_bytes,
             title=command.title,
+            source_path=command.source_path,  # #988: original relative path
             storage_uri=command.storage_uri,  # Object storage reference (ADR-012)
             is_primary_deliverable=command.is_primary_deliverable,
             derived_from=command.derived_from or [],
@@ -269,6 +279,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._content_hash = event.content_hash
         self._size_bytes = event.size_bytes
         self._title = event.title
+        self._source_path = event.source_path
         self._storage_uri = event.storage_uri  # Object storage reference (ADR-012)
         self._is_primary_deliverable = event.is_primary_deliverable
         self._derived_from = list(event.derived_from)
