@@ -27,7 +27,7 @@ phases:
     max_tokens: 32768
     timeout_seconds: 900
 
-    tools:
+    allowed_tools:
       - bash
 
     prompt_template: |

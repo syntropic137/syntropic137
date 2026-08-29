@@ -232,7 +232,16 @@ class PhaseYamlDefinition(BaseModel):
     Converts YAML snake_case to domain PhaseDefinition.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        # WHY (#961): a misspelled key used to be accepted and dropped, so a phase
+        # whose `prompt:` should have been `prompt_template:` installed cleanly,
+        # executed, billed, and gave the agent NO instructions -- with every layer
+        # reporting success. Four shipped trigger workflows were also declaring
+        # `tools:` (not `allowed_tools:`), silently discarding their intended tool
+        # allowlist. Rejecting an unknown key is the only signal an author gets.
+        extra="forbid",
+    )
 
     id: str = Field(..., alias="id", min_length=1)
     name: str = Field(..., min_length=1, max_length=255)
@@ -279,9 +288,24 @@ class PhaseYamlDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
-        """Ensure at most one of prompt_template or prompt_file is set."""
+        """Ensure exactly one of prompt_template or prompt_file is set.
+
+        The "at least one" half is a second, independent guard for #961. A phase
+        with no instructions cannot do useful work, so dispatching it to an agent
+        is never correct -- but that is exactly what happened when a misspelled
+        `prompt:` key was silently dropped: the run completed, billed, and the
+        agent spent its turns hunting for a task file it was never given.
+        Rejecting the empty case catches that class from the opposite direction
+        from `extra="forbid"`, so a future field-name drift cannot reproduce it.
+        """
         if self.prompt_template is not None and self.prompt_file is not None:
             msg = f"Phase '{self.id}': specify either 'prompt_template' or 'prompt_file', not both"
+            raise ValueError(msg)
+        if self.prompt_template is None and self.prompt_file is None:
+            msg = (
+                f"Phase '{self.id}': needs 'prompt_template' or 'prompt_file'. "
+                "A phase with no instructions would run an agent with an empty prompt."
+            )
             raise ValueError(msg)
         return self
 
@@ -373,7 +397,12 @@ class WorkflowDefinition(BaseModel):
     This is the root model for workflow YAML files.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        # Same reasoning as PhaseYamlDefinition (#961): silently dropping an
+        # unknown workflow-level key hides an authoring mistake behind a green run.
+        extra="forbid",
+    )
 
     # Identity
     id: str = Field(..., min_length=1, max_length=100)
