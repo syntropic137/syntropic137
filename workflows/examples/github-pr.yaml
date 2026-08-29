@@ -50,7 +50,7 @@ phases:
     timeout_seconds: 600
 
     # Tools available for this phase
-    tools:
+    allowed_tools:
       - bash
       - computer
 
@@ -139,7 +139,7 @@ phases:
     max_tokens: 2048
     timeout_seconds: 120
 
-    tools:
+    allowed_tools:
       - bash
 
     prompt_template: |

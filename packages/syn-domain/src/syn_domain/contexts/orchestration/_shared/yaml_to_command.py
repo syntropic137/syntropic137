@@ -78,6 +78,7 @@ def build_command_from_definition(
         description=definition.description,
         input_declarations=definition.get_domain_input_declarations(),
         requires_repos=infer_requires_repos(definition),
+        repos=list(definition.repos),
         # WHY (issue #726, PR2): carry workflow-scope claude_plugins from YAML
         # into the create command so the aggregate persists them; PR2's
         # resolution service unions them with per-phase refs at execute time.

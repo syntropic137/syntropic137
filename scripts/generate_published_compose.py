@@ -90,13 +90,20 @@ FILE_HEADER = """\
 # =============================================================================
 
 
-def _env_to_dict(env: dict | list | None) -> dict[str, str]:
-    """Normalize environment (list or dict form) to dict."""
+def _env_to_dict(env: dict | list | None) -> dict[str, str | None]:
+    """Normalize environment (list or dict form) to dict.
+
+    A ``None`` value is PRESERVED, not coerced to "". Compose treats a bare
+    ``KEY:`` as "pass the host variable through, and omit the key entirely if it
+    is unset", which is what keeps "unset" distinguishable from "set to empty".
+    Coercing it to "" would collapse those two states in the generated file and
+    silently reintroduce #954's false pass.
+    """
     if env is None:
         return {}
     if isinstance(env, dict):
-        return {str(k): str(v) if v is not None else "" for k, v in env.items()}
-    result: dict[str, str] = {}
+        return {str(k): (None if v is None else str(v)) for k, v in env.items()}
+    result: dict[str, str | None] = {}
     for item in env:
         s = str(item)
         if "=" in s:

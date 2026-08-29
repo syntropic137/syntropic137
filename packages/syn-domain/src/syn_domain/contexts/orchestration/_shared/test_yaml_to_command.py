@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
+    PhaseYamlDefinition,
     WorkflowDefinition,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -103,6 +104,37 @@ class TestBuildCommandFromDefinition:
 
 
 @pytest.mark.unit
+class TestReposMapping:
+    """`repos` must survive YAML -> CreateWorkflowTemplateCommand.
+
+    Codex pass 2 on #962 noted the strictness tests prove WorkflowDefinition
+    RETAINS repos, but nothing asserted build_command_from_definition copies it
+    into the command. Deleting that one mapping line would recreate the exact
+    silent-drop bug this PR exists to prevent, with every other test green.
+    """
+
+    def test_repos_are_copied_into_the_command(self) -> None:
+        definition = WorkflowDefinition(
+            id="wf-1",
+            name="wf",
+            repos=["https://github.com/acme/api-service", "https://github.com/acme/web-app"],
+            phases=[PhaseYamlDefinition(id="p1", order=1, name="p1", prompt_template="do it")],
+        )
+        command = build_command_from_definition(definition)
+        assert command.repos == [
+            "https://github.com/acme/api-service",
+            "https://github.com/acme/web-app",
+        ]
+
+    def test_repos_default_to_empty_in_the_command(self) -> None:
+        definition = WorkflowDefinition(
+            id="wf-1",
+            name="wf",
+            phases=[PhaseYamlDefinition(id="p1", order=1, name="p1", prompt_template="do it")],
+        )
+        assert build_command_from_definition(definition).repos == []
+
+
 class TestInferRequiresRepos:
     """ADR-058 #666 (v0.25.2): explicit value wins; otherwise default True (opt-out)."""
 
