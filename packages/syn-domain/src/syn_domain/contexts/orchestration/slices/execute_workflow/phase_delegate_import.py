@@ -327,10 +327,17 @@ async def capture_and_import_phase(
 ) -> None:
     """Probe for this phase's sessions, then price the ones nobody billed.
 
-    Takes the leader MAP rather than a resolved id, and pops from it, so the
-    (execution_id, phase_id) key convention lives in one module instead of at
-    every call site. Popping also means a completed phase leaves nothing for a
+    Takes the leader MAP rather than a resolved id, and discards from it, so
+    the (execution_id, phase_id) key convention lives in one module instead of
+    at every call site. Discarding means a completed phase leaves nothing for a
     later run of the same phase id to pick up.
+
+    The discard happens only AFTER the import succeeds. Popping first made the
+    identity unrecoverable the moment anything downstream raised: the retry ran
+    with no leader, so it could not tell the leader from its delegates and took
+    the refusal path, dropping the phase's delegate cost entirely. Surviving a
+    process RESTART is a different problem - the map is in memory - and stays
+    open as part of #933.
 
     One function because the two are one step with one ordering rule: both must
     happen while the container is still up. The processor calls this from the
@@ -339,7 +346,7 @@ async def capture_and_import_phase(
     import would be understated in a way nothing downstream could detect.
     """
     execution_id = getattr(workspace, "execution_id", "") or ""
-    leader_native_session_id = leader_native_ids.pop((execution_id, phase_id), None)
+    leader_native_session_id = leader_native_ids.get((execution_id, phase_id))
     capture = await capture_phase_session(
         capture_port, workspace, session_id=session_id, phase_id=phase_id
     )
@@ -356,6 +363,7 @@ async def capture_and_import_phase(
         workspace_id=getattr(workspace, "workspace_id", None),
         ledger=ledger,
     )
+    leader_native_ids.pop((execution_id, phase_id), None)
 
 
 async def close_phase_workspaces(
@@ -368,6 +376,7 @@ async def close_phase_workspaces(
     capture_port: SessionCapturePort | None,
     session_store: SessionStorePort | None,
     writer: ObservabilityRecorder | None,
+    ledger: ImportLedgerPort | None = None,
 ) -> None:
     """Probe, import, then tear down every still-open phase workspace.
 
@@ -385,6 +394,7 @@ async def close_phase_workspaces(
             leader_native_ids=leader_native_ids,
             session_id=session_ids.get(phase_id, ""),
             phase_id=phase_id,
+            ledger=ledger,
         )
         try:
             await workspace_cm.__aexit__(None, None, None)

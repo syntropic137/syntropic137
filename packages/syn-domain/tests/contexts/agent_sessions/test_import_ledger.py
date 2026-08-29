@@ -13,14 +13,17 @@ green while the real append-only store holds two rows.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from decimal import Decimal
 
 import pytest
 
+from syn_adapters.import_ledger import InMemoryImportLedger
 from syn_domain.contexts.agent_sessions import import_phase_delegates
+from syn_domain.contexts.agent_sessions.delegate_import import DelegateImport
 from syn_domain.contexts.agent_sessions.delegate_usage import StoredSession
-from syn_domain.contexts.agent_sessions.import_ledger import InMemoryImportLedger
+from syn_domain.contexts.agent_sessions.import_ledger import BilledUsage
 
 pytestmark = pytest.mark.unit
 
@@ -192,3 +195,246 @@ class TestTheSameDelegateIsBilledOncePerExecution:
         )
 
         assert recorder.cost_bearing_rows("exec-1") == 1
+
+
+class TestConcurrentImportsDoNotBothBill:
+    """Codex blocker 3: read-the-mark / write / raise-the-mark is check-then-act.
+
+    Without exclusion spanning the whole window, two imports both read a mark
+    of zero, both compute the same delta, and both append it. Monotonic writes
+    do not save it - the duplicate charge is already recorded by then.
+    """
+
+    async def test_two_simultaneous_imports_of_one_session_bill_once(self) -> None:
+        """The suspension point is DELIBERATE and the test is worthless without it.
+
+        `InMemoryImportLedger` never awaits anything real, so two imports under
+        `asyncio.gather` run start-to-finish one after the other and never
+        interleave - the test then passes whether or not any exclusion exists.
+        It did exactly that when first written, and removing the guard left it
+        green. Yielding inside `already_billed` puts a real await between
+        reading the mark and writing the charge, which is the window the race
+        lives in.
+        """
+
+        class _SlowReadLedger(InMemoryImportLedger):
+            async def already_billed(self, execution_id, harness_session_id):  # type: ignore[no-untyped-def]
+                # Read FIRST, then yield. Yielding before the read lets the
+                # second importer resume and see a mark the first one had
+                # already committed - fresh data, no race, and the test passes
+                # without exercising anything. Returning a value fetched
+                # BEFORE the suspension is what makes it stale, which is the
+                # actual shape of a concurrent read.
+                mark = await super().already_billed(execution_id, harness_session_id)
+                await asyncio.sleep(0)
+                return mark
+
+        store = _Store(
+            {LEADER: _claude(LEADER, 100, "m-l"), DELEGATE: _claude(DELEGATE, 25, "m-d")}
+        )
+        recorder, ledger = _AppendOnlyStore(), _SlowReadLedger()
+
+        await asyncio.gather(
+            _import(store, recorder, phase="phase-1", ledger=ledger),
+            _import(store, recorder, phase="phase-2", ledger=ledger),
+        )
+
+        assert recorder.billed_output_for("exec-1") == Decimal("25"), (
+            f"the delegate was billed twice concurrently: {recorder.rows}"
+        )
+
+    async def test_the_guard_actually_excludes(self) -> None:
+        """Prove the exclusion is real, not incidentally-serial test timing.
+
+        A second entry while the first is inside must WAIT. Without this, the
+        test above could pass simply because nothing yielded to the loop.
+        """
+        ledger = InMemoryImportLedger()
+        order: list[str] = []
+
+        async def hold(tag: str) -> None:
+            async with ledger.guard("exec-1", DELEGATE):
+                order.append(f"{tag}-in")
+                await asyncio.sleep(0)
+                order.append(f"{tag}-out")
+
+        await asyncio.gather(hold("a"), hold("b"))
+
+        assert order in (
+            ["a-in", "a-out", "b-in", "b-out"],
+            ["b-in", "b-out", "a-in", "a-out"],
+        ), f"the two regions interleaved, so the guard does not exclude: {order}"
+
+    async def test_different_sessions_are_not_serialized_against_each_other(self) -> None:
+        """The lock is per session. A global one would serialize every import."""
+        ledger = InMemoryImportLedger()
+        inside = asyncio.Event()
+
+        async def first() -> None:
+            async with ledger.guard("exec-1", "session-a"):
+                inside.set()
+                await asyncio.sleep(0.05)
+
+        async def second() -> None:
+            await inside.wait()
+            async with asyncio.timeout(0.02):
+                async with ledger.guard("exec-1", "session-b"):
+                    pass
+
+        await asyncio.gather(first(), second())
+
+
+class TestTheMarkOnlyRises:
+    """Codex blocker 3, second half: an out-of-order commit must not lower it.
+
+    A stale import carrying an older cumulative figure can land after a newer
+    one committed. Writing it unconditionally would lower the mark, and the
+    next read of the newer transcript would bill the difference a second time.
+    """
+
+    async def test_a_stale_commit_cannot_lower_the_mark(self) -> None:
+        ledger = InMemoryImportLedger()
+
+        await ledger.record_billed("exec-1", DELEGATE, BilledUsage(output_tokens=50))
+        await ledger.record_billed("exec-1", DELEGATE, BilledUsage(output_tokens=40))
+
+        mark = await ledger.already_billed("exec-1", DELEGATE)
+        assert mark.output_tokens == 50, (
+            "the stale figure lowered the mark; a reread of 50 would bill 10 again"
+        )
+
+    async def test_it_rises_per_bucket_not_per_row(self) -> None:
+        """One bucket growing must not drag another backwards."""
+        ledger = InMemoryImportLedger()
+
+        await ledger.record_billed(
+            "exec-1", DELEGATE, BilledUsage(output_tokens=50, cache_read_tokens=10)
+        )
+        await ledger.record_billed(
+            "exec-1", DELEGATE, BilledUsage(output_tokens=20, cache_read_tokens=99)
+        )
+
+        mark = await ledger.already_billed("exec-1", DELEGATE)
+        assert (mark.output_tokens, mark.cache_read_tokens) == (50, 99)
+
+
+class TestTheLedgerIsGuardedAsInMemoryState:
+    """ADR-060. Losing the mark on restart silently reverts to double-billing."""
+
+    def test_constructing_it_outside_a_test_environment_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Patch the settings lookup rather than the environment.
+
+        `uses_in_memory_stores` is `is_test or is_offline`, and under pytest
+        `is_test` is unconditionally true - so no env var can express
+        "production" from inside the suite. Setting SYN_ENV=production and
+        asserting a raise would therefore fail for a reason that has nothing to
+        do with the guard. Patching what the guard actually reads is the only
+        way to exercise it.
+        """
+        import syn_adapters.in_memory as in_memory
+
+        class _ProductionSettings:
+            uses_in_memory_stores = False
+            app_environment = "production"
+
+        monkeypatch.setattr(in_memory, "get_settings", lambda: _ProductionSettings())
+
+        with pytest.raises(in_memory.InMemoryAdapterError, match="test/offline only"):
+            InMemoryImportLedger()
+
+    def test_it_still_constructs_under_the_test_suite(self) -> None:
+        """The negative control: without the patch it must work, or the test
+        above would pass for the trivial reason that it never constructs."""
+        assert InMemoryImportLedger() is not None
+
+
+@dataclass
+class _Capture:
+    """Minimal stand-in for AuthoritativeCapture: only the ids are read."""
+
+    agent_session_ids: tuple[str, ...] = (LEADER, DELEGATE)
+
+
+class TestTheDeferredCrashWindowStaysNarrow:
+    """#933's residual gap, deliberately left open - guarded so it cannot widen.
+
+    With the ledger wired, a second import no longer double-bills. What remains
+    is a crash BETWEEN recording the charge and committing the mark: the retry
+    reads a stale mark and bills again. No in-process mechanism closes that;
+    it needs an idempotency key on the observation write, tracked in #933.
+
+    Two things must stay true for the residual gap to remain merely an
+    overcount rather than something worse, and neither is self-evident from
+    reading the code - so they are asserted here.
+    """
+
+    async def test_the_charge_is_recorded_before_the_mark_advances(self) -> None:
+        """Order is load-bearing, and the safe direction is counter-intuitive.
+
+        write-then-mark: a crash in between re-bills on retry (#933, an
+        OVERCOUNT - visible, and it looks like an expensive run).
+
+        mark-then-write: a crash in between loses the charge forever (an
+        UNDERCOUNT - silent, and nothing downstream can detect it, because a
+        cost that was never recorded leaves no trace to reconcile against).
+
+        Reversing these looks like a harmless refactor and is not, so pin it.
+        """
+        events: list[str] = []
+
+        class _OrderRecordingLedger(InMemoryImportLedger):
+            async def record_billed(self, execution_id, harness_session_id, billed):  # type: ignore[no-untyped-def]
+                events.append("mark")
+                await super().record_billed(execution_id, harness_session_id, billed)
+
+        class _OrderRecordingStore(_AppendOnlyStore):
+            async def record_delegate_usage(self, **kwargs: object) -> None:
+                events.append("charge")
+                await super().record_delegate_usage(**kwargs)  # type: ignore[arg-type]
+
+        store = _Store(
+            {LEADER: _claude(LEADER, 100, "m-l"), DELEGATE: _claude(DELEGATE, 25, "m-d")}
+        )
+        await _import(
+            store, _OrderRecordingStore(), phase="phase-1", ledger=_OrderRecordingLedger()
+        )
+
+        assert events.index("charge") < events.index("mark"), (
+            "the mark advanced before the charge was recorded; a crash between "
+            "them now loses the charge silently instead of overcounting it"
+        )
+
+    async def test_the_import_has_no_retry_budget(self) -> None:
+        """A retry inside one process would re-enter the window repeatedly.
+
+        #933 is safe to defer partly because exactly one import runs per phase.
+        That is current behaviour, not a guarantee - raising this budget would
+        silently make the crash window reachable far more often, with no test
+        failing to say so. This is that test.
+        """
+        seen: list[int] = []
+
+        async def _spy(*_args: object, **kwargs: object) -> object:
+            seen.append(int(kwargs["attempts_remaining"]))  # type: ignore[call-overload]
+            return DelegateImport(imported=(), retry_ids=(), attempts_remaining=0)
+
+        import syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import as pdi
+
+        original = pdi.import_phase_delegates
+        pdi.import_phase_delegates = _spy  # type: ignore[assignment]
+        try:
+            await pdi.import_delegates_for_phase(
+                _Capture(),
+                session_store=object(),
+                writer=object(),
+                leader_native_session_id=LEADER,
+                phase_id="phase-1",
+                execution_id="exec-1",
+                workspace_id=None,
+            )
+        finally:
+            pdi.import_phase_delegates = original  # type: ignore[assignment]
+
+        assert seen == [0], f"the import gained a retry budget: {seen}"

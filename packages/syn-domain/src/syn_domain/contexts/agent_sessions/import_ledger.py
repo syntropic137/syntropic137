@@ -25,13 +25,17 @@ recorded.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import contextlib
+from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from syn_domain.contexts.agent_sessions.transcript_usage import PricedUsage
 
-__all__ = ["BilledUsage", "ImportLedger", "ImportLedgerPort", "InMemoryImportLedger"]
+__all__ = ["BilledUsage", "ImportLedger", "ImportLedgerPort"]
 
 
 @dataclass(frozen=True)
@@ -67,9 +71,9 @@ class ImportLedgerPort(Protocol):
 
     A Protocol because the real one must outlive the process - a crash between
     the write and phase completion is precisely the case #933 is about, and an
-    in-memory ledger cannot survive it. The in-memory implementation below is
-    for tests and for a single-process import; production must supply a durable
-    one or the guarantee is only as good as the process.
+    in-memory ledger cannot survive it. Implementations live in syn-adapters;
+    production must supply a durable one or the guarantee is only as good as
+    the process.
     """
 
     async def already_billed(self, execution_id: str, harness_session_id: str) -> BilledUsage:
@@ -79,23 +83,30 @@ class ImportLedgerPort(Protocol):
     async def record_billed(
         self, execution_id: str, harness_session_id: str, billed: BilledUsage
     ) -> None:
-        """Set the high-water mark for this session to the CUMULATIVE total."""
+        """Raise the high-water mark for this session to the CUMULATIVE total.
+
+        MUST be monotonic per bucket. A stale import carrying an older
+        cumulative figure can arrive after a newer one committed; letting it
+        write unconditionally would lower the mark, and the next read of the
+        newer transcript would bill the difference a second time.
+        """
         ...
 
+    def guard(
+        self, execution_id: str, harness_session_id: str
+    ) -> AbstractAsyncContextManager[None]:
+        """Serialize the whole claim-write-commit window for one session.
 
-@dataclass
-class InMemoryImportLedger(ImportLedgerPort):
-    """Process-local ledger. Correct within one process, lost on restart."""
+        `already_billed` -> record the charge -> `record_billed` is a
+        check-then-act. Two concurrent imports can both read a mark of 25, both
+        compute the same delta, and both bill it. Monotonic writes do not help:
+        the duplicate charge is already recorded by then.
 
-    _marks: dict[tuple[str, str], BilledUsage] = field(default_factory=dict)
-
-    async def already_billed(self, execution_id: str, harness_session_id: str) -> BilledUsage:
-        return self._marks.get((execution_id, harness_session_id), BilledUsage())
-
-    async def record_billed(
-        self, execution_id: str, harness_session_id: str, billed: BilledUsage
-    ) -> None:
-        self._marks[(execution_id, harness_session_id)] = billed
+        So the mutual exclusion has to span the external write too, which is
+        why this is a context manager over the region rather than a lock inside
+        `record_billed`.
+        """
+        ...
 
 
 @dataclass(frozen=True)
@@ -103,6 +114,20 @@ class ImportLedger:
     """Turns a cumulative transcript into the part not yet billed."""
 
     port: ImportLedgerPort
+
+    @contextlib.asynccontextmanager
+    async def guard(self, execution_id: str, harness_session_id: str) -> AsyncIterator[None]:
+        """Hold the port's exclusion for one session, if it offers one.
+
+        Tolerating a port without `guard` keeps test doubles simple, but a
+        production port MUST implement it - see `ImportLedgerPort.guard`.
+        """
+        acquire = getattr(self.port, "guard", None)
+        if acquire is None:
+            yield
+            return
+        async with acquire(execution_id, harness_session_id):
+            yield
 
     async def unbilled_delta(
         self, execution_id: str, harness_session_id: str, usage: PricedUsage

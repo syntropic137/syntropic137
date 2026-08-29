@@ -34,6 +34,7 @@ says so.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final, Protocol
 
@@ -47,7 +48,7 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Sequence
 
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
@@ -191,6 +192,18 @@ async def _unbilled_portion(
     )
 
 
+@contextlib.asynccontextmanager
+async def _exclusive(
+    ledger: ImportLedgerPort | None, execution_id: str, harness_id: str
+) -> AsyncIterator[None]:
+    """Serialize one session's import, or do nothing when no ledger is wired."""
+    if ledger is None:
+        yield
+        return
+    async with ImportLedger(ledger).guard(execution_id, harness_id):
+        yield
+
+
 async def _write_one_delegate(
     recorder: DelegateUsageRecorder,
     ledger: ImportLedgerPort | None,
@@ -210,30 +223,38 @@ async def _write_one_delegate(
     (#933, #936).
     """
     priced_usage, reason = _split(usage)
-
-    charge = await _unbilled_portion(ledger, execution_id, harness_id, priced_usage)
-    if charge is _NOTHING_LEFT_TO_BILL:
-        return None
-    if isinstance(charge, tuple):
-        priced_usage, ledger_reason = charge
-        reason = ledger_reason or reason
-
     platform_id = platform_session_id_for(harness_id)
-    await recorder.record_delegate_usage(
-        session_id=platform_id,
-        usage=priced_usage,
-        unpriced_reason=reason,
-        execution_id=execution_id,
-        phase_id=phase_id,
-        workspace_id=workspace_id,
-    )
 
-    priced = priced_usage is not None
-    if ledger is not None and priced and isinstance(usage, PricedUsage):
-        # The CUMULATIVE figure, not the delta just written, and AFTER the
-        # write: a mark that ran ahead of what was recorded would make a crash
-        # between the two look like spend already billed, and it never would be.
-        await ImportLedger(ledger).commit(execution_id, harness_id, usage)
+    # The exclusion spans read-write-commit, not just the two ledger calls.
+    # Reading the mark, recording the charge and raising the mark is a
+    # check-then-act: two concurrent imports could both read 25, both compute
+    # the same delta and both bill it. Serializing only the ledger writes would
+    # not help, because by then the duplicate charge is already recorded.
+    async with _exclusive(ledger, execution_id, harness_id):
+        charge = await _unbilled_portion(ledger, execution_id, harness_id, priced_usage)
+        if charge is _NOTHING_LEFT_TO_BILL:
+            return None
+        if isinstance(charge, tuple):
+            priced_usage, ledger_reason = charge
+            reason = ledger_reason or reason
+
+        await recorder.record_delegate_usage(
+            session_id=platform_id,
+            usage=priced_usage,
+            unpriced_reason=reason,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace_id,
+        )
+
+        priced = priced_usage is not None
+        if ledger is not None and priced and isinstance(usage, PricedUsage):
+            # The CUMULATIVE figure, not the delta just written, and AFTER the
+            # write. A mark that ran ahead of what was recorded would make a
+            # crash between the two look like spend already billed when it
+            # never was - an undercount, which is worse than the overcount in
+            # #933 because nothing ever reveals it.
+            await ImportLedger(ledger).commit(execution_id, harness_id, usage)
 
     return ImportedDelegate(
         harness_session_id=harness_id,
