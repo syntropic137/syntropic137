@@ -15,7 +15,10 @@ from syn_adapters.workspace_backends.agentic.stream_helpers import (
     _build_exec_command,
     _cleanup_process,
 )
-from syn_adapters.workspace_backends.agentic.stream_reader import read_lines
+from syn_adapters.workspace_backends.agentic.stream_reader import (
+    StreamOutcome,
+    read_lines,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -29,6 +32,10 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+#: Conventional shell status for "killed by timeout" (128 + SIGTERM equivalent
+#: used by GNU timeout). Any non-zero value works; a recognisable one helps.
+_TIMEOUT_EXIT_CODE = 124
 
 
 class AgenticEventStreamAdapter:
@@ -127,11 +134,23 @@ class AgenticEventStreamAdapter:
             limit=10 * 1024 * 1024,
         )
 
+        outcome = StreamOutcome()
         try:
-            async for line in read_lines(proc, stream_timeout, start_time):
+            async for line in read_lines(proc, stream_timeout, start_time, outcome):
                 yield line
         finally:
             exit_code = await _cleanup_process(proc)
+            if outcome.timed_out and not exit_code:
+                # The transport lies here: `docker exec` exits 0 on SIGTERM, so a
+                # truncated stream is indistinguishable from a clean one by exit
+                # code alone. Mirrors the codex broken-stream precedent in
+                # AgentExecutionHandler. 124 is the conventional timeout status.
+                logger.error(
+                    "Stream timed out after %.1fs; forcing non-zero exit (container=%s)",
+                    stream_timeout or -1,
+                    container_name,
+                )
+                exit_code = _TIMEOUT_EXIT_CODE
             self._last_exit_code = exit_code
             if exit_code and exit_code != 0:
                 logger.warning(
