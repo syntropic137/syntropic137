@@ -13,9 +13,12 @@ tmpdir since they do not run as root. Nothing else about the script is altered.
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
 
