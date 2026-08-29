@@ -1,0 +1,45 @@
+id: selfhost-skills-injection-v1
+name: "Validation: skill injection (vendored + external)"
+description: >
+  Proves both skill delivery paths reach the agent on this deployment. Asks for
+  a sentinel that cannot be guessed, so a broken injection fails visibly instead
+  of being papered over by the model's general knowledge.
+type: custom
+classification: simple
+requires_repos: false
+
+inputs:
+  - name: task
+    description: "Unused; the phase prompt is fixed so the result is comparable across runs."
+    required: false
+    default: "report the deployment sentinel"
+
+# Workflow scope: a VENDORED skill, shipped in this package.
+skills:
+  - ./skills/deployment-sentinel
+
+phases:
+  - id: report
+    name: Report skill availability
+    order: 1
+    execution_type: sequential
+    max_tokens: 2048
+    timeout_seconds: 300
+    prompt_file: phases/report.md
+    agent:
+      provider: claude
+    # Phase scope ADDS to the workflow scope, so this phase should see two
+    # skills. External refs are pinned by commit sha; "@latest" is rejected.
+    skills:
+      - anthropics/skills/doc-coauthoring@3b3fad96af16a10759d930941b4520ba0c40edae
+
+  # Declares NO skills. If the sentinel still reaches it, workflow-scope
+  # injection covers every phase; if it does not, scope is being applied only
+  # to the first phase and a multi-phase workflow would silently lose it.
+  - id: confirm
+    name: Confirm workflow-scope reaches later phases
+    order: 2
+    execution_type: sequential
+    prompt_file: phases/confirm.md
+    agent:
+      provider: claude

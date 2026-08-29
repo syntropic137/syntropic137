@@ -39,6 +39,7 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
+    RESERVED_INPUT_NAMES,
     WorkflowDefinition,
     validate_workflow_yaml,
 )
@@ -135,6 +136,7 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 )
 
 __all__ = [
+    "RESERVED_INPUT_NAMES",
     # Constants
     "SYN_WORKSPACE_PROMPT",
     # Test support types (used by syn_domain.testing)
