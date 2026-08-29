@@ -12,6 +12,7 @@ here also keeps the domain module free of the telemetry schema.
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
         ManagedWorkspace,
     )
     from syn_domain.contexts.agent_sessions import PricedUsage, SessionStorePort
+    from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
         StreamResult,
@@ -199,6 +201,28 @@ class DelegateUsageRecorder:
             )
 
 
+class ImportDisposition(StrEnum):
+    """How an import ended, for callers that must decide whether to retry.
+
+    `import_delegates_for_phase` is deliberately fail-open: it must never turn
+    agent work that succeeded into a phase that failed. But swallowing the
+    exception also erased the DIFFERENCE between "imported" and "could not
+    import", and the caller then discarded the leader identity either way -
+    so the retry had nothing to distinguish the leader from its delegates and
+    refused, dropping the phase's delegate cost. Fail-open needs a disposition,
+    not silence.
+    """
+
+    COMPLETED = "completed"
+    """The import ran. Nothing is owed; the leader identity can be released."""
+
+    FAILED = "failed"
+    """It raised. A retry may still succeed, so keep the leader identity."""
+
+    SKIPPED = "skipped"
+    """Nothing to import - no store, no writer, or no captured sessions."""
+
+
 async def import_delegates_for_phase(
     capture: AuthoritativeCapture | None,
     *,
@@ -208,7 +232,8 @@ async def import_delegates_for_phase(
     phase_id: str,
     execution_id: str,
     workspace_id: str | None = None,
-) -> None:
+    ledger: ImportLedgerPort | None = None,
+) -> ImportDisposition:
     """Price the sessions this phase produced that nobody billed.
 
     Runs on the SAME two paths capture does - normal finalisation and
@@ -226,11 +251,11 @@ async def import_delegates_for_phase(
     # is nowhere to record it, and calling through would raise inside a
     # teardown path that must not fail a phase.
     if session_store is None or writer is None or capture is None:
-        return
+        return ImportDisposition.SKIPPED
 
     captured_ids = capture.agent_session_ids or ()
     if not captured_ids:
-        return
+        return ImportDisposition.SKIPPED
 
     try:
         outcome = await import_phase_delegates(
@@ -247,12 +272,17 @@ async def import_delegates_for_phase(
             # phase open for; anything still unreadable is written as a
             # named gap instead.
             attempts_remaining=0,
+            # None means no ledger is wired, and the caller then keeps the
+            # cross-phase and re-import double counts (#933, #936). Passing it
+            # is the point; it is optional only so call sites can migrate
+            # independently of the durable adapter (#938).
+            ledger=ledger,
         )
     except Exception:
         logger.exception(
             "Delegate import failed for phase %s; phase cost stands unchanged", phase_id
         )
-        return
+        return ImportDisposition.FAILED
 
     if outcome.leader_missing_from_sweep:
         # A LOG IS NOT A SIGNAL. Without a durable record the phase reports a
@@ -296,7 +326,9 @@ async def import_delegates_for_phase(
             phase_id,
             len(captured_ids),
         )
-        return
+        # COMPLETED, not FAILED: the import ran and recorded a durable coverage
+        # gap. Retrying would re-record the same gap, not recover the cost.
+        return ImportDisposition.COMPLETED
 
     if outcome.imported:
         logger.info(
@@ -305,6 +337,7 @@ async def import_delegates_for_phase(
             phase_id,
             sum(1 for d in outcome.imported if d.priced),
         )
+    return ImportDisposition.COMPLETED
 
 
 async def capture_and_import_phase(
@@ -316,13 +349,21 @@ async def capture_and_import_phase(
     leader_native_ids: dict[tuple[str, str], str],
     session_id: str,
     phase_id: str,
+    ledger: ImportLedgerPort | None = None,
 ) -> None:
     """Probe for this phase's sessions, then price the ones nobody billed.
 
-    Takes the leader MAP rather than a resolved id, and pops from it, so the
-    (execution_id, phase_id) key convention lives in one module instead of at
-    every call site. Popping also means a completed phase leaves nothing for a
+    Takes the leader MAP rather than a resolved id, and discards from it, so
+    the (execution_id, phase_id) key convention lives in one module instead of
+    at every call site. Discarding means a completed phase leaves nothing for a
     later run of the same phase id to pick up.
+
+    The discard happens only AFTER the import succeeds. Popping first made the
+    identity unrecoverable the moment anything downstream raised: the retry ran
+    with no leader, so it could not tell the leader from its delegates and took
+    the refusal path, dropping the phase's delegate cost entirely. Surviving a
+    process RESTART is a different problem - the map is in memory - and stays
+    open as part of #933.
 
     One function because the two are one step with one ordering rule: both must
     happen while the container is still up. The processor calls this from the
@@ -331,11 +372,11 @@ async def capture_and_import_phase(
     import would be understated in a way nothing downstream could detect.
     """
     execution_id = getattr(workspace, "execution_id", "") or ""
-    leader_native_session_id = leader_native_ids.pop((execution_id, phase_id), None)
+    leader_native_session_id = leader_native_ids.get((execution_id, phase_id))
     capture = await capture_phase_session(
         capture_port, workspace, session_id=session_id, phase_id=phase_id
     )
-    await import_delegates_for_phase(
+    disposition = await import_delegates_for_phase(
         capture,
         session_store=session_store,
         writer=writer,
@@ -346,7 +387,10 @@ async def capture_and_import_phase(
         # None on every call, so every delegate observation lost its
         # workspace linkage - invisible because getattr has a default.
         workspace_id=getattr(workspace, "workspace_id", None),
+        ledger=ledger,
     )
+    if disposition is not ImportDisposition.FAILED:
+        leader_native_ids.pop((execution_id, phase_id), None)
 
 
 async def close_phase_workspaces(
@@ -359,6 +403,7 @@ async def close_phase_workspaces(
     capture_port: SessionCapturePort | None,
     session_store: SessionStorePort | None,
     writer: ObservabilityRecorder | None,
+    ledger: ImportLedgerPort | None = None,
 ) -> None:
     """Probe, import, then tear down every still-open phase workspace.
 
@@ -376,6 +421,7 @@ async def close_phase_workspaces(
             leader_native_ids=leader_native_ids,
             session_id=session_ids.get(phase_id, ""),
             phase_id=phase_id,
+            ledger=ledger,
         )
         try:
             await workspace_cm.__aexit__(None, None, None)
