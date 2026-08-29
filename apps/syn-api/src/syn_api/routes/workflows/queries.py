@@ -41,7 +41,10 @@ class WorkflowSummaryResponse(BaseModel):
     created_at: str | None = None
     runs_count: int = 0
     is_archived: bool = False
-    requires_repos: bool = True
+    # No default (#955): omitting this let the model invent `True` for every
+    # workflow while the stored rows said otherwise. An outward response model
+    # must not manufacture domain truth - make omission a construction error.
+    requires_repos: bool
 
 
 class InputDeclarationModel(BaseModel):
@@ -80,7 +83,7 @@ class WorkflowResponse(BaseModel):
     """Template-level repository URL (single-repo workflows)."""
     repos: list[str] = Field(default_factory=list)
     """Default GitHub URLs for multi-repo workspace hydration (ADR-058)."""
-    requires_repos: bool = True
+    requires_repos: bool  # required for the same reason as the summary model
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
 
 

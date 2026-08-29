@@ -85,3 +85,28 @@ async def test_a_mixed_page_preserves_each_value() -> None:
         ]
     )
     assert [w.requires_repos for w in resp.workflows] == [True, False, False]
+
+
+class TestTheFieldCannotBeOmittedAgain:
+    """Structural guard: the response model must not be constructible without it.
+
+    The three tests above catch this instance. This one closes the class -- a
+    future refactor that drops the keyword becomes a type/validation error at
+    construction rather than a plausible-looking `True` in the API response.
+    """
+
+    def test_constructing_without_requires_repos_raises(self) -> None:
+        from pydantic import ValidationError
+
+        from syn_api.routes.workflows.queries import WorkflowSummaryResponse
+
+        with pytest.raises(ValidationError):
+            WorkflowSummaryResponse(
+                id="wf-1",
+                name="wf",
+                workflow_type="custom",
+                phase_count=1,
+                created_at=None,
+                runs_count=0,
+                is_archived=False,
+            )
