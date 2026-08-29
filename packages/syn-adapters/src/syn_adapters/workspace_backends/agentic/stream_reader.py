@@ -53,11 +53,6 @@ class StreamOutcome:
 
     timed_out: bool = False
 
-    #: The exit status for THIS stream, snapshotted when its process is reaped.
-    #: Read this rather than the adapter's shared `last_exit_code` when the
-    #: caller may be running concurrently with other streams.
-    exit_code: int | None = None
-
 
 async def read_lines(
     proc: asyncio.subprocess.Process,

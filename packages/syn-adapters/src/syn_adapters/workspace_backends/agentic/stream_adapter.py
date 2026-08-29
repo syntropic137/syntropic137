@@ -176,11 +176,6 @@ class AgenticEventStreamAdapter:
                 )
             exit_code = _resolve_stream_exit_code(exit_code, timed_out=outcome.timed_out)
             self._last_exit_code = exit_code
-            # Also hand the caller its OWN copy. `_last_exit_code` is adapter-wide
-            # and one adapter is shared across concurrent executions, so between
-            # this assignment and the handler's read another stream can overwrite
-            # it -- and a successful phase would inherit this one's 124.
-            outcome.exit_code = exit_code
             if exit_code and exit_code != 0:
                 logger.warning(
                     "Stream process exited with code %d (container=%s)",

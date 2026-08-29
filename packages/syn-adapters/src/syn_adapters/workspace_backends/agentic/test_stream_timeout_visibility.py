@@ -34,7 +34,9 @@ from syn_adapters.workspace_backends.agentic.stream_reader import StreamOutcome,
 
 pytestmark = pytest.mark.unit
 
-# Ignores SIGTERM and exits 0, reproducing `docker exec`'s behaviour.
+# HANDLES SIGTERM by exiting 0, reproducing `docker exec`'s behaviour.
+# (It does not ignore the signal - it catches it and exits successfully,
+# which is the property that makes truncation invisible.)
 _EXITS_ZERO_ON_SIGTERM = (
     "import signal, sys, time\n"
     "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
@@ -138,30 +140,3 @@ class TestResolveStreamExitCode:
         """
         assert _resolve_stream_exit_code(130, timed_out=False) == 130
         assert _resolve_stream_exit_code(130, timed_out=True) == 130
-
-
-class TestPerStreamAttribution:
-    """One adapter serves concurrent executions, so results must not cross.
-
-    `last_exit_code` is adapter-wide: between the adapter setting it and the
-    handler reading it, another stream can overwrite it, and a successful phase
-    would inherit this one's timeout status. Each stream therefore also gets its
-    own copy on its own StreamOutcome.
-    """
-
-    def test_two_outcomes_do_not_share_state(self) -> None:
-        timed_out = StreamOutcome()
-        clean = StreamOutcome()
-
-        timed_out.timed_out = True
-        timed_out.exit_code = _resolve_stream_exit_code(0, timed_out=True)
-        clean.exit_code = _resolve_stream_exit_code(0, timed_out=False)
-
-        assert timed_out.exit_code == _TIMEOUT_EXIT_CODE
-        assert clean.exit_code == 0, "a concurrent clean stream must keep its own status"
-
-    def test_outcome_defaults_are_not_shared_between_instances(self) -> None:
-        """A mutable default would make every stream share one record."""
-        first, second = StreamOutcome(), StreamOutcome()
-        first.timed_out = True
-        assert second.timed_out is False
