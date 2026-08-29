@@ -155,6 +155,20 @@ def _validate_workspace_settings() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
+async def _init_critical_path() -> Result[None, LifecycleError]:
+    """Checks that must ABORT startup, in order.
+
+    Grouped into one helper so ``startup`` gains no additional branch per check
+    -- adding them inline pushed its cyclomatic complexity past the fitness
+    threshold, and raising the threshold to accommodate a growing critical path
+    is the wrong direction.
+    """
+    workspace_result = _validate_workspace_settings()
+    if isinstance(workspace_result, Err):
+        return workspace_result
+    return await _init_event_store()
+
+
 async def _init_degradable_services(state: LifecycleState) -> None:
     """Initialize all degradable services and start recovery if needed (ADR-057).
 
@@ -240,11 +254,7 @@ async def startup(
         return Ok({"mode": "full"})
 
     # Critical path — abort on failure
-    workspace_result = _validate_workspace_settings()
-    if isinstance(workspace_result, Err):
-        return workspace_result
-
-    result = await _init_event_store()
+    result = await _init_critical_path()
     if isinstance(result, Err):
         return result
 

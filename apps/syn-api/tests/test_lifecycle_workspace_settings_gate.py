@@ -60,7 +60,7 @@ def test_the_gate_runs_before_degradable_services() -> None:
     from syn_api.services import lifecycle
 
     source = inspect.getsource(lifecycle)
-    gate = source.index("_validate_workspace_settings()\n    if isinstance(")
+    gate = source.index("await _init_critical_path()")
     degradable = source.index("await _init_degradable_services(")
     assert gate < degradable, (
         "workspace validation must run on the critical path, before degradable "
