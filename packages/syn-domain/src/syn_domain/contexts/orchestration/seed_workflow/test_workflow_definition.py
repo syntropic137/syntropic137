@@ -241,9 +241,7 @@ def test_load_from_file_with_prompt_file() -> None:
         prompts = dir_path / "prompts"
         prompts.mkdir()
         (prompts / "research.md").write_text(
-            "---\nmodel: sonnet\n---\n\n"
-            "You are a research assistant.\n\n"
-            "## Task\n$ARGUMENTS\n"
+            "---\nmodel: sonnet\n---\n\nYou are a research assistant.\n\n## Task\n$ARGUMENTS\n"
         )
 
         # Create the YAML workflow referencing it.

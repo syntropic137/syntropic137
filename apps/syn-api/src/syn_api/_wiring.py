@@ -10,10 +10,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.ports import SignalQueuePort

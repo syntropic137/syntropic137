@@ -27,11 +27,20 @@ def _phase(**overrides):
 
 
 class TestToolNamesAreAClosedVocabulary:
-    def test_case_is_forgiven_because_every_shipped_workflow_got_it_wrong(self) -> None:
-        """`bash` -> `Bash`. The intent is unambiguous; the CLI is case-sensitive."""
-        phase = _phase(allowed_tools=["bash", "read"])
+    @pytest.mark.parametrize("written", ["bash", "BASH", "bAsH", "Bash"])
+    def test_case_is_forgiven_because_every_shipped_workflow_got_it_wrong(
+        self, written: str
+    ) -> None:
+        """`bash` -> `Bash`. The intent is unambiguous; the CLI is case-sensitive.
 
-        assert phase.allowed_tools == [ToolName.BASH, ToolName.READ]
+        MIXED case matters here and an all-lowercase example does not test it:
+        the lookup table is keyed by casefolded names, so "bash" resolves even
+        without normalisation. Only "BASH"/"bAsH" fail if the casefold is
+        dropped - verified by mutation.
+        """
+        phase = _phase(allowed_tools=[written])
+
+        assert phase.allowed_tools == [ToolName.BASH]
 
     def test_an_unknown_tool_is_rejected_at_authoring_time(self) -> None:
         """`git` is not a Claude tool - the field's own docstring suggested it."""

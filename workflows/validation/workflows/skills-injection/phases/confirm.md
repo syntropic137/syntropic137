@@ -2,7 +2,6 @@
 model: haiku
 description: "Second phase declaring NO skills - proves workflow scope reaches every phase"
 allowed-tools: Read,Glob,Grep
-max-tokens: 1024
 timeout-seconds: 300
 ---
 

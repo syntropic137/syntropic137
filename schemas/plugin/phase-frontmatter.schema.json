@@ -41,7 +41,7 @@
           "type": "array"
         }
       ],
-      "description": "Tools available during this phase. Accepts a YAML list or a comma-separated string (e.g., 'bash, git, read').",
+      "description": "Tools AVAILABLE during this phase, restricting what the agent can reach for. Accepts a YAML list or a comma-separated string (e.g., 'Bash, Read'). Names are Claude built-ins and are validated; case is forgiven. Omit to leave the phase unrestricted. Not supported on the codex provider, which has no tool-name concept.",
       "title": "Allowed-Tools"
     },
     "max-tokens": {
@@ -54,7 +54,7 @@
         }
       ],
       "default": null,
-      "description": "Maximum tokens for this phase.",
+      "description": "UNSUPPORTED - declaring it is an error. No harness CLI has a token-cap flag, so this never bounded anything. Use timeout_seconds.",
       "title": "Max-Tokens"
     },
     "timeout-seconds": {

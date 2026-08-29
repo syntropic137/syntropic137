@@ -1,7 +1,7 @@
 # Research Workflow (with prompt_file)
 # Demonstrates using external .md prompt files alongside inline prompts.
 # Phase 1 loads its prompt from prompts/research-discovery.md (frontmatter
-# provides model, allowed-tools, max-tokens, etc.).
+# provides model, allowed-tools, etc.).
 # Phase 2 uses an inline prompt_template for comparison.
 
 id: research-with-prompts-v1
@@ -35,7 +35,7 @@ phases:
     output_artifacts:
       - research_scope
       - initial_questions
-    # Agent config (model, allowed-tools, max-tokens, timeout-seconds,
+    # Agent config (model, allowed-tools, timeout-seconds,
     # argument-hint) comes from the .md file's frontmatter.
     prompt_file: prompts/research-discovery.md
 
