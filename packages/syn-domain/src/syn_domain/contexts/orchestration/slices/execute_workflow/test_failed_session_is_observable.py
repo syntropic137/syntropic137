@@ -19,7 +19,7 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-from syn_shared.events import SESSION_SUMMARY
+from syn_shared.events import SESSION_ERROR, SESSION_SUMMARY
 
 
 class _FakeRepo:
@@ -88,12 +88,17 @@ async def test_failed_session_records_a_summary_observation() -> None:
 
     await manager.complete_failure(error_message="Setup phase failed: no setup.sh")
 
-    summaries = [o for o in writer.observations if o.observation_type == SESSION_SUMMARY]
-    assert len(summaries) == 1, "a failed session must leave an observable trace"
-    data = summaries[0].data
-    assert data["total_tokens"] == 0
+    errors = [o for o in writer.observations if o.observation_type == SESSION_ERROR]
+    assert len(errors) == 1, "a failed session must leave an observable trace"
+    data = errors[0].data
     assert data["status"] == "failed"
     assert "no setup.sh" in str(data["error_message"])
+
+    # NEVER a session_summary. TimescaleSessionCostQuery selects the LATEST
+    # summary (ORDER BY time DESC LIMIT 1), so a zero-token summary written at
+    # failure time would supersede the real one for a session whose agent DID
+    # run and then exited non-zero - reporting real work as free.
+    assert [o for o in writer.observations if o.observation_type == SESSION_SUMMARY] == []
 
 
 @pytest.mark.unit
@@ -105,15 +110,16 @@ async def test_cancelled_session_records_a_summary_observation() -> None:
 
     await manager.complete_cancelled(reason="user cancelled")
 
-    summaries = [o for o in writer.observations if o.observation_type == SESSION_SUMMARY]
-    assert len(summaries) == 1
-    assert summaries[0].data["status"] == "cancelled"
+    errors = [o for o in writer.observations if o.observation_type == SESSION_ERROR]
+    assert len(errors) == 1
+    assert errors[0].data["status"] == "cancelled"
+    assert [o for o in writer.observations if o.observation_type == SESSION_SUMMARY] == []
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_successful_session_does_not_get_a_synthetic_summary() -> None:
-    """The stream processors already write the real one; two would double-count."""
+async def test_successful_session_gets_no_synthetic_observation() -> None:
+    """The stream processors already wrote the real summary."""
     writer = _RecordingWriter()
     manager = _manager(writer)
     await manager.start()
@@ -128,7 +134,7 @@ async def test_successful_session_does_not_get_a_synthetic_summary() -> None:
         source="test",
     )
 
-    assert [o for o in writer.observations if o.observation_type == SESSION_SUMMARY] == []
+    assert writer.observations == []
 
 
 @pytest.mark.unit

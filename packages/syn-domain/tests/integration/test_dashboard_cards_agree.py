@@ -9,7 +9,7 @@ the moment a second source of truth reappears.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import pytest
@@ -20,6 +20,15 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 _MODEL = "haiku"
 _VENDOR_COST_USD = 0.09439815
+
+
+def _utc_today() -> date:
+    """Observations are stored in UTC; date.today() is LOCAL.
+
+    Between local midnight and UTC midnight the two disagree, so a suite that
+    passed all afternoon starts failing in the evening.
+    """
+    return datetime.now(UTC).date()
 
 
 @pytest.fixture
@@ -111,7 +120,7 @@ class TestBothCardsReadOneSource:
         )
 
         heatmap_buckets = await TimescaleHeatmapQuery(event_store.pool).query(
-            start=date.today(), end=date.today(), execution_ids={execution_id}
+            start=_utc_today(), end=_utc_today(), execution_ids={execution_id}
         )
         heat = {
             "tokens": sum(b.breakdown["tokens"] for b in heatmap_buckets),

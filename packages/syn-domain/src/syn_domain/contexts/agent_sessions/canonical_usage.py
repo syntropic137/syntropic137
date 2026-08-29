@@ -48,22 +48,50 @@ session_start AS (
     FROM scoped_events
     GROUP BY session_id
 ),
-summary_usage AS (
-    -- Grouped on cost-nullness as well as model: two summaries on the SAME
-    -- model, one with a vendor cost and one without, would otherwise land in
-    -- one group whose SUM() is non-NULL, so the token fallback never fires
-    -- while the group's tokens include the unpriced row (issue #788).
+summary_rows AS (
+    -- One row per summary observation, NOT aggregated. Aggregating first was
+    -- the bug: "the summary supersedes the turn rows" means CHOOSE one, and
+    -- SUM() over a session carrying two summaries added them, doubling its
+    -- tokens and its cost. Grouping by model or cost-nullness made the
+    -- duplicates into separate rows, which hid the doubling rather than
+    -- preventing it.
     SELECT
         session_id,
+        time,
         data->>'model' AS model,
-        SUM((data->>'total_cost_usd')::numeric) AS vendor_cost_usd,
-        SUM(COALESCE((data->>'total_input_tokens')::bigint, 0)) AS input_tokens,
-        SUM(COALESCE((data->>'total_output_tokens')::bigint, 0)) AS output_tokens,
-        SUM(COALESCE((data->>'cache_creation_tokens')::bigint, 0)) AS cache_creation_tokens,
-        SUM(COALESCE((data->>'cache_read_tokens')::bigint, 0)) AS cache_read_tokens
+        (data->>'total_cost_usd')::numeric AS vendor_cost_usd,
+        COALESCE((data->>'total_input_tokens')::bigint, 0) AS input_tokens,
+        COALESCE((data->>'total_output_tokens')::bigint, 0) AS output_tokens,
+        COALESCE((data->>'cache_creation_tokens')::bigint, 0) AS cache_creation_tokens,
+        COALESCE((data->>'cache_read_tokens')::bigint, 0) AS cache_read_tokens
     FROM scoped_events
     WHERE event_type = '{SESSION_SUMMARY}'
-    GROUP BY session_id, data->>'model', ((data->>'total_cost_usd') IS NULL)
+),
+ranked_summary AS (
+    -- Prefer a summary that carries usage, then the most recent. A summary of
+    -- all zeroes is an ABSENCE of measurement, not a measurement of none: a
+    -- run that produced no result event records the accumulator in the domain
+    -- lane and zeroes here, and letting that win reports real work as free.
+    SELECT
+        session_id, model, vendor_cost_usd,
+        input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+        ROW_NUMBER() OVER (
+            PARTITION BY session_id
+            ORDER BY
+                (input_tokens + output_tokens
+                 + cache_creation_tokens + cache_read_tokens) DESC,
+                time DESC
+        ) AS rn
+    FROM summary_rows
+),
+priced_summary AS (
+    SELECT
+        session_id, model, vendor_cost_usd,
+        input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens
+    FROM ranked_summary
+    WHERE rn = 1
+      AND input_tokens + output_tokens
+          + cache_creation_tokens + cache_read_tokens > 0
 ),
 turn_usage AS (
     -- No vendor cost exists mid-flight: a session reports its own cost only
@@ -79,17 +107,6 @@ turn_usage AS (
     FROM scoped_events
     WHERE event_type = '{TOKEN_USAGE}'
     GROUP BY session_id, data->>'model'
-),
-priced_summary AS (
-    -- A summary of all zeroes is an ABSENCE of usage, not a measurement of
-    -- none, so it must not supersede anything. Seen on live data: a run that
-    -- produced no result event records the accumulator in Lane 1 and zeroes
-    -- here, because AgentExecutionHandler resolves the aggregate's totals
-    -- with a `result_x or accumulated_x` fallback but writes this row from
-    -- the RAW result fields. Letting those zeroes win reports real work as
-    -- free - the silently-cheap failure this module exists to prevent.
-    SELECT * FROM summary_usage
-    WHERE input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens > 0
 ),
 canonical_usage AS (
     -- The summary SUPERSEDES the per-turn rows for a session; it never adds

@@ -18,7 +18,7 @@ from syn_domain.contexts.agent_sessions import (
     SessionStatus,
     StartSessionCommand,
 )
-from syn_shared.events import SESSION_SUMMARY
+from syn_shared.events import SESSION_ERROR
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -65,19 +65,25 @@ class SessionLifecycleManager:
     def session(self) -> AgentSessionAggregate | None:
         return self._session
 
-    async def _record_terminal_summary(self, status: str, error_message: str) -> None:
-        """Leave an observable trace for a session that produced no telemetry.
+    async def _record_terminal_status(self, status: str, error_message: str) -> None:
+        """Leave an observable trace that this session ended badly.
 
-        A run that dies before the agent starts emits no token_usage and no
-        summary of its own, so it existed only in the domain lane - countable
-        there, invisible everywhere else, and absent from the dashboard
-        entirely. Recording a zero-token summary makes the failure a FACT that
-        every read path already knows how to consume, rather than something
-        each consumer has to learn to infer from an absence.
+        A run that dies before the agent starts emits no telemetry at all, so
+        it existed only in the domain lane - countable there, invisible
+        everywhere else, and absent from the dashboard entirely.
 
-        Zero tokens here is a measurement, not a placeholder: the agent
-        genuinely never ran. `status` distinguishes it from a session that did
-        work, so nothing prices it as free work.
+        DELIBERATELY a session_error, never a session_summary. A summary is a
+        USAGE record, and TimescaleSessionCostQuery selects the latest one
+        (ORDER BY time DESC LIMIT 1). complete_failure also fires for a session
+        whose agent RAN and then exited non-zero - the stream processor has
+        already written that session's real summary by then, so appending a
+        zero-token summary here would supersede it and report real work as
+        free. That is the exact silently-cheap failure this change exists to
+        remove, and it would have been reintroduced one layer down.
+
+        session_error carries no token fields, so nothing can price it, while
+        the session still becomes countable: the canonical session count reads
+        DISTINCT session_id across ALL observation types, not just usage rows.
 
         Secondary failures are swallowed. This runs on the error path; losing
         the domain-lane completion because telemetry was unreachable would
@@ -88,14 +94,8 @@ class SessionLifecycleManager:
         try:
             await self._observability.record_observation(
                 session_id=self._session_id,
-                observation_type=SESSION_SUMMARY,
+                observation_type=SESSION_ERROR,
                 data={
-                    "total_input_tokens": 0,
-                    "total_output_tokens": 0,
-                    "cache_creation_tokens": 0,
-                    "cache_read_tokens": 0,
-                    "total_tokens": 0,
-                    "total_cost_usd": 0,
                     "status": status,
                     "error_message": error_message,
                     "model": self._agent_model,
@@ -105,7 +105,7 @@ class SessionLifecycleManager:
             )
         except Exception as obs_err:
             logger.warning(
-                "Failed to record terminal summary for session %s: %s",
+                "Failed to record terminal status for session %s: %s",
                 self._session_id,
                 obs_err,
             )
@@ -180,7 +180,7 @@ class SessionLifecycleManager:
             )
             self._session.complete_session(complete_cmd)
             await self._repo.save(self._session)
-            await self._record_terminal_summary("failed", error_message)
+            await self._record_terminal_status("failed", error_message)
             logger.debug("Session completed: %s (failed: %s)", self._session_id, error_message)
         except Exception as session_err:
             logger.warning("Failed to complete session %s: %s", self._session_id, session_err)
@@ -199,7 +199,7 @@ class SessionLifecycleManager:
             )
             self._session.complete_session(complete_cmd)
             await self._repo.save(self._session)
-            await self._record_terminal_summary("cancelled", reason)
+            await self._record_terminal_status("cancelled", reason)
             logger.debug("Session completed (cancelled): %s", self._session_id)
         except Exception as sess_err:
             logger.warning(

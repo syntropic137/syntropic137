@@ -21,7 +21,7 @@ messages actually produced 767. The placeholder is not a rounding error.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import pytest
@@ -103,8 +103,18 @@ async def _record_real_session(store, session_id: str, execution_id: str) -> Non
     )
 
 
+def _utc_today() -> date:
+    """Observations are stored in UTC; date.today() is LOCAL.
+
+    Between local midnight and UTC midnight the two disagree, so a suite that
+    passed all afternoon starts failing in the evening. Bucketing is done on
+    the UTC day, so the test must ask the same question.
+    """
+    return datetime.now(UTC).date()
+
+
 def _bucket_for_today(buckets):
-    today = date.today().isoformat()
+    today = _utc_today().isoformat()
     match = [b for b in buckets if b.date == today]
     assert match, f"no bucket for {today}"
     return match[0]
@@ -124,8 +134,8 @@ class TestHeatmapReadsAuthoritativeOutput:
 
         query = TimescaleHeatmapQuery(event_store.pool)
         buckets = await query.query(
-            start=date.today(),
-            end=date.today(),
+            start=_utc_today(),
+            end=_utc_today(),
             execution_ids={execution_id},
         )
 
@@ -146,8 +156,8 @@ class TestHeatmapReadsAuthoritativeOutput:
 
         query = TimescaleHeatmapQuery(event_store.pool)
         buckets = await query.query(
-            start=date.today(),
-            end=date.today(),
+            start=_utc_today(),
+            end=_utc_today(),
             execution_ids={execution_id},
         )
 
@@ -185,8 +195,8 @@ class TestHeatmapReadsAuthoritativeOutput:
 
         query = TimescaleHeatmapQuery(event_store.pool)
         buckets = await query.query(
-            start=date.today(),
-            end=date.today(),
+            start=_utc_today(),
+            end=_utc_today(),
             execution_ids={execution_id},
         )
 
@@ -214,7 +224,7 @@ class TestHeatmapPrefersVendorReportedCost:
 
         query = TimescaleHeatmapQuery(event_store.pool)
         buckets = await query.query(
-            start=date.today(), end=date.today(), execution_ids={execution_id}
+            start=_utc_today(), end=_utc_today(), execution_ids={execution_id}
         )
 
         assert _bucket_for_today(buckets).breakdown["cost_usd"] == pytest.approx(
@@ -250,7 +260,7 @@ class TestHeatmapPrefersVendorReportedCost:
 
         query = TimescaleHeatmapQuery(event_store.pool)
         buckets = await query.query(
-            start=date.today(), end=date.today(), execution_ids={execution_id}
+            start=_utc_today(), end=_utc_today(), execution_ids={execution_id}
         )
 
         breakdown = _bucket_for_today(buckets).breakdown
@@ -306,10 +316,81 @@ class TestEmptySummaryDoesNotEraseRealUsage:
 
         query = TimescaleHeatmapQuery(event_store.pool)
         buckets = await query.query(
-            start=date.today(), end=date.today(), execution_ids={execution_id}
+            start=_utc_today(), end=_utc_today(), execution_ids={execution_id}
         )
 
         breakdown = _bucket_for_today(buckets).breakdown
         assert breakdown["cache_read_tokens"] == 58_654
         assert breakdown["input_tokens"] == 18
         assert breakdown["tokens"] == 63_198
+
+
+class TestOneSummaryPerSession:
+    async def test_two_summaries_do_not_add_together(self, event_store, execution_id):
+        """ "Supersedes" must mean CHOOSE one, not SUM them.
+
+        The rule says a session's summary replaces its turn rows. The SQL
+        grouped by (session_id, model, cost-nullness) and summed, so a session
+        carrying two summaries contributed both - doubling its tokens and its
+        cost. Splitting on model or cost-nullness makes them separate rows,
+        which hides the duplication rather than preventing it.
+
+        Real shapes that produce a second summary: a retried phase reusing a
+        session id, and a resumed run re-emitting its totals.
+        """
+        from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery import (
+            TimescaleHeatmapQuery,
+        )
+
+        session_id = str(uuid4())
+        for _ in range(2):
+            await event_store.record_observation(
+                session_id=session_id,
+                observation_type=SESSION_SUMMARY,
+                data={
+                    "total_input_tokens": 18,
+                    "total_output_tokens": 13_300,
+                    "cache_creation_tokens": 15_809,
+                    "cache_read_tokens": 58_179,
+                    "total_cost_usd": _VENDOR_COST_USD,
+                    "model": _MODEL,
+                },
+                execution_id=execution_id,
+            )
+
+        buckets = await TimescaleHeatmapQuery(event_store.pool).query(
+            start=_utc_today(), end=_utc_today(), execution_ids={execution_id}
+        )
+        breakdown = _bucket_for_today(buckets).breakdown
+
+        assert breakdown["output_tokens"] == _TRUE_OUTPUT_TOKENS
+        assert breakdown["cost_usd"] == pytest.approx(_VENDOR_COST_USD, abs=1e-4)
+
+    async def test_differing_models_across_summaries_still_yield_one(
+        self, event_store, execution_id
+    ):
+        """Grouping by model must not turn a duplicate into two legitimate rows."""
+        from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery import (
+            TimescaleHeatmapQuery,
+        )
+
+        session_id = str(uuid4())
+        for model, cost in ((_MODEL, _VENDOR_COST_USD), ("claude-sonnet-5", None)):
+            await event_store.record_observation(
+                session_id=session_id,
+                observation_type=SESSION_SUMMARY,
+                data={
+                    "total_input_tokens": 18,
+                    "total_output_tokens": 13_300,
+                    "cache_creation_tokens": 15_809,
+                    "cache_read_tokens": 58_179,
+                    "total_cost_usd": cost,
+                    "model": model,
+                },
+                execution_id=execution_id,
+            )
+
+        buckets = await TimescaleHeatmapQuery(event_store.pool).query(
+            start=_utc_today(), end=_utc_today(), execution_ids={execution_id}
+        )
+        assert _bucket_for_today(buckets).breakdown["output_tokens"] == _TRUE_OUTPUT_TOKENS
