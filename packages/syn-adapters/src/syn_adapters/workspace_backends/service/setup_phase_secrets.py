@@ -14,9 +14,8 @@ ensure git picks the right token for each clone.
 
 from __future__ import annotations
 
-import shlex
-
 import logging
+import shlex
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -396,6 +395,18 @@ class SetupPhaseSecrets:
         lines.append("")
         lines.append("# Clone repositories (ADR-058)")
         lines.append("mkdir -p /workspace/repos")
+        # Submodules are frequently declared with the SSH spelling. The workspace has
+        # no SSH key -- auth is an HTTPS installation token -- so those would fail, and
+        # the transport pin below rejects them earlier still. Rewriting to HTTPS makes
+        # them work with the token we already have. Verified against git 2.50.1: the
+        # insteadOf rewrite is applied BEFORE the GIT_ALLOW_PROTOCOL check, so the two
+        # compose (an ssh:// URL without this config gives "transport 'ssh' not allowed").
+        # --add, not a plain set: insteadOf is multi-valued, and a second plain
+        # `git config` REPLACES the first, silently dropping one spelling.
+        for ssh_prefix in ("git@github.com:", "ssh://git@github.com/"):
+            lines.append(
+                f'git config --global --add url."https://github.com/".insteadOf "{ssh_prefix}"'
+            )
         for url in self.repositories:
             name = _repo_name(url)
             dest = f"/workspace/repos/{name}"

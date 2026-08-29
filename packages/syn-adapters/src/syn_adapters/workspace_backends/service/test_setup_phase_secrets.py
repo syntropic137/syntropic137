@@ -9,7 +9,6 @@ Run: pytest -m unit packages/syn-adapters/src/syn_adapters/workspace_backends/se
 from __future__ import annotations
 
 import shlex
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
 
+pytestmark = pytest.mark.unit
+
 GIT_STUB = """#!/bin/bash
 # Emit explicit CALL: markers rather than raw argv. Counting substrings over argv
 # is unreliable here because the tmpdir path is named after the running test, so a
@@ -187,7 +189,9 @@ class TestSubmoduleTransportIsPinned:
         return parent
 
     @staticmethod
-    def _update(parent: Path, tmp_path: Path, *, pin_transport: bool) -> None:
+    def _update(
+        parent: Path, tmp_path: Path, *, pin_transport: bool
+    ) -> subprocess.CompletedProcess[str]:
         env = {
             "PATH": "/usr/bin:/bin",
             "HOME": str(tmp_path),
@@ -195,7 +199,7 @@ class TestSubmoduleTransportIsPinned:
         }
         if pin_transport:
             env["GIT_ALLOW_PROTOCOL"] = "https"
-        subprocess.run(
+        return subprocess.run(
             # `-c protocol.ext.allow=always` simulates ambient config or image drift
             # re-enabling the transport. The pin must win over it.
             [
@@ -225,8 +229,11 @@ class TestSubmoduleTransportIsPinned:
     def test_pin_blocks_the_ext_transport(self, tmp_path: Path) -> None:
         sentinel = tmp_path / "PWNED"
         parent = self._parent_repo_with_ext_submodule(tmp_path, sentinel)
-        self._update(parent, tmp_path, pin_transport=True)
+        proc = self._update(parent, tmp_path, pin_transport=True)
         assert not sentinel.exists()
+        # Assert the SPECIFIC reason. Run alone, this test would otherwise pass
+        # whenever the submodule machinery silently did nothing at all.
+        assert "not allowed" in (proc.stderr + proc.stdout)
 
 
 class TestCredentialsAreScopedToTheirRepo:
@@ -291,3 +298,42 @@ class TestCredentialsAreScopedToTheirRepo:
         assert got["repo-a.git"] == "TOKEN_A"
         # The finding this guards: an unnamed repo must get nothing, not TOKEN_A.
         assert got["unlisted"] == "<none>"
+
+
+class TestSshSubmoduleFormsAreRewritten:
+    """The script must make SSH-form submodule URLs usable with an HTTPS token.
+
+    Git applies `insteadOf` BEFORE the GIT_ALLOW_PROTOCOL check. Verified against
+    git 2.50.1 with a live `ls-remote`: the SSH spelling resolves and succeeds with
+    the rewrite configured, and reports "transport 'ssh' not allowed" without it.
+    """
+
+    def test_both_ssh_spellings_rewrite_to_https(self, tmp_path: Path) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"}
+        secrets = SetupPhaseSecrets(
+            repositories=["https://github.com/org/repo-a"],
+            repo_tokens={"https://github.com/org/repo-a": "tok-a"},
+        )
+        config_lines = [
+            ln
+            for ln in secrets.build_setup_script().splitlines()
+            if ln.startswith("git config") and "insteadOf" in ln
+        ]
+        assert len(config_lines) == 2
+        subprocess.run(
+            ["bash", "-e", "-c", "\n".join(config_lines)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        got = subprocess.run(
+            ["git", "config", "--get-all", "url.https://github.com/.insteadOf"],
+            env=env,
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+        assert "git@github.com:" in got
+        assert "ssh://git@github.com/" in got
