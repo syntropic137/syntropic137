@@ -12,6 +12,7 @@ here also keeps the domain module free of the telemetry schema.
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -200,6 +201,28 @@ class DelegateUsageRecorder:
             )
 
 
+class ImportDisposition(StrEnum):
+    """How an import ended, for callers that must decide whether to retry.
+
+    `import_delegates_for_phase` is deliberately fail-open: it must never turn
+    agent work that succeeded into a phase that failed. But swallowing the
+    exception also erased the DIFFERENCE between "imported" and "could not
+    import", and the caller then discarded the leader identity either way -
+    so the retry had nothing to distinguish the leader from its delegates and
+    refused, dropping the phase's delegate cost. Fail-open needs a disposition,
+    not silence.
+    """
+
+    COMPLETED = "completed"
+    """The import ran. Nothing is owed; the leader identity can be released."""
+
+    FAILED = "failed"
+    """It raised. A retry may still succeed, so keep the leader identity."""
+
+    SKIPPED = "skipped"
+    """Nothing to import - no store, no writer, or no captured sessions."""
+
+
 async def import_delegates_for_phase(
     capture: AuthoritativeCapture | None,
     *,
@@ -210,7 +233,7 @@ async def import_delegates_for_phase(
     execution_id: str,
     workspace_id: str | None = None,
     ledger: ImportLedgerPort | None = None,
-) -> None:
+) -> ImportDisposition:
     """Price the sessions this phase produced that nobody billed.
 
     Runs on the SAME two paths capture does - normal finalisation and
@@ -228,11 +251,11 @@ async def import_delegates_for_phase(
     # is nowhere to record it, and calling through would raise inside a
     # teardown path that must not fail a phase.
     if session_store is None or writer is None or capture is None:
-        return
+        return ImportDisposition.SKIPPED
 
     captured_ids = capture.agent_session_ids or ()
     if not captured_ids:
-        return
+        return ImportDisposition.SKIPPED
 
     try:
         outcome = await import_phase_delegates(
@@ -259,7 +282,7 @@ async def import_delegates_for_phase(
         logger.exception(
             "Delegate import failed for phase %s; phase cost stands unchanged", phase_id
         )
-        return
+        return ImportDisposition.FAILED
 
     if outcome.leader_missing_from_sweep:
         # A LOG IS NOT A SIGNAL. Without a durable record the phase reports a
@@ -303,7 +326,9 @@ async def import_delegates_for_phase(
             phase_id,
             len(captured_ids),
         )
-        return
+        # COMPLETED, not FAILED: the import ran and recorded a durable coverage
+        # gap. Retrying would re-record the same gap, not recover the cost.
+        return ImportDisposition.COMPLETED
 
     if outcome.imported:
         logger.info(
@@ -312,6 +337,7 @@ async def import_delegates_for_phase(
             phase_id,
             sum(1 for d in outcome.imported if d.priced),
         )
+    return ImportDisposition.COMPLETED
 
 
 async def capture_and_import_phase(
@@ -350,7 +376,7 @@ async def capture_and_import_phase(
     capture = await capture_phase_session(
         capture_port, workspace, session_id=session_id, phase_id=phase_id
     )
-    await import_delegates_for_phase(
+    disposition = await import_delegates_for_phase(
         capture,
         session_store=session_store,
         writer=writer,
@@ -363,7 +389,8 @@ async def capture_and_import_phase(
         workspace_id=getattr(workspace, "workspace_id", None),
         ledger=ledger,
     )
-    leader_native_ids.pop((execution_id, phase_id), None)
+    if disposition is not ImportDisposition.FAILED:
+        leader_native_ids.pop((execution_id, phase_id), None)
 
 
 async def close_phase_workspaces(

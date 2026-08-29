@@ -16,6 +16,7 @@ Python cannot make them atomic across concurrent importers:
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import hashlib
 import logging
 import struct
@@ -29,6 +30,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["PostgresImportLedger"]
+
+#: The connection currently holding this session's advisory lock, if any.
+#:
+#: `guard()` holds a pooled connection for the whole claim window. If the reads
+#: and writes inside it acquired their OWN connections, N concurrent imports
+#: would each hold one connection and wait for a second - and with a pool of 5,
+#: five of them deadlock permanently with the cost path wedged. So the guarded
+#: work reuses the guard's connection.
+#:
+#: A ContextVar rather than an attribute because one adapter instance is shared
+#: process-wide (it is a singleton in the wiring): an attribute would leak one
+#: task's connection into another's queries.
+_guarded_conn: contextvars.ContextVar[AsyncConnection | None] = contextvars.ContextVar(
+    "syn_import_ledger_guarded_conn", default=None
+)
 
 
 CREATE_TABLE_SQL = """
@@ -109,6 +125,21 @@ class PostgresImportLedger:
         self._pool = pool
         self._table_created = False
 
+    async def ensure_ready(self) -> None:
+        """Create the table NOW and let failures surface at startup.
+
+        Lazy creation on first import is not good enough here. The import path
+        is deliberately fail-open - it must never turn agent work that
+        succeeded into a phase that failed - so a DDL or permission failure
+        inside it is logged and swallowed, and the execution proceeds billing
+        as if there were no ledger at all. The operator sees healthy.
+
+        Same lesson as the MinIO buckets in ADR-012: create eagerly at startup,
+        because the first real use is the worst place to discover the store is
+        unusable.
+        """
+        await self._ensure_table()
+
     async def _ensure_table(self) -> None:
         if self._table_created:
             return
@@ -117,9 +148,19 @@ class PostgresImportLedger:
         self._table_created = True
         logger.info("Ensured delegate_import_ledger table exists")
 
+    @contextlib.asynccontextmanager
+    async def _connection(self) -> AsyncIterator[AsyncConnection]:
+        """The guard's connection when inside one, otherwise a fresh acquire."""
+        bound = _guarded_conn.get()
+        if bound is not None:
+            yield bound
+            return
+        async with self._pool.acquire() as conn:
+            yield conn
+
     async def already_billed(self, execution_id: str, harness_session_id: str) -> BilledUsage:
         await self._ensure_table()
-        async with self._pool.acquire() as conn:
+        async with self._connection() as conn:
             row = await conn.fetchrow(ALREADY_BILLED_SQL, execution_id, harness_session_id)
         if row is None:
             return BilledUsage()
@@ -134,7 +175,7 @@ class PostgresImportLedger:
         self, execution_id: str, harness_session_id: str, billed: BilledUsage
     ) -> None:
         await self._ensure_table()
-        async with self._pool.acquire() as conn:
+        async with self._connection() as conn:
             await conn.execute(
                 RECORD_BILLED_SQL,
                 execution_id,
@@ -162,7 +203,9 @@ class PostgresImportLedger:
         key = _advisory_key(execution_id, harness_session_id)
         async with self._pool.acquire() as conn:
             await conn.execute("SELECT pg_advisory_lock($1);", key)
+            token = _guarded_conn.set(conn)
             try:
                 yield
             finally:
+                _guarded_conn.reset(token)
                 await conn.execute("SELECT pg_advisory_unlock($1);", key)

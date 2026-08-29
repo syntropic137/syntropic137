@@ -68,6 +68,7 @@ class _AppendOnlyStore:
     """
 
     rows: list[tuple[str, str, Decimal]] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
 
     async def record_delegate_usage(
         self,
@@ -81,10 +82,15 @@ class _AppendOnlyStore:
     ) -> None:
         out = Decimal(str(getattr(usage, "output_tokens", 0) or 0))
         self.rows.append((session_id, execution_id, out))
+        if unpriced_reason:
+            self.reasons.append(unpriced_reason)
 
     def billed_output_for(self, execution_id: str) -> Decimal:
         """What the cost query would report: the SUM over rows."""
         return sum((o for _, e, o in self.rows if e == execution_id), Decimal("0"))
+
+    def unpriced_reasons(self) -> list[str]:
+        return self.reasons
 
     def cost_bearing_rows(self, execution_id: str) -> int:
         return sum(1 for _, e, o in self.rows if e == execution_id and o > 0)
@@ -175,26 +181,44 @@ class TestTheSameDelegateIsBilledOncePerExecution:
         assert recorder.billed_output_for("exec-1") == Decimal("40"), (
             "a shrunken transcript must neither add nor subtract"
         )
+        # The total alone does not distinguish "refused with a reason" from
+        # "the refusal branch was deleted and the delta happened to be zero" -
+        # a codex review pointed out this test passed either way. The unpriced
+        # row IS the visible-undercount signal, so assert it exists.
+        assert recorder.unpriced_reasons(), (
+            "the shrink was silently ignored instead of recorded as unpriced; "
+            "nothing downstream can tell this phase's cost is incomplete"
+        )
+        assert any("smaller than what was already billed" in r for r in recorder.unpriced_reasons())
 
     async def test_without_a_ledger_the_old_behaviour_is_unchanged(self) -> None:
         """The parameter is optional, so a caller that has not been wired yet
-        keeps working - it simply keeps the double-count this fixes."""
+        keeps working - it simply keeps the double-count this fixes.
+
+        Imports TWICE on purpose. Importing once would pass with every piece of
+        deduplication deleted, which is the opposite of what this asserts.
+        """
         store = _Store(
             {LEADER: _claude(LEADER, 100, "m-l"), DELEGATE: _claude(DELEGATE, 25, "m-d")}
         )
         recorder = _AppendOnlyStore()
 
-        await import_phase_delegates(
-            store,
-            recorder,
-            leader_native_session_id=LEADER,
-            captured_session_ids=[LEADER, DELEGATE],
-            execution_id="exec-1",
-            phase_id="phase-1",
-            attempts_remaining=0,
-        )
+        for phase in ("phase-1", "phase-2"):
+            await import_phase_delegates(
+                store,
+                recorder,
+                leader_native_session_id=LEADER,
+                captured_session_ids=[LEADER, DELEGATE],
+                execution_id="exec-1",
+                phase_id=phase,
+                attempts_remaining=0,
+            )
 
-        assert recorder.cost_bearing_rows("exec-1") == 1
+        assert recorder.cost_bearing_rows("exec-1") == 2, (
+            "without a ledger the delegate must still be billed twice - if this "
+            "is 1, dedup is happening somewhere other than the ledger and the "
+            "ledger tests are not testing what they claim"
+        )
 
 
 class TestConcurrentImportsDoNotBothBill:
@@ -360,6 +384,10 @@ class _Capture:
 class TestTheDeferredCrashWindowStaysNarrow:
     """#933's residual gap, deliberately left open - guarded so it cannot widen.
 
+    Only the ordering test below guards the deferral itself. The retry-budget
+    test guards a DIFFERENT hazard and is kept here because both are about
+    cost silently going missing; its docstring explains the distinction.
+
     With the ledger wired, a second import no longer double-bills. What remains
     is a crash BETWEEN recording the charge and committing the mark: the retry
     reads a stale mark and bills again. No in-process mechanism closes that;
@@ -407,12 +435,23 @@ class TestTheDeferredCrashWindowStaysNarrow:
         )
 
     async def test_the_import_has_no_retry_budget(self) -> None:
-        """A retry inside one process would re-enter the window repeatedly.
+        """Raising this budget would silently DROP delegate cost.
 
-        #933 is safe to defer partly because exactly one import runs per phase.
-        That is current behaviour, not a guarantee - raising this budget would
-        silently make the crash window reachable far more often, with no test
-        failing to say so. This is that test.
+        A codex review corrected the original justification for this test,
+        which claimed it protected #933's charge/mark crash window. It does
+        not: `attempts_remaining` only decides whether an unreadable session is
+        held back into `retry_ids` instead of being written
+        (delegate_import.py), and this caller performs no retry at all.
+
+        The test still earns its place, for a different and worse reason.
+        NOTHING in orchestration consumes `retry_ids`. So a budget above zero
+        means retryable sessions are held back for a retry that never comes,
+        and their cost is never written by anyone - a silent undercount, with
+        no unpriced row to reveal it. Zero is what forces those sessions to be
+        written as visible gaps instead.
+
+        If a real retry mechanism is added, this test SHOULD fail; that is the
+        point at which someone has to decide what consumes `retry_ids`.
         """
         seen: list[int] = []
 
@@ -438,3 +477,66 @@ class TestTheDeferredCrashWindowStaysNarrow:
             pdi.import_phase_delegates = original  # type: ignore[assignment]
 
         assert seen == [0], f"the import gained a retry budget: {seen}"
+
+
+class TestAFailedImportKeepsTheLeaderIdentity:
+    """A codex review found the first fix for this was INEFFECTIVE.
+
+    Moving the pop after the import looked right, but
+    `import_delegates_for_phase` catches the exception and returns normally, so
+    the caller could not tell success from failure and popped either way. The
+    identity was still gone, the retry still could not tell the leader from its
+    delegates, and the phase's delegate cost was still dropped.
+    """
+
+    async def _run(self, *, blow_up: bool) -> dict[tuple[str, str], str]:
+        import syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import as pdi
+
+        class _Workspace:
+            execution_id = "exec-1"
+            workspace_id = "ws-1"
+
+        class _Capture:
+            agent_session_ids = (LEADER, DELEGATE)
+
+        async def _capture_phase(*_a: object, **_k: object) -> object:
+            return _Capture()
+
+        async def _boom(*_a: object, **_k: object) -> object:
+            raise RuntimeError("store unreachable")
+
+        async def _ok(*_a: object, **_k: object) -> object:
+            return DelegateImport(imported=(), retry_ids=(), attempts_remaining=0)
+
+        leader_ids = {("exec-1", "phase-1"): LEADER}
+        orig_capture, orig_import = pdi.capture_phase_session, pdi.import_phase_delegates
+        pdi.capture_phase_session = _capture_phase  # type: ignore[assignment]
+        pdi.import_phase_delegates = _boom if blow_up else _ok  # type: ignore[assignment]
+        try:
+            await pdi.capture_and_import_phase(
+                object(),
+                _Workspace(),
+                session_store=object(),
+                writer=object(),
+                leader_native_ids=leader_ids,
+                session_id="sess-1",
+                phase_id="phase-1",
+            )
+        finally:
+            pdi.capture_phase_session = orig_capture  # type: ignore[assignment]
+            pdi.import_phase_delegates = orig_import  # type: ignore[assignment]
+        return leader_ids
+
+    async def test_a_failed_import_leaves_the_leader_for_the_retry(self) -> None:
+        remaining = await self._run(blow_up=True)
+        assert ("exec-1", "phase-1") in remaining, (
+            "the leader identity was consumed by a failed import; the retry now "
+            "cannot tell the leader from its delegates and will refuse"
+        )
+
+    async def test_a_successful_import_still_releases_it(self) -> None:
+        """The negative control. Without this the fix could degenerate into
+        'never release', and a later run of the same phase id would pick up a
+        stale leader."""
+        remaining = await self._run(blow_up=False)
+        assert ("exec-1", "phase-1") not in remaining
