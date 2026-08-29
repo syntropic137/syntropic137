@@ -160,6 +160,53 @@ class WorkspaceSettings(BaseSettings):
         description="Docker network for containers.",
     )
 
+    # --- Self-hosting Syntropic (#949) -------------------------------------
+    #
+    # An agent working ON Syntropic cannot verify its own change: the
+    # integration suite needs Postgres and an event store, and the workspace
+    # has no Docker socket. Granting one would give the agent the host's
+    # container runtime - a far larger capability than the tests need.
+    #
+    # `syn_tests/fixtures/infrastructure.py` resolves in this order:
+    #     explicit env vars  >  test-stack on :15432  >  testcontainers
+    #
+    # so pointing the FIRST tier at an already-running stack lets the suite run
+    # with no container capability at all. That is strictly less privilege than
+    # socket mediation, not merely different.
+    #
+    # OFF BY DEFAULT, and it must stay that way: this hands every workspace
+    # network reach and credentials to a database. It is a deliberate grant for
+    # repos that test against real infrastructure, not a convenience.
+
+    test_infra_enabled: bool = Field(
+        default=False,
+        description=(
+            "Inject TEST_* infrastructure env into workspaces so an agent can run "
+            "integration tests without a Docker socket (#949). Grants the workspace "
+            "network access to the configured database - keep off unless the workflow "
+            "is working on a repo that needs it."
+        ),
+    )
+
+    test_infra_database_url: str = Field(
+        default="",
+        description=(
+            "Value for TEST_DATABASE_URL inside the workspace. Must be reachable FROM "
+            "the container, so a host-local 'localhost' URL will not work; use the "
+            "compose service name or a routable address."
+        ),
+    )
+
+    test_infra_eventstore_host: str = Field(
+        default="",
+        description="Value for TEST_EVENTSTORE_HOST inside the workspace.",
+    )
+
+    test_infra_eventstore_port: int = Field(
+        default=0,
+        description="Value for TEST_EVENTSTORE_PORT inside the workspace. 0 means unset.",
+    )
+
 
 def get_default_isolation_backend() -> IsolationBackend:
     """Select the best available isolation backend for the current platform."""

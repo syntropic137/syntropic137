@@ -167,6 +167,49 @@ def _build_workspace_telemetry_env() -> dict[str, str]:
     }
 
 
+def _build_workspace_test_infra_env() -> dict[str, str]:
+    """Env that lets a workspace run the integration suite without Docker (#949).
+
+    `syn_tests/fixtures/infrastructure.py` resolves explicit env vars BEFORE the
+    local test-stack and before testcontainers, so setting them points the suite
+    at infrastructure that is already running. The workspace then needs no Docker
+    socket - it never starts a container, it just connects.
+
+    That is the point: mediating socket access would still hand the agent the
+    host's container runtime. This grants strictly less.
+
+    Returns {} unless explicitly enabled, and {} again if enabled without a
+    database URL - a half-configured injection would let the suite start and
+    fail on connect, which reads like a broken test rather than a missing
+    setting.
+    """
+    from syn_shared.settings.workspace import WorkspaceSettings
+    from syn_shared.testing import (
+        ENV_TEST_DATABASE_URL,
+        ENV_TEST_EVENTSTORE_HOST,
+        ENV_TEST_EVENTSTORE_PORT,
+    )
+
+    ws = WorkspaceSettings()
+    if not ws.test_infra_enabled:
+        return {}
+    if not ws.test_infra_database_url:
+        logger.warning(
+            "SYN_WORKSPACE_TEST_INFRA_ENABLED is set but "
+            "SYN_WORKSPACE_TEST_INFRA_DATABASE_URL is empty; workspaces will fall "
+            "back to testcontainers and fail without a Docker socket (#949)."
+        )
+        return {}
+
+    env = {ENV_TEST_DATABASE_URL: ws.test_infra_database_url}
+    if ws.test_infra_eventstore_host:
+        env[ENV_TEST_EVENTSTORE_HOST] = ws.test_infra_eventstore_host
+    if ws.test_infra_eventstore_port:
+        env[ENV_TEST_EVENTSTORE_PORT] = str(ws.test_infra_eventstore_port)
+    logger.info("Injecting test infrastructure env into workspaces (#949)")
+    return env
+
+
 async def get_execution_processor() -> WorkflowExecutionProcessor:
     """Wire up WorkflowExecutionProcessor with all dependencies (ISS-196).
 
@@ -230,7 +273,10 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         session_repository=get_session_repository(),
         workspace_service=WorkspaceService.create(
             config=ws_config,
-            environment=_build_workspace_telemetry_env(),
+            environment={
+                **_build_workspace_telemetry_env(),
+                **_build_workspace_test_infra_env(),
+            },
         ),
         artifact_repository=get_artifact_repository(),
         artifact_content_storage=artifact_storage,
