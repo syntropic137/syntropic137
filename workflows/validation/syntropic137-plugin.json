@@ -1,0 +1,5 @@
+{
+  "name": "selfhost-validation",
+  "version": "0.1.0",
+  "description": "Functional validation of a Syntropic137 deployment: skill injection (vendored + external), delegation, GitHub write access, and artifact capture. Run against a self-host after an upgrade."
+}

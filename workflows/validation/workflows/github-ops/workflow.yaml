@@ -1,0 +1,25 @@
+id: selfhost-github-ops-v1
+name: "Validation: GitHub write access"
+description: >
+  Proves the deployment's GitHub App can open an issue, comment on it, and close
+  it. These are the operations research and triage workflows depend on, and a
+  missing scope is otherwise discovered midway through real work.
+type: custom
+classification: simple
+
+inputs:
+  - name: task
+    description: "Short label appended to the issue title so runs are distinguishable."
+    required: false
+    default: "check"
+
+phases:
+  - id: exercise
+    name: Open, comment, close
+    order: 1
+    execution_type: sequential
+    max_tokens: 4096
+    timeout_seconds: 600
+    prompt_file: phases/exercise.md
+    agent:
+      provider: claude
