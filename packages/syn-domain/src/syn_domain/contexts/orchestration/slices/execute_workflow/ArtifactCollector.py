@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
@@ -251,15 +252,90 @@ class ArtifactCollector:
             resolved.update(projection_outputs)
         return resolved
 
+    @classmethod
+    def _tree_files(
+        cls,
+        resolved_files: dict[str, list[PhaseOutputFile]],
+        seen: set[str],
+    ) -> list[tuple[str, bytes]]:
+        """Every produced file that may safely be injected, as (path, bytes).
+
+        Extracted from `_inject_and_log` rather than inlined: with the
+        containment refusal added, that method crossed the cognitive-complexity
+        threshold. Splitting on "which files are eligible" versus "write them"
+        is the natural seam anyway - the eligibility rules are what carry the
+        security argument and deserve to be readable on their own.
+
+        Mutates `seen` so the flat alias emitted afterwards can skip a path this
+        already claimed.
+        """
+        out: list[tuple[str, bytes]] = []
+        for phase_id, produced_files in resolved_files.items():
+            for produced in produced_files:
+                if produced.source_path is None:
+                    continue  # pre-v5 artifact: no path, alias only
+                path = cls._tree_path(phase_id, produced.source_path)
+                if path is None:
+                    continue  # refused: would escape the workspace
+                if path in seen:
+                    continue
+                seen.add(path)
+                out.append((path, produced.content.encode()))
+        return out
+
     @staticmethod
-    def _tree_path(phase_id: str, source_path: str) -> str:
+    def _tree_path(phase_id: str, source_path: str) -> str | None:
         """Where a produced file lands in the consuming phase's workspace.
 
         The phase id namespaces the tree so accumulating every earlier phase
         cannot collide - two phases may both emit ``deliverable.md``.
+
+        Returns None for anything that would not land strictly beneath the
+        phase's own directory. Both inputs are validated even though the phase
+        id is now constrained at authoring time (`PhaseYamlDefinition.id`),
+        because this is the SINK: `source_path` arrives from the projection on
+        the recovery path, so a row written before that grammar existed - or
+        corrupted since - reaches here without passing it. Validating only at
+        the boundary protects new workflows and not old data.
+
+        A dropped file is visible (the tree is short); an escaped write is not.
         """
+        # An ABSOLUTE source_path does not escape - joining it collapses the
+        # double slash and it lands under the phase directory as
+        # `<phase-id>/etc/passwd`. Contained, but it silently becomes a nested
+        # file the author never described, under a name they did not choose.
+        # A source_path is by contract relative to the workspace, so an absolute
+        # one means the contract is already broken; refuse rather than reshape.
+        if source_path.startswith("/"):
+            logger.warning(
+                "Refusing to inject %r for phase %r: source paths are workspace-relative",
+                source_path,
+                phase_id,
+            )
+            return None
+
         relative = source_path.removeprefix(f"{_OUTPUT_DIR_REL}/")
-        return f"{_INPUT_DIR_REL}/{phase_id}/{relative}"
+        candidate = PurePosixPath(f"{_INPUT_DIR_REL}/{phase_id}/{relative}")
+
+        if candidate.is_absolute() or any(part == ".." for part in candidate.parts):
+            logger.warning(
+                "Refusing to inject %r for phase %r: it would escape the workspace",
+                source_path,
+                phase_id,
+            )
+            return None
+        # Belt and braces: even without a literal `..`, the result must still
+        # sit under this phase's directory.
+        expected_root = PurePosixPath(_INPUT_DIR_REL) / phase_id
+        if not candidate.is_relative_to(expected_root):
+            logger.warning(
+                "Refusing to inject %r for phase %r: outside %s",
+                source_path,
+                phase_id,
+                expected_root,
+            )
+            return None
+        return str(candidate)
 
     @staticmethod
     def _flat_alias_path(phase_id: str) -> str:
@@ -294,15 +370,8 @@ class ArtifactCollector:
         files_to_inject: list[tuple[str, bytes]] = []
         seen: set[str] = set()
 
-        for phase_id in resolved_files:
-            for produced in resolved_files[phase_id]:
-                if produced.source_path is None:
-                    continue
-                path = cls._tree_path(phase_id, produced.source_path)
-                if path in seen:
-                    continue
-                seen.add(path)
-                files_to_inject.append((path, produced.content.encode()))
+        for path, content in cls._tree_files(resolved_files, seen):
+            files_to_inject.append((path, content))
 
         for phase_id, content in resolved_outputs.items():
             alias = cls._flat_alias_path(phase_id)
