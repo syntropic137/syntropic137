@@ -158,3 +158,50 @@ class TestWhichFileSurvivesIsNotAuthorControlled:
         )
         assert PHASE_ONE_OUTPUT[0][1] in forward.injected[0][1]
         assert PHASE_ONE_OUTPUT[-1][1] in reversed_.injected[0][1]
+
+
+class TestVisibilityAcrossMultiPLEPreviousPhases:
+    """The other axis. #988 is about files-per-phase; this is phases-per-phase.
+
+    Stated intent: a phase should see the outputs of the phases before it -
+    ideally ALL of them, at minimum the immediately preceding one. These
+    measure which of those two the platform actually delivers today.
+    """
+
+    async def _run_multi(self, phases: list[str]) -> _Workspace:
+        collector = ArtifactCollector(repository=_Repo(), content_storage=None, query_service=None)
+        ws = _Workspace([])
+        await collector.inject_from_previous_phases_explicit(
+            workspace=ws,
+            completed_phase_ids=phases,
+            phase_outputs={p: f"output of {p}" for p in phases},
+            execution_id="exec-1",
+        )
+        return ws
+
+    async def test_a_later_phase_sees_EVERY_earlier_phase(self) -> None:
+        """The stronger half of the intent, and the good news: this part works.
+
+        Phase 3 receives one file per completed phase, each under that phase's
+        id - so the ACCUMULATION across phases is real. What is lost is only
+        the files WITHIN each phase (#988).
+        """
+        ws = await self._run_multi(["phase-1", "phase-2"])
+        paths = sorted(p for p, _ in ws.injected)
+        assert paths == ["artifacts/input/phase-1.md", "artifacts/input/phase-2.md"], (
+            f"a later phase did not see every earlier phase: {paths}"
+        )
+
+    async def test_each_earlier_phase_keeps_its_own_content(self) -> None:
+        """Accumulation is worthless if the contents collide or overwrite."""
+        ws = await self._run_multi(["phase-1", "phase-2"])
+        by_path = {p: b.decode() for p, b in ws.injected}
+        assert by_path["artifacts/input/phase-1.md"] == "output of phase-1"
+        assert by_path["artifacts/input/phase-2.md"] == "output of phase-2"
+
+    async def test_the_minimum_bar_holds_the_immediately_previous_phase_arrives(
+        self,
+    ) -> None:
+        """The floor the intent names explicitly."""
+        ws = await self._run_multi(["phase-1"])
+        assert [p for p, _ in ws.injected] == ["artifacts/input/phase-1.md"]
