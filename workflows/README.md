@@ -100,7 +100,6 @@ phases:
     execution_type: sequential  # sequential|parallel|human_in_loop
     argument_hint: "[topic]"
     model: sonnet               # Per-phase model override (optional)
-    max_tokens: 4096
     timeout_seconds: 300
 
     # Prompt — inline OR external file (mutually exclusive)
@@ -134,7 +133,6 @@ Phases can reference `.md` files with optional YAML frontmatter:
 model: sonnet
 argument-hint: "[research-topic]"
 allowed-tools: Read,Glob,Grep,Bash
-max-tokens: 4096
 timeout-seconds: 300
 ---
 
