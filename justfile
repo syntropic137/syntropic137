@@ -648,6 +648,12 @@ workspace-versions:
 # Both harnesses are required, not just one: omni's contract is that it hosts
 # claude AND codex, and its manifest treats a single working harness as broken
 # rather than degraded.
+# Assert every pinned workspace image is a release-channel build (#941).
+# Separate from check-default-workspace-image, which probes only the DEFAULT
+# image - that blind spot is how the CLAUDE_CLI pin drifted unnoticed.
+check-pinned-image-channels:
+    @uv run python scripts/check_pinned_image_channels.py
+
 check-default-workspace-image:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1004,7 +1010,7 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-env-example check-plugin-schemas
+preflight: lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here (run separately): unit tests (just test),"
     @echo "   dashboard build, CLI checks, integration, security scanning."
