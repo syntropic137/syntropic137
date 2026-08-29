@@ -16,9 +16,42 @@ from syn_domain.contexts.organization.domain.read_models.contribution_heatmap im
 )
 from syn_shared.events import GIT_COMMIT
 
-# Rows narrowed to the caller's window and filters. Every CTE below reads
-# THIS, never agent_events directly, so the filter is applied exactly once.
+# Every observation belonging to a session that STARTED inside the window -
+# not every observation that landed inside it.
+#
+# Filtering rows by time first would hand the canonical CTE a FRAGMENT of a
+# session: a run beginning inside the window whose summary arrives after it
+# would be priced from its placeholder turn rows, reporting 5 output tokens
+# for a session that produced 13,300. That is the bug this whole module
+# exists to prevent, reappearing at the window edge. It also made MIN(time)
+# the first in-window observation rather than the true start, so a session
+# beginning before the window was attributed to the wrong day.
+#
+# So membership is decided per SESSION, then all of that session's rows are
+# loaded regardless of their own timestamps.
 _SCOPED_EVENTS = """
+session_bounds AS (
+    SELECT session_id, MIN(time) AS started_at
+    FROM agent_events
+    WHERE TRUE {execution_filter}
+    GROUP BY session_id
+),
+sessions_in_window AS (
+    SELECT session_id
+    FROM session_bounds
+    WHERE started_at >= $1::date
+      AND started_at < ($2::date + interval '1 day')
+),
+scoped_events AS (
+    SELECT a.session_id, a.execution_id, a.event_type, a.data, a.time
+    FROM agent_events a
+    JOIN sessions_in_window w ON w.session_id = a.session_id
+)
+"""
+
+# Activity markers keep EVENT-time scoping: a commit happens at an instant and
+# belongs on that day, whoever's session it was.
+_ACTIVITY_SCOPE = """
 scoped_events AS (
     SELECT session_id, execution_id, event_type, data, time
     FROM agent_events
@@ -38,7 +71,7 @@ _EXECUTION_FILTER = "AND execution_id = ANY($3)"
 # of the heatmap. Only usage, which has one authoritative record per session,
 # collapses onto a single square.
 _ACTIVITY_QUERY = f"""
-WITH {_SCOPED_EVENTS}
+WITH {_ACTIVITY_SCOPE}
 SELECT
     time_bucket('1 day', time)::date AS day,
     COUNT(DISTINCT execution_id) AS executions,

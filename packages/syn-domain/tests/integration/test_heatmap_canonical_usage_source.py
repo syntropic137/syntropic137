@@ -21,6 +21,7 @@ messages actually produced 767. The placeholder is not a rounding error.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime
 from uuid import uuid4
 
@@ -393,4 +394,65 @@ class TestOneSummaryPerSession:
         buckets = await TimescaleHeatmapQuery(event_store.pool).query(
             start=_utc_today(), end=_utc_today(), execution_ids={execution_id}
         )
+        assert _bucket_for_today(buckets).breakdown["output_tokens"] == _TRUE_OUTPUT_TOKENS
+
+
+class TestSessionsStraddlingTheWindow:
+    async def test_summary_after_the_window_still_supersedes_turn_rows(
+        self, event_store, execution_id
+    ):
+        """A session's authoritative record must be found even if it lands late.
+
+        scoped_events filters observations by the requested window BEFORE the
+        canonical CTE runs, so a session that starts inside the window and
+        whose summary arrives after it was priced from its placeholder turn
+        rows - reporting 5 output tokens for a session that produced 13,300,
+        which is the exact bug this module exists to prevent, reintroduced at
+        the window edge.
+        """
+        from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery import (
+            TimescaleHeatmapQuery,
+        )
+
+        session_id = str(uuid4())
+        today = _utc_today()
+        # Turn rows land today; the summary lands tomorrow, outside the query.
+        await event_store.record_observation(
+            session_id=session_id,
+            observation_type=TOKEN_USAGE,
+            data={
+                "input_tokens": 18,
+                "output_tokens": 5,
+                "cache_creation_tokens": 15_809,
+                "cache_read_tokens": 58_179,
+                "model": _MODEL,
+            },
+            execution_id=execution_id,
+        )
+        async with event_store.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO agent_events
+                    (time, event_type, session_id, execution_id, phase_id, data)
+                VALUES (now() + interval '1 day', $1, $2, $3, NULL, $4::jsonb)
+                """,
+                SESSION_SUMMARY,
+                session_id,
+                execution_id,
+                json.dumps(
+                    {
+                        "total_input_tokens": 18,
+                        "total_output_tokens": _TRUE_OUTPUT_TOKENS,
+                        "cache_creation_tokens": 15_809,
+                        "cache_read_tokens": 58_179,
+                        "total_cost_usd": _VENDOR_COST_USD,
+                        "model": _MODEL,
+                    }
+                ),
+            )
+
+        buckets = await TimescaleHeatmapQuery(event_store.pool).query(
+            start=today, end=today, execution_ids={execution_id}
+        )
+
         assert _bucket_for_today(buckets).breakdown["output_tokens"] == _TRUE_OUTPUT_TOKENS
