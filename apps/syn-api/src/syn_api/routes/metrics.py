@@ -8,10 +8,14 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from syn_api._wiring import ensure_connected, get_execution_cost_query, get_projection_mgr
+from syn_api._wiring import (
+    ensure_connected,
+    get_canonical_usage_query,
+    get_projection_mgr,
+)
 from syn_api.types import (
     DashboardMetrics,
     Err,
@@ -136,22 +140,36 @@ async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
         return []
 
 
-async def _aggregate_total_cost(workflow_id: str | None) -> Decimal:
-    """Sum total_cost_usd across all executions from the Lane 2 execution_cost query service (#695)."""
-    try:
-        query_svc = get_execution_cost_query()
-        costs = await query_svc.list_all()
-    except Exception:
-        logger.debug("Failed to aggregate execution costs", exc_info=True)
-        return Decimal("0")
+class MetricsUnavailableError(Exception):
+    """The usage totals could not be read, so none may be reported.
 
-    if workflow_id is not None:
+    Deliberately NOT a zero-valued result. Returning empty totals made a
+    Timescale outage indistinguishable from a system that had done no work -
+    0 tokens, $0.00 and 0 sessions rendered beside populated workflow and
+    artifact counts, which reads as fact. A silently-cheap number is the
+    dangerous kind; that is the premise of this entire change, and it applies
+    to the error path too.
+    """
+
+
+async def _canonical_totals(workflow_id: str | None):
+    """Canonical token/cost totals, narrowed to one workflow when asked.
+
+    Raises:
+        MetricsUnavailableError: the totals could not be read.
+    """
+    try:
+        query_svc = get_canonical_usage_query()
+        if workflow_id is None:
+            return await query_svc.totals()
         manager = get_projection_mgr()
         summaries = await manager.workflow_execution_list.get_by_workflow_id(workflow_id)
-        ids_in_workflow = {s.workflow_execution_id for s in summaries}
-        costs = [c for c in costs if c.execution_id in ids_in_workflow]
-
-    return sum((c.total_cost_usd for c in costs), Decimal("0"))
+        return await query_svc.totals(execution_ids={s.workflow_execution_id for s in summaries})
+    except Exception as exc:
+        logger.warning("Failed to read canonical usage totals", exc_info=True)
+        raise MetricsUnavailableError(
+            "usage totals are unavailable: the observability store could not be read"
+        ) from exc
 
 
 @router.get("", response_model=MetricsResponse)
@@ -162,30 +180,41 @@ async def get_metrics_endpoint(
     result = await get_dashboard_metrics(workflow_id=workflow_id)
 
     if isinstance(result, Err):
-        return MetricsResponse(
-            total_input_tokens=0,
-            total_output_tokens=0,
-            total_cache_creation_tokens=0,
-            total_cache_read_tokens=0,
-            total_tokens=0,
+        # Same reasoning as MetricsUnavailableError: an all-zero body is a
+        # claim about the system, and this code path cannot support it.
+        raise HTTPException(
+            status_code=503, detail="metrics are unavailable: the read model could not be queried"
         )
 
     m = result.value
     phases = await _build_phase_metrics(workflow_id) if workflow_id else []
-    total_cost = await _aggregate_total_cost(workflow_id)
+
+    # Tokens, cost and session count come from the ONE canonical definition, the same
+    # one the activity heatmap reads (#932). They previously came from Lane 1
+    # SessionCompleted events while the heatmap read Lane 2 observations, so
+    # the two cards quoted 9,151,116 tokens beside 10,002,629 for the same
+    # reality. Workflow/artifact counts stay on the projection: those are
+    # domain lifecycle facts, not observed telemetry.
+    try:
+        totals = await _canonical_totals(workflow_id)
+    except MetricsUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return MetricsResponse(
         total_workflows=m.total_workflows,
         completed_workflows=m.completed_workflows,
         failed_workflows=m.failed_workflows,
-        total_sessions=m.total_sessions,
-        total_input_tokens=m.total_input_tokens,
-        total_output_tokens=m.total_output_tokens,
-        total_cache_creation_tokens=m.total_cache_creation_tokens,
-        total_cache_read_tokens=m.total_cache_read_tokens,
-        total_tokens=m.total_tokens,
-        # Lane 2: cost enriched from execution_cost query service (#695)
-        total_cost_usd=total_cost,
+        # Sessions come from the canonical source too. Counting them in the
+        # projection instead meant the card saw every FAILED session but no
+        # DELEGATE session, while the heatmap saw every delegate and no
+        # failure - two honest counts of two different populations.
+        total_sessions=totals.sessions,
+        total_input_tokens=totals.input_tokens,
+        total_output_tokens=totals.output_tokens,
+        total_cache_creation_tokens=totals.cache_creation_tokens,
+        total_cache_read_tokens=totals.cache_read_tokens,
+        total_tokens=totals.total_tokens,
+        total_cost_usd=totals.cost_usd,
         total_artifacts=m.total_artifacts,
         total_artifact_bytes=m.total_artifact_bytes,
         phases=phases,

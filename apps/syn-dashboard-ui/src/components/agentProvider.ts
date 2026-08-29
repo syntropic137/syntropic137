@@ -16,3 +16,18 @@ export function agentProviderLabel(provider: string | null): string | null {
   if (!provider) return null
   return AGENT_PROVIDER_LABELS[provider.toLowerCase()] ?? provider
 }
+
+// CSS custom property per provider, so the hue lives in the theme rather than
+// in component markup. An unrecognised provider falls back to the theme accent
+// instead of picking an arbitrary colour.
+const AGENT_PROVIDER_ACCENTS: Record<string, string> = {
+  claude: 'var(--color-agent-claude)',
+  codex: 'var(--color-agent-codex)',
+}
+
+const DEFAULT_AGENT_ACCENT = 'var(--color-accent)'
+
+export function agentProviderAccent(provider: string | null): string {
+  if (!provider) return DEFAULT_AGENT_ACCENT
+  return AGENT_PROVIDER_ACCENTS[provider.toLowerCase()] ?? DEFAULT_AGENT_ACCENT
+}

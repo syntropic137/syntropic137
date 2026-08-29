@@ -543,6 +543,7 @@ class WorkflowExecutionProcessor:
             agent_provider=phase.agent_config.provider,
             agent_model=phase.agent_config.model,
             repos=[r.slug for r in repos] if repos else [],
+            observability=self._observability_writer,
         )
         await session_mgr.start()
         self._session_managers[todo.phase_id] = session_mgr

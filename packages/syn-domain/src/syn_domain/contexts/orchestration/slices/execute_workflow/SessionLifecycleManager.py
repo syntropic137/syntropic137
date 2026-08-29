@@ -18,8 +18,12 @@ from syn_domain.contexts.agent_sessions import (
     SessionStatus,
     StartSessionCommand,
 )
+from syn_shared.events import SESSION_ERROR
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+        ObservabilityRecorder,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
         SessionRepository,
     )
@@ -44,8 +48,10 @@ class SessionLifecycleManager:
         agent_provider: str,
         agent_model: str | None,
         repos: list[str] | None = None,
+        observability: ObservabilityRecorder | None = None,
     ) -> None:
         self._repo = repository
+        self._observability = observability
         self._session_id = session_id
         self._session: AgentSessionAggregate | None = None
         self._workflow_id = workflow_id
@@ -58,6 +64,51 @@ class SessionLifecycleManager:
     @property
     def session(self) -> AgentSessionAggregate | None:
         return self._session
+
+    async def _record_terminal_status(self, status: str, error_message: str) -> None:
+        """Leave an observable trace that this session ended badly.
+
+        A run that dies before the agent starts emits no telemetry at all, so
+        it existed only in the domain lane - countable there, invisible
+        everywhere else, and absent from the dashboard entirely.
+
+        DELIBERATELY a session_error, never a session_summary. A summary is a
+        USAGE record, and TimescaleSessionCostQuery selects the latest one
+        (ORDER BY time DESC LIMIT 1). complete_failure also fires for a session
+        whose agent RAN and then exited non-zero - the stream processor has
+        already written that session's real summary by then, so appending a
+        zero-token summary here would supersede it and report real work as
+        free. That is the exact silently-cheap failure this change exists to
+        remove, and it would have been reintroduced one layer down.
+
+        session_error carries no token fields, so nothing can price it, while
+        the session still becomes countable: the canonical session count reads
+        DISTINCT session_id across ALL observation types, not just usage rows.
+
+        Secondary failures are swallowed. This runs on the error path; losing
+        the domain-lane completion because telemetry was unreachable would
+        trade a visibility gap for a correctness one.
+        """
+        if self._observability is None:
+            return
+        try:
+            await self._observability.record_observation(
+                session_id=self._session_id,
+                observation_type=SESSION_ERROR,
+                data={
+                    "status": status,
+                    "error_message": error_message,
+                    "model": self._agent_model,
+                },
+                execution_id=self._execution_id,
+                phase_id=self._phase_id,
+            )
+        except Exception as obs_err:
+            logger.warning(
+                "Failed to record terminal status for session %s: %s",
+                self._session_id,
+                obs_err,
+            )
 
     async def start(self) -> None:
         """Create and persist a new session aggregate. No-op if repo is None."""
@@ -129,6 +180,7 @@ class SessionLifecycleManager:
             )
             self._session.complete_session(complete_cmd)
             await self._repo.save(self._session)
+            await self._record_terminal_status("failed", error_message)
             logger.debug("Session completed: %s (failed: %s)", self._session_id, error_message)
         except Exception as session_err:
             logger.warning("Failed to complete session %s: %s", self._session_id, session_err)
@@ -147,6 +199,7 @@ class SessionLifecycleManager:
             )
             self._session.complete_session(complete_cmd)
             await self._repo.save(self._session)
+            await self._record_terminal_status("cancelled", reason)
             logger.debug("Session completed (cancelled): %s", self._session_id)
         except Exception as sess_err:
             logger.warning(

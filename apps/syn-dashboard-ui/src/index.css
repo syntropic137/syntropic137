@@ -15,6 +15,12 @@
   --color-warning: #f59e0b;
   --color-error: #ef4444;
 
+  /* Agent harness hues — one per provider so a column of badges is
+     scannable at a glance. Codex keeps the theme accent it has always
+     used; Claude takes Anthropic's orange. */
+  --color-agent-claude: #D97757;
+  --color-agent-codex: var(--color-accent);
+
   /* Font stacks */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
