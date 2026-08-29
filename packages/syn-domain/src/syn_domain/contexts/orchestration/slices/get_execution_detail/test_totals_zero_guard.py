@@ -12,6 +12,8 @@ replaces evidence-backed sums with unset fields.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
@@ -90,14 +92,25 @@ class TestZeroDoesNotEraseAccumulatedTotals:
         assert (await _row(projection))["total_duration_seconds"] == 41.5
 
     async def test_a_zero_is_accepted_when_nothing_was_accumulated(
-        self, projection: WorkflowExecutionDetailProjection
+        self, projection: WorkflowExecutionDetailProjection, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """An execution that genuinely did no work must still report zero."""
+        """An execution that genuinely did no work must still report zero.
+
+        Asserting the value alone would prove nothing here: startup seeds the
+        row at 0.0, so `== 0.0` holds whether completion WROTE the field or
+        ignored it entirely -- a codex review caught exactly that. The skip is
+        only observable through the warning the guard emits when it fires, so
+        that absence is what makes this test falsifiable.
+        """
         await _started(projection)
-        await projection.on_workflow_completed(
-            {"execution_id": "exec-1", "completed_at": "now", "total_duration_seconds": 0.0}
-        )
+        with caplog.at_level(logging.WARNING):
+            await projection.on_workflow_completed(
+                {"execution_id": "exec-1", "completed_at": "now", "total_duration_seconds": 0.0}
+            )
         assert (await _row(projection))["total_duration_seconds"] == 0.0
+        assert not [r for r in caplog.records if "total_duration_seconds" in r.getMessage()], (
+            "the guard must not suppress a zero that contradicts nothing"
+        )
 
     async def test_token_totals_stay_authoritative_even_at_zero(
         self, projection: WorkflowExecutionDetailProjection
