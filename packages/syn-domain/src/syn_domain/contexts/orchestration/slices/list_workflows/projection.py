@@ -194,6 +194,13 @@ class WorkflowListProjection(AutoDispatchProjection):
 
         ``limit=None`` means unlimited in both the postgres and memory stores,
         so this counts the whole filtered collection rather than one page.
+
+        COST: this fetches every matching row and takes ``len``, which is O(n)
+        in database work, transfer, and deserialization per request. That is
+        acceptable at the current scale (tens of workflow templates) but it is
+        not the right primitive. The store protocol has no ``count``; adding
+        ``SELECT COUNT(*)`` there touches both adapters and six test doubles,
+        so it is tracked separately rather than bundled into a pagination fix.
         """
         filters = self._filters(workflow_type_filter, include_archived)
         data = await self._store.query(
