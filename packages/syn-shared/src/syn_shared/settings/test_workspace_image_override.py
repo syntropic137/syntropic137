@@ -1,14 +1,23 @@
-"""A blank SYN_WORKSPACE_DOCKER_IMAGE must not override the pinned default (#954).
+"""SYN_WORKSPACE_DOCKER_IMAGE: unset uses the pin, blank is an ERROR (#954).
 
-Compose passes optional variables as `${VAR:-}`, which arrives as an EMPTY
-STRING, not an absent variable. Pydantic treats that as a present value, so a
-naive passthrough would set `docker_image = ""` for every deployment that does
-not use the override -- converting an inert escape hatch into a broken one.
+The hot-swap was inert -- the variable never reached the container. The obvious
+fix (a `${VAR:-}` passthrough plus a blank-means-default fallback) recreates the
+same false pass it was meant to remove:
+
+    SYN_WORKSPACE_DOCKER_IMAGE="$CANDIDATE_IMAGE" docker compose up
+
+With `CANDIDATE_IMAGE` accidentally empty, the operator runs the pinned default
+while believing they tested the candidate. Nothing says so.
+
+Compose distinguishes the two states -- a bare `KEY:` resolves to null and is
+dropped from the container environment when unset, but an explicitly empty value
+is preserved -- so the settings layer distinguishes them too.
 """
 
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from syn_shared.settings.workspace import WorkspaceSettings
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
@@ -24,15 +33,21 @@ def test_unset_uses_the_pinned_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("blank", ["", "   ", "\t"])
-def test_blank_falls_back_to_the_pinned_default(
-    blank: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """This is the case that would otherwise break provisioning everywhere."""
+def test_explicitly_blank_is_rejected(blank: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The false-pass guard: a deliberately-set empty value must fail loudly.
+
+    Falling back to the default here is what would let an operator test the
+    wrong image and never find out.
+    """
     monkeypatch.setenv(_VAR, blank)
-    assert WorkspaceSettings().docker_image == DEFAULT_WORKSPACE_IMAGE
+    with pytest.raises(ValidationError) as exc:
+        WorkspaceSettings()
+    message = str(exc.value)
+    assert "set but empty" in message
+    assert "Unset it" in message, "the error must tell the operator what to do"
 
 
-def test_a_real_value_still_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_real_value_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     """The escape hatch must actually work; that is the point of #954."""
     monkeypatch.setenv(_VAR, "ghcr.io/example/other@sha256:deadbeef")
     assert WorkspaceSettings().docker_image == "ghcr.io/example/other@sha256:deadbeef"

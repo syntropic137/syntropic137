@@ -121,23 +121,33 @@ class WorkspaceSettings(BaseSettings):
 
     @field_validator("docker_image", mode="before")
     @classmethod
-    def _blank_image_means_default(cls, value: object) -> object:
-        """Treat a blank ``SYN_WORKSPACE_DOCKER_IMAGE`` as unset (#954).
+    def _reject_blank_image(cls, value: object) -> object:
+        """An explicitly blank image is an error, not a silent fallback (#954).
 
-        Compose passes optional variables through as ``${VAR:-}``, which reaches
-        the process as an EMPTY STRING rather than an absent variable. Pydantic
-        sees a present value and overrides ``DEFAULT_WORKSPACE_IMAGE`` with
-        ``""``, breaking provisioning for every deployment that does not set the
-        override -- turning a silent no-op into an outage.
+        The first version of this fix quietly substituted the default for any
+        blank value. A codex review pointed out that recreates the very
+        false-pass #954 exists to eliminate:
 
-        Without this, the only safe compose form is to bake the pinned digest
-        into the generated file, which then drifts from ``PINNED_DIGESTS``.
-        Absorbing the blank here keeps one source of truth for the pin.
+            SYN_WORKSPACE_DOCKER_IMAGE="$CANDIDATE_IMAGE" docker compose up
+
+        If ``CANDIDATE_IMAGE`` is accidentally empty, the operator runs the
+        pinned default while believing they tested the candidate -- and nothing
+        says so. That is exactly the class of bug this issue is about.
+
+        Compose distinguishes the two states, so the settings layer must too.
+        A bare ``SYN_WORKSPACE_DOCKER_IMAGE:`` key resolves to null and is
+        removed from the container environment when the variable is unset, so
+        an absent value never reaches here and the field default applies. A
+        value that DOES arrive and is blank was set deliberately, and is wrong.
         """
-        if value is None:
-            return DEFAULT_WORKSPACE_IMAGE
         if isinstance(value, str) and not value.strip():
-            return DEFAULT_WORKSPACE_IMAGE
+            msg = (
+                "SYN_WORKSPACE_DOCKER_IMAGE is set but empty. Unset it to use the "
+                "pinned default, or give it a full image reference. Refusing to "
+                "silently fall back, because that would run a different image "
+                "than the one you meant to test."
+            )
+            raise ValueError(msg)
         return value
 
     docker_runtime: Literal["runsc", "runc"] = Field(

@@ -33,13 +33,13 @@ _VAR = "SYN_WORKSPACE_DOCKER_IMAGE"
 _MUST_CARRY = ("docker-compose.yaml", "docker-compose.syntropic137.yaml")
 
 
-def _api_environment(path: Path) -> dict[str, str]:
+def _api_environment(path: Path) -> dict[str, str | None]:
     compose: dict[str, Any] = yaml.safe_load(path.read_text()) or {}
     api = (compose.get("services") or {}).get("api") or {}
     env = api.get("environment")
     if isinstance(env, dict):
-        return {str(k): str(v) for k, v in env.items()}
-    out: dict[str, str] = {}
+        return {str(k): (None if v is None else str(v)) for k, v in env.items()}
+    out: dict[str, str | None] = {}
     for entry in env or []:
         key, _, value = str(entry).partition("=")
         out[key] = value
@@ -63,9 +63,16 @@ def test_api_passes_the_workspace_image_through(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", _MUST_CARRY)
-def test_passthrough_interpolates_rather_than_hardcoding_a_digest(name: str) -> None:
-    """A baked digest would drift from PINNED_DIGESTS; it must interpolate."""
+def test_declared_bare_so_unset_stays_distinguishable_from_blank(name: str) -> None:
+    """It must be a bare key (null), not `${VAR:-}` and not a baked digest.
+
+    `${VAR:-}` collapses unset and explicitly-empty into "", which would let an
+    accidentally-empty operator variable silently select the pinned default -
+    the false pass #954 exists to remove. A hardcoded digest would instead drift
+    from PINNED_DIGESTS. Only the bare form preserves both properties.
+    """
     value = _api_environment(_DOCKER_DIR / name)[_VAR]
-    assert value.startswith("${") and _VAR in value, (
-        f"{name}: expected an interpolation of {_VAR}, got {value!r}"
+    assert value is None, (
+        f"{name}: {_VAR} must be declared bare (null) so compose drops it when "
+        f"unset and preserves an explicit blank; got {value!r}"
     )
