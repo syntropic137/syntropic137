@@ -155,7 +155,9 @@
       "description": "Phase definition as parsed from YAML.\n\nConverts YAML snake_case to domain PhaseDefinition.",
       "properties": {
         "id": {
+          "maxLength": 100,
           "minLength": 1,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
           "title": "Id",
           "type": "string"
         },
