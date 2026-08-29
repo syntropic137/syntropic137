@@ -154,6 +154,13 @@ services:
       SYN_SESSION_STORE_URL: ${SYN_SESSION_STORE_URL:-}
       SYN_SESSION_STORE_AUTH_TOKEN: ${SYN_SESSION_STORE_AUTH_TOKEN:-}
       SYN_SESSION_STORE_LABEL: ${SYN_SESSION_STORE_LABEL:-}
+      # Operator escape hatch for pinning a different workspace image (#954).
+      # Declared WITHOUT a value on purpose. Compose removes an unresolved
+      # bare key from the container environment, but preserves an explicitly
+      # empty one -- so 'unset' and 'set to empty' stay distinguishable and
+      # the settings layer can reject the second instead of silently
+      # substituting the default image.
+      SYN_WORKSPACE_DOCKER_IMAGE:
       # Note: secrets (GitHub App, Anthropic, storage) are injected via
       # overlay files (dev, selfhost, ondemand) using env_file or environment
     depends_on:
