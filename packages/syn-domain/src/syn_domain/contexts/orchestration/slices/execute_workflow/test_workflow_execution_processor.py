@@ -10,6 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -522,7 +525,7 @@ class TestStaleCollectArtifactsGuard:
         phase = ExecutablePhase(phase_id="p-1", name="Research", order=1, prompt_template="x")
         aggregate = MagicMock()
         all_artifact_ids: list[str] = []
-        phase_outputs: dict[str, str] = {}
+        phase_outputs = PhaseOutputCache()
 
         assert "p-1" not in processor._active_workspaces
 
@@ -537,5 +540,7 @@ class TestStaleCollectArtifactsGuard:
         aggregate.artifacts_collected.assert_not_called()
         processor._save_and_sync.assert_not_called()
         assert all_artifact_ids == []
-        assert phase_outputs == {}
+        assert phase_outputs.primary == {}
+        # #988: a stale todo must not seed the output TREE either.
+        assert phase_outputs.files == {}
         assert "p-1" not in processor._phase_artifact_ids

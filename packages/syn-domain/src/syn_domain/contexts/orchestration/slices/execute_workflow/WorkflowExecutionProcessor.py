@@ -58,6 +58,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     ArtifactRepository,
     CommandBuilder,
     ExecutionRepository,
+    PhaseOutputCache,
     PromptBuilder,
     Runner,
     SessionRepository,
@@ -244,7 +245,7 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
         completed_phase_ids: list[str] = []
-        phase_outputs: dict[str, str] = {}
+        phase_outputs = PhaseOutputCache()
         dispatch_ctx = _DispatchContext()
 
         try:
@@ -305,7 +306,7 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult],
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
         repos: list[RepositoryRef] | None,
         dispatch_ctx: _DispatchContext,
     ) -> None:
@@ -334,7 +335,7 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult],
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
         repos: list[RepositoryRef] | None,
         dispatch_ctx: _DispatchContext,
     ) -> None:
@@ -519,7 +520,7 @@ class WorkflowExecutionProcessor:
         aggregate: WorkflowExecutionAggregate,
         repos: list[RepositoryRef] | None,
         completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
     ) -> None:
         """Dispatch PROVISION_WORKSPACE."""
         assert todo.phase_id is not None
@@ -575,7 +576,7 @@ class WorkflowExecutionProcessor:
         session_id: str,
         repo_urls: list[str],
         completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
     ) -> ProvisionResult:
         """Provision this phase's own workspace and build its ProvisionResult."""
         provision_handler = WorkspaceProvisionHandler(
@@ -714,7 +715,7 @@ class WorkflowExecutionProcessor:
         phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
         all_artifact_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
     ) -> None:
         """Dispatch COLLECT_ARTIFACTS."""
         assert todo.phase_id is not None
@@ -750,8 +751,7 @@ class WorkflowExecutionProcessor:
         )
         all_artifact_ids.extend(result.artifact_ids)
         self._phase_artifact_ids[todo.phase_id] = result.artifact_ids
-        if result.first_content:
-            phase_outputs[todo.phase_id] = result.first_content
+        phase_outputs.record(todo.phase_id, result.first_content, result.files)
         aggregate.artifacts_collected(result.command)
         await self._save_and_sync(aggregate)
 

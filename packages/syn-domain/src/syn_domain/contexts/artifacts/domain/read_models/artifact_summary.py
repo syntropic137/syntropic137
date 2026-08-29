@@ -44,6 +44,13 @@ class ArtifactSummary:
     content_hash: str | None = None
     """Hash of the content for integrity verification."""
 
+    source_path: str | None = None
+    """Path this file occupied under the producing workspace's output directory.
+
+    None for artifacts written before ArtifactCreated v5 (issue #988); consumers
+    fall back to the flat ``artifacts/input/<phase-id>.md`` name in that case.
+    """
+
     @classmethod
     def from_dict(cls, data: dict) -> "ArtifactSummary":
         """Create from dictionary data."""
@@ -59,6 +66,7 @@ class ArtifactSummary:
             size_bytes=data.get("size_bytes", 0),
             content=data.get("content"),
             content_hash=data.get("content_hash"),
+            source_path=data.get("source_path"),
         )
 
     def to_dict(self) -> dict:
@@ -83,4 +91,5 @@ class ArtifactSummary:
             "size_bytes": self.size_bytes,
             "content": self.content,
             "content_hash": self.content_hash,
+            "source_path": self.source_path,
         }

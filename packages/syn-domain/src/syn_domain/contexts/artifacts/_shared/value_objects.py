@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -79,3 +80,23 @@ def compute_content_hash(content: str) -> str:
         Hex-encoded SHA-256 hash (64 characters).
     """
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class PhaseOutputFile:
+    """One file a phase wrote to its output directory (issue #988).
+
+    A phase's output is a DIRECTORY, not a file. Handing the next phase a
+    single ``str`` of content - which is what ``dict[str, str]`` phase outputs
+    can express - is the wrong unit, and forced every file but one to be
+    dropped. This pairs the content with the path it occupied so the tree can
+    be reconstructed in the consuming workspace.
+
+    ``source_path`` is workspace-relative and includes the output directory
+    prefix (e.g. ``artifacts/output/raw-findings/f1.yaml``). It is optional
+    because artifacts created before ArtifactCreated v5 do not carry it; a
+    None here means "flat name only", never "guess a path".
+    """
+
+    source_path: str | None
+    content: str

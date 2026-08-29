@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from syn_domain.contexts.artifacts._shared.value_objects import PhaseOutputFile
+
 if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
         ArtifactSummary,
@@ -60,6 +62,29 @@ class ArtifactQueryServiceProtocol(Protocol):
 
         Returns:
             Dict mapping phase_id -> artifact content
+        """
+        ...
+
+    async def get_files_for_phase_injection(
+        self,
+        execution_id: str,
+        completed_phase_ids: list[str],
+    ) -> dict[str, list[PhaseOutputFile]]:
+        """Get EVERY artifact from each completed phase, with its source path.
+
+        The restart-safe counterpart to ``get_for_phase_injection``. That method
+        returns one content string per phase, which is the right shape for
+        prompt substitution and the wrong shape for reconstructing a phase's
+        output directory (issue #988).
+
+        Args:
+            execution_id: The workflow execution ID
+            completed_phase_ids: List of phase IDs that have completed
+
+        Returns:
+            Dict mapping phase_id -> every file that phase produced, in
+            projection order. Files predating ArtifactCreated v5 carry a
+            ``source_path`` of None.
         """
         ...
 
@@ -125,3 +150,37 @@ class ArtifactQueryService:
                 phase_outputs[artifact.phase_id] = artifact.content
 
         return phase_outputs
+
+    async def get_files_for_phase_injection(
+        self,
+        execution_id: str,
+        completed_phase_ids: list[str],
+    ) -> dict[str, list[PhaseOutputFile]]:
+        """Get every artifact from each completed phase, with its source path.
+
+        Deliberately returns ALL artifacts per phase rather than the first
+        (issue #988). ``get_for_phase_injection`` above keeps the first-only
+        behaviour because its consumer - prompt substitution - genuinely wants
+        one string; this one exists because the workspace handoff wants the
+        whole tree, and collapsing it there silently dropped every file but one
+        on the restart path.
+
+        Args:
+            execution_id: The workflow execution ID
+            completed_phase_ids: List of phase IDs that have completed
+
+        Returns:
+            Dict mapping phase_id -> every file that phase produced.
+        """
+        phase_files: dict[str, list[PhaseOutputFile]] = {}
+        artifacts = await self._projection.get_by_execution(execution_id)
+
+        for artifact in artifacts:
+            phase_id = artifact.phase_id
+            if phase_id is None or phase_id not in completed_phase_ids or not artifact.content:
+                continue
+            phase_files.setdefault(phase_id, []).append(
+                PhaseOutputFile(source_path=artifact.source_path, content=artifact.content)
+            )
+
+        return phase_files
