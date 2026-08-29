@@ -472,6 +472,11 @@ def _build_plugin_files(
 # -- HTTP Endpoints -----------------------------------------------------------
 
 
+_SORTABLE_SUMMARY_FIELDS: frozenset[str] = frozenset(
+    {"runs_count", "name", "workflow_type", "phase_count", "created_at"}
+)
+
+
 @router.get("", response_model=WorkflowListResponse)
 async def list_workflows_endpoint(
     workflow_type: str | None = Query(None, description="Filter by workflow type"),
@@ -504,15 +509,29 @@ async def list_workflows_endpoint(
         for s in result.value
     ]
 
+    # KNOWN LIMITATION: this sorts the current PAGE, not the collection, so
+    # `order_by` with more than one page does not give a global ordering.
+    # Deliberately not pushed into the store yet: it orders on data->>'field',
+    # which is text, so runs_count and phase_count would sort lexically
+    # ("10" < "9"). Fixing it needs numeric casts in the query builder.
     if order_by:
         desc, field = order_by.startswith("-"), order_by.lstrip("-")
-        valid_fields = {"runs_count", "name", "workflow_type", "phase_count", "created_at"}
-        if field in valid_fields:
+        if field in _SORTABLE_SUMMARY_FIELDS:
             summaries.sort(key=lambda s: getattr(s, field) or 0, reverse=desc)
 
-    total = len(summaries)
+    # `total` is the size of the whole filtered collection, NOT of this page.
+    # It was previously `len(summaries)`, which reported the page size and told
+    # a caller on page 1 of 32 records that there were only 20 -- so a client
+    # that paginates until it has `total` items stopped after the first page.
+    total = await get_projection_mgr().workflow_list.count(
+        workflow_type_filter=workflow_type,
+        include_archived=include_archived,
+    )
     return WorkflowListResponse(
-        workflows=summaries[offset : offset + page_size],
+        # No slice here: `list_workflows` already applied limit/offset. Slicing
+        # again applied the offset twice, so page 2 sliced [20:40] of a 12-row
+        # page and returned nothing.
+        workflows=summaries,
         total=total,
         page=page,
         page_size=page_size,

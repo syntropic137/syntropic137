@@ -191,6 +191,67 @@ class TestWorkflowListProjection:
         assert len(page3) == 1
 
 
+@pytest.mark.unit
+class TestWorkflowListCount:
+    """`count` must describe the whole filtered collection, not one page.
+
+    Reproduces what the live API reported: 32 registered workflows, but
+    `GET /api/v1/workflows` answered `total: 20` because the total was computed
+    as the length of the returned page. A client that pages until it has
+    `total` items therefore stopped after page 1 and never saw the other 12.
+    """
+
+    @pytest.mark.asyncio
+    async def test_count_ignores_pagination(self, projection: WorkflowListProjection):
+        for i in range(32):
+            await projection.on_workflow_template_created(
+                {"workflow_id": f"wf-{i}", "name": f"Workflow {i}", "phases": []}
+            )
+
+        page = await projection.query(limit=20, offset=0)
+        assert len(page) == 20, "precondition: the page is capped"
+        assert await projection.count() == 32
+
+    @pytest.mark.asyncio
+    async def test_count_applies_the_same_filters_as_query(
+        self, projection: WorkflowListProjection
+    ):
+        """A total counted under different filters than its page is worse than none."""
+        for i in range(3):
+            await projection.on_workflow_template_created(
+                {
+                    "workflow_id": f"rev-{i}",
+                    "name": f"R{i}",
+                    "workflow_type": "review",
+                    "phases": [],
+                }
+            )
+        for i in range(2):
+            await projection.on_workflow_template_created(
+                {
+                    "workflow_id": f"imp-{i}",
+                    "name": f"I{i}",
+                    "workflow_type": "implementation",
+                    "phases": [],
+                }
+            )
+
+        assert await projection.count() == 5
+        assert await projection.count(workflow_type_filter="review") == 3
+        assert await projection.count(workflow_type_filter="implementation") == 2
+
+    @pytest.mark.asyncio
+    async def test_count_excludes_archived_by_default(self, projection: WorkflowListProjection):
+        for i in range(3):
+            await projection.on_workflow_template_created(
+                {"workflow_id": f"wf-{i}", "name": f"W{i}", "phases": []}
+            )
+        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
+
+        assert await projection.count() == 2
+        assert await projection.count(include_archived=True) == 3
+
+
 class TestListWorkflowsHandler:
     """Tests for ListWorkflowsHandler."""
 
