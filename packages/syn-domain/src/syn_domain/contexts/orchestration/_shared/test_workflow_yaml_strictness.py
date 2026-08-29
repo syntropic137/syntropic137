@@ -80,27 +80,6 @@ class TestPhaseRejectsUnknownKeys:
         assert phase.allowed_tools == ["Bash", "Read"]
 
 
-class TestPhaseRequiresInstructions:
-    def test_phase_with_no_prompt_source_is_rejected(self) -> None:
-        """Independent second guard: an empty prompt can never do useful work."""
-        data = _phase()
-        del data["prompt_template"]
-        with pytest.raises(ValidationError) as exc:
-            PhaseYamlDefinition(**data)
-        assert "prompt_template" in str(exc.value)
-
-    def test_prompt_file_alone_is_accepted(self) -> None:
-        data = _phase()
-        del data["prompt_template"]
-        data["prompt_file"] = "phase.md"
-        assert PhaseYamlDefinition(**data).prompt_file == "phase.md"
-
-    def test_both_prompt_sources_still_rejected(self) -> None:
-        """Pre-existing rule must survive the new one."""
-        with pytest.raises(ValidationError):
-            PhaseYamlDefinition(**_phase(prompt_file="phase.md"))
-
-
 class TestWorkflowRejectsUnknownKeys:
     def test_unknown_workflow_key_is_rejected(self) -> None:
         with pytest.raises(ValidationError) as exc:

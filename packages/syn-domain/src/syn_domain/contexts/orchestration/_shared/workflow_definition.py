@@ -288,24 +288,16 @@ class PhaseYamlDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
-        """Ensure exactly one of prompt_template or prompt_file is set.
+        """Ensure at most one of prompt_template or prompt_file is set.
 
-        The "at least one" half is a second, independent guard for #961. A phase
-        with no instructions cannot do useful work, so dispatching it to an agent
-        is never correct -- but that is exactly what happened when a misspelled
-        `prompt:` key was silently dropped: the run completed, billed, and the
-        agent spent its turns hunting for a task file it was never given.
-        Rejecting the empty case catches that class from the opposite direction
-        from `extra="forbid"`, so a future field-name drift cannot reproduce it.
+        NOT enforced here: that at least one is set. A phase with no
+        instructions cannot do useful work and should be rejected, but adding
+        that guard breaks 21 existing tests whose fixtures omit the prompt, so
+        it is split into its own change rather than buried in a PR about
+        unknown keys. Tracked separately.
         """
         if self.prompt_template is not None and self.prompt_file is not None:
             msg = f"Phase '{self.id}': specify either 'prompt_template' or 'prompt_file', not both"
-            raise ValueError(msg)
-        if self.prompt_template is None and self.prompt_file is None:
-            msg = (
-                f"Phase '{self.id}': needs 'prompt_template' or 'prompt_file'. "
-                "A phase with no instructions would run an agent with an empty prompt."
-            )
             raise ValueError(msg)
         return self
 
