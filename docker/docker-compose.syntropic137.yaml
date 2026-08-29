@@ -298,7 +298,7 @@ services:
     tmpfs:
     - /tmp
     - /home/syn/.config
-    - /home/syn/.sigstore  # cosign writes a TUF trust cache here BEFORE it can verify anything
+    - /home/syn/.sigstore:size=16m
     deploy:
       resources:
         limits:
