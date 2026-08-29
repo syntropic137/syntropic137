@@ -4,11 +4,15 @@ A phase can write many files to `artifacts/output/`. These tests drive the REAL
 `ArtifactCollector` - collection and injection, both halves - and assert what
 lands in the next phase's workspace.
 
-Written to characterise current behaviour, not to bless it. The multi-file cases
-are marked xfail: they are the contract #988 asks for, and they should start
-passing when it is fixed. That is deliberate - a test asserting today's
-lossy behaviour would have to be DELETED to fix the bug, and would read as
-approval of it in the meantime.
+Written to characterise current behaviour, not to bless it. The lossy cases
+assert what happens TODAY and say so in their names and failure messages, so
+that fixing #988 makes them fail loudly and the fixer updates them.
+
+They are deliberately NOT xfail. `fitness-exceptions.toml` counts xfail as a
+disarmed guard - "an xfail on a correctness invariant is a disabled alarm, not
+a known issue" - and multi-file handoff is a correctness invariant. A test that
+passes while the behaviour is wrong is the failure mode this repo already
+decided against.
 """
 
 from __future__ import annotations
@@ -108,27 +112,37 @@ class TestWhatSurvivesTheHandoff:
         assert names == [f"artifacts/input/{PHASE}.md"]
         assert not any("deliverable" in n for n in names)
 
-    @pytest.mark.xfail(
-        reason="#988: only first_content is injected; the other outputs are dropped",
-        strict=True,
-    )
-    async def test_every_output_file_reaches_the_next_phase(self) -> None:
-        """THE CONTRACT #988 ASKS FOR. Currently fails: 1 of 3 arrives."""
+    async def test_TODAY_only_one_of_three_output_files_survives(self) -> None:
+        """CHARACTERISATION, not approval. #988 tracks the fix.
+
+        Deliberately NOT xfail. This repo counts xfail as a disarmed guard - an
+        xfail on a correctness invariant is a disabled alarm - and this is a
+        correctness invariant. So the current behaviour is asserted exactly,
+        and when #988 lands this test FAILS and whoever fixes it updates the
+        number. A loud failure at the moment of the fix is the signal we want;
+        a silently-passing xfail is not.
+        """
         ws = await _run_handoff(PHASE_ONE_OUTPUT)
-        assert len(ws.injected) == len(PHASE_ONE_OUTPUT), (
-            f"phase 2 received {len(ws.injected)} of {len(PHASE_ONE_OUTPUT)} files"
+        assert len(ws.injected) == 1, (
+            f"phase 2 received {len(ws.injected)} of {len(PHASE_ONE_OUTPUT)} files. "
+            "If this is now 3, #988 is FIXED - update this test to assert the "
+            "full contract and delete this message."
         )
 
-    @pytest.mark.xfail(
-        reason="#988: injected as artifacts/input/<phase-id>.md, original path discarded",
-        strict=True,
-    )
-    async def test_outputs_arrive_at_their_original_relative_paths(self) -> None:
+    async def test_TODAY_the_surviving_file_loses_its_original_path(self) -> None:
+        """The second half of #988: the survivor is renamed.
+
+        A phase told to read `review.yaml` finds `artifacts/input/phase-1.md`
+        instead, so even the one file that arrives is not where the author said
+        it would be.
+        """
         ws = await _run_handoff(PHASE_ONE_OUTPUT)
-        got = {p for p, _ in ws.injected}
-        for original, _ in PHASE_ONE_OUTPUT:
-            leaf = original.removeprefix("artifacts/output/")
-            assert any(leaf in g for g in got), f"{leaf} did not survive; got {got}"
+        paths = [p for p, _ in ws.injected]
+        assert paths == [f"artifacts/input/{PHASE}.md"], (
+            f"got {paths}. If original relative paths are preserved, #988 is "
+            "FIXED - assert the real contract instead."
+        )
+        assert not any("deliverable" in p or "review.yaml" in p for p in paths)
 
 
 class TestWhichFileSurvivesIsNotAuthorControlled:
