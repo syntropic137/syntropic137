@@ -43,9 +43,15 @@ sessions_in_window AS (
       AND started_at < ($2::date + interval '1 day')
 ),
 scoped_events AS (
+    -- The execution filter is applied AGAIN here, not just when choosing
+    -- sessions. Joining back on session_id alone assumes session ids are
+    -- globally unique, and no constraint enforces that: a retried or resumed
+    -- session id reused across executions would drag an unselected
+    -- execution's rows into a filtered heatmap.
     SELECT a.session_id, a.execution_id, a.event_type, a.data, a.time
     FROM agent_events a
     JOIN sessions_in_window w ON w.session_id = a.session_id
+    WHERE TRUE {execution_filter}
 )
 """
 

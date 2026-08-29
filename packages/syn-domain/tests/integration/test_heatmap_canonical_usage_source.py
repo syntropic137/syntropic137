@@ -396,6 +396,51 @@ class TestOneSummaryPerSession:
         )
         assert _bucket_for_today(buckets).breakdown["output_tokens"] == _TRUE_OUTPUT_TOKENS
 
+    async def test_a_newer_corrected_summary_beats_an_older_larger_one(
+        self, event_store, execution_id
+    ):
+        """Recency decides among usable summaries - not size.
+
+        The rank ordered by total token count DESC, so a correction that
+        REDUCES a session's totals could never win: the stale, larger row
+        outranked it forever. "Prefer a summary that carries usage, then the
+        most recent" is the rule; ordering by magnitude is a different rule
+        that agrees with it only when corrections happen to grow.
+        """
+        from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery import (
+            TimescaleHeatmapQuery,
+        )
+
+        session_id = str(uuid4())
+        async with event_store.pool.acquire() as conn:
+            for hours_ago, output in ((2, 99_999), (1, _TRUE_OUTPUT_TOKENS)):
+                await conn.execute(
+                    """
+                    INSERT INTO agent_events
+                        (time, event_type, session_id, execution_id, phase_id, data)
+                    VALUES (now() - make_interval(hours => $1), $2, $3, $4, NULL, $5::jsonb)
+                    """,
+                    hours_ago,
+                    SESSION_SUMMARY,
+                    session_id,
+                    execution_id,
+                    json.dumps(
+                        {
+                            "total_input_tokens": 18,
+                            "total_output_tokens": output,
+                            "cache_creation_tokens": 0,
+                            "cache_read_tokens": 0,
+                            "total_cost_usd": _VENDOR_COST_USD,
+                            "model": _MODEL,
+                        }
+                    ),
+                )
+
+        buckets = await TimescaleHeatmapQuery(event_store.pool).query(
+            start=_utc_today(), end=_utc_today(), execution_ids={execution_id}
+        )
+        assert _bucket_for_today(buckets).breakdown["output_tokens"] == _TRUE_OUTPUT_TOKENS
+
 
 class TestSessionsStraddlingTheWindow:
     async def test_summary_after_the_window_still_supersedes_turn_rows(

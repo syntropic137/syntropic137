@@ -77,9 +77,19 @@ ranked_summary AS (
         input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
         ROW_NUMBER() OVER (
             PARTITION BY session_id
+            -- Usable first, then MOST RECENT. Ordering by token magnitude
+            -- instead makes a correction that REDUCES a session's totals
+            -- unable to ever win: the stale larger row outranks it forever.
+            -- Magnitude agrees with recency only when corrections grow.
+            --
+            -- Exact ties in (usable, time) are resolved arbitrarily, because
+            -- agent_events carries no monotonic observation id to break them.
+            -- Two summaries written in the same microsecond for one session
+            -- is not a shape the writers produce; if that changes, this needs
+            -- a durable insertion key rather than a cleverer ORDER BY.
             ORDER BY
                 (input_tokens + output_tokens
-                 + cache_creation_tokens + cache_read_tokens) DESC,
+                 + cache_creation_tokens + cache_read_tokens > 0) DESC,
                 time DESC
         ) AS rn
     FROM summary_rows

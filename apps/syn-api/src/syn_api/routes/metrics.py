@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from syn_api._wiring import (
@@ -140,15 +140,24 @@ async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
         return []
 
 
+class MetricsUnavailableError(Exception):
+    """The usage totals could not be read, so none may be reported.
+
+    Deliberately NOT a zero-valued result. Returning empty totals made a
+    Timescale outage indistinguishable from a system that had done no work -
+    0 tokens, $0.00 and 0 sessions rendered beside populated workflow and
+    artifact counts, which reads as fact. A silently-cheap number is the
+    dangerous kind; that is the premise of this entire change, and it applies
+    to the error path too.
+    """
+
+
 async def _canonical_totals(workflow_id: str | None):
     """Canonical token/cost totals, narrowed to one workflow when asked.
 
-    Falls back to empty totals rather than raising: a metrics page that
-    renders zeroes is recoverable, one that 500s is not. The failure is
-    logged rather than swallowed silently.
+    Raises:
+        MetricsUnavailableError: the totals could not be read.
     """
-    from syn_domain.contexts.agent_sessions import CanonicalTotals
-
     try:
         query_svc = get_canonical_usage_query()
         if workflow_id is None:
@@ -156,9 +165,11 @@ async def _canonical_totals(workflow_id: str | None):
         manager = get_projection_mgr()
         summaries = await manager.workflow_execution_list.get_by_workflow_id(workflow_id)
         return await query_svc.totals(execution_ids={s.workflow_execution_id for s in summaries})
-    except Exception:
+    except Exception as exc:
         logger.warning("Failed to read canonical usage totals", exc_info=True)
-        return CanonicalTotals()
+        raise MetricsUnavailableError(
+            "usage totals are unavailable: the observability store could not be read"
+        ) from exc
 
 
 @router.get("", response_model=MetricsResponse)
@@ -169,12 +180,10 @@ async def get_metrics_endpoint(
     result = await get_dashboard_metrics(workflow_id=workflow_id)
 
     if isinstance(result, Err):
-        return MetricsResponse(
-            total_input_tokens=0,
-            total_output_tokens=0,
-            total_cache_creation_tokens=0,
-            total_cache_read_tokens=0,
-            total_tokens=0,
+        # Same reasoning as MetricsUnavailableError: an all-zero body is a
+        # claim about the system, and this code path cannot support it.
+        raise HTTPException(
+            status_code=503, detail="metrics are unavailable: the read model could not be queried"
         )
 
     m = result.value
@@ -186,7 +195,10 @@ async def get_metrics_endpoint(
     # the two cards quoted 9,151,116 tokens beside 10,002,629 for the same
     # reality. Workflow/artifact counts stay on the projection: those are
     # domain lifecycle facts, not observed telemetry.
-    totals = await _canonical_totals(workflow_id)
+    try:
+        totals = await _canonical_totals(workflow_id)
+    except MetricsUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return MetricsResponse(
         total_workflows=m.total_workflows,
