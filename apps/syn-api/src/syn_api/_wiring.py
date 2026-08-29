@@ -941,14 +941,14 @@ def get_canonical_usage_query():
     Raises:
         RuntimeError: If the TimescaleDB pool is not yet initialized.
     """
-    from syn_domain.contexts.agent_sessions import CanonicalUsageQueryService
+    from syn_domain.contexts.agent_sessions import CanonicalUsageQueryService, CostCalculator
 
     pool = get_event_store_instance().pool
     if pool is None:
         raise RuntimeError(
             "TimescaleDB pool is not initialized; ensure_connected() must be called first"
         )
-    return CanonicalUsageQueryService(pool=pool)
+    return CanonicalUsageQueryService(pool=pool, cost_calculator=CostCalculator())
 
 
 async def get_conversation_store() -> MinioConversationStorage:

@@ -105,6 +105,7 @@ async def _seed_mixed_reality(store, execution_id: str) -> None:
 
 class TestBothCardsReadOneSource:
     async def test_metric_card_totals_equal_heatmap_totals(self, event_store):
+        from syn_domain.contexts.agent_sessions import CostCalculator
         from syn_domain.contexts.agent_sessions.slices.canonical_totals import (
             CanonicalUsageQueryService,
         )
@@ -115,7 +116,7 @@ class TestBothCardsReadOneSource:
         execution_id = str(uuid4())
         await _seed_mixed_reality(event_store, execution_id)
 
-        card = await CanonicalUsageQueryService(event_store.pool).totals(
+        card = await CanonicalUsageQueryService(event_store.pool, CostCalculator()).totals(
             execution_ids={execution_id}
         )
 
@@ -139,13 +140,14 @@ class TestBothCardsReadOneSource:
 
         Two cards agreeing on 5 output tokens would satisfy the test above.
         """
+        from syn_domain.contexts.agent_sessions import CostCalculator
         from syn_domain.contexts.agent_sessions.slices.canonical_totals import (
             CanonicalUsageQueryService,
         )
 
         execution_id = str(uuid4())
         await _seed_mixed_reality(event_store, execution_id)
-        card = await CanonicalUsageQueryService(event_store.pool).totals(
+        card = await CanonicalUsageQueryService(event_store.pool, CostCalculator()).totals(
             execution_ids={execution_id}
         )
 

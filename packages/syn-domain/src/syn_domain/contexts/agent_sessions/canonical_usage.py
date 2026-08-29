@@ -130,14 +130,23 @@ codex never does, and a claude session that ended abnormally may not either.
 """
 
 
-class _Pricing(Protocol):
+class Pricing(Protocol):
+    """What a resolved model's rate card can do."""
+
     def calculate_cost(
         self, input_tokens: int, output_tokens: int, cache_creation: int, cache_read: int
     ) -> Decimal: ...
 
 
-class _Calculator(Protocol):
-    def resolve_pricing(self, model: str | None) -> _Pricing | None: ...
+class PricingResolver(Protocol):
+    """Resolves a model id to its rate card.
+
+    A PROTOCOL, not the concrete CostCalculator, so a slice can price usage
+    without importing another slice - VSA forbids that, and rightly: the
+    calculator lives in session_cost and this is not session_cost.
+    """
+
+    def resolve_pricing(self, model: str | None) -> Pricing | None: ...
 
 
 @dataclass(frozen=True)
@@ -153,7 +162,7 @@ class RowCost:
     unpriced_tokens: int
 
 
-def price_canonical_row(row: Mapping[str, object], calculator: _Calculator) -> RowCost:
+def price_canonical_row(row: Mapping[str, object], calculator: PricingResolver) -> RowCost:
     """Cost one canonical usage row, vendor-reported first.
 
     THE ONE PLACE this precedence is decided. It was previously re-decided in

@@ -17,12 +17,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import asyncpg
 
+    from syn_domain.contexts.agent_sessions.canonical_usage import PricingResolver
+
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_SESSION_USAGE_CTE,
     price_canonical_row,
-)
-from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import (
-    CostCalculator,
 )
 
 # Mirrors the heatmap's scoping so both read the same rows for the same
@@ -92,9 +91,15 @@ class CanonicalTotals:
 class CanonicalUsageQueryService:
     """Reads system-wide totals from the canonical usage definition."""
 
-    def __init__(self, pool: asyncpg.Pool) -> None:
+    def __init__(self, pool: asyncpg.Pool, cost_calculator: PricingResolver) -> None:
+        """Takes the resolver rather than importing one.
+
+        CostCalculator lives in the session_cost slice; importing it here
+        would be a cross-slice dependency, which VSA forbids. The composition
+        root supplies it.
+        """
         self._pool = pool
-        self._cost_calculator = CostCalculator()
+        self._cost_calculator = cost_calculator
 
     @staticmethod
     def _render(template: str, filtered: bool) -> str:
