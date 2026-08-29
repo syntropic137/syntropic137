@@ -25,11 +25,11 @@ import time
 
 import pytest
 
-from syn_adapters.workspace_backends.agentic.stream_helpers import _cleanup_process
 from syn_adapters.workspace_backends.agentic.stream_adapter import (
     _TIMEOUT_EXIT_CODE,
     _resolve_stream_exit_code,
 )
+from syn_adapters.workspace_backends.agentic.stream_helpers import _cleanup_process
 from syn_adapters.workspace_backends.agentic.stream_reader import StreamOutcome, read_lines
 
 pytestmark = pytest.mark.unit
