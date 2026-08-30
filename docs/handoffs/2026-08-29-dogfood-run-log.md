@@ -422,6 +422,34 @@ after the changes. Extracted `_unique_skill_refs` - collecting refs and talking
 to a resolver are different jobs, and the split is also where the dedupe
 belongs.
 
+### Tick 13 — #1002 merged; v3 costing more than predicted
+
+**Merged #1002** after two codex passes with every finding cleared and CI green.
+Verified live on `origin/main` rather than assuming the merge implies it: the
+call site and the definition are both present.
+
+**#999 re-ran automatically** — its head IS main, so merging #1002 updated it.
+34 checks re-running, none failing so far. Worth noting as a property: a release
+PR from `main` cannot go stale, but it also re-runs the whole gate on every
+merge, which is why "green" has to be re-checked against the head SHA each time
+rather than remembered.
+
+**v3 (experiment 4) is mid-flight and already contradicts one prediction.**
+
+I predicted cost near v2's $3.51. Three phases in, it is at **$4.60** — above
+v2 and above H2's $4.14 total. Recording this BEFORE the final number, because
+the temptation once EXACT improves will be to treat the cost as acceptable in
+hindsight.
+
+If EXACT rises sharply, the honest framing is a TRADE - better citations for
+~30% more spend - not a free win. If EXACT does not rise, the instruction cost
+money and bought nothing, and should be reverted rather than kept for tidiness.
+
+The prediction that cost would stay flat was based on nothing: a prompt section
+adds input tokens to every phase and asks the model to be more careful about
+paths, and both cost tokens. I should have predicted an increase and estimated
+its size.
+
 ---
 
 ## Retrospective
