@@ -8575,14 +8575,14 @@
           },
           "claude_plugins": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/PhaseRefResponse"
             },
             "type": "array",
             "title": "Claude Plugins"
           },
           "skills": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/PhaseRefResponse"
             },
             "type": "array",
             "title": "Skills"
@@ -8849,6 +8849,51 @@
           "operation_type"
         ],
         "title": "PhaseOperationInfo"
+      },
+      "PhaseRefResponse": {
+        "properties": {
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "name_overridden": {
+            "type": "boolean",
+            "title": "Name Overridden",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "PhaseRefResponse",
+        "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
       },
       "RegisterClaudePluginRequest": {
         "properties": {

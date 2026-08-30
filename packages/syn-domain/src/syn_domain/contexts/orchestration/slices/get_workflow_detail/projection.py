@@ -24,6 +24,7 @@ from syn_domain.contexts.orchestration.domain.constants import (
 from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
     InputDeclarationDetail,
     PhaseDefinitionDetail,
+    PhaseRefDetail,
     WorkflowDetail,
 )
 
@@ -37,37 +38,19 @@ def _find_phase(phases: list[dict[str, Any]], phase_id: str) -> dict[str, Any] |
     return None
 
 
-def _render_ref(ref: object) -> str | None:
-    """One plugin/skill ref as its canonical string, or None if unnameable.
+def _refs(refs: Iterable[object] | None) -> tuple[PhaseRefDetail, ...]:
+    """Carry refs structurally. Do NOT flatten them to a string.
 
-    Extracted from `_ref_strings` purely to keep each function under the
-    cyclomatic threshold; the branching is inherent, because a projected row
-    holds whatever the event serialized -- a mapping for a typed ref, or a
-    plain string for the shorthand form.
-    """
-    if isinstance(ref, str):
-        return ref
-    if not isinstance(ref, dict):
-        return None
-    name = ref.get("skill_name") or ref.get("name") or ""
-    source = ref.get("source_url") or ref.get("source") or ""
-    version = ref.get("version") or ""
-    joined = "/".join(str(part) for part in (source, name) if part)
-    if not joined:
-        return str(ref)
-    return f"{joined}@{version}" if version else joined
-
-
-def _ref_strings(refs: Iterable[object] | None) -> tuple[str, ...]:
-    """Render plugin/skill refs as strings for the read model.
-
-    The read model is a VIEW, so it carries the canonical spelling rather than
-    re-validating into domain objects a reader does not need.
+    The first version rendered `source/name@version`. That is not a
+    canonical form: source `https://github.com/foo/bar` with name `bar`
+    became `.../bar/bar@v1`, which reparses to a different repository, and
+    two refs differing only in `name_overridden` rendered identically. A
+    renderer that can confidently produce the wrong identity is worse than
+    the omission it replaced -- callers would copy and export the corruption.
     """
     if not refs:
         return ()
-    rendered = (_render_ref(ref) for ref in refs)
-    return tuple(text for text in rendered if text is not None)
+    return tuple(PhaseRefDetail.from_stored(ref) for ref in refs)
 
 
 def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> None:
@@ -146,8 +129,8 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Stored by create since #1012 and invisible until #1013: a
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
-                claude_plugins=_ref_strings(p.get("claude_plugins")),
-                skills=_ref_strings(p.get("skills")),
+                claude_plugins=_refs(p.get("claude_plugins")),
+                skills=_refs(p.get("skills")),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),

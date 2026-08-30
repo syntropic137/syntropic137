@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_api.routes.workflows.commands import _build_phase_defs
+from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import WorkflowDetail
 from syn_domain.contexts.orchestration.slices.get_workflow_detail.projection import (
     WorkflowDetailProjection,
 )
@@ -152,3 +153,127 @@ class TestALegacyRowStillReads:
         assert phases[0].get("allow_delegation") is False
         assert not phases[0].get("skills")
         assert not phases[0].get("claude_plugins")
+
+
+class TestTheRowReadsBackOut:
+    """The seam the first version of this PR missed entirely.
+
+    `to_dict` wrote the fields and `from_dict` dropped them, so the value
+    reached the store and was discarded on the way back. EVERY reader -- the
+    API, the export, the CLI -- goes through `from_dict`, so half the path was
+    fixed while five tests passed.
+
+    The tests above stop at the store. That is one boundary, and this bug lived
+    at the next one. Asserting on the write side alone cannot see it.
+    """
+
+    def test_a_stored_row_reconstructs_with_its_fields(self) -> None:
+        row = {
+            "id": "wf-1",
+            "name": "T",
+            "workflow_type": "custom",
+            "phases": [
+                {
+                    "id": "p",
+                    "name": "P",
+                    "order": 1,
+                    "provider": "codex",
+                    "allow_delegation": True,
+                    "claude_plugins": [{"source_url": "https://github.com/foo/bar", "name": "bar"}],
+                    "skills": [{"source_url": "https://github.com/a/b", "skill_name": "alpha"}],
+                }
+            ],
+        }
+
+        phase = WorkflowDetail.from_dict(row).phases[0]
+
+        assert phase.allow_delegation is True
+        assert phase.claude_plugins[0].source_url == "https://github.com/foo/bar"
+        assert phase.skills[0].name == "alpha"
+
+    def test_a_full_round_trip_preserves_the_refs(self) -> None:
+        """to_dict -> from_dict must be identity for these fields."""
+        row = {
+            "id": "wf-1",
+            "name": "T",
+            "workflow_type": "custom",
+            "phases": [
+                {
+                    "id": "p",
+                    "name": "P",
+                    "order": 1,
+                    "allow_delegation": True,
+                    "skills": [
+                        {
+                            "source_url": "https://github.com/a/b",
+                            "skill_name": "alpha",
+                            "version": "v1",
+                            "name_overridden": True,
+                        }
+                    ],
+                }
+            ],
+        }
+
+        once = WorkflowDetail.from_dict(row)
+        twice = WorkflowDetail.from_dict(once.to_dict())
+
+        assert once.phases[0].skills == twice.phases[0].skills
+        assert twice.phases[0].skills[0].name_overridden is True
+
+
+class TestRefsAreNotFlattened:
+    """Joining source and name is not reversible.
+
+    The first version rendered `source/name@version`. A ref whose source
+    already ends in the repo name became `.../bar/bar@v1`, which reparses to a
+    DIFFERENT repository -- and two refs differing only in `name_overridden`
+    rendered identically. A renderer that confidently returns the wrong
+    identity is worse than the omission it replaced, because callers copy and
+    export the corruption.
+    """
+
+    def test_the_source_is_not_mangled_by_the_name(self) -> None:
+        row = {
+            "id": "wf-1",
+            "name": "T",
+            "workflow_type": "custom",
+            "phases": [
+                {
+                    "id": "p",
+                    "name": "P",
+                    "order": 1,
+                    "claude_plugins": [
+                        {"source_url": "https://github.com/foo/bar", "name": "bar", "version": "v1"}
+                    ],
+                }
+            ],
+        }
+
+        ref = WorkflowDetail.from_dict(row).phases[0].claude_plugins[0]
+
+        assert ref.source_url == "https://github.com/foo/bar"
+        assert ref.name == "bar"
+
+    def test_two_refs_differing_only_in_name_overridden_stay_distinct(self) -> None:
+        base = {"source_url": "https://github.com/a/b", "skill_name": "s", "version": "v1"}
+        row = {
+            "id": "wf-1",
+            "name": "T",
+            "workflow_type": "custom",
+            "phases": [
+                {
+                    "id": "p",
+                    "name": "P",
+                    "order": 1,
+                    "skills": [
+                        {**base, "name_overridden": True},
+                        {**base, "name_overridden": False},
+                    ],
+                }
+            ],
+        }
+
+        skills = WorkflowDetail.from_dict(row).phases[0].skills
+
+        assert skills[0] != skills[1]

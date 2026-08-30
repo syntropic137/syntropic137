@@ -3304,9 +3304,9 @@ export interface components {
              */
             allow_delegation: boolean;
             /** Claude Plugins */
-            claude_plugins?: string[];
+            claude_plugins?: components["schemas"]["PhaseRefResponse"][];
             /** Skills */
-            skills?: string[];
+            skills?: components["schemas"]["PhaseRefResponse"][];
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
@@ -3419,6 +3419,26 @@ export interface components {
              * @default true
              */
             success: boolean;
+        };
+        /**
+         * PhaseRefResponse
+         * @description A plugin or skill reference. Structured, never a joined string.
+         *
+         *     Joining source and name is not reversible: a ref whose source already
+         *     ends in the repo name reparses to a different repository (#1013).
+         */
+        PhaseRefResponse: {
+            /** Source Url */
+            source_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: string | null;
+            /**
+             * Name Overridden
+             * @default false
+             */
+            name_overridden: boolean;
         };
         /**
          * RegisterClaudePluginRequest

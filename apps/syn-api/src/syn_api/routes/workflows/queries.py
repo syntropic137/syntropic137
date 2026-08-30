@@ -15,6 +15,7 @@ from syn_api.types import (
     InputDeclarationResponse,
     Ok,
     PhaseDefinitionResponse,
+    PhaseRefResponse,
     Result,
     WorkflowDetail,
     WorkflowError,
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
         InputDeclarationDetail,
         PhaseDefinitionDetail,
+        PhaseRefDetail,
     )
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -54,6 +56,17 @@ class InputDeclarationModel(BaseModel):
     default: str | None = None
 
 
+def _ref_response(ref: PhaseRefDetail) -> PhaseRefResponse:
+    """Field by field, not `**to_dict()`: an unpacked mapping is unchecked,
+    and a renamed field would then fail at runtime instead of at typecheck."""
+    return PhaseRefResponse(
+        source_url=ref.source_url,
+        name=ref.name,
+        version=ref.version,
+        name_overridden=ref.name_overridden,
+    )
+
+
 class PhaseDefinition(BaseModel):
     phase_id: str
     name: str
@@ -70,8 +83,8 @@ class PhaseDefinition(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
-    claude_plugins: list[str] = Field(default_factory=list)
-    skills: list[str] = Field(default_factory=list)
+    claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
+    skills: list[PhaseRefResponse] = Field(default_factory=list)
 
 
 class WorkflowResponse(BaseModel):
@@ -160,8 +173,8 @@ def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDef
             model=p.model,
             provider=p.provider,
             allow_delegation=p.allow_delegation,
-            claude_plugins=list(p.claude_plugins),
-            skills=list(p.skills),
+            claude_plugins=[_ref_response(r) for r in p.claude_plugins],
+            skills=[_ref_response(r) for r in p.skills],
             execution_type=p.execution_type,
             max_tokens=p.max_tokens,
             input_artifact_types=list(p.input_artifact_types),
@@ -588,6 +601,9 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
                 model=p.model,
                 provider=p.provider,
                 allow_delegation=p.allow_delegation,
+                # Already PhaseRefResponse here: `get_workflow()` mapped the
+                # read model at the first build site, so converting again
+                # would be a second translation of the same value.
                 claude_plugins=list(p.claude_plugins),
                 skills=list(p.skills),
             )

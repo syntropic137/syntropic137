@@ -16,6 +16,47 @@ from syn_domain.contexts.orchestration.domain.constants import (
 
 
 @dataclass(frozen=True)
+class PhaseRefDetail:
+    """A plugin or skill reference as a reader sees it.
+
+    Every field optional, because a projected row may hold the shorthand
+    string form (source only) or the verbose mapping. Keeping the parts
+    separate is the point: joining them is not reversible.
+    """
+
+    source_url: str | None = None
+    name: str | None = None
+    version: str | None = None
+    name_overridden: bool = False
+
+    @classmethod
+    def from_stored(cls, ref: object) -> "PhaseRefDetail":
+        """Read one stored ref without inventing structure it lacks."""
+        if isinstance(ref, str):
+            return cls(source_url=ref)
+        if not isinstance(ref, dict):
+            return cls()
+        return cls(
+            source_url=ref.get("source_url") or ref.get("source"),
+            # SkillRef spells it `skill_name`; ClaudePluginRef spells it `name`.
+            name=ref.get("skill_name") or ref.get("name"),
+            version=ref.get("version"),
+            name_overridden=bool(ref.get("name_overridden", False)),
+        )
+
+    def to_dict(self) -> dict[str, str | bool | None]:
+        """Concretely typed: every field of a ref is a string or a bool, and
+        `object` here would count against the untyped-dict ratchet while
+        telling a reader less."""
+        return {
+            "source_url": self.source_url,
+            "name": self.name,
+            "version": self.version,
+            "name_overridden": self.name_overridden,
+        }
+
+
+@dataclass(frozen=True)
 class PhaseDefinitionDetail:
     """Read model for phase DEFINITION within a workflow template.
 
@@ -62,11 +103,19 @@ class PhaseDefinitionDetail:
     Security-relevant: it stages BOTH agent auths in the workspace, so a
     reader has to be able to see it. It was stored and unreadable."""
 
-    claude_plugins: tuple[str, ...] = ()
-    """Plugin refs the phase declares, rendered as their canonical strings."""
+    claude_plugins: tuple[PhaseRefDetail, ...] = ()
+    """Plugin refs the phase declares, carried STRUCTURALLY.
 
-    skills: tuple[str, ...] = ()
-    """Skill refs the phase declares, rendered as their canonical strings."""
+    Not flattened to a canonical string. The first attempt rendered
+    `source/name@version`, which corrupts a valid ref: source
+    `https://github.com/foo/bar` with name `bar` rendered as
+    `.../bar/bar@v1` and reparsed to a DIFFERENT repository. It also
+    collided distinct refs that differ only in `name_overridden`. A
+    rendering that can confidently return the wrong identity is worse than
+    the omission it replaced."""
+
+    skills: tuple[PhaseRefDetail, ...] = ()
+    """Skill refs the phase declares, carried structurally. See above."""
 
     execution_type: str = "sequential"
     """How this phase executes: sequential, parallel, or human_in_loop."""
@@ -153,6 +202,16 @@ class WorkflowDetail:
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
                 provider=p.get("provider"),
+                # THE seam. `to_dict` wrote these and `from_dict` dropped
+                # them, so the value reached the store and was discarded on
+                # the way back out. Every reader -- the API, the export, the
+                # CLI -- goes through here, so the previous version fixed
+                # exactly half the path while five tests passed.
+                allow_delegation=bool(p.get("allow_delegation", False)),
+                claude_plugins=tuple(
+                    PhaseRefDetail.from_stored(r) for r in p.get("claude_plugins", [])
+                ),
+                skills=tuple(PhaseRefDetail.from_stored(r) for r in p.get("skills", [])),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),
@@ -220,8 +279,8 @@ class WorkflowDetail:
                 # and served -- drops it. Adding the field above without this
                 # line changes nothing a caller can see.
                 "allow_delegation": p.allow_delegation,
-                "claude_plugins": list(p.claude_plugins),
-                "skills": list(p.skills),
+                "claude_plugins": [r.to_dict() for r in p.claude_plugins],
+                "skills": [r.to_dict() for r in p.skills],
                 "execution_type": p.execution_type,
                 PhaseFields.MAX_TOKENS: p.max_tokens,
                 "input_artifact_types": list(p.input_artifact_types),
