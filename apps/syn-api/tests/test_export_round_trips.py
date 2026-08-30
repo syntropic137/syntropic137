@@ -27,6 +27,7 @@ import yaml
 
 from syn_api.routes.workflows.queries import _yaml_phase_lines
 from syn_api.types import PhaseDefinitionResponse, PhaseRefResponse
+from syn_domain.contexts.orchestration._shared.workflow_definition import PhaseYamlDefinition
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -53,7 +54,9 @@ def _phase() -> PhaseDefinitionResponse:
         input_artifact_types=["markdown"],
         output_artifact_types=["markdown"],
         claude_plugins=[
-            PhaseRefResponse(source_url="https://github.com/foo/bar", name="bar", version="v1")
+            PhaseRefResponse(
+                source_url="https://github.com/foo/bar", name="custom-alias", version="v1"
+            )
         ],
         skills=[PhaseRefResponse(source_url="https://github.com/a/b", name="alpha", version="v2")],
     )
@@ -127,6 +130,13 @@ class TestRefsAreExportedStructurally:
         assert isinstance(entry, dict)
         assert entry["source"] == "https://github.com/foo/bar"
         assert entry["version"] == "v1"
+        # SINGULAR `name` for plugins. The plugin validator ignores `names`
+        # entirely and derives the name from the source basename, so a plugin
+        # exported with `names: [custom-alias]` reinstalls as `bar`. The alias
+        # here differs from the basename deliberately -- the first version of
+        # this test used `bar`, which is what the basename would produce
+        # anyway, so it could not detect the wrong spelling.
+        assert entry["name"] == "custom-alias"
 
 
 class TestAnUndeclaredPhaseStaysUndeclared:
@@ -166,3 +176,117 @@ class TestAnUndeclaredPhaseStaysUndeclared:
             phase["timeout_seconds"]
             == PhaseDefinitionResponse.model_fields["timeout_seconds"].default
         )
+
+
+class TestTheLoaderAcceptsWhatWeEmit:
+    """The consumer, not the parser.
+
+    The tests above parse the emitted YAML with `yaml.safe_load` and assert on
+    the mapping. That proves it is well-formed YAML; it does NOT prove the
+    workflow loader accepts it. Those are different questions, and the gap
+    between them is where this PR's own defect lived: emitting `max_tokens`
+    produced valid YAML that `PhaseYamlDefinition` REJECTS, so the export made
+    packages uninstallable -- strictly worse than the lossy export it replaced.
+
+    This is the same mistake as ticks 30-35, one level further out again: I
+    tested the format and not the thing that consumes the format.
+    """
+
+    def _validate(self, phase: PhaseDefinitionResponse) -> PhaseYamlDefinition:
+        emitted = yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0]
+        # The loader wants the prompt inline; export writes it to a sibling
+        # file, so substitute exactly what the installer would have resolved.
+        emitted.pop("prompt_file", None)
+        emitted["prompt_template"] = "body"
+        return PhaseYamlDefinition.model_validate(emitted)
+
+    def test_a_fully_declared_phase_validates(self) -> None:
+        """The whole point: exported YAML must reinstall."""
+        assert self._validate(_phase()) is not None
+
+    def test_a_bare_phase_validates(self) -> None:
+        assert self._validate(PhaseDefinitionResponse(phase_id="p", name="P", order=1)) is not None
+
+    def test_max_tokens_does_not_make_the_package_uninstallable(self) -> None:
+        """`max_tokens` is deliberately not in the authoring schema.
+
+        A phase can only carry one via the untyped JSON create path, which
+        YAML refuses -- so emitting it exported a package that could never be
+        installed. Not part of the schema means not exported."""
+        assert (
+            self._validate(
+                PhaseDefinitionResponse(phase_id="p", name="P", order=1, max_tokens=1234)
+            )
+            is not None
+        )
+
+
+class TestValuesCannotRestructureTheDocument:
+    """Every interpolated scalar is quoted.
+
+    Hand-built YAML with unquoted interpolation lets a value change the
+    document's meaning rather than its content: a comma splits one name into
+    two, a colon-space breaks the mapping, `null`/`true`/`123` parse as other
+    types, and a leading `*` or `&` is an alias or anchor.
+    """
+
+    def _phase_with(self, **kwargs: object) -> Mapping[str, object]:
+        phase = PhaseDefinitionResponse(phase_id="p", name="P", order=1, **kwargs)  # type: ignore[arg-type]
+        return yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0]
+
+    def test_a_model_named_null_stays_a_string(self) -> None:
+        """Unquoted, `model: null` erases the model instead of naming it."""
+        agent = self._phase_with(provider="claude", model="null").get("agent")
+        assert isinstance(agent, dict)
+        assert agent["model"] == "null"
+
+    def test_a_numeric_version_stays_a_string(self) -> None:
+        refs = [PhaseRefResponse(source_url="https://github.com/a/b", version="123")]
+        skills = self._phase_with(skills=refs)["skills"]
+        assert isinstance(skills, list)
+        assert skills[0]["version"] == "123"
+
+    def test_a_version_with_a_colon_does_not_break_the_document(self) -> None:
+        refs = [PhaseRefResponse(source_url="https://github.com/a/b", version="release: candidate")]
+        skills = self._phase_with(skills=refs)["skills"]
+        assert isinstance(skills, list)
+        assert skills[0]["version"] == "release: candidate"
+
+    def test_a_name_containing_a_comma_stays_one_name(self) -> None:
+        """Unquoted in a flow list, a comma silently becomes two entries."""
+        refs = [PhaseRefResponse(source_url="https://github.com/a/b", name="alpha,beta")]
+        skills = self._phase_with(skills=refs)["skills"]
+        assert isinstance(skills, list)
+        assert skills[0]["names"] == ["alpha,beta"]
+
+    def test_a_source_with_a_hash_is_not_truncated(self) -> None:
+        """Unquoted, `# ` starts a comment and eats the rest of the line."""
+        refs = [PhaseRefResponse(source_url="https://github.com/a/b #frag")]
+        skills = self._phase_with(skills=refs)["skills"]
+        assert isinstance(skills, list)
+        assert skills[0]["source"] == "https://github.com/a/b #frag"
+
+
+class TestAShorthandRefExportsAsAScalar:
+    """A ref known only as a shorthand string has no source/version to split.
+
+    Emitting `- source: owner/repo@v1` with no `version` produced a mapping
+    BOTH reference models reject, so the package would not reinstall.
+    """
+
+    def test_it_is_emitted_as_a_bare_entry(self) -> None:
+        phase = PhaseDefinitionResponse(
+            phase_id="p", name="P", order=1, skills=[PhaseRefResponse(raw="owner/repo/s@v1")]
+        )
+        skills = yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0][
+            "skills"
+        ]
+        assert skills == ["owner/repo/s@v1"]
+
+    def test_a_ref_naming_nothing_is_not_exported(self) -> None:
+        """`source: null` would export a reference that cannot resolve."""
+        phase = PhaseDefinitionResponse(
+            phase_id="p", name="P", order=1, skills=[PhaseRefResponse()]
+        )
+        parsed = yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0]
+        assert "skills" not in parsed
