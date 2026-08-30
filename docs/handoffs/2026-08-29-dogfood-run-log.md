@@ -23,6 +23,7 @@ the bottom is the part worth reading later.
 | H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **UNBLOCKED, tick 42** — v0.27.0 deployed and verified on the Mini; codex phases now survive install. Ready to test |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51, all 100%. CAVEAT (tick 40): every run executed on an `edge`-channel workspace image, not `release` |
 | H11 | Local QA missing CI's jobs is why CI catches more; adding them closes it | **partly supported, and incomplete — tick 44** — the six missing jobs were real and are now local. But codex showed parity is a claim about COMMANDS AND ENVIRONMENT, not target names: `docs-lint.yml` gates every PR and was unmapped, `dashboard-ci` dropped CI's `pnpm link`, and `docs-site-ci` is non-frozen locally because Actions sets `CI=true` |
+| H12 | A gate that passes is a gate that works | **REFUTED, tick 45** — four gates written this week were structurally incapable of failing: `check_test_debt --warn-only`, the scorer's `--rev`, `main() -> 0`, and `grep -q` under `pipefail` returning 141. Each looked identical to a working gate until its hazard was reproduced |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
 ---
@@ -2155,3 +2156,78 @@ That is the check that caught the mutation, and it now runs every time rather
 than living in my memory of this tick.
 
 **Awaiting:** CI on #1019, then codex pass 2, then merge (two-pass cap).
+
+---
+
+## Tick 45 — codex pass 2 on #1019, and a check that could never fail
+
+**HYPOTHESIS:** pass 2 would confirm the four fixes and find little new, since
+pass 1 had already been thorough.
+
+**What the evidence said.** Pass 2 confirmed all five dispositions, including
+verifying my rejection of the `pnpm link` finding independently (it searched
+imports, dynamic imports, CSS, Vite aliases, tsconfig paths, Tailwind and ESLint
+config: no consumer). Then it found three more, and testing one of its
+*predictions* found something worse than the prediction.
+
+### The finding of the day
+
+Codex predicted `check-submodules` *might* false-pass if `git` itself failed.
+I tested the hazard rather than the prediction: deinitialised a nested submodule
+so `git submodule status --recursive` printed a line starting with `-`, and ran
+the check.
+
+**It exited 0.** The check I had written that morning to catch broken submodules
+could not fail at all.
+
+```
+set -euo pipefail
+if git submodule status --recursive | grep -qE '^[-+U]'; then
+```
+
+`grep -q` exits at the first match, the producer dies of SIGPIPE, and `pipefail`
+reports the pipeline as **141** rather than 0, so the `if` never fires.
+Confirmed directly: same pipeline, `nopipefail=0`, `pipefail=141`.
+
+The mechanism is the inverse of what codex guessed. It expected a failing
+producer to mask a clean tree; in fact **the producer fails BECAUSE the check
+succeeded**. The more there is to report, the more reliably it is silent.
+
+`check-docs-content` had the same shape from a different cause: `|| true`
+swallowed grep's status 2 (unreadable directory) along with its status 1 (no
+matches), so a scan that read nothing reported a pass.
+
+### And then the fix created the hazard codex actually predicted
+
+Making the check able to fail made it fail *correctly* on something CI cannot
+satisfy: ci.yml checks out with `submodules: true`, which leaves
+`lib/event-sourcing-platform/reference/eventsourcing-book` uninitialized, and CI
+runs `just preflight`. A recursive assertion would have gone red on every PR.
+The earlier run passed only because the check was broken. Now non-recursive,
+matching the contract CI actually provides, with the reason in the recipe.
+
+### Also fixed
+
+- **My "cannot run locally" reasons were partly false, and codex proved it.**
+  `just deps-audit-py` and `just deps-audit-npm` already run pip-audit and
+  osv-scanner; ci.yml DOES run integration tests for PRs based on `release`.
+  Replaced one excuse bucket with four distinguishable categories, and the
+  runnable-but-excluded ones now name the target that runs them.
+- Both mutations codex found surviving: staleness checked against only one
+  mapping table, and a scalar `on: pull_request` unrecognised.
+- preflight claimed submodules were uncovered one line after checking them.
+- The pre-push hook re-ran the em-dash grep preflight now owns.
+
+**Standing hypothesis update.** H10 ("my tests find the bug I am looking for")
+stays refuted, but sharpen it: **a passing check is not evidence the check
+works.** Four separate gates I wrote today were incapable of failing -
+`check_test_debt --warn-only`, the citation scorer's `--rev`, `main() -> 0`, and
+this. The only thing that distinguished them from working gates was reproducing
+the hazard and watching them go green.
+
+**Method that worked, worth keeping:** every hazard now has a reproduction I ran
+(deinit a submodule, move one to another commit, delete a README CI requires,
+hide the docs directory), not an argument that it is handled.
+
+**Status:** two codex passes done on #1019, all findings addressed, `just qa-ci`
+green in 3m21s, tree byte-identical before and after. Merging on green.
