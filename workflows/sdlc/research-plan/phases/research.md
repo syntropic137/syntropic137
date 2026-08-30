@@ -46,5 +46,18 @@ real, and up to 100% of citations were unusable purely because of this.
 
 - Every factual claim carries a `file:line`. A claim you cannot cite goes under
   Open questions instead.
+- **A claim that something does NOT exist carries the command that shows it,
+  with its real output.** "Dead code, no callers", "there is no such channel",
+  "the submodule is unpopulated" cannot carry a `file:line` by construction, so
+  the rule above does not constrain them -- and they are the claims a later
+  phase leans hardest on. Paste the search:
+
+      $ grep -rn "\.clone(" packages/ apps/ --include="*.py" | grep -v test
+      (no output)
+
+  An unchecked absence has already shipped in this workflow's output: a plan
+  rejected a correct architectural blocker because "the submodule is
+  unpopulated", when one `ls` showed two harness packages in it. Every
+  citation in that plan resolved. Absence is where the checking stops.
 - Mark clearly what you VERIFIED by reading versus what you INFERRED.
 - Do not propose a solution. Do not modify any file.
