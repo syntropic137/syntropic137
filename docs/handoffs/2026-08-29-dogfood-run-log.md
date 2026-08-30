@@ -18,6 +18,7 @@ the bottom is the part worth reading later.
 | H3 | Cross-model review catches what the author cannot | **strongly supported, with a LIMIT found in tick 26** — it beat me repeatedly (inert #997 fix, fail-toward-good scorer, the `--tools` dispute). BUT the review INSIDE the workflow was insufficient: the revise phase overruled a correct blocker using a false premise, and an independent pass caught it |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
+| H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **test INVALIDATED, tick 28** — the v4 install silently dropped `provider`, so its "cross-model review" ran as claude. Blocked on #1011 |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51. RESOLVES and EXACT both 100% in all three. EXACT 75% → 100% for +85% cost |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
@@ -1356,3 +1357,42 @@ would be measuring a thing users cannot create.
 The run is still going. I will read its revise phase as WEAK evidence only —
 its cross-model-review input came from claude, not codex, so it is a different
 input to the phase under test.
+
+### Tick 28b — the codex review does not cost $0.55, it costs $0.55 plus the work it causes
+
+The invalid v4 run turned out to be a useful control, because it is the same
+task with the cross-model review phase silently replaced by claude.
+
+| phase | v3 (real codex) | v4 (provider dropped) |
+|---|---|---|
+| cross-model-review | `in=68,099`, cache_create **0**, $0.55 | `in=74`, cache_read 669k, $0.28 |
+| revise | cache_read **6.43M**, out **71k**, **$4.58** | cache_read 0.38M, out 13.8k, **$0.23** |
+| final plan | 57,955 chars | 26,972 chars |
+| TOTAL | $8.15 | $1.19 |
+
+**Two things fall out.**
+
+First, a diagnostic: `in=68099` with `cache_create=0` is a **codex signature** —
+codex does not use Anthropic prompt caching, so a codex phase shows real input
+tokens and no cache. A claude phase shows a tiny `in` and large cache figures.
+v4's review has the claude profile. The telemetry corroborated the provider
+drop independently of the config, and I would not have needed to read
+`_build_phase_defs` at all to know something was wrong.
+
+Second, and this changes how I have been accounting for it all day: I have been
+repeating that **cross-model review is the best value in the workflow at about
+$0.55 a run**. That is wrong, and it undersells rather than oversells. The
+review is cheap; **what it triggers is not.** v3's revise phase read 6.43M
+cached tokens and produced 71k output working through real blockers. Without a
+real review to answer, the same phase read 0.38M and produced 13.8k.
+
+So the honest figure is **$0.55 for the review plus roughly $4.35 of revision it
+causes** — about 60% of the run's total cost, for the phase that found an inert
+#997 fix, a scorer failing toward good, and a plan that would have shipped
+privilege escalation. Still the best value in the workflow. But "it costs
+$0.55" was an accounting error, and the corrected number is the one to defend a
+budget with.
+
+n=1 and the two runs differ in more than one way, so the mechanism is stated as
+an observation with a plausible cause, not a proven one. What is NOT ambiguous
+is the direction: the cheap-looking phase is upstream of the expensive one.
