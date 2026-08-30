@@ -2463,3 +2463,41 @@ a fix.
 premise rather than acting on it: tick 46 (two of my own prompt's premises were
 stale), tick 47 (#1017's root cause never happened), and now this — a bug report
 I was one command away from filing as new.
+
+### Tick 48b — narrowed #969 with a mid-flight reading, then withdrew half of it
+
+Caught the running execution **between phases**, which separates accumulation
+from the completion event:
+
+```
+status: running | total_duration_seconds: 0.0
+  'Bootstrap'   completed  duration=418.065498
+  'Implement'   running    duration=0.0
+```
+
+A phase completed with 418.07s recorded, the execution total is 0.0, and
+`on_workflow_completed` has not fired. So the zero is **not** the completion
+event overwriting a good value, which is what the #969 guard defends against.
+That is the strongest evidence on the issue so far, and it took one API call at
+the right moment rather than another argument.
+
+**Then I over-claimed and had to withdraw it.** I wrote on the issue that the
+guard "guards the second half of a path whose first half is failing", implying
+accumulation never runs. Reading further refutes my own framing: the phase value
+and the running total are set from the **same key on the same event**, one line
+apart, and the handler saves. Both branches of the found/not-found split read
+the key; neither computes it from timestamps, which was my guess. On a single
+event those two values cannot disagree.
+
+Posted the correction rather than leaving a plausible-sounding cause on a bug
+someone else may pick up. The empirical observation is reproducible; the causal
+story was speculation.
+
+**The pattern this belongs to.** Earlier this week the rule was "a citation is a
+claim". This is the same rule applied to a *diagnosis*: a root cause stated
+confidently in an issue is load-bearing for whoever fixes it, and mine was
+supported only by not having read the next twenty lines. The remaining step
+needs instrumentation, not reading, and I said so.
+
+Also recorded on the issue: `VERSION` is still 6, so whatever the fix, historical
+rows never pick it up without a bump.
