@@ -153,6 +153,42 @@ change should not exist."
 This is the argument for the research phase being separate and for cross-model
 review: both exist to catch a wrong premise before it becomes a PR.
 
+## Experiment 2 — does phase isolation earn its cost?
+
+The owner's hypothesis: separate, focused phases produce better output than
+fewer combined ones. First controlled data. Same task (#990), same repo, same
+models, same day. The ONLY variable is phase count.
+
+| | v1 | v2 |
+|---|---|---|
+| phases | 3 (research+plan combined) | 4 (research, plan, review, revise) |
+| cost | $3.3246 | **$3.5111** (+5.6%) |
+| citations resolving | 13/21 — **62%** | 9/12 — **75%** |
+| total citations made | 21 | 12 |
+| abbreviated-path errors | 9 | 3 |
+
+**+5.6% cost bought +13 points of citation accuracy.** The hypothesis survives
+its first test.
+
+The more interesting number is total citations: v2 made FEWER claims (12 vs 21)
+and got a higher proportion of them right. A separate research phase appears to
+produce fewer, better-grounded claims rather than more of them - which is the
+behaviour you would want from splitting "find out what is true" away from
+"decide what to do".
+
+**Caveats, because n=1 each:**
+
+- v2 ran WITHOUT skills. The skills variant died (see #998), so this measures
+  phase count ALONE, not the SLP-skills hypothesis - that is still untested.
+- Neither run had #988's directory handoff; the Mini is v0.26.0. Each phase
+  emitted one document, so the flat alias carried it.
+- One task, one run each. Two data points are a direction, not a result.
+
+**Both runs fail the same way**: abbreviated paths (`routes/artifacts.py`
+instead of the repo-root-relative path). Zero hallucinated files in either. The
+fix is one line in the prompt requiring repo-root-relative paths, and it should
+move both toward 100% - the cheapest available quality win, and now measurable.
+
 ## Release
 
 Nothing blocks it. 80+ commits unreleased. The version bump and release PR are
