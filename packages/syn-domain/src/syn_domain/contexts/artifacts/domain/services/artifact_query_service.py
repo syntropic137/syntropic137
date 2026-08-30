@@ -18,6 +18,21 @@ if TYPE_CHECKING:
     )
 
 
+def _injection_rank(artifact: ArtifactSummary) -> tuple[int, int, str]:
+    """Rank candidates for a phase's flat alias. Lower wins.
+
+    Explicit primary first; then earliest-created, which reproduces what
+    the live path chose for executions written before the flag existed.
+    Rows with no timestamp sort last so a known time always beats none.
+    """
+    primary = 0 if artifact.is_primary_deliverable else 1
+    created = artifact.created_at
+    if created is None:
+        return (primary, 1, "")
+    stamp = created if isinstance(created, str) else created.isoformat()
+    return (primary, 0, stamp)
+
+
 class _ArtifactProjection(Protocol):
     """Protocol for the artifact projection dependency."""
 
@@ -134,22 +149,24 @@ class ArtifactQueryService:
         Returns:
             Dict mapping phase_id -> artifact content
         """
-        phase_outputs: dict[str, str] = {}
-
-        # Query all artifacts for this execution
         artifacts = await self._projection.get_by_execution(execution_id)
 
-        # Filter to completed phases and extract content
+        # Row order is NOT a selector (#997). The production store returns an
+        # unordered query as `updated_at DESC` -- the LAST file collected --
+        # while the live path injects the FIRST. Ranking instead makes both
+        # paths agree, and keeps them agreeing after a restart.
+        best: dict[str, ArtifactSummary] = {}
         for artifact in artifacts:
-            # Use the first artifact found for each phase (primary deliverable)
-            if (
-                artifact.phase_id in completed_phase_ids
-                and artifact.content
-                and artifact.phase_id not in phase_outputs
-            ):
-                phase_outputs[artifact.phase_id] = artifact.content
+            phase_id = artifact.phase_id
+            if phase_id is None or phase_id not in completed_phase_ids:
+                continue
+            if artifact.content is None:
+                continue
+            incumbent = best.get(phase_id)
+            if incumbent is None or _injection_rank(artifact) < _injection_rank(incumbent):
+                best[phase_id] = artifact
 
-        return phase_outputs
+        return {phase_id: a.content for phase_id, a in best.items() if a.content is not None}
 
     async def get_files_for_phase_injection(
         self,

@@ -395,3 +395,56 @@ class TestBuildJunkIsNotCollected:
         )
 
         assert len(result.artifact_ids) == 4
+
+
+class TestExactlyOnePrimaryDeliverable:
+    """The collector marks the phase's primary deliverable (#997).
+
+    Without the flag the cold path has nothing to select on and falls back
+    to row order, which production returns as `updated_at DESC` -- the LAST
+    file collected, not the first one the live path injects.
+    """
+
+    @pytest.mark.asyncio
+    async def test_only_the_first_collected_file_is_primary(self) -> None:
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(
+            collected_files=[
+                ("artifacts/output/deliverable.md", b"# Plan"),
+                ("artifacts/output/review.yaml", b"verdict: ok"),
+                ("artifacts/output/notes.md", b"scratch"),
+            ]
+        )
+
+        result = await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Planning",
+            output_artifact_type="markdown",
+        )
+
+        assert [a.is_primary_deliverable for a in repo.saved] == [True, False, False]
+        # The primary must be the same file the live path injects.
+        assert result.first_content == "# Plan"
+
+    @pytest.mark.asyncio
+    async def test_a_single_file_is_still_primary(self) -> None:
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(collected_files=[("artifacts/output/only.md", b"# Only")])
+
+        await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Planning",
+            output_artifact_type="markdown",
+        )
+
+        assert [a.is_primary_deliverable for a in repo.saved] == [True]

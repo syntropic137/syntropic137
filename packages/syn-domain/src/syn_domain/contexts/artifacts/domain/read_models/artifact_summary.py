@@ -44,6 +44,14 @@ class ArtifactSummary:
     content_hash: str | None = None
     """Hash of the content for integrity verification."""
 
+    is_primary_deliverable: bool = True
+    """Whether this is the phase's primary deliverable (#997).
+
+    Exactly one artifact per phase carries this once collected, so the
+    flat ``<phase-id>.md`` alias no longer depends on query ordering.
+    Rows written before the flag existed all default to ``True``.
+    """
+
     source_path: str | None = None
     """Path this file occupied under the producing workspace's output directory.
 
@@ -66,6 +74,7 @@ class ArtifactSummary:
             size_bytes=data.get("size_bytes", 0),
             content=data.get("content"),
             content_hash=data.get("content_hash"),
+            is_primary_deliverable=bool(data.get("is_primary_deliverable", True)),
             source_path=data.get("source_path"),
         )
 
@@ -91,5 +100,6 @@ class ArtifactSummary:
             "size_bytes": self.size_bytes,
             "content": self.content,
             "content_hash": self.content_hash,
+            "is_primary_deliverable": self.is_primary_deliverable,
             "source_path": self.source_path,
         }
