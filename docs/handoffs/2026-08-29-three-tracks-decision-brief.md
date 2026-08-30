@@ -117,6 +117,51 @@ Missing only: workflows opening drafts, and a final phase promoting to ready.
 
 ---
 
+## Update — both blockers merged
+
+| | |
+|---|---|
+| #988 | MERGED (PR #995). A phase hands the next phase its whole output directory. |
+| #964 | MERGED (PR #996). `--tools` restricts availability, verified against the live CLI. |
+| #992 | CLOSED — see below. |
+| #989 | CLOSED as invalid — the premise was wrong. |
+
+**#964 carried a correction.** `max_tokens` is not merely un-forwarded, it is
+UNFORWARDABLE: `claude 2.1.251` has no token flag (nearest is
+`--max-budget-usd`, in dollars) and `codex 0.147.0` has neither. Declaring it is
+now a validation error pointing at `timeout_seconds`.
+
+**#988 carried a pre-existing path traversal.** `PhaseYamlDefinition.id` was
+`min_length=1`, so `../../../tmp/owned` validated — and injection joins that to
+the HOST-side workspace directory. Reachable by a marketplace workflow author,
+who is not necessarily the operator. Fixed with an allowlist grammar plus
+independent containment at the sink. Not filed publicly: the repo is public and
+the hole was live.
+
+### The dogfooding lesson from #992
+
+Syntropic wrote #992 on the self-host to fix #989. It did exactly what the issue
+said. The issue was wrong: all six "hardcoded literals" were inside DOCSTRINGS,
+including a `>>>` doctest. The result was three unused imports and documentation
+made worse.
+
+**The agent was not wrong; the plan was.** A confident, file-and-line-accurate
+instruction that nobody checked against what those lines actually were. CI
+caught it only as "unused import" — the shallowest possible symptom of "this
+change should not exist."
+
+This is the argument for the research phase being separate and for cross-model
+review: both exist to catch a wrong premise before it becomes a PR.
+
+## Release
+
+Nothing blocks it. 80+ commits unreleased. The version bump and release PR are
+the owner's call.
+
+**The Mini runs v0.26.0**, which predates #988/#964 — so self-host runs do NOT
+yet exercise directory handoff or tool restriction. Any comparison run there
+measures phase isolation only.
+
 ## Priorities
 
 1. **#988 — directory handoff.** Until a phase can pass its whole output
