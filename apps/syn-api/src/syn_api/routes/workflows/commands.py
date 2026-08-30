@@ -30,6 +30,8 @@ from syn_api.types import (
 from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         InputDeclaration,
         PhaseDefinition,
@@ -71,6 +73,26 @@ def _resolve_classification(classification: str) -> WorkflowClassification:
     return classification_map.get(classification.lower(), WorkflowClassification.STANDARD)
 
 
+def _agent_field(phase: Mapping[str, Any], name: str, default: Any = None) -> Any:  # noqa: ANN401
+    """Read a phase's agent setting from either spelling.
+
+    The packaged workflow YAML nests these under ``agent:`` -- see
+    ``workflows/sdlc/research-plan/workflow.yaml`` -- while the create request
+    carries them flat. Posting the YAML shape sent the whole block into a key
+    nothing read, so the phase installed with no provider and no model, with a
+    201 and no warning (#1011).
+
+    A flat field wins when both are present: it is the more specific spelling,
+    and picking silently either way would be a guess.
+    """
+    if name in phase:
+        return phase[name]
+    agent = phase.get("agent")
+    if isinstance(agent, dict) and name in agent:
+        return agent[name]
+    return default
+
+
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
     from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
 
@@ -89,7 +111,17 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 timeout_seconds=p.get("timeout_seconds"),
                 allowed_tools=p.get("allowed_tools", []),
                 argument_hint=p.get("argument_hint"),
-                model=p.get("model"),
+                # These four were accepted and discarded (#1011). `provider`
+                # meant every codex phase installed through the API ran as
+                # claude; `skills` and `claude_plugins` meant per-phase
+                # injection installed nothing. The structural test in
+                # test_phase_create_carries_every_field.py fails if a future
+                # field is added to PhaseDefinition without being mapped here.
+                model=_agent_field(p, "model"),
+                provider=_agent_field(p, "provider"),
+                allow_delegation=bool(_agent_field(p, "allow_delegation", False)),
+                claude_plugins=tuple(p.get("claude_plugins") or ()),
+                skills=tuple(p.get("skills") or ()),
             )
             for i, p in enumerate(phases)
         ]
