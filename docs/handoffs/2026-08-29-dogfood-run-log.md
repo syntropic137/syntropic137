@@ -1922,3 +1922,37 @@ record the workspace image digest too, not just the repo commit.
 
 **Recommendation to the owner: move to the release default.** Running unreviewed
 agent binaries is not a thing to do by accident, and the pin is accidental.
+
+### Tick 41 — v0.27.0 released; Mini update blocked on SSH, nothing changed
+
+**v0.27.0 is out.** Tagged, npm, GHCR, pipeline 0 non-success.
+
+Attempted the Mini update. **SSH died mid-attempt** — the 1Password agent
+refused to sign, the documented intermittency. The failure happened on the FIRST
+command (the backup), so **nothing on the Mini was modified**; verified the API
+is still healthy on the old version via Tailscale.
+
+Worth noting because it went right: I ordered the operations backup-first, so
+the only thing that could fail before any mutation was the backup itself. Had I
+led with `setup update`, a mid-command SSH drop would have left a half-updated
+stack serving a public URL.
+
+Handed the owner an exact command sequence. The only substantive edit is moving
+`SYN_WORKSPACE_DOCKER_IMAGE` off the accidental **edge** pin
+(`9d5bfd87`, channel=edge, revision `d37547ab`) onto the release default
+(`29b76b43`, channel=release, revision `276eec0a` — matching the
+`PINNED_DIGESTS` gitlink).
+
+**Verification does not need SSH.** Once it is up I can confirm everything over
+Tailscale:
+
+- `/api/v1/health` returns healthy
+- the codex probe: install a phase declaring `provider: codex`, read it back,
+  assert `codex` and not `None` — that is the concrete proof #1011/#1012 landed
+- `GET /workflows/{id}` now shows `skills` / `claude_plugins` /
+  `allow_delegation` — proof #1013/#1014 landed
+- the two projections rebuilt (`list_artifacts` v5, `get_workflow_detail` v8)
+
+That list is worth keeping as the shape of a deploy check: **each item is a
+behaviour a user can observe, not a version string.** Today I twice reasoned
+from a version or a filename and was wrong both times.
