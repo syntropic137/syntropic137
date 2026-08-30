@@ -29,7 +29,7 @@ from syn_api.types import (
     WorkflowError,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration import RESERVED_INPUT_NAMES
+from syn_domain.contexts.orchestration import RESERVED_INPUT_NAMES, SkillError
 from syn_shared.agents import (
     AgentProvider,
     UnsupportedAgentProviderError,
@@ -479,6 +479,62 @@ def _check_phase_providers(workflow: WorkflowTemplateAggregate) -> None:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -> None:
+    """Resolve every declared skill NOW, so an unusable ref is a 422 (#998).
+
+    Skill resolution used to happen inside the BackgroundTask, after the 200 had
+    been returned and BEFORE the execution aggregate was first persisted. A
+    failure there is unattributable by construction: there is no execution row
+    to mark failed, so the caller received
+
+        POST /execute      -> 200 {"status": "started"}
+        GET  /executions/X -> 404, permanently
+
+    while the exception - which already names the skill, its source, its pinned
+    version and two ways to fix it - went to a log file. For an orchestration
+    platform that is worse than a generic failure: a 500 tells a caller to look,
+    a 200 tells it to wait. Every trigger, cron job and agent built on this API
+    would wait forever.
+
+    The message is reused verbatim rather than rewritten. It is already the best
+    description of the problem that exists, and paraphrasing it would drift from
+    whatever the resolver actually rejected.
+
+    Fail-open on an unavailable RESOLVER, not on an unresolvable REF: if the
+    service cannot be constructed we let the execution proceed and fail later
+    rather than refusing work for an infrastructure reason. A missing
+    registration is a user error and must be reported; a missing resolver is
+    ours.
+    """
+    refs = [ref for phase in workflow.phases for ref in (phase.skills or [])]
+    refs += list(getattr(workflow, "skills", None) or [])
+    if not refs:
+        return
+
+    try:
+        from syn_api._wiring import get_skill_resolution_service
+
+        service = await get_skill_resolution_service()
+    except Exception:
+        logger.warning(
+            "Skill resolver unavailable; skipping pre-flight skill validation",
+            exc_info=True,
+        )
+        return
+
+    for phase in workflow.phases:
+        phase_refs = list(phase.skills or [])
+        if not phase_refs:
+            continue
+        try:
+            await service.resolve_for_phase((), tuple(phase_refs))
+        except SkillError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"phase '{phase.phase_id}': {exc}",
+            ) from exc
+
+
 async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
@@ -494,6 +550,10 @@ async def _validate_execution_request(
     # with its historical provider. Reject it here rather than remapping it to
     # headless claude downstream.
     _check_phase_providers(workflow)
+
+    # #998: an unresolvable skill ref must be a 422 here, not a 200 followed by
+    # an execution that never exists.
+    await _reject_unresolvable_skill_refs(workflow)
 
     # ADR-063: repository identity is typed on `repos[]`, not smuggled through `inputs`.
     # Reject at the boundary so silent-success-then-BackgroundTask-failure can't happen.
