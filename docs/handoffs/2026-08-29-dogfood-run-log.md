@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H20 | A field wired through event, projection and API is wired end to end | **REFUTED, tick 54** — `WorkspaceCreatedEvent` is never persisted (`git grep WorkspaceCreated` outside syn-domain: 0 hits), so the field would be empty on every run. Schema tests and round-trip tests both passed; neither touched the persistence hop |
 | H19 | Tests written for the bug in front of me are enough | **REFUTED, tick 53** — a fitness test written for the SHAPE of #1011/#1013/#1015 caught #969 on its first run, a field nobody was hunting, which two rounds of reading the projection had missed. Same cost, whole-class yield |
 | H18 | Image identity is already captured, so #1004's image half is just plumbing | **HALF REFUTED, tick 52** — `WorkspaceCreatingEvent.container_image` is a field on an event nothing emits; `IsolationStartedEvent.image_manifest` IS populated but carries BUILD provenance, not the OCI digest, and its capture is best-effort so absence is silent |
 | H17 | Widening a fix once means I have covered the bug class | **REFUTED, tick 50** — widened 2 sites -> 4 in tick 49, and codex found 4 more, including the production gateway image whose identical three lines I had removed from two sibling Dockerfiles in the same commit |
@@ -2849,3 +2850,65 @@ the second.
 - `git checkout -b` + a non-unique text anchor put a field on the wrong class
   and duplicated a kwarg. Pyright caught both. Anchors inside a class body need
   a class-scoped edit, not `replace(..., 1)` on the first match.
+
+---
+
+## Tick 54 — codex answered the question I asked, and it blocked my own PR
+
+**HYPOTHESIS:** #1026 records the workspace image end to end.
+
+**REFUTED, on the exact hop I asked codex to check.** I wrote in the review
+prompt: *"a field that is always empty is worse than no field, because it reads
+as 'this ran on no image'"* — and then shipped exactly that.
+
+**`WorkspaceCreatedEvent` is never persisted.** `_apply()` appends to
+`_uncommitted_events`; nothing saves them. Verified independently rather than
+taking the review's word:
+
+```
+$ grep -n "save\|repository" .../service/workspace_service.py
+(no output)
+$ git grep -rl "WorkspaceCreated" -- packages/syn-adapters apps | wc -l
+0
+```
+
+The event is referenced **nowhere** outside `syn-domain`. `workspace_images`
+would have been `[]` on every real execution.
+
+**Why I missed it:** I tested the event schema and the read-model round trip —
+the two sides I was staring at — and never the hop between them. Identical to
+#1011 and #1013, one layer further out. The tests I wrote were good tests of the
+wrong boundary.
+
+**A second finding I also accept:** even persisted, the event fires *before*
+provisioning succeeds and before the adapter resolves what actually runs. A
+permitted local image records a name while an image ID executes; with
+verification disabled the value can be a mutable tag; a failed provision still
+emits an event called `WorkspaceCreated`. So it records the **requested** image,
+not the one that ran. My "the host both chooses and pulls it, so there is no
+window" was right about the registry race and wrong about the adapter — a
+correlation-not-contract error inside the argument I used to justify the design.
+
+### What survived, and it is the better half
+
+The #969 fix and the fitness gate that found it are independent of all of this
+and verified on their own. Split onto a clean branch off main as **#1027**, both
+pass-throughs mutation-tested, `qa-ci` green. No rebase, no force push — a new
+branch and a new PR.
+
+#1026 is draft with the concrete path recorded: carry the resolved reference
+through the isolation adapter into `WorkspaceProvisionedForPhaseEvent`, which the
+persisted aggregate emits **after** successful provisioning — fixing persistence
+and the timing together. Plus the acceptance test that would have caught this:
+drive the provision handler with a fake isolation provider and real
+repository/coordinator plumbing and assert the sentinel reaches
+`get_execution_endpoint()`. **A unit test on the aggregate or the projection
+cannot prove that hop, which is exactly how this shipped.**
+
+### The compounding lesson
+
+Two ticks ago a class-shaped gate caught a bug nobody was hunting. This tick, a
+review question I wrote myself caught a bug I had already described in the
+prompt. **The pattern is the same: the value came from asking about the shape of
+past failures rather than about this change.** What I keep getting wrong is
+narrower — I test the objects and not the wire between them.
