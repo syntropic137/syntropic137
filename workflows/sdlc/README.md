@@ -72,6 +72,26 @@ collected from, which means a reviewer can rewrite the document it was asked to
 critique. For a phase whose whole value is an independent second opinion, that
 is the property that matters.
 
+## Versions, and why the id changes
+
+The id is bumped whenever a phase prompt changes, because **a workflow's
+prompts are snapshotted into the platform at install time** -- editing a file
+here does NOT change any already-installed workflow. Two versions sharing one
+id would mean two different experiments reported under one name.
+
+| id | difference | measured |
+|---|---|---|
+| `sdlc-research-plan-v1` | 3 phases | EXACT 62%, $3.32 |
+| `sdlc-research-plan-v2` | 4 phases, isolated | EXACT 75%, $3.51 |
+| `sdlc-research-plan-v3` | + repo-root-relative citation rule | EXACT 100% on 3 runs, $6.50-$8.40 |
+| `sdlc-research-plan-v4` | + a claim resting on ABSENCE must show the command | under test |
+
+Only the current version's prompts live in this directory. **v3's exact
+definition is `ad6387519676206f5e934e47ca0494449fcb61d6`** -- recoverable with
+`git show ad6387519676:workflows/sdlc/research-plan/phases/revise.md`. That is
+deliberate: the runs above were scored against specific prompt text, and a
+result whose inputs cannot be reconstructed is not a measurement.
+
 ## Planned families
 
 | directory | output | status |
