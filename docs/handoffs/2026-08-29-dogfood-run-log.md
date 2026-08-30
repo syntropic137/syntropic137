@@ -1610,3 +1610,43 @@ from a careless string replace, and `_ref_strings` at cyclomatic 12 against a
 threshold of 10. Split it in two rather than excepting it.
 
 2399 tests, preflight exit 0, ratchet held at 94.
+
+### Tick 34 — my tests passed while the real read returned defaults
+
+Codex reviewed #1014. Two blockers, both verified before I changed anything.
+
+**The first is the same defect this PR exists to fix, in my own test design.**
+`to_dict` wrote the three fields and `from_dict` dropped them, so the value
+reached the store and was discarded on the way back out. Every reader goes
+through `from_dict`, so I had fixed exactly half the path. A row holding `True`
+and two refs reconstructed as `False () ()`.
+
+I wrote a paragraph in the PR body about how these tests "deliberately cross
+boundaries". **They cross ONE, and the bug lived at the next.** One commit after
+describing why that class is dangerous, I shipped it.
+
+The pattern across today is now unmistakable: **every test I have written that
+felt clever measured the side of the boundary I was already looking at.** The
+structural grep measured the source text, not the mapping. The round trip
+measured the write, not the read. Both times a reviewer supplied the other side.
+
+**Second blocker: my rendering CORRUPTED refs.** `source/name@version` is not a
+canonical form — source `https://github.com/foo/bar` with name `bar` rendered
+as `.../bar/bar@v1`, which reparses to a different repository, and two refs
+differing only in `name_overridden` rendered identically. Worse than the
+omission it replaced, because a caller would copy and export the corruption
+rather than notice absence. Refs are now carried structurally; joining is not
+reversible so I stopped joining.
+
+This is the third time today a "fix" of mine was worse than what it replaced —
+after the #997 tree path and the api_shape merge. All three share one shape: **I
+produced a summary or a rendering by CHOOSING, where the correct answer was to
+preserve.**
+
+Mutation-verified three ways. New tests cross the seam the old ones stopped at.
+Codegen re-run. 2403 tests, preflight exit 0, both ratchets held by typing
+`to_dict` concretely rather than raising a budget.
+
+Accepted and left visible on the PR: export still emits none of these into
+`workflow.yaml`, so export -> reinstall loses them. Its own PR, with the
+round-trip test #1013 names.
