@@ -1788,3 +1788,49 @@ designed to prevent.
 Recorded rather than quietly amended, because a retrospective that edits its
 own wrong conclusions without saying so is worth less than one that keeps them
 visible.
+
+### Tick 38 — release ready and paged; my export fix made packages uninstallable
+
+**Release.** The owner asked whether to cut one today and to be paged when
+ready. Checked #999: head IS `main`, so all five of today's merges are in, 50
+checks green, 155 commits ahead of `release`. **Paged on ntfy.**
+
+**I nearly reported a false blocker.** `just check-version` said 0.26.0 against
+a PR titled 0.27.0, which looked like the bump was missing. It was not — I ran
+it in the main repo directory, **89 commits behind main**. The bump landed in
+`ddac1d2c`. Seventh stale-tree error today; caught within one command only
+because `just bump-version 0.27.0` replied "already 0.27.0 - nothing to do",
+contradicting my premise. Removed the worktree and branch I had created on the
+strength of it.
+
+Flagged two real deploy notes rather than just "it's green": two projections
+rebuild on the Mini (`list_artifacts` v3->v5, `get_workflow_detail` v7->v8) with
+an ungated catch-up window, and the Mini currently downgrades codex phases to
+claude, which this release fixes.
+
+**#1016: my fix made packages UNINSTALLABLE.** `max_tokens` is deliberately
+absent from the authoring schema — `PhaseYamlDefinition` rejects it outright —
+so exporting it produced valid YAML the loader refuses. **Strictly worse than
+the lossy export it replaced**, which is the fourth time today a fix of mine
+was worse than what it replaced.
+
+**And the reason my tests missed it is the same one, one level further out
+again.** They parsed the emitted YAML and asserted on the mapping. That proves
+it is well-formed; it does NOT prove the loader accepts it. **I tested the
+format, not the thing that consumes the format.** Added tests that feed the
+output to `PhaseYamlDefinition` — and that single test caught two findings at
+once.
+
+Also fixed: plugins were exported with `names:`, which the plugin validator
+ignores in favour of the source basename, so `names: [custom]` reinstalled as
+`bar`. My test masked it by using an alias equal to the basename — codex spotted
+that the fixture could not detect the defect it was written for.
+
+And quoting is now **behavioural**: `_yaml_quote` checked for special
+CHARACTERS, so bare `null` erased a field and `123` became an int. It now emits
+the bare form, parses it, and quotes unless it survives as the same string.
+That is the same shape as the citation scorer's `--rev` fix — stop reasoning
+about the rules, run the thing and compare.
+
+Mutation-verified four ways, re-run after a complexity refactor to confirm the
+split did not weaken them. 2432 tests, preflight exit 0.
