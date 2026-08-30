@@ -382,6 +382,46 @@ this cannot be read backwards:
 - Cost should be roughly v2's $3.51. A large rise would mean the phases are
   spending tokens on path bookkeeping rather than thinking.
 
+### Tick 12 — codex pass 2 found a credential leak in my own fix
+
+**Hypothesis:** pass 1's fixes were complete and #1002 was mergeable.
+
+**Wrong on three more counts, one of them a security defect I introduced.**
+
+1. **The 503 reflected the exception text.** I wrote
+   `detail=f"could not verify declared skills: {exc}"`. Infrastructure failure
+   here is usually a database error, and those carry a DSN - user, host,
+   database, sometimes the password. I put an arbitrary internal exception into
+   an HTTP response body while trying to make a failure *more* legible. The
+   detail is now constant; the cause goes to the log.
+
+2. **The timeout did not enclose service construction.** The factory await sat
+   OUTSIDE `asyncio.timeout`, so a hang inside it was unbounded - and the
+   factory is precisely where a pool acquire or DNS lookup would appear. Cheap
+   today; the boundary is the point.
+
+3. **The error named the wrong phase.** I caught `SkillError` outside the loop
+   and guessed afterwards - "the first phase with any skill". With a failure in
+   the second phase that blames the first, pointing whoever reads it at code
+   that is fine. Now caught per ref with the declaring phase.
+
+My existing tests could not have caught any of these: they asserted a status
+code and the presence of a skill name, and none of that changes when the body
+carries a password or when a hang is unbounded. **Passing tests were evidence
+about the wrong properties.**
+
+**A test-double lesson:** the ref doubles were bare strings. They passed while
+the code only COUNTED refs and broke the moment it read their fields. A double
+that cannot be used the way the real object is used tests less than it appears
+to - and the gap is invisible until the production code changes.
+
+All three mutation-checked, each caught by exactly one test.
+
+**Fitness then caught the shape:** the function hit 17 cognitive / 14 cyclomatic
+after the changes. Extracted `_unique_skill_refs` - collecting refs and talking
+to a resolver are different jobs, and the split is also where the dedupe
+belongs.
+
 ---
 
 ## Retrospective
