@@ -15,7 +15,7 @@ the bottom is the part worth reading later.
 |---|---|---|
 | H1 | Separate, focused phases beat fewer combined phases | **supported, n=1** — 62% → 75% citation accuracy for +5.6% cost |
 | H2 | SLP skills in research/planning improve plan quality | **NOT supported, n=1** — 18% more cost, 6 citations vs 12, 0% exact |
-| H3 | Cross-model review catches what the author cannot | **supported** — codex found a live path traversal in #995 |
+| H3 | Cross-model review catches what the author cannot | **strongly supported** — codex found #995's traversal, and in tick 16 found that my #997 fix was INERT in production and that all five of my tests stopped short of the boundary where it broke |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing GROUNDED | **strongly supported** — EXACT 75% -> 98%, GROUNDED held at 98%, citations 12 -> 55, cost +85% |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, but the first instrument was wrong** — it measured path FORMAT while reported as grounding; now reports both |
@@ -588,3 +588,64 @@ reaches the assertion.
 - **H2 untested.** Register the SLP skills, then re-run v2 with them.
 - **SSH to the Mini is intermittent** (1Password agent), which gates log access.
 - **The Mini runs v0.26.0**, so no self-host run yet exercises #988 or #964.
+
+### Tick 16 — codex found my fix did nothing, and my tests could not have noticed
+
+**Worked:** #997, the flat phase alias diverging between the live and cold
+paths. PR #1005, plus issue #1006 for what it does not close.
+
+**Premise check first.** #997 was written by codex from a review, so I verified
+both halves before building on it: `postgres_query_builder.py` does emit
+`ORDER BY updated_at DESC` for an unordered query, and `ArtifactCollector`
+does take the first collected file. Both true. (#989 cost a full workflow run
+this morning because nobody did this.)
+
+**Hypothesis:** persisting an explicit primary removes ordering from the
+selection, so live and cold agree. Implemented it, wrote five tests, and
+mutation-tested four ways — each mutation killed a specific named test.
+
+**Codex found the fix was inert.** `on_artifact_created` never copied
+`is_primary_deliverable` into the read model. Every projected row read back as
+primary, so production still fell back to row order. The change did nothing.
+
+The reason my tests missed it is the part worth keeping: **all five
+hand-constructed an `ArtifactSummary` and stopped one hop short of the
+projection — the exact boundary where it broke.** Four green mutations proved
+the ranking logic was pinned; they proved nothing about whether the value
+reaches it. Mutation testing measures the tests you wrote, not the ones you
+didn't.
+
+Codex also killed a fifth mutation I had not tried — `stamp = artifact.id`
+survived everything, because my expected artifact was always named `art-a` and
+id order accidentally agreed with creation order. And it produced a concrete
+counterexample to the timestamp tiebreak: ISO strings do not sort
+chronologically, so `T10:00:00+02:00` (08:00Z) sorted AFTER
+`T09:00:00+00:00` (09:00Z) because `"10" > "09"`.
+
+Fixed all four, re-mutated: the projection line, the id ranking and the string
+comparison now each fail specific named tests. Deferred two findings to #1006 —
+retries and `collect_partial` can create multiple primaries, and
+`get_files_for_phase_injection` has the same row-order bug. Both need selection
+to come from `ArtifactsCollectedForPhaseEvent.artifact_ids`, which is a design
+change, not a patch.
+
+**A measurement error I caught on myself, and one I did not.** I copied my
+changed files wholesale from the dev branch into a fresh worktree off `main`.
+Two tests failed there that had passed locally. That could have read as
+flakiness; it was not — my dev branch predates #988, so the copy silently
+reverted 209 lines of `ArtifactCollector` and 69 of the query service. Because
+the failure was loud and specific I caught it, reset, and reapplied every edit
+against main's actual content. This is the same stale-tree error as tick 14,
+and this time the tests caught it rather than my judgement.
+
+The one I did not catch on my own: I measured "1,045 tests never run in CI"
+and started to treat it as a finding. It was real in the dev tree and false on
+`main` — `test_artifact_collector.py` already carries a module-level
+`pytestmark = pytest.mark.unit` there. **Third time today I have measured the
+wrong tree.** The `--rev` flag I added in tick 15 fixed this for the citation
+scorer specifically; the general habit is untouched, because the fix was
+instrument-shaped and the habit is not.
+
+**Evidence:** `syn-domain` 1737 passed, adapters + apps 1513 passed, ruff and
+pyright clean, untyped-dicts ratchet held at 391 by typing the new helper
+rather than raising the budget.
