@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H19 | Tests written for the bug in front of me are enough | **REFUTED, tick 53** — a fitness test written for the SHAPE of #1011/#1013/#1015 caught #969 on its first run, a field nobody was hunting, which two rounds of reading the projection had missed. Same cost, whole-class yield |
 | H18 | Image identity is already captured, so #1004's image half is just plumbing | **HALF REFUTED, tick 52** — `WorkspaceCreatingEvent.container_image` is a field on an event nothing emits; `IsolationStartedEvent.image_manifest` IS populated but carries BUILD provenance, not the OCI digest, and its capture is best-effort so absence is silent |
 | H17 | Widening a fix once means I have covered the bug class | **REFUTED, tick 50** — widened 2 sites -> 4 in tick 49, and codex found 4 more, including the production gateway image whose identical three lines I had removed from two sibling Dockerfiles in the same commit |
 | H15 | The existing implement-from-plan workflow can turn a well-specified issue into a PR unattended | **REFUTED, tick 48c** — 3/3 phases, $4.40, zero output. The agent verified every premise and wrote the right diff; the push was rejected because the App token lacks `workflows` permission (#1024). Not a prompt-quality problem |
@@ -2793,3 +2794,58 @@ issue nor my first comment had it.
 **Honest scoring:** no code shipped this tick. A hypothesis I explicitly recorded
 as unverified was checked and corrected, and the correction changes the
 implementation plan rather than decorating it. That is the tick's whole output.
+
+---
+
+## Tick 53 — shipped the image half of #1004, and a generalising gate found #969
+
+**HYPOTHESIS:** the image half of #1004 is small enough to ship end to end this
+tick, because the host owns the value and there is no race.
+
+**Supported.** PR #1026: `WorkspaceCreatedEvent` carries the digest-pinned
+`workspace_image` the command already had, the projection records distinct
+images per execution (VERSION 6 -> 7), and the API exposes `workspace_images`.
+Empty means NOT RECORDED, never "the default image" — defaulting would invent
+provenance for every historical run.
+
+### The part I did not predict
+
+Three defects in this path (#1011, #1013, #1015) were one shape: a value written
+correctly and dropped at a constructor that does not pass it, silently taking
+its default. **Pyright cannot catch it** — omitting a defaulted field is legal.
+
+So instead of testing only my own field, I wrote a fitness test that walks the
+AST of the execution query builders and fails when a name present on BOTH the
+read model and the response model is not passed.
+
+**It failed on its first run, on a field I was not looking at:**
+
+```
+ExecutionDetailResponse(...) does not pass ['total_duration_seconds']
+```
+
+That is **#969**. `ExecutionDetailFull`, the model between the read model and
+the response, has no duration field at all — the value is dropped two hops
+before the endpoint and the response falls back to 0.0 for every execution ever
+run.
+
+**The projection was never the problem.** Which is exactly why reading it twice
+found nothing, including my own withdrawn analysis on #969 yesterday. A
+generalising gate found in one run what two rounds of careful reading did not.
+
+### The lesson, stated once
+
+I have been writing tests for the bug in front of me. This one was written for
+the SHAPE of the last three bugs, and it immediately caught a fourth that nobody
+was hunting. **The cost was the same; the yield was a whole class.** That is the
+difference between a test and a fitness function, and I have been under-using
+the second.
+
+### Also worth recording
+
+- My mutation harness mislabelled two removal mutations as "MISSED TARGET" when
+  they had applied — the grep predicate was inverted for deletions. The tests
+  failed correctly; the label lied. Verifying the verifier, again.
+- `git checkout -b` + a non-unique text anchor put a field on the wrong class
+  and duplicated a kwarg. Pyright caught both. Anchors inside a class body need
+  a class-scoped edit, not `replace(..., 1)` on the first match.
