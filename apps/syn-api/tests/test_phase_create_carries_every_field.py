@@ -22,8 +22,6 @@ field's presence one bug at a time.
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -42,24 +40,77 @@ pytestmark = pytest.mark.unit
 _NOT_CALLER_SETTABLE: dict[str, str] = {}
 
 
-def test_every_phase_definition_field_is_mapped_by_create() -> None:
-    """The structural guard. Adding a field to `PhaseDefinition` without
-    mapping it here fails immediately, rather than shipping and being
-    discovered when someone notices a workflow behaving unlike its YAML."""
-    source = Path(_build_phase_defs.__code__.co_filename).read_text()
-    block = source[
-        source.index("def _build_phase_defs") : source.index("def _build_input_declarations")
-    ]
-    mapped = set(re.findall(r"^\s+(\w+)=", block, re.M))
+#: One distinctive, non-default value per field. The fixture is compared
+#: against ``PhaseDefinition.model_fields`` below, so a NEW field on the model
+#: fails here until someone decides what a caller should be able to send.
+_EVERY_FIELD: Mapping[str, object] = {
+    "phase_id": "review",
+    "name": "Review",
+    "order": 3,
+    "execution_type": "sequential",
+    "description": "a description",
+    "input_artifact_types": ["markdown"],
+    "output_artifact_types": ["json"],
+    "prompt_template": "do the thing",
+    "max_tokens": 1234,
+    "timeout_seconds": 2400,
+    "allowed_tools": ["Read", "Grep"],
+    "argument_hint": "[task]",
+    "model": "gpt-5.6-sol",
+    "provider": "codex",
+    "allow_delegation": True,
+    "claude_plugins": ["owner/repo@abc123"],
+    # Skill refs name a SKILL inside a repo; plugin refs name the repo.
+    # The model rejects the plugin spelling here, which is how I learned it.
+    "skills": ["owner/repo/some-skill@abc123"],
+}
 
-    unmapped = set(PhaseDefinition.model_fields) - mapped - set(_NOT_CALLER_SETTABLE)
 
-    assert not unmapped, (
-        f"{sorted(unmapped)} exist on PhaseDefinition but are never mapped in "
-        "_build_phase_defs, so the create endpoint accepts them and returns 201 "
-        "while storing a workflow that differs from the request. Either map "
-        "them, or add them to _NOT_CALLER_SETTABLE with a reason."
-    )
+def test_the_fixture_covers_every_field_on_the_model() -> None:
+    """A new field on `PhaseDefinition` fails here first.
+
+    Without this, the round-trip below would silently stop covering whatever
+    was added -- which is the failure this whole file exists to prevent, one
+    level up.
+    """
+    assert set(_EVERY_FIELD) == set(PhaseDefinition.model_fields)
+
+
+def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
+    """Behavioural, not textual.
+
+    The first version of this test grepped the function body for ``name=``
+    and asserted every model field appeared. It was worthless: deleting the
+    real ``skills=`` mapping and adding a decoy ``skills=()`` to the
+    DEFAULT-phase constructor a few lines below left all eight tests passing.
+    A guard that can be satisfied by an unrelated assignment does not measure
+    the mapping, and it is worse than no guard because it reads as coverage.
+
+    So this sends a distinctive value for every field and reads the result
+    back off the constructed object. Nothing about how the mapping is written
+    can satisfy it -- only the value arriving.
+    """
+    (phase,) = _build_phase_defs([dict(_EVERY_FIELD)])
+
+    assert phase.phase_id == "review"
+    assert phase.name == "Review"
+    assert phase.order == 3
+    assert phase.description == "a description"
+    assert phase.input_artifact_types == ["markdown"]
+    assert phase.output_artifact_types == ["json"]
+    assert phase.prompt_template == "do the thing"
+    assert phase.max_tokens == 1234
+    assert phase.timeout_seconds == 2400
+    assert phase.allowed_tools == ["Read", "Grep"]
+    assert phase.argument_hint == "[task]"
+    assert phase.model == "gpt-5.6-sol"
+    assert phase.provider == "codex"
+    assert phase.allow_delegation is True
+    # Shorthand strings validate into typed refs, so identity is by count and
+    # by the ref actually carrying the caller's repo rather than a default.
+    assert len(phase.claude_plugins) == 1
+    assert len(phase.skills) == 1
+    assert phase.execution_type is not None
 
 
 class TestTheFieldsThatWereActuallyDropped:
@@ -141,4 +192,21 @@ class TestTheNestedAgentSpellingIsUnderstood:
             [{"phase_id": "r", "name": "R", "order": 1, "agent": {"allow_delegation": True}}]
         )
         assert phase.provider is None
+        assert phase.allow_delegation is True
+
+
+class TestBooleansAreNotCoerced:
+    """`bool("false")` is True, and JSON callers send strings."""
+
+    def test_the_string_false_does_not_enable_delegation(self) -> None:
+        """The caller asked for it OFF. Coercion turned it on."""
+        (phase,) = _build_phase_defs(
+            [{"phase_id": "r", "name": "R", "order": 1, "allow_delegation": "false"}]
+        )
+        assert phase.allow_delegation is False
+
+    def test_a_real_true_still_enables_it(self) -> None:
+        (phase,) = _build_phase_defs(
+            [{"phase_id": "r", "name": "R", "order": 1, "allow_delegation": True}]
+        )
         assert phase.allow_delegation is True

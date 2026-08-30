@@ -73,6 +73,18 @@ def _resolve_classification(classification: str) -> WorkflowClassification:
     return classification_map.get(classification.lower(), WorkflowClassification.STANDARD)
 
 
+def _as_bool(value: object) -> bool:
+    """Strictly. `bool("false")` is True, and a string is what JSON sends.
+
+    Coercing here turned `allow_delegation: "false"` into delegation ENABLED
+    -- the caller asking for the feature off and getting it on. Only a real
+    bool counts; anything else means the caller did not say, so the default
+    stands. This is the third instance of `bool()`-on-untrusted-input in one
+    day, after the artifact primary flag and the api_shape needle.
+    """
+    return value if isinstance(value, bool) else False
+
+
 def _agent_field(phase: Mapping[str, Any], name: str, default: Any = None) -> Any:  # noqa: ANN401
     """Read a phase's agent setting from either spelling.
 
@@ -119,7 +131,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # field is added to PhaseDefinition without being mapped here.
                 model=_agent_field(p, "model"),
                 provider=_agent_field(p, "provider"),
-                allow_delegation=bool(_agent_field(p, "allow_delegation", False)),
+                allow_delegation=_as_bool(_agent_field(p, "allow_delegation", False)),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
                 skills=tuple(p.get("skills") or ()),
             )
