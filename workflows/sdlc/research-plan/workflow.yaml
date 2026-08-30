@@ -1,0 +1,141 @@
+id: sdlc-research-plan-v3
+name: "SDLC: Research, Plan, Cross-Model Review, Revise (v3, root-relative citations)"
+description: >
+  Produce a plan you can trust before any code is written. Four phases, each in
+  its own workspace with a single job: investigate, plan, review across models,
+  revise. The deliverable is a plan document, never code.
+type: research
+classification: standard
+requires_repos: true
+
+# WHY FOUR PHASES AND NOT THREE (or one).
+#
+# v1 collapsed research and planning into a single phase, on the reasoning that
+# a capable model can do both. That is true and beside the point. Separate
+# phases exist so each has ONE job:
+#
+#   - a phase that researches AND plans will start planning early and stop
+#     researching, because writing the plan feels like progress;
+#   - each phase gets its own workspace, so its context holds one concern;
+#   - each phase can be given its own tools, skills and (later) MCP servers,
+#     scoped to that job rather than to the union of all four;
+#   - each phase is separately observable - cost, duration and quality per job,
+#     which is what makes model and harness comparison possible at all.
+#
+# The last point is why this shape is worth its overhead: with one phase you can
+# only measure the whole; with four you can see WHERE quality or cost came from.
+#
+# Per-phase tool scoping IS enforced for the claude phases: `allowed_tools`
+# becomes one comma-joined `--tools` flag (_wiring.py:297), which governs
+# AVAILABILITY. #964 closed when that landed.
+#
+# The codex phase below is the exception and cannot declare tools at all:
+# `_build_codex_command` hardcodes `--sandbox danger-full-access` and takes only
+# a prompt and a model (#1009). Codex rejects tool-NAME policies by design, so
+# the fix is a sandbox mode, not an allowlist. Until then that phase can write
+# to the workspace its artifacts are collected from.
+
+phases:
+  # Phase ids are load-bearing: a later phase reads an earlier one's output at
+  # artifacts/input/<phase-id>.md, so renaming a phase breaks the phase after it.
+  - id: research
+    name: Investigate the codebase
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+    # Lenses for SEEING structure, not for proposing changes.
+    # architecture        - module boundaries, dependency direction,
+    #                       bounded-context isolation. Its own scope line says
+    #                       "structural seams match team and AGENT boundaries",
+    #                       which is the parallelisability goal stated directly.
+    # software-complexity - names accidental complexity.
+    # dependencies        - surfaces coupling.
+    # Research must see all three, or the plan that follows cannot reason about
+    # blast radius and will harden the wrong boundary.
+    skills:
+      - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/software-complexity@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/dependencies@1348146ae5fd1659f2022b3c2bef0218292348d4
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/research.md
+
+  - id: plan
+    name: Design the approach
+    order: 2
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+    # Design lenses.
+    # principles-and-patterns - carries SOLID.
+    # purpose-and-scope       - keeps a change from sprawling.
+    # architecture            - again, because boundary hardening is a DESIGN
+    #                           decision, not an observation; seeing a boundary
+    #                           in research does not mean the plan respects it.
+    # dry                     - stops duplication being planned in deliberately.
+    skills:
+      - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/purpose-and-scope@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/dry@1348146ae5fd1659f2022b3c2bef0218292348d4
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/plan.md
+
+  - id: cross-model-review
+    name: Codex reviews the plan
+    order: 3
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    agent:
+      provider: codex
+      # The CONCRETE model id, not the `gpt-5.6` alias. An aliased or unnamed
+      # model resolves to no rate and the run completes UNPRICED (#892) - and an
+      # unpriced run is a lost data point in a cost experiment.
+      model: gpt-5.6-sol
+    prompt_file: phases/cross-model-review.md
+
+  - id: revise
+    name: Revise the plan against the review
+    order: 4
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+    # The same design lenses as the plan phase. A revision accommodates review
+    # findings, and the cheapest way to satisfy a finding is often to breach a
+    # boundary the plan got right - so the lenses have to be present here too.
+    skills:
+      - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/revise.md
