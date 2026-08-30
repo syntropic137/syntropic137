@@ -2122,3 +2122,36 @@ the owner's interpreter is the owner's call.
 **Next:** fix the five accepted findings on #1019 before a second pass — real
 `main()` tests, a YAML parse, every PR-triggered workflow, the link step, and
 the frozen install — then re-state the claim as something that is actually true.
+
+### Tick 44b — fixed the five findings, and one of them was wrong
+
+Pushed `a03f7799` and `e05b7514` to #1019. Four of codex's five findings were
+real and are fixed as reported. The fifth is worth recording because I checked
+it instead of accepting it:
+
+**The review said** omitting CI's `pnpm link` step meant `dashboard-ci` tests a
+different dependency graph than CI builds. I added the step, and it wrote a root
+`package.json` and modified `pnpm-lock.yaml` and `pnpm-workspace.yaml` — a
+verification command mutating tracked files, which is the exact hazard the same
+review flagged one section later.
+
+**Checking the premise:** nothing under `apps/syn-dashboard-ui` imports
+`@syn137/ui-feedback-react`, its `package.json` does not depend on it, and
+`lib/ui-feedback` is not in `pnpm-workspace.yaml`. The link attaches to nothing,
+so it cannot change a graph. Omitted, evidence in a comment, CI's dead steps
+filed as #1020.
+
+**H3 gets a second limit.** Cross-model review beat me on four counts here,
+including one — `main()` untested — that is my own stated discipline turned back
+on me. But a reviewer's finding is a hypothesis about the code, not a fact about
+it: acting on this one without checking would have shipped a command that
+corrupts the developer's checkout. **Two review passes, two `pnpm`-shaped
+findings, one of them backwards.** The rule that survives: apply a review finding
+only after reproducing the behaviour it claims.
+
+Also added a real assertion for the hazard: `git status --porcelain` is captured
+before and after a full `just qa-ci` run and compared. It is byte-identical.
+That is the check that caught the mutation, and it now runs every time rather
+than living in my memory of this tick.
+
+**Awaiting:** CI on #1019, then codex pass 2, then merge (two-pass cap).
