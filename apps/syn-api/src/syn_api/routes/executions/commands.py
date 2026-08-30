@@ -6,6 +6,7 @@ to a specific workflow.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -29,7 +30,7 @@ from syn_api.types import (
     WorkflowError,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration import RESERVED_INPUT_NAMES
+from syn_domain.contexts.orchestration import RESERVED_INPUT_NAMES, SkillError, SkillRef
 from syn_shared.agents import (
     AgentProvider,
     UnsupportedAgentProviderError,
@@ -479,6 +480,100 @@ def _check_phase_providers(workflow: WorkflowTemplateAggregate) -> None:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+#: A preflight that hangs is worse than one that fails: it converts a fast 200
+#: into a request that never returns. The resolver reads Postgres and the
+#: projection store supplies no timeout of its own.
+_SKILL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
+
+
+def _unique_skill_refs(
+    workflow: WorkflowTemplateAggregate,
+) -> list[tuple[SkillRef, str]]:
+    """Each distinct skill ref once, paired with the phase that declared it.
+
+    Split from the preflight because collecting refs and talking to the resolver
+    are different jobs, and together they pushed one function past the
+    complexity thresholds. The pairing is what lets an error name the phase that
+    actually failed rather than guessing afterwards.
+
+    Deduplicates on `(source_url, version, skill_name)` because resolution
+    merges by exactly that identity - the answer cannot vary by phase, so an
+    N-phase workflow sharing one ref should cost one lookup, not N.
+    """
+    seen: dict[tuple[str, str, str], tuple[SkillRef, str]] = {}
+    for ref in workflow.skills or ():
+        seen.setdefault((ref.source_url, ref.version, ref.skill_name), (ref, "<workflow>"))
+    for phase in workflow.phases:
+        for ref in phase.skills or ():
+            seen.setdefault((ref.source_url, ref.version, ref.skill_name), (ref, phase.phase_id))
+    return list(seen.values())
+
+
+async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -> None:
+    """Resolve every declared skill NOW, so an unusable ref is a 422 (#998).
+
+    Skill resolution used to happen inside the BackgroundTask, after the 200 had
+    been returned and BEFORE the execution aggregate was first persisted. A
+    failure there is unattributable by construction: there is no execution row
+    to mark failed, so the caller received
+
+        POST /execute      -> 200 {"status": "started"}
+        GET  /executions/X -> 404, permanently
+
+    while the exception - which already names the skill, its source, its pinned
+    version and two ways to fix it - went to a log file. For an orchestration
+    platform that is worse than a generic failure: a 500 tells a caller to look,
+    a 200 tells it to wait.
+
+    FAILS CLOSED on infrastructure. An earlier version skipped the preflight
+    when the resolver could not be constructed, so as not to block all work on a
+    degraded subsystem. That was wrong here: the background handler constructs
+    the SAME resolver moments later, before persistence, so skipping merely
+    relocated the failure back into the window this exists to close.
+
+    The timeout encloses the FACTORY as well as resolution. Constructing the
+    service is cheap today, but it is the call that would acquire a pool or do a
+    DNS lookup tomorrow, and a timeout that starts after it would not bound the
+    request at all.
+
+    Deduplicates by ref identity. Resolution merges scopes by exact
+    ``(source_url, version, skill_name)``, so the answer for a given ref does
+    not vary by phase. Per-phase resolution is necessary when BUILDING each
+    executable phase; for an existence check it is N identical lock lookups on
+    an N-phase workflow.
+    """
+    refs = _unique_skill_refs(workflow)
+    if not refs:
+        return
+
+    try:
+        async with asyncio.timeout(_SKILL_PREFLIGHT_TIMEOUT_SECONDS):
+            from syn_api._wiring import get_skill_resolution_service
+
+            service = await get_skill_resolution_service()
+            for ref, owner in refs:
+                try:
+                    await service.resolve_for_phase((), (ref,))
+                except SkillError as exc:
+                    # Caught PER REF so the message names the phase that
+                    # actually declared it. Catching outside the loop meant
+                    # guessing afterwards, and the guess - first phase with any
+                    # skill - is wrong whenever a later phase is the broken one.
+                    raise HTTPException(status_code=422, detail=f"phase '{owner}': {exc}") from exc
+    except HTTPException:
+        raise
+    except Exception:
+        # The exception text is NOT reflected to the caller. It can be a
+        # database error carrying a DSN - user, host, database name, possibly
+        # credentials - and an HTTP body is the wrong place for any of that.
+        # The detail stays constant; the cause goes to the log.
+        logger.warning("Skill preflight could not complete", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="skill validation is temporarily unavailable; retry shortly",
+        ) from None
+
+
 async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
@@ -494,6 +589,10 @@ async def _validate_execution_request(
     # with its historical provider. Reject it here rather than remapping it to
     # headless claude downstream.
     _check_phase_providers(workflow)
+
+    # #998: an unresolvable skill ref must be a 422 here, not a 200 followed by
+    # an execution that never exists.
+    await _reject_unresolvable_skill_refs(workflow)
 
     # ADR-063: repository identity is typed on `repos[]`, not smuggled through `inputs`.
     # Reject at the boundary so silent-success-then-BackgroundTask-failure can't happen.
