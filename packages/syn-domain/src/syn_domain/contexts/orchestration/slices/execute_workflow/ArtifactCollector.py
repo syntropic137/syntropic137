@@ -419,7 +419,7 @@ class ArtifactCollector:
         files: list[PhaseOutputFile] = []
         first_content: str | None = None
 
-        for artifact_path, artifact_content in artifacts:
+        for index, (artifact_path, artifact_content) in enumerate(artifacts):
             artifact_id = str(uuid4())
             content_str = artifact_content.decode("utf-8", errors="replace")
             await self.create_artifact(
@@ -432,6 +432,9 @@ class ArtifactCollector:
                 content=content_str,
                 title=f"{phase_name}: {artifact_path}",
                 source_path=artifact_path,
+                # The flat `<phase-id>.md` alias reads this after a restart,
+                # so it must name the file the live path injects (#997).
+                is_primary_deliverable=index == 0,
             )
             artifact_ids.append(artifact_id)
             files.append(PhaseOutputFile(source_path=artifact_path, content=content_str))
@@ -499,6 +502,7 @@ class ArtifactCollector:
         content: str,
         title: str,
         source_path: str | None = None,
+        is_primary_deliverable: bool = True,
     ) -> None:
         """Create and save an artifact with two-tier storage (ADR-012).
 
@@ -558,6 +562,7 @@ class ArtifactCollector:
             title=title,
             source_path=source_path,
             storage_uri=storage_uri,
+            is_primary_deliverable=is_primary_deliverable,
         )
         aggregate.create_artifact(command)
         await self._repository.save(aggregate)
