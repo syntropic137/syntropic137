@@ -66,6 +66,12 @@ class PhaseDefinition(BaseModel):
     argument_hint: str | None = None
     model: str | None = None
     provider: str | None = None
+    # Stored since #1012, readable since #1013. `allow_delegation` is
+    # security-relevant -- it stages both agent auths -- so a caller must be
+    # able to see it.
+    allow_delegation: bool = False
+    claude_plugins: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
 
 
 class WorkflowResponse(BaseModel):
@@ -153,6 +159,9 @@ def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDef
             argument_hint=p.argument_hint,
             model=p.model,
             provider=p.provider,
+            allow_delegation=p.allow_delegation,
+            claude_plugins=list(p.claude_plugins),
+            skills=list(p.skills),
             execution_type=p.execution_type,
             max_tokens=p.max_tokens,
             input_artifact_types=list(p.input_artifact_types),
@@ -578,6 +587,9 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
                 argument_hint=p.argument_hint,
                 model=p.model,
                 provider=p.provider,
+                allow_delegation=p.allow_delegation,
+                claude_plugins=list(p.claude_plugins),
+                skills=list(p.skills),
             )
             for p in detail.phases
         ],

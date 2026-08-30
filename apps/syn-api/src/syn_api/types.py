@@ -384,6 +384,12 @@ class PhaseDefinitionResponse(BaseModel):
     argument_hint: str | None = None
     model: str | None = None
     provider: str | None = None
+    # Stored since #1012, readable since #1013. `allow_delegation` is
+    # security-relevant -- it stages both agent auths -- so a caller must be
+    # able to see it.
+    allow_delegation: bool = False
+    claude_plugins: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
     execution_type: str = "sequential"
     max_tokens: int | None = None
     input_artifact_types: list[str] = Field(default_factory=list)

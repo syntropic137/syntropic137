@@ -8567,6 +8567,25 @@
               }
             ],
             "title": "Provider"
+          },
+          "allow_delegation": {
+            "type": "boolean",
+            "title": "Allow Delegation",
+            "default": false
+          },
+          "claude_plugins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Claude Plugins"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skills"
           }
         },
         "type": "object",

@@ -3298,6 +3298,15 @@ export interface components {
             model?: string | null;
             /** Provider */
             provider?: string | null;
+            /**
+             * Allow Delegation
+             * @default false
+             */
+            allow_delegation: boolean;
+            /** Claude Plugins */
+            claude_plugins?: string[];
+            /** Skills */
+            skills?: string[];
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {

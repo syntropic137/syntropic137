@@ -56,6 +56,18 @@ class PhaseDefinitionDetail:
     provider: str | None = None
     """Per-phase agent provider ('claude' or 'codex')."""
 
+    allow_delegation: bool = False
+    """Whether the phase may delegate one-shot to the other CLI (#1013).
+
+    Security-relevant: it stages BOTH agent auths in the workspace, so a
+    reader has to be able to see it. It was stored and unreadable."""
+
+    claude_plugins: tuple[str, ...] = ()
+    """Plugin refs the phase declares, rendered as their canonical strings."""
+
+    skills: tuple[str, ...] = ()
+    """Skill refs the phase declares, rendered as their canonical strings."""
+
     execution_type: str = "sequential"
     """How this phase executes: sequential, parallel, or human_in_loop."""
 
@@ -203,6 +215,13 @@ class WorkflowDetail:
                 "argument_hint": p.argument_hint,
                 "model": p.model,
                 "provider": p.provider,
+                # The seam that made #1013 non-obvious: the read model can
+                # carry a field while `to_dict` -- the shape actually stored
+                # and served -- drops it. Adding the field above without this
+                # line changes nothing a caller can see.
+                "allow_delegation": p.allow_delegation,
+                "claude_plugins": list(p.claude_plugins),
+                "skills": list(p.skills),
                 "execution_type": p.execution_type,
                 PhaseFields.MAX_TOKENS: p.max_tokens,
                 "input_artifact_types": list(p.input_artifact_types),

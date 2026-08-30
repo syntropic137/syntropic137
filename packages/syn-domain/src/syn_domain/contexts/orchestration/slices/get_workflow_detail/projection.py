@@ -11,6 +11,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
@@ -33,6 +35,39 @@ def _find_phase(phases: list[dict[str, Any]], phase_id: str) -> dict[str, Any] |
         if pid == phase_id:
             return phase
     return None
+
+
+def _render_ref(ref: object) -> str | None:
+    """One plugin/skill ref as its canonical string, or None if unnameable.
+
+    Extracted from `_ref_strings` purely to keep each function under the
+    cyclomatic threshold; the branching is inherent, because a projected row
+    holds whatever the event serialized -- a mapping for a typed ref, or a
+    plain string for the shorthand form.
+    """
+    if isinstance(ref, str):
+        return ref
+    if not isinstance(ref, dict):
+        return None
+    name = ref.get("skill_name") or ref.get("name") or ""
+    source = ref.get("source_url") or ref.get("source") or ""
+    version = ref.get("version") or ""
+    joined = "/".join(str(part) for part in (source, name) if part)
+    if not joined:
+        return str(ref)
+    return f"{joined}@{version}" if version else joined
+
+
+def _ref_strings(refs: Iterable[object] | None) -> tuple[str, ...]:
+    """Render plugin/skill refs as strings for the read model.
+
+    The read model is a VIEW, so it carries the canonical spelling rather than
+    re-validating into domain objects a reader does not need.
+    """
+    if not refs:
+        return ()
+    rendered = (_render_ref(ref) for ref in refs)
+    return tuple(text for text in rendered if text is not None)
 
 
 def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> None:
@@ -68,7 +103,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # bump would buy nothing and cost a full replay through the coordinator's
     # non-atomic clear-then-delete-checkpoint sequence, which loses the whole
     # read model if the process dies between the two steps.
-    VERSION = 7  # v7: surface per-phase provider + apply provider on phase update
+    VERSION = 8  # v8: surface allow_delegation, claude_plugins, skills (#1013)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -108,6 +143,11 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
                 provider=p.get("provider"),
+                # Stored by create since #1012 and invisible until #1013: a
+                # caller could not ask the API what it had installed.
+                allow_delegation=bool(p.get("allow_delegation", False)),
+                claude_plugins=_ref_strings(p.get("claude_plugins")),
+                skills=_ref_strings(p.get("skills")),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),
