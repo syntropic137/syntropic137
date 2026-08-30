@@ -10,7 +10,6 @@ the whole gate deleted with every test still green.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -46,7 +45,7 @@ def _justfile_at(tmp_path: object) -> Path:
     return path
 
 
-def workflow(*jobs: str) -> dict[str, Any]:
+def workflow(*jobs: str) -> dict[str, object]:
     return {"on": {"pull_request": None}, "jobs": {job: {} for job in jobs}}
 
 
@@ -58,9 +57,10 @@ def mapping(monkeypatch: pytest.MonkeyPatch) -> None:
         "LOCAL_EQUIVALENT",
         {"ci.yml:unit": "test-unit-ci", "ci.yml:ui": "dashboard-ci"},
     )
-    monkeypatch.setattr(
-        check_ci_parity, "NO_LOCAL_EQUIVALENT", {"ci.yml:scan": "queries a remote database"}
-    )
+    monkeypatch.setattr(check_ci_parity, "IMPOSSIBLE_LOCALLY", {"ci.yml:scan": "remote database"})
+    monkeypatch.setattr(check_ci_parity, "AGGREGATOR_ONLY", frozenset())
+    monkeypatch.setattr(check_ci_parity, "NOT_RUN_ON_FEATURE_PR", {})
+    monkeypatch.setattr(check_ci_parity, "RUNNABLE_BUT_EXCLUDED", {})
 
 
 # --- the gate's failures -----------------------------------------------------
@@ -126,10 +126,60 @@ def test_a_mapping_for_a_job_that_no_longer_exists_is_a_problem(mapping: None) -
     assert "no longer" in problems[0]
 
 
+def test_a_stale_unmapped_entry_is_a_problem_too(mapping: None) -> None:
+    """Both mapping tables must be checked for staleness, not just the first.
+
+    Comparing only LOCAL_EQUIVALENT against the live jobs was a surviving
+    mutation: every test made a LOCAL_EQUIVALENT entry stale and none made an
+    unmapped one stale, so half the staleness check was never exercised.
+    """
+    problems, _, _ = find_problems({"ci.yml": workflow("unit", "ui")}, JUSTFILE)
+
+    assert len(problems) == 1
+    assert "ci.yml:scan" in problems[0]
+    assert "no longer" in problems[0]
+
+
+def test_every_unmapped_category_suppresses_the_unmapped_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A job in any of the four buckets counts as accounted for."""
+    monkeypatch.setattr(check_ci_parity, "LOCAL_EQUIVALENT", {})
+    monkeypatch.setattr(check_ci_parity, "IMPOSSIBLE_LOCALLY", {"ci.yml:a": "github only"})
+    monkeypatch.setattr(check_ci_parity, "AGGREGATOR_ONLY", frozenset({"ci.yml:b"}))
+    monkeypatch.setattr(check_ci_parity, "NOT_RUN_ON_FEATURE_PR", {"ci.yml:c": "release only"})
+    monkeypatch.setattr(check_ci_parity, "RUNNABLE_BUT_EXCLUDED", {"ci.yml:d": "too slow"})
+
+    problems, covered, total = find_problems({"ci.yml": workflow("a", "b", "c", "d")}, JUSTFILE)
+
+    assert problems == []
+    assert (covered, total) == (0, 4)
+
+
+def test_each_unmapped_reason_says_which_category_it_came_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The categories only help if the printed reason distinguishes them."""
+    monkeypatch.setattr(check_ci_parity, "IMPOSSIBLE_LOCALLY", {"w:a": "github only"})
+    monkeypatch.setattr(check_ci_parity, "AGGREGATOR_ONLY", frozenset({"w:b"}))
+    monkeypatch.setattr(check_ci_parity, "NOT_RUN_ON_FEATURE_PR", {"w:c": "release only"})
+    monkeypatch.setattr(check_ci_parity, "RUNNABLE_BUT_EXCLUDED", {"w:d": "too slow"})
+
+    reasons = check_ci_parity.unmapped_reasons()
+
+    assert reasons["w:a"].startswith("impossible locally")
+    assert reasons["w:b"].startswith("aggregator")
+    assert reasons["w:c"].startswith("not run on a feature PR")
+    assert reasons["w:d"].startswith("runnable locally, excluded")
+
+
 def test_a_check_nested_under_preflight_still_counts(monkeypatch: pytest.MonkeyPatch) -> None:
     """Moving a check one level down must not read as removing it."""
     monkeypatch.setattr(check_ci_parity, "LOCAL_EQUIVALENT", {"ci.yml:qa": "check-test-debt"})
-    monkeypatch.setattr(check_ci_parity, "NO_LOCAL_EQUIVALENT", {})
+    monkeypatch.setattr(check_ci_parity, "IMPOSSIBLE_LOCALLY", {})
+    monkeypatch.setattr(check_ci_parity, "AGGREGATOR_ONLY", frozenset())
+    monkeypatch.setattr(check_ci_parity, "NOT_RUN_ON_FEATURE_PR", {})
+    monkeypatch.setattr(check_ci_parity, "RUNNABLE_BUT_EXCLUDED", {})
 
     problems, covered, _ = find_problems({"ci.yml": workflow("qa")}, JUSTFILE)
 
@@ -193,6 +243,23 @@ def test_only_pull_request_triggered_workflows_are_collected(tmp_path: object) -
     )
 
     assert set(pr_triggered_workflows(directory)) == {"pr.yml"}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "on: pull_request\njobs:\n  build: {}\n",
+        "on: [push, pull_request]\njobs:\n  build: {}\n",
+        "on:\n  pull_request:\n    branches: [main]\njobs:\n  build: {}\n",
+    ],
+    ids=["scalar", "list", "mapping"],
+)
+def test_every_trigger_spelling_github_accepts_is_recognised(text: str, tmp_path: object) -> None:
+    """GitHub accepts a scalar, a list and a mapping; missing one hides a workflow."""
+    directory = Path(str(tmp_path))
+    (directory / "w.yml").write_text(text)
+
+    assert set(pr_triggered_workflows(directory)) == {"w.yml"}
 
 
 def test_the_bare_on_key_is_found_despite_yaml_resolving_it_to_true(

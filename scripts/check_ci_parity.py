@@ -52,26 +52,63 @@ LOCAL_EQUIVALENT: Final[dict[str, str]] = {
     "docs-lint.yml:lint-content": "check-docs-content",
 }
 
-#: "<workflow file>:<job id>" -> why it has no local equivalent. A reason is a
-#: commitment, not a shrug: it says what a local run genuinely cannot reach.
-NO_LOCAL_EQUIVALENT: Final[dict[str, str]] = {
-    "ci.yml:osv-scan": "queries the remote OSV vulnerability database",
-    "ci.yml:pip-audit": "queries the remote PyPI advisory database",
-    "ci.yml:dependency-review": "a GitHub API action with no local equivalent",
-    "ci.yml:python-integration-tests": "needs live services; CI also skips it on PR branches",
-    "ci.yml:ci-success": "an aggregator job, not a check of its own",
-    "e2e-container.yml:docker-build": "builds the workspace image; minutes and gigabytes, not seconds",
-    "e2e-container.yml:e2e-container": "runs the full container stack against a built image",
-    "e2e-container.yml:e2e-success": "an aggregator job, not a check of its own",
-    "release-gate.yml:version-check": "release PRs only; a feature branch is expected to differ",
-    "release-gate.yml:changelog-check": "release PRs only; compares against the release branch",
-    "release-gate.yml:codegen-sync": "release PRs only; preflight's codegen-check covers the same drift",
-    "release-gate.yml:docker-dry-run": "release PRs only; needs registry credentials",
-    "release-gate.yml:osv-scan": "queries the remote OSV vulnerability database",
-    "release-gate.yml:pip-audit": "queries the remote PyPI advisory database",
-    "release-gate.yml:dependency-review": "a GitHub API action with no local equivalent",
-    "release-gate.yml:release-gate-success": "an aggregator job, not a check of its own",
+#: Jobs with no local target, split by WHY. The first version of this file had
+#: one bucket and one prose reason each, and several of those reasons were
+#: false: it said osv-scan and pip-audit could not run locally while
+#: `just deps-audit-npm` and `just deps-audit-py` already ran exactly those
+#: tools, and it said integration tests are skipped on PR branches when ci.yml
+#: runs them for PRs targeting `release`. A reason that sounds plausible and is
+#: wrong is worse than no reason, so the categories are now distinguishable.
+
+#: Genuinely cannot run outside GitHub.
+IMPOSSIBLE_LOCALLY: Final[dict[str, str]] = {
+    "ci.yml:dependency-review": "a GitHub action reading the PR's base/head dependency graph",
+    "release-gate.yml:dependency-review": "same GitHub action",
+    "release-gate.yml:changelog-check": "reads the pull request body through the GitHub API",
 }
+
+#: Aggregator jobs: they assert other jobs succeeded and check nothing themselves.
+AGGREGATOR_ONLY: Final[frozenset[str]] = frozenset(
+    {
+        "ci.yml:ci-success",
+        "e2e-container.yml:e2e-success",
+        "release-gate.yml:release-gate-success",
+    }
+)
+
+#: Does not run on an ordinary feature-branch PR at all, with the condition that
+#: decides it. These are not coverage gaps for the PRs qa-ci is run against.
+NOT_RUN_ON_FEATURE_PR: Final[dict[str, str]] = {
+    "ci.yml:python-integration-tests": "runs only for PRs with base_ref == release",
+    "e2e-container.yml:e2e-container": "gated on the run_full_e2e workflow_dispatch input",
+    "release-gate.yml:version-check": "release-gate.yml targets the release branch only",
+    "release-gate.yml:codegen-sync": "release-gate.yml targets the release branch only",
+    "release-gate.yml:docker-dry-run": "release-gate.yml targets the release branch only",
+    "release-gate.yml:osv-scan": "release-gate.yml targets the release branch only",
+    "release-gate.yml:pip-audit": "release-gate.yml targets the release branch only",
+}
+
+#: CAN run locally; deliberately outside qa-ci, naming the target that does run
+#: it. Anyone can close these gaps by hand before pushing, which is only true
+#: because this table says so rather than claiming they are unreachable.
+RUNNABLE_BUT_EXCLUDED: Final[dict[str, str]] = {
+    "ci.yml:osv-scan": "network round-trip to the OSV database; `just deps-audit-npm`",
+    "ci.yml:pip-audit": "network round-trip to the PyPI advisory database; `just deps-audit-py`",
+    "e2e-container.yml:docker-build": "builds a multi-gigabyte image; `just workspace-build`",
+}
+
+
+def unmapped_reasons() -> dict[str, str]:
+    """Every job that has no local target, with its reason."""
+    reasons = {job: f"impossible locally: {why}" for job, why in IMPOSSIBLE_LOCALLY.items()}
+    reasons.update(dict.fromkeys(AGGREGATOR_ONLY, "aggregator job, checks nothing itself"))
+    reasons.update(
+        {job: f"not run on a feature PR: {why}" for job, why in NOT_RUN_ON_FEATURE_PR.items()}
+    )
+    reasons.update(
+        {job: f"runnable locally, excluded: {why}" for job, why in RUNNABLE_BUT_EXCLUDED.items()}
+    )
+    return reasons
 
 
 def pr_triggered_workflows(workflow_dir: Path) -> dict[str, dict[str, object]]:
@@ -147,6 +184,7 @@ def find_problems(
     targets = just_targets(justfile)
     reachable = qa_ci_dependencies(justfile)
 
+    unmapped = unmapped_reasons()
     problems: list[str] = []
     keys: set[str] = set()
     covered = 0
@@ -165,14 +203,15 @@ def find_problems(
                     )
                 else:
                     covered += 1
-            elif key not in NO_LOCAL_EQUIVALENT:
+            elif key not in unmapped:
                 problems.append(
                     f"{key} has no entry in scripts/check_ci_parity.py. Add it to "
-                    f"LOCAL_EQUIVALENT (and to `{QA_CI_TARGET}`), or to "
-                    f"NO_LOCAL_EQUIVALENT with the reason it cannot run locally."
+                    f"LOCAL_EQUIVALENT (and to `{QA_CI_TARGET}`), or to one of "
+                    f"IMPOSSIBLE_LOCALLY / AGGREGATOR_ONLY / NOT_RUN_ON_FEATURE_PR "
+                    f"/ RUNNABLE_BUT_EXCLUDED with the reason."
                 )
 
-    for stale in sorted((set(LOCAL_EQUIVALENT) | set(NO_LOCAL_EQUIVALENT)) - keys):
+    for stale in sorted((set(LOCAL_EQUIVALENT) | set(unmapped)) - keys):
         problems.append(
             f"{stale!r} is mapped in check_ci_parity.py but is no longer a "
             f"pull_request-triggered job"
@@ -207,9 +246,16 @@ def main() -> int:
 
     print(
         f"✓ CI parity: {covered} of {total} pull_request-triggered jobs across "
-        f"{len(workflows)} workflows run locally via `just {QA_CI_TARGET}`; "
-        f"the rest are documented as remote-only"
+        f"{len(workflows)} workflows run locally via `just {QA_CI_TARGET}`."
     )
+    print(
+        f"  Of the rest: {len(IMPOSSIBLE_LOCALLY)} impossible locally, "
+        f"{len(AGGREGATOR_ONLY)} aggregators, {len(NOT_RUN_ON_FEATURE_PR)} not run "
+        f"on a feature PR, and {len(RUNNABLE_BUT_EXCLUDED)} that DO run locally "
+        f"but are excluded on cost:"
+    )
+    for job, why in sorted(RUNNABLE_BUT_EXCLUDED.items()):
+        print(f"    {job} -- {why}")
     return 0
 
 

@@ -1029,8 +1029,8 @@ fitness-invariants:
 # if a `just` target CI runs is not in this closure.
 preflight: check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-docs-content check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
     @echo "✅ preflight: every STATIC CI gate passed locally"
-    @echo "   Not covered here: unit tests, dashboard build, CLI checks,"
-    @echo "   docs build, submodules. Run 'just qa-ci' for all of those."
+    @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
+    @echo "   the docs build. Run 'just qa-ci' for all of those."
 
 # Fail when a ci.yml job has no local equivalent, so `just qa-ci` cannot
 # quietly stop meaning "CI will pass". Runs inside preflight, which CI runs.
@@ -1054,8 +1054,10 @@ qa-ci: preflight test-unit-ci cli-node-ci dashboard-ci docs-site-ci
     @echo "   This is job-level coverage, not proof of equivalence: CI runs on"
     @echo "   Ubuntu with pinned toolchains and a clean checkout, and a step"
     @echo "   added inside an existing job is invisible to the parity gate."
-    @echo "   Never run locally: osv-scan, pip-audit, dependency-review"
-    @echo "   (remote data), e2e-container, and the release-only gates."
+    @echo "   Not included: dependency-review (a GitHub-only action), the"
+    @echo "   release-gate jobs, and three that DO run locally but cost too"
+    @echo "   much for every push: just deps-audit-py, just deps-audit-npm,"
+    @echo "   just workspace-build. check_ci_parity.py lists them by category."
 
 # CI's python-qa runs this WITHOUT --warn-only, so it is a hard gate there.
 # 'just test-debt' passes --warn-only and therefore cannot fail; that is a
@@ -1094,11 +1096,21 @@ docs-site-ci:
 # dashes. Same grep, same paths, same exit code.
 check-docs-content:
     #!/usr/bin/env bash
-    set -uo pipefail
-    found=$(grep -rl $'\xe2\x80\x94' apps/syn-docs/content/ 2>/dev/null || true)
-    if [ -n "$found" ]; then
+    set -euo pipefail
+    # `|| true` would swallow grep's status 2 (unreadable or missing directory)
+    # alongside its status 1 (no matches), and report a clean pass for content
+    # that was never read. Only 0 and 1 are answers.
+    set +e
+    found=$(grep -rn $'\xe2\x80\x94' apps/syn-docs/content/)
+    rc=$?
+    set -e
+    if [ "$rc" -gt 1 ]; then
+        echo "❌ could not scan apps/syn-docs/content/ (grep exit $rc)"
+        exit 1
+    fi
+    if [ "$rc" -eq 0 ]; then
         echo "❌ em dash in syn-docs content. Use colons or commas instead:"
-        grep -rn $'\xe2\x80\x94' apps/syn-docs/content/ 2>/dev/null || true
+        printf '%s\n' "$found"
         exit 1
     fi
     echo "✓ Typography check passed."
@@ -1107,15 +1119,36 @@ check-docs-content:
 check-submodules:
     #!/usr/bin/env bash
     set -euo pipefail
-    git submodule status
-    # A leading -, + or U means uninitialized, at the wrong commit, or
-    # conflicted. `git submodule status` exits 0 for all three.
-    if git submodule status --recursive | grep -qE '^[-+U]'; then
+    # Captured into a variable rather than piped, for two reasons:
+    #
+    #  1. `producer | grep -q` under `set -o pipefail` reports 141, not 0: grep
+    #     exits at the first match and the producer dies of SIGPIPE, so an `if`
+    #     guarding it never fires. This check could not fail until it was found
+    #     by deinitialising a submodule and watching it pass anyway.
+    #  2. It lets git's own exit status be checked, so a broken git cannot read
+    #     as a clean tree.
+    if ! status=$(git submodule status --recursive); then
+        echo "❌ could not read submodule status"
+        exit 1
+    fi
+    printf '%s\n' "$status"
+    # A leading -, + or U means uninitialized, at another commit, or conflicted.
+    # `git submodule status` exits 0 for all three.
+    if printf '%s\n' "$status" | grep -E '^[-+U]' > /dev/null; then
         echo "❌ a submodule is uninitialized or not at its recorded commit:"
-        git submodule status --recursive | grep -E '^[-+U]'
+        printf '%s\n' "$status" | grep -E '^[-+U]' || true
         echo "   run: just submodules-init"
         exit 1
     fi
+    # ci.yml's submodule-check asserts these files exist, so a gitlink that is
+    # correct but points at a commit without them still fails CI. Keep both
+    # invariants or the mapping is a false claim of equivalence.
+    for required in lib/agentic-primitives/README.md lib/event-sourcing-platform/README.md; do
+        if [ ! -f "$required" ]; then
+            echo "❌ $required is missing; ci.yml's submodule-check requires it"
+            exit 1
+        fi
+    done
     echo "✅ All submodules initialized at their recorded commits"
 
 # Validate every workflow YAML against WorkflowDefinition.
