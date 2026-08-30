@@ -65,6 +65,13 @@ class ExecutionDetailResponse(BaseModel):
     """
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
+    workspace_images: list[str] = Field(default_factory=list)
+    """Image references the host pulled for this execution's workspaces (#1004).
+
+    Empty means NOT RECORDED, not "the default image": executions from before
+    this was captured have no entry, and so does a run whose workspace creation
+    predates the field.
+    """
     error_message: str | None = None
     repos: list[str] = Field(default_factory=list)
 

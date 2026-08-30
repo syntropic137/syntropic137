@@ -35,3 +35,12 @@ class WorkspaceCreatedEvent(DomainEvent):
     # Resource info
     workspace_path: str | None = None
     security_settings: dict[str, Any] = {}  # noqa: RUF012
+
+    # The image reference the host resolved and pulled for this workspace,
+    # normally digest-pinned (``ghcr.io/...@sha256:...``). Recorded here rather
+    # than read back from the container because the host both CHOOSES and pulls
+    # it, so there is no window in which the recorded value and the running
+    # image can disagree (#1004). Distinct from IsolationStartedEvent's
+    # image_manifest, which is build provenance read out of the container and is
+    # best-effort. None only for events written before this field existed.
+    workspace_image: str | None = None

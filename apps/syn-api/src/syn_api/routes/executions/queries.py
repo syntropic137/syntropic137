@@ -479,6 +479,7 @@ async def get(
             total_cost_usd=total_cost,
             total_duration_seconds=total_duration,
             artifact_ids=list(detail.artifact_ids),
+            workspace_images=list(detail.workspace_images),
             error_message=detail.error_message,
             repos=list(detail.repos),
         )
@@ -577,7 +578,9 @@ async def get_detail(
             started_at=detail.started_at,
             completed_at=detail.completed_at,
             error_message=detail.error_message,
+            total_duration_seconds=detail.total_duration_seconds,
             repos=list(detail.repos),
+            workspace_images=list(detail.workspace_images),
         )
     )
 
@@ -691,6 +694,8 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
         unpriced_observation_count=detail.unpriced_observation_count,
         artifact_ids=artifact_ids,
+        total_duration_seconds=detail.total_duration_seconds,
+        workspace_images=list(detail.workspace_images),
         error_message=detail.error_message,
         repos=list(detail.repos),
     )

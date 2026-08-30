@@ -344,6 +344,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             create_duration_ms=0.0,  # Updated by IsolationStartedEvent
             workspace_path=command.working_directory,
             security_settings=dataclasses.asdict(command.security_policy),
+            workspace_image=command.image,
         )
 
         self._apply(event)

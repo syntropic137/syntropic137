@@ -65,7 +65,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 6  # Bumped: cost moved to Lane 2 — API enriches from execution_cost (#695)
+    VERSION = 7  # Bumped: workspace_images recorded per execution (#1004)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -150,8 +150,32 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "artifact_ids": [],
             "error_message": None,
             "repos": repos,
+            "workspace_images": [],
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
+
+    async def on_workspace_created(self, event_data: dict) -> None:
+        """Record which image the host pulled for this execution's workspace.
+
+        A list, not a single value: an execution provisions one workspace per
+        phase, and a run whose phases did NOT all use the same image is exactly
+        the case worth being able to see. Deduplicated and order-preserving, so
+        the common case reads as one entry.
+        """
+        execution_id = event_data.get("execution_id")
+        image = event_data.get("workspace_image")
+        if not execution_id or not image:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if not existing:
+            return
+
+        images = existing.get("workspace_images", [])
+        if image in images:
+            return
+        existing["workspace_images"] = [*images, image]
+        await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_phase_started(self, event_data: dict) -> None:
         """Handle PhaseStarted event.
