@@ -2389,3 +2389,77 @@ replaces. Sentinel `203.0.113.7` (TEST-NET-3) so the value cannot be a default.
 **Standing lesson, third tick running:** the reviewer's finding is a hypothesis,
 and verifying it is where the value is. Tick 44b, verifying refuted the finding.
 Here, verifying escalated it from a code-review nit to a live exposure.
+
+---
+
+## Tick 48 — ran the implementation workflow for real; and a "new bug" that was already filed
+
+**Priority 2, done properly this time.** Tick 46 showed the premise "we have
+nothing for implementation" was false. So instead of building a fourth workflow,
+I am **validating the one that exists**: launched `implement-from-plan-v1` on
+issue #1020 through Syntropic on the Mini (`exec-1717c4da51c8`), not locally.
+
+**HYPOTHESIS (H15):** the existing implement-from-plan workflow can take a
+well-specified issue and produce a PR that passes `just qa-ci` with no human
+edits.
+
+The task was written to test the discipline, not just the code. It requires the
+agent to (a) verify the issue's premise first and STOP if it is false, (b) paste
+real command output rather than a summary, and (c) prove `git status` is
+byte-identical before and after `just dashboard-ci`. Scoring when it lands:
+does a PR open, is the diff in scope, does `qa-ci` pass on its branch, does a
+codex pass find blockers. Still running at time of writing (Bootstrap, $0.60).
+
+### Verifying my own two observations from tick 46
+
+I flagged both last tick as "needs its own premise check first". Both checks
+were worth doing, and they went opposite ways.
+
+**`phase_name: None` was MY measurement error.** The field is `name`, and it is
+populated: `'Investigate the codebase'`. I had called `.get('phase_name')` on a
+schema whose field is `name` — the same wrong-field class that produced several
+wrong claims earlier this week. Nothing to file.
+
+**`total_duration_seconds: 0.0` is real and systematic.** Six completed
+executions sampled, every one 0.0 while their own phases sum to real time:
+
+| execution | total | sum(phases) |
+|---|---|---|
+| exec-0bcba7624b96 | 0.0 | 619.4 |
+| exec-218c408bb916 | 0.0 | 2201.7 |
+| exec-167fbe65f189 | 0.0 | 1970.0 |
+| exec-efd0d97a0ab7 | 0.0 | 1872.2 |
+| exec-e9ad44461d1f | 0.0 | 412.1 |
+| exec-090d11b773a2 | 0.0 | 1250.6 |
+
+**And then the premise check stopped me filing it.** It is already **#969**,
+with a guard in the projection that exists specifically for it:
+
+```python
+#: The ONE field where a zero is known to be wrong rather than authoritative
+#: (#969). Measured live: the phase reported 33.004841s while the completion
+#: event carried 0.0 ...
+_ZERO_IS_SUSPECT = "total_duration_seconds"
+```
+
+So the honest report is not "new bug" but **"the fix shipped and the symptom did
+not change"**: the guard landed in `ab07cd60` (Aug 29 02:59) and
+`git merge-base --is-ancestor ab07cd60 v0.27.0` confirms it is in the release
+the Mini runs. A v4 execution recorded on that build, **after** the guard, still
+reports 0.0.
+
+Two candidate causes, and I have a live discriminator rather than an argument:
+the guard only fires when `existing.get(field)` is already truthy, so if
+per-phase accumulation never happens the guard has nothing to protect. The
+running `exec-1717c4da51c8` is the first execution I will inspect knowing to
+look, on a build that definitely has the guard.
+
+Separately and regardless of cause: the projection's `VERSION` is still **6**
+and was not bumped when the guard shipped, so every row built before Aug 29
+keeps its 0.0 permanently. A correction that cannot reach existing rows is half
+a fix.
+
+**Pattern worth keeping.** Three ticks running, the valuable move was checking a
+premise rather than acting on it: tick 46 (two of my own prompt's premises were
+stale), tick 47 (#1017's root cause never happened), and now this — a bug report
+I was one command away from filing as new.
