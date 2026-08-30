@@ -18,7 +18,7 @@ the bottom is the part worth reading later.
 | H3 | Cross-model review catches what the author cannot | **strongly supported, with a LIMIT found in tick 26** — it beat me repeatedly (inert #997 fix, fail-toward-good scorer, the `--tools` dispute). BUT the review INSIDE the workflow was insufficient: the revise phase overruled a correct blocker using a false premise, and an independent pass caught it |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
-| H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **under test, tick 27** — v4 running the identical #1009 task; v3 rejected a correct blocker claiming the submodule was unpopulated |
+| H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **test INVALIDATED, tick 28** — the v4 install silently dropped `provider`, so its "cross-model review" ran as claude. Blocked on #1011 |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51. RESOLVES and EXACT both 100% in all three. EXACT 75% → 100% for +85% cost |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
@@ -1313,3 +1313,46 @@ re-running the IDENTICAL #1009 task (`exec-0bcba7624b96`).
 That is the experiment: same task, same model, same four phases, one rule
 different. If the revise phase still rejects the agentic-primitives blocker,
 it must now paste an `ls` that contradicts itself.
+
+### Tick 28 — my controlled experiment had no codex in it, and finding that out was worth more than the experiment
+
+Installed v4 (v3 + the absence rule, nothing else) and re-ran the identical
+#1009 task. Three phases in, cost was **$0.95 against v3's $3.57** at the same
+point.
+
+**A 4x drop from adding one paragraph is not plausible**, so I checked the
+install instead of writing it up. v4 had **no phase with `provider = codex`** —
+the only occurrence of the word was inside a prompt's own text. The
+"cross-model review" phase was running as claude. The experiment was measuring
+nothing.
+
+Note how close that came to being a result. Last tick I drew a mechanism from a
+partial cost number and was wrong; this tick the same instinct was available and
+the number was even more striking. **Implausibility is the only thing that saved
+it, and implausibility is not a control.**
+
+**Root cause, verified in code:** `_build_phase_defs`
+(`commands.py:74-95`) maps `model=p.get("model")` and has no `provider=` line
+at all. `phases` is typed `list[dict[str, Any]]` (`commands.py:132`), so the
+phase body is never validated — the nested `agent: {provider, model}` block our
+own packaged YAML uses is accepted and discarded, and so is any typo. **201, no
+warning.**
+
+Filed **#1011**. This is the same accept-then-discard shape as #998, and the
+independent plan review found it a third time in `update_phase_prompt`. Three
+instances of one bug class in one day, all found by different routes.
+
+**The consequence is bigger than my experiment.** Every codex phase installed
+through the API is silently downgraded to claude. Cross-model review is the
+phase that has caught the most real defects today — an inert #997 fix, a scorer
+that failed toward good, a plan that would have shipped privilege escalation —
+at about $0.55 a run. **Install that workflow through the API and you get a
+workflow that quietly does not do it.**
+
+H8 is blocked until #1011 is fixed: I cannot install a codex-using workflow
+through the API, and hand-editing the stored row to prove a prompt hypothesis
+would be measuring a thing users cannot create.
+
+The run is still going. I will read its revise phase as WEAK evidence only —
+its cross-model-review input came from claude, not codex, so it is a different
+input to the phase under test.
