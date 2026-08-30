@@ -549,7 +549,6 @@ dashboard-frontend:
 
 # Install dashboard frontend dependencies
 dashboard-install:
-    cd lib/ui-feedback/packages/ui-feedback-react && pnpm install
     cd apps/syn-dashboard-ui && pnpm install
 
 # Build dashboard frontend for production
@@ -564,16 +563,10 @@ dashboard-lint:
 # not dashboard-qa, when the question is "will CI pass".
 dashboard-ci:
     # CI=true because GitHub Actions sets it, and pnpm refuses to remove a stale
-    # modules directory without it. Same command, same environment, same result.
+    # modules directory without it. This matches ci.yml's dashboard-ui COMMAND
+    # SEQUENCE, not its environment: CI runs Ubuntu with pinned Node/pnpm and a
+    # clean checkout, and sets CI=true job-wide rather than per command.
     #
-    # The ci.yml job also installs lib/ui-feedback and `pnpm link`s it. Both are
-    # omitted here on purpose: nothing under apps/syn-dashboard-ui imports
-    # @syn137/ui-feedback-react, its package.json does not depend on it, and
-    # lib/ui-feedback is not in pnpm-workspace.yaml -- so the link changes no
-    # dependency graph. Run locally it is actively harmful: with no dependent to
-    # attach to, pnpm writes a root package.json and edits pnpm-lock.yaml and
-    # pnpm-workspace.yaml, i.e. a verification command mutating tracked files.
-    # Removing the dead steps from ci.yml is #1020.
     cd apps/syn-dashboard-ui && CI=true pnpm install --frozen-lockfile --ignore-scripts
     just dashboard-qa
 
