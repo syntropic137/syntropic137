@@ -560,6 +560,15 @@ dashboard-build:
 dashboard-lint:
     cd apps/syn-dashboard-ui && pnpm run lint
 
+# Mirrors ci.yml dashboard-ui, which installs deps before linting. Use this,
+# not dashboard-qa, when the question is "will CI pass".
+dashboard-ci:
+    # CI=true because GitHub Actions sets it, and pnpm refuses to remove a stale
+    # modules directory without it. Same command, same environment, same result.
+    cd lib/ui-feedback/packages/ui-feedback-react && CI=true pnpm install --ignore-scripts
+    cd apps/syn-dashboard-ui && CI=true pnpm install --frozen-lockfile --ignore-scripts
+    just dashboard-qa
+
 # Full dashboard QA (lint + build)
 dashboard-qa: dashboard-lint dashboard-build
     @echo "✅ Dashboard UI checks passed!"
@@ -1010,10 +1019,76 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
+preflight: check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
     @echo "✅ preflight: every STATIC CI gate passed locally"
-    @echo "   Not covered here (run separately): unit tests (just test),"
-    @echo "   dashboard build, CLI checks, integration, security scanning."
+    @echo "   Not covered here: unit tests, dashboard build, CLI checks,"
+    @echo "   docs build, submodules. Run 'just qa-ci' for all of those."
+
+# Fail when a ci.yml job has no local equivalent, so `just qa-ci` cannot
+# quietly stop meaning "CI will pass". Runs inside preflight, which CI runs.
+check-ci-parity:
+    uv run python scripts/check_ci_parity.py
+
+# Every CI gate a PR must pass, run locally, using the SAME commands CI uses.
+#
+# Why this exists: 'just preflight' covers only the static gates, so a green
+# preflight has never meant a green CI. Each sub-target below mirrors exactly
+# one ci.yml job so the two cannot drift apart silently; check-ci-parity is the
+# gate that enforces that mapping.
+#
+# NOT covered here, deliberately, with the reason:
+#   osv-scan, pip-audit  - query remote vulnerability databases
+#   dependency-review    - a GitHub API action with no local equivalent
+#   python-integration-tests - skipped on PR branches in CI too (needs services)
+qa-ci: preflight test-unit-ci cli-node-ci dashboard-ci docs-site-ci
+    @echo ""
+    @echo "✅ qa-ci: every CI gate that runs on a PR passed locally."
+    @echo "   Still only checked on GitHub: osv-scan, pip-audit,"
+    @echo "   dependency-review (remote data), and integration tests."
+
+# CI's python-qa runs this WITHOUT --warn-only, so it is a hard gate there.
+# 'just test-debt' passes --warn-only and therefore cannot fail; that is a
+# different check, and it is why this one is separate.
+check-test-debt:
+    uv run python scripts/check_test_debt.py
+
+# Mirrors ci.yml python-unit-tests, including -x (stop on first failure) and
+# the coverage flags, so a locally-green run is the run CI performs.
+test-unit-ci:
+    TERM=dumb NO_COLOR=1 uv run pytest -m unit \
+        --cov=apps/syn-api/src \
+        --cov=packages/syn-domain/src \
+        --cov=packages/syn-adapters/src \
+        --cov=packages/syn-shared/src \
+        --cov-report=term-missing \
+        -x -q
+
+# Mirrors ci.yml cli-node. cli-node-qa alone omits the two drift checks, which
+# are the ones that catch an API change that never reached the CLI types.
+cli-node-ci:
+    cd apps/syn-cli-node && pnpm install --frozen-lockfile --ignore-scripts
+    just cli-node-qa
+    cd apps/syn-cli-node && pnpm run check:api-drift
+    cd apps/syn-cli-node && pnpm run check:untyped-api
+
+# Mirrors ci.yml docs-site. Note this is NOT docs-site-build, which first runs
+# codegen; CI builds the committed tree as-is.
+docs-site-ci:
+    cd apps/syn-docs && pnpm install
+    cd apps/syn-docs && pnpm run build
+
+# Mirrors ci.yml submodule-check.
+check-submodules:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git submodule status
+    for sub in lib/agentic-primitives lib/event-sourcing-platform; do
+        if [ ! -f "$sub/README.md" ]; then
+            echo "❌ $sub submodule not initialized (run: just submodules-init)"
+            exit 1
+        fi
+    done
+    echo "✅ All submodules properly initialized"
 
 # Validate every workflow YAML against WorkflowDefinition.
 #

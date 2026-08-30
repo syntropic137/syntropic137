@@ -433,15 +433,24 @@ from `syn_shared.settings.constants` (Python) or `constants.ts` (TypeScript).
 CI failures that could have been caught locally waste 8–10 minutes per round-trip and block the release chain. Always run these before pushing:
 
 ```bash
-just preflight       # Every STATIC CI gate, from the same justfile target CI
-                     # and the pre-push hook both call. Add new static gates
-                     # there, never to CI alone (#931).
-                     # NOT covered: unit tests, dashboard build, CLI checks,
-                     # integration, security scanning. Run `just qa` for the
-                     # fuller local sweep before a release PR.
+just qa-ci           # Every CI gate that runs on a PR, using the SAME commands
+                     # ci.yml uses. ~3m30s. If this is green, CI is green.
+                     # Only ever checked on GitHub: osv-scan, pip-audit,
+                     # dependency-review (they query remote databases) and
+                     # integration tests (CI skips those on PR branches too).
+
+just preflight       # The static half only (~1m). Faster inner loop; what the
+                     # pre-push hook runs. A green preflight does NOT mean CI
+                     # will pass - it runs no tests and no builds.
 ```
 
-Or run `just qa` for the full suite (slower but catches everything including tests).
+`scripts/check_ci_parity.py` (inside `preflight`) fails when a ci.yml job has no
+local equivalent, so `qa-ci` cannot silently stop meaning "CI will pass". Add a
+CI job, and you must map it there. Add a new static gate to `preflight`, never to
+CI alone (#931).
+
+`just qa` remains the broader local sweep (it runs non-unit tests too), but it is
+not CI-shaped: some of its targets are deliberately more lenient than CI's.
 
 **Git hooks:** `.githooks/pre-push` runs the fast checks automatically. Wire it up once with `just setup-hooks` after cloning.
 
