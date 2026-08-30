@@ -697,3 +697,14 @@ introduces.
 
 **Standing:** #1005 has had its two codex passes with findings cleared; #999
 remains green at 50 checks and is the owner's to merge.
+
+### Tick 17b — #1005 merged
+
+All 15 checks green against an unmoved base (`origin/main` still `eb32bc1a`,
+0 commits since I branched — so the green was measured against what it will
+actually merge into, not a stale one). Merged as `b2aa7466` with a merge
+commit; #997 auto-closed.
+
+**#999 is now the ONLY open PR**, still green at 50 checks, and stays the
+owner's call — merging it publishes to npm and GHCR, tags, and cuts a public
+release.
