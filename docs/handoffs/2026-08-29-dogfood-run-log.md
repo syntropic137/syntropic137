@@ -1056,3 +1056,16 @@ whose currency I checked first.** Three of today's eight errors would not have
 happened if I had done that by default rather than after being caught.
 
 Waiting on CI before merging. Not merging #999 — that remains the owner's.
+
+### Tick 23b — #1008 merged
+
+All checks complete, 0 failing, measured against a base that was `behind: 0`
+after merging main in. Merged as `ba28a4b2`. On `main` now: the four-phase SDLC
+workflow, the citation scorer with its 26 regression tests, `api_shape.py`, the
+decision brief, and this log.
+
+**#999 is again the only open PR** — 50 checks green, and merging it is the
+publish (npm, GHCR, tag, GitHub Release), so it stays the owner's call.
+
+This log continues on `docs/dogfood-log-continued`, since its original branch
+is now merged.
