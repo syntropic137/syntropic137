@@ -203,3 +203,84 @@ class TestJsonSpellingsAreSearchable:
 
     def test_a_genuinely_absent_scalar_still_reports_absent(self) -> None:
         assert find_value({"k": None}, "nope", exact=True) == []
+
+
+class TestNoVariantIsSuppressed:
+    """A position is not one type, and choosing among observed values is how
+    this file lost information twice.
+
+    First by describing only element [0]; then by merging immediate keys and
+    dropping nested ones; then by reporting the object variant of a key and
+    silently dropping the null one. Each fix was a different CHOICE where the
+    answer was always the union.
+    """
+
+    def test_a_key_that_is_sometimes_null_reports_both(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        describe({"rows": [{"meta": None}, {"meta": {"visible": 1}}]})
+        out = capsys.readouterr().out
+        assert "null" in out
+        assert "object" in out
+        assert "visible" in out
+
+    def test_a_bare_scalar_beside_objects_is_reported(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The old element-[0] version printed this; the first merge did not.
+
+        The value must be one ONLY the scalar can produce. The first version
+        of this test asserted `"int" in out`, which the key line `field: int`
+        satisfies on its own -- so it passed with scalars fully suppressed.
+        """
+        describe({"rows": [99991, {"field": 2}]})
+        out = capsys.readouterr().out
+        assert "field" in out
+        assert "99991" in out
+
+
+class TestCouldNotLookIsNeverSpelledLikeAbsent:
+    """Exit 1 means "looked and it is absent". Anything that did not look
+    must be 2, or a network blip reads as a real answer."""
+
+    def _run(self, monkeypatch: pytest.MonkeyPatch, raises: BaseException, *argv: str) -> int:
+        import scripts.api_shape as mod
+
+        def _boom(_url: str, _timeout: float) -> object:
+            raise raises
+
+        monkeypatch.setattr(mod, "_fetch", _boom)
+        monkeypatch.setattr("sys.argv", ["api_shape.py", "http://x", *argv])
+        return mod.main()
+
+    def test_a_transport_failure_exits_two(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Without this, changing the transport `return 2` to `return 0`
+        survived the entire suite."""
+        import urllib.error
+
+        code = self._run(monkeypatch, urllib.error.URLError("down"), "--find", "x")
+        capsys.readouterr()
+        assert code == 2
+
+    def test_a_timeout_exits_two(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code = self._run(monkeypatch, TimeoutError("slow"))
+        capsys.readouterr()
+        assert code == 2
+
+    def test_a_response_too_deep_to_walk_exits_two(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import scripts.api_shape as mod
+
+        payload: object = {"target": 1}
+        for _ in range(2000):
+            payload = {"k": [payload]}
+        monkeypatch.setattr(mod, "_fetch", lambda _u, _t: payload)
+        monkeypatch.setattr("sys.argv", ["api_shape.py", "http://x", "--find", "target"])
+        code = mod.main()
+        capsys.readouterr()
+        assert code == 2

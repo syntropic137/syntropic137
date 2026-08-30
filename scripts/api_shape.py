@@ -66,24 +66,39 @@ def _first_sample(values: list[object]) -> object:
     return None
 
 
+def _variants(values: list[object]) -> str:
+    """Every type seen at one position, in first-appearance order.
+
+    A position is not one type. `[{"meta": null}, {"meta": {...}}]` has a key
+    that is sometimes an object and sometimes null, and reporting only the
+    object is the same information loss as reporting only element [0] --
+    which is what this whole script exists to avoid. Twice now a "summary"
+    here has been built by CHOOSING among observed values; the fix both times
+    is to report the union instead.
+    """
+    seen: list[str] = []
+    for value in values:
+        name = _type_of(value)
+        if name not in seen:
+            seen.append(name)
+    return " | ".join(seen)
+
+
 def _describe_merged(values: list[object], indent: int, total: int) -> None:
     """Describe ALL parallel values at one position, merged recursively.
 
     `values` are every value seen at this position across the containing
-    list's elements. Merging RECURSIVELY is what makes the summary honest.
-    The first attempt at this unioned only the immediate keys of direct dict
-    elements and never recursed, so `[{"meta": {"visible": 1}}, ...]` printed
-    `meta: object[1]` and hid every nested field -- including one the older
-    element-[0] version DID print. Breadth had been bought with depth, which
-    made it worse than what it replaced for exactly the case the script is
-    supposed to protect.
+    list's elements. `total` is that list's FULL length, so `[in n/N]` means
+    what it says.
 
-    `total` is the containing list's FULL length, including non-dict
-    elements, so `[in n/N]` means what it says.
+    Nothing here is exclusive: a list can hold dicts, nested lists and bare
+    scalars at once, and each branch reports its own without suppressing the
+    others.
     """
     pad = "  " * indent
     dicts = [v for v in values if isinstance(v, dict)]
     lists = [v for v in values if isinstance(v, list)]
+    scalars = [v for v in values if not isinstance(v, (dict, list))]
 
     if dicts:
         counts: dict[str, int] = {}
@@ -94,31 +109,28 @@ def _describe_merged(values: list[object], indent: int, total: int) -> None:
                 collected.setdefault(key, []).append(value)
         for key, seen in counts.items():
             observed = collected[key]
-            sample_value = _first_sample(observed)
-            sample = _sample(sample_value)
+            sample = _sample(_first_sample(observed))
             suffix = f" = {sample}" if sample else ""
             where = "" if seen == total else f"  [in {seen}/{total}]"
-            print(f"{pad}{key}: {_type_of(sample_value)}{suffix}{where}")
+            print(f"{pad}{key}: {_variants(observed)}{suffix}{where}")
             if any(isinstance(v, (dict, list)) for v in observed):
                 _describe_merged(observed, indent + 1, len(observed))
-        # NOT a return: a list can hold dicts AND lists side by side, and
-        # returning here hid every field inside the list elements.
+
     if lists:
         # Lists of lists kept the original element-[0] defect. Flatten every
         # inner element so a field appearing only in a later inner list is
         # still reported.
         flattened = [item for inner in lists for item in inner]
-        if not flattened:
+        if flattened:
+            print(f"{pad}[each of {len(flattened)}] ->")
+            _describe_merged(flattened, indent + 1, len(flattened))
+        else:
             print(f"{pad}(empty list)")
-            return
-        print(f"{pad}[each of {len(flattened)}] ->")
-        _describe_merged(flattened, indent + 1, len(flattened))
-        return
 
-    if dicts:
-        return
-    sample_value = _first_sample(values)
-    print(f"{pad}{_type_of(sample_value)} = {_sample(sample_value)}")
+    if scalars:
+        # A bare scalar sitting beside objects is real data. Suppressing it
+        # lost information the element-[0] version printed.
+        print(f"{pad}{_variants(scalars)} = {_sample(_first_sample(scalars))}")
 
 
 def _describe_list(node: list[object], indent: int, path: str) -> None:
@@ -235,7 +247,7 @@ def main() -> int:
 
     try:
         payload = _fetch(args.url, args.timeout)
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         # All transport failures are 2, not 1. Exit 1 means "looked and it is
         # absent"; a read that never completed did not look, and collapsing
         # the two makes a network blip indistinguishable from a real answer.
@@ -266,7 +278,11 @@ def main() -> int:
     exact = args.find_exact is not None
     needle = args.find_exact if exact else args.find
     if needle is not None:
-        hits = find_value(node, needle, exact=exact)
+        try:
+            hits = find_value(node, needle, exact=exact)
+        except RecursionError:
+            print("response nests too deeply to search", file=sys.stderr)
+            return 2
         scope = f" under {args.at}" if args.at else ""
         if not hits:
             kind = "exactly" if exact else "anywhere"
@@ -277,7 +293,14 @@ def main() -> int:
             print(f"  {hit}")
         return 0
 
-    describe(node)
+    try:
+        describe(node)
+    except RecursionError:
+        # Exit 2, not 1. "Could not look" must never be spelled the same way
+        # as "looked and it is absent" -- that collapse is the failure this
+        # script exists to prevent.
+        print("response nests too deeply to walk", file=sys.stderr)
+        return 2
     return 0
 
 
