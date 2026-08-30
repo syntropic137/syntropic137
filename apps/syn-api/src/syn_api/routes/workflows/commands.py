@@ -30,6 +30,9 @@ from syn_api.types import (
 from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+    from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         InputDeclaration,
         PhaseDefinition,
@@ -71,6 +74,68 @@ def _resolve_classification(classification: str) -> WorkflowClassification:
     return classification_map.get(classification.lower(), WorkflowClassification.STANDARD)
 
 
+def _as_bool(value: object, field: str) -> bool:
+    """Only a real bool. Anything else is the caller's error, so say so.
+
+    `bool("false")` is True, so coercion turned `allow_delegation: "false"`
+    into delegation ENABLED -- asking for the feature off and getting it on.
+    The first fix silently defaulted a non-bool to False instead, which is
+    fail-closed but still wrong in the other direction: `1` and `"true"`
+    became False, so a caller asking for it ON silently got it OFF, with a
+    201. Trading one silent corruption for another is not a fix.
+
+    A JSON boolean literal arrives as a real bool; only a QUOTED value
+    arrives as a string, and that is a malformed request, not an opinion.
+    """
+    if isinstance(value, bool):
+        return value
+    msg = f"phase field {field!r} must be a boolean, got {type(value).__name__}: {value!r}"
+    raise ValueError(msg)
+
+
+def _expand_skills(entries: Iterable[object] | None) -> tuple[SkillRef, ...]:
+    """Expand each entry the way the YAML path does.
+
+    Passing raw entries straight to `SkillRef` looked equivalent and is not:
+    the verbose form `{"source": ..., "names": ["alpha", "beta"]}` declares
+    TWO skills, and direct validation produced ONE named after the repo. So a
+    caller asking for `alpha` and `beta` silently got a single skill called
+    `b` -- a wrong identity rather than a missing one, which resolves and
+    injects the wrong instructions.
+
+    That is worse than the bug this PR set out to fix. `main` dropped skills
+    entirely; absent is recoverable, wrong is not.
+    """
+    from syn_domain.contexts.orchestration._shared.skill_ref import expand_skill_entry
+
+    if not entries:
+        return ()
+    expanded: list[SkillRef] = []
+    for entry in entries:
+        expanded.extend(expand_skill_entry(entry))
+    return tuple(expanded)
+
+
+def _agent_field(phase: Mapping[str, Any], name: str, default: Any = None) -> Any:  # noqa: ANN401
+    """Read a phase's agent setting from either spelling.
+
+    The packaged workflow YAML nests these under ``agent:`` -- see
+    ``workflows/sdlc/research-plan/workflow.yaml`` -- while the create request
+    carries them flat. Posting the YAML shape sent the whole block into a key
+    nothing read, so the phase installed with no provider and no model, with a
+    201 and no warning (#1011).
+
+    A flat field wins when both are present: it is the more specific spelling,
+    and picking silently either way would be a guess.
+    """
+    if name in phase:
+        return phase[name]
+    agent = phase.get("agent")
+    if isinstance(agent, dict) and name in agent:
+        return agent[name]
+    return default
+
+
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
     from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
 
@@ -89,7 +154,19 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 timeout_seconds=p.get("timeout_seconds"),
                 allowed_tools=p.get("allowed_tools", []),
                 argument_hint=p.get("argument_hint"),
-                model=p.get("model"),
+                # These four were accepted and discarded (#1011). `provider`
+                # meant every codex phase installed through the API ran as
+                # claude; `skills` and `claude_plugins` meant per-phase
+                # injection installed nothing. The structural test in
+                # test_phase_create_carries_every_field.py fails if a future
+                # field is added to PhaseDefinition without being mapped here.
+                model=_agent_field(p, "model"),
+                provider=_agent_field(p, "provider"),
+                allow_delegation=_as_bool(
+                    _agent_field(p, "allow_delegation", False), "allow_delegation"
+                ),
+                claude_plugins=tuple(p.get("claude_plugins") or ()),
+                skills=_expand_skills(p.get("skills")),
             )
             for i, p in enumerate(phases)
         ]
