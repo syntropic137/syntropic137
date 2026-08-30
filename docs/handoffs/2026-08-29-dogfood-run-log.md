@@ -2684,3 +2684,61 @@ comment. The command sequence matches ci.yml; the environment does not.
 was intact, only my wording was not.
 
 `just qa-ci` green, one codex pass, all findings addressed.
+
+---
+
+## Tick 51 — #1025 merged; scoped #1004 and stopped before shipping a fragment
+
+**Merged #1025** (`216eaff3`), closing #1020. All 8 sites of the ui-feedback bug
+class gone, both images proven byte-identical, one codex pass, 0 failing checks.
+
+**HYPOTHESIS:** #1004 (record the cloned commit SHA) is a contained change I can
+land this tick.
+
+**Not supported — it is three pieces, and two things about it are non-obvious.**
+
+### The trap in the obvious implementation
+
+The natural approach is to resolve the ref on the host at hydration
+(`GET /repos/{o}/{r}/commits/{ref}`) and record it. **That records a SHA that
+only correlates with what was cloned:** `main` moves, and the clone is what the
+agent read.
+
+That is worse than recording nothing, because the value looks authoritative —
+which is the exact failure class #1004 exists to prevent. Its own motivating
+story is a citation check that gave a confident wrong answer because the tree
+was not the tree.
+
+Authoritative is `git rev-parse HEAD` **inside the workspace after the clone**.
+A capture path exists: repos are cloned by the generated setup script, and
+`run_setup_phase` already returns an `ExecutionResult` to the host, so a marker
+line per repo is parseable and unit-testable without a container.
+
+And the acceptance test has to be the hazard: **move the remote's default branch
+between the host's resolve and the workspace's clone, and assert the recorded
+SHA is the cloned one.** A test against a static repo passes under either
+design — the near-miss shape from earlier this week.
+
+### The half that may already exist
+
+`IsolationStartedEvent.image_manifest` and `WorkspaceCreatingEvent.container_image`
+are already defined. I could not confirm they are populated on real runs
+(`syn events recent` surfaces Lane 2 session telemetry, not these Lane 1 domain
+events), but **if they are, the image half is a projection-and-API change rather
+than a capture change** — small, and shippable independently.
+
+### Why I stopped
+
+I could have shipped the emit-and-parse piece this tick. It would have been a
+parser with no consumer — the same shape as the gate nobody runs and the test
+that measures the wrong side of a boundary, which I have now been caught on
+three times this week. A fragment that no caller reads is not a third of a
+feature; it is a thing that looks done.
+
+So: findings recorded on #1004 with a suggested three-way split, ordered so the
+cheap piece (surface the image identity, if already captured) lands first and
+makes today's experiment provenance auditable immediately.
+
+**Honest scoring of this tick:** one merge and a design note, not a feature. The
+note is worth more than the fragment would have been, but it is not delivery,
+and I should not dress it up as such.
