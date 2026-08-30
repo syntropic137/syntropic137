@@ -17,7 +17,7 @@ the bottom is the part worth reading later.
 | H2 | SLP skills in research/planning improve plan quality | **NOT supported, n=1** — 18% more cost, 6 citations vs 12, 0% exact |
 | H3 | Cross-model review catches what the author cannot | **supported** — codex found a live path traversal in #995 |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
-| H6 | A prompt line requiring root-relative citations moves EXACT without costing GROUNDED | **under test** — `exec-efd0d97a0ab7` |
+| H6 | A prompt line requiring root-relative citations moves EXACT without costing GROUNDED | **strongly supported** — EXACT 75% -> 98%, GROUNDED held at 98%, citations 12 -> 55, cost +85% |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, but the first instrument was wrong** — it measured path FORMAT while reported as grounding; now reports both |
 
 ---
@@ -449,6 +449,56 @@ The prediction that cost would stay flat was based on nothing: a prompt section
 adds input tokens to every phase and asks the model to be more careful about
 paths, and both cost tokens. I should have predicted an increase and estimated
 its size.
+
+### Tick 14 — H6 strongly supported, after my scorer nearly buried it
+
+**Result, scored against a clean checkout of `origin/main`:**
+
+| run | cost | citations | GROUNDED | EXACT |
+|---|---|---|---|---|
+| v1 3ph | $3.3246 | 21 | 21/21 (100%) | 13/21 (62%) |
+| v2 4ph | $3.5111 | 12 | 12/12 (100%) | 9/12 (75%) |
+| H2 4ph + skills | $4.1380 | 6 | 5/6 (83%) | 0/6 (0%) |
+| **v3 4ph + format rule** | **$6.4996** | **55** | **54/55 (98%)** | **54/55 (98%)** |
+
+**H6 is strongly supported.** One prompt section took EXACT from 75% to 98% and
+- unexpectedly - took citation COUNT from 12 to 55 while holding grounding at
+98%. The instruction did not merely reformat citations, it produced four times
+as many verifiable ones. Plausibly because a model told its citations will be
+checked starts citing things it can defend.
+
+**Cost is the trade: $6.50 against v2's $3.51, +85%.** Recorded as a trade, per
+the framing fixed in advance. Per verifiable citation it is cheaper - $0.39/exact
+citation for v2 versus $0.12 for v3 - but the absolute number is what a budget
+sees.
+
+### I nearly reverted it on a false negative
+
+My first score was **GROUNDED 39/55 (71%)** with all 16 failures reading
+"line is past end of file". By my own pre-registered criterion - "if GROUNDED
+falls, the instruction traded accuracy for tidiness and is worth abandoning" -
+that meant revert.
+
+**The scorer was pointed at a checkout 31 commits behind main.** The main
+working directory sits on `feat/workflow-validation-suite`, not `main`:
+
+    artifact_query_service.py   my tree 127 lines   origin/main 186   cited :154-186
+    value_objects.py            my tree  81 lines   origin/main 102   cited  :85-102
+
+Every "past end of file" citation was correct against the tree the agent
+actually read. Re-scored against a clean `origin/main` worktree: 54/55.
+
+**This is my fourth measurement error today and the most consequential.** The
+others cost a few minutes; this one would have discarded the best result of the
+day and recorded a false conclusion in a document meant for decisions. It only
+surfaced because the failure mode was suspiciously uniform - sixteen citations
+failing the same way, none fabricated - which is not what real hallucination
+looks like.
+
+**Structural fix needed, not vigilance:** the scorer must take the commit the
+plan was written against and score against THAT. Scoring a plan about a moving
+repo with whatever happens to be checked out locally is not a measurement.
+Filed as a follow-up.
 
 ---
 
