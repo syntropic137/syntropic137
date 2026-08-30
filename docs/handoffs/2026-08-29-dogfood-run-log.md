@@ -17,7 +17,7 @@ the bottom is the part worth reading later.
 | H2 | SLP skills in research/planning improve plan quality | **RESTORED, NOT supported, n=1** — re-scored: 83% RESOLVES, 0% EXACT, 6 citations for $4.14 vs 12 for $3.51. I predicted the 0% was least likely to survive a stricter scorer; it survived unchanged |
 | H3 | Cross-model review catches what the author cannot | **strongly supported, and it beat me on a direct disagreement** — found #995's traversal; found my #997 fix was INERT; found my scorer failed toward good; and was RIGHT about `--tools` when I publicly said it was wrong (tick 22) |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
-| H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=2, corrected instrument** — v3 on #990: 55/55 and 55/55. v3 on #1004: 37/37 and 37/37. EXACT 75% → 100% for +85% cost |
+| H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51. RESOLVES and EXACT both 100% in all three. EXACT 75% → 100% for +85% cost |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
 ---
@@ -1183,3 +1183,46 @@ gutted. 28 tests now, mutation-verified six ways, all killed.
 
 **Meanwhile** `exec-218c408bb916` reached phase 4 of 4 at $3.57 — the codex
 review phase again cost about $0.56, roughly a sixth of the claude phases.
+
+### Tick 25 — third consecutive 100/100, and my cost speculation was wrong
+
+`exec-218c408bb916` (#1009 plan) completed on the Mini. Scored on the merged,
+fail-closed instrument against `origin/main`:
+
+```
+RESOLVES  51/51 (100%)   EXACT  51/51 (100%)
+```
+
+**H6 is now n=3**, all three v3 runs at 100/100 on both metrics.
+
+**The plan found something I did not know.** I told it `AgentConfiguration` was
+the phase config; it found there are **two hand-synchronized copies** —
+`aggregate_execution/value_objects.py:55-99` and
+`_shared/ExecutionValueObjects.py:34-77` — each carrying a comment telling the
+reader to keep it in sync with the other, and it worked out which one `_wiring`
+actually imports. That is the second consecutive run where the research phase
+corrected or extended my premise rather than accepting it.
+
+**And it contradicted me mid-tick.** When the plan phase came in at $0.52
+against $2.66 for the #1004 run, I said in the tick report that the
+pre-verified premise "may be reducing discovery work". The completed breakdown
+says otherwise:
+
+| phase | #1004 | #1009 | delta |
+|---|---|---|---|
+| research | 2.21 | 2.50 | +0.29 |
+| plan | 2.66 | **0.52** | **-2.14** |
+| cross-model-review | 0.57 | 0.55 | -0.02 |
+| revise | 2.96 | **4.58** | **+1.62** |
+| **TOTAL** | **8.40** | **8.15** | **-0.25** |
+
+The premise did not reduce cost. It **moved** cost — out of planning and into
+revision — for a net difference of 25 cents, which is noise at n=1. I had a
+partial number and narrated a mechanism from it; the whole number says
+something different. Same error shape as the rest of today, just cheaper: a
+conclusion drawn before the measurement finished.
+
+Worth noting separately: the **codex review phase costs about $0.55 in both
+runs**, roughly a sixth of a claude phase, while H3 says it is the phase that
+has caught the most real defects. That is the best cost-to-value ratio in the
+whole workflow, and it is stable across runs.
