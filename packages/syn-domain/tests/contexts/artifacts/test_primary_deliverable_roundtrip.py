@@ -159,3 +159,63 @@ class TestTheAliasSurvivesTheWholeRestartPath:
         outputs = await service.get_for_phase_injection("exec-1", ["research"])
 
         assert outputs["research"] == "# Plan"
+
+
+class TestTheFlagIsReadStrictly:
+    """Truthiness is not a decision.
+
+    `bool("false")` is True and `bool(0)` is False, so coercing a row from a
+    malformed or non-canonical writer silently promotes or demotes it. The
+    failure mode is quiet and picks the wrong document either way.
+    """
+
+    def test_a_falsy_non_boolean_is_not_read_as_secondary(self) -> None:
+        row: ProjectionRow = {
+            "id": "art-1",
+            "workflow_id": "wf-1",
+            "execution_id": "exec-1",
+            "session_id": None,
+            "phase_id": "research",
+            "artifact_type": "markdown",
+            "name": "n",
+            "created_at": None,
+            "content": "x",
+            "is_primary_deliverable": 0,
+        }
+
+        # `bool(0)` is False, so a coercing read would silently demote this
+        # row out of the running for its phase's alias. A non-boolean value
+        # carries no decision, so it falls back to the pre-#997 default
+        # instead of being interpreted.
+        assert ArtifactSummary.from_dict(dict(row)).is_primary_deliverable is True
+
+    def test_a_real_false_survives(self) -> None:
+        row: ProjectionRow = {
+            "id": "art-2",
+            "workflow_id": "wf-1",
+            "execution_id": "exec-1",
+            "session_id": None,
+            "phase_id": "research",
+            "artifact_type": "markdown",
+            "name": "n",
+            "created_at": None,
+            "content": "x",
+            "is_primary_deliverable": False,
+        }
+
+        assert ArtifactSummary.from_dict(dict(row)).is_primary_deliverable is False
+
+    def test_an_absent_key_reads_as_primary(self) -> None:
+        row: ProjectionRow = {
+            "id": "art-3",
+            "workflow_id": "wf-1",
+            "execution_id": "exec-1",
+            "session_id": None,
+            "phase_id": "research",
+            "artifact_type": "markdown",
+            "name": "n",
+            "created_at": None,
+            "content": "x",
+        }
+
+        assert ArtifactSummary.from_dict(dict(row)).is_primary_deliverable is True

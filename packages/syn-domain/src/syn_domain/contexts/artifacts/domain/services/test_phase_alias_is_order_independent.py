@@ -217,3 +217,44 @@ class TestEmptyContentIsNotADeliverable:
         outputs = await service.get_for_phase_injection("exec-1", ["research"])
 
         assert outputs["research"] == "# Plan"
+
+
+@pytest.mark.unit
+class TestTheTreeAgreesWithTheAlias:
+    """Both cold-path readers must name the same artifact.
+
+    `get_for_phase_injection` feeds `<phase-id>.md`; `get_files_for_phase_injection`
+    (#988) feeds `<phase-id>/<source_path>`. `_tree_files()` dedups by
+    destination path first-wins, so the LIST ORDER here decides which content
+    the tree keeps. If the two disagree, a restart injects two different
+    versions of one deliverable -- worse than either being wrong alone.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_duplicated_source_path_resolves_the_same_way_in_both(
+        self,
+    ) -> None:
+        earlier = _artifact("z-earlier", "# Plan", _EARLIER, is_primary=True)
+        later = _artifact("a-later", "# Superseded", _LATER, is_primary=True)
+
+        # updated_at DESC -> the later row arrives first.
+        service = ArtifactQueryService(_ProjectionReturning([later, earlier]))
+
+        alias = await service.get_for_phase_injection("exec-1", ["research"])
+        tree = await service.get_files_for_phase_injection("exec-1", ["research"])
+
+        # `_tree_files` keeps the first entry per destination path.
+        assert tree["research"][0].content == alias["research"]
+
+    @pytest.mark.asyncio
+    async def test_the_tree_order_does_not_depend_on_row_order(self) -> None:
+        earlier = _artifact("z-earlier", "# Plan", _EARLIER, is_primary=True)
+        later = _artifact("a-later", "# Superseded", _LATER, is_primary=False)
+
+        forward = ArtifactQueryService(_ProjectionReturning([earlier, later]))
+        reverse = ArtifactQueryService(_ProjectionReturning([later, earlier]))
+
+        a = await forward.get_files_for_phase_injection("exec-1", ["research"])
+        b = await reverse.get_files_for_phase_injection("exec-1", ["research"])
+
+        assert [f.content for f in a["research"]] == [f.content for f in b["research"]]

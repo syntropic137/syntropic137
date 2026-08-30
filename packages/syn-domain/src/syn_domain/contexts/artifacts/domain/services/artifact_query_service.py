@@ -217,15 +217,26 @@ class ArtifactQueryService:
         Returns:
             Dict mapping phase_id -> every file that phase produced.
         """
-        phase_files: dict[str, list[PhaseOutputFile]] = {}
+        by_phase: dict[str, list[ArtifactSummary]] = {}
         artifacts = await self._projection.get_by_execution(execution_id)
 
         for artifact in artifacts:
             phase_id = artifact.phase_id
             if phase_id is None or phase_id not in completed_phase_ids or not artifact.content:
                 continue
-            phase_files.setdefault(phase_id, []).append(
-                PhaseOutputFile(source_path=artifact.source_path, content=artifact.content)
-            )
+            by_phase.setdefault(phase_id, []).append(artifact)
 
-        return phase_files
+        # Same rank as the flat alias above, and for the same reason: row
+        # order is not a selector. `_tree_files` dedups by destination path
+        # first-wins, so this list's order decides which content survives a
+        # duplicated `source_path`. Ranking both readers identically is what
+        # stops a restart injecting one version at `<phase-id>.md` and a
+        # different one at `<phase-id>/<source_path>`.
+        return {
+            phase_id: [
+                PhaseOutputFile(source_path=a.source_path, content=a.content)
+                for a in sorted(rows, key=_injection_rank)
+                if a.content is not None
+            ]
+            for phase_id, rows in by_phase.items()
+        }

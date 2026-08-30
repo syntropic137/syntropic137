@@ -9,6 +9,7 @@ from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
     ArtifactSummary,
+    read_primary_flag,
 )
 
 
@@ -81,7 +82,7 @@ class ArtifactListProjection(AutoDispatchProjection):
             # Without this the flag the collector writes never reaches the
             # read model, and the cold path silently falls back to row
             # order -- the exact divergence #997 exists to close.
-            is_primary_deliverable=bool(event_data.get("is_primary_deliverable", True)),
+            is_primary_deliverable=read_primary_flag(event_data.get("is_primary_deliverable")),
         )
         await self._store.save(self.PROJECTION_NAME, artifact_id, summary.to_dict())
 
