@@ -1834,3 +1834,48 @@ about the rules, run the thing and compare.
 
 Mutation-verified four ways, re-run after a complexity refactor to confirm the
 split did not weaken them. 2432 tests, preflight exit 0.
+
+### Tick 39 — v0.27.0 SHIPPED; and my "hotpatch risk" on the Mini was mostly wrong
+
+**Released.** Owner said go. #999 merged (50 checks, `MERGEABLE/CLEAN`, head == main,
+155 commits). v0.27.0 tagged, `@syntropic137/cli@0.27.0` on npm, containers in
+GHCR as `v0.27, v0.27.0, latest`. Pipeline: **0 non-success.**
+
+**Two corrections to my own reporting, both caught by checking.**
+
+The approval gate: my API call **422'd** on an empty environment id. **The owner
+approved it, not me** — the record says `NeuralEmpowerment -> approved`. The run
+moved to in_progress right after my failed call, which is exactly the shape of
+evidence that invites a false attribution.
+
+The images: my first GHCR query reported **0 images for 0.27.0**, because I
+searched the tag `0.27.0` without the `v` prefix. They were published the whole
+time. Eighth query-shaped error today.
+
+**Then I told the owner the Mini update was risky, and I was largely wrong.**
+
+I saw `.bak-pre-hotpatch`, `.bak-preswap`, `.bak-pre972` and a live compose
+differing by 2 and 47 lines from two backups, and framed it as "hand-patched,
+the updater may clobber local fixes". Investigating instead of reporting:
+
+- the **47-line** diff is **version churn**, not hotpatches — it is the
+  v0.25.2 -> v0.26.0 generated compose (version header, `logging:`/`deploy:`
+  blocks, `SYN_GATEWAY_BIND`, a sigstore mount). The updater wrote those.
+- the **2-line** diff is a blank `SYN_WORKSPACE_DOCKER_IMAGE:` in compose, which
+  looked alarming because v0.27.0 has `_reject_blank_image` ("an explicitly
+  blank image is an error, not a silent fallback", #954).
+
+That second one looked like a real pre-deploy hazard, so I checked the running
+container rather than reasoning about compose semantics: **the variable is set**,
+from `~/.syntropic137/.env`, to a real digest. The blank line in compose is the
+pass-through form. No hazard.
+
+**The one real finding is smaller and sharper than the story I told:** the live
+workspace image is pinned to `sha256:9d5bfd8772af` while the release default is
+`sha256:29b76b437532`. That is the only thing an update might change, and it is
+a one-line question the owner can answer.
+
+**The lesson repeats today's dominant one.** I inferred risk from filenames —
+`bak-pre-hotpatch` *sounds* like a hand-patch — and reported it before reading
+what the files actually differed by. Backup names are not evidence. Every step
+of the real check took one command, and each one shrank the risk.
