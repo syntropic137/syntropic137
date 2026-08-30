@@ -30,7 +30,7 @@ _LATER = datetime(2026, 8, 29, 12, 0, 5, tzinfo=UTC)
 def _artifact(
     artifact_id: str,
     content: str,
-    created_at: datetime,
+    created_at: datetime | str | None,
     *,
     is_primary: bool,
 ) -> ArtifactSummary:
@@ -72,8 +72,8 @@ class TestColdPathIgnoresRowOrder:
         path takes row 0 it injects B, and the next phase silently reads
         a different document after a restart.
         """
-        deliverable = _artifact("art-a", "# Plan", _EARLIER, is_primary=True)
-        secondary = _artifact("art-b", "review: ok", _LATER, is_primary=False)
+        deliverable = _artifact("z-earlier", "# Plan", _EARLIER, is_primary=True)
+        secondary = _artifact("a-later", "review: ok", _LATER, is_primary=False)
 
         # updated_at DESC -> most recently written row first.
         service = ArtifactQueryService(_ProjectionReturning([secondary, deliverable]))
@@ -85,8 +85,8 @@ class TestColdPathIgnoresRowOrder:
     @pytest.mark.asyncio
     async def test_insertion_order_yields_the_same_answer(self) -> None:
         """The answer must not change with row order. Same data, order flipped."""
-        deliverable = _artifact("art-a", "# Plan", _EARLIER, is_primary=True)
-        secondary = _artifact("art-b", "review: ok", _LATER, is_primary=False)
+        deliverable = _artifact("z-earlier", "# Plan", _EARLIER, is_primary=True)
+        secondary = _artifact("a-later", "review: ok", _LATER, is_primary=False)
 
         service = ArtifactQueryService(_ProjectionReturning([deliverable, secondary]))
 
@@ -103,8 +103,8 @@ class TestColdPathIgnoresRowOrder:
         Nothing can be back-filled, so the tiebreak must reproduce what
         the live path did at the time: the earliest-created row.
         """
-        first = _artifact("art-a", "# Plan", _EARLIER, is_primary=True)
-        second = _artifact("art-b", "review: ok", _LATER, is_primary=True)
+        first = _artifact("z-earlier", "# Plan", _EARLIER, is_primary=True)
+        second = _artifact("a-later", "review: ok", _LATER, is_primary=True)
 
         service = ArtifactQueryService(_ProjectionReturning([second, first]))
 
@@ -124,8 +124,8 @@ class TestTheFlagIsWhatDecides:
 
     @pytest.mark.asyncio
     async def test_primary_wins_even_when_it_was_created_last(self) -> None:
-        late_primary = _artifact("art-a", "# Plan", _LATER, is_primary=True)
-        early_other = _artifact("art-b", "review: ok", _EARLIER, is_primary=False)
+        late_primary = _artifact("z-primary", "# Plan", _LATER, is_primary=True)
+        early_other = _artifact("a-secondary", "review: ok", _EARLIER, is_primary=False)
 
         service = ArtifactQueryService(_ProjectionReturning([early_other, late_primary]))
 
@@ -139,10 +139,80 @@ class TestTheFlagIsWhatDecides:
 
         The timestamp tiebreak cannot separate them, so the flag must.
         """
-        primary = _artifact("art-a", "# Plan", _EARLIER, is_primary=True)
-        secondary = _artifact("art-b", "review: ok", _EARLIER, is_primary=False)
+        primary = _artifact("z-primary", "# Plan", _EARLIER, is_primary=True)
+        secondary = _artifact("a-secondary", "review: ok", _EARLIER, is_primary=False)
 
         service = ArtifactQueryService(_ProjectionReturning([secondary, primary]))
+
+        outputs = await service.get_for_phase_injection("exec-1", ["research"])
+
+        assert outputs["research"] == "# Plan"
+
+
+@pytest.mark.unit
+class TestTimestampsAreInstantsNotStrings:
+    """ISO strings do not sort chronologically.
+
+    `...T10:00:00+02:00` is 08:00Z and `...T09:00:00+00:00` is 09:00Z, but
+    the first sorts LAST as a string because "10" > "09". Legacy rows are
+    exactly where mixed offsets and formats live, which is exactly where
+    the tiebreak is load-bearing.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_later_wall_clock_in_a_different_offset_is_still_earlier(
+        self,
+    ) -> None:
+        # 08:00Z -- the earlier instant, but the larger-looking string.
+        earlier = _artifact("z-earlier", "# Plan", "2026-08-29T10:00:00+02:00", is_primary=True)
+        # 09:00Z -- the later instant.
+        later = _artifact("a-later", "review: ok", "2026-08-29T09:00:00+00:00", is_primary=True)
+
+        service = ArtifactQueryService(_ProjectionReturning([later, earlier]))
+
+        outputs = await service.get_for_phase_injection("exec-1", ["research"])
+
+        assert outputs["research"] == "# Plan"
+
+    @pytest.mark.asyncio
+    async def test_a_space_separator_does_not_reorder(self) -> None:
+        """`"2026-08-29 10:00..."` sorts before `"2026-08-29T09:00..."`
+        as a string because " " < "T", inverting the real order."""
+        earlier = _artifact("z-earlier", "# Plan", "2026-08-29 09:00:00+00:00", is_primary=True)
+        later = _artifact("a-later", "review: ok", "2026-08-29T10:00:00+00:00", is_primary=True)
+
+        service = ArtifactQueryService(_ProjectionReturning([later, earlier]))
+
+        outputs = await service.get_for_phase_injection("exec-1", ["research"])
+
+        assert outputs["research"] == "# Plan"
+
+    @pytest.mark.asyncio
+    async def test_rows_with_no_timestamp_still_resolve_the_same_way(self) -> None:
+        """Two untimed rows must not fall back to row order."""
+        a = _artifact("z-one", "# Plan", None, is_primary=True)
+        b = _artifact("a-two", "review: ok", None, is_primary=True)
+
+        forward = ArtifactQueryService(_ProjectionReturning([a, b]))
+        reverse = ArtifactQueryService(_ProjectionReturning([b, a]))
+
+        assert (await forward.get_for_phase_injection("exec-1", ["research"])) == (
+            await reverse.get_for_phase_injection("exec-1", ["research"])
+        )
+
+
+@pytest.mark.unit
+class TestEmptyContentIsNotADeliverable:
+    """`CreateArtifactCommand` rejects empty content, the live cache skips
+    it and the multi-file path skips it. The alias must agree, or a
+    legacy row can win here and appear nowhere else."""
+
+    @pytest.mark.asyncio
+    async def test_an_empty_primary_does_not_win_over_real_content(self) -> None:
+        empty_primary = _artifact("z-empty", "", _EARLIER, is_primary=True)
+        real = _artifact("a-real", "# Plan", _LATER, is_primary=False)
+
+        service = ArtifactQueryService(_ProjectionReturning([empty_primary, real]))
 
         outputs = await service.get_for_phase_injection("exec-1", ["research"])
 

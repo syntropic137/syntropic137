@@ -32,7 +32,7 @@ class ArtifactListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "artifact_summaries"
-    VERSION = 4  # Added source_path field (#988)
+    VERSION = 5  # Added is_primary_deliverable to the read model (#997)
 
     def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
@@ -78,6 +78,10 @@ class ArtifactListProjection(AutoDispatchProjection):
             content=content,
             content_hash=event_data.get("content_hash"),
             source_path=event_data.get("source_path"),  # v5 event field (#988)
+            # Without this the flag the collector writes never reaches the
+            # read model, and the cold path silently falls back to row
+            # order -- the exact divergence #997 exists to close.
+            is_primary_deliverable=bool(event_data.get("is_primary_deliverable", True)),
         )
         await self._store.save(self.PROJECTION_NAME, artifact_id, summary.to_dict())
 
