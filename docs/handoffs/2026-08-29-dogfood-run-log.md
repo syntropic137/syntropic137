@@ -1396,3 +1396,44 @@ budget with.
 n=1 and the two runs differ in more than one way, so the mechanism is stated as
 an observation with a plausible cause, not a proven one. What is NOT ambiguous
 is the direction: the cheap-looking phase is upstream of the expensive one.
+
+### Tick 29 — one silent drop I noticed, three I could not have
+
+Fixed #1011 rather than working around it, because it blocks H8 and it is a
+live dogfooding defect. **PR #1012.**
+
+**Hypothesis going in:** one field was unmapped, so this is a one-line fix.
+
+**Contradicted immediately.** Comparing `PhaseDefinition.model_fields` against
+what `_build_phase_defs` actually passes found **four** dropped fields:
+
+| dropped | consequence |
+|---|---|
+| `provider` | every codex phase installed via the API became claude |
+| `allow_delegation` | cross-harness delegation silently off |
+| `claude_plugins` (#726) | plugin refs installed nothing |
+| `skills` (#772) | **per-phase skill injection installed nothing** |
+
+The last one matters most for this log: `skills` is the feature H2 was testing.
+
+**The part worth keeping:** I found `provider` because a cost number was
+implausible. **The other three were not noticeable at all** — no error, no
+warning, 201, and a workflow that quietly differs from the one you asked for.
+So the main test is structural rather than three more field-specific ones: it
+compares the model's fields against what the mapping passes, and adding a field
+without mapping it now fails immediately.
+
+That distinction is not academic. Mutation-testing showed `skills` and
+`claude_plugins` are caught **only** by the structural test — the field-specific
+tests I would have written from the bug report would have missed both. **When
+the failure mode is silence, test the mapping, not the symptom.**
+
+Also handled the nested `agent: {provider, model}` spelling, because our OWN
+packaged YAML uses it and posting that shape sent the whole block into a key
+nothing read.
+
+Preflight exit 0, 643 syn-api + 3254 package tests, untyped-dicts ratchet held
+at 94 by typing the new helper `Mapping[str, Any]` rather than raising the
+budget. Two pre-push failures caught locally first — an unsorted import and the
+ratchet — both because I formatted the source file and not the test, which is
+the "lint the commit, not the worktree" trap again.
