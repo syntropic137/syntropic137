@@ -314,7 +314,7 @@ services:
   gateway:
     container_name: syn137-gateway
     ports:
-    - 127.0.0.1:${SYN_GATEWAY_PORT:-8137}:80
+    - ${SYN_GATEWAY_BIND:-127.0.0.1}:${SYN_GATEWAY_PORT:-8137}:80
     environment:
       SYN_API_PASSWORD: ${SYN_API_PASSWORD:-}
       SYN_API_USER: ${SYN_API_USER:-admin}

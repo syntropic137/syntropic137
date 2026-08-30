@@ -212,6 +212,17 @@ class InfraSettings(BaseSettings):
         ),
     )
 
+    syn_gateway_bind: str = Field(
+        default="127.0.0.1",
+        description=(
+            "Host address the gateway binds to. Defaults to 127.0.0.1, which"
+            " reaches the API from the host only. Set it to a LAN or Tailscale"
+            " address (or 0.0.0.0) to reach the stack from other machines."
+            " Anything other than 127.0.0.1 exposes the API to that network, so"
+            " set SYN_API_PASSWORD as well."
+        ),
+    )
+
     syn_api_password: SecretStr = Field(
         default=SecretStr(""),
         description=(
