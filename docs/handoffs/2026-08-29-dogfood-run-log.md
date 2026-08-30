@@ -13,11 +13,11 @@ the bottom is the part worth reading later.
 
 | # | Hypothesis | Status |
 |---|---|---|
-| H1 | Separate, focused phases beat fewer combined phases | **WITHDRAWN pending re-score** — the scorer that produced 62% → 75% failed toward "looks good" (see tick 19). Needs re-running on preserved artifacts |
-| H2 | SLP skills in research/planning improve plan quality | **WITHDRAWN pending re-score** — same broken instrument. The 0% exact reading is the LEAST likely to survive, since EXACT wrongly accepted `./` paths |
+| H1 | Separate, focused phases beat fewer combined phases | **RESTORED, supported, n=1** — re-scored on the corrected fail-closed instrument: EXACT 62% → 75% for +5.6% cost. Identical to the original reading |
+| H2 | SLP skills in research/planning improve plan quality | **RESTORED, NOT supported, n=1** — re-scored: 83% RESOLVES, 0% EXACT, 6 citations for $4.14 vs 12 for $3.51. I predicted the 0% was least likely to survive a stricter scorer; it survived unchanged |
 | H3 | Cross-model review catches what the author cannot | **strongly supported** — codex found #995's traversal, and in tick 16 found that my #997 fix was INERT in production and that all five of my tests stopped short of the boundary where it broke |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
-| H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **supported, and re-confirmed on a corrected instrument** — a fresh v3 run scored RESOLVES 37/37 and EXACT 37/37 under the fail-closed scorer. The earlier 98% is withdrawn; this replaces it |
+| H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=2, corrected instrument** — v3 on #990: 55/55 and 55/55. v3 on #1004: 37/37 and 37/37. EXACT 75% → 100% for +85% cost |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
 ---
@@ -903,3 +903,45 @@ have spent all day writing about checking premises.
 citations; `path:1` and `path:1-1` count twice; and the PR claim that every
 phase gets a scoped toolset is **false** — the codex review phase has no
 allowlist and runs `--sandbox danger-full-access`.
+
+### Tick 20 — I withdrew four conclusions that turn out to have been right
+
+Re-fetched the final artifact of all five runs from the Mini and re-scored every
+one on the corrected, fail-closed instrument, all against `origin/main`.
+
+| run | cost | cites | RESOLVES | EXACT | broken scorer said |
+|---|---|---|---|---|---|
+| v1, 3 phases | $3.32 | 21 | 100% | **62%** | 100% / 62% |
+| v2, 4 phases | $3.51 | 12 | 100% | **75%** | 100% / 75% |
+| v2 + SLP skills | $4.14 | 6 | 83% | **0%** | 83% / 0% |
+| v3, citation rule | $6.50 | 55 | 100% | **100%** | 98% / 98% |
+| v3 on #1004 | $8.40 | 37 | 100% | **100%** | — |
+
+**Not one comparison moved.** Four numbers identical; v3 improved 98% -> 100%.
+
+**Why the defects did not bite here, stated so the next reader can check me.**
+The fail-toward-good path only triggers when a cited file is ABSENT at the
+scored revision. These plans cite long-standing repository files that exist in
+both the working tree and at `origin/main`, so the broken fallback returned the
+same answer the correct path returns. The bug was real and severe; this
+particular corpus just never exercised it. My own probe file did, which is how
+codex demonstrated it.
+
+**And I was wrong about which reading was fragile.** In tick 19 I wrote that
+H2's 0% EXACT was "the LEAST likely to survive, since EXACT wrongly accepted
+`./` paths" — reasoning that a stricter EXACT could only lower scores, so a 0%
+had nowhere to go but up. It survived completely unchanged. The prediction was
+backwards: tightening EXACT cannot raise a score, so 0% was the ONE reading
+that was already safe. I had the direction of the correction inverted while
+writing about being careful with directions.
+
+**H1 and H2 restored** with their original verdicts. **H6 is now n=2** on the
+corrected instrument.
+
+**The honest summary of ticks 19-20:** the withdrawal was correct procedure and
+I would do it again — I could not know the numbers survived without
+re-measuring, and publishing on a demonstrably broken instrument is not
+defensible whatever the numbers happen to say. But the outcome is that the
+instrument was broken in a way that did not touch these results, and saying
+"withdrawn" was cheap while saying "re-measured, unchanged" is what actually
+settles it. Withdrawal without re-measurement would have been theatre.
