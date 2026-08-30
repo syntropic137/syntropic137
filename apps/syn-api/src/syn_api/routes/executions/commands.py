@@ -522,7 +522,11 @@ async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -
     alone left a workflow whose only unregistered skill was WORKFLOW-scoped
     still returning 200 and then 404.
     """
-    workflow_refs = tuple(getattr(workflow, "skills", None) or ())
+    # Direct attribute access, not getattr with a string literal: `skills` is a
+    # declared property on WorkflowTemplateAggregate, so the defensive form was
+    # both unnecessary and a string-keyed lookup the repo lints against. A
+    # rename would now be a type error instead of a silent empty tuple.
+    workflow_refs = tuple(workflow.skills or ())
     phases = list(workflow.phases)
     if not workflow_refs and not any(p.skills for p in phases):
         return
