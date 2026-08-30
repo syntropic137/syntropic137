@@ -1482,3 +1482,46 @@ create still diverges from YAML validation.
 
 Preflight exit 0, 646 syn-api tests, ratchet held at 94. Two pre-push failures
 caught locally again, both the ratchet.
+
+### Tick 31 — I called a regression I introduced "pre-existing, deferred"
+
+Codex pass 2 on #1012. Three findings, all verified before I changed anything.
+The first is the one that matters.
+
+**Multi-name skills became the WRONG skill, and that is this PR's regression.**
+Passing raw entries to `SkillRef` looked equivalent to the YAML path.
+`{"source": ..., "names": ["alpha", "beta"]}` declares two skills; direct
+validation produced ONE named after the repo. Verified: a caller asking for
+`alpha` and `beta` got a single skill called `b`.
+
+`main` dropped skills entirely. **Absent is recoverable; wrong resolves and
+injects the wrong instructions.** I had listed this on the PR under
+"pre-existing, deferred" — it is neither, because this PR is what added the raw
+mapping. I reached for the deferral category without checking which side of the
+change the defect came from, and a reviewer had to tell me it was mine.
+
+**`_as_bool` traded one silent corruption for another.** My tick-30 fix
+defaulted a non-bool to False, so `1` and `"true"` DISABLED delegation a caller
+asked to enable — still 201, still altered state. Fail-closed is not the same as
+correct. It now raises. My docstring also claimed "a string is what JSON sends",
+which is false: JSON booleans arrive as real bools.
+
+**And the round-trip test STILL overstated itself.** `execution_type` was
+asserted `is not None` against a fixture value of `"sequential"` — the model
+DEFAULT — so deleting the mapping satisfied it. Plugins and skills asserted
+`len(...) == 1` while the comment beside them claimed identity was checked.
+
+**That is the fifth and sixth tautology today, inside the test I wrote
+specifically to escape tautologies, one tick after replacing the previous one
+for the same reason.** The pattern is now precise enough to state as a rule:
+**an assertion is worthless unless the fixture value could not have arisen
+without the code under test.** A default value, a cardinality, a type check —
+none of them discriminate.
+
+Mutation-verified against codex's own bypasses: wrong source key and mangled
+plugin both fail now. Removing skill expansion killed NOTHING until I added a
+verbose-form test, because the shorthand fixture validates identically through
+either path. **The fixture has to contain the difference, or the mutation walks
+straight through.**
+
+652 syn-api + 3254 package tests, preflight exit 0, ratchet 94.
