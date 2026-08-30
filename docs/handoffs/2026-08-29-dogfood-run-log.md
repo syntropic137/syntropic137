@@ -20,7 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
-| H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **still blocked, tick 32** — #1011 fixed and merged (#1012), but a behavioural probe shows the Mini does NOT have the fix. Needs a release, which is the owner's call |
+| H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **UNBLOCKED, tick 42** — v0.27.0 deployed and verified on the Mini; codex phases now survive install. Ready to test |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51, all 100%. CAVEAT (tick 40): every run executed on an `edge`-channel workspace image, not `release` |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
@@ -1956,3 +1956,54 @@ Tailscale:
 That list is worth keeping as the shape of a deploy check: **each item is a
 behaviour a user can observe, not a version string.** Today I twice reasoned
 from a version or a filename and was wrong both times.
+
+### Tick 42 — v0.27.0 deployed and verified; the update silently cut LAN access
+
+**Deployed to the Mini.** Backup first, then update, then re-pin the workspace
+image off `edge` onto `release`.
+
+**Two things went wrong, both worth keeping.**
+
+**1. My own command was wrong.** I told the owner to run
+`npx syntropic137@latest setup update`. A **typosquat guard** caught it: the
+real package is `@syntropic137/setup`. Good that the guard exists; bad that I
+handed over an unverified command. I had never run it — I copied the shape from
+memory rather than checking, which is the same class as everything else today.
+
+**2. The update silently cut LAN/Tailscale access, and I nearly misread it.**
+After updating, every container reported healthy and `curl localhost:8137`
+worked on the host, but the API was unreachable from my machine.
+
+My first health check printed `status: healthy` — **from a stale `/tmp` file**,
+because the curl had returned `000` and left the previous response in place. I
+caught it only because I printed the HTTP code beside the parsed body. That is
+the silent-stale-result trap that has produced most of today's wrong claims, and
+this time the guard was already in the command.
+
+Root cause, found by hypothesis then check: `.env` still had
+`SYN_GATEWAY_BIND=100.112.178.5`, but the **regenerated compose hardcodes
+`127.0.0.1:${SYN_GATEWAY_PORT:-8137}:80`** — the v0.27.0 generator dropped the
+`${SYN_GATEWAY_BIND:-...}` variable that v0.26.0 emitted. Confirmed with
+`docker port`: `127.0.0.1:8137` after the update, `100.112.178.5:8137` after
+restoring the variable.
+
+Filed **#1017**. It is the same shape as #1011/#1013/#1015 — a value preserved
+at one layer and dropped at the next, with no error — and it is a genuine
+onboarding rough edge: healthy containers, a working localhost curl, and a
+success message, while every remote consumer breaks.
+
+**Verified the release behaviourally, not by version string:**
+
+| field | before v0.27.0 | now |
+|---|---|---|
+| `provider` | `None` (silently claude) | **`codex`** |
+| `allow_delegation` | absent | `True` |
+| `skills` | absent | structured ref (source, name, version, name_overridden) |
+| `allowed_tools` | — | `['Read','Grep']` |
+
+So #1005, #1012 and #1014 are confirmed live. **H8 is unblocked** — a codex
+phase installed through the API now stays codex.
+
+Loop re-armed at :11 and :41 for the next six hours, with the goal stated as
+the owner framed it: dogfood hard enough to build Syntropic inside Syntropic,
+closing unknowns by experiment.
