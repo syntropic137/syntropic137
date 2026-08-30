@@ -14,10 +14,10 @@ the bottom is the part worth reading later.
 | # | Hypothesis | Status |
 |---|---|---|
 | H1 | Separate, focused phases beat fewer combined phases | **supported, n=1** — 62% → 75% citation accuracy for +5.6% cost |
-| H2 | SLP skills in research/planning improve plan quality | **under test** — skills registered, `exec-dc01c5b029ec` running |
+| H2 | SLP skills in research/planning improve plan quality | **NOT supported, n=1** — 18% more cost, 6 citations vs 12, 0% exact |
 | H3 | Cross-model review catches what the author cannot | **supported** — codex found a live path traversal in #995 |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
-| H5 | Mechanical scoring beats opinion for comparing runs | **supported** — the citation scorer produced the H1 result |
+| H5 | Mechanical scoring beats opinion for comparing runs | **supported, but the first instrument was wrong** — it measured path FORMAT while reported as grounding; now reports both |
 
 ---
 
@@ -296,6 +296,57 @@ H2 measurement in flight. Baselines to beat:
 
     v1  3 phases, no skills   $3.3246   13/21 (62%)
     v2  4 phases, no skills   $3.5111    9/12 (75%)
+
+### Tick 10 — H2 measured, and the instrument was measuring the wrong thing
+
+**H2 result** (`exec-dc01c5b029ec`, 4 phases + 6 SLP skills, same #990 task):
+
+| run | cost | citations | GROUNDED | EXACT |
+|---|---|---|---|---|
+| v1 3ph, no skills | $3.3246 | 21 | 21/21 (100%) | 13/21 (62%) |
+| v2 4ph, no skills | $3.5111 | 12 | 12/12 (100%) | 9/12 (75%) |
+| **H2 4ph + skills** | **$4.1380** | **6** | **5/6 (83%)** | **0/6 (0%)** |
+
+**H2 is NOT supported.** Skills cost 18% more than v2 and produced fewer
+citations, none of them usable as written, and one ambiguous. On this metric,
+adding skills made the plan less verifiable.
+
+**But the bigger finding is that my metric was wrong**, and I only saw it
+because the result was surprising enough to check.
+
+The scorer reported `0/6 resolve (0%)` for H2 - which reads as fabrication. It
+was not: every cited file was REAL, just written as `routes/artifacts.py`
+instead of the repo-root-relative path. **The scorer had been measuring
+FORMATTING while I described it as measuring grounding**, including in the
+decision brief and in H5.
+
+It now reports two numbers:
+
+- **GROUNDED** - the file exists at that line. The trust signal.
+- **EXACT** - the path is usable as written. Citation hygiene.
+
+A plan can be 100% grounded and 0% exact. Reporting those as one number told me
+a well-grounded plan was fabricating.
+
+**A second defect in the same instrument:** `_shared/value_objects.py` matches
+four bounded contexts, and the scorer called that "no such file anywhere" - a
+lie about a path whose target exists several times over. Ambiguity is still a
+legitimate ding (a reader cannot follow it either) but it is a different
+failure, now reported as one.
+
+**Third measurement error of the day, same class:** I first scored against the
+wrong worktree, and scores shifted between trees (v2: 12/12 vs 11/12). An
+instrument whose reading depends on which checkout you run it from is not
+measuring the artifact.
+
+**What this does to the earlier conclusions.** H1 stands - v2 beat v1 on EXACT
+(75% vs 62%) and both were 100% grounded, so phase isolation improved hygiene
+without harming grounding. But the headline I recorded, "62% -> 75% citation
+accuracy", was accuracy of FORMAT, not of fact. Corrected above.
+
+**Priority 4 is now clearly the next experiment**: one prompt line requiring
+repo-root-relative paths should move EXACT sharply, and the two-number scorer
+can finally tell whether it costs grounding.
 
 ---
 

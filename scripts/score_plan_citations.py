@@ -60,17 +60,27 @@ class Verdict:
     citation: Citation
     file_exists: bool
     line_exists: bool
+    exact: bool = True
 
     @property
     def ok(self) -> bool:
         return self.file_exists and self.line_exists
 
+    #: True when the path matched several files and identified none of them.
+    ambiguous: bool = False
+
     @property
     def reason(self) -> str:
         if not self.file_exists:
-            return "file does not exist"
+            return (
+                "ambiguous - matches several files, identifies none"
+                if self.ambiguous
+                else "no such file anywhere in the repo"
+            )
         if not self.line_exists:
             return "line is past end of file"
+        if not self.exact:
+            return "real file, but the path is abbreviated"
         return "ok"
 
 
@@ -83,13 +93,53 @@ def extract(text: str) -> list[Citation]:
     return list(seen.values())
 
 
+def _resolve(repo: Path, cited: str) -> tuple[Path | None, bool]:
+    """Find the file a citation refers to, and whether the path was exact.
+
+    TWO DIFFERENT QUALITIES were conflated before this: whether a plan is
+    GROUNDED (the file exists) and whether its citations are USABLE (the path
+    resolves as written). Scoring only exact matches reported 0% for a plan
+    whose every citation pointed at a real file - measuring formatting while
+    claiming to measure grounding.
+
+    They are both worth knowing and they are not the same. A plan citing a
+    fabricated file is untrustworthy; a plan citing a real file by its last two
+    segments is merely inconvenient.
+    """
+    exact = repo / cited
+    if exact.is_file():
+        return exact, True
+    # Abbreviated: match on a trailing path segment sequence, which is what a
+    # human does when they read `routes/artifacts.py` and go looking.
+    suffix = "/" + cited
+    matches = [
+        f
+        for f in repo.rglob("*" + Path(cited).name)
+        if f.is_file()
+        and str(f).endswith(suffix)
+        and ".venv" not in f.parts
+        and ".git" not in f.parts
+        and "_worktrees" not in str(f)
+        and ".claude" not in f.parts
+    ]
+    if len(matches) == 1:
+        return matches[0], False
+    # AMBIGUOUS is not ABSENT, and reporting them the same way was a bug in
+    # this scorer: `_shared/value_objects.py` matches four bounded contexts, so
+    # the citation identifies no particular file. Still a legitimate ding - a
+    # reader cannot follow it either - but "no such file" was a lie about a
+    # path whose target exists several times over.
+    return (None, False) if not matches else (None, True)
+
+
 def verify(citations: list[Citation], repo: Path) -> list[Verdict]:
     out: list[Verdict] = []
     for c in citations:
-        target = repo / c.path
-        exists = target.is_file()
+        target, ambiguous = _resolve(repo, c.path)
+        exists = target is not None
+        exact = exists and target == (repo / c.path)
         line_ok = False
-        if exists:
+        if target is not None:
             try:
                 # Count lines without loading the whole file into memory.
                 with target.open("rb") as fh:
@@ -97,7 +147,7 @@ def verify(citations: list[Citation], repo: Path) -> list[Verdict]:
                 line_ok = 1 <= c.line <= total and (c.end is None or c.end <= total)
             except OSError:
                 line_ok = False
-        out.append(Verdict(c, exists, line_ok))
+        out.append(Verdict(c, exists, line_ok, bool(exact), ambiguous))
     return out
 
 
@@ -115,15 +165,23 @@ def main() -> int:
         return 2
 
     verdicts = verify(citations, args.repo)
-    good = [v for v in verdicts if v.ok]
+    grounded = [v for v in verdicts if v.ok]
+    exact = [v for v in grounded if v.exact]
     for v in verdicts:
-        mark = "ok " if v.ok else "BAD"
+        mark = "ok " if v.ok and v.exact else ("~  " if v.ok else "BAD")
         print(f"  [{mark}] {v.citation.label:<62} {v.reason}")
 
-    pct = 100.0 * len(good) / len(verdicts)
+    n = len(verdicts)
     print()
-    print(f"citations: {len(good)}/{len(verdicts)} resolve ({pct:.0f}%)")
-    return 0 if len(good) == len(verdicts) else 1
+    print(
+        f"  GROUNDED  {len(grounded)}/{n} ({100.0 * len(grounded) / n:.0f}%)  cite a real file at a real line"
+    )
+    print(f"  EXACT     {len(exact)}/{n} ({100.0 * len(exact) / n:.0f}%)  path usable as written")
+    print()
+    print("  Grounded is the trust signal; exact is citation hygiene. A plan can")
+    print("  be fully grounded and score 0% exact - that is a formatting problem,")
+    print("  not a fabrication problem, and the two must not be reported as one.")
+    return 0 if len(grounded) == n else 1
 
 
 if __name__ == "__main__":
