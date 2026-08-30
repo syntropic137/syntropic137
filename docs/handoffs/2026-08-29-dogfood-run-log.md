@@ -13,11 +13,11 @@ the bottom is the part worth reading later.
 
 | # | Hypothesis | Status |
 |---|---|---|
-| H1 | Separate, focused phases beat fewer combined phases | **supported, n=1** — 62% → 75% citation accuracy for +5.6% cost |
-| H2 | SLP skills in research/planning improve plan quality | **NOT supported, n=1** — 18% more cost, 6 citations vs 12, 0% exact |
+| H1 | Separate, focused phases beat fewer combined phases | **WITHDRAWN pending re-score** — the scorer that produced 62% → 75% failed toward "looks good" (see tick 19). Needs re-running on preserved artifacts |
+| H2 | SLP skills in research/planning improve plan quality | **WITHDRAWN pending re-score** — same broken instrument. The 0% exact reading is the LEAST likely to survive, since EXACT wrongly accepted `./` paths |
 | H3 | Cross-model review catches what the author cannot | **strongly supported** — codex found #995's traversal, and in tick 16 found that my #997 fix was INERT in production and that all five of my tests stopped short of the boundary where it broke |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
-| H6 | A prompt line requiring root-relative citations moves EXACT without costing GROUNDED | **strongly supported** — EXACT 75% -> 98%, GROUNDED held at 98%, citations 12 -> 55, cost +85% |
+| H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **supported, and re-confirmed on a corrected instrument** — a fresh v3 run scored RESOLVES 37/37 and EXACT 37/37 under the fail-closed scorer. The earlier 98% is withdrawn; this replaces it |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
 ---
@@ -833,3 +833,73 @@ so in the PR body rather than presenting four clean rows.
 
 **Standing:** #999 green and unmerged (owner's). #1008 open. #1005 merged.
 `exec-167fbe65f189` still running on the Mini at $5.44, phase 3 of 4.
+
+### Tick 19 — codex blocked my PR because my measuring instrument fails toward "looks good"
+
+**Reviewed the scorer, not the code.** `scripts/score_plan_citations.py` produced
+every experimental number in this log, so if it is wrong every conclusion here
+is wrong. I asked codex to treat it as an instrument whose calibration is the
+deliverable. Verdict: **not calibrated well enough to support the published
+conclusions.** Blocked.
+
+**The critical defect, verified by me before fixing:**
+
+| input | scored |
+|---|---|
+| `--rev definitely-no-such-rev` | **100%** |
+| a file absent at `origin/main` but present locally | **100%** |
+
+Every nonzero `git show rev:path` became `None`, and `verify()` then continued
+with the working tree. So the flag silently degraded to exactly the behaviour it
+was added to prevent.
+
+**This is worse than the bug it replaced, and the reason is the lesson.** Tick 15
+added `--rev` precisely to stop scoring against a stale checkout. I verified it
+on the path where the file EXISTS at the revision — which works, and gave the
+71% -> 98% correction I was pleased with. **I never tested the path where the
+file does not exist at the revision, which is the fabrication case the flag
+exists to catch.** I then published four results on the strength of that
+half-verification.
+
+That is the same shape as the tautological tests in ticks 16 and 17: I confirmed
+the behaviour on an input where the fix and its absence agree, and called it
+verified.
+
+**Second finding, an overclaim I repeated all day:** GROUNDED proves an ADDRESS
+resolves. It does not prove the cited lines support the claim attached to them —
+any invented claim followed by a real `file:line` scored "grounded". Renamed
+**RESOLVES**, with the limitation printed on every run. Calling it "the trust
+signal" in this log was wrong.
+
+**Also fixed:** unvalidated ranges (`10-2` and `1-0` scored valid, and `label`
+rendered `:1-0` as `:1` because zero is falsey); `./x.py` and `../outside/x.py`
+scored EXACT (`PurePosixPath` normalizes `./x` to `x`, so the segment check has
+to run on the raw string); `git show HEAD:scripts` counted a directory listing
+as ~49 lines; line counting lost the final line of a file with no trailing
+newline and could crash on a binary blob.
+
+Each verified failing before and passing after.
+
+**Consequence: the 62% / 75% / 83% / 98% table is withdrawn.** The artifacts are
+on the Mini and re-scoring is pending. H1 and H2 are marked withdrawn above
+rather than quietly left standing.
+
+**One result re-established on the corrected instrument.** A fresh v3 run
+planning #1004 (`exec-167fbe65f189`, $8.40, 4 phases, run on the Mini):
+
+```
+RESOLVES  37/37 (100%)   EXACT  37/37 (100%)
+```
+
+First number today measured by an instrument that refuses to fail toward good.
+
+**And the run corrected me.** My task prompt asserted the dead code was
+`WorkspaceServicePort.clone`. The plan found no such class and identified
+`GitConfigurationPort.clone` (`ports.py:220,235-244`) instead — an error in MY
+premise, caught by the workflow rather than by me. Worth recording, because I
+have spent all day writing about checking premises.
+
+**Still outstanding from the review:** fenced code blocks are counted as
+citations; `path:1` and `path:1-1` count twice; and the PR claim that every
+phase gets a scoped toolset is **false** — the codex review phase has no
+allowlist and runs `--sandbox danger-full-access`.
