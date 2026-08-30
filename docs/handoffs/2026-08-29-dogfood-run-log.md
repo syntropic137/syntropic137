@@ -1099,3 +1099,40 @@ is cheap insurance.
 Running. Score with `scripts/score_plan_citations.py --rev origin/main` when it
 lands — now the merged, fail-closed version with its 26 regression tests behind
 it, rather than the one that scored an invalid revision at 100%.
+
+### Tick 24b — the tool I built to stop silent-absence had silent-absence
+
+While the #1009 plan runs, closed the outstanding `api_shape.py` findings.
+**PR #1010.**
+
+This is the sharpest finding of the session. I built that script in tick 18b
+*specifically* because four of my wrong claims were "read a field the response
+does not carry, get None, report the silence as a finding". Codex then found
+the script did exactly that: `describe()` inspected only element `[0]` of a
+list, so a field on later elements was missing from the output and the command
+still exited 0.
+
+Reproduced before fixing: `[{"first_only": 1}, {"later_only": 2}]` printed only
+`first_only`, and `later_only` was not findable either, because `find_value()`
+searched values but never KEYS while reporting "does not appear anywhere".
+
+**The lesson is not "be more careful writing tools".** It is that an instrument
+built in reaction to a failure mode inherits that failure mode unless something
+tests for it. I wrote the tool AND the docstring explaining the exact bug it
+prevents, and still shipped the bug, because I verified it on a homogeneous
+list where the defect is invisible. That is the tautological-input mistake from
+ticks 16, 17 and 21 for the fourth time — the same shape, in the artifact
+designed to prevent the shape.
+
+Fixes: every element summarized with `[in n/N]` on non-universal keys (the
+count IS the signal — without it the output still reads as "these are the
+fields"); keys searched as well as values; `--at` applied before `--find`
+rather than ignored when it is present; `--find-exact` added because substring
+search reports `foo` present when only `foobar` exists.
+
+Regression tests added — this script lacked them too, same gap as the scorer.
+Mutation-verified four ways, all killed. Negative controls included, so a
+`find()` returning everything would not pass.
+
+**Meanwhile** `exec-218c408bb916` (the #1009 plan) is still in phase 1 on the
+Mini at $0.89.
