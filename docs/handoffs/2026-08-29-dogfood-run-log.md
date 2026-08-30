@@ -145,6 +145,50 @@ a validation error, phase ids are constrained, unknown YAML keys are rejected.
 #998 and #997 are listed as Known Issues — someone should see those before
 upgrading.
 
+### Tick 7 — the release blocker was a clock, not the code
+
+**Symptom:** release PR #999 red — 46 passed, 4 failed. All four were the same
+integration test:
+
+    assert _bucket_for_today(buckets).breakdown["output_tokens"] == _TRUE_OUTPUT_TOKENS
+    E  assert 0.0 == 13300
+
+**First hypothesis (wrong):** the release broke the cost pipeline. Plausible —
+this release is FULL of cost changes (#940, #979, #966), and `0.0` where tokens
+should be is exactly what a broken cost projection looks like.
+
+**What actually decided it:** the same commit PASSED at 23:34 UTC and FAILED at
+01:48 UTC. Code does not change between runs; the clock does.
+
+**Root cause:** the test inserts rows at `now() - 2 hours` and `now() - 1 hour`,
+then queries only TODAY. Run between 00:00 and 02:00 UTC both rows land in
+yesterday, today's bucket is empty, and the assertion reads `0.0 == 13300` —
+indistinguishable from the production query returning nothing.
+
+**Proved arithmetically rather than by re-running CI**, because at 02:10 UTC the
+OLD test also passes — a green re-run would have "confirmed" a fix that had done
+nothing:
+
+    run time   now-2h       now-2s
+    00:30      YESTERDAY    ok
+    01:48      YESTERDAY    ok       <- the observed failure
+    02:10      ok           ok       <- now; both pass, proves nothing
+    23:34      ok           ok       <- the observed success
+
+    broken window: hours = 2h 00m 00s   seconds = 0h 00m 02s
+
+The model reproduces both observed outcomes, which is what makes it an
+explanation rather than a story.
+
+**Also learned:** #1000 shows CI green while "Python Integration Tests:
+skipping" — integration runs only on schedule, main pushes, and PRs targeting
+`release`. So green on a feature PR is NOT evidence for an integration fix. The
+real run happens when #999 picks it up.
+
+**Residue left deliberately:** two seconds either side of midnight still breaks.
+Eliminating it needs a future-dated row or a frozen clock; the comment states
+the residue rather than implying it is gone.
+
 ---
 
 ## Retrospective
