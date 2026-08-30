@@ -1571,3 +1571,42 @@ The issue names a full round-trip test — create, GET, export, reinstall,
 compare — rather than per-layer presence checks, because per-layer assertions
 pass while the round trip loses data at a boundary between them. That is
 precisely how the create-path drop survived.
+
+### Tick 33 — three layers looked right and the data still did not arrive
+
+Implemented **#1013** (the deferred read/export gap). **PR #1014.**
+
+**Hypothesis:** add the three fields to the read model, the projection and the
+API response, and they become readable.
+
+**Contradicted at the second step.** I added them to the read model AND the
+projection, and the tests still failed. `PhaseDefinitionDetail` can carry a
+field while `to_dict()` — the shape actually stored and served — silently drops
+it. **Three layers looked right and the data still did not arrive.**
+
+That is the same lesson as tick 29, arriving from the other direction. There I
+argued the test must be structural because the failure mode is silence. Here
+the failure survived three correct layers and was caught only because the test
+crosses boundaries. **Per-layer checks all pass while the value is lost at a
+seam BETWEEN them** — which is precisely how the create-path drop survived in
+the first place, and it is now the second time in five ticks that a `to_dict`
+or a mapping function has been the invisible layer.
+
+Also worth recording: I printed the stored row rather than assuming my
+assertion targeted the right shape, and the row had 15 keys and used `id` not
+`phase_id`. That is what pointed at `to_dict`. Guessing would have had me
+editing the read model again.
+
+Mutation-verified three ways — `to_dict` dropping them (4 tests), the
+projection not reading them (3), the legacy default flipping to True (1). The
+last matters on its own: a wrong default would report delegation on phases that
+never asked for it, which is worse than omitting the field.
+
+Codegen ran, so the OpenAPI spec and the CLI + dashboard types follow.
+
+Four local gate failures caught before push, none of which CI would have told
+me faster: an unsorted import, the untyped-dicts ratchet, a duplicated keyword
+from a careless string replace, and `_ref_strings` at cyclomatic 12 against a
+threshold of 10. Split it in two rather than excepting it.
+
+2399 tests, preflight exit 0, ratchet held at 94.
