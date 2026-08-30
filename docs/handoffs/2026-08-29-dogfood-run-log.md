@@ -708,3 +708,52 @@ commit; #997 auto-closed.
 **#999 is now the ONLY open PR**, still green at 50 checks, and stays the
 owner's call — merging it publishes to npm and GHCR, tags, and cuts a public
 release.
+
+### Tick 18 — planning #1004 through Syntropic; five measurement errors in one day
+
+**Ran through Syntropic on the Mini**, not locally: `exec-167fbe65f189`,
+workflow `sdlc-research-plan-v3` (the 98%-EXACT variant), task = design how an
+execution records the commit SHA of every repo it cloned (#1004). Running at
+last check.
+
+**Why #1004 and not #1006.** #1004 is the gap that limits every measurement in
+this log: no artifact from any run can be checked against the tree the agent
+read. I picked it, then checked whether it was tick-sized. It is not —
+`WorkspaceServicePort.clone` is **dead code** (no implementation, no callers);
+the real clone is a generated shell script in `setup_phase_secrets.py`, and
+there is no structured channel back from setup to the host. So it spans script
+-> transport -> domain event -> projection -> API. That is a planning job, which
+is exactly what the owner asked to route through Syntropic. Dispatched rather
+than hand-rolled.
+
+**Premise verified live, not from my own issue text.** `GET
+/api/v1/executions/exec-efd0d97a0ab7` really does return
+`repos: ["https://github.com/syntropic137/syntropic137"]` with no SHA.
+
+**Then I made three false findings in a row, all my own query errors.**
+
+1. "The SDLC workflows are not installed on the Mini." Wrong — I filtered on
+   `workflow_id`, which the list response does not carry. They were all there.
+2. "`workflow_id` is None for every workflow — the list returns null ids."
+   Wrong — the field is named `id` on the list.
+3. "`phase_count` is 0 for everything." Wrong — I read a `phases` key that does
+   not exist on a summary. `phase_count` is correct (v3 reports 4, matching
+   detail).
+
+Each dissolved the moment I printed the raw keys instead of my filtered view.
+
+**That is five measurement errors today** (the 31-commit-stale scorer, the
+wrong-tree test census, and these three). Every one has the same shape: **I
+asserted from a query or scope I had not validated, and the failure mode was a
+silent empty result that reads as a finding.** Tick 15 fixed one instrument;
+the habit is untouched, because the fix was instrument-shaped and the habit is
+not. The generalisable control is cheap and I keep skipping it: **print the raw
+shape once before filtering it.**
+
+**One real finding survived** and became #1007: workflow identity is `id` on the
+list endpoint and `workflow_id` on detail and execution. AGENTS.md explicitly
+requires these to match across layers. The cost is exactly what bit me — reading
+`workflow_id` off a list item yields None silently, so a client dispatches on
+nothing and gets "no such workflow" instead of "wrong field name". An agent is
+the stated acceptance case for this API, and the natural list-then-execute loop
+does not compose today.
