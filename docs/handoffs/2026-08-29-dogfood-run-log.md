@@ -945,3 +945,38 @@ defensible whatever the numbers happen to say. But the outcome is that the
 instrument was broken in a way that did not touch these results, and saying
 "withdrawn" was cheap while saying "re-measured, unchanged" is what actually
 settles it. Withdrawal without re-measurement would have been theatre.
+
+### Tick 21 — the obvious fix deleted every citation; and codex was half wrong
+
+Closed the last two scorer findings and corrected the tool-scoping docs.
+
+**Fenced examples and duplicate spans:** a plan that DEMONSTRATES the citation
+format inside a fence was scored as having made that citation, and `x.py:5` /
+`x.py:5-5` counted as two locations. Both fixed, both mutation-verified.
+
+**The fence fix, done the obvious way, was a disaster.** I followed the review's
+"exclude code blocks" wording and blanked inline `backticked` spans too. That
+deleted **every real citation in every plan measured so far** — these plans
+write citations as `path/to/file.py:12-30`, because that is simply how markdown
+names a file. All five runs scored NO CITATIONS. Caught in one command by
+re-scoring instead of assuming. Fenced blocks are where a document demonstrates
+its format; inline code is where it names things.
+
+**Codex was half wrong, and acting on it would have made an accurate doc
+wrong.** Finding 6 said my comments were stale because "current wiring uses the
+restrictive `--tools`". `--allowedTools` is the ONLY tool flag emitted anywhere
+in production code (`_wiring.py:285`); `--tools` appears nowhere. My comment was
+right. I only caught it because I opened the file to edit it.
+
+That is the mirror of the tick-16 lesson. There I under-trusted nothing and
+accepted a finding wholesale; the correct posture is the same in both
+directions — **a review finding is a hypothesis until something runs.**
+
+**What WAS true, verified myself:** the codex phase has no tool enforcement and
+cannot be given any — `_build_codex_command` hardcodes `--sandbox
+danger-full-access` and takes only a prompt and a model. Filed **#1009**. The
+container is still the isolation boundary, so this is not host security; the
+cost is review independence, since the reviewer can rewrite the document it was
+asked to critique and the artifact collector will pick up the rewrite.
+
+**Re-scored all five runs after both fixes: every number unchanged.**
