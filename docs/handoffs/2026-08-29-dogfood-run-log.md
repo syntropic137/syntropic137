@@ -1025,3 +1025,34 @@ tick-17 tautologies — found this time by the discipline rather than by a
 reviewer, which is the first time today that has happened.
 
 **Re-scored all five runs after every change: unchanged.**
+
+### Tick 23 — merged main into the PR before trusting its green
+
+#1008 had both codex passes done, findings cleared, 26 checks green, and
+`MERGEABLE / CLEAN`. Under the standing rule that is a merge.
+
+**It was 4 commits behind main, so the green measured a stale base.**
+`MERGEABLE / CLEAN` describes a textual merge, not a tested one. Merged
+`origin/main` in (merge, never rebase — the 4 commits were my own #1005 work),
+re-ran every gate on the result, and pushed so CI re-runs against a base that
+is `behind: 0`.
+
+Local on the merged tree: preflight exit 0, syn-domain 1742 passed,
+adapters + apps 1513 passed, scorer tests 26 passed.
+
+**And I closed the tick-22 loop honestly.** Having been wrong about `--tools`
+because I grepped a 35-commit-stale tree, I re-ran that exact grep from the
+now-current worktree before letting the correction stand:
+
+```
+297:        cmd.extend(["--tools", ",".join(phase.agent_config.allowed_tools)])
+```
+
+`--allowedTools` is not emitted. Codex was right, my correction of my
+correction is right, and this time the tree it was measured in is stated.
+
+That is the whole discipline in one line: **the same command, run in a tree
+whose currency I checked first.** Three of today's eight errors would not have
+happened if I had done that by default rather than after being caught.
+
+Waiting on CI before merging. Not merging #999 — that remains the owner's.
