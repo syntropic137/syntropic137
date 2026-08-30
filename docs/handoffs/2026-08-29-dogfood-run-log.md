@@ -15,8 +15,9 @@ the bottom is the part worth reading later.
 |---|---|---|
 | H1 | Separate, focused phases beat fewer combined phases | **RESTORED, supported, n=1** — re-scored on the corrected fail-closed instrument: EXACT 62% → 75% for +5.6% cost. Identical to the original reading |
 | H2 | SLP skills in research/planning improve plan quality | **RESTORED, NOT supported, n=1** — re-scored: 83% RESOLVES, 0% EXACT, 6 citations for $4.14 vs 12 for $3.51. I predicted the 0% was least likely to survive a stricter scorer; it survived unchanged |
-| H3 | Cross-model review catches what the author cannot | **strongly supported, and it beat me on a direct disagreement** — found #995's traversal; found my #997 fix was INERT; found my scorer failed toward good; and was RIGHT about `--tools` when I publicly said it was wrong (tick 22) |
+| H3 | Cross-model review catches what the author cannot | **strongly supported, with a LIMIT found in tick 26** — it beat me repeatedly (inert #997 fix, fail-toward-good scorer, the `--tools` dispute). BUT the review INSIDE the workflow was insufficient: the revise phase overruled a correct blocker using a false premise, and an independent pass caught it |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
+| H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51. RESOLVES and EXACT both 100% in all three. EXACT 75% → 100% for +85% cost |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
@@ -1226,3 +1227,51 @@ Worth noting separately: the **codex review phase costs about $0.55 in both
 runs**, roughly a sixth of a claude phase, while H3 says it is the phase that
 has caught the most real defects. That is the best cost-to-value ratio in the
 whole workflow, and it is stable across runs.
+
+### Tick 26 — a 100/100 plan that would have shipped privilege escalation
+
+Merged **#1010** (16 checks green, `behind main: 0`, two codex passes cleared).
+#999 is again the only open PR.
+
+Then, before executing the #1009 plan, I put the FINAL revised plan through an
+independent codex review — because a citation score measures whether addresses
+resolve, not whether claims are true, and I had just spent a tick establishing
+exactly that distinction. Verdict: **not ready**, and the workflow's own
+internal review phase was insufficient.
+
+**The finding that matters: the fix would have been privilege escalation.**
+The plan asserts that a read-only claude phase whose declared tools intersect
+to nothing yields `--tools ""`. I checked the code myself:
+
+```python
+if phase.agent_config.allowed_tools:
+    cmd.extend(["--tools", ",".join(phase.agent_config.allowed_tools)])
+```
+
+An empty tuple is falsy, so `--tools` is **omitted** and every tool stays
+available. A phase declaring `allowed_tools: [Bash]` + `read_only` would get
+MORE access than one declaring nothing — in the feature whose entire purpose is
+restricting access.
+
+**And the revise phase overruled a correct blocker with a false premise.** The
+internal codex phase raised the agentic-primitives boundary. Revise rejected it
+because "the submodule is unpopulated". It is not — `harnesses/claude` and
+`harnesses/codex` are both there at `276eec0ac231`. Verified directly.
+
+**H7, refuted on first test: a 100% citation score does not indicate a correct
+plan.** RESOLVES 51/51, EXACT 51/51, and still not executable. The central
+claim's citation resolves *perfectly* — real file, real lines — and the
+adjacent executable code contradicts it. This is the cleanest possible
+demonstration of the line the scorer now prints on every run, and it is worth
+more than another 100% would have been.
+
+**H3 gains a limit.** Cross-model review remains the highest-value phase — it
+has caught more real defects today than anything else, at about $0.55 a run.
+But the review INSIDE the workflow was not sufficient: it raised the right
+blocker and the next phase talked itself out of it. **A review is only as good
+as the step that consumes it**, and a revise phase marking its own homework is
+not an independent check. The external pass cost $0 extra beyond one codex run
+and caught six blockers.
+
+Ten load-bearing claims checked; eight held. Not executing the plan. Posted the
+full disposition to #1009.
