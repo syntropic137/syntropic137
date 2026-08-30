@@ -1693,3 +1693,47 @@ staring at, and the defect lives on the other one.** The practical control is
 cheap: after fixing layer N, ask what consumes layer N, and test THAT.
 
 Mutation-verified three ways. 2411 tests, preflight exit 0, codegen re-run.
+
+### Tick 36 — the same defect at a third layer, and a mutation that missed its target
+
+**#1014 merged, #1013 closed.** Then took the export gap I had deferred twice.
+
+**Hypothesis:** export drops the same four fields, so this is a small fix.
+
+**Contradicted by measuring.** Comparing `PhaseDefinitionResponse.model_fields`
+against what `_yaml_phase_lines` references: **export emitted 6 of 18.** Ten
+fields genuinely lost, including `allowed_tools`, `timeout_seconds`, `provider`
+and `model`.
+
+So exporting `workflows/sdlc/research-plan` and reinstalling it loses its codex
+review phase, every per-phase tool allowlist, and all skills — and reports
+success. Filed **#1015**, fixed in **PR #1016**.
+
+**Third layer of one defect.** #1011 dropped fields on create, #1013 on read,
+#1015 on the way out. Each was found only after fixing the previous one, and
+each time I assumed the fix I had just made was the whole path. The lesson is
+not "check the other layers" — I did check, twice, and stopped at the layer I
+could see. It is that **a field's journey has more hops than the fix in front
+of me suggests, and the only reliable probe is to follow the value rather than
+audit the code.**
+
+**Applied H10 deliberately for the first time.** The tests parse the emitted
+YAML through a real loader instead of asserting on the string, because the
+failure mode is output that is valid YAML meaning the wrong thing — and a text
+check is exactly what #1012 shipped and had defeated by a decoy.
+
+**One test corrected its own premise rather than the code.** My negative
+control asserted export invents nothing for a bare phase, and it failed on
+`timeout_seconds`. Investigating: the RESPONSE model defaults it to 300 while
+the DOMAIN field defaults to None, so the API genuinely reports 300 and export
+is faithful to what GET returns. Suppressing it would make the export disagree
+with the response a caller just read. I changed the test and stated the
+ambiguity rather than bending the emitter.
+
+**A mutation killed nothing, and the harness was at fault.** My sed hit a
+DIFFERENT `if phase.allowed_tools:` — in the prompt-frontmatter builder, not
+the export line. Re-aimed, it fails the named test. Worth recording because
+**a mutation that silently misses its target reads exactly like a test that
+cannot fail**, and I have spent all day treating the second as the diagnosis.
+
+2422 tests, preflight exit 0.
