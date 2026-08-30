@@ -1,5 +1,5 @@
-id: sdlc-research-plan-v2
-name: "SDLC: Research, Plan, Cross-Model Review, Revise"
+id: sdlc-research-plan-v3
+name: "SDLC: Research, Plan, Cross-Model Review, Revise (v3, root-relative citations)"
 description: >
   Produce a plan you can trust before any code is written. Four phases, each in
   its own workspace with a single job: investigate, plan, review across models,

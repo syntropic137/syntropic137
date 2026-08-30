@@ -17,6 +17,7 @@ the bottom is the part worth reading later.
 | H2 | SLP skills in research/planning improve plan quality | **NOT supported, n=1** — 18% more cost, 6 citations vs 12, 0% exact |
 | H3 | Cross-model review catches what the author cannot | **supported** — codex found a live path traversal in #995 |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
+| H6 | A prompt line requiring root-relative citations moves EXACT without costing GROUNDED | **under test** — `exec-efd0d97a0ab7` |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, but the first instrument was wrong** — it measured path FORMAT while reported as grounding; now reports both |
 
 ---
@@ -347,6 +348,39 @@ accuracy", was accuracy of FORMAT, not of fact. Corrected above.
 **Priority 4 is now clearly the next experiment**: one prompt line requiring
 repo-root-relative paths should move EXACT sharply, and the two-number scorer
 can finally tell whether it costs grounding.
+
+### Tick 11 — experiment 4: one prompt line, measured
+
+**Hypothesis (H6, new):** the single cheapest quality win available is a prompt
+line requiring repo-root-relative citations. Across three runs EXACT ranged
+62% -> 75% -> 0% while GROUNDED stayed 83-100%, so every failure was format,
+not fabrication. If the format is the whole problem, saying so should move EXACT
+sharply and leave GROUNDED alone.
+
+**Why it is a real experiment and not a guess:** the corrected two-number scorer
+can now distinguish the two outcomes. Before this tick it could not - a run
+that got worse at formatting and better at grounding would have looked like a
+straight regression.
+
+**Method:** `sdlc-research-plan-v3`, identical to v2 in every other respect,
+with one section added to all four phase prompts. Same #990 task. Asserted at
+build time that all four templates carry it, rather than trusting the edit.
+
+The line names the actual failure rather than stating a rule: it points out
+that `_shared/value_objects.py` matches four bounded contexts and identifies
+none of them, so a reader cannot follow it and a checker cannot verify it. A
+model given the reason has something to generalise from; a model given "use
+full paths" has a rule to forget.
+
+**Running:** `exec-efd0d97a0ab7`. Predictions recorded BEFORE the result, so
+this cannot be read backwards:
+
+- EXACT should rise well above 75%. If it does not, the format is not something
+  a prompt can fix and the scorer should be relaxed instead.
+- GROUNDED should stay at or near 100%. If it falls, the instruction traded
+  accuracy for tidiness, which would be a bad trade and worth abandoning.
+- Cost should be roughly v2's $3.51. A large rise would mean the phases are
+  spending tokens on path bookkeeping rather than thinking.
 
 ---
 

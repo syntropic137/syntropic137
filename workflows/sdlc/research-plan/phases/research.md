@@ -29,6 +29,19 @@ $ARGUMENTS
 - **Constraints** - ADRs, schema-compatibility rules, existing invariants.
 - **Open questions** - what you could NOT determine, and what would settle it.
 
+## Citing code
+
+Every `file:line` reference MUST be the path from the repository root, exactly
+as `git ls-files` prints it - for example
+`packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/value_objects.py:85`,
+never `_shared/value_objects.py:85`.
+
+An abbreviated path is not a smaller version of a citation, it is an unusable
+one. `_shared/value_objects.py` matches four bounded contexts in this
+repository and identifies none of them, so a reader cannot follow it and a
+checker cannot verify it. Measured across three runs: every cited file was
+real, and up to 100% of citations were unusable purely because of this.
+
 ## Rules
 
 - Every factual claim carries a `file:line`. A claim you cannot cite goes under
