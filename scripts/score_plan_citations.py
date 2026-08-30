@@ -105,12 +105,53 @@ class Verdict:
         return "ok"
 
 
+def strip_examples(text: str) -> str:
+    """Blank out FENCED blocks only, keeping line structure.
+
+    Inline code is deliberately NOT stripped. The obvious-looking version of
+    this also blanked `backticked` spans as "examples", which silently deleted
+    every real citation in every plan measured so far -- these plans write
+    citations as `path/to/file.py:12-30`, because that is the ordinary
+    markdown convention for naming a file. Scoring went to NO CITATIONS on all
+    five runs, which is how it was caught. Fenced blocks are where a document
+    demonstrates its own format; inline code is where it names things.
+
+    A plan that DEMONSTRATES the citation format inside a fence is not making
+    that claim, but the extractor could not tell the difference and counted it.
+    That inflates the denominator with citations the author never asserted, and
+    it inflates it most for the plans that document their own conventions.
+
+    Replaced with blanks rather than deleted so any future line-based reporting
+    still points at the right line.
+    """
+    out: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            out.append("")
+            continue
+        out.append("" if in_fence else line)
+    return "\n".join(out)
+
+
 def extract(text: str) -> list[Citation]:
-    """Every distinct file:line citation, in order of first appearance."""
-    seen: dict[str, Citation] = {}
-    for m in _CITATION.finditer(text):
-        c = Citation(m["path"], int(m["line"]), int(m["end"]) if m["end"] else None)
-        seen.setdefault(c.label, c)
+    """Every distinct cited LOCATION, in order of first appearance.
+
+    Keyed on the canonical span, not the literal text: `x.py:5` and `x.py:5-5`
+    name the same line and were counted as two separate citations, so a plan
+    that varied its spelling scored against a larger denominator than one that
+    did not. Malformed spans are kept -- they are a real defect and must be
+    reported, not silently dropped.
+    """
+    seen: dict[tuple[str, int, int | None], Citation] = {}
+    for m in _CITATION.finditer(strip_examples(text)):
+        end = int(m["end"]) if m["end"] else None
+        c = Citation(m["path"], int(m["line"]), end)
+        # A single-line span and an explicit N-N span are the same location.
+        canonical = (c.path, c.line, None if end == c.line else end)
+        seen.setdefault(canonical, c)
     return list(seen.values())
 
 

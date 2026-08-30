@@ -29,6 +29,13 @@ requires_repos: true
 # platform - `allowed_tools` maps to `--allowedTools`, which governs
 # auto-approval rather than availability (#964). Declared here so the workflow
 # states its intent and starts working the moment #964 lands.
+#
+# The codex phase below is a further gap: it carries no `allowed_tools` and
+# cannot, because `_build_codex_command` hardcodes `--sandbox
+# danger-full-access` and takes only a prompt and a model (#1009). Codex
+# rejects tool-NAME policies by design, so the fix is a sandbox mode, not an
+# allowlist. Until then the review phase can write to the workspace its
+# artifacts are collected from.
 
 phases:
   # Phase ids are load-bearing: a later phase reads an earlier one's output at
