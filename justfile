@@ -565,9 +565,16 @@ dashboard-lint:
 dashboard-ci:
     # CI=true because GitHub Actions sets it, and pnpm refuses to remove a stale
     # modules directory without it. Same command, same environment, same result.
-    cd lib/ui-feedback/packages/ui-feedback-react && CI=true pnpm install --ignore-scripts
+    #
+    # The ci.yml job also installs lib/ui-feedback and `pnpm link`s it. Both are
+    # omitted here on purpose: nothing under apps/syn-dashboard-ui imports
+    # @syn137/ui-feedback-react, its package.json does not depend on it, and
+    # lib/ui-feedback is not in pnpm-workspace.yaml -- so the link changes no
+    # dependency graph. Run locally it is actively harmful: with no dependent to
+    # attach to, pnpm writes a root package.json and edits pnpm-lock.yaml and
+    # pnpm-workspace.yaml, i.e. a verification command mutating tracked files.
+    # Removing the dead steps from ci.yml is #1020.
     cd apps/syn-dashboard-ui && CI=true pnpm install --frozen-lockfile --ignore-scripts
-    cd apps/syn-dashboard-ui && CI=true pnpm link ../../lib/ui-feedback/packages/ui-feedback-react
     just dashboard-qa
 
 # Full dashboard QA (lint + build)
