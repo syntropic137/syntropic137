@@ -19,6 +19,7 @@ the bottom is the part worth reading later.
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
+| H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
 | H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **still blocked, tick 32** — #1011 fixed and merged (#1012), but a behavioural probe shows the Mini does NOT have the fix. Needs a release, which is the owner's call |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51. RESOLVES and EXACT both 100% in all three. EXACT 75% → 100% for +85% cost |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
@@ -1650,3 +1651,45 @@ Codegen re-run. 2403 tests, preflight exit 0, both ratchets held by typing
 Accepted and left visible on the PR: export still emits none of these into
 `workflow.yaml`, so export -> reinstall loses them. Its own PR, with the
 round-trip test #1013 names.
+
+### Tick 35 — a default asserted only in its default direction proves nothing
+
+Codex pass 2 on #1014 found two mutations my tests survived. Both are the same
+hole, one layer further out each time.
+
+**Deleting the endpoint build site passed all nine tests**, because
+`PhaseDefinition` supplies False and empty lists from its own defaults and none
+of my tests reached `_map_phases` — the mapping a caller's JSON is actually
+built from.
+
+**Hard-coding `allow_delegation=True` in `from_dict` also passed**, because
+every readback fixture set it True. That gives the rule its sharpest form yet:
+**a default asserted only in its default direction proves nothing.** All nine
+tests agreed with a literal `True`.
+
+Also fixed something worse than an omission: an entry `from_stored` could not
+read became an EMPTY ref, serializing as `{"source_url": null, "name": null,
+...}` — indistinguishable from a declared-but-blank reference. `None` used to
+be filtered; turning it into an apparently-valid object erased the abnormality
+instead of surfacing it. And shorthand is now kept verbatim in `raw` rather
+than assigned to `source_url`, because `owner/repo@v1` is not a source URL and
+calling it one is the mislabelling that made `_render_ref` dangerous. Codex was
+right that my docstring promised to handle shorthand and did not; rather than
+make the promise true I removed it.
+
+**H10 registered and refuted: my tests find the bug I am looking for.** Across
+ticks 30-35 that has been false four times:
+
+| tick | what my test measured | what it missed |
+|---|---|---|
+| 30 | source text of the mapping | whether the mapping ran |
+| 31 | shorthand skills | the verbose multi-name form |
+| 34 | the write side (`to_dict`) | the read side (`from_dict`) |
+| 35 | store + read model | the API response mapping |
+
+Every one felt like the careful choice at the time. The generalisation is not
+"write better tests" — it is that **I reliably test the side I have just been
+staring at, and the defect lives on the other one.** The practical control is
+cheap: after fixing layer N, ask what consumes layer N, and test THAT.
+
+Mutation-verified three ways. 2411 tests, preflight exit 0, codegen re-run.
