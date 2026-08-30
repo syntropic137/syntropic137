@@ -412,27 +412,41 @@ class TestOneSummaryPerSession:
         )
 
         session_id = str(uuid4())
-        # SECONDS, not hours. Both rows must land in the SAME UTC day the query
-        # asks for, and `now() - 2 hours` does not when CI runs between 00:00
-        # and 02:00 UTC - the rows fall into yesterday, today's bucket comes
-        # back empty, and the assertion reads `0.0 == 13300`.
+        # ANCHORED to midday on the queried date, not offset from `now()`.
         #
-        # Observed: this test passed at 23:34 UTC and failed at 01:48 UTC on the
-        # same commit, which is how it was found. It had nothing to do with the
-        # change under test.
+        # The original used `now() - 2 hours` and `now() - 1 hour`, then queried
+        # TODAY only. Run between 00:00 and 02:00 UTC both rows land in
+        # YESTERDAY, today's bucket comes back empty, and the assertion reads
+        # `0.0 == 13300` - indistinguishable from the production query returning
+        # nothing. Observed: the same commit passed at 23:34 UTC and failed at
+        # 01:48 UTC, which is how it was found.
         #
-        # Seconds keep the only property the test needs - one row strictly newer
-        # than the other - while shrinking the broken window from two hours to
-        # two seconds either side of midnight.
+        # A smaller offset (seconds) only shrinks the broken window; it does not
+        # close it. Anchoring closes it: both rows are placed at a fixed point
+        # on the SAME date the query asks for, so no run time can separate them
+        # from it.
+        #
+        # These timestamps are in the FUTURE when the suite runs before midday,
+        # and that is fine - nothing under test rejects `time > now()`. The
+        # ranking orders by untruncated `time DESC` (canonical_usage.py) and the
+        # heatmap buckets by date; only date membership and relative order
+        # matter here. Avoiding future timestamps was the reason the first fix
+        # settled for a smaller window, and it was not a real constraint.
         async with event_store.pool.acquire() as conn:
-            for seconds_ago, output in ((2, 99_999), (1, _TRUE_OUTPUT_TOKENS)):
+            for secs_past_noon, output in ((0, 99_999), (1, _TRUE_OUTPUT_TOKENS)):
                 await conn.execute(
                     """
                     INSERT INTO agent_events
                         (time, event_type, session_id, execution_id, phase_id, data)
-                    VALUES (now() - make_interval(secs => $1), $2, $3, $4, NULL, $5::jsonb)
+                    VALUES (
+                        (
+                            date_trunc('day', now() AT TIME ZONE 'UTC')
+                            + make_interval(hours => 12, secs => $1)
+                        ) AT TIME ZONE 'UTC',
+                        $2, $3, $4, NULL, $5::jsonb
+                    )
                     """,
-                    seconds_ago,
+                    secs_past_noon,
                     SESSION_SUMMARY,
                     session_id,
                     execution_id,
