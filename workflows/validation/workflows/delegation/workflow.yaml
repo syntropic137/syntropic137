@@ -1,0 +1,29 @@
+id: selfhost-delegation-v1
+name: "Validation: cross-harness delegation and cost attribution"
+description: >
+  A codex-primary phase that shells out to `claude -p`. Proves delegation works
+  on this deployment AND that the delegate's cost is attributed - the leg was
+  invisible before #895, so a run could look complete while understating spend.
+type: custom
+classification: simple
+requires_repos: false
+
+inputs:
+  - name: task
+    description: "Unused; the phase prompt is fixed so runs are comparable."
+    required: false
+    default: "delegate a review"
+
+phases:
+  - id: build-and-delegate
+    name: Codex builds, delegates review to Claude
+    order: 1
+    execution_type: sequential
+    timeout_seconds: 600
+    prompt_file: phases/delegate.md
+    agent:
+      provider: codex
+      allow_delegation: true
+      # The concrete model id, not the alias: an unnamed model resolves to no
+      # rate and the run prices as unpriced. See #892.
+      model: gpt-5.6-sol

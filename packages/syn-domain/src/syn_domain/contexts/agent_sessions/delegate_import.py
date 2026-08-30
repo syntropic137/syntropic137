@@ -34,11 +34,13 @@ says so.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+import contextlib
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_domain.contexts.agent_sessions.delegate_usage import resolve_delegate_usage
 from syn_domain.contexts.agent_sessions.import_identity import platform_session_id_for
+from syn_domain.contexts.agent_sessions.import_ledger import ImportLedger
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     PricedUsage,
     RetryDisposition,
@@ -46,9 +48,10 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Sequence
 
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
+    from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.agent_sessions.transcript_usage import UsageResult
 
 __all__ = [
@@ -146,6 +149,144 @@ def _is_retryable(usage: UsageResult) -> bool:
     return isinstance(usage, UnpricedUsage) and usage.retry is not RetryDisposition.PERMANENT
 
 
+#: Sentinel: fully billed already and the transcript has not moved. Distinct
+#: from None, which means no ledger is wired at all.
+_NOTHING_LEFT_TO_BILL: Final = object()
+
+
+async def _unbilled_portion(
+    ledger: ImportLedgerPort | None,
+    execution_id: str,
+    harness_id: str,
+    priced_usage: PricedUsage | None,
+) -> tuple[PricedUsage | None, str | None] | object | None:
+    """The part of this transcript the execution has not been charged for.
+
+    A harness session can be captured by more than one phase - it is resumed
+    and its transcript is CUMULATIVE - and a phase can be imported twice after
+    a crash. Both write under the same derived session id and the cost queries
+    SUM, so charging the delta is what makes either safe (#933, #936).
+
+    None when no ledger is wired, the sentinel when nothing is left to bill,
+    otherwise the usage to charge plus any reason it could not be trusted.
+    """
+    if ledger is None or priced_usage is None:
+        return None
+
+    delta, ledger_reason = await ImportLedger(ledger).unbilled_delta(
+        execution_id, harness_id, priced_usage
+    )
+    if ledger_reason:
+        return None, ledger_reason
+    if delta.is_nothing:
+        return _NOTHING_LEFT_TO_BILL
+    return (
+        replace(
+            priced_usage,
+            uncached_input_tokens=delta.uncached_input_tokens,
+            cache_read_tokens=delta.cache_read_tokens,
+            cache_creation_tokens=delta.cache_creation_tokens,
+            output_tokens=delta.output_tokens,
+        ),
+        None,
+    )
+
+
+@contextlib.asynccontextmanager
+async def _exclusive(
+    ledger: ImportLedgerPort | None, execution_id: str, harness_id: str
+) -> AsyncIterator[None]:
+    """Serialize one session's import, or do nothing when no ledger is wired."""
+    if ledger is None:
+        yield
+        return
+    async with ImportLedger(ledger).guard(execution_id, harness_id):
+        yield
+
+
+async def _write_one_delegate(
+    recorder: DelegateUsageRecorder,
+    ledger: ImportLedgerPort | None,
+    *,
+    harness_id: str,
+    usage: UsageResult,
+    execution_id: str,
+    phase_id: str,
+    workspace_id: str | None,
+) -> ImportedDelegate | None:
+    """Charge one delegate for the part not yet billed, or None if none is.
+
+    The platform id is uuid5 of the harness id, so a re-run addresses the SAME
+    session rather than minting a second one. That is stable IDENTITY and not
+    idempotent writes - agent_events is append-only and the cost queries SUM -
+    which is why the ledger, not the id, is what prevents the double charge
+    (#933, #936).
+    """
+    priced_usage, reason = _split(usage)
+    platform_id = platform_session_id_for(harness_id)
+
+    # The exclusion spans read-write-commit, not just the two ledger calls.
+    # Reading the mark, recording the charge and raising the mark is a
+    # check-then-act: two concurrent imports could both read 25, both compute
+    # the same delta and both bill it. Serializing only the ledger writes would
+    # not help, because by then the duplicate charge is already recorded.
+    async with _exclusive(ledger, execution_id, harness_id):
+        charge = await _unbilled_portion(ledger, execution_id, harness_id, priced_usage)
+        if charge is _NOTHING_LEFT_TO_BILL:
+            return None
+        if isinstance(charge, tuple):
+            priced_usage, ledger_reason = charge
+            reason = ledger_reason or reason
+
+        await recorder.record_delegate_usage(
+            session_id=platform_id,
+            usage=priced_usage,
+            unpriced_reason=reason,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace_id,
+        )
+
+        priced = priced_usage is not None
+        if ledger is not None and priced and isinstance(usage, PricedUsage):
+            # The CUMULATIVE figure, not the delta just written, and AFTER the
+            # write. A mark that ran ahead of what was recorded would make a
+            # crash between the two look like spend already billed when it
+            # never was - an undercount, which is worse than the overcount in
+            # #933 because nothing ever reveals it.
+            await ImportLedger(ledger).commit(execution_id, harness_id, usage)
+
+    return ImportedDelegate(
+        harness_session_id=harness_id,
+        platform_session_id=platform_id,
+        priced=priced,
+        reason=reason,
+    )
+
+
+def _refusal_if_leader_unknown(
+    captured: tuple[str, ...],
+    leader_native_session_id: str | None,
+    attempts_remaining: int,
+) -> DelegateImport | None:
+    """An early result when there is nothing to do, or nothing safe to do.
+
+    An empty sweep is simply nothing. A sweep whose leader cannot be identified
+    is a REFUSAL: importing everything would bill the leader twice and importing
+    nothing would silently drop real delegates, so it does neither and says so.
+    """
+    if not captured:
+        return DelegateImport(imported=(), retry_ids=(), attempts_remaining=attempts_remaining)
+    if leader_native_session_id is None or leader_native_session_id not in captured:
+        return DelegateImport(
+            imported=(),
+            retry_ids=(),
+            attempts_remaining=attempts_remaining,
+            leader_missing_from_sweep=True,
+        )
+    return None
+
+
 async def import_phase_delegates(
     store: SessionStorePort,
     recorder: DelegateUsageRecorder,
@@ -156,6 +297,7 @@ async def import_phase_delegates(
     phase_id: str,
     workspace_id: str | None = None,
     attempts_remaining: int,
+    ledger: ImportLedgerPort | None = None,
 ) -> DelegateImport:
     """Price every captured session except the leader's.
 
@@ -171,19 +313,9 @@ async def import_phase_delegates(
             last word, and any still-unreadable delegate becomes a named gap.
     """
     captured = tuple(dict.fromkeys(i for i in captured_session_ids if i and i.strip()))
-    if not captured:
-        return DelegateImport(imported=(), retry_ids=(), attempts_remaining=attempts_remaining)
-
-    if leader_native_session_id is None or leader_native_session_id not in captured:
-        # Refusing, not guessing. Without a known leader every id is a
-        # candidate: importing all of them bills the leader twice, importing
-        # none silently drops real delegates. Both are worse than saying so.
-        return DelegateImport(
-            imported=(),
-            retry_ids=(),
-            attempts_remaining=attempts_remaining,
-            leader_missing_from_sweep=True,
-        )
+    refusal = _refusal_if_leader_unknown(captured, leader_native_session_id, attempts_remaining)
+    if refusal is not None:
+        return refusal
 
     imported: list[ImportedDelegate] = []
     retry_ids: list[str] = []
@@ -198,40 +330,21 @@ async def import_phase_delegates(
             retry_ids.append(harness_id)
             continue
 
-        priced_usage, reason = _split(usage)
-        # uuid5 of the harness id, so a re-run addresses the SAME session
-        # rather than minting a second one.
-        #
-        # That is NOT full idempotency, and this comment used to claim it was.
-        # `agent_events` is append-only with no uniqueness constraint, so a
-        # second import writes a second pair of rows under the same session id
-        # and the cost queries SUM them. Same id, doubled tokens (#933).
-        #
-        # What keeps it correct today: exactly one import per phase. The
-        # retry budget is spent (attempts_remaining=0) and the finalise and
-        # teardown paths are mutually exclusive, since finalisation pops the
-        # workspace context manager before teardown iterates. A crash between
-        # the write and the phase completing is the case that is NOT covered.
-        platform_id = platform_session_id_for(harness_id)
-        await recorder.record_delegate_usage(
-            session_id=platform_id,
-            usage=priced_usage,
-            unpriced_reason=reason,
+        written = await _write_one_delegate(
+            recorder,
+            ledger,
+            harness_id=harness_id,
+            usage=usage,
             execution_id=execution_id,
             phase_id=phase_id,
             workspace_id=workspace_id,
         )
-        priced = priced_usage is not None
+        if written is None:
+            # Already billed in full and the transcript has not moved.
+            continue
         if _is_retryable(usage):
             retry_ids.append(harness_id)
-        imported.append(
-            ImportedDelegate(
-                harness_session_id=harness_id,
-                platform_session_id=platform_id,
-                priced=priced,
-                reason=reason,
-            )
-        )
+        imported.append(written)
 
     return DelegateImport(
         imported=tuple(imported),

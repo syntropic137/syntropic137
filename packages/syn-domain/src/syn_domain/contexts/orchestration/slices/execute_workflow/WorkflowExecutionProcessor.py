@@ -58,6 +58,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     ArtifactRepository,
     CommandBuilder,
     ExecutionRepository,
+    PhaseOutputCache,
     PromptBuilder,
     Runner,
     SessionRepository,
@@ -81,6 +82,7 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
+    from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
@@ -140,6 +142,7 @@ class WorkflowExecutionProcessor:
         skill_materializer: SkillMaterializerProtocol | None = None,
         session_capture: SessionCapturePort | None = None,
         session_store: SessionStorePort | None = None,
+        import_ledger: ImportLedgerPort | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -168,6 +171,7 @@ class WorkflowExecutionProcessor:
         # deployment without a session store simply imports no delegates; it
         # must never be a reason a phase fails.
         self._session_store = session_store
+        self._import_ledger = import_ledger
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
@@ -241,7 +245,7 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
         completed_phase_ids: list[str] = []
-        phase_outputs: dict[str, str] = {}
+        phase_outputs = PhaseOutputCache()
         dispatch_ctx = _DispatchContext()
 
         try:
@@ -302,7 +306,7 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult],
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
         repos: list[RepositoryRef] | None,
         dispatch_ctx: _DispatchContext,
     ) -> None:
@@ -331,7 +335,7 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult],
         all_artifact_ids: list[str],
         completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
         repos: list[RepositoryRef] | None,
         dispatch_ctx: _DispatchContext,
     ) -> None:
@@ -506,6 +510,7 @@ class WorkflowExecutionProcessor:
             capture_port=self._session_capture,
             session_store=self._session_store,
             writer=self._observability_writer,
+            ledger=self._import_ledger,
         )
 
     async def _handle_provision(
@@ -515,7 +520,7 @@ class WorkflowExecutionProcessor:
         aggregate: WorkflowExecutionAggregate,
         repos: list[RepositoryRef] | None,
         completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
     ) -> None:
         """Dispatch PROVISION_WORKSPACE."""
         assert todo.phase_id is not None
@@ -539,6 +544,7 @@ class WorkflowExecutionProcessor:
             agent_provider=phase.agent_config.provider,
             agent_model=phase.agent_config.model,
             repos=[r.slug for r in repos] if repos else [],
+            observability=self._observability_writer,
         )
         await session_mgr.start()
         self._session_managers[todo.phase_id] = session_mgr
@@ -571,7 +577,7 @@ class WorkflowExecutionProcessor:
         session_id: str,
         repo_urls: list[str],
         completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
     ) -> ProvisionResult:
         """Provision this phase's own workspace and build its ProvisionResult."""
         provision_handler = WorkspaceProvisionHandler(
@@ -710,7 +716,7 @@ class WorkflowExecutionProcessor:
         phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
         all_artifact_ids: list[str],
-        phase_outputs: dict[str, str],
+        phase_outputs: PhaseOutputCache,
     ) -> None:
         """Dispatch COLLECT_ARTIFACTS."""
         assert todo.phase_id is not None
@@ -746,8 +752,7 @@ class WorkflowExecutionProcessor:
         )
         all_artifact_ids.extend(result.artifact_ids)
         self._phase_artifact_ids[todo.phase_id] = result.artifact_ids
-        if result.first_content:
-            phase_outputs[todo.phase_id] = result.first_content
+        phase_outputs.record(todo.phase_id, result.first_content, result.files)
         aggregate.artifacts_collected(result.command)
         await self._save_and_sync(aggregate)
 
@@ -864,6 +869,7 @@ class WorkflowExecutionProcessor:
             leader_native_ids=self._phase_leader_native_ids,
             session_id=session_id,
             phase_id=phase_id,
+            ledger=self._import_ledger,
         )
 
         if workspace_cm is not None:

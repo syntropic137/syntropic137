@@ -40,6 +40,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowClassification,
 )
 from syn_shared.agents import REMOVED_INTERACTIVE_PROVIDER, AgentProvider
+from syn_shared.tools import ToolName, canonical_tool_name
 
 _SHARED_PREFIX = "shared://"
 
@@ -141,10 +142,20 @@ def _resolve_phase_prompt_file(
 class RepositoryConfig(BaseModel):
     """Repository configuration for a workflow."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     url: str = Field(..., min_length=1)
     ref: str = Field(default="main")
+
+
+#: Input names a workflow may NOT declare, because the execute API refuses them.
+#:
+#: ADR-063 made repository identity typed on ``repos[]`` rather than smuggled
+#: through ``inputs``. The API rejects these at its boundary - but nothing
+#: stopped a workflow DECLARING one, and the dashboard renders declared inputs.
+#: The result was a form field that could never be submitted by any value
+#: (#942). Defined here and imported by the API so the two cannot drift.
+RESERVED_INPUT_NAMES: frozenset[str] = frozenset({"repos", "repository"})
 
 
 class InputYamlDefinition(BaseModel):
@@ -153,7 +164,7 @@ class InputYamlDefinition(BaseModel):
     Maps to domain InputDeclaration.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str = Field(..., min_length=1)
     description: str | None = None
@@ -232,9 +243,32 @@ class PhaseYamlDefinition(BaseModel):
     Converts YAML snake_case to domain PhaseDefinition.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        # WHY (#961): a misspelled key used to be accepted and dropped, so a phase
+        # whose `prompt:` should have been `prompt_template:` installed cleanly,
+        # executed, billed, and gave the agent NO instructions -- with every layer
+        # reporting success. Four shipped trigger workflows were also declaring
+        # `tools:` (not `allowed_tools:`), silently discarding their intended tool
+        # allowlist. Rejecting an unknown key is the only signal an author gets.
+        extra="forbid",
+    )
 
-    id: str = Field(..., alias="id", min_length=1)
+    # A phase id is INTERPOLATED INTO A FILESYSTEM PATH: outputs from this
+    # phase are injected into the next phase's workspace at
+    # `artifacts/input/<phase-id>/...`. `min_length=1` alone accepted
+    # `../../../tmp/owned`, which escapes the workspace on injection - and with
+    # the Docker backend the write lands on the host beside the mount, not
+    # merely elsewhere inside the container.
+    #
+    # Workflows are installable from a marketplace, so the author of a phase id
+    # is not necessarily the operator running it. That makes this reachable by
+    # an untrusted party, which is what decides the grammar below: an
+    # allowlist, not a `..` denylist. Denylists lose to encoding tricks; a
+    # closed character set does not.
+    id: str = Field(
+        ..., alias="id", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    )
     name: str = Field(..., min_length=1, max_length=255)
     order: int = Field(..., ge=1)
     execution_type: PhaseExecutionType = PhaseExecutionType.SEQUENTIAL
@@ -267,6 +301,63 @@ class PhaseYamlDefinition(BaseModel):
     # identity collision when the two lists are merged at resolution time.
     skills: list[SkillRef] = Field(default_factory=list)
 
+    @field_validator("allowed_tools", mode="before")
+    @classmethod
+    def _validate_tool_names(cls, value: object) -> object:
+        """Resolve authored tool names against the closed vocabulary (#964).
+
+        Rejecting here rather than at execution: while the declaration was
+        inert a typo cost nothing, but it now restricts availability, so
+        `bash` instead of `Bash` becomes an agent that cannot run a command -
+        discovered at runtime, on an unattended CI trigger.
+        """
+        if value is None:
+            return []
+        raw = value.split(",") if isinstance(value, str) else value
+        if not isinstance(raw, list):
+            return value
+
+        resolved: list[str] = []
+        unknown: list[str] = []
+        for item in raw:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            match = canonical_tool_name(item)
+            if match is None:
+                unknown.append(item.strip())
+            else:
+                resolved.append(str(match))
+        if unknown:
+            known = ", ".join(sorted(t.value for t in ToolName))
+            msg = f"unknown tool name(s): {', '.join(unknown)}. Valid tools are: {known}"
+            raise ValueError(msg)
+        return resolved
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def _reject_max_tokens(cls, value: object) -> object:
+        """`max_tokens` caps nothing, on any harness (#964).
+
+        It is declared, carried into AgentConfiguration, and rendered by the
+        workflow-detail projection - so it reads as configuration that works -
+        and reaches no command builder. It cannot: neither CLI has a token-cap
+        flag. Verified against claude 2.1.251, whose nearest control is
+        `--max-budget-usd` (dollars, not tokens), and codex 0.147.0, which has
+        neither.
+
+        Failing loudly rather than accepting-and-dropping is the whole point
+        of the issue this closes. An author bounding an expensive fan-out
+        should learn that this is not the lever, at authoring time.
+        """
+        if value is None:
+            return None
+        msg = (
+            "max_tokens is not supported: no agent CLI exposes a token cap, so this "
+            "value has never bounded anything. Remove it. To bound a phase use "
+            "timeout_seconds, or scope the work with allowed_tools."
+        )
+        raise ValueError(msg)
+
     @field_validator("skills", mode="before")
     @classmethod
     def _expand_skills(cls, value: object) -> object:
@@ -279,7 +370,14 @@ class PhaseYamlDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
-        """Ensure at most one of prompt_template or prompt_file is set."""
+        """Ensure at most one of prompt_template or prompt_file is set.
+
+        NOT enforced here: that at least one is set. A phase with no
+        instructions cannot do useful work and should be rejected, but adding
+        that guard breaks 21 existing tests whose fixtures omit the prompt, so
+        it is split into its own change rather than buried in a PR about
+        unknown keys. Tracked separately.
+        """
         if self.prompt_template is not None and self.prompt_file is not None:
             msg = f"Phase '{self.id}': specify either 'prompt_template' or 'prompt_file', not both"
             raise ValueError(msg)
@@ -346,12 +444,18 @@ class PhaseFrontmatterSchema(BaseModel):
     )
     allowed_tools: str | list[str] = Field(
         default_factory=list,
-        description="Tools available during this phase. "
-        "Accepts a YAML list or a comma-separated string (e.g., 'bash, git, read').",
+        description="Tools AVAILABLE during this phase, restricting what the agent "
+        "can reach for. Accepts a YAML list or a comma-separated string "
+        "(e.g., 'Bash, Read'). Names are Claude built-ins and are validated; "
+        "case is forgiven. Omit to leave the phase unrestricted. Not supported "
+        "on the codex provider, which has no tool-name concept.",
         alias="allowed-tools",
     )
     max_tokens: int | None = Field(
-        default=None, description="Maximum tokens for this phase.", alias="max-tokens"
+        default=None,
+        description="UNSUPPORTED - declaring it is an error. No harness CLI has a "
+        "token-cap flag, so this never bounded anything. Use timeout_seconds.",
+        alias="max-tokens",
     )
     timeout_seconds: int | None = Field(
         default=None, description="Phase timeout in seconds.", alias="timeout-seconds"
@@ -373,7 +477,12 @@ class WorkflowDefinition(BaseModel):
     This is the root model for workflow YAML files.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(
+        frozen=True,
+        # Same reasoning as PhaseYamlDefinition (#961): silently dropping an
+        # unknown workflow-level key hides an authoring mistake behind a green run.
+        extra="forbid",
+    )
 
     # Identity
     id: str = Field(..., min_length=1, max_length=100)
@@ -386,6 +495,14 @@ class WorkflowDefinition(BaseModel):
 
     # Repository context
     repository: RepositoryConfig | None = None
+
+    # Multi-repo templates. `CreateWorkflowTemplateCommand.repos` and the
+    # aggregate have carried this since ADR-058, and the docs advertise it
+    # (guide/core-concepts, workspaces/hydration), but the YAML model never
+    # gained the field -- so a documented `repos:` block was silently dropped.
+    # With extra="forbid" that silence becomes a hard error, so the field is
+    # added here rather than deleting the documented capability.
+    repos: list[str] = Field(default_factory=list)
 
     # Execution gate (ADR-058 #666): None = infer from repository presence
     requires_repos: bool | None = None
@@ -417,6 +534,30 @@ class WorkflowDefinition(BaseModel):
         for entry in value:
             expanded.extend(expand_skill_entry(entry))
         return expanded
+
+    @field_validator("inputs")
+    @classmethod
+    def reject_reserved_input_names(
+        cls, inputs: list[InputYamlDefinition]
+    ) -> list[InputYamlDefinition]:
+        """A workflow must not declare an input the execute API will refuse.
+
+        Caught here rather than at run time because the dashboard renders
+        declared inputs: a reserved name becomes a field a user can fill and
+        can never submit. Failing at definition time also covers workflows
+        installed from the marketplace, which nobody reviews by hand.
+        """
+        offending = sorted({i.name for i in inputs} & RESERVED_INPUT_NAMES)
+        if offending:
+            names = ", ".join(repr(n) for n in offending)
+            msg = (
+                f"input name(s) {names} are reserved: repositories are passed in "
+                "the typed 'repos' array (CLI: -R <owner/repo>), never as an "
+                "input. A workflow declaring one renders a form field the API "
+                "always rejects."
+            )
+            raise ValueError(msg)
+        return inputs
 
     @field_validator("phases")
     @classmethod

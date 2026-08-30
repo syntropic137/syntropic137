@@ -20,10 +20,6 @@ inputs:
   - name: task
     description: "Feature request or issue body to implement"
     required: true
-  - name: repository
-    description: "Repository URL (owner/repo or full URL)"
-    required: false
-    default: "https://github.com/example/repo"
 
 phases:
   - id: research
@@ -40,7 +36,6 @@ phases:
       - codebase_analysis
       - dependency_map
       - existing_patterns
-    max_tokens: 8192
     timeout_seconds: 600
     prompt_template: |
       You are a software engineer in the RESEARCH phase. Your job is to
@@ -73,7 +68,6 @@ phases:
     output_artifacts:
       - approach_options
       - trade_off_analysis
-    max_tokens: 4096
     timeout_seconds: 300
     prompt_template: |
       You are a software architect brainstorming implementation approaches.
@@ -109,7 +103,6 @@ phases:
       - implementation_plan
       - file_change_list
       - test_plan
-    max_tokens: 8192
     timeout_seconds: 600
     prompt_template: |
       You are a software architect creating a detailed implementation plan.
@@ -143,7 +136,6 @@ phases:
       - code_changes
       - test_results
       - qa_report
-    max_tokens: 16384
     timeout_seconds: 1800
     prompt_template: |
       You are a software engineer executing an approved implementation plan.
@@ -180,7 +172,6 @@ phases:
       - review_report
       - deviation_list
       - approval_status
-    max_tokens: 4096
     timeout_seconds: 300
     prompt_template: |
       You are a code reviewer validating implementation against the plan.

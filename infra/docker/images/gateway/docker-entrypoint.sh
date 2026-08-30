@@ -24,6 +24,13 @@ fi
 
 # --- Shared locations (included by both server blocks) ---
 cat > "$AUTH_DIR/locations.conf" <<'LOCATIONS'
+# Keep redirects relative. nginx auto-appends a trailing slash for prefix
+# locations (e.g. /api/v1 -> /api/v1/) and by default builds an absolute URL
+# from the listen port and scheme, leaking the internal :8081 port and
+# downgrading https->http in the Location header. Relative redirects avoid both.
+absolute_redirect off;
+port_in_redirect off;
+
 # GitHub webhook endpoint — NO auth (uses HMAC signature verification)
 location = /api/v1/webhooks/github {
     auth_basic off;
@@ -60,7 +67,13 @@ location /api/v1/ {
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
+    # A location with its own limit_req does NOT inherit the server-scope auth
+    # backstop, so declare it here too: /api/v1/ is Basic-Auth-protected and must
+    # not fall back to the looser api-zone rate for credential guessing. Both
+    # zones apply; the more restrictive wins per request. The webhook location
+    # below is unauthenticated (HMAC-verified), so it keeps only its own zone.
     limit_req zone=api burst=50 nodelay;
+    limit_req zone=auth burst=20 nodelay;
     limit_req_status 429;
 }
 
@@ -101,8 +114,10 @@ location /api/v1/stream {
     chunked_transfer_encoding off;
 }
 
-# Health check — no auth
-location /health {
+# Health check — no auth. Exact match on /health and /healthz only: a prefix
+# location would leave everything under /health* (e.g. /healthfoo) unauthenticated,
+# so any future route mounted there would silently inherit the auth bypass.
+location ~ ^/healthz?$ {
     auth_basic off;
     access_log off;
     return 200 "healthy\n";
@@ -118,7 +133,9 @@ location /assets/ {
 }
 
 
-# SPA routing (dashboard — root)
+# SPA routing (dashboard — root). The brute-force backstop is applied at the
+# 8081 server scope (nginx.conf), so it covers this and every other Basic-Auth
+# path without also throttling the loopback-only port 80. Nothing to add here.
 location / {
     try_files $uri $uri/ /index.html;
 }

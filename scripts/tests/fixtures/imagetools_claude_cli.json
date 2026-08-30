@@ -1,0 +1,44 @@
+{
+  "linux/amd64": {
+    "config": {
+      "Labels": {
+        "agentic.claude_cli_version": "2.1.126",
+        "agentic.cli.version": "2.1.126",
+        "agentic.codex_cli_version": "0.144.6",
+        "agentic.image.channel": "release",
+        "agentic.provider": "claude-cli",
+        "agentic.provider.version": "2.1.3",
+        "org.opencontainers.image.created": "2026-08-29T16:41:11.427Z",
+        "org.opencontainers.image.description": "Agentic Workspace - claude-cli provider",
+        "org.opencontainers.image.licenses": "MIT",
+        "org.opencontainers.image.revision": "276eec0ac2315d32b83fb86fc4997cbaf1d87a52",
+        "org.opencontainers.image.source": "https://github.com/AgentParadise/agentic-primitives",
+        "org.opencontainers.image.title": "agentic-workspace-claude-cli",
+        "org.opencontainers.image.url": "https://github.com/AgentParadise/agentic-primitives",
+        "org.opencontainers.image.vendor": "AgentParadise",
+        "org.opencontainers.image.version": "2.1.3"
+      }
+    }
+  },
+  "linux/arm64": {
+    "config": {
+      "Labels": {
+        "agentic.claude_cli_version": "2.1.126",
+        "agentic.cli.version": "2.1.126",
+        "agentic.codex_cli_version": "0.144.6",
+        "agentic.image.channel": "release",
+        "agentic.provider": "claude-cli",
+        "agentic.provider.version": "2.1.3",
+        "org.opencontainers.image.created": "2026-08-29T16:41:11.427Z",
+        "org.opencontainers.image.description": "Agentic Workspace - claude-cli provider",
+        "org.opencontainers.image.licenses": "MIT",
+        "org.opencontainers.image.revision": "276eec0ac2315d32b83fb86fc4997cbaf1d87a52",
+        "org.opencontainers.image.source": "https://github.com/AgentParadise/agentic-primitives",
+        "org.opencontainers.image.title": "agentic-workspace-claude-cli",
+        "org.opencontainers.image.url": "https://github.com/AgentParadise/agentic-primitives",
+        "org.opencontainers.image.vendor": "AgentParadise",
+        "org.opencontainers.image.version": "2.1.3"
+      }
+    }
+  }
+}

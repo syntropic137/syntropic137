@@ -1,0 +1,1 @@
+"""Artifacts bounded context tests."""

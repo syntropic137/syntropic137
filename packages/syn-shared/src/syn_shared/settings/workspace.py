@@ -119,6 +119,37 @@ class WorkspaceSettings(BaseSettings):
         description="Docker image for Claude agent execution.",
     )
 
+    @field_validator("docker_image", mode="before")
+    @classmethod
+    def _reject_blank_image(cls, value: object) -> object:
+        """An explicitly blank image is an error, not a silent fallback (#954).
+
+        The first version of this fix quietly substituted the default for any
+        blank value. A codex review pointed out that recreates the very
+        false-pass #954 exists to eliminate:
+
+            SYN_WORKSPACE_DOCKER_IMAGE="$CANDIDATE_IMAGE" docker compose up
+
+        If ``CANDIDATE_IMAGE`` is accidentally empty, the operator runs the
+        pinned default while believing they tested the candidate -- and nothing
+        says so. That is exactly the class of bug this issue is about.
+
+        Compose distinguishes the two states, so the settings layer must too.
+        A bare ``SYN_WORKSPACE_DOCKER_IMAGE:`` key resolves to null and is
+        removed from the container environment when the variable is unset, so
+        an absent value never reaches here and the field default applies. A
+        value that DOES arrive and is blank was set deliberately, and is wrong.
+        """
+        if isinstance(value, str) and not value.strip():
+            msg = (
+                "SYN_WORKSPACE_DOCKER_IMAGE is set but empty. Unset it to use the "
+                "pinned default, or give it a full image reference. Refusing to "
+                "silently fall back, because that would run a different image "
+                "than the one you meant to test."
+            )
+            raise ValueError(msg)
+        return value
+
     docker_runtime: Literal["runsc", "runc"] = Field(
         default="runsc",
         description="Docker runtime to use (runsc = gVisor, runc = native).",

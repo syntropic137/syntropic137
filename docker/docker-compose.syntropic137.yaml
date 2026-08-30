@@ -224,6 +224,7 @@ services:
       SYN_SESSION_STORE_URL: ${SYN_SESSION_STORE_URL:-}
       SYN_SESSION_STORE_AUTH_TOKEN: ${SYN_SESSION_STORE_AUTH_TOKEN:-}
       SYN_SESSION_STORE_LABEL: ${SYN_SESSION_STORE_LABEL:-}
+      SYN_WORKSPACE_DOCKER_IMAGE: null
       LOG_FORMAT: ${LOG_FORMAT:-json}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SYN_GITHUB_APP_ID: ${SYN_GITHUB_APP_ID:-}
@@ -298,6 +299,7 @@ services:
     tmpfs:
     - /tmp
     - /home/syn/.config
+    - /home/syn/.sigstore:size=16m
     deploy:
       resources:
         limits:

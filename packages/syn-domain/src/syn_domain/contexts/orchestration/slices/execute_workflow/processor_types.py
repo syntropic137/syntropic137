@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
+    from syn_domain.contexts.artifacts import PhaseOutputFile
     from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
         ArtifactAggregate,
     )
@@ -33,6 +34,32 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
     )
+
+
+@dataclass
+class PhaseOutputCache:
+    """What each completed phase produced, cached for one processor run (#988).
+
+    A phase outputs a DIRECTORY, so two shapes are needed and must not drift:
+    ``primary`` is the one string per phase that prompt substitution wants, and
+    ``files`` is the whole output tree the next workspace is rebuilt from.
+    Created per ``run()`` and never held as processor instance state - the
+    dispatcher shares one processor across concurrent executions, so instance
+    state would let one execution read another's phase outputs.
+    """
+
+    primary: dict[str, str] = field(default_factory=dict)
+    files: dict[str, list[PhaseOutputFile]] = field(default_factory=dict)
+
+    def record(self, phase_id: str, primary: str | None, files: list[PhaseOutputFile]) -> None:
+        """Record what a phase produced. Empty results are not recorded, so a
+        phase whose artifacts have not landed yet still falls back to the
+        projection rather than resolving to an authoritative empty tree."""
+        if primary:
+            self.primary[phase_id] = primary
+        if files:
+            self.files[phase_id] = files
+
 
 PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, Any]],

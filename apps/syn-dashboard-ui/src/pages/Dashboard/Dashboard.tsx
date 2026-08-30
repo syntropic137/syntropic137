@@ -47,7 +47,7 @@ export function Dashboard() {
           value={metrics?.total_workflows ?? 0}
           icon={GitBranch}
           color="accent"
-          subtitle={`${metrics?.completed_workflows ?? 0} completed`}
+          subtitle={`${metrics?.completed_workflows ?? 0} runs completed`}
           href="/workflows"
         />
         <MetricCard

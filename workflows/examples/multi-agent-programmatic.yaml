@@ -15,7 +15,6 @@ phases:
     input_artifacts: []
     output_artifacts:
       - text
-    max_tokens: 2048
     timeout_seconds: 300
     agent:
       provider: claude
@@ -30,7 +29,6 @@ phases:
       - text
     output_artifacts:
       - text
-    max_tokens: 4096
     timeout_seconds: 600
     agent:
       provider: codex

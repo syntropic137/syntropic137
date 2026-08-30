@@ -3298,6 +3298,15 @@ export interface components {
             model?: string | null;
             /** Provider */
             provider?: string | null;
+            /**
+             * Allow Delegation
+             * @default false
+             */
+            allow_delegation: boolean;
+            /** Claude Plugins */
+            claude_plugins?: components["schemas"]["PhaseRefResponse"][];
+            /** Skills */
+            skills?: components["schemas"]["PhaseRefResponse"][];
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
@@ -3410,6 +3419,28 @@ export interface components {
              * @default true
              */
             success: boolean;
+        };
+        /**
+         * PhaseRefResponse
+         * @description A plugin or skill reference. Structured, never a joined string.
+         *
+         *     Joining source and name is not reversible: a ref whose source already
+         *     ends in the repo name reparses to a different repository (#1013).
+         */
+        PhaseRefResponse: {
+            /** Source Url */
+            source_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: string | null;
+            /**
+             * Name Overridden
+             * @default false
+             */
+            name_overridden: boolean;
+            /** Raw */
+            raw?: string | null;
         };
         /**
          * RegisterClaudePluginRequest
@@ -5249,10 +5280,7 @@ export interface components {
             repository_url?: string | null;
             /** Repos */
             repos?: string[];
-            /**
-             * Requires Repos
-             * @default true
-             */
+            /** Requires Repos */
             requires_repos: boolean;
         };
         /** WorkflowSummaryResponse */
@@ -5277,10 +5305,7 @@ export interface components {
              * @default false
              */
             is_archived: boolean;
-            /**
-             * Requires Repos
-             * @default true
-             */
+            /** Requires Repos */
             requires_repos: boolean;
         };
         /**

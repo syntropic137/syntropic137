@@ -16,6 +16,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.artifacts import PhaseOutputFile
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
     )
@@ -29,17 +30,21 @@ logger = logging.getLogger(__name__)
 class ArtifactCollectionResult:
     """Result of artifact collection."""
 
-    __slots__ = ("artifact_ids", "command", "first_content")
+    __slots__ = ("artifact_ids", "command", "files", "first_content")
 
     def __init__(
         self,
         artifact_ids: list[str],
         first_content: str | None,
         command: ArtifactsCollectedCommand,
+        files: list[PhaseOutputFile] | None = None,
     ) -> None:
         self.artifact_ids = artifact_ids
         self.first_content = first_content
         self.command = command
+        #: Every file the phase produced, with its path (#988). The next
+        #: phase's workspace is built from this, not from first_content.
+        self.files: list[PhaseOutputFile] = files if files is not None else []
 
 
 class ArtifactCollectionHandler:
@@ -99,4 +104,5 @@ class ArtifactCollectionHandler:
             artifact_ids=collected.artifact_ids,
             first_content=collected.first_content,
             command=command,
+            files=collected.files,
         )

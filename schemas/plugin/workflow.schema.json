@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.26.0/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.27.0/workflow.schema.json",
   "$defs": {
     "AgentYamlDefinition": {
       "additionalProperties": false,
@@ -96,6 +96,7 @@
       "title": "ClaudePluginRef"
     },
     "InputYamlDefinition": {
+      "additionalProperties": false,
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
       "properties": {
         "name": {
@@ -150,10 +151,13 @@
       "type": "string"
     },
     "PhaseYamlDefinition": {
+      "additionalProperties": false,
       "description": "Phase definition as parsed from YAML.\n\nConverts YAML snake_case to domain PhaseDefinition.",
       "properties": {
         "id": {
+          "maxLength": 100,
           "minLength": 1,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
           "title": "Id",
           "type": "string"
         },
@@ -312,6 +316,7 @@
       "type": "object"
     },
     "RepositoryConfig": {
+      "additionalProperties": false,
       "description": "Repository configuration for a workflow.",
       "properties": {
         "url": {
@@ -403,6 +408,7 @@
       "type": "string"
     }
   },
+  "additionalProperties": false,
   "description": "Complete workflow definition as parsed from YAML.\n\nThis is the root model for workflow YAML files.",
   "properties": {
     "id": {
@@ -448,6 +454,13 @@
         }
       ],
       "default": null
+    },
+    "repos": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Repos",
+      "type": "array"
     },
     "requires_repos": {
       "anyOf": [

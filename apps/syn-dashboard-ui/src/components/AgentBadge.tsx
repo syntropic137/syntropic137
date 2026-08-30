@@ -9,7 +9,7 @@
 
 import { Bot } from 'lucide-react'
 
-import { agentProviderLabel } from './agentProvider'
+import { agentProviderAccent, agentProviderLabel } from './agentProvider'
 
 export function AgentBadge({
   provider,
@@ -20,9 +20,11 @@ export function AgentBadge({
 }) {
   const label = agentProviderLabel(provider)
   if (!label) return null
+  const accent = agentProviderAccent(provider)
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent)]/15 px-2 py-0.5 text-xs font-medium text-[var(--color-accent)] ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${className}`}
+      style={{ color: accent, backgroundColor: `color-mix(in srgb, ${accent} 15%, transparent)` }}
     >
       <Bot className="h-3 w-3" />
       {label}

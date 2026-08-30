@@ -13,6 +13,8 @@ import logging
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.ports import SignalQueuePort
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from syn_api.services.skill_materializer import SkillMaterializer
     from syn_api.services.skill_resolution_service import SkillResolutionService
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.agent_sessions import ImportLedgerPort
     from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
@@ -244,6 +247,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         skill_materializer=skill_materializer,
         session_capture=session_capture,
         session_store=_build_session_store(_settings),
+        import_ledger=_create_import_ledger(),
     )
 
 
@@ -278,9 +282,19 @@ def _build_claude_command(
         prompt,
     ]
 
+    # `--tools` is AVAILABILITY; `--allowedTools` is auto-approval. We emitted
+    # the second while the field is named and documented as the first, and the
+    # command already carries --dangerously-skip-permissions, so auto-approving
+    # was a no-op twice over: a phase declaring three tools could use all of
+    # them (issue #964). Verified against claude 2.1.251:
+    #   --tools <tools...>  Specify the list of available tools from the
+    #                       built-in set. Use "" to disable all tools ...
+    #
+    # ONE flag with a comma-joined list, not the flag repeated: `--tools` takes
+    # a single list and repeating it keeps only the last occurrence, which
+    # would have restricted every phase to its last-declared tool.
     if phase.agent_config.allowed_tools:
-        for tool in phase.agent_config.allowed_tools:
-            cmd.extend(["--allowedTools", tool])
+        cmd.extend(["--tools", ",".join(phase.agent_config.allowed_tools)])
 
     return cmd
 
@@ -299,6 +313,61 @@ def _is_codex_model(model: str | None) -> TypeGuard[str]:
         return False
     lowered = model.lower()
     return lowered not in _CLAUDE_MODEL_ALIASES and not lowered.startswith("claude")
+
+
+class UnsupportedToolPolicyError(ValueError):
+    """A phase declared tools the selected harness cannot restrict.
+
+    Raised rather than ignored. Codex expresses policy as a SANDBOX MODE
+    (read-only / workspace-write / danger-full-access) and has no tool-name
+    concept at all - verified against codex 0.147.0, which exposes no tool
+    flag of any kind. Translating a tool allowlist into a sandbox mode is
+    lossy in both directions: an allowlist says nothing about filesystem
+    scope, and a sandbox says nothing about which tools exist.
+
+    Accepting the declaration and dropping it would mean a workflow that
+    scopes tools silently means something different depending on
+    ``agent.provider``, which is worse than not scoping at all. Believing you
+    have a control you do not have is the failure this issue exists to remove.
+    """
+
+    def __init__(self, provider: str, phase_id: str, declared: list[str]) -> None:
+        super().__init__(
+            f"phase {phase_id!r} declares allowed_tools {declared!r}, but provider "
+            f"{provider!r} cannot restrict tools: codex expresses policy as a sandbox "
+            f"mode, not a tool list. Remove allowed_tools from this phase, or run it "
+            f"on the claude provider."
+        )
+        self.provider = provider
+        self.phase_id = phase_id
+        self.declared = declared
+
+
+_TOOL_GRANT_TEMPLATE = """{prompt}
+
+## Tool policy
+
+You have been granted exactly these tools for this phase: {tools}.
+
+Do not use any other tool. If the task appears to require a tool you were not
+granted, stop and say so rather than reaching for one - the omission is the
+phase author's deliberate scoping, not an oversight."""
+
+
+def apply_tool_policy_to_prompt(prompt: str, allowed_tools: Sequence[str]) -> str:
+    """Name the declared tools in the prompt itself.
+
+    The ONLY harness-neutral mechanism here: it needs no CLI support, so it
+    works identically on claude and codex, and it is the whole of the
+    behavioural benefit on a harness that cannot enforce anything.
+
+    Advisory, not enforcement - an agent can ignore it. It is layered UNDER
+    `--tools` on claude rather than instead of it, and never presented as a
+    security boundary on its own.
+    """
+    if not allowed_tools:
+        return prompt
+    return _TOOL_GRANT_TEMPLATE.format(prompt=prompt, tools=", ".join(allowed_tools))
 
 
 def _build_codex_command(prompt: str, model: str | None) -> list[str]:
@@ -338,10 +407,19 @@ def _build_agent_command(
         phase.agent_config.provider,
         phase_id=phase.phase_id,
     )
+    # Every harness carries the grant in the prompt; only claude can also
+    # enforce it on the command line.
+    scoped_prompt = apply_tool_policy_to_prompt(prompt, phase.agent_config.allowed_tools)
     if provider is AgentProvider.CODEX:
-        return _build_codex_command(prompt, phase.agent_config.model)
+        if phase.agent_config.allowed_tools:
+            raise UnsupportedToolPolicyError(
+                provider=str(provider),
+                phase_id=phase.phase_id,
+                declared=list(phase.agent_config.allowed_tools),
+            )
+        return _build_codex_command(scoped_prompt, phase.agent_config.model)
     if provider is AgentProvider.CLAUDE:
-        return _build_claude_command(phase, prompt)
+        return _build_claude_command(phase, scoped_prompt)
     raise UnsupportedAgentProviderError(provider, phase_id=phase.phase_id)
 
 
@@ -613,6 +691,61 @@ def _create_dedup_adapter() -> DedupPort:
             "Configure SYN_OBSERVABILITY_DB_URL or REDIS_URL for production. "
             "See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)."
         ) from exc
+
+
+_import_ledger_singleton: ImportLedgerPort | None = None
+
+
+def _create_import_ledger() -> ImportLedgerPort:
+    """Return the process-wide delegate import ledger (#933, #936).
+
+    A singleton because `get_execution_processor()` builds a NEW processor per
+    dispatch. A fresh Postgres adapter each time would re-issue CREATE TABLE on
+    every execution, and a fresh in-memory one would forget the mark between
+    phases of a single execution - which is precisely the cross-phase recount
+    #936 is about, reintroduced by the wiring rather than the logic.
+
+    Postgres or nothing. Unlike dedup there is no Redis tier: the mark says how
+    much of a session has already been CHARGED, and it has to stay consistent
+    with the cost rows in `agent_events`. A ledger in a different store can
+    disagree with the spend it describes, and nothing in the system would
+    report the disagreement - it would just quietly bill wrong.
+
+    ADR-060: never fall back to in-memory in production. Losing the mark on
+    restart silently reverts to double-billing delegates (#936), which is the
+    overcount failure mode that nobody reports because it just looks expensive.
+    """
+    global _import_ledger_singleton
+    if _import_ledger_singleton is not None:
+        return _import_ledger_singleton
+
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+
+    if settings.uses_in_memory_stores:
+        from syn_adapters.import_ledger import InMemoryImportLedger
+
+        _import_ledger_singleton = InMemoryImportLedger()
+        return _import_ledger_singleton
+
+    if settings.syn_observability_db_url:
+        from syn_api._wiring_db import get_shared_db_pool
+
+        pool = get_shared_db_pool()
+        if pool is not None:
+            from syn_adapters.import_ledger import PostgresImportLedger
+
+            logger.info("Delegate import ledger using Postgres (ADR-060)")
+            _import_ledger_singleton = PostgresImportLedger(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
+            return _import_ledger_singleton
+
+    raise RuntimeError(
+        "No durable delegate import ledger available. Configure "
+        "SYN_OBSERVABILITY_DB_URL for production. Without it, delegate cost is "
+        "double-billed across phases (#936) and across a crash (#933). "
+        "See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)."
+    )
 
 
 def get_webhook_health_tracker() -> WebhookHealthTracker:
@@ -954,6 +1087,25 @@ def get_execution_cost_query():
             "TimescaleDB pool is not initialized; ensure_connected() must be called first"
         )
     return ExecutionCostQueryService(pool=pool)
+
+
+def get_canonical_usage_query():
+    """Return a CanonicalUsageQueryService backed by TimescaleDB.
+
+    The ONE source the dashboard's totals read, so the metric card and the
+    activity heatmap cannot drift apart again (#932).
+
+    Raises:
+        RuntimeError: If the TimescaleDB pool is not yet initialized.
+    """
+    from syn_domain.contexts.agent_sessions import CanonicalUsageQueryService, CostCalculator
+
+    pool = get_event_store_instance().pool
+    if pool is None:
+        raise RuntimeError(
+            "TimescaleDB pool is not initialized; ensure_connected() must be called first"
+        )
+    return CanonicalUsageQueryService(pool=pool, cost_calculator=CostCalculator())
 
 
 async def get_conversation_store() -> MinioConversationStorage:

@@ -32,10 +32,6 @@ inputs:
   - name: task
     description: "What changes to make (issue body, change description, etc.)"
     required: true
-  - name: repository
-    description: "Repository URL (owner/repo or full GitHub URL)"
-    required: false
-    default: "https://github.com/syntropic137/sandbox_syn-engineer-beta"
 
 phases:
   - id: create-pr
@@ -50,13 +46,17 @@ phases:
     output_artifacts:
       - pr_metadata
       - changes_summary
-    max_tokens: 8192
     timeout_seconds: 600
 
     # Tools available for this phase
-    tools:
-      - bash
-      - computer
+    # `computer` removed: the workspace image lists it under
+    # `require_enablement`, not `defaults.allowed_tools`, so it was never
+    # granted here regardless. Names are now validated (#964).
+    allowed_tools:
+      - Bash
+      - Read
+      - Edit
+      - Write
 
     prompt_template: |
       You are a software engineer with access to git and the GitHub CLI (gh).
@@ -140,11 +140,10 @@ phases:
       - pr_metadata
     output_artifacts:
       - verification_report
-    max_tokens: 2048
     timeout_seconds: 120
 
-    tools:
-      - bash
+    allowed_tools:
+      - Bash
 
     prompt_template: |
       You are verifying that the Pull Request was created successfully.

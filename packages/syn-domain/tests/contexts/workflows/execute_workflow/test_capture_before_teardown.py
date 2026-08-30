@@ -99,6 +99,10 @@ def _processor(capture: object, workspace: object, cm: object) -> WorkflowExecut
     p._session_store = None  # type: ignore[attr-defined]
     p._observability_writer = None  # type: ignore[attr-defined]
     p._phase_leader_native_ids = {}  # type: ignore[attr-defined]  # keyed (execution_id, phase_id)
+    # No ledger: these tests are about capture ORDER, not billing. The import
+    # path treats None as "not wired" and bills the full transcript, which is
+    # irrelevant here and exercised in test_import_ledger.py.
+    p._import_ledger = None  # type: ignore[attr-defined]
     return p
 
 

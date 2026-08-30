@@ -45,6 +45,10 @@ from syn_domain.contexts.agent_sessions._shared import (
     SessionStatus,
     TokenMetrics,
 )
+from syn_domain.contexts.agent_sessions.canonical_usage import (
+    CANONICAL_SESSION_USAGE_CTE,
+    price_canonical_row,
+)
 from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
 from syn_domain.contexts.agent_sessions.delegate_usage import (
     SessionStorePort,
@@ -52,6 +56,15 @@ from syn_domain.contexts.agent_sessions.delegate_usage import (
 )
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
+)
+from syn_domain.contexts.agent_sessions.import_ledger import (
+    BilledUsage,
+    ImportLedger,
+    ImportLedgerPort,
+)
+from syn_domain.contexts.agent_sessions.slices.canonical_totals import (
+    CanonicalTotals,
+    CanonicalUsageQueryService,
 )
 from syn_domain.contexts.agent_sessions.slices.complete_session import (
     CompleteSessionCommand,
@@ -91,10 +104,16 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 )
 
 __all__ = [
+    "CANONICAL_SESSION_USAGE_CTE",
     "AgentSessionAggregate",
+    "BilledUsage",
+    "CanonicalTotals",
+    "CanonicalUsageQueryService",
     "CompleteSessionCommand",
     "CompleteSessionHandler",
     "CostCalculator",
+    "ImportLedger",
+    "ImportLedgerPort",
     "ObservationType",
     "OperationRecord",
     "OperationRecordedEvent",
@@ -112,6 +131,7 @@ __all__ = [
     "StoredTranscript",
     "TokenMetrics",
     "import_phase_delegates",
+    "price_canonical_row",
     "record_error",
     "record_message_request",
     "record_message_response",

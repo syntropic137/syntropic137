@@ -130,6 +130,45 @@ _state = LifecycleState()
 # ── Public API ──────────────────────────────────────────────────────
 
 
+def _validate_workspace_settings() -> Result[None, LifecycleError]:
+    """Fail startup on invalid workspace settings, rather than degrading (#954).
+
+    `WorkspaceSettings()` is otherwise first constructed inside a degradable
+    service init, whose exception is caught and appended to `degraded_reasons`.
+    Startup then returns Ok, `/health` returns 200 "healthy", and the npx setup
+    flow prints "Services healthy" -- while the workflow dispatcher never
+    started. The operator gets a confident green signal for a broken stack.
+
+    That is the same false-pass this issue is about, one layer further out: an
+    invalid image setting must stop the boot, not quietly remove the ability to
+    run workflows.
+    """
+    from syn_shared.settings.workspace import WorkspaceSettings
+
+    try:
+        WorkspaceSettings()
+    except Exception as exc:
+        # No exc_info and no exception object in the log: settings errors echo
+        # their input, and neighbouring settings carry tokens.
+        logger.error("Workspace settings are invalid; refusing to start: %s", exc)
+        return Err(LifecycleError.VALIDATION_FAILED, message=str(exc))
+    return Ok(None)
+
+
+async def _init_critical_path() -> Result[None, LifecycleError]:
+    """Checks that must ABORT startup, in order.
+
+    Grouped into one helper so ``startup`` gains no additional branch per check
+    -- adding them inline pushed its cyclomatic complexity past the fitness
+    threshold, and raising the threshold to accommodate a growing critical path
+    is the wrong direction.
+    """
+    workspace_result = _validate_workspace_settings()
+    if isinstance(workspace_result, Err):
+        return workspace_result
+    return await _init_event_store()
+
+
 async def _init_degradable_services(state: LifecycleState) -> None:
     """Initialize all degradable services and start recovery if needed (ADR-057).
 
@@ -215,18 +254,13 @@ async def startup(
         return Ok({"mode": "full"})
 
     # Critical path — abort on failure
-    result = await _init_event_store()
+    result = await _init_critical_path()
     if isinstance(result, Err):
         return result
 
-    # ADR-060: Initialize shared DB pool for durable dedup and cursor store.
-    # Best-effort — if it fails, services fall back to Redis/in-memory.
-    try:
-        from syn_api._wiring_db import init_shared_db_pool
-
-        await init_shared_db_pool()
-    except Exception:
-        logger.warning("Shared DB pool init failed — dedup will use Redis fallback", exc_info=True)
+    result = await _init_durable_stores()
+    if isinstance(result, Err):
+        return result
 
     await _init_degradable_services(_state)
 
@@ -423,6 +457,57 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
         destination,
         ENV_SYN_SESSION_STORE_URL,
     )
+
+
+async def _init_durable_stores() -> Result[None, LifecycleError]:
+    """The shared DB pool, then the things that require it.
+
+    One function because the ledger depends on the pool and the two have
+    DIFFERENT failure contracts: the pool is best-effort (dedup falls back to
+    Redis), the ledger is critical. Keeping them adjacent makes that ordering
+    and that asymmetry visible in one place.
+    """
+    # ADR-060: shared DB pool for durable dedup and cursor store.
+    # Best-effort — if it fails, services fall back to Redis/in-memory.
+    try:
+        from syn_api._wiring_db import init_shared_db_pool
+
+        await init_shared_db_pool()
+    except Exception:
+        logger.warning("Shared DB pool init failed — dedup will use Redis fallback", exc_info=True)
+
+    return await _init_import_ledger()
+
+
+async def _init_import_ledger() -> Result[None, LifecycleError]:
+    """Create the delegate import ledger's table eagerly (critical).
+
+    CRITICAL rather than degradable, because the import path is deliberately
+    fail-open: it must never turn agent work that succeeded into a failed
+    phase. That means a DDL or permission failure discovered on FIRST USE is
+    logged and swallowed, and every execution afterwards bills as though no
+    ledger existed - double-charging delegates across phases (#936) while the
+    operator sees a healthy service. An API that cannot bill correctly should
+    refuse to start rather than quietly overcharge.
+
+    Same shape as the MinIO buckets in ADR-012: create eagerly at startup,
+    because the first real use is the worst place to learn the store is
+    unusable.
+    """
+    try:
+        from syn_api._wiring import _create_import_ledger
+
+        ledger = _create_import_ledger()
+        ensure_ready = getattr(ledger, "ensure_ready", None)
+        if ensure_ready is not None:
+            await ensure_ready()
+    except Exception as e:
+        logger.exception("Delegate import ledger initialization failed")
+        return Err(
+            LifecycleError.CONNECTION_FAILED,
+            message=f"Delegate import ledger initialization failed: {e}",
+        )
+    return Ok(None)
 
 
 async def _init_event_store() -> Result[None, LifecycleError]:

@@ -24,11 +24,20 @@ phases:
     input_artifacts: []
     output_artifacts:
       - heal_summary
-    max_tokens: 32768
     timeout_seconds: 900
 
-    tools:
-      - bash
+    # Widened from `bash` alone when allowed_tools began RESTRICTING
+    # availability rather than merely auto-approving (#964). The prompt below
+    # tells this agent to read code, edit it and push - under the old no-op
+    # semantics that worked despite the declaration; under real enforcement it
+    # would have failed on an unattended CI trigger.
+    allowed_tools:
+      - Bash
+      - Read
+      - Edit
+      - Write
+      - Glob
+      - Grep
 
     prompt_template: |
       You are a software engineer fixing issues on PR #{{pr_number}}.

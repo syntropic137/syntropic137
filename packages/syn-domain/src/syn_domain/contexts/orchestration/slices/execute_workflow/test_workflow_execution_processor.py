@@ -5,11 +5,14 @@ Tests the Processor To-Do List pattern end-to-end with mocked infrastructure.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -522,7 +525,7 @@ class TestStaleCollectArtifactsGuard:
         phase = ExecutablePhase(phase_id="p-1", name="Research", order=1, prompt_template="x")
         aggregate = MagicMock()
         all_artifact_ids: list[str] = []
-        phase_outputs: dict[str, str] = {}
+        phase_outputs = PhaseOutputCache()
 
         assert "p-1" not in processor._active_workspaces
 
@@ -537,5 +540,90 @@ class TestStaleCollectArtifactsGuard:
         aggregate.artifacts_collected.assert_not_called()
         processor._save_and_sync.assert_not_called()
         assert all_artifact_ids == []
-        assert phase_outputs == {}
+        assert phase_outputs.primary == {}
+        # #988: a stale todo must not seed the output TREE either.
+        assert phase_outputs.files == {}
         assert "p-1" not in processor._phase_artifact_ids
+
+
+@pytest.mark.unit
+class TestPhaseOutputCacheCarriesTheWholeTree:
+    """The live handoff path between COLLECT_ARTIFACTS and the next PROVISION.
+
+    A phase outputs a DIRECTORY (#988). The cache is what carries it from the
+    phase that wrote it to the workspace of the phase that reads it, so if it
+    keeps only the primary string the fix is undone before injection ever runs
+    - and every assertion about injection would still pass.
+    """
+
+    def test_record_keeps_both_the_primary_and_the_file_tree(self) -> None:
+        from syn_domain.contexts.artifacts import PhaseOutputFile
+
+        cache = PhaseOutputCache()
+        files = [
+            PhaseOutputFile(source_path="artifacts/output/deliverable.md", content="d"),
+            PhaseOutputFile(source_path="artifacts/output/review.yaml", content="r"),
+        ]
+        cache.record("p-1", "d", files)
+
+        assert cache.primary == {"p-1": "d"}
+        assert cache.files == {"p-1": files}
+
+    def test_a_phase_that_produced_nothing_is_not_recorded(self) -> None:
+        """An empty entry would read as an authoritative empty tree and stop
+        the restart path from re-querying the projection for that phase."""
+        cache = PhaseOutputCache()
+        cache.record("p-1", None, [])
+
+        assert cache.primary == {}
+        assert cache.files == {}
+
+    @pytest.mark.anyio
+    async def test_collecting_artifacts_records_the_files_it_collected(self) -> None:
+        """The call site, not just the method: _handle_collect_artifacts must
+        hand the collected files to the cache, not only first_content."""
+        from syn_domain.contexts.artifacts import PhaseOutputFile
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
+            ArtifactCollectionResult,
+        )
+
+        files = [PhaseOutputFile(source_path="artifacts/output/review.yaml", content="r")]
+        processor = _make_processor()
+        processor._save_and_sync = AsyncMock()
+        processor._active_workspaces["p-1"] = MagicMock()
+
+        handler = MagicMock()
+        handler.handle = AsyncMock(
+            return_value=ArtifactCollectionResult(
+                artifact_ids=["a1"],
+                first_content="r",
+                command=MagicMock(),
+                files=files,
+            )
+        )
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.COLLECT_ARTIFACTS,
+            phase_id="p-1",
+            session_id="sess-1",
+        )
+        phase = ExecutablePhase(phase_id="p-1", name="Research", order=1, prompt_template="x")
+        cache = PhaseOutputCache()
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow"
+            ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+            return_value=handler,
+        ):
+            await processor._handle_collect_artifacts(todo, phase, MagicMock(), [], cache)
+
+        assert cache.files == {"p-1": files}
+        assert cache.primary == {"p-1": "r"}
