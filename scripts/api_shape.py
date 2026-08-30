@@ -58,6 +58,40 @@ def _sample(value: object) -> str:
     return text if len(text) <= _MAX_SAMPLE else text[: _MAX_SAMPLE - 3] + "..."
 
 
+def _describe_list(node: list[object], indent: int, path: str) -> None:
+    """Every key across ALL elements, with how many elements carry it.
+
+    Describing only element [0] recreated the exact failure this script
+    exists to prevent: a field present on later elements was silently
+    absent from the output, and the command still exited 0. A partial
+    listing that looks complete is worse than no listing.
+    """
+    pad = "  " * indent
+    dicts = [item for item in node if isinstance(item, dict)]
+    if not dicts:
+        print(f"{pad}  [0] ->")
+        describe(node[0], indent + 2, f"{path}[0]")
+        return
+    counts: dict[str, int] = {}
+    example: dict[str, object] = {}
+    for item in dicts:
+        for key, value in item.items():
+            counts[key] = counts.get(key, 0) + 1
+            if key not in example or example[key] is None:
+                example[key] = value
+    total = len(dicts)
+    for key, seen in counts.items():
+        value = example[key]
+        sample = _sample(value)
+        suffix = f" = {sample}" if sample else ""
+        # The count is the point: "3/5" says the key is NOT universal, which
+        # is precisely what a first-element-only view hides.
+        where = "" if seen == total else f"  [in {seen}/{total}]"
+        print(f"{pad}  {key}: {_type_of(value)}{suffix}{where}")
+    if len(dicts) != len(node):
+        print(f"{pad}  ({len(node) - len(dicts)} non-object element(s) not summarized)")
+
+
 def describe(node: object, indent: int = 0, path: str = "") -> None:
     """Print every key with its type and a value sample. No filtering."""
     pad = "  " * indent
@@ -72,19 +106,27 @@ def describe(node: object, indent: int = 0, path: str = "") -> None:
             if isinstance(value, dict):
                 describe(value, indent + 1, f"{path}.{key}")
             elif isinstance(value, list) and value:
-                print(f"{pad}  [0] ->")
-                describe(value[0], indent + 2, f"{path}.{key}[0]")
+                _describe_list(value, indent + 1, f"{path}.{key}")
     elif isinstance(node, list):
         if not node:
             print(f"{pad}(empty list)")
             return
-        print(f"{pad}list of {len(node)}; first element:")
-        describe(node[0], indent + 1, f"{path}[0]")
+        print(f"{pad}list of {len(node)}")
+        _describe_list(node, indent, path)
     else:
         print(f"{pad}{_type_of(node)} = {_sample(node)}")
 
 
-def find_value(node: object, needle: str, path: str = "$") -> list[str]:
+def _matches(haystack: str, needle: str, *, exact: bool) -> bool:
+    """Substring by default; whole-value when exact.
+
+    Substring alone reports `foo` present when only `foobar` exists, and
+    the exit code is used as a presence check.
+    """
+    return haystack == needle if exact else needle in haystack
+
+
+def find_value(node: object, needle: str, path: str = "$", *, exact: bool = False) -> list[str]:
     """Every path whose value contains `needle`.
 
     This answers the question I kept getting wrong: not "is the value under
@@ -93,11 +135,16 @@ def find_value(node: object, needle: str, path: str = "$") -> list[str]:
     hits: list[str] = []
     if isinstance(node, dict):
         for key, value in node.items():
-            hits.extend(find_value(value, needle, f"{path}.{key}"))
+            # Keys too. Saying "does not appear anywhere" while never having
+            # looked at a key is the same false-absence this script exists to
+            # stop, and a field NAME is the thing most often searched for.
+            if _matches(key, needle, exact=exact):
+                hits.append(f"{path}.{key}  (as a key)")
+            hits.extend(find_value(value, needle, f"{path}.{key}", exact=exact))
     elif isinstance(node, list):
         for index, value in enumerate(node):
-            hits.extend(find_value(value, needle, f"{path}[{index}]"))
-    elif needle in str(node):
+            hits.extend(find_value(value, needle, f"{path}[{index}]", exact=exact))
+    elif _matches(str(node), needle, exact=exact):
         hits.append(f"{path} = {node!r}")
     return hits
 
@@ -121,7 +168,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("url")
     parser.add_argument("--at", help="Descend into this top-level key first.")
-    parser.add_argument("--find", help="Report which key path holds this value.")
+    parser.add_argument("--find", help="Report which key path holds this value (substring).")
+    parser.add_argument(
+        "--find-exact",
+        help="Like --find but the value must match WHOLE. Substring search reports\n"
+        "'foo' present when only 'foobar' exists, which is wrong if you are\n"
+        "using the exit code as a presence check.",
+    )
     parser.add_argument("--timeout", type=float, default=20.0)
     args = parser.parse_args()
 
@@ -134,16 +187,9 @@ def main() -> int:
     print(f"GET {args.url}")
     print()
 
-    if args.find:
-        hits = find_value(payload, args.find)
-        if not hits:
-            print(f"{args.find!r} does not appear anywhere in this response.")
-            return 1
-        print(f"{args.find!r} appears at:")
-        for hit in hits:
-            print(f"  {hit}")
-        return 0
-
+    # --at is applied FIRST, always. It used to run only when --find was
+    # absent, so `--at missing --find x` silently searched the whole payload
+    # and could exit 0 on a match outside the subtree the caller asked about.
     node = payload
     if args.at:
         if not isinstance(payload, dict) or args.at not in payload:
@@ -152,6 +198,20 @@ def main() -> int:
             return 1
         node = payload[args.at]
         print(f"(at {args.at})")
+
+    needle = args.find_exact or args.find
+    if needle:
+        exact = args.find_exact is not None
+        hits = find_value(node, needle, exact=exact)
+        scope = f" under {args.at}" if args.at else ""
+        if not hits:
+            kind = "exactly" if exact else "anywhere"
+            print(f"{needle!r} does not appear {kind}{scope} in this response.")
+            return 1
+        print(f"{needle!r} appears at:")
+        for hit in hits:
+            print(f"  {hit}")
+        return 0
 
     describe(node)
     return 0
