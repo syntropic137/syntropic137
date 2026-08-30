@@ -1437,3 +1437,48 @@ at 94 by typing the new helper `Mapping[str, Any]` rather than raising the
 budget. Two pre-push failures caught locally first — an unsorted import and the
 ratchet — both because I formatted the source file and not the test, which is
 the "lint the commit, not the worktree" trap again.
+
+### Tick 30 — I shipped a guard that certifies coverage it does not provide
+
+Codex reviewed #1012 and requested changes. The finding is about the part I
+argued hardest for.
+
+**My structural guard was worthless.** It grepped the function body for `name=`
+and asserted every model field appeared between two `def`s. I deleted the real
+`skills=` mapping, added a decoy `skills=()` to the DEFAULT-phase constructor a
+few lines below, and **all eight tests passed**. Verified before changing
+anything.
+
+A guard satisfiable by an unrelated assignment does not measure the mapping. It
+is worse than no guard, because it reads as coverage — and I wrote a paragraph
+in the PR body explaining why it was the right design.
+
+**The tautology has been climbing levels all day.** Ticks 16, 17, 21 and 24c: a
+test asserting something both candidate behaviours satisfy. This one is the
+same error one level up — a test asserting something both a correct and a
+gutted IMPLEMENTATION satisfy. Same shape, bigger blast radius, and harder to
+see because the test looked structural and clever.
+
+Replaced with a round trip: one distinctive value per field, sent in, read back
+off the constructed object. **Nothing about how the mapping is written can
+satisfy it, only the value arriving.** Confirmed the old bypass now fails.
+
+**Third `bool()` coercion bug today.** `allow_delegation=bool(...)`, and JSON
+callers send strings, so `"false"` ENABLED delegation — the caller asking for
+the feature off and getting it on. After the artifact primary flag (#1005) and
+the api_shape needle (#1010). All three identical in shape; two were found by
+review, not by me. I now treat `bool(x)` on anything crossing a boundary as a
+defect on sight.
+
+Also learned rather than assumed: a skill ref is `org/repo/skill-name@version`
+while a plugin ref names only the repo. My fixture used the plugin spelling and
+Pydantic rejected it — validation doing its job on my test.
+
+**Deferred and listed on the PR**, not dropped: read/export still omit three of
+the repaired fields (which preserves the original undetectable failure mode
+even though storage is fixed), `_build_agent_config_from_phase` drops
+`allowed_tools` at execution, multi-name skills bypass expansion, and JSON
+create still diverges from YAML validation.
+
+Preflight exit 0, 646 syn-api tests, ratchet held at 94. Two pre-push failures
+caught locally again, both the ratchet.
