@@ -803,3 +803,33 @@ one instrument.
 
 **Meanwhile** `exec-167fbe65f189` (the #1004 plan) is still running on the Mini,
 phase 1 of 4, $2.21.
+
+### Tick 18c — PR #1008 opens the branch that has been sitting unmerged all day
+
+25 commits, 1888 lines, **zero deletions**: the four-phase SDLC workflow, the
+citation scorer, `api_shape.py`, the decision brief, and this log. `just
+preflight` green — every static CI gate.
+
+**Checked coverage rather than assuming it.** #986 says packaged workflows go
+unvalidated, so before opening the PR I asked whether the repo's own gate
+actually sees mine. It does: `workflows/sdlc/research-plan/workflow.yaml` is in
+`check_workflow_definitions.py`'s scanned set and passes.
+
+**Seventh instance of the same error, caught this time.** My first check printed
+all 20 workflow files as "MINE", because I filtered on `'sdlc' in str(path)` and
+the *worktree directory* is named `20260829_sdlc-workflows` — so every absolute
+path matched. This is verbatim the trap already recorded in
+`patterns_tmp_path_named_after_test`: a substring assertion over a captured path
+matching the harness's own name. I caught it by reading the output instead of
+the conclusion, which is the whole point of the tick-18b instrument.
+
+**What the PR does NOT claim.** The four experiment results are stated with
+their limit attached: the runs are hours apart against a moving `main`, and
+because of #1004 no execution records the commit it cloned, so I cannot prove
+the input was constant across comparisons. H6's effect (EXACT 75% -> 98%,
+citations 12 -> 55) is large enough that drift is an implausible explanation;
+H1 and H2 are weaker and genuinely rest on an assumption I cannot check. Said
+so in the PR body rather than presenting four clean rows.
+
+**Standing:** #999 green and unmerged (owner's). #1008 open. #1005 merged.
+`exec-167fbe65f189` still running on the Mini at $5.44, phase 3 of 4.
