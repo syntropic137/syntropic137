@@ -1,17 +1,26 @@
-"""Fail when a CI job has no local equivalent in `just qa-ci`.
+"""Fail when a CI job that gates a PR has no local equivalent in `just qa-ci`.
 
-`just qa-ci` claims that a green local run means a green CI run. That claim
-decays the moment someone adds a job to ci.yml, and nothing would notice: the
-new job would simply run only on GitHub, and qa-ci would keep printing its
-success line.
+`just qa-ci` exists so that one local command answers "will CI pass". That
+answer decays silently: someone adds a job, it runs only on GitHub, and qa-ci
+keeps printing its success line. The mapping below is the contract, and this
+script is what holds it.
 
-So the mapping below is the contract, and this script is what holds it. Every
-job in ci.yml must appear here, mapped either to the just target that mirrors
-it or to an explicit reason it cannot run locally. Adding a CI job without
-touching this file is the failure this exists to produce.
+Two things this deliberately does NOT claim, because the first version of it
+claimed both and neither was true:
 
-Exit code 1 if any job is unmapped, any mapped target is missing from the
-justfile, or any mapped target is missing from qa-ci's dependency list.
+- It compares JOBS, not steps. Adding a step to an existing job, widening a
+  matrix, or changing what a reusable workflow does is invisible here. Job-level
+  coverage is the floor, not a proof of equivalence.
+- Running the same command is not running it in the same environment. CI is
+  Ubuntu with pinned toolchains and a clean checkout; a local run is not. See
+  `qa-ci` in the justfile for the wording that is actually true.
+
+It discovers the workflows itself rather than reading a hardcoded list, because
+a hardcoded list is the same drift bug one level up.
+
+Exit 1 if a job is unmapped, a mapped target is missing from the justfile, a
+mapped target is not reachable from `qa-ci`, or a mapping names a job that no
+longer exists.
 """
 
 from __future__ import annotations
@@ -22,74 +31,78 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import yaml
+
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
-CI_WORKFLOW: Final = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+WORKFLOW_DIR: Final = REPO_ROOT / ".github" / "workflows"
 JUSTFILE: Final = REPO_ROOT / "justfile"
 
 QA_CI_TARGET: Final = "qa-ci"
 
-# CI job name -> the just target that runs the same commands locally.
+#: "<workflow file>:<job id>" -> the just target that runs the same commands.
 LOCAL_EQUIVALENT: Final[dict[str, str]] = {
-    "python-qa": "preflight",
-    "architectural-fitness": "preflight",
-    "python-unit-tests": "test-unit-ci",
-    "dashboard-ui": "dashboard-ci",
-    "docs-site": "docs-site-ci",
-    "cli-node": "cli-node-ci",
-    "submodule-check": "check-submodules",
-    "default-workspace-image": "preflight",
+    "ci.yml:python-qa": "preflight",
+    "ci.yml:architectural-fitness": "preflight",
+    "ci.yml:python-unit-tests": "test-unit-ci",
+    "ci.yml:dashboard-ui": "dashboard-ci",
+    "ci.yml:docs-site": "docs-site-ci",
+    "ci.yml:cli-node": "cli-node-ci",
+    "ci.yml:submodule-check": "check-submodules",
+    "ci.yml:default-workspace-image": "check-default-workspace-image",
+    "docs-lint.yml:lint-content": "check-docs-content",
 }
 
-# CI job name -> why it has no local equivalent. A reason is a commitment, not
-# a shrug: it says what a local run genuinely cannot reach.
+#: "<workflow file>:<job id>" -> why it has no local equivalent. A reason is a
+#: commitment, not a shrug: it says what a local run genuinely cannot reach.
 NO_LOCAL_EQUIVALENT: Final[dict[str, str]] = {
-    "osv-scan": "queries the remote OSV vulnerability database",
-    "pip-audit": "queries the remote PyPI advisory database",
-    "dependency-review": "a GitHub API action with no local equivalent",
-    "python-integration-tests": "needs live services; CI also skips it on PR branches",
-    "ci-success": "an aggregator job, not a check of its own",
+    "ci.yml:osv-scan": "queries the remote OSV vulnerability database",
+    "ci.yml:pip-audit": "queries the remote PyPI advisory database",
+    "ci.yml:dependency-review": "a GitHub API action with no local equivalent",
+    "ci.yml:python-integration-tests": "needs live services; CI also skips it on PR branches",
+    "ci.yml:ci-success": "an aggregator job, not a check of its own",
+    "e2e-container.yml:docker-build": "builds the workspace image; minutes and gigabytes, not seconds",
+    "e2e-container.yml:e2e-container": "runs the full container stack against a built image",
+    "e2e-container.yml:e2e-success": "an aggregator job, not a check of its own",
+    "release-gate.yml:version-check": "release PRs only; a feature branch is expected to differ",
+    "release-gate.yml:changelog-check": "release PRs only; compares against the release branch",
+    "release-gate.yml:codegen-sync": "release PRs only; preflight's codegen-check covers the same drift",
+    "release-gate.yml:docker-dry-run": "release PRs only; needs registry credentials",
+    "release-gate.yml:osv-scan": "queries the remote OSV vulnerability database",
+    "release-gate.yml:pip-audit": "queries the remote PyPI advisory database",
+    "release-gate.yml:dependency-review": "a GitHub API action with no local equivalent",
+    "release-gate.yml:release-gate-success": "an aggregator job, not a check of its own",
 }
 
-# python-qa's test-debt step is stricter than `just test-debt`, so qa-ci runs it
-# through its own target. Listed here so the dependency check below sees it.
-EXTRA_QA_CI_DEPS: Final[frozenset[str]] = frozenset({"check-test-debt"})
 
-_JOB_RE: Final = re.compile(r"^  ([a-z0-9][a-z0-9_-]*):\s*$")
+def pr_triggered_workflows(workflow_dir: Path) -> dict[str, dict[str, object]]:
+    """Every workflow that runs on `pull_request`, keyed by file name.
 
-_PY_VERSION_RE: Final = re.compile(r'python-version:\s*"?(\d+\.\d+)"?')
+    Discovered, not listed: a hardcoded set of files would drift exactly the way
+    the job mapping drifts, and nothing would catch it.
+    """
+    found: dict[str, dict[str, object]] = {}
+    for path in sorted(workflow_dir.glob("*.y*ml")):
+        document = yaml.safe_load(path.read_text())
+        if not isinstance(document, dict):
+            continue
+        # PyYAML resolves the bare key `on` to the boolean True.
+        triggers = document.get("on", document.get(True))
+        names = set(triggers) if isinstance(triggers, (dict, list)) else {triggers}
+        if "pull_request" in names:
+            found[path.name] = document
+    return found
 
 
-def ci_python_version(workflow: str) -> str | None:
-    """The Python minor version CI pins, or None if it pins none."""
-    match = _PY_VERSION_RE.search(workflow)
-    return match.group(1) if match else None
-
-
-def local_python_version() -> str:
-    """The running interpreter's minor version, e.g. "3.12"."""
-    major, minor, *_ = platform.python_version_tuple()
-    return f"{major}.{minor}"
-
-
-def ci_job_names(workflow: str) -> list[str]:
-    """Every job key under `jobs:` in the workflow, in file order."""
-    lines = workflow.splitlines()
-    try:
-        start = next(i for i, line in enumerate(lines) if line.rstrip() == "jobs:")
-    except StopIteration:
-        raise SystemExit("no `jobs:` block found in ci.yml") from None
-    names: list[str] = []
-    for line in lines[start + 1 :]:
-        if line and not line.startswith((" ", "\t", "#")):
-            break  # left the jobs block
-        match = _JOB_RE.match(line)
-        if match:
-            names.append(match.group(1))
-    return names
+def job_ids(document: dict[str, object]) -> list[str]:
+    """The job ids of one parsed workflow."""
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        raise SystemExit("workflow has no `jobs:` mapping")
+    return [str(name) for name in jobs]
 
 
 def just_targets(justfile: str) -> set[str]:
-    """Every recipe name defined in the justfile."""
+    """Every recipe name DEFINED in the justfile, not merely mentioned."""
     return set(re.findall(r"^([a-z0-9][a-z0-9_-]*)\s*:", justfile, re.MULTILINE))
 
 
@@ -115,43 +128,66 @@ def qa_ci_dependencies(justfile: str) -> set[str]:
     return seen
 
 
-def main() -> int:
-    workflow = CI_WORKFLOW.read_text()
-    justfile = JUSTFILE.read_text()
+def ci_python_version(workflow: str) -> str | None:
+    """The Python minor version CI pins, or None if it pins none."""
+    match = re.search(r'python-version:\s*"?(\d+\.\d+)"?', workflow)
+    return match.group(1) if match else None
 
-    jobs = ci_job_names(workflow)
+
+def local_python_version() -> str:
+    """The running interpreter's minor version, e.g. "3.12"."""
+    major, minor, *_ = platform.python_version_tuple()
+    return f"{major}.{minor}"
+
+
+def find_problems(
+    workflows: dict[str, dict[str, object]], justfile: str
+) -> tuple[list[str], int, int]:
+    """Every way the mapping and the justfile currently disagree."""
     targets = just_targets(justfile)
-    deps = qa_ci_dependencies(justfile)
+    reachable = qa_ci_dependencies(justfile)
 
     problems: list[str] = []
+    keys: set[str] = set()
+    covered = 0
 
-    for job in jobs:
-        if job in LOCAL_EQUIVALENT:
-            target = LOCAL_EQUIVALENT[job]
-            if target not in targets:
+    for filename, document in sorted(workflows.items()):
+        for job in job_ids(document):
+            key = f"{filename}:{job}"
+            keys.add(key)
+            if key in LOCAL_EQUIVALENT:
+                target = LOCAL_EQUIVALENT[key]
+                if target not in targets:
+                    problems.append(f"{key} maps to just target {target!r}, which does not exist")
+                elif target not in reachable:
+                    problems.append(
+                        f"{key} maps to {target!r}, which `{QA_CI_TARGET}` does not run"
+                    )
+                else:
+                    covered += 1
+            elif key not in NO_LOCAL_EQUIVALENT:
                 problems.append(
-                    f"CI job {job!r} maps to just target {target!r}, which does not exist"
+                    f"{key} has no entry in scripts/check_ci_parity.py. Add it to "
+                    f"LOCAL_EQUIVALENT (and to `{QA_CI_TARGET}`), or to "
+                    f"NO_LOCAL_EQUIVALENT with the reason it cannot run locally."
                 )
-            elif target not in deps:
-                problems.append(
-                    f"CI job {job!r} maps to {target!r}, which `{QA_CI_TARGET}` does not run"
-                )
-        elif job not in NO_LOCAL_EQUIVALENT:
-            problems.append(
-                f"CI job {job!r} has no entry in scripts/check_ci_parity.py. "
-                f"Add it to LOCAL_EQUIVALENT (and to `{QA_CI_TARGET}`), or to "
-                f"NO_LOCAL_EQUIVALENT with the reason it cannot run locally."
-            )
 
-    known = set(LOCAL_EQUIVALENT) | set(NO_LOCAL_EQUIVALENT)
-    for stale in sorted(known - set(jobs)):
+    for stale in sorted((set(LOCAL_EQUIVALENT) | set(NO_LOCAL_EQUIVALENT)) - keys):
         problems.append(
-            f"{stale!r} is mapped in check_ci_parity.py but is no longer a job in ci.yml"
+            f"{stale!r} is mapped in check_ci_parity.py but is no longer a "
+            f"pull_request-triggered job"
         )
 
-    for dep in EXTRA_QA_CI_DEPS:
-        if dep not in deps:
-            problems.append(f"`{QA_CI_TARGET}` no longer runs {dep!r}")
+    return problems, covered, len(keys)
+
+
+def main() -> int:
+    workflows = pr_triggered_workflows(WORKFLOW_DIR)
+    if not workflows:
+        print("❌ no pull_request-triggered workflows found; refusing to report parity")
+        return 1
+
+    problems, covered, total = find_problems(workflows, JUSTFILE.read_text())
 
     if problems:
         print("❌ local QA has drifted from CI:")
@@ -161,7 +197,7 @@ def main() -> int:
 
     # A warning, not a failure: the fix is to install another interpreter, and
     # that is the repo owner's call, not something a lint should force. See #1018.
-    pinned = ci_python_version(workflow)
+    pinned = ci_python_version((WORKFLOW_DIR / "ci.yml").read_text())
     local = local_python_version()
     if pinned is not None and pinned != local:
         print(
@@ -169,10 +205,10 @@ def main() -> int:
             f"not evidence about the interpreter CI runs (see #1018)."
         )
 
-    covered = sum(1 for job in jobs if job in LOCAL_EQUIVALENT)
     print(
-        f"✓ CI parity: {covered} of {len(jobs)} ci.yml jobs run locally via "
-        f"`just {QA_CI_TARGET}`; the rest are documented as remote-only"
+        f"✓ CI parity: {covered} of {total} pull_request-triggered jobs across "
+        f"{len(workflows)} workflows run locally via `just {QA_CI_TARGET}`; "
+        f"the rest are documented as remote-only"
     )
     return 0
 

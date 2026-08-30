@@ -567,6 +567,7 @@ dashboard-ci:
     # modules directory without it. Same command, same environment, same result.
     cd lib/ui-feedback/packages/ui-feedback-react && CI=true pnpm install --ignore-scripts
     cd apps/syn-dashboard-ui && CI=true pnpm install --frozen-lockfile --ignore-scripts
+    cd apps/syn-dashboard-ui && CI=true pnpm link ../../lib/ui-feedback/packages/ui-feedback-react
     just dashboard-qa
 
 # Full dashboard QA (lint + build)
@@ -1019,7 +1020,7 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
+preflight: check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-docs-content check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks,"
     @echo "   docs build, submodules. Run 'just qa-ci' for all of those."
@@ -1042,9 +1043,12 @@ check-ci-parity:
 #   python-integration-tests - skipped on PR branches in CI too (needs services)
 qa-ci: preflight test-unit-ci cli-node-ci dashboard-ci docs-site-ci
     @echo ""
-    @echo "✅ qa-ci: every CI gate that runs on a PR passed locally."
-    @echo "   Still only checked on GitHub: osv-scan, pip-audit,"
-    @echo "   dependency-review (remote data), and integration tests."
+    @echo "✅ qa-ci: every PR-gating CI JOB with a local equivalent passed."
+    @echo "   This is job-level coverage, not proof of equivalence: CI runs on"
+    @echo "   Ubuntu with pinned toolchains and a clean checkout, and a step"
+    @echo "   added inside an existing job is invisible to the parity gate."
+    @echo "   Never run locally: osv-scan, pip-audit, dependency-review"
+    @echo "   (remote data), e2e-container, and the release-only gates."
 
 # CI's python-qa runs this WITHOUT --warn-only, so it is a hard gate there.
 # 'just test-debt' passes --warn-only and therefore cannot fail; that is a
@@ -1055,7 +1059,7 @@ check-test-debt:
 # Mirrors ci.yml python-unit-tests, including -x (stop on first failure) and
 # the coverage flags, so a locally-green run is the run CI performs.
 test-unit-ci:
-    TERM=dumb NO_COLOR=1 uv run pytest -m unit \
+    TERM=dumb NO_COLOR=1 COLUMNS=200 uv run pytest -m unit \
         --cov=apps/syn-api/src \
         --cov=packages/syn-domain/src \
         --cov=packages/syn-adapters/src \
@@ -1067,28 +1071,45 @@ test-unit-ci:
 # are the ones that catch an API change that never reached the CLI types.
 cli-node-ci:
     cd apps/syn-cli-node && pnpm install --frozen-lockfile --ignore-scripts
-    just cli-node-qa
+    cd apps/syn-cli-node && pnpm run typecheck
+    cd apps/syn-cli-node && NO_COLOR=1 pnpm run test
+    cd apps/syn-cli-node && pnpm run build
     cd apps/syn-cli-node && pnpm run check:api-drift
     cd apps/syn-cli-node && pnpm run check:untyped-api
 
 # Mirrors ci.yml docs-site. Note this is NOT docs-site-build, which first runs
 # codegen; CI builds the committed tree as-is.
 docs-site-ci:
-    cd apps/syn-docs && pnpm install
+    cd apps/syn-docs && CI=true pnpm install --frozen-lockfile
     cd apps/syn-docs && pnpm run build
+
+# Mirrors docs-lint.yml lint-content: the published docs must contain no em
+# dashes. Same grep, same paths, same exit code.
+check-docs-content:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    found=$(grep -rl $'\xe2\x80\x94' apps/syn-docs/content/ 2>/dev/null || true)
+    if [ -n "$found" ]; then
+        echo "❌ em dash in syn-docs content. Use colons or commas instead:"
+        grep -rn $'\xe2\x80\x94' apps/syn-docs/content/ 2>/dev/null || true
+        exit 1
+    fi
+    echo "✓ Typography check passed."
 
 # Mirrors ci.yml submodule-check.
 check-submodules:
     #!/usr/bin/env bash
     set -euo pipefail
     git submodule status
-    for sub in lib/agentic-primitives lib/event-sourcing-platform; do
-        if [ ! -f "$sub/README.md" ]; then
-            echo "❌ $sub submodule not initialized (run: just submodules-init)"
-            exit 1
-        fi
-    done
-    echo "✅ All submodules properly initialized"
+    # A leading -, + or U means uninitialized, at the wrong commit, or
+    # conflicted. `git submodule status` exits 0 for all three.
+    if git submodule status --recursive | grep -qE '^[-+U]'; then
+        echo "❌ a submodule is uninitialized or not at its recorded commit:"
+        git submodule status --recursive | grep -E '^[-+U]'
+        echo "   run: just submodules-init"
+        exit 1
+    fi
+    echo "✅ All submodules initialized at their recorded commits"
 
 # Validate every workflow YAML against WorkflowDefinition.
 #
