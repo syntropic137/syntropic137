@@ -40,8 +40,16 @@ from pathlib import Path
 #: here so the score is read as "of the citations we can check", not "of all
 #: claims made".
 _CITATION = re.compile(
+    # The lookbehind and lookahead are load-bearing, not tidiness. Without
+    # them the regex starts matching AFTER an invalid prefix and stops BEFORE
+    # invalid trailing text, cropping a malformed citation into a clean one:
+    # `/scripts/x.py:1`, `bad\\scripts/x.py:1` and `scripts/x.py:1-junk` all
+    # became `scripts/x.py:1` and scored EXACT. That is fail-toward-good --
+    # the scorer rewarded the citation for being wrong in a croppable way.
+    r"(?<![\w./\\-])"
     r"(?P<path>(?:[\w.\-]+/)+[\w.\-]+\.(?:py|ts|tsx|js|yaml|yml|toml|md|rs|sh))"
     r":(?P<line>\d+)(?:-(?P<end>\d+))?"
+    r"(?![\w-])"
 )
 
 
