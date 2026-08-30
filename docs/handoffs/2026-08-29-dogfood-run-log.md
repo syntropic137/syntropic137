@@ -20,7 +20,8 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
-| H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **UNBLOCKED, tick 42** — v0.27.0 deployed and verified on the Mini; codex phases now survive install. Ready to test |
+| H13 | The v4 absence rule is citation-neutral | **REFUTED, tick 46, n=1** — v4's final plan has ZERO `file:line` citations against v3's 81 on the identical task, and its revise phase dropped 10 -> 0 where v3's rose 54 -> 81. Where v4 cites, it is 3/3 correct: density collapsed, not accuracy |
+| H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **STILL UNTESTED, tick 46** — the v4 run exists ($1.19 vs v3's >=$8.15, same issue) but its review returned "No blockers", so the rejection hazard never arose. Needs a run where the review DOES raise a blocker. Previously "UNBLOCKED, tick 42 — v0.27.0 deployed and verified on the Mini; codex phases now survive install. Ready to test |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51, all 100%. CAVEAT (tick 40): every run executed on an `edge`-channel workspace image, not `release` |
 | H11 | Local QA missing CI's jobs is why CI catches more; adding them closes it | **partly supported, and incomplete — tick 44** — the six missing jobs were real and are now local. But codex showed parity is a claim about COMMANDS AND ENVIRONMENT, not target names: `docs-lint.yml` gates every PR and was unmapped, `dashboard-ci` dropped CI's `pnpm link`, and `docs-site-ci` is non-frozen locally because Actions sets `CI=true` |
 | H12 | A gate that passes is a gate that works | **REFUTED, tick 45** — four gates written this week were structurally incapable of failing: `check_test_debt --warn-only`, the scorer's `--rev`, `main() -> 0`, and `grep -q` under `pipefail` returning 141. Each looked identical to a working gate until its hazard was reproduced |
@@ -2231,3 +2232,75 @@ hide the docs directory), not an argument that it is handled.
 
 **Status:** two codex passes done on #1019, all findings addressed, `just qa-ci`
 green in 3m21s, tree byte-identical before and after. Merging on green.
+
+---
+
+## Tick 46 — #1019 merged; two prompt premises were stale; v4 scored
+
+**Merged #1019** (`f671543934b4`) after both codex passes, 0 failing checks.
+Architectural Fitness - the job that would have caught the recursive-submodule
+mistake - passed on the exact head SHA.
+
+### Two premises in my own tick prompt were false
+
+I have been writing the tick prompts, so these are my errors, not the loop's.
+
+1. **"Build the implement->review->docs->QA half; we have nothing for
+   implementation."** `syn workflow list` against the Mini shows
+   `implement-from-plan-v1` (Bootstrap / Implement / Open Draft PR),
+   `plan-build-pr`, `Code Review` and `PR Review` already installed, and
+   `syn execution list` shows implement-from-plan has RUN twice, at $4.06 and
+   $8.92. What is missing is not a workflow, it is a *validated* one.
+2. **"H8 is now testable - install v4 and re-run."** v4 already ran:
+   `exec-0bcba7624b96`, Aug 30 04:50, 4/4 phases, same issue (#1009), **$1.19**
+   against v3's **>=$8.15** (v3 has 2 unpriced observations, so its true cost is
+   higher still; v4 has 0). I had the answer sitting in the execution list and
+   asked for the experiment again.
+
+**HYPOTHESIS (H8):** the v4 absence rule stops the false-premise rejection that
+made v3 discard a correct blocker.
+
+### What the evidence said: H8 is still UNTESTED, and something else broke
+
+**H8 cannot be answered by this run.** v4's review phase concluded *"No
+blockers"*. There was no blocker to wrongly reject, so the hazard never
+occurred. A run that fails safe because the hazard was absent certifies
+nothing - the same near-miss trap recorded earlier this week.
+
+**What the run does show, and I did not predict:** citations collapse across
+v4's phases.
+
+| phase | v3 `file:line` count | v4 |
+|---|---|---|
+| investigate | 80 | 25 |
+| plan | 33 | 3 |
+| review | 54 | 10 |
+| **revise (final plan)** | **81** | **0** |
+
+The v4 final plan contains **zero** `file:line` references. Confirmed two ways:
+the scorer reports `NO CITATIONS`, and an independent regex over the raw text
+finds 0 (v3's finds 81), including inside fenced blocks. It names 25 bare file
+paths with no lines.
+
+The discriminating detail is the direction of travel in the last phase: v3's
+revise phase *raised* citations 54 -> 81; v4's dropped 10 -> 0. Its own review
+had a table of verified `file:line` claims that the revision did not carry
+forward.
+
+Where v4 does cite, it cites correctly: its plan-phase 3 citations score
+RESOLVES 3/3, EXACT 3/3. Quality per citation held; **density** collapsed.
+
+**Reading it honestly, n=1.** v4 is 1/7 the cost and produced a shorter,
+structurally reasonable plan that is far less verifiable. I cannot yet separate
+"the absence rule suppressed citing" from "this run happened to go easy" - the
+review finding no blockers suggests the whole run was on a lighter path. What is
+established is that a v4 plan CAN reach the deliverable with zero verifiable
+claims, which is exactly what H6's citation discipline was buying.
+
+**Correction to myself:** I briefly read `total_cost_usd` as a float in one
+response and a string in another and nearly filed an API type inconsistency. It
+is a string in both; the f-string had hidden the quotes. Checked before claiming.
+
+**Also observed:** `/executions/{id}` returns `total_duration_seconds: 0.0` for
+a run that took 10 minutes, and `phase_name: None` for every phase while the CLI
+displays names. Not filed yet - needs its own premise check first.
