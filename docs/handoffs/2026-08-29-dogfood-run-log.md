@@ -649,3 +649,51 @@ instrument-shaped and the habit is not.
 **Evidence:** `syn-domain` 1737 passed, adapters + apps 1513 passed, ruff and
 pyright clean, untyped-dicts ratchet held at 391 by typing the new helper
 rather than raising the budget.
+
+### Tick 17 — codex pass 2: my fix made one case worse, and my new test could not fail
+
+**Worked:** codex pass 2 on #1005 (the second and final allowed pass), then
+fixed what it found. Pushed 4b074e8f.
+
+**Hypothesis going in:** pass 2 would confirm the four pass-1 fixes and find
+nothing structural, because I had mutation-tested each one.
+
+**Contradicted, on the part I did not think to check.** The pass-1 fix made one
+production case WORSE than before. I had taught the flat alias to rank
+candidates, but left `get_files_for_phase_injection` returning raw projection
+order — and `_tree_files` dedups first-wins. So with a duplicated `source_path`
+the alias resolved to the earliest primary while the tree kept the newest row:
+**a restart could inject two different versions of the same deliverable**, one
+at `<phase-id>.md` and another at `<phase-id>/<source_path>`. Before my branch
+both read newest-first and at least agreed.
+
+I reproduced it before fixing — both new consistency tests failed against the
+previous commit. That is the difference between accepting a finding and
+verifying one.
+
+The reasoning error is worth naming: I treated "the tree path" as deferred
+scope because codex had filed it under a deferred finding. But two readers of
+one phase output disagreeing IS the defect #997 describes. I had drawn the
+scope boundary around the *finding number* rather than around the *bug class*,
+which is precisely the carve-out I am supposed to refuse.
+
+**And the second tautological test in two ticks.** I added a strict-boolean
+read because `bool("false")` is True, then tested it by asserting `"false"`
+reads as True — which the strict AND the coercing implementation both satisfy.
+Mutation killed nothing. Rewritten against `0`, where the two genuinely
+differ, and the mutation now fails it.
+
+Both tautologies had the same shape: **I picked an input where the two
+candidate behaviours happen to agree.** Mutation testing catches this, which is
+why it is not optional — but only if the mutation is the one that matters. A
+test that cannot distinguish the fix from its absence is decoration no matter
+how green it is.
+
+**Accepted without changing:** the VERSION 4->5 bump does rebuild (codex traced
+the coordinator deleting rows + checkpoint and replaying from zero), though
+there is a visibility window because startup does not wait for catch-up. That
+is a property of every projection bump in this repo, not something this PR
+introduces.
+
+**Standing:** #1005 has had its two codex passes with findings cleared; #999
+remains green at 50 checks and is the owner's to merge.
