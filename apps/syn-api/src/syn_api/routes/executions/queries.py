@@ -578,6 +578,7 @@ async def get_detail(
             completed_at=detail.completed_at,
             error_message=detail.error_message,
             repos=list(detail.repos),
+            total_duration_seconds=detail.total_duration_seconds,
         )
     )
 
@@ -693,4 +694,5 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         artifact_ids=artifact_ids,
         error_message=detail.error_message,
         repos=list(detail.repos),
+        total_duration_seconds=detail.total_duration_seconds,
     )

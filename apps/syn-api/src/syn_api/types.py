@@ -784,6 +784,12 @@ class ExecutionDetailFull(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0
+    total_duration_seconds: float = 0.0
+    """Wall-clock seconds across the execution's phases (#969).
+
+    Absent from this model until now, which is why the endpoint reported 0.0
+    for every run regardless of what the projection held.
+    """
     """Observations that carried no usable rate and so added nothing to the total.
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
