@@ -377,6 +377,49 @@ def _yaml_input_lines(detail: WorkflowDetail) -> list[str]:
     return lines
 
 
+def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """The `agent:` block, in the spelling the packaged workflow YAML uses.
+
+    Emitted only when the phase actually declares something. A bare
+    `agent: {}` would be noise, and `provider: null` would assert a choice
+    the author never made.
+    """
+    entries: list[str] = []
+    if phase.provider:
+        entries.append(f"      provider: {phase.provider}")
+    if phase.model:
+        entries.append(f"      model: {phase.model}")
+    if phase.allow_delegation:
+        entries.append("      allow_delegation: true")
+    return ["    agent:", *entries] if entries else []
+
+
+def _yaml_ref_lines(key: str, refs: list[PhaseRefResponse]) -> list[str]:
+    """Plugin/skill refs in their STRUCTURED form.
+
+    Never joined into `source/name@version`. #1014 established that joining
+    corrupts a ref whose source already ends in the repo name -- it reparses
+    to a different repository -- so the export writes the mapping form the
+    loader accepts and keeps the parts apart.
+    """
+    if not refs:
+        return []
+    lines = [f"    {key}:"]
+    for ref in refs:
+        source = ref.source_url or ref.raw
+        if not source:
+            # A ref we cannot name is not exportable. Dropping it is honest;
+            # writing `source: null` would produce YAML that reinstalls into
+            # a broken reference.
+            continue
+        lines.append(f"      - source: {source}")
+        if ref.name:
+            lines.append(f"        names: [{ref.name}]")
+        if ref.version:
+            lines.append(f"        version: {ref.version}")
+    return lines if len(lines) > 1 else []
+
+
 def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     """Build the phase entry lines for a single phase in workflow.yaml."""
     pid = _validate_phase_id(phase.phase_id)
@@ -389,9 +432,29 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if phase.description:
         lines.append(f"    description: {_yaml_quote(phase.description)}")
     lines.append(f"    prompt_file: phases/{pid}.md")
+    if phase.input_artifact_types:
+        lines.append(f"    input_artifacts: [{', '.join(phase.input_artifact_types)}]")
     if phase.output_artifact_types:
         artifacts = ", ".join(phase.output_artifact_types)
         lines.append(f"    output_artifacts: [{artifacts}]")
+    # Everything below was silently dropped (#1015). Export emitted 6 of 18
+    # fields, so export -> reinstall produced a DIFFERENT workflow rather than
+    # an incomplete one: no tool scoping, no provider, no timeouts, no skills.
+    #
+    # Each guarded on presence, never emitted as an empty value: writing
+    # `allowed_tools: []` would turn "inherits the default" into "explicitly
+    # declares nothing", which reinstalls differently again.
+    if phase.timeout_seconds is not None:
+        lines.append(f"    timeout_seconds: {phase.timeout_seconds}")
+    if phase.max_tokens is not None:
+        lines.append(f"    max_tokens: {phase.max_tokens}")
+    if phase.argument_hint:
+        lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
+    if phase.allowed_tools:
+        lines.append(f"    allowed_tools: [{', '.join(phase.allowed_tools)}]")
+    lines.extend(_yaml_agent_lines(phase))
+    lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
+    lines.extend(_yaml_ref_lines("skills", phase.skills))
     return lines
 
 
