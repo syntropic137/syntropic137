@@ -22,6 +22,7 @@ the bottom is the part worth reading later.
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
 | H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **UNBLOCKED, tick 42** — v0.27.0 deployed and verified on the Mini; codex phases now survive install. Ready to test |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51, all 100%. CAVEAT (tick 40): every run executed on an `edge`-channel workspace image, not `release` |
+| H11 | Local QA missing CI's jobs is why CI catches more; adding them closes it | **partly supported, and incomplete — tick 44** — the six missing jobs were real and are now local. But codex showed parity is a claim about COMMANDS AND ENVIRONMENT, not target names: `docs-lint.yml` gates every PR and was unmapped, `dashboard-ci` dropped CI's `pnpm link`, and `docs-site-ci` is non-frozen locally because Actions sets `CI=true` |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
 ---
@@ -2044,3 +2045,80 @@ That gap is itself a dogfooding target: **the QA an agent runs before pushing
 should be the same set CI runs**, and today it demonstrably was not.
 
 Mutation-verified three ways, all killed.
+
+---
+
+## Tick 44 — merged #1016; built local CI parity; codex refuted its headline claim
+
+**Did:** merged #1016 (both codex passes done, all findings fixed, CI green on
+the exact head SHA `e3941d18`, base current). Then built the thing the owner
+asked for: one local command that means "CI will pass".
+
+**HYPOTHESIS (H11):** the reason CI catches things my local run does not is that
+`just preflight` covers only the static gates, so the fix is to add the missing
+jobs to a local target.
+
+**What the evidence said — H11 is true but badly incomplete, and codex proved
+it.** The measurement first, since I have been burned by skipping it:
+
+| CI job | had a local equivalent before? |
+|---|---|
+| `python-qa` | partly — its `check_test_debt.py` step is a HARD gate in CI, and the only local caller passed `--warn-only`, so the local check was structurally incapable of failing |
+| `python-unit-tests` | no |
+| `dashboard-ui` | partly (no install step) |
+| `docs-site` | no |
+| `cli-node` | partly (missing `check:api-drift`, `check:untyped-api`) |
+| `submodule-check` | no |
+
+So `just qa-ci` + `scripts/check_ci_parity.py` (PR #1019), the gate mapping each
+ci.yml job to a local target or to a stated reason it cannot run locally. It ran
+green in 3m35s and it immediately caught my own lint errors in 1.5s.
+
+Then codex reviewed it and **falsified the headline claim.** Findings I accept:
+
+1. **`main()` is not tested at all.** The mutation `def main(): return 0` passes
+   every one of my seven tests. I mutation-tested the gate by hand at the shell
+   and mistook that for the tests covering it — the shell run proves the code
+   works today, the tests are what stop it breaking tomorrow. This is H10 again,
+   for the fourth tick running: I tested the parsing helpers, which is the side
+   of the boundary I was staring at, and not the fail-closed behaviour that is
+   the entire product.
+2. **The parser is a line regex over YAML.** `jobs: # comment`, a quoted key, an
+   uppercase job id, a leading underscore, and a YAML anchor each make it report
+   either zero jobs or no jobs block — i.e. **it fails toward "perfect parity"**,
+   the exact failure mode I fixed in the citation scorer in tick 22 and then
+   rebuilt from scratch here.
+3. **It reads ci.yml only.** `docs-lint.yml` triggers on every PR and is not
+   mapped. So the claim was false on its face and I never checked the premise.
+4. **`dashboard-ci` omits CI's `pnpm link` step** — a transcription miss in the
+   very commit whose subject is "make one local command mean CI will pass".
+5. **`docs-site-ci` is not equivalent**: Actions sets `CI=true`, under which
+   pnpm treats the lockfile as frozen. Locally it can silently update a stale
+   lockfile and pass.
+
+**The pattern, stated once.** Three of five findings are the same failure: I
+compared target NAMES to job names and called it parity, when parity is a claim
+about COMMANDS AND ENVIRONMENT. A gate that compares the wrong two things is
+worse than no gate, because it reports coverage.
+
+**Contradicted me:** the commit message says "if this is green, CI is green."
+That was not true when I wrote it, and `docs-lint.yml` was one `ls
+.github/workflows/` away the whole time — a directory listing I had already run
+in this same tick, and read past.
+
+**Also found, filed:** #1018 — local Python is **3.14**, CI pins **3.12**. Every
+local test result this week, including yesterday's "3149 tests passed", was
+evidence about an interpreter CI never runs. Warned rather than gated: pinning
+the owner's interpreter is the owner's call.
+
+**Rough edges hit, both in our own tooling:**
+- `sdlc:git-worktree`'s `worktree.sh` fails on macOS: `sed: RE error: parentheses
+  not balanced` for any `feat/...` branch (BSD sed, unescaped alternation).
+- `codex exec --full-auto` was **removed** in codex-cli 0.147.0. Our
+  `delegating-to-codex` skill documents it as the validated invocation, so every
+  agent following that skill now gets exit 2. Working form:
+  `codex exec -s read-only -c approval_policy='"never"' --json`.
+
+**Next:** fix the five accepted findings on #1019 before a second pass — real
+`main()` tests, a YAML parse, every PR-triggered workflow, the link step, and
+the frozen install — then re-state the claim as something that is actually true.
