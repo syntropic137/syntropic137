@@ -6,6 +6,7 @@ to a specific workflow.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -479,6 +480,12 @@ def _check_phase_providers(workflow: WorkflowTemplateAggregate) -> None:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+#: A preflight that hangs is worse than one that fails: it converts a fast 200
+#: into a request that never returns. The resolver reads Postgres and the
+#: projection store supplies no timeout of its own.
+_SKILL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
+
+
 async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -> None:
     """Resolve every declared skill NOW, so an unusable ref is a 422 (#998).
 
@@ -496,43 +503,54 @@ async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -
     a 200 tells it to wait. Every trigger, cron job and agent built on this API
     would wait forever.
 
-    The message is reused verbatim rather than rewritten. It is already the best
-    description of the problem that exists, and paraphrasing it would drift from
-    whatever the resolver actually rejected.
+    The resolver's message is reused verbatim rather than rewritten. It is
+    already the best description of the problem that exists, and paraphrasing it
+    would drift from whatever the resolver actually rejected.
 
-    Fail-open on an unavailable RESOLVER, not on an unresolvable REF: if the
-    service cannot be constructed we let the execution proceed and fail later
-    rather than refusing work for an infrastructure reason. A missing
-    registration is a user error and must be reported; a missing resolver is
-    ours.
+    FAILS CLOSED on infrastructure, not open. An earlier version skipped the
+    preflight when the resolver could not be constructed, on the reasoning that
+    a degraded subsystem should not block all work. A codex review showed that
+    reasoning was wrong HERE: the background handler constructs the SAME
+    resolver moments later, before persistence, so skipping merely relocates the
+    failure back into the window this function exists to close - recreating the
+    exact false success. Nothing retries or acknowledges in between, so a 200
+    would not be truthful. Infrastructure failure is therefore a 503, which
+    tells the caller to look and to try again.
+
+    Both scopes are resolved together because that is what execution does
+    (``ExecuteWorkflowHandler._resolve_phase_skills``). Validating phase refs
+    alone left a workflow whose only unregistered skill was WORKFLOW-scoped
+    still returning 200 and then 404.
     """
-    refs = [ref for phase in workflow.phases for ref in (phase.skills or [])]
-    refs += list(getattr(workflow, "skills", None) or [])
-    if not refs:
+    workflow_refs = tuple(getattr(workflow, "skills", None) or ())
+    phases = list(workflow.phases)
+    if not workflow_refs and not any(p.skills for p in phases):
         return
 
     try:
         from syn_api._wiring import get_skill_resolution_service
 
         service = await get_skill_resolution_service()
-    except Exception:
-        logger.warning(
-            "Skill resolver unavailable; skipping pre-flight skill validation",
-            exc_info=True,
+        async with asyncio.timeout(_SKILL_PREFLIGHT_TIMEOUT_SECONDS):
+            for phase in phases:
+                # Every phase, not only those with their own refs: a
+                # workflow-scoped skill applies to all of them.
+                await service.resolve_for_phase(workflow_refs, tuple(phase.skills or ()))
+    except SkillError as exc:
+        # The one case that is the CALLER's to fix.
+        phase_hint = next(
+            (p.phase_id for p in phases if p.skills),
+            phases[0].phase_id if phases else "?",
         )
-        return
-
-    for phase in workflow.phases:
-        phase_refs = list(phase.skills or [])
-        if not phase_refs:
-            continue
-        try:
-            await service.resolve_for_phase((), tuple(phase_refs))
-        except SkillError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=f"phase '{phase.phase_id}': {exc}",
-            ) from exc
+        raise HTTPException(status_code=422, detail=f"phase '{phase_hint}': {exc}") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # includes TimeoutError from asyncio.timeout
+        logger.warning("Skill preflight could not complete", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"could not verify declared skills: {exc}",
+        ) from exc
 
 
 async def _validate_execution_request(

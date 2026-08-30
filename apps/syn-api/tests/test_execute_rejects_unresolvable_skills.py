@@ -20,6 +20,8 @@ built on this API would wait forever.
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 from fastapi import HTTPException
 
@@ -120,16 +122,73 @@ class TestAnUnresolvableRefIsRejectedAtTheBoundary:
         assert exc.value.status_code == 422
 
 
-class TestItDoesNotRefuseWorkItShouldAccept:
-    async def test_a_workflow_with_no_skills_never_touches_the_resolver(
+class TestWorkflowScopedSkillsAreValidatedToo:
+    """A codex review found the first version validated PHASE refs only.
+
+    Production resolves both scopes together
+    (`ExecuteWorkflowHandler._resolve_phase_skills`), so a workflow whose only
+    unregistered skill was WORKFLOW-scoped still returned 200 and then 404 -
+    the exact bug, still reachable through a different door.
+    """
+
+    async def test_an_unregistered_WORKFLOW_scoped_skill_is_rejected(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Most workflows declare none. Constructing the service for them would
-        make every execution pay for a feature it does not use."""
+        wf = _Workflow([_Phase("research")])  # NO phase-level skills
+        wf.skills = ("workflow-ref",)
+        resolver = _Resolver(SkillNotRegistered(_SOURCE, _VERSION, "architecture"))
+
+        with pytest.raises(HTTPException) as exc:
+            await _check(monkeypatch, wf, resolver)
+        assert exc.value.status_code == 422
+        assert "architecture" in str(exc.value.detail)
+
+    async def test_workflow_refs_reach_the_resolver(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Asserting the ARGUMENT, not just that a call happened: passing
+        `()` for the workflow scope is exactly the bug being fixed."""
+        seen: list[tuple[object, object]] = []
+
+        class _Recording(_Resolver):
+            async def resolve_for_phase(self, workflow_refs, phase_refs):  # type: ignore[no-untyped-def]
+                seen.append((workflow_refs, phase_refs))
+                return ()
+
+        wf = _Workflow([_Phase("research", skills=("phase-ref",))])
+        wf.skills = ("workflow-ref",)
+        await _check(monkeypatch, wf, _Recording())
+
+        assert seen, "the resolver was never called"
+        workflow_refs, phase_refs = seen[0]
+        assert workflow_refs == ("workflow-ref",), f"workflow scope dropped: {workflow_refs}"
+        assert phase_refs == ("phase-ref",)
+
+
+class TestItDoesNotRefuseWorkItShouldAccept:
+    async def test_a_workflow_with_no_skills_never_CONSTRUCTS_the_resolver(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spies the FACTORY, not `resolve_for_phase`.
+
+        A codex review caught the earlier version counting resolve calls: it
+        passed even with the early return deleted, because a resolver that is
+        constructed and then handed no refs still records zero calls. The claim
+        is that we never build the service at all, so the factory is what must
+        be observed.
+        """
+        import syn_api._wiring as wiring
+        from syn_api.routes.executions import commands
+
+        built = 0
+
+        async def _factory() -> object:
+            nonlocal built
+            built += 1
+            return _Resolver()
+
+        monkeypatch.setattr(wiring, "get_skill_resolution_service", _factory)
         wf = _Workflow([_Phase("research"), _Phase("plan")])
-        resolver = _Resolver()
-        await _check(monkeypatch, wf, resolver)
-        assert resolver.calls == 0
+        await commands._reject_unresolvable_skill_refs(wf)  # type: ignore[arg-type]
+        assert built == 0, "the resolver was constructed for a workflow with no skills"
 
     async def test_resolvable_skills_pass(self, monkeypatch: pytest.MonkeyPatch) -> None:
         wf = _Workflow([_Phase("research", skills=("ref",))])
@@ -137,15 +196,20 @@ class TestItDoesNotRefuseWorkItShouldAccept:
         await _check(monkeypatch, wf, resolver)
         assert resolver.calls == 1
 
-    async def test_an_unavailable_RESOLVER_does_not_block_execution(
+    async def test_an_unavailable_resolver_is_a_503_not_a_silent_pass(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Fail-open on OUR infrastructure, fail-closed on THEIR input.
+        """FAILS CLOSED, reversing the first version of this fix.
 
-        A missing registration is a user error and must be reported. A resolver
-        that cannot be constructed is our problem, and refusing to run any
-        workflow because of it would turn a degraded subsystem into a total
-        outage.
+        I originally skipped the preflight when the resolver could not be
+        built, reasoning that a degraded subsystem should not block all work. A
+        codex review showed that is wrong HERE: the background handler
+        constructs the SAME resolver moments later, before persistence, so
+        skipping just relocates the failure back into the window this exists to
+        close - recreating the exact false success. Nothing retries in between,
+        so a 200 would not be truthful.
+
+        503, not 422: the caller did nothing wrong and should retry.
         """
         from syn_api.routes.executions import commands
 
@@ -156,4 +220,64 @@ class TestItDoesNotRefuseWorkItShouldAccept:
 
         monkeypatch.setattr(wiring, "get_skill_resolution_service", _boom)
         wf = _Workflow([_Phase("research", skills=("ref",))])
-        await commands._reject_unresolvable_skill_refs(wf)  # type: ignore[arg-type]
+        with pytest.raises(HTTPException) as exc:
+            await commands._reject_unresolvable_skill_refs(wf)  # type: ignore[arg-type]
+        assert exc.value.status_code == 503
+
+
+class _StubRepo:
+    def __init__(self, workflow: object) -> None:
+        self._workflow = workflow
+
+    async def get_by_id(self, _workflow_id: str) -> object:
+        return self._workflow
+
+
+class _StubRequest:
+    """Minimal stand-in for ExecuteWorkflowRequest."""
+
+    def __init__(self) -> None:
+        self.inputs: dict[str, str] = {}
+        self.task: str | None = "t"
+        self.repos: list[str] = []
+        self.provider = "claude"
+
+
+class TestTheROUTEActuallyCallsThePreflight:
+    """The finding that mattered most in review.
+
+    Every other test here drives `_reject_unresolvable_skill_refs` directly, and
+    ALL of them passed with the CALL SITE deleted from
+    `_validate_execution_request`. They proved the helper worked while the
+    endpoint carried on returning 200. Testing a helper is not testing a fix.
+
+    This binds the route to the helper.
+    """
+
+    async def test_the_validator_invokes_the_preflight(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Deleting the call from `_validate_execution_request` fails here."""
+        from syn_api.routes.executions import commands
+
+        called: list[object] = []
+
+        async def _spy(workflow: object) -> None:
+            called.append(workflow)
+
+        async def _connected() -> None:
+            return None
+
+        workflow = _Workflow([_Phase("research", skills=("ref",))])
+        monkeypatch.setattr(commands, "_reject_unresolvable_skill_refs", _spy)
+        monkeypatch.setattr(commands, "ensure_connected", _connected)
+        monkeypatch.setattr(commands, "get_workflow_repo", lambda: _StubRepo(workflow))
+        monkeypatch.setattr(commands, "_check_phase_providers", lambda _w: None)
+
+        with contextlib.suppress(Exception):
+            # Later stages need more wiring than this test provides. The only
+            # claim here is that the preflight runs, and runs FIRST.
+            await commands._validate_execution_request("wf-1", _StubRequest())  # type: ignore[arg-type]
+
+        assert called, "the route did not invoke the skill preflight"
+        assert called[0] is workflow, "the preflight was handed the wrong workflow"
