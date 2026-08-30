@@ -20,6 +20,8 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H15 | The existing implement-from-plan workflow can turn a well-specified issue into a PR unattended | **REFUTED, tick 48c** — 3/3 phases, $4.40, zero output. The agent verified every premise and wrote the right diff; the push was rejected because the App token lacks `workflows` permission (#1024). Not a prompt-quality problem |
+| H16 | A completed execution produced its deliverable | **REFUTED, tick 48c** — the same run reports `completed` with no PR and no branch. An agent that finishes without crashing produces a completed phase; task failure and harness failure are indistinguishable (#1023) |
 | H13 | The v4 absence rule is citation-neutral | **REFUTED, tick 46, n=1** — v4's final plan has ZERO `file:line` citations against v3's 81 on the identical task, and its revise phase dropped 10 -> 0 where v3's rose 54 -> 81. Where v4 cites, it is 3/3 correct: density collapsed, not accuracy |
 | H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **STILL UNTESTED, tick 46** — the v4 run exists ($1.19 vs v3's >=$8.15, same issue) but its review returned "No blockers", so the rejection hazard never arose. Needs a run where the review DOES raise a blocker. Previously "UNBLOCKED, tick 42 — v0.27.0 deployed and verified on the Mini; codex phases now survive install. Ready to test |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51, all 100%. CAVEAT (tick 40): every run executed on an `edge`-channel workspace image, not `release` |
@@ -2501,3 +2503,66 @@ needs instrumentation, not reading, and I said so.
 
 Also recorded on the issue: `VERSION` is still 6, so whatever the fix, historical
 rows never pick it up without a bump.
+
+### Tick 48c — H15 scored: the agent did everything right and delivered nothing
+
+`exec-1717c4da51c8` completed. **3/3 phases, 27 minutes, 13.2M tokens, $4.40, no
+PR, no branch on origin.**
+
+**H15 REFUTED, and not for the reason I expected.** I was ready to score plan
+quality, diff scope and review findings. None of that was the binding
+constraint.
+
+**What the agent did, and it was good work.** It verified all three of #1020's
+premises independently and pasted real command output for each (`grep` across
+`src/`, `package.json`, `vite.config.ts`, `eslint.config.js`, `tsconfig*.json`,
+tailwind, `pnpm-workspace.yaml`), made an exactly-scoped 2-file change, and
+touched nothing else. The diff is what I would have written.
+
+**What stopped it** is GitHub's own error:
+
+```
+! [remote rejected] ... (refusing to allow a GitHub App to create or update
+  workflow `.github/workflows/ci.yml` without `workflows` permission)
+```
+
+It then checked for a fallback credential, found that `gh` and
+`~/.git-credentials` resolve to the same App token, and reported
+`IMPLEMENTATION_FAILED` with the reason. Phase 3 wrote `PR_SKIPPED`.
+
+So: **Syntropic cannot change its own CI.** Every self-improvement task touching
+`.github/workflows/` is unreachable by a workspace agent, and it fails at the
+last step, after the full cost is spent. Filed as **#1024** with the options; the
+choice between granting `workflows: write` and routing through a separate
+credential is a security posture call, so it is the owner's.
+
+### The finding I did not go looking for
+
+**The execution status is `completed`.**
+
+Three phases completed, execution completed, $4.40 spent, nothing produced. The
+only signal is prose inside an artifact nobody reads unless they already suspect
+a problem. `syn execution list` shows this beside runs that produced merged PRs.
+
+This is the same failure class as tick 45's gate that could not fail, now in the
+observability layer: **an agent that finishes without crashing produces a
+completed phase.** There is no supported way to say "I ran to completion and the
+outcome is failure", so *the harness broke* and *the task could not be done* are
+indistinguishable — and the second is the one a human needs.
+
+That lands directly on the goal. An autonomous loop that dispatches work and
+checks status would mark this done and move on. Filed as **#1023**, proposing a
+declared per-phase outcome plus an engine-side acceptance check, because a
+self-report the engine does not verify repeats the mistake.
+
+### Also, the #969 discriminator completed
+
+`total_duration_seconds: 0.0`, `sum(phases): 1554.4`. A fresh execution, on
+v0.27.0, which contains the guard. Consistent with the mid-flight reading.
+
+### What this tick actually bought
+
+An honest answer to priority 2 that no amount of workflow-building would have
+produced: the implementation half is not blocked on prompt quality. It is
+blocked on a permission bit and on the platform's inability to say "this failed".
+Both are now filed with evidence, and both are cheaper to fix than a new workflow.
