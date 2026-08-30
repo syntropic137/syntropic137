@@ -30,8 +30,9 @@ from syn_api.types import (
 from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
+    from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         InputDeclaration,
         PhaseDefinition,
@@ -73,16 +74,46 @@ def _resolve_classification(classification: str) -> WorkflowClassification:
     return classification_map.get(classification.lower(), WorkflowClassification.STANDARD)
 
 
-def _as_bool(value: object) -> bool:
-    """Strictly. `bool("false")` is True, and a string is what JSON sends.
+def _as_bool(value: object, field: str) -> bool:
+    """Only a real bool. Anything else is the caller's error, so say so.
 
-    Coercing here turned `allow_delegation: "false"` into delegation ENABLED
-    -- the caller asking for the feature off and getting it on. Only a real
-    bool counts; anything else means the caller did not say, so the default
-    stands. This is the third instance of `bool()`-on-untrusted-input in one
-    day, after the artifact primary flag and the api_shape needle.
+    `bool("false")` is True, so coercion turned `allow_delegation: "false"`
+    into delegation ENABLED -- asking for the feature off and getting it on.
+    The first fix silently defaulted a non-bool to False instead, which is
+    fail-closed but still wrong in the other direction: `1` and `"true"`
+    became False, so a caller asking for it ON silently got it OFF, with a
+    201. Trading one silent corruption for another is not a fix.
+
+    A JSON boolean literal arrives as a real bool; only a QUOTED value
+    arrives as a string, and that is a malformed request, not an opinion.
     """
-    return value if isinstance(value, bool) else False
+    if isinstance(value, bool):
+        return value
+    msg = f"phase field {field!r} must be a boolean, got {type(value).__name__}: {value!r}"
+    raise ValueError(msg)
+
+
+def _expand_skills(entries: Iterable[object] | None) -> tuple[SkillRef, ...]:
+    """Expand each entry the way the YAML path does.
+
+    Passing raw entries straight to `SkillRef` looked equivalent and is not:
+    the verbose form `{"source": ..., "names": ["alpha", "beta"]}` declares
+    TWO skills, and direct validation produced ONE named after the repo. So a
+    caller asking for `alpha` and `beta` silently got a single skill called
+    `b` -- a wrong identity rather than a missing one, which resolves and
+    injects the wrong instructions.
+
+    That is worse than the bug this PR set out to fix. `main` dropped skills
+    entirely; absent is recoverable, wrong is not.
+    """
+    from syn_domain.contexts.orchestration._shared.skill_ref import expand_skill_entry
+
+    if not entries:
+        return ()
+    expanded: list[SkillRef] = []
+    for entry in entries:
+        expanded.extend(expand_skill_entry(entry))
+    return tuple(expanded)
 
 
 def _agent_field(phase: Mapping[str, Any], name: str, default: Any = None) -> Any:  # noqa: ANN401
@@ -131,9 +162,11 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # field is added to PhaseDefinition without being mapped here.
                 model=_agent_field(p, "model"),
                 provider=_agent_field(p, "provider"),
-                allow_delegation=_as_bool(_agent_field(p, "allow_delegation", False)),
+                allow_delegation=_as_bool(
+                    _agent_field(p, "allow_delegation", False), "allow_delegation"
+                ),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
-                skills=tuple(p.get("skills") or ()),
+                skills=_expand_skills(p.get("skills")),
             )
             for i, p in enumerate(phases)
         ]

@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_api.routes.workflows.commands import _build_phase_defs
-from syn_domain.contexts.orchestration import PhaseDefinition
+from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -47,7 +47,11 @@ _EVERY_FIELD: Mapping[str, object] = {
     "phase_id": "review",
     "name": "Review",
     "order": 3,
-    "execution_type": "sequential",
+    # NOT the default. "sequential" IS the default, so asserting it proves
+    # nothing -- deleting the mapping entirely would still satisfy it. That
+    # is the tautology this file exists to avoid, and the first version of
+    # this fixture contained it.
+    "execution_type": "parallel",
     "description": "a description",
     "input_artifact_types": ["markdown"],
     "output_artifact_types": ["json"],
@@ -106,11 +110,15 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.model == "gpt-5.6-sol"
     assert phase.provider == "codex"
     assert phase.allow_delegation is True
-    # Shorthand strings validate into typed refs, so identity is by count and
-    # by the ref actually carrying the caller's repo rather than a default.
-    assert len(phase.claude_plugins) == 1
-    assert len(phase.skills) == 1
-    assert phase.execution_type is not None
+    # IDENTITY, not cardinality. The previous version asserted `len(...) == 1`
+    # while its comment claimed identity was checked -- so an implementation
+    # substituting a wholly different plugin passed. Verified: a mutant
+    # returning ("wrong/repo@wrong",) satisfied every assertion here.
+    assert phase.claude_plugins[0].source_url.endswith("owner/repo")
+    assert phase.claude_plugins[0].version == "abc123"
+    assert phase.skills[0].skill_name == "some-skill"
+    assert phase.skills[0].source_url.endswith("owner/repo")
+    assert phase.execution_type == PhaseExecutionType.PARALLEL
 
 
 class TestTheFieldsThatWereActuallyDropped:
@@ -198,15 +206,70 @@ class TestTheNestedAgentSpellingIsUnderstood:
 class TestBooleansAreNotCoerced:
     """`bool("false")` is True, and JSON callers send strings."""
 
-    def test_the_string_false_does_not_enable_delegation(self) -> None:
-        """The caller asked for it OFF. Coercion turned it on."""
-        (phase,) = _build_phase_defs(
-            [{"phase_id": "r", "name": "R", "order": 1, "allow_delegation": "false"}]
-        )
-        assert phase.allow_delegation is False
+    @pytest.mark.parametrize("sent", ["false", "true", 1, 0, "yes"])
+    def test_a_non_boolean_is_rejected_rather_than_guessed(self, sent: object) -> None:
+        """Both guesses are wrong, in opposite directions.
+
+        `bool("false")` enabled delegation the caller asked to disable. The
+        first fix silently defaulted a non-bool to False, so `1` and `"true"`
+        DISABLED delegation the caller asked to enable -- still a 201, still
+        altered state. A malformed value is an error, not an opinion.
+        """
+        with pytest.raises(ValueError, match="must be a boolean"):
+            _build_phase_defs(
+                [{"phase_id": "r", "name": "R", "order": 1, "allow_delegation": sent}]
+            )
 
     def test_a_real_true_still_enables_it(self) -> None:
         (phase,) = _build_phase_defs(
             [{"phase_id": "r", "name": "R", "order": 1, "allow_delegation": True}]
         )
         assert phase.allow_delegation is True
+
+
+class TestMultiNameSkillsExpand:
+    """`names: [a, b]` declares TWO skills, and shorthand cannot prove it.
+
+    The round-trip fixture sends a shorthand skill string, which validates
+    identically whether or not expansion runs -- so removing expansion killed
+    no test. The verbose form is the only shape where the two paths differ,
+    which makes it the only shape that measures this.
+    """
+
+    def test_two_names_become_two_skills(self) -> None:
+        """Passing the entry straight to `SkillRef` produced ONE skill named
+        after the repo. A caller asking for `alpha` and `beta` got a single
+        skill called `b`: a wrong identity, which resolves and injects the
+        wrong instructions. `main` merely dropped skills -- absent is
+        recoverable, wrong is not."""
+        (phase,) = _build_phase_defs(
+            [
+                {
+                    "phase_id": "r",
+                    "name": "R",
+                    "order": 1,
+                    "skills": [
+                        {"source": "github.com/a/b", "version": "v1", "names": ["alpha", "beta"]}
+                    ],
+                }
+            ]
+        )
+
+        assert [s.skill_name for s in phase.skills] == ["alpha", "beta"]
+        assert all(s.source_url.endswith("a/b") for s in phase.skills)
+
+    def test_the_shorthand_form_still_yields_one(self) -> None:
+        """The negative control: expansion must not multiply an ordinary
+        entry."""
+        (phase,) = _build_phase_defs(
+            [
+                {
+                    "phase_id": "r",
+                    "name": "R",
+                    "order": 1,
+                    "skills": ["owner/repo/one-skill@v1"],
+                }
+            ]
+        )
+
+        assert [s.skill_name for s in phase.skills] == ["one-skill"]
