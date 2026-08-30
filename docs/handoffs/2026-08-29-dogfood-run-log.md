@@ -2007,3 +2007,40 @@ phase installed through the API now stays codex.
 Loop re-armed at :11 and :41 for the next six hours, with the goal stated as
 the owner framed it: dogfood hard enough to build Syntropic inside Syntropic,
 closing unknowns by experiment.
+
+### Tick 43 — the carve-out I keep being told not to make, made again
+
+Codex pass 2 on #1016. Four findings, three mine.
+
+**The one that stings: `output_artifact_types` still bypassed quoting.** I had
+just quoted `input_artifacts` and `allowed_tools` and left the identical line
+next to them alone, because it was pre-existing code I "had not touched". So
+`["null"]` emitted `[null]` (which the loader rejects) and `["a,b"]` reinstalled
+as two entries. **Fixing the fields I added while leaving an identical one
+beside them is exactly the carve-out the owner's standing rule forbids.**
+
+**Per-item quoting was not enough, and the reason is interesting.** `a,b` reads
+back as `a,b` on its own, so the per-value check correctly answered "safe" — and
+inside `[a,b]` it splits into two. The value was safe; the CONTEXT was not.
+Lists are now built by the emitter rather than by joining quoted strings.
+Another instance of the day's theme: I tested the value and the defect lived in
+what surrounded it.
+
+Also: hand-written double-quoted scalars keep physical newlines, and YAML folds
+them, so `"A\nB"` reinstalled as `A B`. Now emitted through the YAML emitter.
+And a DERIVED ref name was being exported as an authored one, because the loader
+sets `name_overridden=True` whenever a name is present — inventing provenance
+the phase never declared.
+
+**Owner asked for local QA before pushing** — CI cycle time and cost add up. So
+this push ran the full unit suite, not just preflight: **3149 tests, plus
+preflight exit 0.** Worth noting what that showed: preflight alone does NOT
+cover unit tests, the dashboard build, or CLI checks, so "preflight green" has
+been a weaker claim than I implied on several PRs today. `uv run pytest -m unit`
+takes 76 seconds locally against several minutes of CI wall-clock plus billed
+runners.
+
+That gap is itself a dogfooding target: **the QA an agent runs before pushing
+should be the same set CI runs**, and today it demonstrably was not.
+
+Mutation-verified three ways, all killed.
