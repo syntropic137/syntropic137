@@ -500,6 +500,42 @@ plan was written against and score against THAT. Scoring a plan about a moving
 repo with whatever happens to be checked out locally is not a measurement.
 Filed as a follow-up.
 
+### Tick 15 — fixed the instrument structurally, not by being careful
+
+**Hypothesis:** the near-miss in tick 14 was a discipline failure, so the fix is
+to remember to check the tree.
+
+**Rejected.** I had already resolved to "verify your own measurement" three
+times today and still walked into it a fourth. A rule I keep breaking is not a
+control. The scorer had to stop depending on ambient state.
+
+Two changes:
+
+1. **`--rev`** reads blobs via `git show <rev>:<path>`, so the answer does not
+   depend on what is checked out. Verified from the SAME stale directory that
+   produced the false 71%: with `--rev origin/main` it reports 98%.
+
+2. **A banner on every run**, stating the tree and warning when it is behind:
+
+       scoring against: .../syntropic137 @ feat/workflow-validation-suite (27926d84)
+         ** 31 COMMITS BEHIND origin/main - citations may read as out of range **
+
+   The failure was silent before. Now the thing that misled me is the first line
+   of output.
+
+Control preserved: a fabricated file still fails at a revision, so the fix did
+not make the scorer permissive.
+
+**Filed #1004** — the deeper gap. An execution records the repo URL but NOT the
+commit it cloned, so no artifact from any run can be verified against the code
+it actually saw. The workspace clones at a specific commit and discards the
+value. Without it, "the same task" across two runs silently means different
+code, which undermines every comparison recorded in this log.
+
+That is the honest limit on today's numbers: v1, v2, H2 and v3 ran hours apart
+against a moving `main`. I have been treating the input as constant and cannot
+prove it was.
+
 ---
 
 ## Retrospective

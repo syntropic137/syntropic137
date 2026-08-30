@@ -93,6 +93,19 @@ def extract(text: str) -> list[Citation]:
     return list(seen.values())
 
 
+def _line_count_at_rev(repo: Path, rev: str, cited: str) -> int | None:
+    """Line count of a path AT a revision, without touching the working tree."""
+    import subprocess
+
+    r = subprocess.run(
+        ["git", "-C", str(repo), "show", f"{rev}:{cited}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return None if r.returncode != 0 else r.stdout.count("\n")
+
+
 def _resolve(repo: Path, cited: str) -> tuple[Path | None, bool]:
     """Find the file a citation refers to, and whether the path was exact.
 
@@ -132,13 +145,23 @@ def _resolve(repo: Path, cited: str) -> tuple[Path | None, bool]:
     return (None, False) if not matches else (None, True)
 
 
-def verify(citations: list[Citation], repo: Path) -> list[Verdict]:
+def verify(citations: list[Citation], repo: Path, rev: str | None = None) -> list[Verdict]:
     out: list[Verdict] = []
     for c in citations:
         target, ambiguous = _resolve(repo, c.path)
         exists = target is not None
         exact = exists and target == (repo / c.path)
         line_ok = False
+        if rev is not None:
+            # Authoritative when given: reads the blob at that revision rather
+            # than whatever the checkout happens to hold.
+            total = _line_count_at_rev(repo, rev, c.path)
+            if total is not None:
+                exists = True
+                exact = True
+                line_ok = 1 <= c.line <= total and (c.end is None or c.end <= total)
+                out.append(Verdict(c, exists, line_ok, exact, False))
+                continue
         if target is not None:
             try:
                 # Count lines without loading the whole file into memory.
@@ -151,11 +174,54 @@ def verify(citations: list[Citation], repo: Path) -> list[Verdict]:
     return out
 
 
+def _describe_tree(repo: Path, rev: str | None) -> str:
+    """What the caller is actually being scored against, stated plainly."""
+    import subprocess
+
+    def _git(*a: str) -> str:
+        r = subprocess.run(
+            ["git", "-C", str(repo), *a], capture_output=True, text=True, check=False
+        )
+        return r.stdout.strip() if r.returncode == 0 else "?"
+
+    if rev:
+        return f"{repo} @ {rev} ({_git('rev-parse', '--short', rev)})"
+
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    head = _git("rev-parse", "--short", "HEAD")
+    behind = _git("rev-list", "--count", "HEAD..origin/main")
+    warn = ""
+    if behind.isdigit() and int(behind) > 0:
+        warn = f"  ** {behind} COMMITS BEHIND origin/main - citations may read as out of range **"
+    return f"{repo} @ {branch} ({head}){warn}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("plan", type=Path)
     ap.add_argument("--repo", type=Path, default=Path.cwd())
+    ap.add_argument(
+        "--rev",
+        default=None,
+        help=(
+            "Git revision the plan was written against. STRONGLY RECOMMENDED: "
+            "without it, files are read from the working tree, which may be on "
+            "another branch or behind."
+        ),
+    )
     args = ap.parse_args()
+
+    # Announce what is actually being measured against. Scoring a plan about a
+    # MOVING repository against whatever happens to be checked out is not a
+    # measurement, and the failure is silent: a stale tree reports correct
+    # citations as "line is past end of file".
+    #
+    # This cost a real false conclusion - a plan scored 71% grounded against a
+    # tree 31 commits behind, and 98% against the right one. The banner exists
+    # so the next reader can see the discrepancy rather than discover it.
+    resolved = _describe_tree(args.repo, args.rev)
+    print(f"scoring against: {resolved}")
+    print()
 
     citations = extract(args.plan.read_text())
     if not citations:
@@ -164,7 +230,7 @@ def main() -> int:
         print("NO CITATIONS - the plan makes no verifiable claim about the code.")
         return 2
 
-    verdicts = verify(citations, args.repo)
+    verdicts = verify(citations, args.repo, args.rev)
     grounded = [v for v in verdicts if v.ok]
     exact = [v for v in grounded if v.exact]
     for v in verdicts:
