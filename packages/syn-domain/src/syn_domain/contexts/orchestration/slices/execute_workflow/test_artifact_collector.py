@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType
+from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType, PhaseOutputFile
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
     map_artifact_type,
@@ -17,6 +17,10 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
         ArtifactAggregate,
     )
+
+# CI selects with `pytest -m unit`; without this the whole module is collected
+# by no job and can fail on main behind a green check (#825).
+pytestmark = pytest.mark.unit
 
 
 class TestMapArtifactType:
@@ -110,6 +114,16 @@ class TestArtifactCollector:
         assert len(result.artifact_ids) == 2
         assert result.first_content == "# Result"
         assert len(repo.saved) == 2
+        # #988: every collected file is reported with the path it occupied,
+        # not just the first one's content.
+        assert [(f.source_path, f.content) for f in result.files] == [
+            ("artifacts/output/result.md", "# Result"),
+            ("artifacts/output/data.json", '{"key": "value"}'),
+        ]
+        assert [a.source_path for a in repo.saved] == [
+            "artifacts/output/result.md",
+            "artifacts/output/data.json",
+        ]
 
     @pytest.mark.asyncio
     async def test_collect_empty_workspace(self) -> None:
@@ -126,6 +140,7 @@ class TestArtifactCollector:
         )
         assert result.artifact_ids == []
         assert result.first_content is None
+        assert result.files == []
 
     @pytest.mark.asyncio
     async def test_inject_from_query_service(self) -> None:
@@ -138,6 +153,16 @@ class TestArtifactCollector:
             ) -> dict[str, str]:
                 queried.append((execution_id, completed_phase_ids))
                 return {"p2": "content from projection"}
+
+            async def get_files_for_phase_injection(
+                self,
+                execution_id: str,
+                completed_phase_ids: list[str],
+            ) -> dict[str, list[PhaseOutputFile]]:
+                # This execution predates ArtifactCreated v5, so no file
+                # carries a source_path and only the flat alias is written.
+                del execution_id, completed_phase_ids
+                return {}
 
         collector = ArtifactCollector(MockArtifactRepo(), None, MockQueryService())  # type: ignore[arg-type]
         workspace = MockWorkspace()

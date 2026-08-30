@@ -13,7 +13,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 
 
-def _phase(provider: str, model: str = "gpt-5.6") -> ExecutablePhase:
+def _phase(
+    provider: str, model: str = "gpt-5.6", tools: tuple[str, ...] = ("Read", "Bash")
+) -> ExecutablePhase:
     return ExecutablePhase(
         phase_id="phase-1",
         name="Agent phase",
@@ -21,7 +23,7 @@ def _phase(provider: str, model: str = "gpt-5.6") -> ExecutablePhase:
         agent_config=AgentConfiguration(
             provider=provider,
             model=model,
-            allowed_tools=("Read", "Bash"),
+            allowed_tools=list(tools),
         ),
     )
 
@@ -100,11 +102,19 @@ def test_codex_command_via_domain_default_model_omits_model_flag() -> None:
 
 
 def test_agent_command_dispatches_on_provider_string() -> None:
-    assert _build_agent_command(_phase("codex"), "x")[0] == "codex"
+    # Codex declares NO tools here: it cannot restrict by tool name, so a
+    # declaration is now refused rather than dropped (#964).
+    assert _build_agent_command(_phase("codex", tools=()), "x")[0] == "codex"
     assert _build_agent_command(_phase("claude"), "x")[0] == "claude"
 
 
-def test_claude_command_argv_is_unchanged() -> None:
+def test_claude_command_argv_is_pinned() -> None:
+    """Pins the argv, INCLUDING the #964 change from --allowedTools to --tools.
+
+    This guard caught that change, which is what it is for. The change is
+    deliberate: --allowedTools governs auto-approval and, beside
+    --dangerously-skip-permissions on the same line, restricted nothing.
+    """
     phase = _phase("claude", model="sonnet")
     expected = [
         "claude",
@@ -116,11 +126,19 @@ def test_claude_command_argv_is_unchanged() -> None:
         "--dangerously-skip-permissions",
         "-p",
         "do the thing",
-        "--allowedTools",
-        "Read",
-        "--allowedTools",
-        "Bash",
+        "--tools",
+        "Read,Bash",
     ]
 
     assert _build_claude_command(phase, "do the thing") == expected
-    assert _build_agent_command(phase, "do the thing") == expected
+
+
+def test_the_dispatched_prompt_carries_the_tool_grant() -> None:
+    """_build_agent_command adds the harness-neutral grant; the builder does not."""
+    phase = _phase("claude", model="sonnet")
+
+    argv = _build_agent_command(phase, "do the thing")
+    prompt = argv[argv.index("-p") + 1]
+
+    assert "do the thing" in prompt
+    assert "Read" in prompt and "Bash" in prompt

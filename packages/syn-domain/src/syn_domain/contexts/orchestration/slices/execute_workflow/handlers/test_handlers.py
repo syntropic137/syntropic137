@@ -396,14 +396,20 @@ class TestArtifactCollectionHandler:
     @pytest.mark.anyio
     async def test_issues_artifacts_collected_command(self) -> None:
         """Handler returns ArtifactsCollectedCommand after collection."""
+        from syn_domain.contexts.artifacts import PhaseOutputFile
         from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
             CollectedArtifacts,
         )
 
+        files = [
+            PhaseOutputFile(source_path="artifacts/output/a.md", content="Result content here"),
+            PhaseOutputFile(source_path="artifacts/output/b.yaml", content="b: 1"),
+        ]
         mock_collector = AsyncMock()
         mock_collector.collect_from_workspace.return_value = CollectedArtifacts(
             artifact_ids=["art-1", "art-2"],
             first_content="Result content here",
+            files=files,
         )
 
         handler = ArtifactCollectionHandler(artifact_collector=mock_collector)
@@ -430,6 +436,10 @@ class TestArtifactCollectionHandler:
         assert result.command.first_content_preview == "Result content here"
         assert result.artifact_ids == ["art-1", "art-2"]
         assert result.first_content == "Result content here"
+        # #988: the whole output tree must reach the caller, not just the
+        # first file's content. Dropping it here undoes the fix upstream of
+        # every injection assertion.
+        assert result.files == files
 
     @pytest.mark.anyio
     async def test_empty_artifacts(self) -> None:
@@ -1634,3 +1644,46 @@ class TestWorkspaceProvisionSkills:
                 )
         materializer.fetch_for_workspace.assert_not_called()
         workspace.execute.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestWorkspaceProvisionHandlerInjectsTheWholeTree:
+    """The provisioning seam between the cache and the collector (#988).
+
+    Everything upstream can carry the output tree correctly and everything
+    downstream can inject it correctly, and the handoff still loses it here if
+    this method forwards only the primary strings. Nothing else in the suite
+    covers that one hop.
+    """
+
+    @pytest.mark.anyio
+    async def test_the_file_tree_reaches_the_collector(self) -> None:
+        from syn_domain.contexts.artifacts import PhaseOutputFile
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+            PhaseOutputCache,
+        )
+
+        files = [PhaseOutputFile(source_path="artifacts/output/review.yaml", content="r")]
+        cache = PhaseOutputCache(primary={"p-1": "r"}, files={"p-1": files})
+        collector = AsyncMock()
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.PROVISION_WORKSPACE,
+            phase_id="p-2",
+        )
+
+        await WorkspaceProvisionHandler._inject_phase_artifacts(
+            MagicMock(),  # handler self is unused by this method's body
+            MagicMock(),
+            collector,
+            ["p-1"],
+            cache,
+            todo,
+        )
+
+        kwargs = collector.inject_from_previous_phases_explicit.await_args.kwargs
+        assert kwargs["phase_files"] == {"p-1": files}
+        assert collector.inject_from_previous_phases_explicit.await_args.args[2] == {"p-1": "r"}

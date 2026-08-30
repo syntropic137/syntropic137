@@ -2,7 +2,6 @@
 model: sonnet
 argument-hint: "[research-topic]"
 allowed-tools: Read,Glob,Grep,Bash
-max-tokens: 4096
 timeout-seconds: 300
 ---
 

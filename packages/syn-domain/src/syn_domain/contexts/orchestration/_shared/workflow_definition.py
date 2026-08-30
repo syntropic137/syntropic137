@@ -40,6 +40,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowClassification,
 )
 from syn_shared.agents import REMOVED_INTERACTIVE_PROVIDER, AgentProvider
+from syn_shared.tools import ToolName, canonical_tool_name
 
 _SHARED_PREFIX = "shared://"
 
@@ -253,7 +254,21 @@ class PhaseYamlDefinition(BaseModel):
         extra="forbid",
     )
 
-    id: str = Field(..., alias="id", min_length=1)
+    # A phase id is INTERPOLATED INTO A FILESYSTEM PATH: outputs from this
+    # phase are injected into the next phase's workspace at
+    # `artifacts/input/<phase-id>/...`. `min_length=1` alone accepted
+    # `../../../tmp/owned`, which escapes the workspace on injection - and with
+    # the Docker backend the write lands on the host beside the mount, not
+    # merely elsewhere inside the container.
+    #
+    # Workflows are installable from a marketplace, so the author of a phase id
+    # is not necessarily the operator running it. That makes this reachable by
+    # an untrusted party, which is what decides the grammar below: an
+    # allowlist, not a `..` denylist. Denylists lose to encoding tricks; a
+    # closed character set does not.
+    id: str = Field(
+        ..., alias="id", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    )
     name: str = Field(..., min_length=1, max_length=255)
     order: int = Field(..., ge=1)
     execution_type: PhaseExecutionType = PhaseExecutionType.SEQUENTIAL
@@ -285,6 +300,63 @@ class PhaseYamlDefinition(BaseModel):
     # Workflow-scope refs live on WorkflowDefinition; phase scope wins on
     # identity collision when the two lists are merged at resolution time.
     skills: list[SkillRef] = Field(default_factory=list)
+
+    @field_validator("allowed_tools", mode="before")
+    @classmethod
+    def _validate_tool_names(cls, value: object) -> object:
+        """Resolve authored tool names against the closed vocabulary (#964).
+
+        Rejecting here rather than at execution: while the declaration was
+        inert a typo cost nothing, but it now restricts availability, so
+        `bash` instead of `Bash` becomes an agent that cannot run a command -
+        discovered at runtime, on an unattended CI trigger.
+        """
+        if value is None:
+            return []
+        raw = value.split(",") if isinstance(value, str) else value
+        if not isinstance(raw, list):
+            return value
+
+        resolved: list[str] = []
+        unknown: list[str] = []
+        for item in raw:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            match = canonical_tool_name(item)
+            if match is None:
+                unknown.append(item.strip())
+            else:
+                resolved.append(str(match))
+        if unknown:
+            known = ", ".join(sorted(t.value for t in ToolName))
+            msg = f"unknown tool name(s): {', '.join(unknown)}. Valid tools are: {known}"
+            raise ValueError(msg)
+        return resolved
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def _reject_max_tokens(cls, value: object) -> object:
+        """`max_tokens` caps nothing, on any harness (#964).
+
+        It is declared, carried into AgentConfiguration, and rendered by the
+        workflow-detail projection - so it reads as configuration that works -
+        and reaches no command builder. It cannot: neither CLI has a token-cap
+        flag. Verified against claude 2.1.251, whose nearest control is
+        `--max-budget-usd` (dollars, not tokens), and codex 0.147.0, which has
+        neither.
+
+        Failing loudly rather than accepting-and-dropping is the whole point
+        of the issue this closes. An author bounding an expensive fan-out
+        should learn that this is not the lever, at authoring time.
+        """
+        if value is None:
+            return None
+        msg = (
+            "max_tokens is not supported: no agent CLI exposes a token cap, so this "
+            "value has never bounded anything. Remove it. To bound a phase use "
+            "timeout_seconds, or scope the work with allowed_tools."
+        )
+        raise ValueError(msg)
 
     @field_validator("skills", mode="before")
     @classmethod
@@ -372,12 +444,18 @@ class PhaseFrontmatterSchema(BaseModel):
     )
     allowed_tools: str | list[str] = Field(
         default_factory=list,
-        description="Tools available during this phase. "
-        "Accepts a YAML list or a comma-separated string (e.g., 'bash, git, read').",
+        description="Tools AVAILABLE during this phase, restricting what the agent "
+        "can reach for. Accepts a YAML list or a comma-separated string "
+        "(e.g., 'Bash, Read'). Names are Claude built-ins and are validated; "
+        "case is forgiven. Omit to leave the phase unrestricted. Not supported "
+        "on the codex provider, which has no tool-name concept.",
         alias="allowed-tools",
     )
     max_tokens: int | None = Field(
-        default=None, description="Maximum tokens for this phase.", alias="max-tokens"
+        default=None,
+        description="UNSUPPORTED - declaring it is an error. No harness CLI has a "
+        "token-cap flag, so this never bounded anything. Use timeout_seconds.",
+        alias="max-tokens",
     )
     timeout_seconds: int | None = Field(
         default=None, description="Phase timeout in seconds.", alias="timeout-seconds"

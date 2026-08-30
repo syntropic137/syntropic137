@@ -19,7 +19,6 @@ phases:
     name: Codex builds, delegates review to Claude
     order: 1
     execution_type: sequential
-    max_tokens: 4096
     timeout_seconds: 600
     prompt_file: phases/delegate.md
     agent:

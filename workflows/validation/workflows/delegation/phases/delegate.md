@@ -2,7 +2,6 @@
 description: "Codex builds, then delegates a review to claude -p"
 argument-hint: "[ignored]"
 allowed-tools: Read,Write,Bash
-max-tokens: 4096
 timeout-seconds: 600
 ---
 

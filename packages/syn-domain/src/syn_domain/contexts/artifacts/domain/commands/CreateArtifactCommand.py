@@ -43,6 +43,12 @@ class CreateArtifactCommand(BaseModel):
     # Content
     content: str = Field(..., description="Artifact content", min_length=1)
     title: str | None = Field(default=None, description="Human-readable title")
+    source_path: str | None = Field(
+        default=None,
+        description="Path this file occupied under the producing workspace's "
+        "output directory (issue #988). None means the path is unknown, which "
+        "is the case for every artifact created before v5 of ArtifactCreated.",
+    )
 
     # Storage (ADR-012: Two-tier storage)
     storage_uri: str | None = Field(

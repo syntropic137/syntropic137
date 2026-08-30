@@ -25,10 +25,14 @@ class ArtifactListProjection(AutoDispatchProjection):
         v1: Initial schema
         v2: Added size_bytes and content fields
         v3: Added execution_id for workflow execution linking (ADR-012)
+        v4: Added source_path so a phase can be handed the producing phase's
+            whole output tree at its original relative paths (issue #988).
+            Rebuilding is safe: pre-v5 ArtifactCreated events carry no
+            source_path and simply project as None.
     """
 
     PROJECTION_NAME = "artifact_summaries"
-    VERSION = 3  # Added execution_id field
+    VERSION = 4  # Added source_path field (#988)
 
     def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
@@ -73,6 +77,7 @@ class ArtifactListProjection(AutoDispatchProjection):
             size_bytes=size_bytes,
             content=content,
             content_hash=event_data.get("content_hash"),
+            source_path=event_data.get("source_path"),  # v5 event field (#988)
         )
         await self._store.save(self.PROJECTION_NAME, artifact_id, summary.to_dict())
 

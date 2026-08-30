@@ -3,7 +3,6 @@ model: haiku
 description: "Report which skills actually reached the agent's context"
 argument-hint: "[ignored]"
 allowed-tools: Read,Glob,Grep
-max-tokens: 2048
 timeout-seconds: 300
 ---
 

@@ -2,7 +2,6 @@
 model: opus
 argument-hint: "[pr-number-or-url]"
 allowed-tools: Read,Glob,Grep,Bash
-max-tokens: 8192
 timeout-seconds: 600
 ---
 

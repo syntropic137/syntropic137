@@ -13,13 +13,22 @@ from syn_domain.contexts.artifacts._shared.value_objects import (  # noqa: TC001
 )
 
 
-@event("ArtifactCreated", "v4")
+@event("ArtifactCreated", "v5")
 class ArtifactCreatedEvent(DomainEvent):
     """Event emitted when an artifact is created.
 
     v2: Added execution_id to link artifacts to specific workflow execution runs.
     v3: Added storage_uri for two-tier storage (ADR-012).
-    v4: Added created_at (issue #920). NOTE the version string here is
+    v4: Added created_at (issue #920).
+    v5: Added source_path (issue #988) - the path the file occupied under
+    ``artifacts/output/`` in the producing phase's workspace. Before v5 the
+    only record of it was interpolated into the display ``title`` as
+    ``f"{phase_name}: {artifact_path}"``, so recovering it meant parsing a
+    human-readable string on a separator (": ") that a phase name may itself
+    contain. Storing it as a field is what lets a later phase receive the
+    producing phase's whole output TREE at its original relative paths
+    instead of one arbitrary file flattened to ``<phase-id>.md``.
+    NOTE the version string here is
     decorator metadata only - it does not set ``DomainEvent.schema_version``,
     and the gRPC serializer writes ``event_version=1`` regardless. Deserialization
     resolves on event TYPE and ignores the stored version, so no upcaster runs
@@ -83,6 +92,14 @@ class ArtifactCreatedEvent(DomainEvent):
 
     # Metadata
     metadata: dict[str, Any] = {}  # noqa: RUF012
+
+    # Where the file lived under artifacts/output/ in the producing workspace
+    # (NEW in v5, issue #988). Example: "artifacts/output/raw-findings/f1.yaml".
+    # Optional for the same reason created_at is: v4-and-earlier events already
+    # in the store genuinely do not carry it, and no upcaster runs to add it.
+    # Consumers MUST treat None as "path unknown" and fall back to the flat
+    # artifacts/input/<phase-id>.md name rather than inventing a path.
+    source_path: str | None = None
 
     # When the artifact was created (NEW in v4, issue #920). Server-side UTC;
     # clients format for their locale.

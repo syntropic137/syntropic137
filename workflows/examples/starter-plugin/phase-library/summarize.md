@@ -1,6 +1,5 @@
 ---
 model: sonnet
-max-tokens: 4096
 timeout-seconds: 300
 ---
 

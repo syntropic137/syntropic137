@@ -3,7 +3,6 @@ model: sonnet
 description: "Open, comment on, and close an issue to prove GitHub write access"
 argument-hint: "[label]"
 allowed-tools: Bash
-max-tokens: 4096
 timeout-seconds: 600
 ---
 

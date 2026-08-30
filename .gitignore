@@ -147,6 +147,8 @@ artifacts/
 !packages/syn-domain/src/syn_domain/contexts/artifacts/
 # And not the adapters artifacts module
 !packages/syn-adapters/src/syn_adapters/artifacts/
+# And not that bounded context's tests
+!packages/syn-domain/tests/contexts/artifacts/
 
 _reference/
 archive/

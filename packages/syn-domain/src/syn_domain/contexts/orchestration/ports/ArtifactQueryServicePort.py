@@ -6,6 +6,8 @@ workflows. Artifacts from previous phases are injected into subsequent phase pro
 
 from typing import TYPE_CHECKING, Protocol
 
+from syn_domain.contexts.artifacts import PhaseOutputFile
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.ArtifactValueObjects import (
         ArtifactSummary,
@@ -65,6 +67,30 @@ class ArtifactQueryServicePort(Protocol):
             #
             # Implement the solution.
             # '''
+        """
+        ...
+
+    async def get_files_for_phase_injection(
+        self,
+        execution_id: str,
+        completed_phase_ids: list[str],
+    ) -> dict[str, list[PhaseOutputFile]]:
+        """Get EVERY file each completed phase produced, with its source path.
+
+        ``get_for_phase_injection`` above answers "what one string do I paste
+        into the prompt". This answers "what directory did that phase write",
+        which is the unit a phase actually outputs (issue #988). Keeping them
+        separate is deliberate: collapsing the tree to one string is correct
+        for a prompt and lossy for a workspace.
+
+        Args:
+            execution_id: The execution ID to query artifacts for.
+            completed_phase_ids: List of phase IDs that have completed.
+
+        Returns:
+            Dictionary mapping phase_id to that phase's files. A file created
+            before ArtifactCreated v5 has ``source_path`` None, meaning its
+            original path was never recorded and cannot be recovered.
         """
         ...
 

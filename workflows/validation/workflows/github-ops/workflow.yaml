@@ -18,7 +18,6 @@ phases:
     name: Open, comment, close
     order: 1
     execution_type: sequential
-    max_tokens: 4096
     timeout_seconds: 600
     prompt_file: phases/exercise.md
     agent:

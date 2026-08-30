@@ -40,7 +40,6 @@ phases:
     output_artifacts:
       - research_scope
       - initial_questions
-    max_tokens: 4096
     timeout_seconds: 300
     prompt_template: |
       You are a research assistant conducting initial exploration and scoping.
@@ -70,7 +69,6 @@ phases:
     output_artifacts:
       - detailed_findings
       - code_analysis
-    max_tokens: 8192
     timeout_seconds: 600
     prompt_template: |
       You are a research analyst conducting a deep dive analysis.
@@ -104,7 +102,6 @@ phases:
       - research_summary
       - recommendations
       - action_items
-    max_tokens: 4096
     timeout_seconds: 300
     prompt_template: |
       You are a technical writer synthesizing research findings.
