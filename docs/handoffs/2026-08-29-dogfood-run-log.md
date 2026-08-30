@@ -15,7 +15,7 @@ the bottom is the part worth reading later.
 |---|---|---|
 | H1 | Separate, focused phases beat fewer combined phases | **RESTORED, supported, n=1** — re-scored on the corrected fail-closed instrument: EXACT 62% → 75% for +5.6% cost. Identical to the original reading |
 | H2 | SLP skills in research/planning improve plan quality | **RESTORED, NOT supported, n=1** — re-scored: 83% RESOLVES, 0% EXACT, 6 citations for $4.14 vs 12 for $3.51. I predicted the 0% was least likely to survive a stricter scorer; it survived unchanged |
-| H3 | Cross-model review catches what the author cannot | **strongly supported** — codex found #995's traversal, and in tick 16 found that my #997 fix was INERT in production and that all five of my tests stopped short of the boundary where it broke |
+| H3 | Cross-model review catches what the author cannot | **strongly supported, and it beat me on a direct disagreement** — found #995's traversal; found my #997 fix was INERT; found my scorer failed toward good; and was RIGHT about `--tools` when I publicly said it was wrong (tick 22) |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=2, corrected instrument** — v3 on #990: 55/55 and 55/55. v3 on #1004: 37/37 and 37/37. EXACT 75% → 100% for +85% cost |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
@@ -980,3 +980,48 @@ cost is review independence, since the reviewer can rewrite the document it was
 asked to critique and the artifact collector will pick up the rewrite.
 
 **Re-scored all five runs after both fixes: every number unchanged.**
+
+### Tick 22 — I used a stale tree to publicly contradict a correct review
+
+Codex pass 2 on #1008 blocked again. The finding that matters is about me.
+
+In pass 1 codex said my docs were stale because "current wiring uses the
+restrictive `--tools`". I disputed it, grepped, found `--allowedTools`, and
+wrote in a commit message, a log entry AND a PR comment that codex was wrong.
+
+**It was not wrong.** `origin/main:297` emits `--tools` and #964 is CLOSED. My
+grep ran in a working directory **35 commits behind main** — the same stale-tree
+error as ticks 14 and 18, the third time today, and the first time I used it to
+contradict someone who was right.
+
+The asymmetry is worth naming. In tick 16 I accepted a codex finding wholesale
+and it was correct. In tick 21 I rejected one and was wrong. Neither posture is
+the lesson; **the lesson is that a review finding is a hypothesis and so is my
+rebuttal, and the rebuttal needs the same execution the finding does.** I ran a
+grep, which felt like executing. It was executing against the wrong tree.
+
+**Consequence, and it cuts in a good direction for once:** per-phase tool
+scoping IS enforced for the claude phases via a comma-joined `--tools` flag
+governing availability. My README had claimed it was declared-but-unenforced,
+so my "correction" preserved a falsehood I had inherited. Docs now written from
+verified behaviour. #1009 (codex phase unrestricted) stands and was always the
+true half.
+
+**Scorer, also from pass 2:** the regex matched from the middle of an invalid
+token and stopped before invalid trailing text, so `/src/x.py:1`,
+`bad\src/x.py:1` and `src/x.py:1-junk` all cropped to `src/x.py:1` and scored
+EXACT. Fail-toward-good again. Lookbehind + lookahead now refuse them, and I
+checked the other direction so real citations still extract.
+
+**Committed the regression tests this script has never had.** 26 of them, one
+per defect. Codex was right that every verification so far lived in /tmp probes
+that vanished while the numbers were being published.
+
+**Mutation testing found a hole in my own new tests.** Six mutations; the first
+pass killed five. Reverting the range guard inside `in_range` killed NOTHING,
+because the tests exercised `well_formed` and `in_range` separately and nothing
+asserted that a malformed span addresses nothing. Same shape as the tick-16 and
+tick-17 tautologies — found this time by the discipline rather than by a
+reviewer, which is the first time today that has happened.
+
+**Re-scored all five runs after every change: unchanged.**
