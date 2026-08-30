@@ -157,6 +157,13 @@ class WorkflowExecutionDetail:
     artifact_ids: tuple[str, ...] = field(default_factory=tuple)
     """IDs of all artifacts produced."""
 
+    workspace_images: tuple[str, ...] = field(default_factory=tuple)
+    """Image references the host pulled for this execution's workspaces (#1004).
+
+    Empty for executions recorded before the field existed, which is why absence
+    must not be read as "the default image".
+    """
+
     error_message: str | None = None
     """Error message if execution failed."""
 
@@ -189,6 +196,7 @@ class WorkflowExecutionDetail:
             total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
             total_duration_seconds=data.get("total_duration_seconds", 0.0),
             artifact_ids=tuple(data.get("artifact_ids", [])),
+            workspace_images=tuple(data.get("workspace_images", [])),
             error_message=data.get("error_message"),
             repos=tuple(data.get("repos", [])),
         )
@@ -218,6 +226,7 @@ class WorkflowExecutionDetail:
             "total_cache_read_tokens": self.total_cache_read_tokens,
             "total_duration_seconds": self.total_duration_seconds,
             "artifact_ids": list(self.artifact_ids),
+            "workspace_images": list(self.workspace_images),
             "error_message": self.error_message,
             "repos": list(self.repos),
         }

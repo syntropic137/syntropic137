@@ -2584,6 +2584,8 @@ export interface components {
             total_duration_seconds: number;
             /** Artifact Ids */
             artifact_ids?: string[];
+            /** Workspace Images */
+            workspace_images?: string[];
             /** Error Message */
             error_message?: string | null;
             /** Repos */

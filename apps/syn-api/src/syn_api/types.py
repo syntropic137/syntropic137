@@ -481,6 +481,13 @@ class ExecutionDetail(BaseModel):
     """
     total_duration_seconds: float = 0.0
     artifact_ids: list[str] = Field(default_factory=list)
+    workspace_images: list[str] = Field(default_factory=list)
+    """Image references the host pulled for this execution's workspaces (#1004).
+
+    Empty means NOT RECORDED, not "the default image": executions from before
+    this was captured have no entry, and so does a run whose workspace creation
+    predates the field.
+    """
     error_message: str | None = None
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
@@ -784,6 +791,12 @@ class ExecutionDetailFull(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0
+    total_duration_seconds: float = 0.0
+    """Wall-clock seconds across the execution's phases (#969).
+
+    Absent from this model until now, which is why the endpoint reported 0.0
+    for every run regardless of what the projection held.
+    """
     """Observations that carried no usable rate and so added nothing to the total.
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
@@ -793,6 +806,12 @@ class ExecutionDetailFull(BaseModel):
     error_message: str | None = None
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+
+    workspace_images: list[str] = Field(default_factory=list)
+    """Image references the host pulled for this execution's workspaces (#1004).
+
+    Empty means NOT RECORDED, not "the default image".
+    """
 
 
 class ControlResult(BaseModel):

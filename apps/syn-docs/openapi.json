@@ -6957,6 +6957,13 @@
             "type": "array",
             "title": "Artifact Ids"
           },
+          "workspace_images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Workspace Images"
+          },
           "error_message": {
             "anyOf": [
               {
