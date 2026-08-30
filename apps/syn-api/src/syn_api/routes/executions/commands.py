@@ -30,7 +30,7 @@ from syn_api.types import (
     WorkflowError,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration import RESERVED_INPUT_NAMES, SkillError
+from syn_domain.contexts.orchestration import RESERVED_INPUT_NAMES, SkillError, SkillRef
 from syn_shared.agents import (
     AgentProvider,
     UnsupportedAgentProviderError,
@@ -486,6 +486,29 @@ def _check_phase_providers(workflow: WorkflowTemplateAggregate) -> None:
 _SKILL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
 
 
+def _unique_skill_refs(
+    workflow: WorkflowTemplateAggregate,
+) -> list[tuple[SkillRef, str]]:
+    """Each distinct skill ref once, paired with the phase that declared it.
+
+    Split from the preflight because collecting refs and talking to the resolver
+    are different jobs, and together they pushed one function past the
+    complexity thresholds. The pairing is what lets an error name the phase that
+    actually failed rather than guessing afterwards.
+
+    Deduplicates on `(source_url, version, skill_name)` because resolution
+    merges by exactly that identity - the answer cannot vary by phase, so an
+    N-phase workflow sharing one ref should cost one lookup, not N.
+    """
+    seen: dict[tuple[str, str, str], tuple[SkillRef, str]] = {}
+    for ref in workflow.skills or ():
+        seen.setdefault((ref.source_url, ref.version, ref.skill_name), (ref, "<workflow>"))
+    for phase in workflow.phases:
+        for ref in phase.skills or ():
+            seen.setdefault((ref.source_url, ref.version, ref.skill_name), (ref, phase.phase_id))
+    return list(seen.values())
+
+
 async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -> None:
     """Resolve every declared skill NOW, so an unusable ref is a 422 (#998).
 
@@ -500,61 +523,55 @@ async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -
     while the exception - which already names the skill, its source, its pinned
     version and two ways to fix it - went to a log file. For an orchestration
     platform that is worse than a generic failure: a 500 tells a caller to look,
-    a 200 tells it to wait. Every trigger, cron job and agent built on this API
-    would wait forever.
+    a 200 tells it to wait.
 
-    The resolver's message is reused verbatim rather than rewritten. It is
-    already the best description of the problem that exists, and paraphrasing it
-    would drift from whatever the resolver actually rejected.
+    FAILS CLOSED on infrastructure. An earlier version skipped the preflight
+    when the resolver could not be constructed, so as not to block all work on a
+    degraded subsystem. That was wrong here: the background handler constructs
+    the SAME resolver moments later, before persistence, so skipping merely
+    relocated the failure back into the window this exists to close.
 
-    FAILS CLOSED on infrastructure, not open. An earlier version skipped the
-    preflight when the resolver could not be constructed, on the reasoning that
-    a degraded subsystem should not block all work. A codex review showed that
-    reasoning was wrong HERE: the background handler constructs the SAME
-    resolver moments later, before persistence, so skipping merely relocates the
-    failure back into the window this function exists to close - recreating the
-    exact false success. Nothing retries or acknowledges in between, so a 200
-    would not be truthful. Infrastructure failure is therefore a 503, which
-    tells the caller to look and to try again.
+    The timeout encloses the FACTORY as well as resolution. Constructing the
+    service is cheap today, but it is the call that would acquire a pool or do a
+    DNS lookup tomorrow, and a timeout that starts after it would not bound the
+    request at all.
 
-    Both scopes are resolved together because that is what execution does
-    (``ExecuteWorkflowHandler._resolve_phase_skills``). Validating phase refs
-    alone left a workflow whose only unregistered skill was WORKFLOW-scoped
-    still returning 200 and then 404.
+    Deduplicates by ref identity. Resolution merges scopes by exact
+    ``(source_url, version, skill_name)``, so the answer for a given ref does
+    not vary by phase. Per-phase resolution is necessary when BUILDING each
+    executable phase; for an existence check it is N identical lock lookups on
+    an N-phase workflow.
     """
-    # Direct attribute access, not getattr with a string literal: `skills` is a
-    # declared property on WorkflowTemplateAggregate, so the defensive form was
-    # both unnecessary and a string-keyed lookup the repo lints against. A
-    # rename would now be a type error instead of a silent empty tuple.
-    workflow_refs = tuple(workflow.skills or ())
-    phases = list(workflow.phases)
-    if not workflow_refs and not any(p.skills for p in phases):
+    refs = _unique_skill_refs(workflow)
+    if not refs:
         return
 
     try:
-        from syn_api._wiring import get_skill_resolution_service
-
-        service = await get_skill_resolution_service()
         async with asyncio.timeout(_SKILL_PREFLIGHT_TIMEOUT_SECONDS):
-            for phase in phases:
-                # Every phase, not only those with their own refs: a
-                # workflow-scoped skill applies to all of them.
-                await service.resolve_for_phase(workflow_refs, tuple(phase.skills or ()))
-    except SkillError as exc:
-        # The one case that is the CALLER's to fix.
-        phase_hint = next(
-            (p.phase_id for p in phases if p.skills),
-            phases[0].phase_id if phases else "?",
-        )
-        raise HTTPException(status_code=422, detail=f"phase '{phase_hint}': {exc}") from exc
+            from syn_api._wiring import get_skill_resolution_service
+
+            service = await get_skill_resolution_service()
+            for ref, owner in refs:
+                try:
+                    await service.resolve_for_phase((), (ref,))
+                except SkillError as exc:
+                    # Caught PER REF so the message names the phase that
+                    # actually declared it. Catching outside the loop meant
+                    # guessing afterwards, and the guess - first phase with any
+                    # skill - is wrong whenever a later phase is the broken one.
+                    raise HTTPException(status_code=422, detail=f"phase '{owner}': {exc}") from exc
     except HTTPException:
         raise
-    except Exception as exc:  # includes TimeoutError from asyncio.timeout
+    except Exception:
+        # The exception text is NOT reflected to the caller. It can be a
+        # database error carrying a DSN - user, host, database name, possibly
+        # credentials - and an HTTP body is the wrong place for any of that.
+        # The detail stays constant; the cause goes to the log.
         logger.warning("Skill preflight could not complete", exc_info=True)
         raise HTTPException(
             status_code=503,
-            detail=f"could not verify declared skills: {exc}",
-        ) from exc
+            detail="skill validation is temporarily unavailable; retry shortly",
+        ) from None
 
 
 async def _validate_execution_request(

@@ -20,6 +20,7 @@ built on this API would wait forever.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 
 import pytest
@@ -31,6 +32,21 @@ pytestmark = pytest.mark.unit
 
 _SOURCE = "https://github.com/syntropic137/software-leverage-points"
 _VERSION = "1348146ae5fd1659f2022b3c2bef0218292348d4"
+
+
+class _Ref:
+    """A skill ref double with the three fields the preflight reads.
+
+    The earlier version used bare strings. That passed while the production code
+    only counted refs, and broke the moment it began deduplicating by
+    `(source_url, version, skill_name)` - a double that cannot be used the way
+    the real object is used tests less than it appears to.
+    """
+
+    def __init__(self, skill_name: str, version: str = _VERSION) -> None:
+        self.source_url = _SOURCE
+        self.version = version
+        self.skill_name = skill_name
 
 
 class _Phase:
@@ -75,7 +91,7 @@ async def _check(monkeypatch: pytest.MonkeyPatch, workflow: _Workflow, resolver:
 class TestAnUnresolvableRefIsRejectedAtTheBoundary:
     async def test_an_unregistered_skill_raises_422(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """THE reported bug. Before this, the same input returned 200."""
-        wf = _Workflow([_Phase("research", skills=("ref",))])
+        wf = _Workflow([_Phase("research", skills=(_Ref("architecture"),))])
         resolver = _Resolver(SkillNotRegistered(_SOURCE, _VERSION, "architecture"))
 
         with pytest.raises(HTTPException) as exc:
@@ -91,7 +107,7 @@ class TestAnUnresolvableRefIsRejectedAtTheBoundary:
         A 422 whose body says 'invalid request' would be almost as useless as
         the 200 it replaces - the caller still could not act on it.
         """
-        wf = _Workflow([_Phase("research", skills=("ref",))])
+        wf = _Workflow([_Phase("research", skills=(_Ref("architecture"),))])
         resolver = _Resolver(SkillNotRegistered(_SOURCE, _VERSION, "architecture"))
 
         with pytest.raises(HTTPException) as exc:
@@ -114,7 +130,7 @@ class TestAnUnresolvableRefIsRejectedAtTheBoundary:
         catches the base class, and a test that only ever raises the subclass
         named in the bug report would pass against a narrower catch.
         """
-        wf = _Workflow([_Phase("plan", skills=("ref",))])
+        wf = _Workflow([_Phase("plan", skills=(_Ref("architecture"),))])
         resolver = _Resolver(SkillInvalidName("../etc/passwd", "path traversal in the skill name"))
 
         with pytest.raises(HTTPException) as exc:
@@ -135,7 +151,7 @@ class TestWorkflowScopedSkillsAreValidatedToo:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         wf = _Workflow([_Phase("research")])  # NO phase-level skills
-        wf.skills = ("workflow-ref",)
+        wf.skills = (_Ref("architecture"),)
         resolver = _Resolver(SkillNotRegistered(_SOURCE, _VERSION, "architecture"))
 
         with pytest.raises(HTTPException) as exc:
@@ -143,24 +159,40 @@ class TestWorkflowScopedSkillsAreValidatedToo:
         assert exc.value.status_code == 422
         assert "architecture" in str(exc.value.detail)
 
-    async def test_workflow_refs_reach_the_resolver(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Asserting the ARGUMENT, not just that a call happened: passing
-        `()` for the workflow scope is exactly the bug being fixed."""
-        seen: list[tuple[object, object]] = []
+    async def test_every_unique_ref_is_checked_exactly_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both scopes are checked, and neither is checked twice.
+
+        The preflight resolves each unique `(source_url, version, skill_name)`
+        once rather than re-resolving the workflow scope for every phase.
+        Resolution merges by that exact identity, so the answer cannot vary by
+        phase - on a ten-phase workflow the old shape was ten identical lock
+        lookups for one answer.
+
+        Asserts the SET of names, not the call count alone: a version that
+        checked one ref ten times would also satisfy a count.
+        """
+        seen: list[str] = []
 
         class _Recording(_Resolver):
             async def resolve_for_phase(self, workflow_refs, phase_refs):  # type: ignore[no-untyped-def]
-                seen.append((workflow_refs, phase_refs))
+                for r in tuple(workflow_refs) + tuple(phase_refs):
+                    seen.append(r.skill_name)
                 return ()
 
-        wf = _Workflow([_Phase("research", skills=("phase-ref",))])
-        wf.skills = ("workflow-ref",)
+        wf = _Workflow(
+            [
+                _Phase("research", skills=(_Ref("dry"),)),
+                _Phase("plan", skills=(_Ref("dry"),)),  # same ref, second phase
+            ]
+        )
+        wf.skills = (_Ref("architecture"),)
         await _check(monkeypatch, wf, _Recording())
 
-        assert seen, "the resolver was never called"
-        workflow_refs, phase_refs = seen[0]
-        assert workflow_refs == ("workflow-ref",), f"workflow scope dropped: {workflow_refs}"
-        assert phase_refs == ("phase-ref",)
+        assert sorted(seen) == ["architecture", "dry"], (
+            f"expected each unique ref exactly once, got {sorted(seen)}"
+        )
 
 
 class TestItDoesNotRefuseWorkItShouldAccept:
@@ -191,7 +223,7 @@ class TestItDoesNotRefuseWorkItShouldAccept:
         assert built == 0, "the resolver was constructed for a workflow with no skills"
 
     async def test_resolvable_skills_pass(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        wf = _Workflow([_Phase("research", skills=("ref",))])
+        wf = _Workflow([_Phase("research", skills=(_Ref("architecture"),))])
         resolver = _Resolver()
         await _check(monkeypatch, wf, resolver)
         assert resolver.calls == 1
@@ -219,7 +251,7 @@ class TestItDoesNotRefuseWorkItShouldAccept:
         import syn_api._wiring as wiring
 
         monkeypatch.setattr(wiring, "get_skill_resolution_service", _boom)
-        wf = _Workflow([_Phase("research", skills=("ref",))])
+        wf = _Workflow([_Phase("research", skills=(_Ref("architecture"),))])
         with pytest.raises(HTTPException) as exc:
             await commands._reject_unresolvable_skill_refs(wf)  # type: ignore[arg-type]
         assert exc.value.status_code == 503
@@ -268,7 +300,7 @@ class TestTheROUTEActuallyCallsThePreflight:
         async def _connected() -> None:
             return None
 
-        workflow = _Workflow([_Phase("research", skills=("ref",))])
+        workflow = _Workflow([_Phase("research", skills=(_Ref("architecture"),))])
         monkeypatch.setattr(commands, "_reject_unresolvable_skill_refs", _spy)
         monkeypatch.setattr(commands, "ensure_connected", _connected)
         monkeypatch.setattr(commands, "get_workflow_repo", lambda: _StubRepo(workflow))
@@ -281,3 +313,98 @@ class TestTheROUTEActuallyCallsThePreflight:
 
         assert called, "the route did not invoke the skill preflight"
         assert called[0] is workflow, "the preflight was handed the wrong workflow"
+
+
+class TestTheFailurePathLeaksNothingAndBoundsEverything:
+    """Three findings from codex pass 2 that had no coverage at all.
+
+    Each was invisible to the existing tests: they asserted a status code and
+    the presence of a skill name, and none of that changes when the response
+    body carries a database password or when a hang is unbounded.
+    """
+
+    async def test_the_503_does_not_reflect_the_exception_text(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SECURITY. The earlier version put `str(exc)` in the HTTP detail.
+
+        An infrastructure failure here is usually a database error, and those
+        carry a DSN - user, host, database, sometimes the password. An HTTP
+        response body is the wrong place for any of it, and the caller cannot
+        act on it anyway.
+        """
+        import syn_api._wiring as wiring
+        from syn_api.routes.executions import commands
+
+        secret = "postgresql://syn:hunter2@internal-db.local:5432/syn"
+
+        async def _boom() -> object:
+            raise RuntimeError(secret)
+
+        monkeypatch.setattr(wiring, "get_skill_resolution_service", _boom)
+        wf = _Workflow([_Phase("research", skills=(_Ref("architecture"),))])
+
+        with pytest.raises(HTTPException) as exc:
+            await commands._reject_unresolvable_skill_refs(wf)  # type: ignore[arg-type]
+
+        detail = str(exc.value.detail)
+        assert exc.value.status_code == 503
+        for leaked in ("hunter2", "internal-db.local", "postgresql://", "syn:"):
+            assert leaked not in detail, f"{leaked!r} reached the HTTP response"
+
+    async def test_a_hanging_FACTORY_is_bounded_by_the_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The timeout must enclose service CONSTRUCTION, not just resolution.
+
+        Codex pass 2: the factory await used to precede `asyncio.timeout`, so a
+        future pool acquire or DNS lookup inside it would hang the HTTP request
+        with nothing to stop it. Cheap today; the boundary is what matters.
+        """
+        import syn_api._wiring as wiring
+        from syn_api.routes.executions import commands
+
+        async def _hangs() -> object:
+            await asyncio.sleep(30)
+            return _Resolver()
+
+        monkeypatch.setattr(wiring, "get_skill_resolution_service", _hangs)
+        monkeypatch.setattr(commands, "_SKILL_PREFLIGHT_TIMEOUT_SECONDS", 0.05)
+        wf = _Workflow([_Phase("research", skills=(_Ref("architecture"),))])
+
+        async with asyncio.timeout(5):  # the test itself must not hang
+            with pytest.raises(HTTPException) as exc:
+                await commands._reject_unresolvable_skill_refs(wf)  # type: ignore[arg-type]
+        assert exc.value.status_code == 503
+
+    async def test_the_error_names_the_phase_that_actually_failed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Attribution, not a guess.
+
+        The earlier version caught `SkillError` outside the loop and then chose
+        'the first phase with any skill'. With two phases and a failure in the
+        SECOND, that names the wrong one - and points whoever reads it at code
+        that is fine.
+        """
+
+        class _FailsOnlyDry(_Resolver):
+            async def resolve_for_phase(self, workflow_refs, phase_refs):  # type: ignore[no-untyped-def]
+                for r in tuple(workflow_refs) + tuple(phase_refs):
+                    if r.skill_name == "dry":
+                        raise SkillNotRegistered(_SOURCE, _VERSION, "dry")
+                return ()
+
+        wf = _Workflow(
+            [
+                _Phase("research", skills=(_Ref("architecture"),)),
+                _Phase("plan", skills=(_Ref("dry"),)),  # the broken one
+            ]
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await _check(monkeypatch, wf, _FailsOnlyDry())
+
+        detail = str(exc.value.detail)
+        assert "plan" in detail, f"named the wrong phase: {detail}"
+        assert "research" not in detail, f"blamed an innocent phase: {detail}"
