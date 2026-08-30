@@ -19,7 +19,7 @@ the bottom is the part worth reading later.
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
-| H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **test INVALIDATED, tick 28** — the v4 install silently dropped `provider`, so its "cross-model review" ran as claude. Blocked on #1011 |
+| H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **still blocked, tick 32** — #1011 fixed and merged (#1012), but a behavioural probe shows the Mini does NOT have the fix. Needs a release, which is the owner's call |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51. RESOLVES and EXACT both 100% in all three. EXACT 75% → 100% for +85% cost |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
@@ -1525,3 +1525,49 @@ either path. **The fixture has to contain the difference, or the mutation walks
 straight through.**
 
 652 syn-api + 3254 package tests, preflight exit 0, ratchet 94.
+
+### Tick 32 — #1012 merged; H8 blocked on a release, verified by probe not by version string
+
+Merged **#1012** (16 checks, `behind main: 0`, two codex passes cleared).
+**#1011 closed.** #999 is again the only open PR.
+
+**H8 is still blocked, and I checked rather than assumed how.** The obvious move
+was to read a version string off the Mini and reason about it. Instead I probed
+the behaviour: installed a workflow declaring `provider: codex` and read it
+back.
+
+```
+POST /api/v1/workflows -> 201
+GET  /api/v1/workflows/probe-provider-check
+  provider = None      <- the fix is NOT deployed
+```
+
+That is a stronger check than a version comparison, and cheaper. The Mini needs
+a release to get the fix, and the release is #999, which is the owner's. So H8
+stays blocked for a reason outside my control rather than an unfinished task.
+(Probe workflow archived afterwards; archive is the documented soft-delete, not
+a leak.)
+
+**Then verified the deferred read/export gap before building on it** — the item
+codex reclassified from "incomplete" to "risky to defer":
+
+| field | read model | API response |
+|---|---|---|
+| `provider` | present | present |
+| `allow_delegation` | **MISSING** | **MISSING** |
+| `claude_plugins` | **MISSING** | **MISSING** |
+| `skills` | **MISSING** | **MISSING** |
+
+So #1012 made `provider` visible end to end, and left three fields **stored
+correctly and unreadable**. Filed **#1013**.
+
+**The reason that is worse than an omission is the point of the whole day:** it
+preserves the exact failure mode #1011 was about. Storage is right, nothing a
+caller can read says so, and export -> import silently loses skills and plugins.
+Had `GET` shown these fields, the missing codex provider would have been
+obvious immediately instead of taking an implausible cost number to notice.
+
+The issue names a full round-trip test — create, GET, export, reinstall,
+compare — rather than per-layer presence checks, because per-layer assertions
+pass while the round trip loses data at a boundary between them. That is
+precisely how the create-path drop survived.
