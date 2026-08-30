@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H18 | Image identity is already captured, so #1004's image half is just plumbing | **HALF REFUTED, tick 52** — `WorkspaceCreatingEvent.container_image` is a field on an event nothing emits; `IsolationStartedEvent.image_manifest` IS populated but carries BUILD provenance, not the OCI digest, and its capture is best-effort so absence is silent |
 | H17 | Widening a fix once means I have covered the bug class | **REFUTED, tick 50** — widened 2 sites -> 4 in tick 49, and codex found 4 more, including the production gateway image whose identical three lines I had removed from two sibling Dockerfiles in the same commit |
 | H15 | The existing implement-from-plan workflow can turn a well-specified issue into a PR unattended | **REFUTED, tick 48c** — 3/3 phases, $4.40, zero output. The agent verified every premise and wrote the right diff; the push was rejected because the App token lacks `workflows` permission (#1024). Not a prompt-quality problem |
 | H16 | A completed execution produced its deliverable | **REFUTED, tick 48c** — the same run reports `completed` with no PR and no branch. An agent that finishes without crashing produces a completed phase; task failure and harness failure are indistinguishable (#1023) |
@@ -2742,3 +2743,53 @@ makes today's experiment provenance auditable immediately.
 **Honest scoring of this tick:** one merge and a design note, not a feature. The
 note is worth more than the fragment would have been, but it is not delivery,
 and I should not dress it up as such.
+
+---
+
+## Tick 52 — verified last tick's guess about #1004, and it was half wrong
+
+**HYPOTHESIS (from tick 51):** `IsolationStartedEvent.image_manifest` and
+`WorkspaceCreatingEvent.container_image` already capture image identity, so that
+half of #1004 is a projection-and-API change rather than a capture change.
+
+**Half supported, and the wrong half.** I flagged it as unverified last tick and
+said checking it first would avoid building something that already exists. That
+was right to flag, and the check paid.
+
+**1. `WorkspaceCreatingEvent.container_image` is dead.** The event is defined,
+exported from two `__init__.py` files, and listed in `vsa-manifest.json` — and
+**nothing constructs it**. `git grep` finds only the class definition, the
+imports, the `__all__` entries and the manifest. So it is not a head start; it is
+a field on an event that never fires.
+
+**2. `IsolationStartedEvent.image_manifest` IS populated** —
+`workspace_lifecycle.py:195` reads `/opt/agentic/version.json` out of the running
+container — but it carries **build provenance, not an image digest**:
+`provider_version`, `components`, `build_commit`, `built_at`, and
+`manifest_digest`, which is documented as *"Hash of the manifest.yaml used for
+the build"*. That is not the OCI digest, and so it does not answer "was this an
+`edge` image or a `release` one", which is the question the loop prompt has been
+asking all day.
+
+**3. The capture is best-effort and silent.** `_read_image_manifest` returns
+`None` on every failure path and "never raises" — correct for a
+workspace-creation path that must not fail on telemetry, but it means **a missing
+manifest, an old image, and a silently failed read are indistinguishable**. That
+is the same shape as the problem #1004 exists to fix: an absent record that reads
+like an answer.
+
+### The useful inversion
+
+The image digest turns out to be **easier** than the repo SHA, and for a reason
+worth stating: the host both chooses and pulls the image, so there is no race —
+it can record the digest it resolved. For the repo it is a bystander; `main`
+moves between a host-side resolve and the workspace's clone, which is the trap in
+tick 51.
+
+**Host is the authority for the image; the workspace is the authority for the
+repo.** That single sentence is what the implementation needs, and neither the
+issue nor my first comment had it.
+
+**Honest scoring:** no code shipped this tick. A hypothesis I explicitly recorded
+as unverified was checked and corrected, and the correction changes the
+implementation plan rather than decorating it. That is the tick's whole output.
