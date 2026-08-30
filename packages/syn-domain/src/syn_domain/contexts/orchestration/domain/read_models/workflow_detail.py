@@ -16,6 +16,85 @@ from syn_domain.contexts.orchestration.domain.constants import (
 
 
 @dataclass(frozen=True)
+class PhaseRefDetail:
+    """A plugin or skill reference as a reader sees it.
+
+    Every field optional, because a projected row may hold the shorthand
+    string form (source only) or the verbose mapping. Keeping the parts
+    separate is the point: joining them is not reversible.
+    """
+
+    source_url: str | None = None
+    name: str | None = None
+    version: str | None = None
+    name_overridden: bool = False
+
+    raw: str | None = None
+    """The shorthand spelling, when the row held a bare string.
+
+    Kept verbatim instead of guessed apart, because splitting it correctly
+    requires knowing plugin-vs-skill context this view does not have."""
+
+    @classmethod
+    def from_stored(cls, ref: object) -> "PhaseRefDetail | None":
+        """Read one stored ref, or None when it names nothing.
+
+        Returning an EMPTY ref for an entry we cannot read is the wrong
+        answer twice over: over HTTP it serializes as
+        `{"source_url": null, "name": null, ...}`, which reads as a
+        declared-but-blank reference rather than as bad data, and it erases
+        the abnormality instead of surfacing it. A `None` entry used to be
+        filtered; turning it into an apparently-valid empty object was worse
+        than the omission this PR set out to fix.
+
+        The shorthand string is kept whole in `raw` rather than being split
+        into `source_url`, because parsing `owner/repo/skill@v1` needs to
+        know whether it is a plugin or a skill -- and calling it a source URL
+        when it is not is exactly the mislabelling that made `_render_ref`
+        dangerous.
+        """
+        if isinstance(ref, str):
+            return cls(raw=ref)
+        if not isinstance(ref, dict):
+            return None
+        source = ref.get("source_url") or ref.get("source")
+        # SkillRef spells it `skill_name`; ClaudePluginRef spells it `name`.
+        name = ref.get("skill_name") or ref.get("name")
+        if not source and not name:
+            return None
+        return cls(
+            source_url=source if isinstance(source, str) else None,
+            name=name if isinstance(name, str) else None,
+            version=ref.get("version") if isinstance(ref.get("version"), str) else None,
+            name_overridden=ref.get("name_overridden") is True,
+        )
+
+    def to_dict(self) -> dict[str, str | bool | None]:
+        """Concretely typed: every field of a ref is a string or a bool, and
+        `object` here would count against the untyped-dict ratchet while
+        telling a reader less."""
+        return {
+            "source_url": self.source_url,
+            "name": self.name,
+            "version": self.version,
+            "name_overridden": self.name_overridden,
+            "raw": self.raw,
+        }
+
+
+def _stored_refs(refs: object) -> tuple[PhaseRefDetail, ...]:
+    """Every readable ref in a stored list; unreadable entries dropped.
+
+    Also tolerates the whole value being absent or None, which a row written
+    before these fields existed genuinely is.
+    """
+    if not isinstance(refs, list):
+        return ()
+    read = (PhaseRefDetail.from_stored(ref) for ref in refs)
+    return tuple(ref for ref in read if ref is not None)
+
+
+@dataclass(frozen=True)
 class PhaseDefinitionDetail:
     """Read model for phase DEFINITION within a workflow template.
 
@@ -55,6 +134,26 @@ class PhaseDefinitionDetail:
 
     provider: str | None = None
     """Per-phase agent provider ('claude' or 'codex')."""
+
+    allow_delegation: bool = False
+    """Whether the phase may delegate one-shot to the other CLI (#1013).
+
+    Security-relevant: it stages BOTH agent auths in the workspace, so a
+    reader has to be able to see it. It was stored and unreadable."""
+
+    claude_plugins: tuple[PhaseRefDetail, ...] = ()
+    """Plugin refs the phase declares, carried STRUCTURALLY.
+
+    Not flattened to a canonical string. The first attempt rendered
+    `source/name@version`, which corrupts a valid ref: source
+    `https://github.com/foo/bar` with name `bar` rendered as
+    `.../bar/bar@v1` and reparsed to a DIFFERENT repository. It also
+    collided distinct refs that differ only in `name_overridden`. A
+    rendering that can confidently return the wrong identity is worse than
+    the omission it replaced."""
+
+    skills: tuple[PhaseRefDetail, ...] = ()
+    """Skill refs the phase declares, carried structurally. See above."""
 
     execution_type: str = "sequential"
     """How this phase executes: sequential, parallel, or human_in_loop."""
@@ -141,6 +240,14 @@ class WorkflowDetail:
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
                 provider=p.get("provider"),
+                # THE seam. `to_dict` wrote these and `from_dict` dropped
+                # them, so the value reached the store and was discarded on
+                # the way back out. Every reader -- the API, the export, the
+                # CLI -- goes through here, so the previous version fixed
+                # exactly half the path while five tests passed.
+                allow_delegation=bool(p.get("allow_delegation", False)),
+                claude_plugins=_stored_refs(p.get("claude_plugins")),
+                skills=_stored_refs(p.get("skills")),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),
@@ -203,6 +310,13 @@ class WorkflowDetail:
                 "argument_hint": p.argument_hint,
                 "model": p.model,
                 "provider": p.provider,
+                # The seam that made #1013 non-obvious: the read model can
+                # carry a field while `to_dict` -- the shape actually stored
+                # and served -- drops it. Adding the field above without this
+                # line changes nothing a caller can see.
+                "allow_delegation": p.allow_delegation,
+                "claude_plugins": [r.to_dict() for r in p.claude_plugins],
+                "skills": [r.to_dict() for r in p.skills],
                 "execution_type": p.execution_type,
                 PhaseFields.MAX_TOKENS: p.max_tokens,
                 "input_artifact_types": list(p.input_artifact_types),

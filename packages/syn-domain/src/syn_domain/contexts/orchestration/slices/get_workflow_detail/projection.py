@@ -11,6 +11,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
@@ -22,6 +24,7 @@ from syn_domain.contexts.orchestration.domain.constants import (
 from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
     InputDeclarationDetail,
     PhaseDefinitionDetail,
+    PhaseRefDetail,
     WorkflowDetail,
 )
 
@@ -33,6 +36,22 @@ def _find_phase(phases: list[dict[str, Any]], phase_id: str) -> dict[str, Any] |
         if pid == phase_id:
             return phase
     return None
+
+
+def _refs(refs: Iterable[object] | None) -> tuple[PhaseRefDetail, ...]:
+    """Carry refs structurally. Do NOT flatten them to a string.
+
+    The first version rendered `source/name@version`. That is not a
+    canonical form: source `https://github.com/foo/bar` with name `bar`
+    became `.../bar/bar@v1`, which reparses to a different repository, and
+    two refs differing only in `name_overridden` rendered identically. A
+    renderer that can confidently produce the wrong identity is worse than
+    the omission it replaced -- callers would copy and export the corruption.
+    """
+    if not refs:
+        return ()
+    read = (PhaseRefDetail.from_stored(ref) for ref in refs)
+    return tuple(ref for ref in read if ref is not None)
 
 
 def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> None:
@@ -68,7 +87,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # bump would buy nothing and cost a full replay through the coordinator's
     # non-atomic clear-then-delete-checkpoint sequence, which loses the whole
     # read model if the process dies between the two steps.
-    VERSION = 7  # v7: surface per-phase provider + apply provider on phase update
+    VERSION = 8  # v8: surface allow_delegation, claude_plugins, skills (#1013)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -108,6 +127,11 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
                 provider=p.get("provider"),
+                # Stored by create since #1012 and invisible until #1013: a
+                # caller could not ask the API what it had installed.
+                allow_delegation=bool(p.get("allow_delegation", False)),
+                claude_plugins=_refs(p.get("claude_plugins")),
+                skills=_refs(p.get("skills")),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),

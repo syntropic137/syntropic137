@@ -370,6 +370,20 @@ class InputDeclarationResponse(BaseModel):
     default: str | None = None
 
 
+class PhaseRefResponse(BaseModel):
+    """A plugin or skill reference. Structured, never a joined string.
+
+    Joining source and name is not reversible: a ref whose source already
+    ends in the repo name reparses to a different repository (#1013)."""
+
+    source_url: str | None = None
+    name: str | None = None
+    version: str | None = None
+    name_overridden: bool = False
+    raw: str | None = None
+    """The shorthand spelling when the stored row held a bare string."""
+
+
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -384,6 +398,12 @@ class PhaseDefinitionResponse(BaseModel):
     argument_hint: str | None = None
     model: str | None = None
     provider: str | None = None
+    # Stored since #1012, readable since #1013. `allow_delegation` is
+    # security-relevant -- it stages both agent auths -- so a caller must be
+    # able to see it.
+    allow_delegation: bool = False
+    claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
+    skills: list[PhaseRefResponse] = Field(default_factory=list)
     execution_type: str = "sequential"
     max_tokens: int | None = None
     input_artifact_types: list[str] = Field(default_factory=list)

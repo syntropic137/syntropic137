@@ -8567,6 +8567,25 @@
               }
             ],
             "title": "Provider"
+          },
+          "allow_delegation": {
+            "type": "boolean",
+            "title": "Allow Delegation",
+            "default": false
+          },
+          "claude_plugins": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseRefResponse"
+            },
+            "type": "array",
+            "title": "Claude Plugins"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseRefResponse"
+            },
+            "type": "array",
+            "title": "Skills"
           }
         },
         "type": "object",
@@ -8830,6 +8849,62 @@
           "operation_type"
         ],
         "title": "PhaseOperationInfo"
+      },
+      "PhaseRefResponse": {
+        "properties": {
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "name_overridden": {
+            "type": "boolean",
+            "title": "Name Overridden",
+            "default": false
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
+          }
+        },
+        "type": "object",
+        "title": "PhaseRefResponse",
+        "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
       },
       "RegisterClaudePluginRequest": {
         "properties": {
