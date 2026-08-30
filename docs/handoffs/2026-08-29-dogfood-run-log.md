@@ -21,7 +21,7 @@ the bottom is the part worth reading later.
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
 | H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **still blocked, tick 32** — #1011 fixed and merged (#1012), but a behavioural probe shows the Mini does NOT have the fix. Needs a release, which is the owner's call |
-| H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51. RESOLVES and EXACT both 100% in all three. EXACT 75% → 100% for +85% cost |
+| H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51, all 100%. CAVEAT (tick 40): every run executed on an `edge`-channel workspace image, not `release` |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
 ---
@@ -1879,3 +1879,46 @@ a one-line question the owner can answer.
 `bak-pre-hotpatch` *sounds* like a hand-patch — and reported it before reading
 what the files actually differed by. Backup names are not evidence. Every step
 of the real check took one command, and each one shrank the risk.
+
+### Tick 40 — every experiment today ran on an unreviewed edge image
+
+Turned the owner's open question about the Mini's workspace pin into an
+evidence-backed recommendation, and found something I had not accounted for.
+
+The two digests are not just different versions, they are **different
+channels**:
+
+| | channel | revision | created |
+|---|---|---|---|
+| live on Mini | **`edge`** | `d37547abb717` | 2026-08-29 01:01 |
+| v0.27.0 default | `release` | `276eec0ac231` | 2026-08-29 16:46 |
+
+AGENTS.md is explicit that `:edge` is "explicitly unreviewed and is NOT what
+consumers pull". The release default is 15 hours newer and its revision matches
+the `PINNED_DIGESTS` gitlink that `preflight` verifies.
+
+**It is the leftover from my own task #41** — "Hot-swap Mini to edge image and
+re-run selfhost-selftest-v1" — an experiment that was never reverted.
+
+**The consequence I had not accounted for: every workflow run I measured today
+executed on an edge workspace image.** v1, v2, H2, both v3 runs, the v4 run. I
+have spent the day controlling for prompt text, phase count and skills while an
+uncontrolled variable sat underneath all of it — the agent binaries in the
+workspace were from an unreviewed build.
+
+That does not invalidate the results. The comparisons are all *within* that
+constant, so H1/H2/H6 still hold relative to each other. But two things are now
+untrue that I have been implying:
+
+- "these numbers describe what a user gets" — a user gets the release image
+- the H6 effect size is measured on edge binaries, and `claude`/`codex` versions
+  differ between channels (the earlier PINNED_DIGESTS work showed 2.1.126 vs
+  2.1.250 across two providers)
+
+**Added the caveat to H6 rather than restating the number as if I had known.**
+This is the same class as #1004 — an input to every measurement that nothing
+recorded — and it is a second argument for that issue: an execution should
+record the workspace image digest too, not just the repo commit.
+
+**Recommendation to the owner: move to the release default.** Running unreviewed
+agent binaries is not a thing to do by accident, and the pin is accidental.
