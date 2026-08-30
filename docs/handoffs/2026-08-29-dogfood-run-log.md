@@ -16,7 +16,7 @@ the bottom is the part worth reading later.
 | H1 | Separate, focused phases beat fewer combined phases | **supported, n=1** — 62% → 75% citation accuracy for +5.6% cost |
 | H2 | SLP skills in research/planning improve plan quality | **untested** — the skills run died on an unregistered ref |
 | H3 | Cross-model review catches what the author cannot | **supported** — codex found a live path traversal in #995 |
-| H4 | A workflow can do real work on this repo unattended | **supported** — PR #992 opened for $1.09, but shipped red CI |
+| H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported** — the citation scorer produced the H1 result |
 
 ---
@@ -188,6 +188,56 @@ real run happens when #999 picks it up.
 **Residue left deliberately:** two seconds either side of midnight still breaks.
 Eliminating it needs a future-dated row or a frozen clock; the comment states
 the residue rather than implying it is gone.
+
+### Tick 8 — release green; #998's reachable half closed
+
+**Did:** merged #1000 (the heatmap flake). Verified #999 is genuinely green
+rather than trusting the badge — PR head `3b4e86e3a484` equals `origin/main`,
+and Python Integration Tests **passed after actually running** (1m38s), not
+skipped. That check matters: on #1000 the same job reported green while
+SKIPPING, because integration only runs on schedule, main pushes, and PRs
+targeting `release`.
+
+**Caveat I am keeping honest about:** it is now past 02:00 UTC, so the OLD test
+would also pass. This green does not prove the fix. What proves it is the
+arithmetic model plus the real-Postgres check run AT 02:13 UTC, inside the
+window that broke the original.
+
+**Then #998.** Hypothesis: the fix belongs at the request boundary, not in the
+background task.
+
+**Confirmed by the code itself** — `_validate_execution_request` already
+carries the comment *"Reject at the boundary so
+silent-success-then-BackgroundTask-failure can't happen"* for the repo-identity
+check. The pattern was already there and argued for; skills simply were not in
+it. That is stronger than my reasoning: someone had already hit this class and
+written down the remedy.
+
+Three judgment calls, each recorded because each could be wrong:
+
+- **Reuse the resolver's message verbatim.** It already names the skill, source,
+  pinned version and two remedies. A paraphrase drifts from what was actually
+  rejected.
+- **Catch `SkillError`, not `SkillNotRegistered`.** Catching only the subclass
+  from the bug report leaves every sibling on the silent path.
+- **Fail-open on the RESOLVER, fail-closed on the REF.** A missing registration
+  is a user error and must be reported; a resolver that will not construct is
+  ours, and refusing every workflow over it turns a degraded subsystem into a
+  total outage. Codex is being asked to argue the other side.
+
+**Mutation-checked four ways**, each caught by the test that should catch it.
+The sibling-error test deliberately raises a DIFFERENT `SkillError` subclass
+than the bug report, so it cannot pass against a narrower catch.
+
+**Two of my own errors, both caught by gates rather than by me:** I imported
+`SkillError` from `_shared` (a deep cross-context import the fitness gate
+rejects) when it was already exported publicly; and my replacement error class
+was not exported at all and takes two constructor args. Neither would have been
+caught by reading.
+
+**Scope held deliberately:** persisting the aggregate before returning 200 is
+the general fix and is NOT in this PR. #998 stays open for it. This closes the
+reachable case only, and the PR says so.
 
 ---
 
