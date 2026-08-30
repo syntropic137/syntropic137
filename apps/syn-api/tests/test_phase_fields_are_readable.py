@@ -25,7 +25,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_api.routes.workflows.commands import _build_phase_defs
-from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import WorkflowDetail
+from syn_api.routes.workflows.queries import _map_phases
+from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
+    PhaseDefinitionDetail,
+    PhaseRefDetail,
+    WorkflowDetail,
+)
 from syn_domain.contexts.orchestration.slices.get_workflow_detail.projection import (
     WorkflowDetailProjection,
 )
@@ -191,6 +196,22 @@ class TestTheRowReadsBackOut:
         assert phase.claude_plugins[0].source_url == "https://github.com/foo/bar"
         assert phase.skills[0].name == "alpha"
 
+    def test_a_row_without_delegation_reconstructs_as_false(self) -> None:
+        """The fixture that stops `from_dict` hard-coding True.
+
+        Every other readback fixture sets it True, so writing
+        `allow_delegation=True` as a literal in `from_dict` satisfied all of
+        them. A default asserted only in its default direction proves
+        nothing; this asserts the other one through the SAME function."""
+        row = {
+            "id": "wf-1",
+            "name": "T",
+            "workflow_type": "custom",
+            "phases": [{"id": "p", "name": "P", "order": 1, "allow_delegation": False}],
+        }
+
+        assert WorkflowDetail.from_dict(row).phases[0].allow_delegation is False
+
     def test_a_full_round_trip_preserves_the_refs(self) -> None:
         """to_dict -> from_dict must be identity for these fields."""
         row = {
@@ -277,3 +298,78 @@ class TestRefsAreNotFlattened:
         skills = WorkflowDetail.from_dict(row).phases[0].skills
 
         assert skills[0] != skills[1]
+
+
+class TestTheApiLayerCarriesThem:
+    """The layer the previous tests stopped before.
+
+    Deleting the three assignments at the endpoint build site left all nine
+    earlier tests passing, because `PhaseDefinition` supplies False and empty
+    lists from its own defaults. Every test so far measured the store or the
+    read model; none reached the mapping a caller's JSON is built from.
+    """
+
+    def _detail(self, *, delegation: bool) -> PhaseDefinitionDetail:
+        return PhaseDefinitionDetail(
+            id="p",
+            name="P",
+            order=1,
+            allow_delegation=delegation,
+            claude_plugins=(PhaseRefDetail(source_url="https://github.com/foo/bar", name="bar"),),
+            skills=(PhaseRefDetail(source_url="https://github.com/a/b", name="alpha"),),
+        )
+
+    def test_delegation_reaches_the_response_model(self) -> None:
+        (response,) = _map_phases([self._detail(delegation=True)])
+        assert response.allow_delegation is True
+
+    def test_delegation_false_reaches_the_response_model(self) -> None:
+        """The fixture that stops a hard-coded True from passing.
+
+        Every readback fixture used True, so `allow_delegation=True` written
+        as a literal in `from_dict` satisfied all nine earlier tests."""
+        (response,) = _map_phases([self._detail(delegation=False)])
+        assert response.allow_delegation is False
+
+    def test_refs_reach_the_response_model_with_their_identity(self) -> None:
+        (response,) = _map_phases([self._detail(delegation=True)])
+        assert response.claude_plugins[0].source_url == "https://github.com/foo/bar"
+        assert response.claude_plugins[0].name == "bar"
+        assert response.skills[0].name == "alpha"
+
+
+class TestUnreadableRefsAreDroppedNotInvented:
+    """An entry we cannot name must not become an empty ref.
+
+    Over HTTP an empty `PhaseRefDetail` serializes as
+    `{"source_url": null, "name": null, ...}`, which reads as a
+    declared-but-blank reference rather than as bad data -- so the previous
+    version erased the abnormality instead of surfacing it. `None` used to be
+    filtered; turning it into an apparently-valid object was worse than the
+    omission this PR set out to fix.
+    """
+
+    def test_a_null_entry_is_dropped(self) -> None:
+        assert PhaseRefDetail.from_stored(None) is None
+
+    def test_a_mapping_naming_nothing_is_dropped(self) -> None:
+        assert PhaseRefDetail.from_stored({"unexpected": "x"}) is None
+
+    def test_shorthand_is_kept_whole_not_mislabelled(self) -> None:
+        """`owner/repo@v1` is not a source URL. Splitting it needs
+        plugin-vs-skill context this view does not have, and calling it a
+        source URL is the mislabelling that made the old renderer unsafe."""
+        ref = PhaseRefDetail.from_stored("owner/repo@v1")
+        assert ref is not None
+        assert ref.raw == "owner/repo@v1"
+        assert ref.source_url is None
+
+    def test_a_row_whose_list_is_null_does_not_raise(self) -> None:
+        row = {
+            "id": "wf-1",
+            "name": "T",
+            "workflow_type": "custom",
+            "phases": [{"id": "p", "name": "P", "order": 1, "skills": None}],
+        }
+
+        assert WorkflowDetail.from_dict(row).phases[0].skills == ()

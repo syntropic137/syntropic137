@@ -50,7 +50,8 @@ def _refs(refs: Iterable[object] | None) -> tuple[PhaseRefDetail, ...]:
     """
     if not refs:
         return ()
-    return tuple(PhaseRefDetail.from_stored(ref) for ref in refs)
+    read = (PhaseRefDetail.from_stored(ref) for ref in refs)
+    return tuple(ref for ref in read if ref is not None)
 
 
 def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> None:

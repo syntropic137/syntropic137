@@ -8889,6 +8889,17 @@
             "type": "boolean",
             "title": "Name Overridden",
             "default": false
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
           }
         },
         "type": "object",

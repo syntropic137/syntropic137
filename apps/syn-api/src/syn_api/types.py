@@ -380,6 +380,8 @@ class PhaseRefResponse(BaseModel):
     name: str | None = None
     version: str | None = None
     name_overridden: bool = False
+    raw: str | None = None
+    """The shorthand spelling when the stored row held a bare string."""
 
 
 class PhaseDefinitionResponse(BaseModel):

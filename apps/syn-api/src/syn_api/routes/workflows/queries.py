@@ -64,6 +64,7 @@ def _ref_response(ref: PhaseRefDetail) -> PhaseRefResponse:
         name=ref.name,
         version=ref.version,
         name_overridden=ref.name_overridden,
+        raw=ref.raw,
     )
 
 

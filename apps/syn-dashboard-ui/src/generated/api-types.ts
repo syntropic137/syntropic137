@@ -3439,6 +3439,8 @@ export interface components {
              * @default false
              */
             name_overridden: boolean;
+            /** Raw */
+            raw?: string | null;
         };
         /**
          * RegisterClaudePluginRequest

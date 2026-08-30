@@ -29,19 +29,44 @@ class PhaseRefDetail:
     version: str | None = None
     name_overridden: bool = False
 
+    raw: str | None = None
+    """The shorthand spelling, when the row held a bare string.
+
+    Kept verbatim instead of guessed apart, because splitting it correctly
+    requires knowing plugin-vs-skill context this view does not have."""
+
     @classmethod
-    def from_stored(cls, ref: object) -> "PhaseRefDetail":
-        """Read one stored ref without inventing structure it lacks."""
+    def from_stored(cls, ref: object) -> "PhaseRefDetail | None":
+        """Read one stored ref, or None when it names nothing.
+
+        Returning an EMPTY ref for an entry we cannot read is the wrong
+        answer twice over: over HTTP it serializes as
+        `{"source_url": null, "name": null, ...}`, which reads as a
+        declared-but-blank reference rather than as bad data, and it erases
+        the abnormality instead of surfacing it. A `None` entry used to be
+        filtered; turning it into an apparently-valid empty object was worse
+        than the omission this PR set out to fix.
+
+        The shorthand string is kept whole in `raw` rather than being split
+        into `source_url`, because parsing `owner/repo/skill@v1` needs to
+        know whether it is a plugin or a skill -- and calling it a source URL
+        when it is not is exactly the mislabelling that made `_render_ref`
+        dangerous.
+        """
         if isinstance(ref, str):
-            return cls(source_url=ref)
+            return cls(raw=ref)
         if not isinstance(ref, dict):
-            return cls()
+            return None
+        source = ref.get("source_url") or ref.get("source")
+        # SkillRef spells it `skill_name`; ClaudePluginRef spells it `name`.
+        name = ref.get("skill_name") or ref.get("name")
+        if not source and not name:
+            return None
         return cls(
-            source_url=ref.get("source_url") or ref.get("source"),
-            # SkillRef spells it `skill_name`; ClaudePluginRef spells it `name`.
-            name=ref.get("skill_name") or ref.get("name"),
-            version=ref.get("version"),
-            name_overridden=bool(ref.get("name_overridden", False)),
+            source_url=source if isinstance(source, str) else None,
+            name=name if isinstance(name, str) else None,
+            version=ref.get("version") if isinstance(ref.get("version"), str) else None,
+            name_overridden=ref.get("name_overridden") is True,
         )
 
     def to_dict(self) -> dict[str, str | bool | None]:
@@ -53,7 +78,20 @@ class PhaseRefDetail:
             "name": self.name,
             "version": self.version,
             "name_overridden": self.name_overridden,
+            "raw": self.raw,
         }
+
+
+def _stored_refs(refs: object) -> tuple[PhaseRefDetail, ...]:
+    """Every readable ref in a stored list; unreadable entries dropped.
+
+    Also tolerates the whole value being absent or None, which a row written
+    before these fields existed genuinely is.
+    """
+    if not isinstance(refs, list):
+        return ()
+    read = (PhaseRefDetail.from_stored(ref) for ref in refs)
+    return tuple(ref for ref in read if ref is not None)
 
 
 @dataclass(frozen=True)
@@ -208,10 +246,8 @@ class WorkflowDetail:
                 # CLI -- goes through here, so the previous version fixed
                 # exactly half the path while five tests passed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
-                claude_plugins=tuple(
-                    PhaseRefDetail.from_stored(r) for r in p.get("claude_plugins", [])
-                ),
-                skills=tuple(PhaseRefDetail.from_stored(r) for r in p.get("skills", [])),
+                claude_plugins=_stored_refs(p.get("claude_plugins")),
+                skills=_stored_refs(p.get("skills")),
                 execution_type=p.get("execution_type", "sequential"),
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),
