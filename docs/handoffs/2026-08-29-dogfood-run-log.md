@@ -1069,3 +1069,33 @@ publish (npm, GHCR, tag, GitHub Release), so it stays the owner's call.
 
 This log continues on `docs/dogfood-log-continued`, since its original branch
 is now merged.
+
+### Tick 24 — #1009 planning dispatched through Syntropic (n=3 for H6)
+
+All five listed priorities are closed, so the work moved to the open issues.
+Picked **#1009** (every codex phase runs `--sandbox danger-full-access`; a
+workflow cannot make a review phase read-only) because I filed AND verified it
+this session, and because it is the one open issue that degrades the SDLC
+workflow itself: the cross-model review phase can write to the workspace whose
+artifacts are collected, so the reviewer can rewrite what it was asked to
+critique.
+
+**Ran it through the platform, not by hand** — `exec-218c408bb916`, workflow
+`sdlc-research-plan-v3`, on the Mini. That is the orchestration path the owner
+asked for, and it is the third v3 run, so it also extends H6 from n=2 to n=3.
+
+**Hypothesis being tested by the prompt itself:** I handed the workflow a
+PRE-VERIFIED premise this time — four facts I had checked directly, each with a
+file and line — and explicitly invited it to contradict any of them. The
+previous run (#1004) corrected an error in my prompt unprompted, which is
+evidence the research phase does not simply accept what it is told. Stating the
+premise as checkable rather than as background is the variable.
+
+The prompt also states plainly what the issue is NOT: the container is the
+isolation boundary, so this is not host security. Every previous run that went
+wrong went wrong on a premise, so being precise about the *shape* of the problem
+is cheap insurance.
+
+Running. Score with `scripts/score_plan_citations.py --rev origin/main` when it
+lands — now the merged, fail-closed version with its 26 regression tests behind
+it, rather than the one that scored an invalid revision at 100%.
