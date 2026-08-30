@@ -18,7 +18,7 @@ the bottom is the part worth reading later.
 | H3 | Cross-model review catches what the author cannot | **strongly supported** — codex found #995's traversal, and in tick 16 found that my #997 fix was INERT in production and that all five of my tests stopped short of the boundary where it broke |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing GROUNDED | **strongly supported** — EXACT 75% -> 98%, GROUNDED held at 98%, citations 12 -> 55, cost +85% |
-| H5 | Mechanical scoring beats opinion for comparing runs | **supported, but the first instrument was wrong** — it measured path FORMAT while reported as grounding; now reports both |
+| H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
 ---
 
@@ -757,3 +757,49 @@ requires these to match across layers. The cost is exactly what bit me — readi
 nothing and gets "no such workflow" instead of "wrong field name". An agent is
 the stated acceptance case for this API, and the natural list-then-execute loop
 does not compose today.
+
+### Tick 18b — I retracted my own issue an hour after filing it, then built the control
+
+**#1007 closed as invalid.** I filed it claiming workflow identity is `id` on
+the list endpoint and `workflow_id` on detail and execution. Checked against the
+live API afterwards:
+
+| endpoint | field | value |
+|---|---|---|
+| `GET /workflows` | `id` | `sdlc-research-plan-v3` |
+| `GET /workflows/{id}` | `id` | `sdlc-research-plan-v3` |
+| `GET /executions/{id}` | `workflow_id` | `sdlc-research-plan-v3` |
+
+Workflows expose their own identity as `id` on **both** list and detail; an
+execution references a foreign workflow as `workflow_id`. That is ordinary REST
+convention, not the cross-layer drift AGENTS.md prohibits. I had inferred the
+detail shape from line numbers in `queries.py` — two classes there both declare
+`id: str` and others nearby declare `workflow_id` — instead of reading the
+response that was already sitting on disk.
+
+**Sixth error today, and the second premise I have had to retract after #989.**
+I made it in the same tick where I wrote "print the raw shape once before
+filtering" as the lesson.
+
+**So I stopped resolving and built the instrument.** `scripts/api_shape.py`
+prints a response's real key shape, and `--find <value>` answers the question I
+kept getting wrong: not "is it under the key I assumed?" but "which key is it
+actually under?"
+
+Exit codes are load-bearing because the failure mode being guarded is silence:
+`0` found, `1` absent, `2` not JSON. That third one catches a real trap on this
+stack — the dashboard SPA catch-all answers unknown paths with **200 and HTML**,
+which is why fetching `/openapi.json` from the Mini earlier this tick looked
+like a server problem when the path was simply wrong.
+
+Verified against the live Mini, including the negative control: a genuinely
+absent value reports absent and exits 1. Each of today's four API errors would
+have been one command.
+
+The pattern worth keeping: **tick 15 fixed `--rev` on the citation scorer and I
+treated the class as closed.** It was not — the same failure was waiting in a
+completely different instrument. A fix that is instrument-shaped closes exactly
+one instrument.
+
+**Meanwhile** `exec-167fbe65f189` (the #1004 plan) is still running on the Mini,
+phase 1 of 4, $2.21.
