@@ -1136,3 +1136,50 @@ Mutation-verified four ways, all killed. Negative controls included, so a
 
 **Meanwhile** `exec-218c408bb916` (the #1009 plan) is still in phase 1 on the
 Mini at $0.89.
+
+### Tick 24c — my fix for the silent-absence bug introduced a different silent-absence bug
+
+Codex reviewed #1010 and blocked it. The headline: **my fix was worse than what
+it replaced.**
+
+`_describe_list` unioned only the IMMEDIATE keys of direct dict elements and
+never recursed. For `{"rows": [{"meta": {"visible": 1}}, {"meta": {"hidden": 2}}]}`
+the old element-[0] version printed `visible`; mine printed `meta: object[1]`
+and nothing else. I traded depth for breadth and **lost a field the previous
+version showed**, in the one script whose entire purpose is not hiding fields.
+
+Verified both behaviours side by side before changing anything, by running the
+old version out of `git show origin/main`.
+
+**Second time today a fix of mine made something worse.** The other was #997:
+I taught the flat alias to rank candidates and left the tree path on raw row
+order, so the two cold readers disagreed where they had previously agreed. Same
+shape both times: **I fixed the case in front of me without asking what the
+previous behaviour was good at.** A change is only an improvement if it
+dominates; otherwise it is a trade, and a trade has to be argued rather than
+assumed.
+
+Fixed with a recursive merge, verified against every payload the review gave —
+nested objects, lists of lists, a list sibling of a dict (handling dicts used to
+`return` early and skip them), and the `[in n/N]` denominator counting only
+dicts instead of the list length.
+
+Also, from the same review: `--find`/`--find-exact` were not mutually exclusive
+so supplying both silently answered one; needle and `--at` used truthiness, so
+`--find-exact ""` printed the shape and exited 0 without searching; and
+transport/decode failures could escape as exit 1, which is indistinguishable
+from "looked and it is absent".
+
+**And a third instance of this file containing the exact bug it exists to
+prevent:** searching `str(value)` meant a caller typing `null` or `true` — the
+JSON spellings that were actually in the response — got NOT FOUND for a value
+that is present. Both spellings now match.
+
+**`main()` had no coverage at all**, which is why codex's fifth mutation
+(deleting the whole `--at` fix) survived my first suite. And it found a test of
+mine that passed for the wrong reason: asserting output was non-empty, which
+`describe()` satisfies before the list walker runs, so it passed with the walker
+gutted. 28 tests now, mutation-verified six ways, all killed.
+
+**Meanwhile** `exec-218c408bb916` reached phase 4 of 4 at $3.57 — the codex
+review phase again cost about $0.56, roughly a sixth of the claude phases.
