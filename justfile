@@ -1127,7 +1127,14 @@ check-submodules:
     #     by deinitialising a submodule and watching it pass anyway.
     #  2. It lets git's own exit status be checked, so a broken git cannot read
     #     as a clean tree.
-    if ! status=$(git submodule status --recursive); then
+    # NOT --recursive, deliberately. ci.yml checks out with `submodules: true`,
+    # which initializes the four direct submodules and leaves
+    # lib/event-sourcing-platform/reference/eventsourcing-book uninitialized. A
+    # recursive check here would assert something CI's own checkout cannot
+    # satisfy, so preflight -- which CI runs -- would fail on every PR. Match
+    # the contract CI actually provides; widening it means changing the
+    # checkouts first.
+    if ! status=$(git submodule status); then
         echo "❌ could not read submodule status"
         exit 1
     fi
