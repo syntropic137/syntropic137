@@ -6,6 +6,7 @@ import re
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
+import yaml
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -325,12 +326,51 @@ def _validate_phase_id(phase_id: str) -> str:
     return phase_id
 
 
+def _yaml_flow_list(values: list[str]) -> str:
+    """A flow list the emitter builds, not string concatenation.
+
+    Quoting each item and joining with ", " is not enough: a value that is a
+    perfectly safe standalone scalar can still restructure a FLOW LIST. `a,b`
+    reads back as `a,b` on its own and splits into two entries inside
+    `[a,b]`, so per-item quoting decided correctly and the surrounding
+    context still broke it. The emitter knows both.
+    """
+    return yaml.safe_dump(values, default_flow_style=True, width=10**9).strip().rstrip("\n")
+
+
 def _yaml_quote(value: str) -> str:
-    """Quote a YAML string value if it contains special characters."""
-    if _YAML_SPECIAL_RE.search(value):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
+    """Quote a YAML string unless the bare form reads back as itself.
+
+    Special CHARACTERS are not the whole risk. A value made entirely of
+    ordinary characters can still change type: bare `null` parses as None and
+    erases the field, `123` becomes an int a string field then rejects, and
+    `true`/`no`/`on` become booleans. Those look nothing like injection while
+    reading the emitted file, which is why the character test missed them.
+
+    So the check is behavioural rather than syntactic: emit the bare form,
+    parse it, and quote unless it survives as the same string. That covers
+    every YAML scalar resolution rule without this function having to know
+    them.
+    """
+    if _YAML_SPECIAL_RE.search(value) or not _reads_back_as_itself(value):
+        # Delegate to the YAML emitter rather than hand-rolling the escape.
+        # A hand-written double-quoted scalar keeps PHYSICAL newlines, and
+        # YAML folds those to a single space -- so "A\nB" reinstalled as
+        # "A B". A NUL produced a document PyYAML refuses outright. The
+        # emitter knows every escape; this function only decides WHETHER.
+        #
+        # Emitted inside a one-item flow list and unwrapped, so there is no
+        # document-end marker to trim off a bare scalar dump.
+        return _yaml_flow_list([value])[1:-1]
     return value
+
+
+def _reads_back_as_itself(value: str) -> bool:
+    """Whether the bare scalar parses back to the identical string."""
+    try:
+        return yaml.safe_load(value) == value
+    except yaml.YAMLError:
+        return False
 
 
 # -- Export file builders -----------------------------------------------------
@@ -377,6 +417,71 @@ def _yaml_input_lines(detail: WorkflowDetail) -> list[str]:
     return lines
 
 
+def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """The `agent:` block, in the spelling the packaged workflow YAML uses.
+
+    Emitted only when the phase actually declares something. A bare
+    `agent: {}` would be noise, and `provider: null` would assert a choice
+    the author never made.
+    """
+    entries: list[str] = []
+    if phase.provider:
+        entries.append(f"      provider: {_yaml_quote(phase.provider)}")
+    if phase.model:
+        entries.append(f"      model: {_yaml_quote(phase.model)}")
+    if phase.allow_delegation:
+        entries.append("      allow_delegation: true")
+    return ["    agent:", *entries] if entries else []
+
+
+def _yaml_ref_entry(key: str, ref: PhaseRefResponse) -> list[str]:
+    """One ref, in the spelling ITS loader accepts.
+
+    Skills and plugins are not symmetric and treating them as one shape
+    silently changed identities: `expand_skill_entry` reads `names:`, while
+    the plugin validator ignores `names` and derives the name from the source
+    basename -- so a plugin exported with `names: [custom]` reinstalled as
+    `bar`.
+
+    A ref known only as shorthand becomes a scalar entry. Writing
+    `- source: owner/repo@v1` with no `version` produced a mapping BOTH
+    reference models reject, so the package would not reinstall.
+
+    Extracted from `_yaml_ref_lines` to stay under the cognitive-complexity
+    threshold; the branching is inherent to the two loaders differing.
+    """
+    if ref.source_url:
+        lines = [f"      - source: {_yaml_quote(ref.source_url)}"]
+        # Only when the author actually overrode it. Emitting a name that was
+        # DERIVED from the source basename makes the loader reconstruct the
+        # ref with `name_overridden=True` -- changing provenance the phase
+        # never declared. When it was not overridden the loader derives the
+        # same name from the source anyway.
+        if ref.name and ref.name_overridden:
+            plural = key == "skills"
+            spelling = "names" if plural else "name"
+            value = _yaml_flow_list([ref.name]) if plural else _yaml_quote(ref.name)
+            lines.append(f"        {spelling}: {value}")
+        if ref.version:
+            lines.append(f"        version: {_yaml_quote(ref.version)}")
+        return lines
+    if ref.raw:
+        return [f"      - {_yaml_quote(ref.raw)}"]
+    # Neither: unnameable. Dropping it is honest; `source: null` would export
+    # a reference that cannot resolve.
+    return []
+
+
+def _yaml_ref_lines(key: str, refs: list[PhaseRefResponse]) -> list[str]:
+    """Plugin/skill refs, never joined into `source/name@version`.
+
+    #1014 established that joining corrupts a ref whose source already ends
+    in the repo name -- it reparses to a different repository.
+    """
+    entries = [line for ref in refs for line in _yaml_ref_entry(key, ref)]
+    return [f"    {key}:", *entries] if entries else []
+
+
 def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     """Build the phase entry lines for a single phase in workflow.yaml."""
     pid = _validate_phase_id(phase.phase_id)
@@ -389,9 +494,32 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if phase.description:
         lines.append(f"    description: {_yaml_quote(phase.description)}")
     lines.append(f"    prompt_file: phases/{pid}.md")
+    if phase.input_artifact_types:
+        lines.append(f"    input_artifacts: {_yaml_flow_list(list(phase.input_artifact_types))}")
     if phase.output_artifact_types:
-        artifacts = ", ".join(phase.output_artifact_types)
-        lines.append(f"    output_artifacts: [{artifacts}]")
+        lines.append(f"    output_artifacts: {_yaml_flow_list(list(phase.output_artifact_types))}")
+    # Everything below was silently dropped (#1015). Export emitted 6 of 18
+    # fields, so export -> reinstall produced a DIFFERENT workflow rather than
+    # an incomplete one: no tool scoping, no provider, no timeouts, no skills.
+    #
+    # Each guarded on presence, never emitted as an empty value: writing
+    # `allowed_tools: []` would turn "inherits the default" into "explicitly
+    # declares nothing", which reinstalls differently again.
+    if phase.timeout_seconds is not None:
+        lines.append(f"    timeout_seconds: {phase.timeout_seconds}")
+    # `max_tokens` is deliberately NOT exported. `PhaseYamlDefinition`
+    # rejects it -- "no agent CLI exposes a token cap, so this value has never
+    # bounded anything" -- so emitting it produced a package that could never
+    # be installed. A phase can only carry one via the untyped JSON create
+    # path, which is its own defect (#1015 follow-up); exporting it would
+    # propagate that anomaly into a file the loader refuses.
+    if phase.argument_hint:
+        lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
+    if phase.allowed_tools:
+        lines.append(f"    allowed_tools: {_yaml_flow_list(list(phase.allowed_tools))}")
+    lines.extend(_yaml_agent_lines(phase))
+    lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
+    lines.extend(_yaml_ref_lines("skills", phase.skills))
     return lines
 
 
