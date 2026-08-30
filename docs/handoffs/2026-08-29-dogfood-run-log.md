@@ -24,6 +24,7 @@ the bottom is the part worth reading later.
 | H8 | A rule requiring the COMMAND behind an absence claim stops false-premise rejections | **STILL UNTESTED, tick 46** — the v4 run exists ($1.19 vs v3's >=$8.15, same issue) but its review returned "No blockers", so the rejection hazard never arose. Needs a run where the review DOES raise a blocker. Previously "UNBLOCKED, tick 42 — v0.27.0 deployed and verified on the Mini; codex phases now survive install. Ready to test |
 | H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51, all 100%. CAVEAT (tick 40): every run executed on an `edge`-channel workspace image, not `release` |
 | H11 | Local QA missing CI's jobs is why CI catches more; adding them closes it | **partly supported, and incomplete — tick 44** — the six missing jobs were real and are now local. But codex showed parity is a claim about COMMANDS AND ENVIRONMENT, not target names: `docs-lint.yml` gates every PR and was unmapped, `dashboard-ci` dropped CI's `pnpm link`, and `docs-site-ci` is non-frozen locally because Actions sets `CI=true` |
+| H14 | An issue I filed myself has a sound premise | **REFUTED, tick 47** — #1017's stated root cause (a v0.26->v0.27 generator regression) never happened; 54 release tags contain no `SYN_GATEWAY_BIND`. Acting on it would have "restored" a variable that never existed |
 | H12 | A gate that passes is a gate that works | **REFUTED, tick 45** — four gates written this week were structurally incapable of failing: `check_test_debt --warn-only`, the scorer's `--rev`, `main() -> 0`, and `grep -q` under `pipefail` returning 141. Each looked identical to a working gate until its hazard was reproduced |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
@@ -2304,3 +2305,87 @@ is a string in both; the f-string had hidden the quotes. Checked before claiming
 **Also observed:** `/executions/{id}` returns `total_duration_seconds: 0.0` for
 a run that took 10 minutes, and `phase_name: None` for every phase while the CLI
 displays names. Not filed yet - needs its own premise check first.
+
+---
+
+## Tick 47 — checked an issue's premise, found it false, then found a live exposure
+
+**HYPOTHESIS:** #1017 is a v0.26 -> v0.27 generator regression that drops
+`${SYN_GATEWAY_BIND}`, so the fix is to restore the variable.
+
+**What the evidence said: the premise is false, and I wrote the issue.**
+
+```
+$ git show v0.26.0:docker/docker-compose.syntropic137.yaml | grep 8137
+315:    - 127.0.0.1:${SYN_GATEWAY_PORT:-8137}:80
+$ git show v0.27.0:docker/docker-compose.syntropic137.yaml | grep 8137
+317:    - 127.0.0.1:${SYN_GATEWAY_PORT:-8137}:80
+$ git log --all -S SYN_GATEWAY_BIND --oneline
+(two commits, both my own dogfood-log entries)
+```
+
+Both releases hardcode the loopback identically; the variable never existed
+here. Codex independently checked all **54** release tags: zero contain it.
+There was nothing to revert. The Mini's compose had been hand-edited and
+`setup update` regenerated over the edit.
+
+The real defect is the one that forced the hand-edit: **the published stack
+offers no supported way to bind the gateway off loopback**, so every
+multi-machine operator edits a generated file that every update reverts. That is
+worse than a one-release regression, because fixing a generator would not stop
+it recurring. Corrected the issue, retitled it, opened #1021 adding the knob
+with a loopback default.
+
+### Then the review turned a config change into a security finding
+
+Codex raised the security posture as a hypothesis. **Verifying it** showed:
+
+- `nginx.conf:15` `listen 80;` — `auth_basic off`
+- `nginx.conf:37` `listen 8081;` — the only listener with Basic Auth
+- the published compose maps the host port to **80**
+
+So `SYN_API_PASSWORD` does not protect the port being published. And my own
+field description said *"...so set SYN_API_PASSWORD as well"* — advice that does
+nothing, which is worse than no advice.
+
+**It is already live, not hypothetical:**
+
+```
+$ curl -o /dev/null -w '%{http_code}' http://<mini-tailscale>:8137/api/v1/health
+200                                        # no credentials
+$ curl http://<mini-tailscale>:8137/api/v1/workflows
+200, 20 workflows                          # no credentials
+```
+
+The Mini has served an unauthenticated API and dashboard on its tailnet the
+whole time I have been running experiments against it with `-u admin:...`
+credentials that were being ignored. Filed **#1022**, paged the owner, and
+marked #1021 **draft** rather than merge a footgun. Choosing between "publish
+8081 when binding off loopback" and "fail closed on an empty password" changes
+behaviour for tunnel users, so it is the owner's call.
+
+### Also confirmed from the same review
+
+- **I edited the wrong operator template.** `infra/.env.example` is for the repo
+  workflow; the file actually released and synced to the setup package is
+  `docker/selfhost.env.example` (uploaded by `release-containers.yaml:326`),
+  still listing only `SYN_GATEWAY_PORT`. A new install would never learn the
+  knob exists.
+- **My "anything other than 127.0.0.1" is the wrong category** — `::1` is
+  loopback and safe.
+- **Surviving mutation:** reverting only `docker-compose.selfhost.yaml` while
+  the published file stays correct passes all three of my tests, because they
+  read only the published artifact. `check-compose` catches it at suite level,
+  but the file does not enforce the invariant its own docstring discusses.
+
+### What the tests DID catch
+
+Three mutations killed by the intended test, including reverting the published
+compose to the exact #1017 state. Written against `docker compose config`
+rather than a regex of the YAML, because docker's interpolation is the consumer
+— and a regex test would have passed just as happily on the hand-edit this
+replaces. Sentinel `203.0.113.7` (TEST-NET-3) so the value cannot be a default.
+
+**Standing lesson, third tick running:** the reviewer's finding is a hypothesis,
+and verifying it is where the value is. Tick 44b, verifying refuted the finding.
+Here, verifying escalated it from a code-review nit to a live exposure.
