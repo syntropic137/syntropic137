@@ -55,10 +55,20 @@ def _phase() -> PhaseDefinitionResponse:
         output_artifact_types=["markdown"],
         claude_plugins=[
             PhaseRefResponse(
-                source_url="https://github.com/foo/bar", name="custom-alias", version="v1"
+                source_url="https://github.com/foo/bar",
+                name="custom-alias",
+                version="v1",
+                name_overridden=True,
             )
         ],
-        skills=[PhaseRefResponse(source_url="https://github.com/a/b", name="alpha", version="v2")],
+        skills=[
+            PhaseRefResponse(
+                source_url="https://github.com/a/b",
+                name="alpha",
+                version="v2",
+                name_overridden=True,
+            )
+        ],
     )
 
 
@@ -254,7 +264,11 @@ class TestValuesCannotRestructureTheDocument:
 
     def test_a_name_containing_a_comma_stays_one_name(self) -> None:
         """Unquoted in a flow list, a comma silently becomes two entries."""
-        refs = [PhaseRefResponse(source_url="https://github.com/a/b", name="alpha,beta")]
+        refs = [
+            PhaseRefResponse(
+                source_url="https://github.com/a/b", name="alpha,beta", name_overridden=True
+            )
+        ]
         skills = self._phase_with(skills=refs)["skills"]
         assert isinstance(skills, list)
         assert skills[0]["names"] == ["alpha,beta"]
@@ -290,3 +304,69 @@ class TestAShorthandRefExportsAsAScalar:
         )
         parsed = yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0]
         assert "skills" not in parsed
+
+
+class TestProvenanceIsNotInvented:
+    """A derived name must not be exported as an authored one.
+
+    The loader sets `name_overridden=True` whenever a name is present, so
+    emitting a name that was DERIVED from the source basename makes the
+    reinstalled phase claim the author chose it. When it was not overridden
+    the loader derives the same name from the source anyway, so emitting it
+    adds nothing and changes provenance.
+    """
+
+    def _skills(self, ref: PhaseRefResponse) -> object:
+        phase = PhaseDefinitionResponse(phase_id="p", name="P", order=1, skills=[ref])
+        return yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0][
+            "skills"
+        ][0]
+
+    def test_a_derived_name_is_not_emitted(self) -> None:
+        entry = self._skills(
+            PhaseRefResponse(source_url="https://github.com/a/b", name="b", name_overridden=False)
+        )
+        assert isinstance(entry, dict)
+        assert "names" not in entry
+
+    def test_an_authored_name_is_emitted(self) -> None:
+        entry = self._skills(
+            PhaseRefResponse(
+                source_url="https://github.com/a/b", name="chosen", name_overridden=True
+            )
+        )
+        assert isinstance(entry, dict)
+        assert entry["names"] == ["chosen"]
+
+
+class TestListValuesCannotSplit:
+    """Per-item quoting is not enough; the surrounding flow list matters.
+
+    `a,b` reads back as `a,b` on its own, so a per-value quoting decision says
+    "safe" -- and inside `[a,b]` it becomes two entries. The emitter builds
+    the whole list instead.
+    """
+
+    def _phase(self, **kw: object) -> Mapping[str, object]:
+        p = PhaseDefinitionResponse(phase_id="p", name="P", order=1, **kw)  # type: ignore[arg-type]
+        return yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(p)))["phases"][0]
+
+    def test_an_output_artifact_with_a_comma_stays_one_entry(self) -> None:
+        assert self._phase(output_artifact_types=["a,b"])["output_artifacts"] == ["a,b"]
+
+    def test_a_tool_with_a_comma_stays_one_entry(self) -> None:
+        assert self._phase(allowed_tools=["Read", "x,y"])["allowed_tools"] == ["Read", "x,y"]
+
+    def test_an_artifact_named_null_stays_a_string(self) -> None:
+        """Unquoted, `[null]` reinstalls as `[None]` and the loader rejects it."""
+        assert self._phase(output_artifact_types=["null"])["output_artifacts"] == ["null"]
+
+
+class TestMultilineValuesSurvive:
+    """A hand-written double-quoted scalar keeps PHYSICAL newlines, and YAML
+    folds those to a single space -- so `A\nB` reinstalled as `A B`."""
+
+    def test_a_multiline_description_round_trips(self) -> None:
+        phase = PhaseDefinitionResponse(phase_id="p", name="P", order=1, description="A\nB")
+        parsed = yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0]
+        assert parsed["description"] == "A\nB"

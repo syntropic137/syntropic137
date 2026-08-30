@@ -326,6 +326,18 @@ def _validate_phase_id(phase_id: str) -> str:
     return phase_id
 
 
+def _yaml_flow_list(values: list[str]) -> str:
+    """A flow list the emitter builds, not string concatenation.
+
+    Quoting each item and joining with ", " is not enough: a value that is a
+    perfectly safe standalone scalar can still restructure a FLOW LIST. `a,b`
+    reads back as `a,b` on its own and splits into two entries inside
+    `[a,b]`, so per-item quoting decided correctly and the surrounding
+    context still broke it. The emitter knows both.
+    """
+    return yaml.safe_dump(values, default_flow_style=True, width=10**9).strip().rstrip("\n")
+
+
 def _yaml_quote(value: str) -> str:
     """Quote a YAML string unless the bare form reads back as itself.
 
@@ -341,8 +353,15 @@ def _yaml_quote(value: str) -> str:
     them.
     """
     if _YAML_SPECIAL_RE.search(value) or not _reads_back_as_itself(value):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
+        # Delegate to the YAML emitter rather than hand-rolling the escape.
+        # A hand-written double-quoted scalar keeps PHYSICAL newlines, and
+        # YAML folds those to a single space -- so "A\nB" reinstalled as
+        # "A B". A NUL produced a document PyYAML refuses outright. The
+        # emitter knows every escape; this function only decides WHETHER.
+        #
+        # Emitted inside a one-item flow list and unwrapped, so there is no
+        # document-end marker to trim off a bare scalar dump.
+        return _yaml_flow_list([value])[1:-1]
     return value
 
 
@@ -433,10 +452,15 @@ def _yaml_ref_entry(key: str, ref: PhaseRefResponse) -> list[str]:
     """
     if ref.source_url:
         lines = [f"      - source: {_yaml_quote(ref.source_url)}"]
-        if ref.name:
+        # Only when the author actually overrode it. Emitting a name that was
+        # DERIVED from the source basename makes the loader reconstruct the
+        # ref with `name_overridden=True` -- changing provenance the phase
+        # never declared. When it was not overridden the loader derives the
+        # same name from the source anyway.
+        if ref.name and ref.name_overridden:
             plural = key == "skills"
             spelling = "names" if plural else "name"
-            value = f"[{_yaml_quote(ref.name)}]" if plural else _yaml_quote(ref.name)
+            value = _yaml_flow_list([ref.name]) if plural else _yaml_quote(ref.name)
             lines.append(f"        {spelling}: {value}")
         if ref.version:
             lines.append(f"        version: {_yaml_quote(ref.version)}")
@@ -471,11 +495,9 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
         lines.append(f"    description: {_yaml_quote(phase.description)}")
     lines.append(f"    prompt_file: phases/{pid}.md")
     if phase.input_artifact_types:
-        kinds = ", ".join(_yaml_quote(a) for a in phase.input_artifact_types)
-        lines.append(f"    input_artifacts: [{kinds}]")
+        lines.append(f"    input_artifacts: {_yaml_flow_list(list(phase.input_artifact_types))}")
     if phase.output_artifact_types:
-        artifacts = ", ".join(phase.output_artifact_types)
-        lines.append(f"    output_artifacts: [{artifacts}]")
+        lines.append(f"    output_artifacts: {_yaml_flow_list(list(phase.output_artifact_types))}")
     # Everything below was silently dropped (#1015). Export emitted 6 of 18
     # fields, so export -> reinstall produced a DIFFERENT workflow rather than
     # an incomplete one: no tool scoping, no provider, no timeouts, no skills.
@@ -494,8 +516,7 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if phase.argument_hint:
         lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
     if phase.allowed_tools:
-        tools = ", ".join(_yaml_quote(t) for t in phase.allowed_tools)
-        lines.append(f"    allowed_tools: [{tools}]")
+        lines.append(f"    allowed_tools: {_yaml_flow_list(list(phase.allowed_tools))}")
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))
