@@ -17,7 +17,7 @@ the bottom is the part worth reading later.
 | H2 | SLP skills in research/planning improve plan quality | **RESTORED, NOT supported, n=1** — re-scored: 83% RESOLVES, 0% EXACT, 6 citations for $4.14 vs 12 for $3.51. I predicted the 0% was least likely to survive a stricter scorer; it survived unchanged |
 | H3 | Cross-model review catches what the author cannot | **strongly supported, and it beat me on a direct disagreement** — found #995's traversal; found my #997 fix was INERT; found my scorer failed toward good; and was RIGHT about `--tools` when I publicly said it was wrong (tick 22) |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
-| H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=2, corrected instrument** — v3 on #990: 55/55 and 55/55. v3 on #1004: 37/37 and 37/37. EXACT 75% → 100% for +85% cost |
+| H6 | A prompt line requiring root-relative citations moves EXACT without costing RESOLVES | **strongly supported, n=3, corrected instrument** — #990: 55/55, #1004: 37/37, #1009: 51/51. RESOLVES and EXACT both 100% in all three. EXACT 75% → 100% for +85% cost |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported, and the failure generalises** — the instrument was wrong twice (measured FORMAT not grounding; then scored a stale tree). Tick 18 showed the same class outside the scorer entirely: 4 of 6 wrong claims today were unvalidated API queries. Instruments, not resolutions |
 
 ---
@@ -1056,3 +1056,173 @@ whose currency I checked first.** Three of today's eight errors would not have
 happened if I had done that by default rather than after being caught.
 
 Waiting on CI before merging. Not merging #999 — that remains the owner's.
+
+### Tick 23b — #1008 merged
+
+All checks complete, 0 failing, measured against a base that was `behind: 0`
+after merging main in. Merged as `ba28a4b2`. On `main` now: the four-phase SDLC
+workflow, the citation scorer with its 26 regression tests, `api_shape.py`, the
+decision brief, and this log.
+
+**#999 is again the only open PR** — 50 checks green, and merging it is the
+publish (npm, GHCR, tag, GitHub Release), so it stays the owner's call.
+
+This log continues on `docs/dogfood-log-continued`, since its original branch
+is now merged.
+
+### Tick 24 — #1009 planning dispatched through Syntropic (n=3 for H6)
+
+All five listed priorities are closed, so the work moved to the open issues.
+Picked **#1009** (every codex phase runs `--sandbox danger-full-access`; a
+workflow cannot make a review phase read-only) because I filed AND verified it
+this session, and because it is the one open issue that degrades the SDLC
+workflow itself: the cross-model review phase can write to the workspace whose
+artifacts are collected, so the reviewer can rewrite what it was asked to
+critique.
+
+**Ran it through the platform, not by hand** — `exec-218c408bb916`, workflow
+`sdlc-research-plan-v3`, on the Mini. That is the orchestration path the owner
+asked for, and it is the third v3 run, so it also extends H6 from n=2 to n=3.
+
+**Hypothesis being tested by the prompt itself:** I handed the workflow a
+PRE-VERIFIED premise this time — four facts I had checked directly, each with a
+file and line — and explicitly invited it to contradict any of them. The
+previous run (#1004) corrected an error in my prompt unprompted, which is
+evidence the research phase does not simply accept what it is told. Stating the
+premise as checkable rather than as background is the variable.
+
+The prompt also states plainly what the issue is NOT: the container is the
+isolation boundary, so this is not host security. Every previous run that went
+wrong went wrong on a premise, so being precise about the *shape* of the problem
+is cheap insurance.
+
+Running. Score with `scripts/score_plan_citations.py --rev origin/main` when it
+lands — now the merged, fail-closed version with its 26 regression tests behind
+it, rather than the one that scored an invalid revision at 100%.
+
+### Tick 24b — the tool I built to stop silent-absence had silent-absence
+
+While the #1009 plan runs, closed the outstanding `api_shape.py` findings.
+**PR #1010.**
+
+This is the sharpest finding of the session. I built that script in tick 18b
+*specifically* because four of my wrong claims were "read a field the response
+does not carry, get None, report the silence as a finding". Codex then found
+the script did exactly that: `describe()` inspected only element `[0]` of a
+list, so a field on later elements was missing from the output and the command
+still exited 0.
+
+Reproduced before fixing: `[{"first_only": 1}, {"later_only": 2}]` printed only
+`first_only`, and `later_only` was not findable either, because `find_value()`
+searched values but never KEYS while reporting "does not appear anywhere".
+
+**The lesson is not "be more careful writing tools".** It is that an instrument
+built in reaction to a failure mode inherits that failure mode unless something
+tests for it. I wrote the tool AND the docstring explaining the exact bug it
+prevents, and still shipped the bug, because I verified it on a homogeneous
+list where the defect is invisible. That is the tautological-input mistake from
+ticks 16, 17 and 21 for the fourth time — the same shape, in the artifact
+designed to prevent the shape.
+
+Fixes: every element summarized with `[in n/N]` on non-universal keys (the
+count IS the signal — without it the output still reads as "these are the
+fields"); keys searched as well as values; `--at` applied before `--find`
+rather than ignored when it is present; `--find-exact` added because substring
+search reports `foo` present when only `foobar` exists.
+
+Regression tests added — this script lacked them too, same gap as the scorer.
+Mutation-verified four ways, all killed. Negative controls included, so a
+`find()` returning everything would not pass.
+
+**Meanwhile** `exec-218c408bb916` (the #1009 plan) is still in phase 1 on the
+Mini at $0.89.
+
+### Tick 24c — my fix for the silent-absence bug introduced a different silent-absence bug
+
+Codex reviewed #1010 and blocked it. The headline: **my fix was worse than what
+it replaced.**
+
+`_describe_list` unioned only the IMMEDIATE keys of direct dict elements and
+never recursed. For `{"rows": [{"meta": {"visible": 1}}, {"meta": {"hidden": 2}}]}`
+the old element-[0] version printed `visible`; mine printed `meta: object[1]`
+and nothing else. I traded depth for breadth and **lost a field the previous
+version showed**, in the one script whose entire purpose is not hiding fields.
+
+Verified both behaviours side by side before changing anything, by running the
+old version out of `git show origin/main`.
+
+**Second time today a fix of mine made something worse.** The other was #997:
+I taught the flat alias to rank candidates and left the tree path on raw row
+order, so the two cold readers disagreed where they had previously agreed. Same
+shape both times: **I fixed the case in front of me without asking what the
+previous behaviour was good at.** A change is only an improvement if it
+dominates; otherwise it is a trade, and a trade has to be argued rather than
+assumed.
+
+Fixed with a recursive merge, verified against every payload the review gave —
+nested objects, lists of lists, a list sibling of a dict (handling dicts used to
+`return` early and skip them), and the `[in n/N]` denominator counting only
+dicts instead of the list length.
+
+Also, from the same review: `--find`/`--find-exact` were not mutually exclusive
+so supplying both silently answered one; needle and `--at` used truthiness, so
+`--find-exact ""` printed the shape and exited 0 without searching; and
+transport/decode failures could escape as exit 1, which is indistinguishable
+from "looked and it is absent".
+
+**And a third instance of this file containing the exact bug it exists to
+prevent:** searching `str(value)` meant a caller typing `null` or `true` — the
+JSON spellings that were actually in the response — got NOT FOUND for a value
+that is present. Both spellings now match.
+
+**`main()` had no coverage at all**, which is why codex's fifth mutation
+(deleting the whole `--at` fix) survived my first suite. And it found a test of
+mine that passed for the wrong reason: asserting output was non-empty, which
+`describe()` satisfies before the list walker runs, so it passed with the walker
+gutted. 28 tests now, mutation-verified six ways, all killed.
+
+**Meanwhile** `exec-218c408bb916` reached phase 4 of 4 at $3.57 — the codex
+review phase again cost about $0.56, roughly a sixth of the claude phases.
+
+### Tick 25 — third consecutive 100/100, and my cost speculation was wrong
+
+`exec-218c408bb916` (#1009 plan) completed on the Mini. Scored on the merged,
+fail-closed instrument against `origin/main`:
+
+```
+RESOLVES  51/51 (100%)   EXACT  51/51 (100%)
+```
+
+**H6 is now n=3**, all three v3 runs at 100/100 on both metrics.
+
+**The plan found something I did not know.** I told it `AgentConfiguration` was
+the phase config; it found there are **two hand-synchronized copies** —
+`aggregate_execution/value_objects.py:55-99` and
+`_shared/ExecutionValueObjects.py:34-77` — each carrying a comment telling the
+reader to keep it in sync with the other, and it worked out which one `_wiring`
+actually imports. That is the second consecutive run where the research phase
+corrected or extended my premise rather than accepting it.
+
+**And it contradicted me mid-tick.** When the plan phase came in at $0.52
+against $2.66 for the #1004 run, I said in the tick report that the
+pre-verified premise "may be reducing discovery work". The completed breakdown
+says otherwise:
+
+| phase | #1004 | #1009 | delta |
+|---|---|---|---|
+| research | 2.21 | 2.50 | +0.29 |
+| plan | 2.66 | **0.52** | **-2.14** |
+| cross-model-review | 0.57 | 0.55 | -0.02 |
+| revise | 2.96 | **4.58** | **+1.62** |
+| **TOTAL** | **8.40** | **8.15** | **-0.25** |
+
+The premise did not reduce cost. It **moved** cost — out of planning and into
+revision — for a net difference of 25 cents, which is noise at n=1. I had a
+partial number and narrated a mechanism from it; the whole number says
+something different. Same error shape as the rest of today, just cheaper: a
+conclusion drawn before the measurement finished.
+
+Worth noting separately: the **codex review phase costs about $0.55 in both
+runs**, roughly a sixth of a claude phase, while H3 says it is the phase that
+has caught the most real defects. That is the best cost-to-value ratio in the
+whole workflow, and it is stable across runs.
