@@ -14,7 +14,7 @@ the bottom is the part worth reading later.
 | # | Hypothesis | Status |
 |---|---|---|
 | H1 | Separate, focused phases beat fewer combined phases | **supported, n=1** — 62% → 75% citation accuracy for +5.6% cost |
-| H2 | SLP skills in research/planning improve plan quality | **untested** — the skills run died on an unregistered ref |
+| H2 | SLP skills in research/planning improve plan quality | **under test** — skills registered, `exec-dc01c5b029ec` running |
 | H3 | Cross-model review catches what the author cannot | **supported** — codex found a live path traversal in #995 |
 | H4 | A workflow can do real work on this repo unattended | **supported, with a caveat** — PR #992 opened for $1.09, shipped red CI, and was ultimately closed because the ISSUE was wrong, not the work |
 | H5 | Mechanical scoring beats opinion for comparing runs | **supported** — the citation scorer produced the H1 result |
@@ -238,6 +238,64 @@ caught by reading.
 **Scope held deliberately:** persisting the aggregate before returning 200 is
 the general fix and is NOT in this PR. #998 stays open for it. This closes the
 reachable case only, and the PR says so.
+
+### Tick 9 — codex dismantled my #998 fix; H2 finally under test
+
+**Hypothesis going in:** #1002 closed #998's reachable case.
+
+**Evidence: wrong on three counts, two of them errors in my REASONING rather
+than my code.**
+
+1. **Workflow-scoped skills were never validated.** I passed
+   `resolve_for_phase((), phase_refs)` and skipped phases with no phase-level
+   refs. Production resolves BOTH scopes together. A workflow whose only
+   unregistered skill was workflow-scoped still returned 200 then 404 - the
+   reported bug, reachable through a different door.
+
+2. **My fail-open was wrong, and I had argued for it.** I asked codex to argue
+   the other side and it was right: the background handler constructs the SAME
+   resolver moments later, before persistence, so skipping relocates the failure
+   back into the window this exists to close. Nothing retries in between, so the
+   200 is not truthful. Now 422 for the caller's error, 503 for ours, with a 10s
+   timeout because the resolver reads Postgres and the store sets none.
+
+3. **All six of my tests passed with the CALL SITE deleted.** They drove the
+   helper directly - proving the helper worked while the endpoint kept returning
+   200. My no-skills test also counted resolve calls rather than FACTORY calls,
+   so it passed with the early return deleted.
+
+That third one is the day's recurring failure one level up: I mutation-tested
+the HELPER and never the BINDING. A fix is not tested until something asserts
+the caller calls it.
+
+Now mutation-checked four ways, each caught by exactly one test.
+
+**Then CI caught a fourth**, which I had missed by running the wrong scope
+again: `getattr(workflow, "skills", None)` violates the repo's no-string-keyed-
+lookup lint. Worse than stylistic - a rename would have silently yielded an
+empty tuple and skipped validation entirely, the same silent-pass class the PR
+exists to close. I had run only the new test file, not
+`pytest -m unit apps/syn-api/`, which catches it.
+
+**Filed #1003:** GitHub triggers bypass this boundary entirely - they call
+`run_workflow()` directly and mark the trigger `dispatched` regardless. Worse
+than the HTTP case: no caller holds a response, and the trigger record asserts
+success. The unattended path is the one that most needs to fail loudly.
+
+### H2 is finally testable
+
+Registered the six SLP skills against the Mini (`POST /skills/registrations`,
+six 201s), cloned at the exact pin `1348146`. The skills run now EXISTS
+(`GET /executions/exec-dc01c5b029ec` -> 200) where the pre-registration attempt
+returned a permanent 404.
+
+That is also independent confirmation of #998's root cause: registration was the
+only variable, and the failure mode was silence rather than an error.
+
+H2 measurement in flight. Baselines to beat:
+
+    v1  3 phases, no skills   $3.3246   13/21 (62%)
+    v2  4 phases, no skills   $3.5111    9/12 (75%)
 
 ---
 
