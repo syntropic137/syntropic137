@@ -2566,3 +2566,54 @@ An honest answer to priority 2 that no amount of workflow-building would have
 produced: the implementation half is not blocked on prompt quality. It is
 blocked on a permission bit and on the platform's inability to say "this failed".
 Both are now filed with evidence, and both are cheaper to fix than a new workflow.
+
+---
+
+## Tick 49 — landed the blocked agent's work, and widened it to the whole bug class
+
+**HYPOTHESIS:** the agent's #1020 change was correct and only delivery failed, so
+landing it myself converts a $4.40 loss into a delivered result.
+
+**Supported, with two things the agent got wrong or left out** — which is a
+fairer score for H15 than "it produced nothing":
+
+1. **It dropped a security rationale.** The `ISS-259` comment explaining
+   `--ignore-scripts` sat on the step being deleted, and the agent deleted both.
+   The remaining install still uses the flag, so the reference moves rather than
+   disappears.
+2. **It stopped at the two sites the issue named.** Both dashboard Dockerfiles
+   also `COPY` ui-feedback, with comments asserting *"resolved via Vite alias and
+   tsconfig paths"* and *"ui-feedback is a workspace dep"* — **both false**. Same
+   bug class; leaving them would have left false comments claiming a dependency
+   that does not exist.
+
+The agent obeyed the scope I gave it, so (2) is my prompt's fault, not its
+judgement. Worth noting for the SDLC workflow design: a scope written as a file
+list stops the agent from fixing the class, and the owner's standing rule is to
+fix the class.
+
+### The verification that mattered
+
+"The build succeeded" would not have been enough — a missing file breaks at
+runtime, not build time. The consumer is the served bundle, so I compared that:
+
+| | baseline | without the COPY |
+|---|---|---|
+| build | ok | ok |
+| `assets/index-75LOXfic.css` | present | present |
+| `assets/index-Bdu0t_HM.js` | present | present |
+| files under `/usr/share/nginx/html` | 8 | identical 8 |
+
+Vite content-hashes its bundles, so **identical hashes prove byte-identical
+output**. Had the COPY contributed anything, the hash would differ. That is the
+strongest available evidence and it cost one extra `docker run`.
+
+PR #1025. `just qa-ci` green, tree byte-identical before and after.
+
+### Standing-hypothesis nuance
+
+H15 stays refuted — the workflow could not deliver. But the *work product* was
+sound, which narrows what needs fixing: **the implementation half of the SDLC
+workflow is blocked on delivery capability (#1024) and outcome reporting
+(#1023), not on the agent's reasoning.** That is a much cheaper problem than the
+one I assumed at the start of the day.
