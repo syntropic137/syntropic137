@@ -151,6 +151,26 @@ def describe(node: object, indent: int = 0, path: str = "") -> None:
         print(f"{pad}{_type_of(node)} = {_sample(node)}")
 
 
+def _spellings(value: object) -> tuple[str, ...]:
+    """How a scalar can legitimately be written, JSON and Python both.
+
+    The response was JSON, so a caller searching it types `null` and `true`.
+    Searching only `str(value)` gave Python's spelling -- `None`, `True` -- so
+    a value that IS present reported absent. That is precisely the
+    false-absence this script exists to prevent, reproduced inside it.
+
+    Both spellings are accepted rather than one, because the caller may have
+    copied the needle from either the raw response or from this tool's own
+    output, and neither reading should be punished.
+    """
+    python_form = str(value)
+    try:
+        json_form = json.dumps(value)
+    except (TypeError, ValueError):
+        return (python_form,)
+    return (python_form,) if json_form == python_form else (python_form, json_form)
+
+
 def _matches(haystack: str, needle: str, *, exact: bool) -> bool:
     """Substring by default; whole-value when exact.
 
@@ -178,7 +198,7 @@ def find_value(node: object, needle: str, path: str = "$", *, exact: bool = Fals
     elif isinstance(node, list):
         for index, value in enumerate(node):
             hits.extend(find_value(value, needle, f"{path}[{index}]", exact=exact))
-    elif _matches(str(node), needle, exact=exact):
+    elif any(_matches(spelling, needle, exact=exact) for spelling in _spellings(node)):
         hits.append(f"{path} = {node!r}")
     return hits
 

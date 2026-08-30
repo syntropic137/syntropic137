@@ -176,3 +176,30 @@ class TestTheCommandAnswersTheQuestionItWasAsked:
         """Two conflicting questions used to silently answer only one."""
         with pytest.raises(SystemExit):
             self._run(monkeypatch, {"k": 1}, "--find", "a", "--find-exact", "b")
+
+
+class TestJsonSpellingsAreSearchable:
+    """The response was JSON, so a caller types `null`, not `None`.
+
+    Searching only Python's `str()` spelling reported a value that IS present
+    as absent -- the exact false-absence this script exists to prevent,
+    reproduced inside it.
+    """
+
+    @pytest.mark.parametrize(
+        ("needle", "value"),
+        [("null", None), ("true", True), ("false", False)],
+    )
+    def test_the_json_spelling_is_found(self, needle: str, value: object) -> None:
+        assert find_value({"k": value}, needle, exact=True)
+
+    @pytest.mark.parametrize(
+        ("needle", "value"),
+        [("None", None), ("True", True), ("False", False)],
+    )
+    def test_the_python_spelling_still_works(self, needle: str, value: object) -> None:
+        """The caller may have copied the needle from this tool's own output."""
+        assert find_value({"k": value}, needle, exact=True)
+
+    def test_a_genuinely_absent_scalar_still_reports_absent(self) -> None:
+        assert find_value({"k": None}, "nope", exact=True) == []
