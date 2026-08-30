@@ -58,38 +58,72 @@ def _sample(value: object) -> str:
     return text if len(text) <= _MAX_SAMPLE else text[: _MAX_SAMPLE - 3] + "..."
 
 
-def _describe_list(node: list[object], indent: int, path: str) -> None:
-    """Every key across ALL elements, with how many elements carry it.
+def _first_sample(values: list[object]) -> object:
+    """A representative scalar: the first that is not None, else None."""
+    for value in values:
+        if value is not None:
+            return value
+    return None
 
-    Describing only element [0] recreated the exact failure this script
-    exists to prevent: a field present on later elements was silently
-    absent from the output, and the command still exited 0. A partial
-    listing that looks complete is worse than no listing.
+
+def _describe_merged(values: list[object], indent: int, total: int) -> None:
+    """Describe ALL parallel values at one position, merged recursively.
+
+    `values` are every value seen at this position across the containing
+    list's elements. Merging RECURSIVELY is what makes the summary honest.
+    The first attempt at this unioned only the immediate keys of direct dict
+    elements and never recursed, so `[{"meta": {"visible": 1}}, ...]` printed
+    `meta: object[1]` and hid every nested field -- including one the older
+    element-[0] version DID print. Breadth had been bought with depth, which
+    made it worse than what it replaced for exactly the case the script is
+    supposed to protect.
+
+    `total` is the containing list's FULL length, including non-dict
+    elements, so `[in n/N]` means what it says.
     """
     pad = "  " * indent
-    dicts = [item for item in node if isinstance(item, dict)]
-    if not dicts:
-        print(f"{pad}  [0] ->")
-        describe(node[0], indent + 2, f"{path}[0]")
+    dicts = [v for v in values if isinstance(v, dict)]
+    lists = [v for v in values if isinstance(v, list)]
+
+    if dicts:
+        counts: dict[str, int] = {}
+        collected: dict[str, list[object]] = {}
+        for item in dicts:
+            for key, value in item.items():
+                counts[key] = counts.get(key, 0) + 1
+                collected.setdefault(key, []).append(value)
+        for key, seen in counts.items():
+            observed = collected[key]
+            sample_value = _first_sample(observed)
+            sample = _sample(sample_value)
+            suffix = f" = {sample}" if sample else ""
+            where = "" if seen == total else f"  [in {seen}/{total}]"
+            print(f"{pad}{key}: {_type_of(sample_value)}{suffix}{where}")
+            if any(isinstance(v, (dict, list)) for v in observed):
+                _describe_merged(observed, indent + 1, len(observed))
+        # NOT a return: a list can hold dicts AND lists side by side, and
+        # returning here hid every field inside the list elements.
+    if lists:
+        # Lists of lists kept the original element-[0] defect. Flatten every
+        # inner element so a field appearing only in a later inner list is
+        # still reported.
+        flattened = [item for inner in lists for item in inner]
+        if not flattened:
+            print(f"{pad}(empty list)")
+            return
+        print(f"{pad}[each of {len(flattened)}] ->")
+        _describe_merged(flattened, indent + 1, len(flattened))
         return
-    counts: dict[str, int] = {}
-    example: dict[str, object] = {}
-    for item in dicts:
-        for key, value in item.items():
-            counts[key] = counts.get(key, 0) + 1
-            if key not in example or example[key] is None:
-                example[key] = value
-    total = len(dicts)
-    for key, seen in counts.items():
-        value = example[key]
-        sample = _sample(value)
-        suffix = f" = {sample}" if sample else ""
-        # The count is the point: "3/5" says the key is NOT universal, which
-        # is precisely what a first-element-only view hides.
-        where = "" if seen == total else f"  [in {seen}/{total}]"
-        print(f"{pad}  {key}: {_type_of(value)}{suffix}{where}")
-    if len(dicts) != len(node):
-        print(f"{pad}  ({len(node) - len(dicts)} non-object element(s) not summarized)")
+
+    if dicts:
+        return
+    sample_value = _first_sample(values)
+    print(f"{pad}{_type_of(sample_value)} = {_sample(sample_value)}")
+
+
+def _describe_list(node: list[object], indent: int, path: str) -> None:
+    """Every key across ALL elements, at every depth."""
+    _describe_merged(list(node), indent, len(node))
 
 
 def describe(node: object, indent: int = 0, path: str = "") -> None:
@@ -168,8 +202,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("url")
     parser.add_argument("--at", help="Descend into this top-level key first.")
-    parser.add_argument("--find", help="Report which key path holds this value (substring).")
-    parser.add_argument(
+    search = parser.add_mutually_exclusive_group()
+    search.add_argument("--find", help="Report which key path holds this value (substring).")
+    search.add_argument(
         "--find-exact",
         help="Like --find but the value must match WHOLE. Substring search reports\n"
         "'foo' present when only 'foobar' exists, which is wrong if you are\n"
@@ -180,8 +215,14 @@ def main() -> int:
 
     try:
         payload = _fetch(args.url, args.timeout)
-    except urllib.error.URLError as exc:
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        # All transport failures are 2, not 1. Exit 1 means "looked and it is
+        # absent"; a read that never completed did not look, and collapsing
+        # the two makes a network blip indistinguishable from a real answer.
         print(f"request failed: {exc}", file=sys.stderr)
+        return 2
+    except UnicodeDecodeError as exc:
+        print(f"response was not decodable text: {exc}", file=sys.stderr)
         return 2
 
     print(f"GET {args.url}")
@@ -191,7 +232,7 @@ def main() -> int:
     # absent, so `--at missing --find x` silently searched the whole payload
     # and could exit 0 on a match outside the subtree the caller asked about.
     node = payload
-    if args.at:
+    if args.at is not None:
         if not isinstance(payload, dict) or args.at not in payload:
             available = sorted(payload) if isinstance(payload, dict) else "(not an object)"
             print(f"no top-level key {args.at!r}. Available: {available}", file=sys.stderr)
@@ -199,9 +240,12 @@ def main() -> int:
         node = payload[args.at]
         print(f"(at {args.at})")
 
-    needle = args.find_exact or args.find
-    if needle:
-        exact = args.find_exact is not None
+    # `is not None`, never truthiness: `--find-exact ""` is a legitimate
+    # question about empty-string values, and truthiness silently answered a
+    # different one -- it printed the shape and exited 0 without searching.
+    exact = args.find_exact is not None
+    needle = args.find_exact if exact else args.find
+    if needle is not None:
         hits = find_value(node, needle, exact=exact)
         scope = f" under {args.at}" if args.at else ""
         if not hits:

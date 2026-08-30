@@ -47,11 +47,47 @@ class TestEveryElementIsInspected:
         assert "a: int" in out
         assert "[in " not in out
 
-    def test_a_list_of_scalars_still_reports_something(
+    def test_a_list_of_scalars_reports_the_element_type(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """The first version asserted only that output was non-empty, which
+        `describe()` satisfies before the list walker runs at all -- so it
+        passed even with the walker gutted."""
         describe({"rows": [1, 2, 3]})
-        assert capsys.readouterr().out.strip() != ""
+        assert "int" in capsys.readouterr().out
+
+    def test_a_field_nested_inside_a_later_element_is_shown(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The regression that made the first fix WORSE than what it replaced:
+        merging immediate keys without recursing hid every nested field,
+        including ones the old element-[0] version did print."""
+        describe({"rows": [{"meta": {"visible": 1}}, {"meta": {"hidden": 2}}]})
+        out = capsys.readouterr().out
+        assert "visible" in out
+        assert "hidden" in out
+
+    def test_a_field_in_a_later_inner_list_is_shown(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        describe({"rows": [[{"visible": 1}], [{"hidden_later": 2}]]})
+        assert "hidden_later" in capsys.readouterr().out
+
+    def test_a_list_sibling_of_a_dict_is_not_skipped(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Handling dicts and returning early hid everything inside sibling
+        list elements."""
+        describe({"rows": [{"visible": 1}, [{"hidden_mixed": 2}]]})
+        assert "hidden_mixed" in capsys.readouterr().out
+
+    def test_the_denominator_counts_non_dict_elements(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`[in n/N]` claims "not on all elements", so N must be the list
+        length, not the number of dicts in it."""
+        describe({"rows": [{"a": 1}, 7]})
+        assert "[in 1/2]" in capsys.readouterr().out
 
 
 class TestFindLooksWhereItSaysItLooks:
@@ -81,3 +117,62 @@ class TestSubstringIsNotPresence:
 
     def test_exact_still_matches_a_whole_value(self) -> None:
         assert find_value({"k": "foobar"}, "foobar", exact=True)
+
+
+class TestTheCommandAnswersTheQuestionItWasAsked:
+    """`main()` had no coverage at all, so removing the whole `--at` fix
+    survived every test in the first version of this file."""
+
+    def _run(self, monkeypatch: pytest.MonkeyPatch, payload: object, *argv: str) -> int:
+        import scripts.api_shape as mod
+
+        monkeypatch.setattr(mod, "_fetch", lambda _url, _timeout: payload)
+        monkeypatch.setattr("sys.argv", ["api_shape.py", "http://x", *argv])
+        return mod.main()
+
+    def test_at_scopes_the_search(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The needle exists, but NOT under the requested subtree. Exiting 0
+        here would answer a question the caller did not ask."""
+        payload = {"wanted": {"a": 1}, "elsewhere": {"needle": 2}}
+        code = self._run(monkeypatch, payload, "--at", "wanted", "--find", "needle")
+        capsys.readouterr()
+        assert code == 1
+
+    def test_at_finds_it_when_it_is_in_scope(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        payload = {"wanted": {"needle": 1}}
+        code = self._run(monkeypatch, payload, "--at", "wanted", "--find", "needle")
+        capsys.readouterr()
+        assert code == 0
+
+    def test_a_missing_at_key_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code = self._run(monkeypatch, {"a": 1}, "--at", "nope")
+        capsys.readouterr()
+        assert code == 1
+
+    def test_an_empty_exact_needle_is_still_a_question(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Truthiness treated `--find-exact ""` as "not supplied", printed the
+        shape, and exited 0 without searching."""
+        code = self._run(monkeypatch, {"k": ""}, "--find-exact", "")
+        out = capsys.readouterr().out
+        assert code == 0
+        assert "appears at" in out
+
+    def test_an_empty_exact_needle_that_is_absent_exits_one(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code = self._run(monkeypatch, {"k": "nonempty"}, "--find-exact", "")
+        capsys.readouterr()
+        assert code == 1
+
+    def test_both_find_flags_together_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Two conflicting questions used to silently answer only one."""
+        with pytest.raises(SystemExit):
+            self._run(monkeypatch, {"k": 1}, "--find", "a", "--find-exact", "b")
