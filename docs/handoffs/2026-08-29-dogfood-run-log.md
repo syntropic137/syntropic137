@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H17 | Widening a fix once means I have covered the bug class | **REFUTED, tick 50** — widened 2 sites -> 4 in tick 49, and codex found 4 more, including the production gateway image whose identical three lines I had removed from two sibling Dockerfiles in the same commit |
 | H15 | The existing implement-from-plan workflow can turn a well-specified issue into a PR unattended | **REFUTED, tick 48c** — 3/3 phases, $4.40, zero output. The agent verified every premise and wrote the right diff; the push was rejected because the App token lacks `workflows` permission (#1024). Not a prompt-quality problem |
 | H16 | A completed execution produced its deliverable | **REFUTED, tick 48c** — the same run reports `completed` with no PR and no branch. An agent that finishes without crashing produces a completed phase; task failure and harness failure are indistinguishable (#1023) |
 | H13 | The v4 absence rule is citation-neutral | **REFUTED, tick 46, n=1** — v4's final plan has ZERO `file:line` citations against v3's 81 on the identical task, and its revise phase dropped 10 -> 0 where v3's rose 54 -> 81. Where v4 cites, it is 3/3 correct: density collapsed, not accuracy |
@@ -2617,3 +2618,69 @@ sound, which narrows what needs fixing: **the implementation half of the SDLC
 workflow is blocked on delivery capability (#1024) and outcome reporting
 (#1023), not on the agent's reasoning.** That is a much cheaper problem than the
 one I assumed at the start of the day.
+
+---
+
+## Tick 50 — codex pass on #1025: right conclusion, overstated proof, incomplete class
+
+**HYPOTHESIS:** #1025 is a small, well-evidenced deletion and a codex pass will
+confirm it with at most cosmetic notes.
+
+**Half right, and the other half is the interesting part.**
+
+**Confirmed:** the deletion is safe. Codex searched for consumers in the places a
+`grep` for the name would miss — bare `@syn137/` specifiers, relative imports
+escaping into `lib/`, computed dynamic imports, programmatic Vite aliases,
+tsconfig `references`, CSS `@import`, eslint plugin resolution, `pnpm-lock.yaml`
+importers and overrides, the nginx config, runtime asset fetches — and found
+none.
+
+### My proof was weaker than I wrote
+
+I claimed *"identical hashes are the proof"* of byte-identical served output.
+It is not: a truncated content hash covers the Vite module graph, and says
+nothing about `index.html`, favicons, or other unhashed public assets. That is
+corroboration dressed as proof, in a PR whose whole argument is "verified by
+building, not by reading".
+
+Rather than soften the wording I did the comparison:
+
+```
+find /usr/share/nginx/html -type f -print0 | sort -z | xargs -0 sha256sum
+```
+
+**8 files each, identical byte for byte**, with and without the COPY, for both
+the dashboard image and the gateway image. Cost: one extra `docker run` per
+image. The claim now matches the evidence.
+
+### I stopped short of the bug class a SECOND time
+
+Tick 49 I widened from the 2 sites the issue named to 4. Codex found **4 more**,
+each carrying the same false comment:
+
+| site | claim | reality |
+|---|---|---|
+| `infra/docker/images/gateway/Dockerfile` | "resolved via Vite alias and tsconfig paths" | no alias — **and this is the image that ships** |
+| `docker/docker-compose.dev.yaml` | "ui-feedback is a workspace dep" | not in `pnpm-workspace.yaml`; mount + named volume + declaration |
+| `justfile dashboard-install` | — | installed the unused package on every local setup |
+| `docs/security-practices.md` | "(submodule, pnpm)" | ordinary files, and the install it documented is gone |
+
+The gateway miss is the one to remember: **it is the production image, and I had
+removed the identical three lines from two other Dockerfiles in the same
+commit.** Widening once felt like thoroughness and was not.
+
+### The generalisation
+
+Two ticks, two versions of the same error, and they are the same error:
+**a claim's confidence outran its evidence** — first "identical hashes prove
+bytes", then "I fixed the class" after fixing half of it. The fix in both cases
+was mechanical and cheap (run the manifest; grep the whole repo, not the paths I
+was already looking at), which is what makes it worth writing down: the cost of
+being right here was under two minutes.
+
+Also corrected: `dashboard-ci`'s "same command, same environment, same result"
+comment. The command sequence matches ci.yml; the environment does not.
+`check_ci_parity.py` never claimed step or environment identity — the contract
+was intact, only my wording was not.
+
+`just qa-ci` green, one codex pass, all findings addressed.
