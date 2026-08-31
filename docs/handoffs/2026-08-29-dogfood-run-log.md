@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H28 | Acting on a review's first findings is acting on the review | **REFUTED, tick 62** — I read 55 of 197 lines, fixed three real things, and skipped a time bomb in code I had just shipped: every SDLC prompt read an artifact path marked "kept for one release" |
 | H27 | A multi-phase workflow shares a filesystem between phases | **REFUTED, tick 61** — every phase gets a fresh workspace and its own clone; only artifacts cross. Both workflows I wrote assumed otherwise: implement was told not to push, so verify would have checked the default branch believing it checked the change |
 | H26 | An in-platform review workflow can match an external cross-model pass | **SUPPORTED n=2, tick 61** — on a CORRECT PR (#1033) it returned "the claim holds", invented nothing, and closed two verification gaps I had left open. Previously n=1, tick 60 — found the same blocker with stronger evidence, added 3 findings codex missed (incl. a real blind spot in my own fitness gate), invented zero false blockers, and stated 5 things it could not verify. Missed one codex finding. NOT yet run on a PR whose claim holds |
 | H25 | The missing review-workflow definition is a one-off | **REFUTED, tick 58** — `implement-from-plan-v1` is also absent from the repo. BOTH workflows doing the platform's SDLC work were database-only, which is why a 300s analysis budget survived for months unreviewed |
@@ -3504,3 +3505,61 @@ because every phase gets a fresh workspace.
 Also merged **#1032** (the dogfooding skill) — though I merged it from a base 3
 commits behind, contrary to my own stale-green rule. Docs-only, so no interaction
 risk, but the rule is the rule and I applied it inconsistently.
+
+---
+
+## Tick 62 — I acted on three findings and skipped the rest; the rest had two more
+
+Installed the fixed `sdlc-implement-v1` and `sdlc-pr-review-v1` and started
+`exec-999fa1f2b331` on **#1029** — the first test of whether the cross-phase fix
+actually works, since a branch that dies with its phase is exactly what the fix
+addresses.
+
+**Then, waiting, I went back to the codex review I had only partly read.** I had
+acted on findings 1-3 and never opened the rest. Two more mattered.
+
+### A path marked for removal, in every workflow
+
+`ArtifactCollector`:
+
+```python
+#: Extension of the flat single-file alias kept for one release (issue #988).
+_FLAT_ALIAS_SUFFIX: Final[str] = ".md"
+```
+
+**Every SDLC prompt read only `artifacts/input/<phase-id>.md`** — the alias on its
+way out. Its removal would silently hand the next phase nothing, and a prompt
+that says *"the report is at X. Read it first"* gives an agent no reason to treat
+a missing X as a stop condition. It would read as an empty report, not a broken
+chain.
+
+Fixed across **all three** workflows — including `research-plan`, which I did not
+write and which is the one validated n=3. Fixing only my two would have been the
+carve-out the repo's rule forbids, and the change cannot alter measured behaviour
+while the alias exists: it only adds a second place to look.
+
+### Fields that validate, persist, and do nothing
+
+`input_artifacts` and `execution_type` are accepted by the schema, survive into
+`PhaseDefinition`, and are **dropped when `ExecutablePhase` is constructed**.
+`output_artifacts` is only partly applied — the first entry becomes a label and
+enforces no format, filename, or that output exists at all.
+
+`execution_type: sequential` happens to match reality, so it is inert without
+being wrong. A `parallel` declaration would be silently ignored, which is the
+dangerous case: it looks like it configured something. Filed **#1039**.
+
+Same shape as most of this week: **a declaration that reads as configuration and
+does nothing.** A reviewer cannot tell which lines in a workflow YAML are
+load-bearing, and neither can its author later.
+
+### The meta-lesson, and it is uncomfortable
+
+I read 55 lines of a 197-line review, acted decisively on what I found, and
+moved on. The findings I skipped included a time bomb in code I had just
+shipped. **Reading part of a review and acting is not the same as reviewing** —
+and the failure mode is invisible, because the part I did read was real and the
+fixes were correct.
+
+This is the same shape as the day's other recurring error at yet another
+altitude: I checked the hops I was looking at.
