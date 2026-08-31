@@ -290,9 +290,22 @@ def _build_claude_command(
     #   --tools <tools...>  Specify the list of available tools from the
     #                       built-in set. Use "" to disable all tools ...
     #
-    # ONE flag with a comma-joined list, not the flag repeated: `--tools` takes
-    # a single list and repeating it keeps only the last occurrence, which
-    # would have restricted every phase to its last-declared tool.
+    # ONE flag with a comma-joined list, not the flag repeated. `--tools` is
+    # VARIADIC (`<tools...>`), which has two consequences:
+    #
+    #   1. Repeating it keeps only the last occurrence, so the flag-per-tool
+    #      form would have restricted every phase to its last-declared tool.
+    #   2. It is GREEDY - it swallows any positional that follows it. Verified
+    #      against claude 2.1.251:
+    #        $ claude -p --tools Bash,Read "say ok"
+    #        Error: Input must be provided either through stdin or as a prompt
+    #               argument when using --print
+    #      The prompt was eaten as a tool name.
+    #
+    # ORDERING IS THEREFORE LOAD-BEARING: `-p <prompt>` must come BEFORE
+    # `--tools`. Moving this extend() earlier breaks every claude phase, with
+    # an error that names stdin rather than argument order. Pinned by
+    # test_the_prompt_must_precede_the_variadic_tools_flag.
     if phase.agent_config.allowed_tools:
         cmd.extend(["--tools", ",".join(phase.agent_config.allowed_tools)])
 
