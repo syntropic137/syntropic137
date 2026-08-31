@@ -40,6 +40,14 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
             ("syn_api.routes.executions.models", "ExecutionDetailResponse"),
         ),
     ),
+    (
+        "costs.py",
+        (
+            "syn_domain.contexts.agent_sessions.domain.read_models.session_cost",
+            "SessionCost",
+        ),
+        (("syn_api.routes.costs", "SessionCostResponse"),),
+    ),
 )
 
 #: Route modules that import a read model but carry no source-to-response pair
@@ -48,7 +56,6 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
 #: here is a gap rather than a non-case.
 _NO_PAIR: dict[str, str] = {
     "sessions.py": "TODO(#1040): SessionSummary -> SessionDetail -> SessionResponse is the same shape and belongs here; adding it needs its own exception review",
-    "costs.py": "Lane 2 cost read models are enriched, not copied field-for-field",
     "workflows/queries.py": "WorkflowDetail maps through per-phase builders, not a flat copy",
 }
 
@@ -58,6 +65,10 @@ _NO_PAIR: dict[str, str] = {
 #: claims to except: the first version of this list had four entries, three of
 #: which were not on the source model at all and so excepted nothing.
 _NOT_FROM_THE_READ_MODEL: dict[str, str] = {
+    "SessionCostResponse.workspace_id": "TODO(#1041): dropped today, tracked not excused",
+    "SessionCostResponse.compute_cost_usd": "TODO(#1041): dropped today, tracked not excused",
+    "SessionCostResponse.tokens_by_tool": "TODO(#1041): dropped today, tracked not excused",
+    "SessionCostResponse.cost_by_tool_tokens": "TODO(#1041): dropped today, tracked not excused",
     "ExecutionDetailFull.phases": "mapped through _map_phase_to_response, not copied",
     "ExecutionDetailResponse.phases": "mapped through _map_phase_to_response, not copied",
 }
@@ -93,7 +104,9 @@ def _kwargs_passed_to(call_name: str, route_dir: str) -> set[str]:
     hide, and `**kwargs` fails loudly rather than being read as "passes nothing".
     """
     sites: list[set[str]] = []
-    for path in sorted((_ROUTES_ROOT / route_dir).glob("*.py")):
+    scope = _ROUTES_ROOT / route_dir
+    paths = [scope] if scope.is_file() else sorted(scope.rglob("*.py"))
+    for path in paths:
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or _called_name(node.func) != call_name:
@@ -156,6 +169,22 @@ def test_every_shared_field_is_actually_passed(
     )
 
 
+#: KNOWN HOLES, stated rather than implied. A cross-model review of this gate
+#: found these and they are not closed:
+#:
+#:  - a NEW file inside an already-watched scope that maps a DIFFERENT read model
+#:    is invisible: the scope is watched, so the drift guard skips it, and the
+#:    pair's own check only knows about its declared models.
+#:  - a route that receives a read model from a service instead of importing it
+#:    evades detection entirely, because consumption is detected textually.
+#:  - a re-export (`from syn_domain.contexts.orchestration import Foo`) evades
+#:    for the same reason.
+#:
+#: Closing these needs import resolution rather than substring matching. Until
+#: then this gate is a floor, not a proof, and saying so here is the difference
+#: between a known limit and a false sense of coverage.
+
+
 def test_no_route_consuming_a_read_model_is_unwatched() -> None:
     """A route that maps a read model to a response must be gated or excused.
 
@@ -173,7 +202,7 @@ def test_no_route_consuming_a_read_model_is_unwatched() -> None:
         if "read_models" not in path.read_text():
             continue
         rel = path.relative_to(_ROUTES_ROOT)
-        if rel.parts[0] in watched:
+        if any(rel.as_posix() == w or rel.as_posix().startswith(f"{w}/") for w in watched):
             continue
         consumers.append(rel.as_posix())
 
