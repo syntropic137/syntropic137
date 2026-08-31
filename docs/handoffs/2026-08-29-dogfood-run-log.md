@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H33 | Pinning a clock in a test is always the safe choice | **REFUTED, tick 67** — pinning `now` made code that reads the clock TWICE indistinguishable from code that reads it once, hiding a split-duration bug I introduced. A control that collapses the difference under test is not a control, it is a blindfold |
 | H32 | Extracted code carries its old test coverage with it | **REFUTED, tick 66b** — mutating the moved success path left the whole suite green: removing the `zero_tokens` warning and dropping the completed result both broke nothing. It was untested in place and nobody could see it. Extraction IS a coverage audit |
 | H31 | A workspace agent can run `just qa-ci` to verify its own work | **REFUTED, tick 65** — `/tmp` is noexec under the security profile, so every `just` shebang recipe fails identically. Not the image: a shebang runs fine under plain `docker run`. #1042 |
 | H30 | An exemption I write in the same breath as its guard is held to that guard | **REFUTED, tick 64** — I asserted that FIELD-level exceptions must name a field in the intersection, then added a MODULE-level exemption table in the same commit with no such check. The costs.py excuse hid four live dropped fields (#1041) |
@@ -3896,3 +3897,39 @@ A workflow run wrote the fix and found a projection I had missed. It could not
 verify itself (#1042). It correctly refused to open a PR on unverified work. The
 fitness gate then refused ME until the debt went down instead of up. Three gates,
 three real catches, one merged-quality change.
+
+### Tick 67 — my own review prompt caught my own bug, before the reviewer ran
+
+Dispatched `sdlc-pr-review-v1` on **#1043** (`exec-67d3a60701b1`) — third data
+point, and it is reviewing my own extraction. In the prompt I named the specific
+risk of a refactor:
+
+> ...or a value computed at a different moment.
+
+Then checked it myself rather than waiting. **It was there, and I put it there.**
+
+`completed_phase()` called `datetime.now(UTC)` **twice** when `now` was not
+passed — which is production. The command's duration goes to the aggregate and
+its event; the returned duration goes to observability. Two readings microseconds
+apart put **two different durations on one phase** — the exact split-truth the
+module was extracted to remove. The code it replaced computed `duration` once.
+
+### Why my tests could not catch it
+
+Every test in that file pins `now=_END`. **With a fixed timestamp, code that
+reads the clock twice is indistinguishable from code that reads it once.** The
+fixture made both implementations produce identical output.
+
+That is the "a fixture value must be one that could not have arisen without the
+code under test" rule failing in a form I had not met before. Not a default
+asserted in its default direction — **a control variable that collapses the very
+difference under test.** Pinning the clock is normally exactly right; here it
+erased the distinction.
+
+The new test deliberately does not pin `now`. Unpinned, two `datetime.now()`
+calls differ and the assertion fails. Mutation-verified: reinstating the split
+fails 2 tests.
+
+**The transferable form:** when a test controls a source of variation, ask
+whether the bug you are hunting IS variation in that source. If it is, the
+control hides it, and you need one test that lets it vary.
