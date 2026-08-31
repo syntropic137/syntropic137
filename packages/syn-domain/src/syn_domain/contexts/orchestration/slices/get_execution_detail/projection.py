@@ -65,7 +65,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 6  # Bumped: cost moved to Lane 2 — API enriches from execution_cost (#695)
+    VERSION = 7  # Bumped: the #969 zero-guard shipped without one, so rows overwritten to 0.0 never rebuilt
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.

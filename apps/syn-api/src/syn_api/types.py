@@ -784,11 +784,13 @@ class ExecutionDetailFull(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0
-    total_duration_seconds: float = 0.0
+    total_duration_seconds: float
     """Wall-clock seconds across the execution's phases (#969).
 
-    Absent from this model until now, which is why the endpoint reported 0.0
-    for every run regardless of what the projection held.
+    REQUIRED, deliberately. This model is internal, has exactly one construction
+    site, and always has a source value. A default here would recreate the class
+    of bug this field exists to fix: an omitted argument silently becoming 0.0,
+    which pyright cannot see because omitting a defaulted field is legal.
     """
     """Observations that carried no usable rate and so added nothing to the total.
 

@@ -21,15 +21,16 @@ import pytest
 pytestmark = pytest.mark.architecture
 
 _ROOT = Path(__file__).resolve().parents[3]
-_QUERIES = _ROOT / "apps" / "syn-api" / "src" / "syn_api" / "routes" / "executions" / "queries.py"
+_ROUTES = _ROOT / "apps" / "syn-api" / "src" / "syn_api" / "routes" / "executions"
 
-#: Fields the destination deliberately does not take from the read model, with
-#: the reason. Anything else common to both must be passed.
+#: Fields the destination deliberately does not take from the read model, keyed
+#: by "<destination>.<field>" so an exception cannot silently apply to a model it
+#: was never meant for. Each entry is asserted to be in the intersection it
+#: claims to except: the first version of this list had four entries, three of
+#: which were not on the source model at all and so excepted nothing.
 _NOT_FROM_THE_READ_MODEL: dict[str, str] = {
-    "total_tokens": "recomputed from enriched Lane 2 cost data",
-    "total_cost_usd": "Lane 2: enriched from execution_cost (#695)",
-    "unpriced_observation_count": "Lane 2: comes from the cost enrichment",
-    "phases": "mapped through _map_phase_to_response, not copied",
+    "ExecutionDetailFull.phases": "mapped through _map_phase_to_response, not copied",
+    "ExecutionDetailResponse.phases": "mapped through _map_phase_to_response, not copied",
 }
 
 
@@ -43,17 +44,40 @@ def _model_field_names(module: str, class_name: str) -> set[str]:
     return {f.name for f in model.__dataclass_fields__.values()}  # type: ignore[attr-defined]
 
 
+def _called_name(func: ast.expr) -> str | None:
+    """The constructor name, whether called bare or attribute-qualified."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
 def _kwargs_passed_to(call_name: str) -> set[str]:
-    """Keyword names passed to the first `call_name(...)` in queries.py."""
-    tree = ast.parse(_QUERIES.read_text())
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == call_name
-        ):
-            return {kw.arg for kw in node.keywords if kw.arg}
-    raise AssertionError(f"no call to {call_name}() found in {_QUERIES}")
+    """Keywords common to EVERY `call_name(...)` across the executions routes.
+
+    Every call, not the first: a second construction site that drops a field
+    while the first still passes it was the obvious way to defeat the earlier
+    version of this check. Intersecting means one careless site fails the gate.
+
+    Attribute-qualified calls count, so `models.ExecutionDetailFull(...)` cannot
+    hide, and `**kwargs` fails loudly rather than being read as "passes nothing".
+    """
+    sites: list[set[str]] = []
+    for path in sorted(_ROUTES.glob("*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or _called_name(node.func) != call_name:
+                continue
+            if any(kw.arg is None for kw in node.keywords):
+                raise AssertionError(
+                    f"{path.name}:{node.lineno} builds {call_name} with **kwargs; this "
+                    f"gate cannot see which fields that passes, so it cannot certify it"
+                )
+            sites.append({kw.arg for kw in node.keywords if kw.arg})
+    if not sites:
+        raise AssertionError(f"no call to {call_name}() found under {_ROUTES}")
+    return set.intersection(*sites)
 
 
 @pytest.mark.parametrize(
@@ -71,7 +95,21 @@ def test_every_shared_field_is_actually_passed(module: str, class_name: str) -> 
     destination = _model_field_names(module, class_name)
     passed = _kwargs_passed_to(class_name)
 
-    shared = (source & destination) - set(_NOT_FROM_THE_READ_MODEL)
+    excepted = {
+        field
+        for key, _ in _NOT_FROM_THE_READ_MODEL.items()
+        for model, field in [key.split(".", 1)]
+        if model == class_name
+    }
+    for key in _NOT_FROM_THE_READ_MODEL:
+        model, field = key.split(".", 1)
+        if model == class_name:
+            assert field in (source & destination), (
+                f"{key} excepts a field that is not on both WorkflowExecutionDetail "
+                f"and {class_name}, so it excepts nothing and hides nothing. Remove it."
+            )
+
+    shared = (source & destination) - excepted
     dropped = sorted(shared - passed)
 
     assert not dropped, (
