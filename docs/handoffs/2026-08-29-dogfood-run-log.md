@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H22 | The SDLC review half is covered, because review workflows are installed | **REFUTED, tick 56** — `PR Review` and `Code Review` are both installed and have ZERO executions across all 100 runs on the Mini. Installed has been standing in for works |
 | H21 | A blocker found in one run is a blocker on dispatching work generally | **REFUTED, tick 55** — #1024 rejects pushes touching `.github/workflows` only. I stopped dispatching entirely for four hours and worked locally instead. Three runs went out in parallel the moment the blocker was read precisely |
 | H20 | A field wired through event, projection and API is wired end to end | **REFUTED, tick 54** — `WorkspaceCreatedEvent` is never persisted (`git grep WorkspaceCreated` outside syn-domain: 0 hits), so the field would be empty on every run. Schema tests and round-trip tests both passed; neither touched the persistence hop |
 | H19 | Tests written for the bug in front of me are enough | **REFUTED, tick 53** — a fitness test written for the SHAPE of #1011/#1013/#1015 caught #969 on its first run, a field nobody was hunting, which two rounds of reading the projection had missed. Same cost, whole-class yield |
@@ -2977,3 +2978,60 @@ guarantee — first call only, bare names only, one file, `**kwargs` read as
 "passes nothing" — and three of its four exception entries named fields not on
 the source model, so they excepted nothing. Hardened, and the three evasions
 codex named are mutation-tested and killed.
+
+---
+
+## Tick 56 — #1027 merged, #969 closed; and the review workflows have never run
+
+**Merged #1027** (`99109acf`), closing **#969**. `total_duration_seconds` was
+dropped two hops before the response because `ExecutionDetailFull` had no such
+field. The projection VERSION is now 7, so historical rows rebuild on deploy —
+the earlier zero-guard shipped without a bump, which is why it repaired nothing.
+
+Note the fix is **not live**: the Mini runs v0.27.0, and this is on main.
+
+**Applied my own new skill immediately** and it paid: checked for PRs rather than
+statuses. The three parallel runs all report `running` in Implement at ~12.5M
+tokens each — real work in flight, no deliverable yet, and nothing to claim.
+
+### The experiment: has the review half ever run?
+
+**HYPOTHESIS:** the SDLC gap is the implementation half; review is covered,
+because `PR Review` (3 phases) and `Code Review` (2 phases) are both installed.
+
+**Not supported.** Across all 100 executions on the Mini:
+
+```
+$ syn execution list --page-size 100 | grep -icE "PR Review|Code Review"
+0
+```
+
+**Both review workflows have been installed and never once run.** "Installed"
+has been standing in for "works" for as long as they have existed — the same
+substitution as the four gates that could not fail. So the SDLC gap is wider
+than the loop prompt says: it is not "planning works, implementation missing",
+it is "planning validated n=3, implementation runs but cannot deliver, review
+never exercised at all".
+
+### The test now running
+
+Dispatched `PR Review` on **#1026** (`exec-8fa79618d42f`) — chosen because it has
+**known ground truth**: codex found a blocking defect there that required
+tracing the persistence path rather than reading the diff (the event is never
+saved, so the field would be empty on every run). The prompt does NOT reveal
+that finding, or the test would be void.
+
+Scoring when it lands:
+1. does it find the persistence break?
+2. does it find that the event fires before the adapter resolves the real image?
+3. does it produce false blockers?
+4. does it paste real command output, as asked, or summarise?
+
+That is a head-to-head between the in-platform review and an external codex pass
+on the same diff, with the answer known in advance.
+
+**Incidental finding, and a good one:** `syn workflow run` refused the dispatch
+with `Missing required inputs: --input pr_number=<value> — Pull request number`.
+Named both missing inputs and their descriptions. That is the failure mode
+#1023 lacks — a refusal that says what to do — and it is worth pointing at when
+that issue gets designed.
