@@ -3278,3 +3278,46 @@ budget, and it explicitly did not write the code it is checking.
 **Still not claimed:** neither new workflow has run. That is the next step and I
 am not calling either validated until it has produced output — the exact error
 the orphaned pair embodied for months.
+
+---
+
+## Tick 59 — installed the new review workflow and ran the head-to-head
+
+`syn workflow install workflows/sdlc/pr-review` installed `sdlc-pr-review-v1` on
+the Mini. Then ran it on **#1026** — `exec-6558bfae74fe`.
+
+That PR is the right test because it has **known ground truth**: an external
+codex pass found a blocking defect there that required tracing a persistence
+path rather than reading the diff. The prompt does not mention it.
+
+**HYPOTHESIS:** the new workflow, given 2400s where the old one had 300, finds
+what the external review found.
+
+Running. Scoring when it lands: does it find the persistence break, does it find
+that the recorded value is the requested rather than the resolved image, does it
+invent false blockers, and does it paste real command output as instructed.
+
+### Verified the install rather than assuming it
+
+Checked that budgets and tools survived create -> read, since that is precisely
+the class of bug I fixed twice today (#1012, #1014):
+
+```
+Map what the change touches  timeout=2400 tools=['Read','Grep','Glob','Bash']
+Try to falsify the claim     timeout=2400 tools=['Read','Grep','Glob','Bash']
+Write the verdict            timeout=900  tools=['Read','Grep','Glob']
+```
+
+**And I misread it first.** I printed `(phase.get('agent') or {}).get('provider')`
+and got `None`, and briefly believed install had dropped the provider. The API
+**flattens** `agent` into top-level `provider` and `model`; there is no nested
+block in the response. The real values are `provider: claude, model: sonnet`.
+
+Same wrong-field error as `phase_name` versus `name` earlier today. **Third time
+today that "verify your own measurement before doubting the result" has caught a
+false alarm before I acted on it** — and each time the correct value was already
+sitting one key away.
+
+Incidentally: the incumbent `implement-from-plan-v1` reads back `provider: None`,
+while the new definition carries `provider: claude` explicitly. The orphan was
+also under-specified, not merely unversioned.
