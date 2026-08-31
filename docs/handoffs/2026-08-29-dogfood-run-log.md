@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H25 | The missing review-workflow definition is a one-off | **REFUTED, tick 58** — `implement-from-plan-v1` is also absent from the repo. BOTH workflows doing the platform's SDLC work were database-only, which is why a 300s analysis budget survived for months unreviewed |
 | H24 | The review workflow's problem is its timeout number | **REFUTED, tick 57** — the number was real (300s vs the 2400s the validated planner uses) but the deeper problem is that the workflow exists ONLY as database state. `Gather Context`/`Deep Analysis` appear nowhere in the repo, so its budget could never be fixed in a PR |
 | H23 | Session logs are exported as intended | **REFUTED, tick 56b** — the per-operation schema exists end to end and nothing fills it: `RecordOperationHandler` is a no-op whose body is a comment, and the one real caller writes a single synthetic totals-only operation per session (#1034). Totals are real; the history they imply is not |
 | H22 | The SDLC review half is covered, because review workflows are installed | **REFUTED, tick 56** — `PR Review` and `Code Review` are both installed and have ZERO executions across all 100 runs on the Mini. Installed has been standing in for works |
@@ -3210,3 +3211,70 @@ planning: a phase that investigates AND judges starts judging early, because
 forming a verdict feels like progress.
 
 `just check-workflows` now validates 15 definitions, up from 14. Preflight green.
+
+---
+
+## Tick 58 — both SDLC workflows were orphans; both are now files
+
+**HYPOTHESIS:** the review workflow's missing definition (tick 57) is a one-off.
+
+**REFUTED immediately.** `implement-from-plan-v1` — the workflow that has done
+every implementation run this week — appears nowhere in the repository either:
+
+```
+$ git grep -rln "implement-from-plan\|Open Draft PR" -- '*.yaml' '*.py' '*.json'
+(no output)
+```
+
+**Both workflows that do the actual SDLC work existed only as database state.**
+Their budgets and prompts could not be reviewed, diffed, or fixed in a pull
+request. That is #1031 with two casualties, and it explains a lot: a 300s
+analysis budget survived for months because there was no file in which to notice
+it.
+
+Added to #1037 (review): **PR #1038-shaped commit on the same branch** adds
+`sdlc-implement-v1`.
+
+### The measurement that shaped it
+
+Four runs of the old shape, whose single `Implement` phase had to change code
+AND verify it inside 1800s:
+
+| execution | result |
+|---|---|
+| exec-1717c4da51c8 | completed, 1113s |
+| exec-9dcfe2c87357 | completed, 1316s |
+| exec-e8cb453a850d | **FAILED**, exit 124 at 1800s |
+| exec-1205971c9f13 | **FAILED**, exit 124 at 1800s |
+
+**Two of four blew the budget**, and the successes used 62% and 73% of it. The
+two that failed were the ones I asked for premise verification, pasted command
+output and an integration test — which is to say, the ones asking for exactly the
+discipline that makes the output trustworthy.
+
+**So the honest reading is not "the platform is slow", it is "I asked one phase
+to do two jobs".** Raising the number alone would treat that as slowness. A phase
+that must finish a change AND prove it shortchanges the proving, because the
+change feels like the deliverable. `verify` is now its own phase with its own
+budget, and it explicitly did not write the code it is checking.
+
+### What went into the prompts
+
+- **bootstrap can stop the run.** It checks the TASK'S premise, because issues
+  here have repeatedly described defects that do not exist — a regression that
+  never happened (#1017), a field said missing that was present under another
+  name, a fix said absent that had shipped. A false premise wastes the run and
+  produces something that looks like progress.
+- **implement fixes the bug CLASS**, not the files the task names, and declares
+  any widening rather than doing it silently. Both mistakes I made this week.
+- **verify breaks each new test to confirm it can fail** — after confirming the
+  mutation actually applied, since one that misses its target reads exactly like
+  a test that cannot fail. It also diffs `git status` around `qa-ci`, because
+  verification commands here have mutated tracked files.
+- **open_pr refuses to open one if verification found a defect.**
+
+`just check-workflows` validates 16 definitions, up from 14 this morning.
+
+**Still not claimed:** neither new workflow has run. That is the next step and I
+am not calling either validated until it has produced output — the exact error
+the orphaned pair embodied for months.
