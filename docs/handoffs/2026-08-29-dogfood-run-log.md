@@ -20,7 +20,8 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
-| H26 | An in-platform review workflow can match an external cross-model pass | **SUPPORTED n=1, tick 60** — found the same blocker with stronger evidence, added 3 findings codex missed (incl. a real blind spot in my own fitness gate), invented zero false blockers, and stated 5 things it could not verify. Missed one codex finding. NOT yet run on a PR whose claim holds |
+| H27 | A multi-phase workflow shares a filesystem between phases | **REFUTED, tick 61** — every phase gets a fresh workspace and its own clone; only artifacts cross. Both workflows I wrote assumed otherwise: implement was told not to push, so verify would have checked the default branch believing it checked the change |
+| H26 | An in-platform review workflow can match an external cross-model pass | **SUPPORTED n=2, tick 61** — on a CORRECT PR (#1033) it returned "the claim holds", invented nothing, and closed two verification gaps I had left open. Previously n=1, tick 60 — found the same blocker with stronger evidence, added 3 findings codex missed (incl. a real blind spot in my own fitness gate), invented zero false blockers, and stated 5 things it could not verify. Missed one codex finding. NOT yet run on a PR whose claim holds |
 | H25 | The missing review-workflow definition is a one-off | **REFUTED, tick 58** — `implement-from-plan-v1` is also absent from the repo. BOTH workflows doing the platform's SDLC work were database-only, which is why a 300s analysis budget survived for months unreviewed |
 | H24 | The review workflow's problem is its timeout number | **REFUTED, tick 57** — the number was real (300s vs the 2400s the validated planner uses) but the deeper problem is that the workflow exists ONLY as database state. `Gather Context`/`Deep Analysis` appear nowhere in the repo, so its budget could never be fixed in a PR |
 | H23 | Session logs are exported as intended | **REFUTED, tick 56b** — the per-operation schema exists end to end and nothing fills it: `RecordOperationHandler` is a no-op whose body is a comment, and the one real caller writes a single synthetic totals-only operation per session (#1034). Totals are real; the history they imply is not |
@@ -3426,3 +3427,80 @@ is validated for one case, not validated.
 `total_duration_seconds: 0.0` on a fully successful run, again. The Mini runs
 v0.27.0; the fix merged to main hours ago is not deployed. Consistent with #969
 rather than a new instance.
+
+---
+
+## Tick 61 — the calibration passed, and codex found my workflows could not have worked
+
+Two results, opposite directions.
+
+### 1. The review workflow does NOT manufacture findings
+
+**HYPOTHESIS:** having only ever reviewed a PR whose claim was false,
+`sdlc-pr-review-v1` might invent findings on a correct one.
+
+**REFUTED — and it out-verified me.** Ran it on **#1033**, a change I had already
+proven correct and mutation-tested (`exec-ecc7eb93a378`, $3.13).
+
+> **The central claim holds, end to end**, and survived every falsification
+> attempt.
+
+No blockers, nothing invented. And it closed the two gaps its own map phase had
+flagged as unverified — gaps I had not closed either:
+
+- wrote a **delegate (non-leader)** test, the case the PR's own test omits
+- wrote a **real HTTP boundary** test via `TestClient`, proving the fields
+  survive Pydantic response validation and the route handler, not just the
+  internal function
+- confirmed there is **exactly one construction site and one caller**, ruling out
+  a second still-broken parallel path
+
+Then mutation-tested all three together against pre-fix code — 3 failed — and
+concluded *"None is a vacuous test."* It worked in a disposable worktree,
+restored the tree, and verified with `git status --short` and `git worktree list`.
+
+**H26 upgraded to n=2**: finds real blockers, does not invent absent ones.
+#1033 merged.
+
+### 2. Both my new workflows would NOT have worked
+
+Codex pass on #1037 found the design error, and **evidence I already had confirms
+it**: every phase runs in **its own fresh workspace with its own clone**. Only
+artifacts cross.
+
+My `implement` prompt said *"Commit locally on a new branch. Do not push - later
+phases do that."* That branch dies with the phase. `verify` would have run
+`qa-ci` against the default branch while believing it checked the change, and
+`open_pr` would have had nothing to push.
+
+**I had the evidence and did not connect it.** The #1020 run reported "Pushed to
+origin: NO" and then `PR_SKIPPED` — I attributed that entirely to #1024's missing
+permission. And the run that DID open #1033 pushed from its implement phase,
+which is precisely the behaviour my prompt forbade.
+
+Also: `bootstrap` was installing dependencies "so later phases can run checks",
+which nobody inherits. And the review workflow told the agent to run
+`git diff origin/main...HEAD` in a workspace checked out on the default branch —
+**comparing main with itself.** The #1026 review only worked because the agent
+ignored the literal instruction and diffed remote refs on its own initiative.
+
+Fixed: implement pushes and records branch + SHA; verify checks out that exact
+SHA and pastes `rev-parse HEAD`; open_pr opens from the pushed branch and refuses
+if the head moved; bootstrap is reconnaissance; both review phases resolve refs
+explicitly and treat an empty diff as wrong refs rather than a small change.
+
+**The lesson, and it is the day's recurring one at a new altitude:** I designed a
+multi-phase workflow without verifying what actually crosses a phase boundary. I
+have spent all day catching values dropped between hops in code, and then wrote a
+workflow that assumed a filesystem hop that does not exist.
+
+### 3. Incidental, filed as #1038
+
+The calibration run hit `No space left on device` writing to
+`/home/agent/.cache/uv` — the workspace home is tmpfs and nearly full. It
+diagnosed and worked around it mid-task. Every phase pays that cost again,
+because every phase gets a fresh workspace.
+
+Also merged **#1032** (the dogfooding skill) — though I merged it from a base 3
+commits behind, contrary to my own stale-green rule. Docs-only, so no interaction
+risk, but the rule is the rule and I applied it inconsistently.
