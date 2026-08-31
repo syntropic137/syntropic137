@@ -3321,3 +3321,50 @@ sitting one key away.
 Incidentally: the incumbent `implement-from-plan-v1` reads back `provider: None`,
 while the new definition carries `provider: claude` explicitly. The orphan was
 also under-specified, not merely unversioned.
+
+### Tick 59b — verified the agent's PR, and found the hole in my own gate
+
+**#1033**, opened by `exec-9dcfe2c87357`, marked ready after independent
+verification rather than trust.
+
+**The defect is real and is the day's recurring class.** `SessionDetail` gained
+`parent_session_id`/`root_session_id` for #895, and the `SessionDetail(...)`
+construction inside `get_session()` was never updated to pass them — so the
+fields existed and read `None` at that endpoint while `list_sessions()`
+populated them correctly.
+
+**Mutation-tested rather than assumed:**
+
+```
+mutation applied; remaining refs: 0
+FAILED test_get_session_includes_lineage_fields
+1 failed, 4 passed
+```
+
+Restored: 5 passed. The test drives `get_session()` — the consumer — rather than
+constructing a `SessionDetail` and asserting its fields, which is the distinction
+that matters for this class. Its assertion discriminates too:
+`root_session_id == session_id` cannot arise from the omission, whose value
+would be `None`.
+
+The branch was **3 commits behind main**, so I merged main in and re-ran before
+marking it ready. A green from a stale base describes a textual merge.
+
+### The finding that matters more than the fix
+
+`ci/fitness/api/test_execution_detail_carries_every_field.py` — added on main
+hours earlier, built specifically to catch a field present on both models and
+not passed at the constructor — **did not catch this one, because it only scans
+`routes/executions`.** The same bug was sitting in `routes/sessions.py` the whole
+time.
+
+**The gate generalised the failure and not the scope.** That is a subtler version
+of the mistake it was written to prevent: I widened from "test my field" to "test
+the class", and stopped at the directory I happened to be working in. Second
+instance now on record, which is what justifies widening it rather than guessing.
+
+### Head-to-head progress
+
+`exec-6558bfae74fe` is in phase 2 at $3.59, having cleared `Map what the change
+touches` in ~5 minutes — the phase budget that killed the old workflow twice.
+The 300s wall was real and the 2400s budget is being used, not merely granted.
