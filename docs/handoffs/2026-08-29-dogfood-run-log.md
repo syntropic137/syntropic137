@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H31 | A workspace agent can run `just qa-ci` to verify its own work | **REFUTED, tick 65** — `/tmp` is noexec under the security profile, so every `just` shebang recipe fails identically. Not the image: a shebang runs fine under plain `docker run`. #1042 |
 | H30 | An exemption I write in the same breath as its guard is held to that guard | **REFUTED, tick 64** — I asserted that FIELD-level exceptions must name a field in the intersection, then added a MODULE-level exemption table in the same commit with no such check. The costs.py excuse hid four live dropped fields (#1041) |
 | H29 | An implementation phase empowered to stop on a false premise prevents more waste than it costs | **SUPPORTED n=1, tick 63** — refused #1029 for $3.54 having found my premise false, and it WAS false: the sessions endpoints carry no phase name, only a server-truncated `phase_display`. No wrong PR, no wrong review, issue corrected instead |
 | H28 | Acting on a review's first findings is acting on the review | **REFUTED, tick 62** — I read 55 of 197 lines, fixed three real things, and skipped a time bomb in code I had just shipped: every SDLC prompt read an artifact path marked "kept for one release" |
@@ -3723,3 +3724,72 @@ Those are now written into the file as KNOWN HOLES rather than left to be
 discovered. **The gate is a floor, not a proof**, and saying so is the difference
 between a known limit and a false sense of coverage — which is the whole subject
 of this tick.
+
+---
+
+## Tick 65 — the branch-push fix WORKS, and the run still shipped nothing
+
+`exec-9a1c0a0b8940` on **#1036** — true premise this time.
+
+### The fix is proven
+
+`origin/fix/1036-failed-phase-duration` **exists**, commit `c96b5f76`: 7 files,
++276, including a 201-line test. The implement phase pushed, which is exactly
+what tick 61's fix added and what the #1029 run never got far enough to test.
+
+The work also went beyond the issue: it touched a **second projection**
+(`workflow_phase_metrics`) that I had not considered when filing #1036.
+
+### And then the chain broke anyway
+
+| phase | duration | artifact |
+|---|---|---|
+| bootstrap | 183s | **none** |
+| implement | 1627s of 2400 | present |
+| verify | **235s of 1800** | **none** |
+| open_pr | 47s | present |
+
+`open_pr` refused, correctly:
+
+> The task instructions require an independent verification report at
+> `artifacts/input/verify.md`... That file does not exist... Opening a PR on an
+> unverified change is exactly the situation the instructions warn against.
+
+**That refusal is the workflow working.** The defect is upstream: verify produced
+no artifact.
+
+### Why verify produced nothing, and it is a platform finding
+
+From its session:
+
+> `/tmp` is mounted **noexec** in this sandbox, blocking `just`'s shebang recipes
+> generically — not a code issue.
+
+`just` writes shebang recipes to a temp file and executes them. Under `noexec`
+every shebang recipe fails identically — so `just qa-ci`, the command this
+repo now uses to mean "CI will pass", **cannot run in a workspace at all**.
+
+**Not the image.** Tested directly:
+
+```
+$ docker run --rm --entrypoint sh <pinned-image> -c '... /tmp/t.sh'
+SHEBANG_RAN
+```
+
+It comes from the security profile Syntropic applies. `noexec` on `/tmp` is good
+hardening; the tension is real rather than an obvious mistake. Filed **#1042**
+with a `TMPDIR=/workspace/.tmp` proposal that keeps the hardening.
+
+### The honest accounting
+
+**$8.34, a correct-looking branch pushed, and no PR.** The verify phase burned
+235 of 1800 seconds fighting the environment and gave up without writing its
+report. My prompts also never say WHERE to write the deliverable — implement
+happened to write `artifacts/output/`, verify did not, and `output_artifacts:
+[markdown]` is a label that enforces nothing (#1039). Two independent reasons
+the chain broke, and I introduced one of them.
+
+**Three workspace-environment gaps found today, each costing a run**: #1028
+(no Playwright libs), #1038 (tmpfs home full, breaks `uv sync`), #1042 (noexec
+/tmp, breaks `just`). The pattern is that in-workspace QA is not one gap but a
+class, and each was invisible until an agent hit it.
