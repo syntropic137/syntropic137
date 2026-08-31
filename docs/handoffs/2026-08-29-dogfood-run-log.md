@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H21 | A blocker found in one run is a blocker on dispatching work generally | **REFUTED, tick 55** — #1024 rejects pushes touching `.github/workflows` only. I stopped dispatching entirely for four hours and worked locally instead. Three runs went out in parallel the moment the blocker was read precisely |
 | H20 | A field wired through event, projection and API is wired end to end | **REFUTED, tick 54** — `WorkspaceCreatedEvent` is never persisted (`git grep WorkspaceCreated` outside syn-domain: 0 hits), so the field would be empty on every run. Schema tests and round-trip tests both passed; neither touched the persistence hop |
 | H19 | Tests written for the bug in front of me are enough | **REFUTED, tick 53** — a fitness test written for the SHAPE of #1011/#1013/#1015 caught #969 on its first run, a field nobody was hunting, which two rounds of reading the projection had missed. Same cost, whole-class yield |
 | H18 | Image identity is already captured, so #1004's image half is just plumbing | **HALF REFUTED, tick 52** — `WorkspaceCreatingEvent.container_image` is a field on an event nothing emits; `IsolationStartedEvent.image_manifest` IS populated but carries BUILD provenance, not the OCI digest, and its capture is best-effort so absence is silent |
@@ -2912,3 +2913,67 @@ review question I wrote myself caught a bug I had already described in the
 prompt. **The pattern is the same: the value came from asking about the shape of
 past failures rather than about this change.** What I keep getting wrong is
 narrower — I test the objects and not the wire between them.
+
+---
+
+## Tick 55 — the owner caught me not using the system, and using it found three gaps
+
+**The correction, and it lands.** The owner: *"you can run multiple workflows.
+The last workflow was run four hours ago, so why aren't you using a self-hosted
+system to build Syntropic?"*
+
+Fair. I let ONE blocked run (#1024, `.github/workflows` pushes rejected) stop me
+dispatching at all — but that blocker is **path-specific**, and most work does
+not touch `.github/`. I had generalised a narrow failure into a total one and
+went back to working locally, which is the opposite of the goal.
+
+**Dispatched three in parallel** on the Mini: the #1026 rework via the durable
+event (`exec-1205971c9f13`), #1006 premise-check-and-fix (`exec-e8cb453a850d`),
+and a session-export cross-check for the SeshMagic question
+(`exec-9dcfe2c87357`). Each prompt carries the failure it must not repeat —
+notably that a unit test on the aggregate cannot prove the persistence hop,
+which is exactly how #1026 shipped broken.
+
+### Three usability gaps, all found by the owner USING it
+
+**1. Phase names render as UUIDs.** The sessions page shows `Phase 20f0e1d7`,
+`Phase e4d5d6ad`, `Phase f6702a20`. Those are the real `phase_id`s of
+`exec-1717c4da51c8`, and the API already returns names beside them:
+
+```
+phase_id= 20f0e1d7-... | name= 'Bootstrap'
+phase_id= e4d5d6ad-... | name= 'Implement'
+phase_id= f6702a20-... | name= 'Open Draft PR'
+```
+
+Pure presentation. With several workflows running at once the column loses all
+its value. **#1029.**
+
+**2. The execution does not record what it was asked to do.** Verified: the
+detail response has 18 keys and **not one** is task, prompt, input or arguments.
+Cost, tokens, phases, artifacts and duration are all preserved; the ask is not.
+
+That is the same class as #1004 — output preserved, the input it should be
+judged against discarded — and it blocks the experiment work directly: two runs
+cannot be compared if the difference between them was the prompt. **#1030.**
+
+**3. No organization scheme.** 20 workflows on the Mini mix gold-standard
+workflows, eval variants (`all Haiku` / `all Sonnet` / `Routed`) and dead
+one-off probes, with everything experimental dumped in `custom`. And v3/v4 of
+the SDLC workflow are archived, so executions reference workflows that
+`syn workflow list` cannot resolve — an experiment you cannot look up. **#1031**,
+recorded as a design question rather than a scheme I invent unilaterally.
+
+### Also this tick
+
+Codex pass on #1027 found four things, all accepted. The one worth recording:
+**my causal claim on #969 was overstated a second time.** There were TWO causes —
+the projection overwrite (already fixed by `ab07cd60`) and the DTO omission. I
+wrote "the projection was never the problem"; it was, and it had been fixed.
+That is now the third correction I have made on that one issue.
+
+Also: my fitness gate was a name-presence check presented as a data-flow
+guarantee — first call only, bare names only, one file, `**kwargs` read as
+"passes nothing" — and three of its four exception entries named fields not on
+the source model, so they excepted nothing. Hardened, and the three evasions
+codex named are mutation-tested and killed.
