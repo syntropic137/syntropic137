@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from syn_domain.contexts.orchestration.slices.execute_workflow import phase_outcome
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
     completed_phase,
     failed_phase_elapsed_seconds,
@@ -24,6 +25,20 @@ pytestmark = pytest.mark.unit
 _START = datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC)
 #: 407 seconds. Not a default, not a round number, and not derivable from zeros.
 _END = _START + timedelta(seconds=407)
+
+
+class _ClockStub:
+    """Stands in for the `datetime` module, handing out a new time per `now()`.
+
+    Deliberately not a frozen timestamp: a frozen clock cannot distinguish one
+    read from two, which is the whole point of the test that uses this.
+    """
+
+    def __init__(self, next_now):
+        self._next_now = next_now
+
+    def now(self, tz=None):
+        return self._next_now(tz)
 
 
 def _outcome(
@@ -98,26 +113,99 @@ def test_a_phase_that_never_started_has_no_duration_rather_than_zero() -> None:
     assert failed_phase_elapsed_seconds(_START, now=_END) == 407.0
 
 
-def test_one_phase_reports_one_duration() -> None:
+def test_one_phase_reports_one_duration(monkeypatch: pytest.MonkeyPatch) -> None:
     """The command and the returned value must be the SAME measurement.
 
-    Deliberately does NOT pin `now`. Every other test here passes a fixed
-    timestamp, and that is exactly what hid this: with `now` pinned, code that
-    reads the clock twice is indistinguishable from code that reads it once.
-    Unpinned, two `datetime.now()` calls differ by microseconds and this fails.
+    Uses a clock that advances a full second on every read, rather than relying
+    on real `datetime.now()` calls happening to differ. The first version of this
+    test did rely on that, and a cross-model review pointed out it is flaky
+    exactly where it matters: two consecutive `now()` calls can return the same
+    value, and then code that reads the clock twice passes.
 
-    It matters because the two values go to different places - the command to
-    the aggregate and its event, the returned duration to observability - so a
-    split reading puts two different durations on one phase.
+    A regression test for a timing bug that depends on timing to detect it is not
+    a regression test. With this clock, one read gives equal durations and two
+    reads differ by a second, deterministically.
+
+    It matters because the two values go to different places - the command to the
+    aggregate and its event, the returned duration to observability - so a split
+    reading puts two different durations on one phase.
     """
+    ticks = iter([_START + timedelta(seconds=n) for n in (100, 200, 300, 400)])
+    monkeypatch.setattr(
+        phase_outcome, "datetime", _ClockStub(lambda _tz: next(ticks)), raising=True
+    )
+
     outcome = completed_phase(
         execution_id="exec-1",
         workflow_id="wf-1",
         phase_id="implement",
         session_id="sess-1",
-        started_at=datetime.now(UTC) - timedelta(seconds=5),
+        started_at=_START,
         artifact_ids=["art-1"],
         auth_tokens=(1, 1, 0, 0),
     )
 
     assert outcome.duration_seconds == outcome.command.duration_seconds
+    # And the single read is the FIRST tick, not some later one: 100s, not 200s.
+    assert outcome.duration_seconds == 100.0
+
+
+def test_a_failed_phase_is_counted_in_the_execution_metrics() -> None:
+    """The synchronous execute response counts the failed phase (#1036 side effect).
+
+    Before the failure path produced a `PhaseResult`, `ExecutionMetrics.from_results`
+    never saw the failed phase: `total_phases` counted only the ones that finished,
+    and `failed_phases` was always 0 for a run that failed. `POST /workflows/{id}/execute`
+    builds its response straight from those metrics, so a synchronous failure
+    reported counts that were quietly wrong.
+
+    That correction rode along with this PR's extraction rather than being asked
+    for, which is precisely why it needs a test: an unlabelled behaviour change is
+    one nobody will notice regressing.
+    """
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        ExecutionMetrics,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
+        failed_phase_result,
+    )
+
+    succeeded = _outcome(artifact_ids=["art-1"], auth=(1, 1, 0, 0)).result
+    failed = failed_phase_result("implement", _START, "sess-2", "timed out")
+    assert failed is not None
+
+    metrics = ExecutionMetrics.from_results([succeeded, failed])
+
+    # 2, not 1: the failed phase used to be invisible here.
+    assert metrics.total_phases == 2
+    assert metrics.completed_phases == 1
+    assert metrics.failed_phases == 1
+
+
+def test_a_phase_that_started_and_died_produces_a_result_to_count() -> None:
+    """The failure path must yield a result, or the metrics above see nothing.
+
+    Pairs with the metrics test: that one proves `from_results` counts a failed
+    result correctly, this one proves one exists to be counted.
+
+    KNOWN GAP, stated rather than implied: neither covers the two lines in
+    `WorkflowExecutionProcessor._fail_execution` that actually append it.
+    Deleting them leaves this whole file green. Closing that needs a
+    processor-level test with real repository plumbing, which is a larger piece
+    than this PR - and a gap named is worth more than a gap assumed covered.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
+        failed_phase_outcome,
+    )
+
+    duration, result = failed_phase_outcome(
+        "implement", {"implement": _START}, {"implement": "sess-9"}, "timed out"
+    )
+
+    assert result is not None
+    assert result.phase_id == "implement"
+    assert duration is not None and duration > 0
+
+    # A phase with no recorded start yields neither, rather than a zero-duration
+    # result that would enter the metrics as a phase that ran instantly.
+    assert failed_phase_outcome("implement", {}, {}, "timed out") == (None, None)
