@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H34 | Unpinning a clock fixes what pinning it hid | **REFUTED, tick 68** — unpinned, the test relies on two `datetime.now()` calls differing, and they often do not. Same control-variable mistake in the opposite direction, an hour later. A stub that advances per read is deterministic: 20/20 detection vs intermittent |
 | H33 | Pinning a clock in a test is always the safe choice | **REFUTED, tick 67** — pinning `now` made code that reads the clock TWICE indistinguishable from code that reads it once, hiding a split-duration bug I introduced. A control that collapses the difference under test is not a control, it is a blindfold |
 | H32 | Extracted code carries its old test coverage with it | **REFUTED, tick 66b** — mutating the moved success path left the whole suite green: removing the `zero_tokens` warning and dropping the completed result both broke nothing. It was untested in place and nobody could see it. Extraction IS a coverage audit |
 | H31 | A workspace agent can run `just qa-ci` to verify its own work | **REFUTED, tick 65** — `/tmp` is noexec under the security profile, so every `just` shebang recipe fails identically. Not the image: a shebang runs fine under plain `docker run`. #1042 |
@@ -3933,3 +3934,55 @@ fails 2 tests.
 **The transferable form:** when a test controls a source of variation, ask
 whether the bug you are hunting IS variation in that source. If it is, the
 control hides it, and you need one test that lets it vary.
+
+---
+
+## Tick 68 — the platform reviewed my extraction and found two things I missed
+
+`exec-67d3a60701b1` on **#1043**, $6.84. Verdict: *"the claim holds with
+caveats"* — it confirmed the extraction is behaviourally faithful field by field,
+including the single-clock-read invariant, then named two real problems.
+
+### 1. My regression test could not reliably catch its own bug
+
+`test_one_phase_reports_one_duration` relied on two real `datetime.now()` calls
+returning DIFFERENT values. They often do not: consecutive reads can be
+identical, and then code that reads the clock twice passes.
+
+> A regression test for a timing bug that depends on timing to detect it is not a
+> regression test.
+
+Replaced with a clock stub advancing a second per read. **Measured rather than
+asserted:** with the split reinstated it fails **20 of 20** consecutive runs, and
+passes 5 of 5 restored.
+
+**This is the SECOND time on one PR that a control variable hid the difference
+under test.** First I pinned `now`, which made one read indistinguishable from
+two — I caught that. Then I unpinned it and relied on it to vary — I did not.
+The same mistake in both directions, an hour apart.
+
+### 2. An unlabelled behaviour change shipped untested
+
+Appending a `PhaseResult` on the failure path also silently corrected the
+synchronous execute response: `from_results` never saw the failed phase, so
+`total_phases` counted only those that finished and `failed_phases` was 0 for a
+failed run. Correct, but it rode along unnamed — and an unlabelled change is one
+nobody notices regressing. Now tested.
+
+### A gap named, not closed
+
+Neither test covers the two lines in `_fail_execution` that append the result;
+deleting them leaves the file green. That needs processor-level plumbing, larger
+than this PR, and it is written into the test file rather than implied away.
+
+### The workflow at n=3
+
+| PR | claim | result |
+|---|---|---|
+| #1026 | false | found the blocker, plus 3 findings codex missed |
+| #1033 | true | confirmed it, invented nothing, closed 2 gaps I had left |
+| #1043 | true with caveats | found 2 real problems in work I had been careful about |
+
+It also declined to re-investigate in its verdict phase, carrying forward what
+the prior phase left unresolved instead of settling it — which is the phase
+separation working as designed rather than as decoration.
