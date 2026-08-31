@@ -3563,3 +3563,41 @@ fixes were correct.
 
 This is the same shape as the day's other recurring error at yet another
 altitude: I checked the hops I was looking at.
+
+### Tick 62b — widened the gate that missed #1033; PR #1040
+
+**HYPOTHESIS:** the dropped-field gate needs a bigger file glob.
+
+**Half right, and the other half is the pattern.** The gate generalised the
+FAILURE and not the SCOPE — it caught "a field on both models that is not passed
+at the constructor" but only in `routes/executions`, while #1033 was that exact
+defect in `routes/sessions.py`. A bigger glob would fix today's instance and
+leave the next one to chance.
+
+So the scope is now **asserted**: `test_no_route_consuming_a_read_model_is_unwatched`
+walks every route module, and one importing a read model must appear either in
+`_PAIRS` with its source-to-response mapping or in `_NO_PAIR` with a reason it is
+not a flat copy. `_PAIRS` is declared rather than inferred — which response
+corresponds to which read model is not mechanically derivable — and the drift
+guard is what stops the table going stale. Same shape as `check_ci_parity.py`,
+where a hardcoded list would have been the identical bug one level up.
+
+Excuses are held to the mappings' standard: an entry naming a module that no
+longer consumes a read model **fails**. That rule already caught three inert
+entries in this file's first version, so it is not hypothetical.
+
+**Deliberately not done:** `sessions.py` is excused with a TODO rather than
+gated. Its chain is the same shape and belongs in `_PAIRS`, but wiring it means
+adding exceptions I have not examined — which is exactly how the first version
+acquired three that excepted nothing. Doing it properly is its own change.
+
+Three mutations killed: a new consuming route with no entry, a removed excuse,
+and an excuse for a module that consumes nothing.
+
+### The cross-phase fix is working
+
+`exec-999fa1f2b331` reached **Verify** — which only happens if `implement`
+actually pushed a branch for it to check out. The phase that would have silently
+verified the default branch is now doing the thing it claims to do. Not yet
+conclusive; the proof is a PR at the end whose head SHA matches what verify
+reported.
