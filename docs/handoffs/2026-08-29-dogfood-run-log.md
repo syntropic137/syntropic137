@@ -3092,3 +3092,64 @@ also correctly resolved a conflict between its embedded task ("open a PR") and
 the phase rule ("PR is the next phase"), and explained which took precedence.
 
 That is better reporting discipline than several of my own PRs today.
+
+### Tick 56c — the head-to-head died at five minutes, and that IS the result
+
+**HYPOTHESIS:** the in-platform `PR Review` workflow can find on #1026 what an
+external codex pass found.
+
+**Untestable as configured, and the reason is the finding.** `exec-8fa79618d42f`:
+
+```
+Gather Context   completed  dur=72.5s
+Deep Analysis    failed     exit_code=124
+```
+
+Every phase of `PR Review` declares `timeout_seconds: 300`. Correct behaviour,
+not a bug — but **five minutes is a fraction of what the review it describes
+takes.** Today's cross-model reviews of single PRs ran 5 to 25 minutes each, and
+the findings that mattered came from tracing a call path across packages.
+`implement-from-plan` budgets its working phase **1800s**, six times as much, and
+one run still hit that wall.
+
+So the workflow is structurally unable to produce the output its own phase names
+promise — and **nothing discovered that in the months it has been installed,
+because it had never been run.** That is H22 with a mechanism attached: not just
+"never run", but "never run, and would not have worked".
+
+Filed **#1035**, with the recommendation to measure rather than guess the new
+budget, and to question whether 300 should stay the uniform default: it is a
+sensible floor for a fetch-and-summarise phase and a trap for an analysis one.
+
+### A second bug from the same evidence
+
+Both timed-out phases report **`duration_seconds: 0.0`**:
+
+```
+Implement      failed  dur=0.0    # actually ran ~31 minutes, to its full 1800s
+Deep Analysis  failed  dur=0.0    # exit_code=124, i.e. ran to its limit by definition
+```
+
+A phase that exits 124 ran for exactly its budget. `0.0` is the least plausible
+value available, and it points the reader at provisioning rather than at the
+budget — the opposite of the truth. Establishing that the #1006 run had used its
+full 1800s meant subtracting timestamps from the execution list by hand.
+
+It also silently distorts `total_duration_seconds`, which sums phase durations —
+so any execution with a failed phase under-reports by exactly the working time.
+That compounds with #969, fixed hours earlier. Filed **#1036**, with the note to
+confirm where the zero enters rather than assume, since the last two duration
+bugs in this area were both one hop from where they appeared to be.
+
+### Standing tally for the day's dispatches
+
+| run | outcome |
+|---|---|
+| implement #1020 | correct work, could not push (#1024) |
+| session export | **PR #1033 + 28KB report**, found #1034 |
+| #1006 | timed out at 1800s |
+| PR Review head-to-head | timed out at 300s (#1035) |
+| #1026 rework | still running, 29.8M tokens in Implement |
+
+Two of five hit timeouts. That is a real reliability number, and it is the kind
+that only appears once you actually dispatch instead of working locally.
