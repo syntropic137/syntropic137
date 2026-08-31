@@ -19,7 +19,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CancelExecutionCommand,
     CompleteExecutionCommand,
-    CompletePhaseCommand,
     FailExecutionCommand,
     StartExecutionCommand,
     StartPhaseCommand,
@@ -27,9 +26,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.failed_phase_duration import (
-    failed_phase_outcome,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
@@ -53,8 +49,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_im
     close_phase_workspaces,
     remember_leader_native_id,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import (
-    PhaseResultBuilder,
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
+    completed_phase,
+    failed_phase_outcome,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     AgentHandlerProtocol,
@@ -784,63 +781,29 @@ class WorkflowExecutionProcessor:
         artifact_ids = self._phase_artifact_ids.pop(todo.phase_id, [])
         started_at = self._phase_started_at.pop(todo.phase_id, datetime.now(UTC))
 
-        # Authoritative token counts come from the CLI result event; fall back
-        # to zeros when the result is missing (partial/interrupted phases) —
-        # Lane 2 observability holds the definitive cost either way.
-        final_input, final_output, final_cache_creation, final_cache_read = auth_tokens or (
-            0,
-            0,
-            0,
-            0,
-        )
-        final_total = final_input + final_output + final_cache_creation + final_cache_read
-
-        warnings: list[str] = []
-        if final_input == 0 and final_output == 0:
-            warnings.append("zero_tokens")
-        if not artifact_ids:
-            warnings.append("no_artifacts")
-
-        result = PhaseResultBuilder.success(
-            phase_id=todo.phase_id,
-            started_at=started_at,
-            session_id=todo.session_id or "",
-            artifact_ids=artifact_ids,
-            input_tokens=final_input,
-            output_tokens=final_output,
-            cache_creation_tokens=final_cache_creation,
-            cache_read_tokens=final_cache_read,
-            total_tokens=final_total,
-            warnings=warnings,
-        )
-        phase_results.append(result)
-        completed_phase_ids.append(todo.phase_id)
-        duration = (datetime.now(UTC) - started_at).total_seconds()
-
-        complete_cmd = CompletePhaseCommand(
+        outcome = completed_phase(
             execution_id=todo.execution_id,
             workflow_id=aggregate.workflow_id or "",
             phase_id=todo.phase_id,
             session_id=todo.session_id,
-            artifact_id=artifact_ids[0] if artifact_ids else None,
-            input_tokens=final_input,
-            output_tokens=final_output,
-            cache_creation_tokens=final_cache_creation,
-            cache_read_tokens=final_cache_read,
-            total_tokens=final_total,
-            duration_seconds=duration,
+            started_at=started_at,
+            artifact_ids=artifact_ids,
+            auth_tokens=auth_tokens,
         )
-        aggregate.complete_phase(complete_cmd)
+        phase_results.append(outcome.result)
+        completed_phase_ids.append(todo.phase_id)
+
+        aggregate.complete_phase(outcome.command)
         await self._save_and_sync(aggregate)
 
         await self._finalize_phase(
             todo.phase_id,
-            final_input,
-            final_output,
-            final_cache_creation,
-            final_cache_read,
-            final_total,
-            duration,
+            outcome.input_tokens,
+            outcome.output_tokens,
+            outcome.cache_creation_tokens,
+            outcome.cache_read_tokens,
+            outcome.total_tokens,
+            outcome.duration_seconds,
         )
 
     async def _finalize_phase(
