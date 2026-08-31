@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H29 | An implementation phase empowered to stop on a false premise prevents more waste than it costs | **SUPPORTED n=1, tick 63** — refused #1029 for $3.54 having found my premise false, and it WAS false: the sessions endpoints carry no phase name, only a server-truncated `phase_display`. No wrong PR, no wrong review, issue corrected instead |
 | H28 | Acting on a review's first findings is acting on the review | **REFUTED, tick 62** — I read 55 of 197 lines, fixed three real things, and skipped a time bomb in code I had just shipped: every SDLC prompt read an artifact path marked "kept for one release" |
 | H27 | A multi-phase workflow shares a filesystem between phases | **REFUTED, tick 61** — every phase gets a fresh workspace and its own clone; only artifacts cross. Both workflows I wrote assumed otherwise: implement was told not to push, so verify would have checked the default branch believing it checked the change |
 | H26 | An in-platform review workflow can match an external cross-model pass | **SUPPORTED n=2, tick 61** — on a CORRECT PR (#1033) it returned "the claim holds", invented nothing, and closed two verification gaps I had left open. Previously n=1, tick 60 — found the same blocker with stronger evidence, added 3 findings codex missed (incl. a real blind spot in my own fitness gate), invented zero false blockers, and stated 5 things it could not verify. Missed one codex finding. NOT yet run on a PR whose claim holds |
@@ -3601,3 +3602,65 @@ actually pushed a branch for it to check out. The phase that would have silently
 verified the default branch is now doing the thing it claims to do. Not yet
 conclusive; the proof is a PR at the end whose head SHA matches what verify
 reported.
+
+---
+
+## Tick 63 — the implement workflow refused to build the wrong thing, and it was right
+
+`exec-999fa1f2b331`, the first run of the FIXED `sdlc-implement-v1`, on **#1029**.
+**4/4 phases, $3.54, and no PR** — which is the correct outcome.
+
+**HYPOTHESIS:** the cross-phase fix works, and the run produces a PR whose head
+SHA matches what verify checked.
+
+**Untestable this run, for the best possible reason: there was nothing to build.**
+
+The implement phase checked the task's premise, **found it false, and stopped** —
+exactly what its prompt is written to do. Verify never ran because there was
+nothing to verify. The final phase declined to open a PR and said precisely why:
+
+> **No PR was opened.** There is no branch to open one from... The implement
+> phase determined the task's premise was false and stopped before making any
+> change.
+
+### And the premise was mine
+
+I filed #1029 claiming *"the API already returns the phase name"*. Verified
+myself before accepting the agent's finding:
+
+```
+SessionSummaryResponse -> ['phase_id', 'phase_display']
+SessionResponse        -> ['phase_id', 'phase_display']
+```
+
+Neither sessions model carries a name. The client gets `phase_display`, produced
+**server-side** by `format_phase()`, whose own docstring says:
+
+> UUID ids render as the first hex segment with a `Phase` prefix... **Callers
+> with workflow context should prefer the real phase name.**
+
+And the dashboard was already right: it renders `phase_display ?? phase_id`. It
+prefers the nicer field; that field never holds a name for this resource.
+
+**My error, and it is the same one twice in one day:** I verified `name` on
+`PhaseExecutionInfo` from `GET /executions/{id}` and generalised it to the
+sessions list — a different resource. Same shape as reading `phase_name` where
+the field is `name`.
+
+Issue corrected and retitled; the real fix is backend (the sessions read model
+needs the name so `phase_display` can carry it), which also puts it on the right
+side of the display-in-the-API convention.
+
+### What this validates
+
+The premise check is the highest-leverage instruction in that workflow. It cost
+$3.54 to NOT write a wrong change, NOT open a PR against a false premise, and to
+correct the issue instead. Shipping the change and discovering it in review would
+have cost more, and shipping it unnoticed would have cost most.
+
+**H29 supported:** an implementation workflow whose first phase can stop the run
+prevents more waste than it consumes. n=1, and the cleanest possible instance —
+the false premise was mine, filed with evidence, and I still had it wrong.
+
+**Still unproven:** the branch-push fix itself. This run never reached the point
+of needing it. The next task with a TRUE premise tests that.
