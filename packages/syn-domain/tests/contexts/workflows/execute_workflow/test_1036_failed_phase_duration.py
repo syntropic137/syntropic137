@@ -36,11 +36,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
-from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
-    ExecutionTodoProjection,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
+)
+from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+    ExecutionTodoProjection,
 )
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
@@ -132,7 +132,9 @@ async def _run_fail_execution_and_serialize(processor: WorkflowExecutionProcesso
         for envelope in aggregate.get_uncommitted_events()
         if type(envelope.event).__name__ == "WorkflowFailedEvent"
     ]
-    assert len(failed_events) == 1, "expected _fail_execution to emit exactly one WorkflowFailedEvent"
+    assert len(failed_events) == 1, (
+        "expected _fail_execution to emit exactly one WorkflowFailedEvent"
+    )
     return WorkflowExecutionProcessor._serialize_event(failed_events[0])
 
 

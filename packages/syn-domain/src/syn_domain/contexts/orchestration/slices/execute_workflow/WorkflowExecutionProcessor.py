@@ -28,6 +28,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.failed_phase_duration import (
+    failed_phase_outcome,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
@@ -475,28 +478,13 @@ class WorkflowExecutionProcessor:
         self._active_envs.clear()
         self._active_cmds.clear()
 
-        # The failed phase never reaches _handle_complete_phase (it raised
-        # instead), so nothing else computes how long it ran. Without this,
-        # every failed phase reports duration_seconds 0.0 downstream -- the
-        # least plausible value available, since a phase that failed via
-        # timeout ran for exactly its budget (#1036).
-        failed_phase_started_at = (
-            self._phase_started_at.get(failed_phase_id) if failed_phase_id else None
+        # A failed phase never reaches _handle_complete_phase, so nothing on the
+        # success path computes its duration (#1036). See failed_phase_duration.
+        failed_phase_duration, failed_result = failed_phase_outcome(
+            failed_phase_id, self._phase_started_at, self._phase_session_ids, str(error)
         )
-        failed_phase_duration = (
-            (datetime.now(UTC) - failed_phase_started_at).total_seconds()
-            if failed_phase_started_at is not None
-            else None
-        )
-        if failed_phase_id is not None and failed_phase_started_at is not None:
-            phase_results.append(
-                PhaseResultBuilder.failure(
-                    phase_id=failed_phase_id,
-                    started_at=failed_phase_started_at,
-                    session_id=self._phase_session_ids.get(failed_phase_id, ""),
-                    error_message=str(error),
-                )
-            )
+        if failed_result is not None:
+            phase_results.append(failed_result)
 
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
