@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H35 | Testing a projection one event at a time tests the projection | **REFUTED, tick 69** — every test fired a single event, so nobody saw that the failure handler ASSIGNED to a field `on_phase_completed` ACCUMULATES. A failed run erased the workflow's history: 10 + 3 = 3. A projection's job IS what happens across events |
 | H34 | Unpinning a clock fixes what pinning it hid | **REFUTED, tick 68** — unpinned, the test relies on two `datetime.now()` calls differing, and they often do not. Same control-variable mistake in the opposite direction, an hour later. A stub that advances per read is deterministic: 20/20 detection vs intermittent |
 | H33 | Pinning a clock in a test is always the safe choice | **REFUTED, tick 67** — pinning `now` made code that reads the clock TWICE indistinguishable from code that reads it once, hiding a split-duration bug I introduced. A control that collapses the difference under test is not a control, it is a blindfold |
 | H32 | Extracted code carries its old test coverage with it | **REFUTED, tick 66b** — mutating the moved success path left the whole suite green: removing the `zero_tokens` warning and dropping the completed result both broke nothing. It was untested in place and nobody could see it. Extraction IS a coverage audit |
@@ -3986,3 +3987,61 @@ than this PR, and it is written into the test file rather than implied away.
 It also declined to re-investigate in its verdict phase, carrying forward what
 the prior phase left unresolved instead of settling it — which is the phase
 separation working as designed rather than as decoration.
+
+---
+
+## Tick 69 — cross-model pass found a regression WORSE than the bug being fixed
+
+Codex reviewed #1043 after the platform's own review had already passed it and
+after I had fixed everything that review found. It found three more. The first
+is a genuine regression I had preserved without noticing.
+
+### The blocker: a failed run erased the workflow's history
+
+`WorkflowPhaseMetricsProjection` aggregates **by workflow_id across executions**.
+`on_phase_completed` ADDS to `duration_seconds`; the new failure handler
+ASSIGNED to the same field.
+
+Reproduced before fixing, exactly as predicted:
+
+```
+after 10s completed run: 10.0
+after a 3s FAILED run:   3.0   (expected 13.0)
+REGRESSION REPRODUCED
+```
+
+**On main the failed run's time was merely omitted. This would have destroyed
+what was already there.** A fix that makes a field wrong in a new direction is
+not a fix, and I shipped it through two reviews without seeing it.
+
+Two writers of one field, ten lines apart, with opposite semantics — and every
+test I had exercised one event at a time, so accumulation was never observed.
+**Testing one event is not testing a projection**: a projection's whole job is
+what happens across events.
+
+### Two more, both real, not yet addressed
+
+- **Duration is measured after teardown.** `_fail_execution` completes sessions
+  and tears down workspaces before computing elapsed time, so container capture
+  and teardown latency count as "how long the phase ran". Worse,
+  `close_phase_workspaces()` clears the session map first, so the failed
+  `PhaseResult` gets `session_id=""` even when the session was known.
+- **`_phase_started_at` is keyed by phase_id alone on a processor shared across
+  concurrent executions.** Two runs of the same workflow phase can read each
+  other's timestamp. This is *the same hazard* the fitness exception's own
+  history records for the leader-id map — the incident is written down in the
+  file I edited, and the new code reproduced its shape.
+
+### What this says about review depth
+
+Three passes, three different failure classes, none redundant:
+
+| pass | found |
+|---|---|
+| my own checking | the split clock read |
+| platform review | a flaky regression test, an unlabelled behaviour change |
+| cross-model | a history-destroying regression, teardown-inflated timing, a concurrency key bug |
+
+**The later passes did not find "more of the same" — each found a class the
+previous could not see.** I have been treating two passes as sufficient. On a
+refactor touching shared state, it evidently is not.
