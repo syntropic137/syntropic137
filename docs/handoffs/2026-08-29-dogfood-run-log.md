@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H26 | An in-platform review workflow can match an external cross-model pass | **SUPPORTED n=1, tick 60** — found the same blocker with stronger evidence, added 3 findings codex missed (incl. a real blind spot in my own fitness gate), invented zero false blockers, and stated 5 things it could not verify. Missed one codex finding. NOT yet run on a PR whose claim holds |
 | H25 | The missing review-workflow definition is a one-off | **REFUTED, tick 58** — `implement-from-plan-v1` is also absent from the repo. BOTH workflows doing the platform's SDLC work were database-only, which is why a 300s analysis budget survived for months unreviewed |
 | H24 | The review workflow's problem is its timeout number | **REFUTED, tick 57** — the number was real (300s vs the 2400s the validated planner uses) but the deeper problem is that the workflow exists ONLY as database state. `Gather Context`/`Deep Analysis` appear nowhere in the repo, so its budget could never be fixed in a PR |
 | H23 | Session logs are exported as intended | **REFUTED, tick 56b** — the per-operation schema exists end to end and nothing fills it: `RecordOperationHandler` is a no-op whose body is a comment, and the one real caller writes a single synthetic totals-only operation per session (#1034). Totals are real; the history they imply is not |
@@ -3368,3 +3369,60 @@ instance now on record, which is what justifies widening it rather than guessing
 `exec-6558bfae74fe` is in phase 2 at $3.59, having cleared `Map what the change
 touches` in ~5 minutes — the phase budget that killed the old workflow twice.
 The 300s wall was real and the 2400s budget is being used, not merely granted.
+
+---
+
+## Tick 60 — the review workflow works, scored against known ground truth
+
+**HYPOTHESIS:** `sdlc-pr-review-v1`, given 2400s where the old one had 300, finds
+what an external cross-model pass found on #1026.
+
+**SUPPORTED, and it went further.** `exec-6558bfae74fe`: **$3.86, 11.5 minutes,
+3/3 phases.** Review posted on #1026.
+
+### Score against ground truth
+
+| known finding | result |
+|---|---|
+| BLOCKER: `WorkspaceCreatedEvent` never persisted, field empty on every run | **found** |
+| records the REQUESTED image, not what the adapter resolved | **missed** |
+| false blockers invented | **zero** |
+
+**Where it beat the external pass.** It called the real production factory
+(`create_workspace_aggregate`) and traced its output rather than reasoning from
+the diff, and found that `repositories.py` lists **eleven**
+`RepositoryAdapter[...]` singletons and no workspace one — a detail codex did not
+surface. It also broke the one hop the diff touches and ran the suite to confirm
+nothing catches it.
+
+**Three findings codex did not make**, including one about my own work:
+
+1. no test, added or pre-existing, would catch the missing persistence hop
+2. a latent projection hazard, flagged at **~60% confidence** rather than asserted
+3. **my fitness gate checks only the FIRST constructor call site**
+
+Finding 3 needed a staleness check before I credited it: true of #1026's branch,
+**already fixed on main**. So a correct finding about the code it was given, and
+it self-labelled "informational, not a blocker" — the right call.
+
+### The section that matters most
+
+It wrote **"What was not verified"** with five entries, including that it never
+ran `qa-ci` or a live HTTP round-trip, and that it could not determine whether
+the missing persistence is deliberate design or a pre-existing bug. **That is
+better discipline than several of my own PRs today**, and it is the section that
+makes the rest of the review believable.
+
+### What this does NOT prove, stated because the day keeps punishing the opposite
+
+One run, one PR, and that PR's defect was structural rather than subtle. It has
+never seen a change whose claim HOLDS, so it is not yet known to avoid
+manufacturing findings on a clean PR. A review that only ever meets broken code
+learns to find breakage. That is the next run, and until it happens the workflow
+is validated for one case, not validated.
+
+### Incidental
+
+`total_duration_seconds: 0.0` on a fully successful run, again. The Mini runs
+v0.27.0; the fix merged to main hours ago is not deployed. Consistent with #969
+rather than a new instance.
