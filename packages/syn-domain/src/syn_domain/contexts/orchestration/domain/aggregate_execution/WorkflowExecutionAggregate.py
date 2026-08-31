@@ -239,6 +239,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             error_type=command.error_type,
             completed_phases=command.completed_phases,
             total_phases=command.total_phases,
+            failed_phase_duration_seconds=command.failed_phase_duration_seconds,
         )
         self._apply(event)
 

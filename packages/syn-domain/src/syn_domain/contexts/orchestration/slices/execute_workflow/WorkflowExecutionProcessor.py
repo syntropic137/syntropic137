@@ -474,6 +474,30 @@ class WorkflowExecutionProcessor:
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
+
+        # The failed phase never reaches _handle_complete_phase (it raised
+        # instead), so nothing else computes how long it ran. Without this,
+        # every failed phase reports duration_seconds 0.0 downstream -- the
+        # least plausible value available, since a phase that failed via
+        # timeout ran for exactly its budget (#1036).
+        failed_phase_started_at = (
+            self._phase_started_at.get(failed_phase_id) if failed_phase_id else None
+        )
+        failed_phase_duration = (
+            (datetime.now(UTC) - failed_phase_started_at).total_seconds()
+            if failed_phase_started_at is not None
+            else None
+        )
+        if failed_phase_id is not None and failed_phase_started_at is not None:
+            phase_results.append(
+                PhaseResultBuilder.failure(
+                    phase_id=failed_phase_id,
+                    started_at=failed_phase_started_at,
+                    session_id=self._phase_session_ids.get(failed_phase_id, ""),
+                    error_message=str(error),
+                )
+            )
+
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
             error=str(error),
@@ -481,6 +505,7 @@ class WorkflowExecutionProcessor:
             failed_phase_id=failed_phase_id,
             completed_phases=len(completed_phase_ids),
             total_phases=len(phases),
+            failed_phase_duration_seconds=failed_phase_duration,
         )
         try:
             aggregate.fail_execution(fail_cmd)
