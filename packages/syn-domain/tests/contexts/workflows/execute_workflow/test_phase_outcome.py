@@ -171,7 +171,7 @@ def test_a_failed_phase_is_counted_in_the_execution_metrics() -> None:
     )
 
     succeeded = _outcome(artifact_ids=["art-1"], auth=(1, 1, 0, 0)).result
-    failed = failed_phase_result("implement", _START, "sess-2", "timed out")
+    failed = failed_phase_result("implement", _START, "sess-2", "timed out", ended_at=_START)
     assert failed is not None
 
     metrics = ExecutionMetrics.from_results([succeeded, failed])
@@ -246,3 +246,36 @@ async def test_a_failed_run_adds_to_workflow_duration_rather_than_replacing_it()
 
     assert metrics["implement"]["duration_seconds"] == 13.0
     assert metrics["implement"]["status"] == "failed"
+
+
+def test_the_failed_phase_duration_matches_its_own_completed_at() -> None:
+    """One clock reading on the failure path, not two.
+
+    `failed_phase_outcome` computed the duration and then `PhaseResultBuilder`
+    independently read the clock for `completed_at`, so the two disagreed by
+    however long the intervening work took. This is the same defect already
+    fixed on the success path; a reader comparing a failed phase's timestamps
+    against its recorded duration would find them inconsistent.
+
+    Passing an explicit instant makes a second read unmissable: a builder that
+    calls the clock itself stamps wall-now, not the instant supplied here, so
+    the gap is hours rather than the microseconds a real clock would hide.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
+        failed_phase_outcome,
+    )
+
+    ended = _START + timedelta(seconds=5)
+    duration, result = failed_phase_outcome(
+        "implement",
+        {"implement": _START},
+        {"implement": "sess-2"},
+        "timed out",
+        now=ended,
+    )
+
+    assert result is not None
+    assert duration is not None
+    assert (result.completed_at - result.started_at).total_seconds() == duration
+    assert duration == 5.0
+    assert result.completed_at == ended

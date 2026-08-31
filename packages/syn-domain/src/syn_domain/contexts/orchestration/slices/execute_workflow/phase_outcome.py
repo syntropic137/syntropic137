@@ -67,6 +67,7 @@ def failed_phase_outcome(
     started_at_by_phase: Mapping[str, DateTime],
     session_id_by_phase: Mapping[str, str],
     error_message: str,
+    now: DateTime | None = None,
 ) -> tuple[float | None, PhaseResult | None]:
     """The duration and result for a phase that failed.
 
@@ -75,13 +76,17 @@ def failed_phase_outcome(
     did it run" and "what result does it produce" share a start timestamp.
     """
     started_at = started_at_by_phase.get(phase_id) if phase_id else None
+    # ONE clock reading. The duration and the result's completed_at describe the
+    # same instant, so reading twice made them disagree.
+    ended_at = now or datetime.now(UTC)
     return (
-        failed_phase_elapsed_seconds(started_at),
+        failed_phase_elapsed_seconds(started_at, now=ended_at),
         failed_phase_result(
             phase_id,
             started_at,
             session_id_by_phase.get(phase_id or "", ""),
             error_message,
+            ended_at=ended_at,
         ),
     )
 
@@ -91,6 +96,7 @@ def failed_phase_result(
     started_at: DateTime | None,
     session_id: str,
     error_message: str,
+    ended_at: DateTime,
 ) -> PhaseResult | None:
     """The `PhaseResult` for a phase that failed, or None if it never started.
 
@@ -109,6 +115,7 @@ def failed_phase_result(
         started_at=started_at,
         session_id=session_id,
         error_message=error_message,
+        completed_at=ended_at,
     )
 
 
