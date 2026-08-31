@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H30 | An exemption I write in the same breath as its guard is held to that guard | **REFUTED, tick 64** — I asserted that FIELD-level exceptions must name a field in the intersection, then added a MODULE-level exemption table in the same commit with no such check. The costs.py excuse hid four live dropped fields (#1041) |
 | H29 | An implementation phase empowered to stop on a false premise prevents more waste than it costs | **SUPPORTED n=1, tick 63** — refused #1029 for $3.54 having found my premise false, and it WAS false: the sessions endpoints carry no phase name, only a server-truncated `phase_display`. No wrong PR, no wrong review, issue corrected instead |
 | H28 | Acting on a review's first findings is acting on the review | **REFUTED, tick 62** — I read 55 of 197 lines, fixed three real things, and skipped a time bomb in code I had just shipped: every SDLC prompt read an artifact path marked "kept for one release" |
 | H27 | A multi-phase workflow shares a filesystem between phases | **REFUTED, tick 61** — every phase gets a fresh workspace and its own clone; only artifacts cross. Both workflows I wrote assumed otherwise: implement was told not to push, so verify would have checked the default branch believing it checked the change |
@@ -3664,3 +3665,61 @@ the false premise was mine, filed with evidence, and I still had it wrong.
 
 **Still unproven:** the branch-push fix itself. This run never reached the point
 of needing it. The next task with a TRUE premise tests that.
+
+---
+
+## Tick 64 — my exemption was hiding four live instances of the bug it exempted
+
+Dispatched `exec-9a1c0a0b8940` on **#1036** — a TRUE premise this time, so it
+should exercise the branch-push fix the #1029 run never reached. Running.
+
+Meanwhile, codex reviewed **#1040**, the gate widening. Two findings, and the
+second is the worst self-inflicted result of the day.
+
+### The excuse hid the bug
+
+I excused `costs.py` from the gate with *"Lane 2 cost read models are enriched,
+not copied field-for-field"*. That reasoning is wrong, and it was concealing four
+live instances of exactly the defect the gate exists to catch:
+
+```
+SessionCost & SessionCostResponse shared: 23
+DROPPED: ['compute_cost_usd', 'cost_by_tool_tokens', 'tokens_by_tool', 'workspace_id']
+```
+
+Filed **#1041**.
+
+**And my first verification said codex was WRONG.** I checked the four against
+`SessionCostData`, the intermediate DTO, where they genuinely do not exist,
+and concluded there was nothing there. The real source-to-response hop reproduces
+all four.
+
+**Fourth wrong-field measurement today, and the first with a consequence.** The
+others produced false alarms I caught. This one nearly made me dismiss a correct
+finding and keep an exemption sitting on four live bugs.
+
+### The irony is exact
+
+In the same commit that added the module-level `_NO_PAIR` table, I wrote an
+assertion that a FIELD-level exception must name a field in the intersection —
+precisely so that an exception could not except nothing. **I did not apply that
+standard to the table I was adding.** I built the guard for one table and not the
+other, in one sitting.
+
+`costs.py` is now gated rather than excused, with the four tracked as per-field
+exceptions citing #1041. A module-level excuse hid four bugs; a field-level
+exception naming an issue cannot.
+
+### Stated, not implied
+
+Codex's other finding — the drift guard is evadable — is only partly closed. Path
+scoping now matches by prefix and recurses, so a nested route under an unwatched
+path is caught. But a new file inside an already-watched scope mapping a
+DIFFERENT read model is still invisible, and a route that receives a read model
+from a service rather than importing it evades entirely, because consumption is
+detected textually.
+
+Those are now written into the file as KNOWN HOLES rather than left to be
+discovered. **The gate is a floor, not a proof**, and saying so is the difference
+between a known limit and a false sense of coverage — which is the whole subject
+of this tick.
