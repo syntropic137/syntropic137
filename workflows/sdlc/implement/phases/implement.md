@@ -6,6 +6,14 @@ The bootstrap report is at `artifacts/input/bootstrap.md`. **If it says the task
 premise is false, stop. Change nothing** and report that. Do not try to salvage
 the task by reinterpreting it.
 
+> **Where to find that input.** The durable location is the directory
+> `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
+> `artifacts/output/`. A flat `artifacts/input/<phase-id>.md` alias also exists
+> today, but `ArtifactCollector` marks it "kept for one release (issue #988)", so
+> a prompt that reads only the flat path will silently receive nothing once it
+> goes. Look in the directory first and fall back to the flat file. If neither
+> exists, stop and say so rather than proceeding on no input.
+
 ## Scope
 
 Make the change the task describes, and the whole of it. If the task names two

@@ -5,6 +5,14 @@ $ARGUMENTS
 The previous phase's map is at `artifacts/input/investigate.md`. Read it first,
 and take the base and head SHAs from it.
 
+> **Where to find that input.** The durable location is the directory
+> `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
+> `artifacts/output/`. A flat `artifacts/input/<phase-id>.md` alias also exists
+> today, but `ArtifactCollector` marks it "kept for one release (issue #988)", so
+> a prompt that reads only the flat path will silently receive nothing once it
+> goes. Look in the directory first and fall back to the flat file. If neither
+> exists, stop and say so rather than proceeding on no input.
+
 **You are in a fresh workspace on the default branch** - the PR's code is not
 checked out here. Fetch and use the exact SHAs the previous phase recorded, and
 confirm what you are looking at:

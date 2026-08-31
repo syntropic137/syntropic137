@@ -5,6 +5,14 @@ $ARGUMENTS
 The implementation report is at `artifacts/input/implement.md`. Your job is to
 find out whether that change is actually correct, not to confirm that it is.
 
+> **Where to find that input.** The durable location is the directory
+> `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
+> `artifacts/output/`. A flat `artifacts/input/<phase-id>.md` alias also exists
+> today, but `ArtifactCollector` marks it "kept for one release (issue #988)", so
+> a prompt that reads only the flat path will silently receive nothing once it
+> goes. Look in the directory first and fall back to the flat file. If neither
+> exists, stop and say so rather than proceeding on no input.
+
 This phase exists because a phase that makes a change and then checks it will
 shortchange the checking: the change feels like the deliverable, and the check
 feels like paperwork. You did not write this code. Treat it as suspect.

@@ -4,6 +4,14 @@ $ARGUMENTS
 
 The verification report is at `artifacts/input/verify.md`.
 
+> **Where to find that input.** The durable location is the directory
+> `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
+> `artifacts/output/`. A flat `artifacts/input/<phase-id>.md` alias also exists
+> today, but `ArtifactCollector` marks it "kept for one release (issue #988)", so
+> a prompt that reads only the flat path will silently receive nothing once it
+> goes. Look in the directory first and fall back to the flat file. If neither
+> exists, stop and say so rather than proceeding on no input.
+
 **If verification failed, or found a defect, do not open a PR.** Report what
 happened and stop. A PR that carries a known defect costs a reviewer more than an
 honest failure does.
