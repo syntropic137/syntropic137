@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from syn_api._wiring import (
     _build_agent_command,
     _build_claude_command,
@@ -11,6 +13,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
 )
+
+# Without this the whole module collects ZERO under CI's `pytest -m unit`, and
+# the gate goes green having run none of it - including the argv pin that
+# guards the #964 --tools change.
+pytestmark = pytest.mark.unit
 
 
 def _phase(
@@ -131,6 +138,25 @@ def test_claude_command_argv_is_pinned() -> None:
     ]
 
     assert _build_claude_command(phase, "do the thing") == expected
+
+
+def test_the_prompt_must_precede_the_variadic_tools_flag() -> None:
+    """`--tools` is variadic and GREEDY: it swallows any positional after it.
+
+    Verified against claude 2.1.251 - `claude -p --tools Bash,Read "say ok"`
+    fails with "Input must be provided either through stdin or as a prompt
+    argument", because the prompt was consumed as a tool name.
+
+    The full-argv pin above would also catch a reordering, but only as an
+    opaque list diff. This names the hazard, so a future edit that moves the
+    flag earlier fails with the reason rather than with a puzzle.
+    """
+    argv = _build_claude_command(_phase("claude", model="sonnet"), "do the thing")
+
+    assert argv.index("-p") < argv.index("--tools"), (
+        "--tools is greedy; the prompt must be passed before it or it is eaten"
+    )
+    assert argv[argv.index("-p") + 1] == "do the thing"
 
 
 def test_the_dispatched_prompt_carries_the_tool_grant() -> None:
