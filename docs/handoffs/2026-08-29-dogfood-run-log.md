@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H32 | Extracted code carries its old test coverage with it | **REFUTED, tick 66b** — mutating the moved success path left the whole suite green: removing the `zero_tokens` warning and dropping the completed result both broke nothing. It was untested in place and nobody could see it. Extraction IS a coverage audit |
 | H31 | A workspace agent can run `just qa-ci` to verify its own work | **REFUTED, tick 65** — `/tmp` is noexec under the security profile, so every `just` shebang recipe fails identically. Not the image: a shebang runs fine under plain `docker run`. #1042 |
 | H30 | An exemption I write in the same breath as its guard is held to that guard | **REFUTED, tick 64** — I asserted that FIELD-level exceptions must name a field in the intersection, then added a MODULE-level exemption table in the same commit with no such check. The costs.py excuse hid four live dropped fields (#1041) |
 | H29 | An implementation phase empowered to stop on a false premise prevents more waste than it costs | **SUPPORTED n=1, tick 63** — refused #1029 for $3.54 having found my premise false, and it WAS false: the sessions endpoints carry no phase name, only a server-truncated `phase_display`. No wrong PR, no wrong review, issue corrected instead |
@@ -3844,3 +3845,54 @@ The friction is real — a verified fix is sitting unpushed — but every stop w
 gate working, not a gate failing. That is the opposite of the day's recurring
 finding, and worth recording as such: **today's other lesson was gates that could
 not fail; this is a gate that could, and did, against me.**
+
+### Tick 66b — extracted, and the file ended up smaller than it started
+
+The owner's call on the ceiling: *"lol then extract."* Correct, and I had framed
+the choice too narrowly — I offered "raise the pin or defer to #934" when the
+third option was sitting in the exception's own text.
+
+That text names what belongs elsewhere: `run`, `_handle_run_agent`,
+`_handle_complete_phase`. I had extracted only the NEW failure-path code and
+then reported being 9 lines short, without seriously attempting the extraction
+the exception itself points at.
+
+| | lines |
+|---|---|
+| main | 777 |
+| with the fix, inline | 802 |
+| after two small extractions | 787 |
+| **after extracting the success half too** | **753** |
+
+`_handle_complete_phase`'s token reconciliation, health warnings, `PhaseResult`
+and `CompletePhaseCommand` now sit in `phase_outcome.py` beside the failure path,
+because they are **one concern seen twice**: a phase that finished and a phase
+that died each report duration, tokens and a result. **Keeping them apart is
+exactly what let the failure half go uncomputed until #1036** — the bug and the
+structure that hid it are the same fact.
+
+Tightened the pin **778 -> 753** rather than leaving it slack. Slack banks room
+for silent regrowth, which is how a ceiling becomes permanent.
+
+### The extraction found untested code
+
+Mutating the moved success path left the entire suite green: deleting the
+`zero_tokens` warning, and dropping the completed result from the results list,
+**both broke nothing**.
+
+Not a regression from moving it — it was untested inside the processor too. But
+a helper is testable where the private middle of a 900-line method was not, so
+the coverage is owed the moment it becomes payable. 8 tests, 4 mutations killed.
+
+**The general form, worth keeping:** extraction is a coverage audit. Code that
+was untestable-in-place becomes testable, and whatever survives mutation
+afterwards was never covered — you just could not see it. Every large extraction
+should be followed by mutating the moved code, because that is the cheapest
+moment to find out.
+
+### PR #1043, and what produced it
+
+A workflow run wrote the fix and found a projection I had missed. It could not
+verify itself (#1042). It correctly refused to open a PR on unverified work. The
+fitness gate then refused ME until the debt went down instead of up. Three gates,
+three real catches, one merged-quality change.
