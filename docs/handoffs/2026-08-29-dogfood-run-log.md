@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H23 | Session logs are exported as intended | **REFUTED, tick 56b** — the per-operation schema exists end to end and nothing fills it: `RecordOperationHandler` is a no-op whose body is a comment, and the one real caller writes a single synthetic totals-only operation per session (#1034). Totals are real; the history they imply is not |
 | H22 | The SDLC review half is covered, because review workflows are installed | **REFUTED, tick 56** — `PR Review` and `Code Review` are both installed and have ZERO executions across all 100 runs on the Mini. Installed has been standing in for works |
 | H21 | A blocker found in one run is a blocker on dispatching work generally | **REFUTED, tick 55** — #1024 rejects pushes touching `.github/workflows` only. I stopped dispatching entirely for four hours and worked locally instead. Three runs went out in parallel the moment the blocker was read precisely |
 | H20 | A field wired through event, projection and API is wired end to end | **REFUTED, tick 54** — `WorkspaceCreatedEvent` is never persisted (`git grep WorkspaceCreated` outside syn-domain: 0 hits), so the field would be empty on every run. Schema tests and round-trip tests both passed; neither touched the persistence hop |
@@ -3035,3 +3036,59 @@ with `Missing required inputs: --input pr_number=<value> — Pull request number
 Named both missing inputs and their descriptions. That is the failure mode
 #1023 lacks — a refusal that says what to do — and it is worth pointing at when
 that issue gets designed.
+
+### Tick 56b — the parallel runs land: one delivered, one timed out, and the answer to the SeshMagic question
+
+**Scored by artifact, not status, per the skill written this tick.**
+
+| run | status | outcome |
+|---|---|---|
+| `exec-9dcfe2c87357` session export | completed, >=$5.76 | **PR #1033 + a 28KB report**, real |
+| `exec-e8cb453a850d` #1006 | **failed**, exit_code=124 | timed out in Implement after 31 min |
+| `exec-1205971c9f13` #1026 rework | still running | - |
+
+**The timeout is worth noting for #1023.** This failure was reported CORRECTLY
+as `failed` with the exit code. So the completed-when-broken problem is narrower
+than I framed it: the platform reports harness failures accurately; what it
+cannot represent is an agent that ran to completion and reported failure in
+prose. That sharpens #1023 rather than weakening it.
+
+### What the session investigation found
+
+It answers the owner's question, and the answer is **no, not fully**.
+
+The agent traced Command → Event → Projection → Service → HTTP field by field,
+and then discovered something better: **it was itself running inside a live
+SeshMagic-enabled workspace**, so it verified the join contract against its own
+container rather than inferring it:
+
+```
+AGENTIC_SESSION_STORE_PROVIDER=seshmagic
+AGENTIC_SESSION_STORE_PARTITION=exec-9dcfe2c87357/306ac3b7-...
+```
+
+**The headline gap, which I verified myself before filing (#1034):**
+`RecordOperationHandler.handle()` is a VSA-compliance wrapper whose entire body
+is a comment reading *"When fully integrated, this handler would:"*. The only
+real caller writes **one synthetic totals-only operation per session**. So the
+schema for per-operation history exists end to end and nothing fills it. Tokens
+and cost are real; the operation stream they imply is not.
+
+That matters directly for what is queued: comparing two workflow runs beyond
+their totals needs per-operation traces, and #792's parent/child session linking
+needs a real operation stream to show nesting against.
+
+Ten more gaps itemised in the report, each with evidence, including a dead
+`workspace_path` with no writer anywhere, and tool I/O previews truncated at 500
+chars with a silent `{"raw": ...}` fallback so a caller cannot tell truncated
+JSON from small JSON.
+
+### The part worth copying
+
+The agent **disclosed a process deviation unprompted**: it had made one `Agent`
+tool call violating the phase's no-subagents rule, noticed, stopped, and said so
+- noting the findings were independently corroborated by its own reading. It
+also correctly resolved a conflict between its embedded task ("open a PR") and
+the phase rule ("PR is the next phase"), and explained which took precedence.
+
+That is better reporting discipline than several of my own PRs today.
