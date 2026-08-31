@@ -2,7 +2,20 @@
 
 $ARGUMENTS
 
-The previous phase's map is at `artifacts/input/investigate.md`. Read it first.
+The previous phase's map is at `artifacts/input/investigate.md`. Read it first,
+and take the base and head SHAs from it.
+
+**You are in a fresh workspace on the default branch** - the PR's code is not
+checked out here. Fetch and use the exact SHAs the previous phase recorded, and
+confirm what you are looking at:
+
+```
+git fetch origin
+git rev-parse origin/main origin/<pr-branch>    # must match the recorded SHAs
+```
+
+If they differ, the branch moved since the previous phase; say so rather than
+reviewing a different commit than the one that was mapped.
 
 Your job is to try to make the PR's central claim FALSE, and to report honestly
 whether you succeeded. A review that sets out to confirm a change finds it

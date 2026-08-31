@@ -37,7 +37,25 @@ Every factual claim needs a command and its real output, pasted. Not a summary o
 what you saw. If you write that something does not exist, show the search that
 proves absence rather than reasoning that it must be so.
 
-Read the diff with `git diff origin/main...HEAD`, but do not stop there - most of
-this phase is reading code the diff does not contain.
+**Resolve the refs before you read anything.** This workspace is a fresh clone
+checked out on the DEFAULT branch, not on the PR. `git diff origin/main...HEAD`
+would compare main against itself and show you nothing, and an empty diff read as
+"a small change" is the worst possible start.
+
+So name the refs explicitly:
+
+```
+git fetch origin
+git rev-parse origin/main origin/<pr-branch>     # record both SHAs
+git diff origin/main...origin/<pr-branch>
+```
+
+If the diff is empty, stop and say so - that means the refs are wrong, not that
+the PR is trivial. **Record both SHAs in your output**: the next phase gets its
+own fresh clone and must read exactly the same code, and a review of two
+different commits is not a review.
+
+Do not stop at the diff. Most of this phase is reading code the diff does not
+contain.
 
 You are read-only. Do not edit files, do not commit, do not push.

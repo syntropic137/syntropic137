@@ -29,10 +29,22 @@ change, not the object you just edited.
 A fixture value must be one that could not have arisen without your change. A
 default asserted in its default direction proves nothing.
 
-## Commit
+## Commit AND push the branch
 
-Commit locally on a new branch. Do not push, do not open a PR - later phases do
-that. Never force push, never rebase.
+Commit on a new branch, then **push that branch to origin**. Do not open a PR -
+that is the last phase's job.
+
+Pushing is not optional. **Every phase runs in its own fresh workspace with its
+own clone**, so nothing on this filesystem survives into the next phase; only
+your artifact does. A branch left local is destroyed when this phase ends, the
+verify phase would check the default branch while believing it checked your work,
+and the final phase would have nothing to open a PR from.
+
+Never force push, never rebase.
+
+**Record in your artifact, exactly:** the branch name and the full commit SHA you
+pushed. The next phase checks out that SHA by name. If it is missing or wrong,
+verification silently runs against the wrong code.
 
 ## Output
 

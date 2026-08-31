@@ -10,8 +10,15 @@ honest failure does.
 
 ## If verification passed
 
-Push the branch and open a PR against `main`. Do not merge it. Never force push,
-never rebase.
+The implement phase already pushed the branch; this workspace is a fresh clone
+that does not contain it. Open a PR from the **existing remote branch** named in
+the artifacts - you do not need to push anything.
+
+Confirm first that the branch exists on origin and that its head SHA matches the
+one verification reported. If they differ, something pushed over it; stop and say
+so rather than opening a PR for code nobody verified.
+
+Do not merge. Never force push, never rebase.
 
 The description must contain:
 

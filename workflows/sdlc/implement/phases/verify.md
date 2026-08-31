@@ -9,6 +9,22 @@ This phase exists because a phase that makes a change and then checks it will
 shortchange the checking: the change feels like the deliverable, and the check
 feels like paperwork. You did not write this code. Treat it as suspect.
 
+## First: check out the code you are verifying
+
+**You are in a fresh workspace with a fresh clone of the default branch.** The
+implementation is not here yet. Before anything else:
+
+```
+git fetch origin <branch-from-the-artifact>
+git checkout <the-exact-commit-SHA-from-the-artifact>
+git rev-parse HEAD          # must equal that SHA
+```
+
+Paste that `rev-parse` output. If it does not match, stop and report it: every
+result after this point would describe the wrong code, and a green run against
+the wrong tree is worse than a red one because it certifies nothing while looking
+like proof.
+
 ## Run the gates
 
 Run `just qa-ci`. Paste its final lines. If it is not green, that is the finding

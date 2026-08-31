@@ -4,12 +4,16 @@ $ARGUMENTS
 
 Two jobs, and the second matters more.
 
-## 1. Make the toolchain work
+## 1. Find out what the toolchain needs
 
-Get the repository to the point where you can run its checks: submodules
-initialised, dependencies installed, `just` available. Record what you had to do
-and what was already present. If something in the image was missing, say which -
-that is a finding about the workspace, not a nuisance.
+**Every phase runs in its own fresh workspace, so anything you install here is
+gone when this phase ends.** This phase does not prepare anything for the phases
+after it; it finds out what they will each have to do, and writes it down.
+
+Determine what the repository needs before its checks can run - submodules,
+dependencies, `just` - and record the exact commands, so the later phases can
+repeat them rather than rediscover them. If something is missing from the image
+itself, say which: that is a finding about the workspace worth reporting.
 
 Do not start the change in this phase.
 
