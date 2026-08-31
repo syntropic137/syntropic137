@@ -96,3 +96,28 @@ def test_a_phase_that_never_started_has_no_duration_rather_than_zero() -> None:
     """None and 0.0 differ: 0.0 claims it began and took no time."""
     assert failed_phase_elapsed_seconds(None) is None
     assert failed_phase_elapsed_seconds(_START, now=_END) == 407.0
+
+
+def test_one_phase_reports_one_duration() -> None:
+    """The command and the returned value must be the SAME measurement.
+
+    Deliberately does NOT pin `now`. Every other test here passes a fixed
+    timestamp, and that is exactly what hid this: with `now` pinned, code that
+    reads the clock twice is indistinguishable from code that reads it once.
+    Unpinned, two `datetime.now()` calls differ by microseconds and this fails.
+
+    It matters because the two values go to different places - the command to
+    the aggregate and its event, the returned duration to observability - so a
+    split reading puts two different durations on one phase.
+    """
+    outcome = completed_phase(
+        execution_id="exec-1",
+        workflow_id="wf-1",
+        phase_id="implement",
+        session_id="sess-1",
+        started_at=datetime.now(UTC) - timedelta(seconds=5),
+        artifact_ids=["art-1"],
+        auth_tokens=(1, 1, 0, 0),
+    )
+
+    assert outcome.duration_seconds == outcome.command.duration_seconds

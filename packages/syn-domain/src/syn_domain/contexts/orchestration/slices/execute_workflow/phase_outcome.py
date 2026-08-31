@@ -152,6 +152,13 @@ def completed_phase(
     inp, out, cache_creation, cache_read = auth_tokens or (0, 0, 0, 0)
     total = inp + out + cache_creation + cache_read
 
+    # ONE clock reading, not one per use. The command's duration goes to the
+    # aggregate and the event; the returned duration goes to observability. Two
+    # `datetime.now()` calls would put two different numbers on one phase - the
+    # exact class of split-truth this module exists to remove.
+    ended_at = now or datetime.now(UTC)
+    elapsed = (ended_at - started_at).total_seconds()
+
     # Health signals, not errors: a phase can legitimately produce neither, and
     # the dashboard shows them so a silently empty phase is visible as such.
     warnings: list[str] = []
@@ -184,9 +191,9 @@ def completed_phase(
             cache_creation_tokens=cache_creation,
             cache_read_tokens=cache_read,
             total_tokens=total,
-            duration_seconds=((now or datetime.now(UTC)) - started_at).total_seconds(),
+            duration_seconds=elapsed,
         ),
-        duration_seconds=((now or datetime.now(UTC)) - started_at).total_seconds(),
+        duration_seconds=elapsed,
         input_tokens=inp,
         output_tokens=out,
         cache_creation_tokens=cache_creation,
