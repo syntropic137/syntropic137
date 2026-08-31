@@ -3793,3 +3793,54 @@ the chain broke, and I introduced one of them.
 (no Playwright libs), #1038 (tmpfs home full, breaks `uv sync`), #1042 (noexec
 /tmp, breaks `just`). The pattern is that in-workspace QA is not one gap but a
 class, and each was invisible until an agent hit it.
+
+---
+
+## Tick 66 — salvaged the agent's work, and hit a gate that correctly refuses me
+
+Picked up `origin/fix/1036-failed-phase-duration` — the branch the #1036 run
+pushed but could not verify, because `/tmp` is noexec and `just qa-ci` cannot run
+in a workspace (#1042). Did the verification here, where it can.
+
+### The agent's work is sound
+
+A failed phase never reaches `_handle_complete_phase`, so nothing on the success
+path computes its duration and it stays at the 0.0 `PhaseDetail.running()` seeded.
+The fix threads elapsed time through `FailExecutionCommand` and
+`WorkflowFailedEvent` into **both** consuming projections — it found
+`workflow_phase_metrics`, which I had not considered when filing the issue — and
+rolls it into the execution total.
+
+**Verified rather than trusted.** Both mutations killed, each confirmed applied:
+reverting the detail projection fails 2 of 3 tests; breaking the phase-metrics
+key fails 1. Also fixed the import sorting `just` could not check for it.
+
+### Then the fitness gate refused me, correctly
+
+The change took `WorkflowExecutionProcessor` from 777 to **802** lines. Its
+fitness exception pins **778**, with a long documented history saying each raise
+needs its own justification and that **#934 owns the real split**.
+
+I extracted twice — a `failed_phase_duration` module, then collapsed three
+call-site lookups into one helper call — reaching **787**. The last 9 lines
+require extracting unrelated code inside a bug-fix PR, which is exactly what that
+exception's history argues against.
+
+**So the pre-push hook blocks me, and it is right to.** I am not raising a
+documented debt ceiling unilaterally. Paged the owner with the decision: raise the
+pin to 787 with a reason, or fold this into #934. Work sits at `1ecb7aab` locally.
+
+### What this tick actually demonstrates
+
+Three separate mechanisms did their job in sequence, and each caught something
+the previous one could not:
+
+1. **the workflow's open_pr phase** refused to open a PR on unverified work
+2. **`just qa-ci` run locally** caught lint the workspace could not check
+3. **the fitness exception** refused a change that grows an already-over-budget
+   file, and its own recorded history told me why not to override it
+
+The friction is real — a verified fix is sitting unpushed — but every stop was a
+gate working, not a gate failing. That is the opposite of the day's recurring
+finding, and worth recording as such: **today's other lesson was gates that could
+not fail; this is a gate that could, and did, against me.**
