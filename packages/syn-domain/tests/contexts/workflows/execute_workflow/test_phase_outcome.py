@@ -209,3 +209,40 @@ def test_a_phase_that_started_and_died_produces_a_result_to_count() -> None:
     # A phase with no recorded start yields neither, rather than a zero-duration
     # result that would enter the metrics as a phase that ran instantly.
     assert failed_phase_outcome("implement", {}, {}, "timed out") == (None, None)
+
+
+async def test_a_failed_run_adds_to_workflow_duration_rather_than_replacing_it() -> None:
+    """The metrics projection aggregates by workflow_id, across executions.
+
+    `on_phase_completed` adds to `duration_seconds`; the failure handler must
+    too. Assigning made a failed run erase the workflow's accumulated history -
+    ten seconds of completed work then a three-second failure reported three,
+    which is worse than the omission #1036 set out to fix.
+
+    The fixture values discriminate: 10 and 3 share no factor with each other or
+    with 0, so 13 cannot arise from assignment, from dropping either term, or
+    from a default.
+    """
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_domain.contexts.orchestration.slices.workflow_phase_metrics.projection import (
+        WorkflowPhaseMetricsProjection,
+    )
+
+    projection = WorkflowPhaseMetricsProjection(InMemoryProjectionStore())
+    phase = {"workflow_id": "wf-1", "phase_id": "implement"}
+
+    await projection.on_phase_started({**phase, "execution_id": "e1"})
+    await projection.on_phase_completed({**phase, "execution_id": "e1", "duration_seconds": 10.0})
+    await projection.on_phase_started({**phase, "execution_id": "e2"})
+    await projection.on_workflow_failed(
+        {
+            "workflow_id": "wf-1",
+            "failed_phase_id": "implement",
+            "failed_phase_duration_seconds": 3.0,
+        }
+    )
+
+    metrics = await projection.get_phase_metrics("wf-1")
+
+    assert metrics["implement"]["duration_seconds"] == 13.0
+    assert metrics["implement"]["status"] == "failed"
