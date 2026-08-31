@@ -24,6 +24,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutionMetrics,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    WorkflowExecutionResult,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -199,4 +206,33 @@ def completed_phase(
         cache_creation_tokens=cache_creation,
         cache_read_tokens=cache_read,
         total_tokens=total,
+    )
+
+
+def failed_execution_result(
+    *,
+    workflow_id: str,
+    execution_id: str,
+    started_at: DateTime,
+    phase_results: list[PhaseResult],
+    artifact_ids: list[str],
+    error_message: str,
+    now: DateTime | None = None,
+) -> WorkflowExecutionResult:
+    """Assemble the result an execution returns when it dies.
+
+    Pure assembly, so it lives beside `completed_phase` rather than in the
+    processor: the two are the same statement made on opposite paths, and the
+    failure half is the one that historically drifted.
+    """
+    return WorkflowExecutionResult(
+        workflow_id=workflow_id,
+        execution_id=execution_id,
+        status="failed",
+        started_at=started_at,
+        completed_at=now or datetime.now(UTC),
+        phase_results=phase_results,
+        artifact_ids=artifact_ids,
+        metrics=ExecutionMetrics.from_results(phase_results),
+        error_message=error_message,
     )

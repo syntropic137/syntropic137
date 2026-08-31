@@ -51,6 +51,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_im
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
     completed_phase,
+    failed_execution_result,
     failed_phase_outcome,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
@@ -395,11 +396,7 @@ class WorkflowExecutionProcessor:
         reason = cancel_reason or "Cancelled by user"
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_cancelled(reason=reason)
-        self._session_managers.clear()
         await self._close_phase_workspace_cms(context="cancel")
-        self._active_workspaces.clear()
-        self._active_envs.clear()
-        self._active_cmds.clear()
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -467,21 +464,18 @@ class WorkflowExecutionProcessor:
         it always belongs to THIS execution, even with concurrent runs
         sharing the processor instance.
         """
-        for _pid, mgr in list(self._session_managers.items()):
-            await mgr.complete_failure(error_message=str(error))
-        self._session_managers.clear()
-        await self._close_phase_workspace_cms(context="failure")
-        self._active_workspaces.clear()
-        self._active_envs.clear()
-        self._active_cmds.clear()
-
-        # A failed phase never reaches _handle_complete_phase, so nothing on the
-        # success path computes its duration (#1036). See failed_phase_duration.
+        # BEFORE any await: teardown clears the session-id map, so reading it
+        # afterwards timed the phase to the end of cleanup and lost the
+        # session_id entirely (#1036).
         failed_phase_duration, failed_result = failed_phase_outcome(
             failed_phase_id, self._phase_started_at, self._phase_session_ids, str(error)
         )
         if failed_result is not None:
             phase_results.append(failed_result)
+
+        for _pid, mgr in list(self._session_managers.items()):
+            await mgr.complete_failure(error_message=str(error))
+        await self._close_phase_workspace_cms(context="failure")
 
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
@@ -497,15 +491,12 @@ class WorkflowExecutionProcessor:
             await self._save_and_sync(aggregate)
         except Exception as save_err:
             logger.error("Failed to save failure event: %s", save_err)
-        return WorkflowExecutionResult(
+        return failed_execution_result(
             workflow_id=workflow_id,
             execution_id=execution_id,
-            status="failed",
             started_at=started_at,
-            completed_at=datetime.now(UTC),
             phase_results=phase_results,
             artifact_ids=all_artifact_ids,
-            metrics=ExecutionMetrics.from_results(phase_results),
             error_message=str(error),
         )
 
@@ -522,6 +513,12 @@ class WorkflowExecutionProcessor:
             writer=self._observability_writer,
             ledger=self._import_ledger,
         )
+        # Both terminal paths (cancel, failure) cleared exactly this set after
+        # closing workspaces; they differ only in how they complete sessions.
+        self._session_managers.clear()
+        self._active_workspaces.clear()
+        self._active_envs.clear()
+        self._active_cmds.clear()
 
     async def _handle_provision(
         self,
