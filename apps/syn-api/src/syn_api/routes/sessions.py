@@ -555,6 +555,8 @@ async def get_session(
             workflow_name=wf_name,
             execution_id=session.execution_id,
             phase_id=session.phase_id,
+            parent_session_id=session.parent_session_id,
+            root_session_id=session.root_session_id,
             agent_type=session.agent_type,
             status=session.status,
             repos=list(session.repos),
