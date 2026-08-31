@@ -20,6 +20,7 @@ the bottom is the part worth reading later.
 | H7 | A 100% mechanical citation score indicates a correct plan | **REFUTED, tick 26** — a plan scoring RESOLVES 51/51 and EXACT 51/51 was not executable. Its central claim cites a real file at real lines and the adjacent code contradicts it |
 | H9 | Cross-model review's real cost is its own $0.55, not more | **REFUTED, tick 28b** — the review phase triggers the revision work. v3 revise: 6.43M cache-read, 71k out, $4.58. Same task without a real codex review: 0.38M, 13.8k, $0.23 |
 | H10 | My tests find the bug I am looking for | **REFUTED across ticks 30-35** — every clever test I wrote measured the side of the boundary I was already looking at. A reviewer supplied the other side four times in six ticks |
+| H24 | The review workflow's problem is its timeout number | **REFUTED, tick 57** — the number was real (300s vs the 2400s the validated planner uses) but the deeper problem is that the workflow exists ONLY as database state. `Gather Context`/`Deep Analysis` appear nowhere in the repo, so its budget could never be fixed in a PR |
 | H23 | Session logs are exported as intended | **REFUTED, tick 56b** — the per-operation schema exists end to end and nothing fills it: `RecordOperationHandler` is a no-op whose body is a comment, and the one real caller writes a single synthetic totals-only operation per session (#1034). Totals are real; the history they imply is not |
 | H22 | The SDLC review half is covered, because review workflows are installed | **REFUTED, tick 56** — `PR Review` and `Code Review` are both installed and have ZERO executions across all 100 runs on the Mini. Installed has been standing in for works |
 | H21 | A blocker found in one run is a blocker on dispatching work generally | **REFUTED, tick 55** — #1024 rejects pushes touching `.github/workflows` only. I stopped dispatching entirely for four hours and worked locally instead. Three runs went out in parallel the moment the blocker was read precisely |
@@ -3153,3 +3154,59 @@ bugs in this area were both one hop from where they appeared to be.
 
 Two of five hit timeouts. That is a real reliability number, and it is the kind
 that only appears once you actually dispatch instead of working locally.
+
+---
+
+## Tick 57 — built the review half, and found the deeper reason it never worked
+
+**Priority 2, the review side.** PR #1037 adds `sdlc-pr-review-v1`.
+
+**HYPOTHESIS:** #1035 is a timeout number to raise.
+
+**The number was the smaller half.** Going to fix it, I could not find the
+workflow:
+
+```
+$ git grep -rln "Gather Context\|Deep Analysis" -- '*.py' '*.yaml' '*.json'
+(no output)
+```
+
+**The installed `PR Review` exists only as database state.** A workflow that
+gates code review could not itself be reviewed, diffed, or fixed in a pull
+request. That is #1031's problem with a concrete casualty attached: the reason
+nobody corrected a 300s analysis budget is that there was nothing to correct in
+a PR.
+
+The budget itself, stated from measurement rather than taste: cross-model
+reviews on this repo this week took **5 to 25 minutes**, and the validated
+planner uses **2400s** per phase. 300s is a floor for fetch-and-summarise and a
+trap for analysis. New definition: 2400 / 2400 / 900.
+
+### What went into the prompts
+
+Not generic review advice — this week's actual failure mode:
+
+> Attack the hops the diff does NOT touch. The recurring defect here is not a
+> wrong line, it is a value written correctly and dropped one hop later, at a
+> constructor that omits it or an event that is never persisted. Those hops pass
+> every test that looks at either end of them.
+
+That is #1011, #1013, #1015 and #1026 generalised into a review instruction. Plus:
+run the commands and paste real output; test the tests by breaking the hop and
+checking the test fails; carry forward what could NOT be verified; do not
+manufacture findings to look thorough, and do not soften a blocker into a
+suggestion.
+
+### What I deliberately did not claim
+
+The PR says it is **not yet run end to end**. Claiming a workflow works before it
+has produced a review is precisely what the old one embodied for months, and
+writing "installed" where "validated" belongs is the error this whole day keeps
+finding. It gets installed and run against #1026 next — the case with known
+ground truth.
+
+**Three phases, not one**, for the reason the planner splits research from
+planning: a phase that investigates AND judges starts judging early, because
+forming a verdict feels like progress.
+
+`just check-workflows` now validates 15 definitions, up from 14. Preflight green.
