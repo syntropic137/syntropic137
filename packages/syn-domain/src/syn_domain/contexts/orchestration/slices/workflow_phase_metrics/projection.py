@@ -25,7 +25,7 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_phase_metrics"
-    VERSION = 2  # Bumped: cost moved to Lane 2 — API enriches from execution_cost (#695)
+    VERSION = 3  # Bumped: #1036 adds on_workflow_failed, needs a rebuild to apply
 
     def __init__(self, store: ProjectionStore) -> None:
         self._store = store
@@ -115,6 +115,38 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
             entry["artifact_count"] = entry.get("artifact_count", 0) + 1
 
         entry["status"] = "completed" if event_data.get("success", True) else "failed"
+
+        await self._save_workflow_data(workflow_id, data)
+
+    async def on_workflow_failed(self, event_data: dict) -> None:
+        """Mark the failed phase's real status and duration.
+
+        A failed phase never gets a PhaseCompleted event -- the only other
+        writer of these fields -- so without this it stays "running" with
+        duration_seconds stuck at the 0.0 PhaseStarted seeded it with,
+        forever (#1036).
+        """
+        workflow_id = event_data.get("workflow_id", "")
+        phase_id = event_data.get("failed_phase_id")
+        if not workflow_id or not phase_id:
+            return
+
+        data = await self._get_workflow_data(workflow_id)
+        phases = data.setdefault("phases", {})
+        if phase_id not in phases:
+            return
+
+        entry = phases[phase_id]
+        entry["status"] = "failed"
+        # ACCUMULATE, never assign. This projection aggregates by workflow_id
+        # across every execution, and on_phase_completed adds to this same field.
+        # Assigning here made a failed run erase the workflow's history: ten
+        # seconds of completed work followed by a three-second failure reported
+        # three. That is worse than the bug being fixed, which merely omitted the
+        # failed run's time.
+        duration = event_data.get("failed_phase_duration_seconds")
+        if duration is not None:
+            entry["duration_seconds"] = entry.get("duration_seconds", 0.0) + duration
 
         await self._save_workflow_data(workflow_id, data)
 

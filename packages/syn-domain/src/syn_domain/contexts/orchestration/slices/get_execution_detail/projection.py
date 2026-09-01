@@ -65,7 +65,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 7  # Bumped: the #969 zero-guard shipped without one, so rows overwritten to 0.0 never rebuilt
+    VERSION = 8  # Bumped: #1036 fixes failed-phase duration_seconds, needs a rebuild to apply
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -336,6 +336,21 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                     _, phase = found
                     phase["status"] = "failed"
                     phase["error_message"] = event_data.get("error_message")
+
+                    # The failed phase never gets a PhaseCompleted event, so
+                    # without this its duration_seconds is stuck at the 0.0
+                    # PhaseDetail.running() seeded it with -- reporting a
+                    # timed-out phase as instantaneous (#1036). The processor
+                    # computes this from when the phase actually started, so
+                    # it is present exactly when a phase was in flight.
+                    failed_duration = event_data.get("failed_phase_duration_seconds")
+                    if failed_duration is not None:
+                        phase["duration_seconds"] = failed_duration
+                        phase["completed_at"] = event_data.get("failed_at")
+                        # Also roll into the execution total, which otherwise
+                        # under-reports by exactly the failed phase's time --
+                        # it only accumulates from PhaseCompleted events.
+                        self._aggregate_totals(existing, 0, 0, 0, 0, failed_duration)
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 

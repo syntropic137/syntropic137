@@ -24,6 +24,10 @@ class WorkflowFailedEvent(DomainEvent):
     error_message: str
     error_type: str | None = None
 
+    # How long failed_phase_id had been running when the failure was caught.
+    # None when no phase was in flight (e.g. failure between phases).
+    failed_phase_duration_seconds: float | None = None
+
     # Partial progress
     completed_phases: int
     total_phases: int
