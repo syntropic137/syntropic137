@@ -22,6 +22,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowSummary,
 )
+from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
@@ -383,6 +384,14 @@ def _build_phase_md(phase: PhaseDefinitionResponse) -> str:
     """
     frontmatter_lines: list[str] = []
 
+    # NOTHING REFUSED BY THE LOADER MAY BE EMITTED HERE. The frontmatter this
+    # writes is re-read by md_prompt_loader on install, so a key the loader
+    # rejects turns export -> reinstall into a hard failure.
+    #
+    # `max-tokens` is omitted: it was being emitted here while
+    # `PhaseYamlDefinition._reject_max_tokens` already refused it, so an
+    # exported phase carrying one could not be reinstalled. Fixed in the same
+    # pass as #1039 rather than left as a known open case of the same class.
     if phase.model:
         frontmatter_lines.append(f"model: {_yaml_quote(phase.model)}")
     if phase.argument_hint:
@@ -391,8 +400,6 @@ def _build_phase_md(phase: PhaseDefinitionResponse) -> str:
         frontmatter_lines.append(f"allowed-tools: {','.join(phase.allowed_tools)}")
     if phase.timeout_seconds and phase.timeout_seconds != 300:
         frontmatter_lines.append(f"timeout-seconds: {phase.timeout_seconds}")
-    if phase.max_tokens is not None:
-        frontmatter_lines.append(f"max-tokens: {phase.max_tokens}")
 
     body = phase.prompt_template or ""
 
@@ -489,8 +496,14 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
         f"  - id: {pid}",
         f"    name: {_yaml_quote(phase.name)}",
         f"    order: {phase.order}",
-        f"    execution_type: {phase.execution_type}",
     ]
+    # `execution_type` is deliberately NOT exported (#1039), for the same
+    # reason as `max_tokens` below. Only `sequential` is implemented and the
+    # loader now refuses the rest, so emitting a stored `parallel` or
+    # `human_in_loop` would produce a package this platform cannot install.
+    # Emitting `sequential` in its place would be worse: it would silently
+    # rewrite what the author declared. Absence means sequential (ADR-069 D4),
+    # which is what actually runs, so absence is the honest export.
     if phase.description:
         lines.append(f"    description: {_yaml_quote(phase.description)}")
     lines.append(f"    prompt_file: phases/{pid}.md")
@@ -515,7 +528,13 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # propagate that anomaly into a file the loader refuses.
     if phase.argument_hint:
         lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
-    if phase.allowed_tools:
+    # A codex phase's `allowed_tools` is NOT exported (#1039, #1009). Codex has
+    # no tool vocabulary - it enforces a filesystem sandbox instead - so the
+    # loader refuses the combination, and re-emitting it would export a package
+    # that cannot be reinstalled. Dropping it is also the truthful export:
+    # codex never applied the grant, so the phase reinstalls behaving exactly
+    # as it behaved before.
+    if phase.allowed_tools and str(phase.provider) != AgentProvider.CODEX:
         lines.append(f"    allowed_tools: {_yaml_flow_list(list(phase.allowed_tools))}")
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))

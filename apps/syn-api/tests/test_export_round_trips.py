@@ -99,9 +99,27 @@ class TestTheExportedPhaseParsesBack:
         assert isinstance(agent, dict)
         assert agent["allow_delegation"] is True
 
-    def test_tool_scoping_survives(self) -> None:
-        """Without this, every claude phase reinstalls with the full toolset."""
-        assert _parsed()["allowed_tools"] == ["Read", "Grep"]
+    def test_tool_scoping_survives_for_claude(self) -> None:
+        """Without this, every claude phase reinstalls with the full toolset.
+
+        The phase MUST be a claude one, which is a correction rather than a
+        detail: this asserted the docstring's claim against the shared codex
+        fixture, so the claude path it names was never actually covered.
+        """
+        claude_phase = _phase().model_copy(update={"provider": "claude", "model": "sonnet"})
+        document = yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(claude_phase)))
+        (phase,) = document["phases"]
+
+        assert phase["allowed_tools"] == ["Read", "Grep"]
+
+    def test_tool_scoping_is_dropped_for_codex(self) -> None:
+        """Codex has no tool vocabulary, so the grant is not re-emitted (#1009).
+
+        The loader refuses codex + allowed_tools, so exporting it would produce
+        a package that cannot be reinstalled. Dropping it also reinstalls the
+        phase behaving exactly as it ran: codex never applied the grant.
+        """
+        assert "allowed_tools" not in _parsed()
 
     def test_timeout_survives(self) -> None:
         assert _parsed()["timeout_seconds"] == 2400
@@ -110,12 +128,24 @@ class TestTheExportedPhaseParsesBack:
         assert _parsed()["input_artifacts"] == ["markdown"]
 
     def test_argument_hint_survives(self) -> None:
+        """Display metadata, and it must round-trip like any other field.
+
+        Briefly removed during #1039 on the assumption it was inert; it is not
+        - the dashboard renders it - so dropping it from the export would have
+        silently stripped the hint from every reinstalled workflow.
+        """
         assert _parsed()["argument_hint"] == "[task]"
 
-    def test_execution_type_survives_as_declared(self) -> None:
-        """`parallel`, not the `sequential` default -- a value that could not
-        have arrived by accident."""
-        assert _parsed()["execution_type"] == "parallel"
+    def test_execution_type_is_not_exported(self) -> None:
+        """Also inverted by #1039, and this one had teeth.
+
+        The fixture declares `parallel`, which has no implementation - nothing
+        in the codebase branches on the field. Re-emitting it produced YAML the
+        loader now rejects; emitting `sequential` in its place would silently
+        rewrite the author's declaration. Absence means sequential (ADR-069
+        D4), which is what actually runs.
+        """
+        assert "execution_type" not in _parsed()
 
 
 class TestRefsAreExportedStructurally:
@@ -216,6 +246,19 @@ class TestTheLoaderAcceptsWhatWeEmit:
 
     def test_a_bare_phase_validates(self) -> None:
         assert self._validate(PhaseDefinitionResponse(phase_id="p", name="P", order=1)) is not None
+
+    def test_a_refused_execution_type_does_not_make_the_package_uninstallable(self) -> None:
+        """A legacy template carrying `parallel` must still export installably.
+
+        Stored templates predate the refusal, so the export path cannot assume
+        its input is valid under the current schema (#1039).
+        """
+        assert (
+            self._validate(
+                PhaseDefinitionResponse(phase_id="p", name="P", order=1, execution_type="parallel")
+            )
+            is not None
+        )
 
     def test_max_tokens_does_not_make_the_package_uninstallable(self) -> None:
         """`max_tokens` is deliberately not in the authoring schema.

@@ -18,11 +18,17 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    PhaseExecutionType,
+    require_supported_execution_type,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
+    UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
-from syn_shared.agents import require_executable_provider
+from syn_shared.agents import AgentProvider, require_executable_provider
+from syn_shared.tools import require_supported_tools
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
@@ -181,15 +187,39 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     phase_provider: str | None = getattr(phase, "provider", None)
     allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
     phase_id: str | None = getattr(phase, "phase_id", None)
+    # Canonicalise here, not just in the YAML validator: a stored template
+    # never saw that validator. Unknown names are refused rather than
+    # dropped - dropping would restrict a phase to whatever happened to be
+    # spelled correctly and silently remove the rest.
+    allowed_tools: tuple[str, ...] = require_supported_tools(
+        tuple(getattr(phase, "allowed_tools", ()) or ()), phase_id=phase_id
+    )
     defaults = AgentConfiguration()
     resolved_provider = phase_provider or defaults.provider
-    require_executable_provider(resolved_provider, phase_id=phase_id)
-    if not (phase_model or phase_provider or allow_delegation):
+    provider = require_executable_provider(resolved_provider, phase_id=phase_id)
+    # Codex has no tool vocabulary (ADR-069 section 3), so this combination can
+    # never be honoured. The YAML validator refuses it at authoring time, but a
+    # stored template bypasses that, and the only other guard is in the command
+    # builder - which runs AFTER the workspace is provisioned and paid for.
+    # Two installed workflows carry exactly this shape today.
+    if provider is AgentProvider.CODEX and allowed_tools:
+        raise UnsupportedToolPolicyForProviderError(
+            provider=str(provider), phase_id=phase_id, declared=list(allowed_tools)
+        )
+    # `allowed_tools` MUST be part of this condition, not only of the
+    # constructor below (#1039). A phase that scopes its tools and accepts the
+    # default model and provider is the commonest tool-scoping shape there is,
+    # and it takes this branch - so a constructor-only fix drops the grant for
+    # exactly the author who asked for it, while passing any test that also
+    # sets a model. Pinned by
+    # test_tools_survive_when_they_are_the_only_thing_declared.
+    if not (phase_model or phase_provider or allow_delegation or allowed_tools):
         return defaults
     return AgentConfiguration(
         provider=resolved_provider,
         model=phase_model,
         allow_delegation=allow_delegation,
+        allowed_tools=allowed_tools,
     )
 
 
@@ -334,6 +364,16 @@ class ExecuteWorkflowHandler:
         workflow_skill_refs = workflow.skills
         executable_phases: list[ExecutablePhase] = []
         for phase in workflow.phases:
+            # EXECUTION-BOUNDARY re-check, not a duplicate of the YAML rule.
+            # A template stored before that rule existed is rehydrated from its
+            # historical `WorkflowTemplateCreated` event and never sees the
+            # loader, exactly as the provider guard below documents. Checking
+            # only at authoring would let every already-stored `parallel` phase
+            # through - the population most likely to have one.
+            require_supported_execution_type(
+                getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
+                phase_id=getattr(phase, "phase_id", None),
+            )
             agent_config = _build_agent_config_from_phase(phase)
             resolved = await self._resolve_phase_plugins(
                 workflow_refs=workflow_refs,

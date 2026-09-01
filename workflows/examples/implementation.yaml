@@ -31,7 +31,7 @@ phases:
       Information gathering phase. Read files, understand existing code,
       identify patterns and dependencies. NO changes made.
     input_artifacts:
-      - feature_request
+      - task
     output_artifacts:
       - codebase_analysis
       - dependency_map
@@ -64,7 +64,7 @@ phases:
       and disadvantages. NO concrete planning yet.
     input_artifacts:
       - codebase_analysis
-      - feature_request
+      - task
     output_artifacts:
       - approach_options
       - trade_off_analysis
@@ -91,11 +91,11 @@ phases:
   - id: plan
     name: Plan
     order: 3
-    execution_type: human_in_loop
+    execution_type: sequential
     argument_hint: "[feature-request]"
     description: |
       Create detailed technical specification. Define file paths,
-      changes, and implementation order. Requires human approval.
+      changes, and implementation order.
     input_artifacts:
       - approach_options
       - trade_off_analysis
