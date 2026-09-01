@@ -1,0 +1,104 @@
+# =============================================================================
+# Release Beta - publish a prerelease cut from main
+# =============================================================================
+#
+# Trigger: a PRERELEASE GitHub release is published. Stable releases are
+#          ignored here and go through release-create.yml.
+#
+# WHY THIS EXISTS. docs/release-process.md described a beta path that fired
+# release.published directly at release-containers.yaml. That trigger was
+# deliberately removed to protect the approval gate, so the documented path
+# silently produced a tag with no images. This restores a beta path with the
+# guards that made removing the old one correct.
+#
+# WHAT BOUNDS THE RISK, and why there is no approval environment here:
+#   - prerelease only. A stable release cannot reach this workflow.
+#   - release-containers.yaml already refuses to tag `latest` for any version
+#     containing a hyphen, so a beta cannot become what consumers pull.
+#   - release-cli.yaml publishes the CLI under `next`, not `latest`.
+#   - the tag must point at a commit reachable from main, so a beta cannot be
+#     cut from an unreviewed branch.
+# If the owner wants a manual gate on betas too, add `environment:` to the
+# publish jobs below; nothing else needs to change.
+#
+# Betas NEVER touch the `release` branch. _check-version.yml refuses a PR into
+# `release` carrying a prerelease version, so `release` always means production.
+# =============================================================================
+
+name: Release Beta
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: release-beta-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Verify this is a beta cut from main
+    if: github.event.release.prerelease == true
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Verify version, and that the tag is reachable from main
+        id: check
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          echo "Tag: ${TAG}"
+
+          # Belt and braces: GitHub says prerelease, the version must agree.
+          # A stable version published as a prerelease would otherwise publish
+          # images under a tag consumers could reasonably mistake for a release.
+          if [[ ! "${VERSION}" =~ (-|\+) ]]; then
+            echo "::error::Release is flagged prerelease but version '${VERSION}' has no prerelease suffix."
+            echo "::error::Refusing to publish. Either cut it as a stable release, or fix the version."
+            exit 1
+          fi
+
+          # The repo's own version must match the tag, or the images are built
+          # from a tree that disagrees with what they are labelled.
+          FILE_VERSION=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [[ "${FILE_VERSION}" != "${VERSION}" ]]; then
+            echo "::error file=pyproject.toml::Tag says '${VERSION}' but pyproject.toml says '${FILE_VERSION}'."
+            exit 1
+          fi
+
+          # A beta must come from main. Without this the guard above is the only
+          # thing standing between an arbitrary branch and a published image.
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${TAG}" origin/main; then
+            echo "::error::Tag '${TAG}' is not reachable from origin/main. Betas are cut from main only."
+            exit 1
+          fi
+
+          echo "OK: '${VERSION}' is a prerelease, matches pyproject.toml, and is on main."
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+  containers:
+    name: Publish beta containers
+    needs: guard
+    uses: ./.github/workflows/release-containers.yaml
+    with:
+      version: v${{ needs.guard.outputs.version }}
+    secrets: inherit
+
+  cli:
+    name: Publish beta CLI
+    needs: guard
+    uses: ./.github/workflows/release-cli.yaml
+    with:
+      version: v${{ needs.guard.outputs.version }}
+    secrets: inherit
