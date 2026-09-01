@@ -1020,10 +1020,42 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-docs-content check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
+preflight: check-agent-docs check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-docs-content check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
+
+# Regenerate CLAUDE.md from AGENTS.md.
+#
+# AGENTS.md is canonical; CLAUDE.md is a byte-identical COPY of it, committed so
+# a fresh clone has it. Not a symlink: git for Windows defaults to
+# core.symlinks=false and checks a symlink out as a plain text file containing
+# the target path, so CLAUDE.md would become a 9-byte file reading "AGENTS.md"
+# and Claude Code would load THAT as the project context - no error, just an
+# agent running blind.
+#
+# Not an `@AGENTS.md` import stub either. Claude resolves at most 5 files deep,
+# and the stub spends one hop reaching AGENTS.md. Measured, not assumed:
+#   stub bridge     -> AGENTS.md's imports resolve 3 levels
+#   copy (or link)  -> AGENTS.md's imports resolve 4 levels
+sync-agent-docs:
+    @cp AGENTS.md CLAUDE.md
+    @echo "✅ CLAUDE.md regenerated from AGENTS.md"
+
+# Gate: the copy must be identical. The generator above is a convenience; THIS
+# is the guarantee. A generator that is not enforced drifts the first time
+# someone edits one file by hand.
+check-agent-docs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! cmp -s AGENTS.md CLAUDE.md; then
+        echo "❌ CLAUDE.md is not identical to AGENTS.md."
+        echo "   AGENTS.md is canonical. Edit THAT, never CLAUDE.md."
+        echo "   Then run: just sync-agent-docs"
+        diff AGENTS.md CLAUDE.md | head -20 || true
+        exit 1
+    fi
+    echo "✅ CLAUDE.md matches AGENTS.md"
 
 # Fail when a ci.yml job has no local equivalent, so `just qa-ci` cannot
 # quietly stop meaning "CI will pass". Runs inside preflight, which CI runs.

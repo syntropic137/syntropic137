@@ -3,6 +3,26 @@ description:
 globs:
 alwaysApply: true
 ---
+<!--
+CANONICAL FILE. Edit this one.
+
+CLAUDE.md is a byte-identical generated COPY of this file, committed so a fresh
+clone has it. After editing here, run `just sync-agent-docs`. `just preflight`
+fails if the two differ.
+
+This notice lives in AGENTS.md rather than CLAUDE.md because the two files must
+be identical, so the copy has nowhere of its own to carry a banner.
+
+Why a copy and not a symlink: git for Windows defaults to core.symlinks=false
+and checks a symlink out as a plain text file containing the target path, so
+CLAUDE.md would become a 9-byte file reading "AGENTS.md" and Claude Code would
+silently load that as the entire project context.
+
+Why a copy and not an `@AGENTS.md` import stub: Claude resolves at most 5 files
+deep and the stub spends one hop reaching AGENTS.md. Measured, not assumed: a
+stub bridge leaves this file 3 levels of nested imports, a copy leaves 4.
+-->
+
 # Syntropic137
 
 ## What This Is
