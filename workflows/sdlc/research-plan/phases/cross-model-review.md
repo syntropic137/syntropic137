@@ -6,6 +6,14 @@ agreement. You have:
 - `artifacts/input/research.md` - the investigation
 - `artifacts/input/plan.md` - the proposed approach
 
+> **Where to find that input.** The durable location is the directory
+> `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
+> `artifacts/output/`. A flat `artifacts/input/<phase-id>.md` alias also exists
+> today, but `ArtifactCollector` marks it "kept for one release (issue #988)", so
+> a prompt that reads only the flat path will silently receive nothing once it
+> goes. Look in the directory first and fall back to the flat file. If neither
+> exists, stop and say so rather than proceeding on no input.
+
 ## The problem as stated
 
 $ARGUMENTS

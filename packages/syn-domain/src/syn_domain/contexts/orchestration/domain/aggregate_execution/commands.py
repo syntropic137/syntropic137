@@ -78,6 +78,7 @@ class FailExecutionCommand:
         failed_phase_id: str | None,
         completed_phases: int,
         total_phases: int,
+        failed_phase_duration_seconds: float | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -85,6 +86,7 @@ class FailExecutionCommand:
         self.failed_phase_id = failed_phase_id
         self.completed_phases = completed_phases
         self.total_phases = total_phases
+        self.failed_phase_duration_seconds = failed_phase_duration_seconds
 
 
 class StartPhaseCommand:
