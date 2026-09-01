@@ -28,10 +28,20 @@ make a phase narrow are the two that are dropped.
   unreachable. Wiring it makes all three live.
 - `argument_hint`: cosmetic, and possibly should be deleted instead. It is
   slash-command heritage, and the command surface is gone.
-- `input_artifacts`: a behaviour change with blast radius. Today every phase
-  receives every completed phase's output. Honouring the declaration means some
-  phases stop receiving artifacts they currently get. Existing workflows were
-  authored against the actual behaviour, not the declared one.
+- `input_artifacts`: CANNOT be honoured as written. Corrected 2026-09-01 after
+  measurement by syntropic137-f1; the framing above this line was wrong and is
+  kept only in the open questions below as a record of the error. Injection is
+  keyed by PHASE ID (`_wiring.py:497`, `:509` both iterate `phase_outputs`
+  keyed by `pid`), while the declaration is keyed by ARTIFACT TYPE
+  (`workflow_definition.py:414` maps `input_artifacts` to
+  `input_artifact_types`). Across all 22 authored multi-phase workflows the
+  intersection of the two vocabularies is EMPTY. Filtering a phase-id-keyed
+  dict by a set of type names would therefore deliver nothing to every phase.
+  This is not a blast radius to size; it is guaranteed total breakage.
+
+  The useful finding underneath: authors use the field coherently as a
+  type-level dependency graph. 31 of 33 declarations resolve to a prior phase's
+  declared output type. It is a meaningful assertion wired to nothing.
 - `execution_type`: cannot be honoured at all today. `parallel` has no
   implementation. Wiring it without one converts a silent lie into a crash.
 
@@ -72,10 +82,19 @@ it on evidence the platform produced rather than on the agent's narration.
 
 ## Open questions this track must answer
 
-1. For `input_artifacts`: is the fix to honour the declaration, or to delete the
-   field and document that all prior outputs are always injected? Honouring it
-   is better for context efficiency and worse for compatibility. How many
-   installed workflows would change behaviour?
+1. ANSWERED 2026-09-01, and the question as posed was malformed. It assumed the
+   filter was expressible. It is not, for the reason recorded above. The
+   decision is REFUSE: validate at workflow creation that every declared input
+   type is produced by a prior phase's `output_artifacts` or by a workflow-level
+   input, and reject otherwise. Zero runtime change, no compatibility risk, and
+   the field stops being inert by becoming a checked assertion.
+
+   THE QUESTION THIS PRODUCES, which is now the live one: making
+   `input_artifacts` a checked assertion does not make phases context-efficient.
+   Every phase still receives every prior phase's output. Narrowing requires a
+   PHASE-ID-KEYED field, since that is the channel that exists, something like
+   `inputs_from: [phase-id]`. That is a deliberate design decision touching
+   ADR-069, not a retrofit onto the type graph, and it needs the owner.
 2. For `execution_type`: refuse `parallel` at authoring time until a parallel
    processor exists, or build one? Refusing is honest and cheap; building it is
    what the experimentation fan-out eventually needs.
