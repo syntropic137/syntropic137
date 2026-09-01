@@ -4,8 +4,10 @@
 **Repo:** github.com/syntropic137/syntropic137
 **Branch:** `marketplace-gaps` (worktree `syntropic137_worktrees/20260901_marketplace-gaps`)
 **Status:** research done, ADR proposed, implementation not started
-**Coordinating session:** `syntropic137-f1` (ref 85bb3e). Reach it if a decision
-below turns out to be wrong; do not silently work around it.
+**Owner:** `syntropic137-f1` (ref 85bb3e) owns this track.
+**Coordinating session:** `syntropic137-f6` (ref e780d2) did the research and
+holds the analyses. Reach it if a decision below turns out to be wrong; do not
+silently work around it.
 
 ## Purpose
 
