@@ -3,6 +3,26 @@ description:
 globs:
 alwaysApply: true
 ---
+<!--
+CANONICAL FILE. Edit this one.
+
+CLAUDE.md is a byte-identical generated COPY of this file, committed so a fresh
+clone has it. After editing here, run `just sync-agent-docs`. `just preflight`
+fails if the two differ.
+
+This notice lives in AGENTS.md rather than CLAUDE.md because the two files must
+be identical, so the copy has nowhere of its own to carry a banner.
+
+Why a copy and not a symlink: git for Windows defaults to core.symlinks=false
+and checks a symlink out as a plain text file containing the target path, so
+CLAUDE.md would become a 9-byte file reading "AGENTS.md" and Claude Code would
+silently load that as the entire project context.
+
+Why a copy and not an `@AGENTS.md` import stub: Claude resolves at most 5 files
+deep and the stub spends one hop reaching AGENTS.md. Measured, not assumed: a
+stub bridge leaves this file 3 levels of nested imports, a copy leaves 4.
+-->
+
 # Syntropic137
 
 ## What This Is
@@ -96,6 +116,50 @@ Treat Python like TypeScript. Strict type safety everywhere.
 - **Pydantic** for all API boundaries, configs, and domain events (`frozen=True`, `extra="forbid"`)
 - **All public interfaces fully typed** - no implicit signatures
 - **API routes MUST use Pydantic response models** - never `-> dict[str, Any]`. FastAPI generates the OpenAPI spec from return type annotations. Untyped routes are invisible to the spec, which breaks the CLI type generation pipeline (`openAPI spec → openapi-typescript → CLI types`). Always define a response model and use it: `async def list_foos() -> FooListResponse:`
+
+#### Why the typing ratchets are fitness functions, not lint
+
+Type safety is a declared architectural characteristic of this system, not a
+style preference. Python does not enforce it, so it is built in and measured.
+That is exactly what a fitness function is: an objective, whole-codebase
+measure of a characteristic the architecture requires, ratcheted so it can
+only improve.
+
+`untyped-dicts` and the pyright gate are therefore in the same category as
+`dependency_direction` and `bounded_context_isolation`, even though the
+subject is typing rather than module structure. Do not reclassify them as
+"just lint" or "just tests" and do not weaken them on that basis.
+
+The distinction that DOES matter when adding a new check:
+
+| Shape | Category |
+|---|---|
+| Static property measured across the whole codebase, ratcheted | fitness function - belongs in `ci/fitness/` + `fitness-exceptions.toml` |
+| Behavioural assertion about one code path | a test - belongs beside the code |
+
+"Does this specific field have a production consumer" is the second, however
+architectural it sounds.
+
+#### Known gap: `untyped-dicts` counts TEXT, not types
+
+`just check-untyped-dicts` is a regex over source files:
+
+```python
+re.findall(r"dict\[str, (?:Any|object)\]", py_file.read_text())
+```
+
+It matches one spelling. `Mapping[str, object]`, `MutableMapping[str, Any]`,
+`Dict[str, Any]`, aliases, and annotations hidden behind
+`from __future__ import annotations` all pass unseen. So the count can fall
+while the typing is unchanged, and an agent optimising against the number will
+find that seam - one did, swapping `dict[str, object]` for
+`Mapping[str, object]` in a parameter and moving the count without improving
+anything.
+
+`Mapping` for a read-only parameter is the better annotation on its merits, so
+prefer it. Just do not read a falling count as evidence of stricter typing. If
+this check ever needs to bite properly it wants an AST pass over resolved
+annotations, not a text search.
 
 ### API → CLI Type Pipeline
 
