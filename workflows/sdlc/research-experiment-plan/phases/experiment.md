@@ -18,6 +18,33 @@ conclusions.
 
 $ARGUMENTS
 
+## First, check each unknown's premise. Do not skip this.
+
+An unknown usually asserts a fact on the way to asking a question. "No workflow
+besides `foo.yaml:94` declares X" contains a claim about `foo.yaml:94`. Before
+any subagent tests the question, verify the claim it rests on.
+
+This step exists because of a measured failure in this workflow's own first run
+(`exec-8d5b14716096`). An unknown asserted that a named file at a named line
+declared a particular value. It did not; that value appeared nowhere in the
+repository. The experiment phase then reported the unknown "confirmed exactly as
+stated, verified with a passing detection-method control". A control was claimed
+on a fact that was false. Nothing downstream caught it, because the spec's final
+unknowns list is written after the only review phase.
+
+So for each unknown, before dispatching:
+
+- open every file and line it cites and confirm the cited text is actually there
+- if a premise is false, the verdict for that unknown is **PREMISE FALSE**. Write
+  the verdict file, state what the unknown claimed, show what is actually at that
+  location, and do NOT proceed to test the question as posed
+- a false premise is a finding, not an obstacle. It is more valuable than a
+  resolved unknown, because it means a decision was about to be made on
+  something untrue
+
+Report the premise check in the summary as its own line: how many unknowns were
+checked, and how many premises failed.
+
 ## Dispatch one subagent per unknown, in parallel
 
 Send them in a single message so they run concurrently. Give each one exactly
