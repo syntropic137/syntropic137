@@ -1,0 +1,167 @@
+id: sdlc-research-experiment-plan-v1
+name: "SDLC: Research, review, experiment, plan (v1)"
+description: >
+  Produce a plan whose risky unknowns have been REDUCED BY EXPERIMENT rather
+  than reasoned about. Eight phases: investigate, cross-model review, revise,
+  experiment, revise again, plan, cross-model review, final plan.
+type: research
+classification: standard
+requires_repos: true
+
+# WHY THIS EXISTS, AND HOW IT DIFFERS FROM sdlc-research-plan-v3.
+#
+# v3 is research, plan, review, revise. It produces a well-reviewed plan whose
+# unknowns are still unknowns: a reviewer can say "this assumes X" but neither
+# phase can find out whether X is true.
+#
+# This workflow inserts an EXPERIMENT phase between the reviewed spec and the
+# plan. Its only job is to reduce the unknowns the reviewer named, by running
+# things and recording what happened.
+#
+# The hypothesis, to be measured against v3 on the same task: a plan whose
+# unknowns were tested is right more often on the first attempt, and the extra
+# phases cost less than one wrong implementation.
+#
+# TWO STANDING FAILURE MODES THIS SHAPE IS BUILT AGAINST.
+#
+# 1. A phase that investigates AND decides starts deciding early, because
+#    forming a verdict feels like progress. Hence separate phases with one job.
+#
+# 2. An agent asked whether something is true will often answer from what it
+#    already believes, and report that as a finding. The experiment phase
+#    therefore requires an ARTIFACT that only exists if the thing happened.
+#    This is not pedantry: in this repository, a capability claim was wrong
+#    four times in one day because it was sourced from a model describing
+#    itself rather than from an observable side effect.
+#
+# FAN-OUT. The experiment phase dispatches subagents, one per unknown. A phase
+# agent is a top-level session, so it has a fresh dispatch budget; an
+# orchestrator that is itself a subagent cannot fan out. Subagent sessions do
+# not currently land as child sessions (#792), so each subagent writes a
+# verdict FILE and the parent never re-ingests its response. That keeps the
+# findings in the artifact record even though per-subagent cost is invisible.
+#
+# execution_type is declared sequential throughout because parallel is not
+# implemented (#1039). Do not declare parallel here expecting it to work.
+
+phases:
+  # Phase ids are load-bearing: a later phase reads an earlier one's output at
+  # artifacts/input/<phase-id>/, so renaming a phase breaks the phase after it.
+  - id: research
+    name: Investigate and write the spec
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    allowed_tools: [Read, Grep, Glob, Bash]
+    skills:
+      - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/software-complexity@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/dependencies@1348146ae5fd1659f2022b3c2bef0218292348d4
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/research.md
+
+  - id: review-spec
+    name: Codex reviews the spec
+    order: 2
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    agent:
+      provider: codex
+      # The CONCRETE model id, not the `gpt-5.6` alias. An aliased model
+      # resolves to no rate and the run completes UNPRICED (#892), which
+      # destroys the cost data a workflow comparison depends on.
+      model: gpt-5.6-sol
+    prompt_file: phases/review-spec.md
+
+  - id: revise-spec
+    name: Revise the spec, and name the unknowns
+    order: 3
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    allowed_tools: [Read, Grep, Glob, Bash]
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/revise-spec.md
+
+  - id: experiment
+    name: Reduce the unknowns by experiment
+    order: 4
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    # Longest budget in the workflow: this phase runs things, and running things
+    # is slower than reading them.
+    timeout_seconds: 3600
+    allowed_tools: [Read, Grep, Glob, Bash, Write, Task]
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/experiment.md
+
+  - id: revise-after-experiment
+    name: Revise the spec against what the experiments found
+    order: 5
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    allowed_tools: [Read, Grep, Glob]
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/revise-after-experiment.md
+
+  - id: plan
+    name: Write the plan
+    order: 6
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    allowed_tools: [Read, Grep, Glob]
+    skills:
+      - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/purpose-and-scope@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/dry@1348146ae5fd1659f2022b3c2bef0218292348d4
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/plan.md
+
+  - id: review-plan
+    name: Codex reviews the plan against the spec
+    order: 7
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    agent:
+      provider: codex
+      model: gpt-5.6-sol
+    prompt_file: phases/review-plan.md
+
+  - id: final-plan
+    name: Final plan
+    order: 8
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    allowed_tools: [Read, Grep, Glob]
+    skills:
+      - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/final-plan.md
