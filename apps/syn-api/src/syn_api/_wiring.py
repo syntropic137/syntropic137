@@ -949,6 +949,15 @@ class BackgroundWorkflowDispatcher:
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
     ) -> None:
+        # SYNCHRONOUS refusal, before the task exists (#1039). Everything after
+        # this line is fire-and-forget: `WorkflowDispatchProjection` awaits
+        # this method and then writes `status="dispatched"`, so anything that
+        # fails inside the task leaves a trigger record claiming a run that has
+        # no execution stream and never will. Raising HERE reaches the
+        # projection's `dispatch_exception` path, which marks the record
+        # `failed` - the state that is actually true.
+        await self._handler.validate_stored_declarations(workflow_id)
+
         asyncio_task = asyncio.create_task(
             self._run_with_semaphore(workflow_id, inputs, execution_id, task=task, repos=repos),
             name=f"workflow-exec-{execution_id or workflow_id}",

@@ -32,19 +32,18 @@ from syn_api.types import (
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
-    PhaseExecutionType,
     SkillError,
     SkillRef,
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
-    require_supported_execution_type,
+    validate_phase_declarations,
 )
 from syn_shared.agents import (
     AgentProvider,
     UnsupportedAgentProviderError,
     require_executable_provider,
 )
-from syn_shared.tools import UnsupportedToolNameError, require_supported_tools
+from syn_shared.tools import UnsupportedToolNameError
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
@@ -490,42 +489,26 @@ def _check_phase_providers(workflow: WorkflowTemplateAggregate) -> None:
 
 
 def _check_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
-    """Raise 422 if any stored phase declares something that cannot be honoured.
+    """Raise 422 if any stored phase declares something we cannot honour.
 
-    Same contract and same reason as `_check_phase_providers` above (#1039).
-    The domain refuses these at the execution boundary, which is what makes
-    trigger- and CLI-initiated runs behave identically; without this boundary
-    check the HTTP caller gets 200 `started` with an execution_id, the
-    BackgroundTask then raises BEFORE the execution stream is created, and
-    polling that id returns 404 forever. A ghost execution is a worse failure
-    than a rejected request, because nothing records that it was refused.
+    Same contract and same reason as `_check_phase_providers` above (#1039):
+    without it the caller gets 200 `started` with an execution_id, the
+    BackgroundTask raises BEFORE the execution stream is created, and polling
+    that id returns 404 forever. A ghost execution is worse than a rejected
+    request, because nothing records that it was refused.
 
-    Three declarations, all reachable only from STORED templates - YAML
-    authoring already refuses each of them, but a template stored earlier
-    rehydrates from its historical event and never sees that validator.
+    The RULE is `validate_phase_declarations` in the domain - the trigger
+    dispatcher and the execution boundary apply the same one. This function
+    only translates it into HTTP.
     """
-    for phase in workflow.phases:
-        try:
-            require_supported_execution_type(
-                phase.execution_type or PhaseExecutionType.SEQUENTIAL,
-                phase_id=phase.phase_id,
-            )
-            tools = require_supported_tools(
-                tuple(phase.allowed_tools or ()),
-                phase_id=phase.phase_id,
-            )
-            if tools and (phase.provider or AgentProvider.CLAUDE) == AgentProvider.CODEX:
-                raise UnsupportedToolPolicyForProviderError(
-                    provider=str(phase.provider),
-                    phase_id=phase.phase_id,
-                    declared=list(tools),
-                )
-        except (
-            UnsupportedExecutionTypeError,
-            UnsupportedToolNameError,
-            UnsupportedToolPolicyForProviderError,
-        ) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        validate_phase_declarations(workflow)
+    except (
+        UnsupportedExecutionTypeError,
+        UnsupportedToolNameError,
+        UnsupportedToolPolicyForProviderError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 #: A preflight that hangs is worse than one that fails: it converts a fast 200

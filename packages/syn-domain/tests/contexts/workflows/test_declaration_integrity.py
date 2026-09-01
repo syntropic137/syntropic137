@@ -403,3 +403,39 @@ class TestStoredTemplatesAreCheckedAtTheExecutionBoundary:
             _build_agent_config_from_phase(stored)
 
         assert "codex" in str(exc.value).lower()
+
+
+class TestDelegatingTheVocabularyCheckChangedNoBehaviour:
+    """`_validate_tool_names` now calls `require_supported_tools` (#1039).
+
+    The rule had to move so execution could apply the SAME one to stored
+    templates that never saw the YAML validator; two copies of a vocabulary
+    check are two things to drift apart. But a refactor that quietly changes
+    how declarations normalise would corrupt every workflow on reinstall, so
+    the accepted shapes are pinned here rather than assumed.
+    """
+
+    @pytest.mark.parametrize(
+        ("declared", "expected"),
+        [
+            ("Bash,Read", ["Bash", "Read"]),
+            ("bash,read", ["Bash", "Read"]),
+            (None, []),
+            ([], []),
+            (["bAsH", "READ"], ["Bash", "Read"]),
+            # Duplicates are NOT collapsed, and order is NOT sorted. Both are
+            # pre-existing behaviour; changing either would rewrite the `--tools`
+            # argument for workflows that never asked for it.
+            (["Bash", "Bash", "Read"], ["Bash", "Bash", "Read"]),
+            (["Write", "Bash", "Read"], ["Write", "Bash", "Read"]),
+        ],
+    )
+    def test_accepted_shapes_normalise_exactly_as_before(
+        self, declared: object, expected: list[str]
+    ) -> None:
+        assert _phase(allowed_tools=declared).allowed_tools == expected
+
+    @pytest.mark.parametrize("declared", [["git"], [""], ["   "], [3], 42])
+    def test_rejected_shapes_are_still_rejected(self, declared: object) -> None:
+        with pytest.raises(ValidationError):
+            _phase(allowed_tools=declared)

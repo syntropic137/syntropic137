@@ -166,6 +166,40 @@ def _resolve_repos_from_template(
     return []
 
 
+def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
+    """Raise if any stored phase declares something the platform cannot honour.
+
+    THE single definition of that check (#1039). Three entry points need it and
+    each one previously would have grown its own copy:
+
+    - the HTTP route, so a caller gets a 422 instead of a 200 carrying an
+      execution id that will never resolve;
+    - the trigger dispatcher, so the dispatch record can be marked `failed`
+      rather than `dispatched` for a run that cannot happen;
+    - `_get_executable_phases` below, which is the boundary that actually
+      protects the CLI and any future caller.
+
+    All three matter because a stored template is rehydrated from its
+    historical ``WorkflowTemplateCreated`` event and never sees the YAML
+    validator, so authoring-time refusal reaches none of them.
+    """
+    for phase in workflow.phases:
+        phase_id = getattr(phase, "phase_id", None)
+        require_supported_execution_type(
+            getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
+            phase_id=phase_id,
+        )
+        tools = require_supported_tools(
+            tuple(getattr(phase, "allowed_tools", ()) or ()),
+            phase_id=phase_id,
+        )
+        provider = getattr(phase, "provider", None) or AgentProvider.CLAUDE
+        if tools and provider == AgentProvider.CODEX:
+            raise UnsupportedToolPolicyForProviderError(
+                provider=str(provider), phase_id=phase_id, declared=list(tools)
+            )
+
+
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
@@ -345,6 +379,21 @@ class ExecuteWorkflowHandler:
             )
 
         return _resolve_repos_from_template(merged_inputs, workflow)
+
+    async def validate_stored_declarations(self, workflow_id: str) -> None:
+        """Apply `validate_phase_declarations` to a stored template, by id.
+
+        Exists so a caller that has not loaded the aggregate - the trigger
+        dispatcher - can refuse a bad template BEFORE acknowledging the
+        dispatch, without reaching into this handler's repository.
+
+        A missing workflow is NOT this check's business: `handle()` raises
+        `WorkflowNotFoundError` for that, and duplicating the decision here
+        would give two entry points different answers for the same id.
+        """
+        workflow = await self._workflow_repo.get_by_id(workflow_id)
+        if workflow is not None:
+            validate_phase_declarations(workflow)
 
     async def _get_executable_phases(
         self,

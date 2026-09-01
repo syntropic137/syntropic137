@@ -108,6 +108,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
+    validate_phase_declarations,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
@@ -216,5 +217,6 @@ __all__ = [
     "WorkspaceAggregate",
     "build_command_from_definition",
     "require_supported_execution_type",
+    "validate_phase_declarations",
     "validate_workflow_yaml",
 ]

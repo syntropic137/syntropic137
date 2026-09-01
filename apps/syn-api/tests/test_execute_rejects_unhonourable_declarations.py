@@ -168,3 +168,63 @@ class TestTheROUTEActuallyCallsThePreflight:
 class _StubRequest:
     inputs: dict[str, str] = field(default_factory=dict)
     repos: list[str] = field(default_factory=list)
+
+
+class TestTheTriggerPathRefusesBeforeItAcknowledges:
+    """A trigger must never report `dispatched` for a run that cannot happen.
+
+    `WorkflowDispatchProjection` awaits `run_workflow()` and then writes
+    `status="dispatched"`. `run_workflow()` used to only create an asyncio
+    task, so a stored template carrying an unhonourable declaration produced: a
+    trigger record saying dispatched, an execution id that resolves 404
+    forever, and a swallowed exception in the task. The refusal now happens
+    SYNCHRONOUSLY, before the task exists, so it reaches the projection's
+    `dispatch_exception` path and the record is marked `failed` instead.
+
+    This is the path that matters most in practice: CI Self-Healing and PR
+    Review are trigger-driven, and both are among the four installed workflows
+    measured to carry a declaration the platform will not honour.
+    """
+
+    async def test_run_workflow_raises_instead_of_scheduling_a_doomed_task(self) -> None:
+        from syn_api._wiring import BackgroundWorkflowDispatcher
+        from syn_domain.contexts.orchestration import UnsupportedExecutionTypeError
+
+        handled: list[object] = []
+
+        class _Handler:
+            async def validate_stored_declarations(self, _wid: str) -> None:
+                raise UnsupportedExecutionTypeError("parallel", phase_id="plan")
+
+            async def handle(self, cmd: object) -> None:
+                handled.append(cmd)
+
+        dispatcher = BackgroundWorkflowDispatcher(_Handler())  # type: ignore[arg-type]
+
+        with pytest.raises(UnsupportedExecutionTypeError):
+            await dispatcher.run_workflow("wf-1", {}, "exec-1")
+
+        # The projection writes `dispatched` only if run_workflow RETURNS, so
+        # raising is what marks the record failed. And nothing was scheduled.
+        assert not handled
+        assert not dispatcher._tasks
+
+    async def test_a_valid_template_still_dispatches(self) -> None:
+        import asyncio
+
+        from syn_api._wiring import BackgroundWorkflowDispatcher
+
+        handled: list[object] = []
+
+        class _Handler:
+            async def validate_stored_declarations(self, _wid: str) -> None:
+                return None
+
+            async def handle(self, cmd: object) -> None:
+                handled.append(cmd)
+
+        dispatcher = BackgroundWorkflowDispatcher(_Handler())  # type: ignore[arg-type]
+        await dispatcher.run_workflow("wf-1", {}, "exec-1")
+        await asyncio.gather(*list(dispatcher._tasks), return_exceptions=True)
+
+        assert handled, "a valid template must still reach the handler"
