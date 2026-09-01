@@ -2,7 +2,8 @@
 
 Four fields were validated, persisted, projected, re-exported as YAML, and then
 dropped before execution. ``ExecutablePhase`` has exactly one production
-construction site (``ExecuteWorkflowHandler.py:347``), so anything not passed
+construction site (``ExecuteWorkflowHandler._build_executable_phases``), so
+anything not passed
 there is inert by construction.
 
 The four are NOT one change, and this module is organised by the decision taken
@@ -62,9 +63,9 @@ class TestAllowedToolsReachesExecution:
     """APPLY. The emit path already existed; only the hand-off was missing.
 
     ``_build_agent_config_from_phase`` built ``AgentConfiguration`` from three
-    fields, so ``allowed_tools`` kept its default of ``()``, the guard at
-    ``_wiring.py:309`` never fired, and ``--tools`` was never passed to any
-    phase. That also left the codex refusal and the #964 vocabulary validator
+    fields, so ``allowed_tools`` kept its default of ``()``, the
+    ``if phase.agent_config.allowed_tools:`` guard in ``_build_claude_command``
+    never fired, and ``--tools`` was never passed to any phase. That also left the codex refusal and the #964 vocabulary validator
     enforcing nothing.
     """
 
@@ -182,8 +183,9 @@ class TestInputArtifactsAreValidatedNotFiltered:
     Measured across all 22 authored multi-phase workflows before this was
     designed:
 
-    - injection is keyed on PHASE IDs. ``_wiring.py:496`` substitutes
-      ``{{<phase-id>}}`` and ``:509`` builds the context appendix per phase id.
+    - injection is keyed on PHASE IDs. ``_substitute_inputs`` substitutes
+      ``{{<phase-id>}}`` and ``_build_context_appendix`` keys the appendix by
+      phase id.
     - declaration is keyed on ARTIFACT TYPES
       (``workflow_definition.py`` maps ``input_artifacts`` ->
       ``input_artifact_types``).

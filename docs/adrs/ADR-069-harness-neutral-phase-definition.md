@@ -1,6 +1,6 @@
 # ADR-069: Harness-neutral phase definition, and where the translation lives
 
-- **Status**: Proposed
+- **Status**: Accepted (D1-D2, D6 remain Proposed; see Implementation notes)
 - **Date**: 2026-09-01
 - **Issue**: #1039, #1052, #802, #964, #1009
 - **Related**: ADR-068 (remove interactive-tmux path), ADR-066 (separation of concerns), ADR-027 (workspace provider images)
@@ -32,12 +32,12 @@ platform rejects at parse time (`workflow_definition.py:336-359`).
 ### 2. Most of what a phase declares is never applied
 
 `ExecutablePhase` has exactly one production construction site,
-`ExecuteWorkflowHandler.py:347-361`. Anything not passed there is inert by
+`ExecuteWorkflowHandler._build_executable_phases`. Anything not passed there is inert by
 construction. Verified inert: `input_artifacts`, `execution_type`,
 `argument_hint`, and `allowed_tools`.
 
 `allowed_tools` is the consequential one. `_build_agent_config_from_phase`
-(`ExecuteWorkflowHandler.py:189-193`) constructs `AgentConfiguration` with only
+constructs `AgentConfiguration` with only
 `provider`, `model` and `allow_delegation`, so `allowed_tools` keeps its default
 of `()`. The `if phase.agent_config.allowed_tools:` guard in `_wiring.py:309`
 therefore never fires, `--tools` is never emitted, and every phase inherits the
@@ -220,3 +220,66 @@ contract and not for one still being designed.
   configuration tested, including with `network_access=false`, while the
   standalone `codex sandbox` subcommand did. Cause undetermined. This compounds
   #1049, where the declared network settings do not describe the runtime.
+
+
+## Implementation notes (2026-09-01, #1039)
+
+D3, D4 and D5 are implemented. D1, D2 and D6 are untouched and remain
+proposals. Three things were learned by building it that change what the ADR
+above says, recorded here rather than left to contradict it.
+
+### `input_artifacts` cannot be applied, only checked
+
+Section 2 lists it among the fields that are "never applied" as though wiring
+it were the fix. It is not, and this was established by measurement over all 22
+authored multi-phase workflows before anything was built:
+
+- injection is keyed on PHASE IDS (`_substitute_inputs`, `_build_context_appendix`)
+- the declaration names ARTIFACT TYPES (`input_artifacts` -> `input_artifact_types`)
+- the intersection of the two vocabularies across the corpus is the EMPTY SET.
+  0 declared inputs equal a phase id; 31 equal a prior phase's output type.
+
+Filtering phase outputs by the declaration would therefore match nothing and
+give every phase an empty context. The field is now validated instead: every
+declared type must be produced by an earlier phase or supplied by a workflow
+input, else the workflow is refused.
+
+**Open question this produces.** Making it a checked assertion stops it being
+inert; it does NOT make phases context-efficient, because every phase still
+receives every prior phase's output. Narrowing needs a phase-id-keyed field -
+something like `inputs_from: [phase-id]` - designed deliberately rather than
+retrofitted onto a type graph. Not built.
+
+**Second open question, raised in review.** The validator treats workflow INPUT
+NAMES as satisfying artifact TYPES, which are different namespaces; it is a
+pragmatic join, not a real one. The alternative is an explicit `artifact_type`
+on input declarations. Unresolved, and it belongs here rather than in the
+implementation.
+
+### D5 must count display as a fate
+
+"A schema field may exist only if there is a code path that applies it or
+refuses it" is too narrow as written. Applied through the AGENT COMMAND is what
+it implies, and by that reading `argument_hint` is inert and should be deleted -
+which is exactly the conclusion reached, and it was wrong. The dashboard renders
+it (`PhasePromptEditor.tsx`), and the domain describes it as display metadata
+for `$ARGUMENTS`.
+
+So the rule is: applied, refused, validated, or displayed. The fitness function
+enforces all four, and a field classified as displayed must name the UI source
+that renders it.
+
+### Refusal has to happen at both ends, not just at authoring
+
+D3 says "refuse at authoring time, and verify at runtime". Building it showed
+the runtime half is not optional and not merely a double-check: a template
+stored before a rule existed is rehydrated from its historical
+`WorkflowTemplateCreated` event and NEVER sees the authoring validator. The
+population most likely to carry a bad declaration is precisely the one
+authoring-time refusal cannot reach.
+
+There are three entry points - HTTP, GitHub trigger, and the execution boundary
+itself - and each needs the check for a different reason. The trigger path is
+the one that bites: it acknowledges a dispatch before any validation, so a
+refusal inside the async task leaves a record claiming a run that has no
+execution and never will.
