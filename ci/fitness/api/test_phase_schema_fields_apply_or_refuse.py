@@ -92,6 +92,9 @@ _DISPLAYED: dict[str, str] = {
 #: Fields VALIDATED as a cross-phase assertion rather than carried into
 #: execution. Distinct from `_REFUSED`: the field is accepted, and a workflow
 #: whose declaration does not resolve is rejected.
+#: Each entry needs a BEHAVIOURAL fixture pair below, not just a rationale.
+#: Without one this table is the gate's own loophole: a new inert field could
+#: be parked here and the suite would prove nothing about it.
 _VALIDATED: dict[str, str] = {
     "input_artifacts": (
         "declaration is keyed on artifact TYPES while injection is keyed on "
@@ -276,3 +279,90 @@ class TestDisplayedFieldsAreActuallyRendered:
             "displayed (so it is inert and must be wired or refused), or the "
             "renderer moved and this table is stale."
         )
+
+
+#: One accepted and one rejected workflow per `_VALIDATED` field. The pair is
+#: the contract: acceptance alone would pass with the validator deleted, and
+#: rejection alone would pass with a validator that refuses everything.
+_VALIDATION_FIXTURES: dict[str, tuple[dict[str, object], dict[str, object]]] = {
+    "input_artifacts": (
+        {
+            "id": "wf-ok",
+            "name": "ok",
+            "type": "research",
+            "phases": [
+                {
+                    "id": "producer",
+                    "name": "p",
+                    "order": 1,
+                    "prompt_template": "x",
+                    "output_artifacts": ["notes"],
+                },
+                {
+                    "id": "consumer",
+                    "name": "c",
+                    "order": 2,
+                    "prompt_template": "x",
+                    "input_artifacts": ["notes"],
+                },
+            ],
+        },
+        {
+            "id": "wf-bad",
+            "name": "bad",
+            "type": "research",
+            "phases": [
+                {
+                    "id": "consumer",
+                    "name": "c",
+                    "order": 1,
+                    "prompt_template": "x",
+                    "input_artifacts": ["nothing_produces_this"],
+                },
+            ],
+        },
+    ),
+}
+
+
+class TestValidatedFieldsAreActuallyValidated:
+    """`_VALIDATED` must not be a parking space for inert fields.
+
+    A field classified here is neither carried into execution nor refused
+    outright, so nothing else in this module constrains it. Without these two
+    assertions per field, moving a new inert field into `_VALIDATED` would make
+    the gate green while changing nothing - which is exactly the failure mode
+    the gate exists to prevent.
+    """
+
+    def test_every_validated_field_has_a_fixture_pair(self) -> None:
+        missing = set(_VALIDATED) - set(_VALIDATION_FIXTURES)
+
+        assert not missing, (
+            f"_VALIDATED fields with no behavioural fixture: {sorted(missing)}. "
+            "Add an accepted and a rejected workflow, or the classification "
+            "asserts nothing."
+        )
+
+    @pytest.mark.parametrize("field", sorted(_VALIDATION_FIXTURES))
+    def test_the_valid_workflow_is_accepted(self, field: str) -> None:
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+
+        good, _ = _VALIDATION_FIXTURES[field]
+
+        assert WorkflowDefinition.model_validate(good) is not None
+
+    @pytest.mark.parametrize("field", sorted(_VALIDATION_FIXTURES))
+    def test_the_invalid_workflow_is_rejected(self, field: str) -> None:
+        from pydantic import ValidationError
+
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+
+        _, bad = _VALIDATION_FIXTURES[field]
+
+        with pytest.raises(ValidationError):
+            WorkflowDefinition.model_validate(bad)

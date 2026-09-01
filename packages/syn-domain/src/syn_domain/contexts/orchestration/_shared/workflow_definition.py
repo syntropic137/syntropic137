@@ -41,7 +41,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     require_supported_execution_type,
 )
 from syn_shared.agents import REMOVED_INTERACTIVE_PROVIDER, AgentProvider
-from syn_shared.tools import ToolName, canonical_tool_name
+from syn_shared.tools import require_supported_tools
 
 _SHARED_PREFIX = "shared://"
 
@@ -307,32 +307,21 @@ class PhaseYamlDefinition(BaseModel):
     def _validate_tool_names(cls, value: object) -> object:
         """Resolve authored tool names against the closed vocabulary (#964).
 
-        Rejecting here rather than at execution: while the declaration was
+        Rejecting here rather than only at execution: while the declaration was
         inert a typo cost nothing, but it now restricts availability, so
         `bash` instead of `Bash` becomes an agent that cannot run a command -
         discovered at runtime, on an unattended CI trigger.
+
+        The RULE lives in `require_supported_tools`, not here. Execution has to
+        apply the same one to stored templates that never saw this validator,
+        and two copies of a vocabulary check are two things to drift apart.
         """
         if value is None:
             return []
         raw = value.split(",") if isinstance(value, str) else value
         if not isinstance(raw, list):
             return value
-
-        resolved: list[str] = []
-        unknown: list[str] = []
-        for item in raw:
-            if not isinstance(item, str) or not item.strip():
-                continue
-            match = canonical_tool_name(item)
-            if match is None:
-                unknown.append(item.strip())
-            else:
-                resolved.append(str(match))
-        if unknown:
-            known = ", ".join(sorted(t.value for t in ToolName))
-            msg = f"unknown tool name(s): {', '.join(unknown)}. Valid tools are: {known}"
-            raise ValueError(msg)
-        return resolved
+        return [str(t) for t in require_supported_tools(raw)]
 
     @field_validator("max_tokens", mode="before")
     @classmethod

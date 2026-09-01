@@ -22,7 +22,6 @@ from syn_api.types import (
     WorkflowError,
     WorkflowSummary,
 )
-from syn_shared.agents import AgentProvider
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
@@ -496,14 +495,8 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
         f"  - id: {pid}",
         f"    name: {_yaml_quote(phase.name)}",
         f"    order: {phase.order}",
+        f"    execution_type: {phase.execution_type}",
     ]
-    # `execution_type` is deliberately NOT exported (#1039), for the same
-    # reason as `max_tokens` below. Only `sequential` is implemented and the
-    # loader now refuses the rest, so emitting a stored `parallel` or
-    # `human_in_loop` would produce a package this platform cannot install.
-    # Emitting `sequential` in its place would be worse: it would silently
-    # rewrite what the author declared. Absence means sequential (ADR-069 D4),
-    # which is what actually runs, so absence is the honest export.
     if phase.description:
         lines.append(f"    description: {_yaml_quote(phase.description)}")
     lines.append(f"    prompt_file: phases/{pid}.md")
@@ -520,21 +513,22 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # declares nothing", which reinstalls differently again.
     if phase.timeout_seconds is not None:
         lines.append(f"    timeout_seconds: {phase.timeout_seconds}")
-    # `max_tokens` is deliberately NOT exported. `PhaseYamlDefinition`
-    # rejects it -- "no agent CLI exposes a token cap, so this value has never
-    # bounded anything" -- so emitting it produced a package that could never
-    # be installed. A phase can only carry one via the untyped JSON create
-    # path, which is its own defect (#1015 follow-up); exporting it would
-    # propagate that anomaly into a file the loader refuses.
+    # EXPORT PRESERVES WHAT THE SCHEMA CAN EXPRESS, even when the loader would
+    # refuse it (#1039). Omitting a refused declaration LAUNDERS it: a stored
+    # `execution_type: human_in_loop` phase, dropped on export, reinstalls as
+    # `sequential` and then runs - turning a template this platform refuses
+    # into one it happily executes, with the human gate its author believed in
+    # silently gone. An uninstallable package is the better failure, because it
+    # names the problem instead of hiding it. The same holds for a codex phase
+    # carrying `allowed_tools`.
+    #
+    # `max_tokens` is the ONE exception, and it is a different case: it is not
+    # in the authoring schema at all, so there is no spelling that round-trips.
+    # It can only arrive via the untyped JSON create path (#1015 follow-up).
+    # Nothing that CAN be expressed is dropped here.
     if phase.argument_hint:
         lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
-    # A codex phase's `allowed_tools` is NOT exported (#1039, #1009). Codex has
-    # no tool vocabulary - it enforces a filesystem sandbox instead - so the
-    # loader refuses the combination, and re-emitting it would export a package
-    # that cannot be reinstalled. Dropping it is also the truthful export:
-    # codex never applied the grant, so the phase reinstalls behaving exactly
-    # as it behaved before.
-    if phase.allowed_tools and str(phase.provider) != AgentProvider.CODEX:
+    if phase.allowed_tools:
         lines.append(f"    allowed_tools: {_yaml_flow_list(list(phase.allowed_tools))}")
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))

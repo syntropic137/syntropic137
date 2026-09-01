@@ -30,12 +30,21 @@ from syn_api.types import (
     WorkflowError,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration import RESERVED_INPUT_NAMES, SkillError, SkillRef
+from syn_domain.contexts.orchestration import (
+    RESERVED_INPUT_NAMES,
+    PhaseExecutionType,
+    SkillError,
+    SkillRef,
+    UnsupportedExecutionTypeError,
+    UnsupportedToolPolicyForProviderError,
+    require_supported_execution_type,
+)
 from syn_shared.agents import (
     AgentProvider,
     UnsupportedAgentProviderError,
     require_executable_provider,
 )
+from syn_shared.tools import UnsupportedToolNameError, require_supported_tools
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
@@ -480,6 +489,45 @@ def _check_phase_providers(workflow: WorkflowTemplateAggregate) -> None:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _check_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
+    """Raise 422 if any stored phase declares something that cannot be honoured.
+
+    Same contract and same reason as `_check_phase_providers` above (#1039).
+    The domain refuses these at the execution boundary, which is what makes
+    trigger- and CLI-initiated runs behave identically; without this boundary
+    check the HTTP caller gets 200 `started` with an execution_id, the
+    BackgroundTask then raises BEFORE the execution stream is created, and
+    polling that id returns 404 forever. A ghost execution is a worse failure
+    than a rejected request, because nothing records that it was refused.
+
+    Three declarations, all reachable only from STORED templates - YAML
+    authoring already refuses each of them, but a template stored earlier
+    rehydrates from its historical event and never sees that validator.
+    """
+    for phase in workflow.phases:
+        try:
+            require_supported_execution_type(
+                phase.execution_type or PhaseExecutionType.SEQUENTIAL,
+                phase_id=phase.phase_id,
+            )
+            tools = require_supported_tools(
+                tuple(phase.allowed_tools or ()),
+                phase_id=phase.phase_id,
+            )
+            if tools and (phase.provider or AgentProvider.CLAUDE) == AgentProvider.CODEX:
+                raise UnsupportedToolPolicyForProviderError(
+                    provider=str(phase.provider),
+                    phase_id=phase.phase_id,
+                    declared=list(tools),
+                )
+        except (
+            UnsupportedExecutionTypeError,
+            UnsupportedToolNameError,
+            UnsupportedToolPolicyForProviderError,
+        ) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 #: A preflight that hangs is worse than one that fails: it converts a fast 200
 #: into a request that never returns. The resolver reads Postgres and the
 #: projection store supplies no timeout of its own.
@@ -589,6 +637,10 @@ async def _validate_execution_request(
     # with its historical provider. Reject it here rather than remapping it to
     # headless claude downstream.
     _check_phase_providers(workflow)
+
+    # #1039: same shape as the provider check - a stored declaration the
+    # platform cannot honour must be a 422, never a ghost execution.
+    _check_phase_declarations(workflow)
 
     # #998: an unresolvable skill ref must be a 422 here, not a 200 followed by
     # an execution that never exists.

@@ -101,8 +101,14 @@ def require_supported_tools(
     """
     resolved: list[ToolName] = []
     unknown: list[str] = []
-    for raw in declared:
+    for index, raw in enumerate(declared):
+        # A blank or non-string entry is REFUSED, not skipped. Skipping it
+        # would contradict the rule this function exists to enforce:
+        # `allowed_tools: [""]` would normalise to an empty tuple, and an empty
+        # tuple means "declared nothing", so the phase would run completely
+        # unrestricted while its author believed it was scoped.
         if not isinstance(raw, str) or not raw.strip():
+            unknown.append(f"<empty at index {index}>" if isinstance(raw, str) else repr(raw))
             continue
         match = canonical_tool_name(raw)
         if match is None:

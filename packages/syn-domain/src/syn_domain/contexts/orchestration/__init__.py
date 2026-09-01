@@ -46,8 +46,10 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
 from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     PhaseDefinition,
     PhaseExecutionType,
+    UnsupportedExecutionTypeError,
     WorkflowClassification,
     WorkflowType,
+    require_supported_execution_type,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
@@ -98,6 +100,7 @@ from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWor
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
+    UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -193,6 +196,8 @@ __all__ = [
     "SubagentTracker",
     "TerminateWorkspaceCommand",
     "TokenAccumulator",
+    "UnsupportedExecutionTypeError",
+    "UnsupportedToolPolicyForProviderError",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowPhaseHandler",
     "UpdateWorkflowTemplateCommand",
@@ -210,5 +215,6 @@ __all__ = [
     "WorkflowType",
     "WorkspaceAggregate",
     "build_command_from_definition",
+    "require_supported_execution_type",
     "validate_workflow_yaml",
 ]
