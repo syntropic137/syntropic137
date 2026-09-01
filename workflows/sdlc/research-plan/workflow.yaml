@@ -51,6 +51,7 @@ phases:
       - Grep
       - Glob
       - Bash
+      - Write
     # Lenses for SEEING structure, not for proposing changes.
     # architecture        - module boundaries, dependency direction,
     #                       bounded-context isolation. Its own scope line says
@@ -82,6 +83,7 @@ phases:
       - Read
       - Grep
       - Glob
+      - Write
     # Design lenses.
     # principles-and-patterns - carries SOLID.
     # purpose-and-scope       - keeps a change from sprawling.
@@ -129,6 +131,7 @@ phases:
       - Read
       - Grep
       - Glob
+      - Write
     # The same design lenses as the plan phase. A revision accommodates review
     # findings, and the cheapest way to satisfy a finding is often to breach a
     # boundary the plan got right - so the lenses have to be present here too.

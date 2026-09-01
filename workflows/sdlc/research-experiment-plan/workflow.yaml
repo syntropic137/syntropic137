@@ -54,7 +54,8 @@ phases:
     input_artifacts: []
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob, Bash]
+    allowed_tools: [Read, Grep, Glob, Bash, Write]
+
     skills:
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/software-complexity@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -86,7 +87,8 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob, Bash]
+    allowed_tools: [Read, Grep, Glob, Bash, Write]
+
     agent:
       provider: claude
       model: sonnet
@@ -114,7 +116,8 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob]
+    allowed_tools: [Read, Grep, Glob, Write]
+
     agent:
       provider: claude
       model: sonnet
@@ -127,7 +130,8 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob]
+    allowed_tools: [Read, Grep, Glob, Write]
+
     skills:
       - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -157,7 +161,8 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob]
+    allowed_tools: [Read, Grep, Glob, Write]
+
     skills:
       - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
