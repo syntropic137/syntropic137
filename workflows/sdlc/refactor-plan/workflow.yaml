@@ -1,5 +1,5 @@
-id: sdlc-refactor-plan-v1
-name: "SDLC: Refactor planning - coverage gate, seams, extraction, TDD sequence"
+id: sdlc-refactor-plan-v2
+name: "SDLC: Refactor planning - coverage gate, seams, extraction, TDD sequence (v2, opus)"
 description: >
   Plan a refactor of a large module WITHOUT writing code. Five phases. The first
   is a gate: measure real test coverage and say plainly whether the module is
@@ -31,6 +31,21 @@ requires_repos: true
 # deliverable MUST declare Write - the whole sdlc-research-plan family omitted
 # it and silently relied on the restriction being inert.
 
+# WHY v2 RATHER THAN EDITING v1. v1 ran on sonnet and its numbers are the
+# measured arm of experiments/2026-09-01--refactor-planning--does-a-coverage-
+# gate-change-the-plan. Changing the model under the same id would leave those
+# numbers attached to a workflow that no longer exists, and would invite a
+# later comparison against runs that used a different model without saying so.
+#
+# The pair is also the next experiment. "Does opus justify its cost here" is
+# exactly the model cost-versus-quality question, and v1/v2 differing in ONE
+# field is the cleanest way to ask it.
+#
+# NOT expressible today: thinking level. There is no such field in the phase
+# schema and no code path that would apply one, so declaring it would create
+# precisely the inert field ADR-069 D5 and the declaration-integrity fitness
+# gate now forbid. It needs a consumer before it can be a declaration.
+
 phases:
   # Phase ids are load-bearing: a later phase reads an earlier one's output at
   # artifacts/input/<phase-id>.md, so renaming a phase breaks the phase after it.
@@ -42,7 +57,7 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
-    model: sonnet
+    model: opus
     allowed_tools:
       - Read
       - Grep
@@ -60,7 +75,7 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
-    model: sonnet
+    model: opus
     allowed_tools:
       - Read
       - Grep
@@ -78,7 +93,7 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
-    model: sonnet
+    model: opus
     allowed_tools:
       - Read
       - Grep
@@ -112,7 +127,7 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
-    model: sonnet
+    model: opus
     allowed_tools:
       - Read
       - Grep
