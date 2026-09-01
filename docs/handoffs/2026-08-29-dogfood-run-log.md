@@ -1226,3 +1226,66 @@ Worth noting separately: the **codex review phase costs about $0.55 in both
 runs**, roughly a sixth of a claude phase, while H3 says it is the phase that
 has caught the most real defects. That is the best cost-to-value ratio in the
 whole workflow, and it is stable across runs.
+
+---
+
+## H9 - does an experiment phase make a plan trustworthy?
+
+**Hypothesis.** Inserting an experiment phase between a reviewed spec and the
+plan produces a plan whose risky unknowns were REDUCED BY MEASUREMENT rather
+than reasoned about, and the extra phases cost less than one wrong
+implementation.
+
+**Method.** `sdlc-research-experiment-plan-v1` (8 phases: research, codex review,
+revise, experiment, revise, plan, codex review, final plan) run on issue #1039
+against this repository. `exec-8d5b14716096`. Compared against
+`sdlc-research-plan-v3` (4 phases) on cost, and against a peer agent working the
+same issue on the host with deployment access.
+
+**Cost.** ~$17.0 for 8 phases, against $2.65 and $3.43 for v3's two arms. Roughly
+5x. Phase 1 alone was $3.88, 27 percent of the run. The two codex phases
+together were $1.09, under 7 percent.
+
+**Result: NOT SUPPORTED, for a reason that is not about the design.**
+
+All five unknowns came back STILL UNKNOWN. Every one required querying the
+running platform, and a workspace cannot reach it: the API sits on a different
+docker network from `agent-net`, the `syn` CLI is absent from the workspace
+image, and no API URL or token is injected. Filed as #1053.
+
+Meanwhile a peer agent working the same issue ON THE HOST answered all five by
+measurement in a fraction of the time and found three classes nobody predicted,
+including four claude phases that historically used tools outside their own
+declaration. The measurements that decided the issue were available; they were
+just not available from inside a phase.
+
+**So the experiment phase is the right idea in the wrong place, for this class
+of question.** It works for questions answerable from the repository. It cannot
+work for questions about the deployment until #1053 changes.
+
+**What earned its cost anyway.** The two codex phases, at 7 percent of spend:
+- rejected the spec's shape and its principal measurement oracle
+- corrected `argument_hint`, which the plan and the handoff had both marked for
+  deletion, by finding its live dashboard consumer. That correction reached the
+  implementing agent before it shipped a deletion
+- on the peer's parallel review, found ghost executions and export laundering
+
+The expensive phases produced documents. The cheap phases produced the findings.
+
+**A methodological failure worth recording, mine.** I reported the experiment
+phase as having fabricated a verified control. It had not. Its citation was
+correct against `main`; I checked a worktree where a peer's commit had already
+changed that exact line, and reported the workflow had invented it. Retracted in
+`d0a75fe9`. The premise check now added to the experiment phase requires naming
+the revision a premise was checked against, because a shared tree moves while a
+workflow runs. That rule came from my error, not the workflow's.
+
+**Structural gap found in the shape itself.** The only review phase sees the
+first-draft spec. The FINAL unknowns list is written afterwards by `revise-spec`,
+so the artifact the experiment phase works from is reviewed by nothing. Recorded
+in the workflow header. The structural fix is a second review; the cheaper
+mitigation is the premise check.
+
+**What to do with v4.** Do not run it again on a deployment question until #1053
+is answered. It remains the right shape for a repository-scoped question, and
+the two codex gates are worth their cost on any shape.
