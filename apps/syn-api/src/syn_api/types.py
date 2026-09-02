@@ -458,6 +458,8 @@ class ExecutionSummary(BaseModel):
     error_message: str | None = None
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    task: str | None = None
+    """Free-form task text the execution was started with (#1075)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -484,6 +486,8 @@ class ExecutionDetail(BaseModel):
     error_message: str | None = None
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    task: str | None = None
+    """Free-form task text the execution was started with (#1075)."""
 
 
 class SessionSummary(BaseModel):
@@ -801,6 +805,8 @@ class ExecutionDetailFull(BaseModel):
     error_message: str | None = None
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    task: str | None = None
+    """Free-form task text the execution was started with (#1075)."""
 
 
 class ControlResult(BaseModel):

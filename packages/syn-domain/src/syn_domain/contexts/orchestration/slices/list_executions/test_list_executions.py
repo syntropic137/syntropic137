@@ -222,6 +222,44 @@ class TestWorkflowExecutionListProjection:
         assert executions[0].workflow_execution_id == "exec-2"
         assert executions[1].workflow_execution_id == "exec-1"
 
+    @pytest.mark.asyncio
+    async def test_task_survives_event_to_get_by_id_round_trip(self) -> None:
+        """Task from inputs must survive the to_dict/from_dict hop, not just land
+        in the dict passed to save() (#1075).
+
+        A mock that only inspects the save() call args can't catch a to_dict()
+        that forgets to serialize the field it was just given — this exercises
+        the real MemoryProjectionStore and reads back through get_by_id(), the
+        actual consumer, so the round trip has to work end to end.
+        """
+        import os
+
+        from event_sourcing.stores.memory_projection import MemoryProjectionStore
+
+        from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        os.environ["TEST_ENV"] = "true"
+        store = MemoryProjectionStore()
+        projection = WorkflowExecutionListProjection(store)
+
+        await projection.on_workflow_execution_started(
+            {
+                "execution_id": "exec-task-1",
+                "workflow_id": "workflow-1",
+                "workflow_name": "Test Workflow",
+                "started_at": "2024-12-04T10:00:00Z",
+                "total_phases": 1,
+                "inputs": {"task": "Fix issue #1075 in the syntropic137 repo"},
+            }
+        )
+
+        result = await projection.get_by_id("exec-task-1")
+
+        assert result is not None
+        assert result.task == "Fix issue #1075 in the syntropic137 repo"
+
 
 @pytest.mark.unit
 class TestWorkflowInterruptedProjection:

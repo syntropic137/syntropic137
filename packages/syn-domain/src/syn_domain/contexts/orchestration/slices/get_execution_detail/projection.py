@@ -65,7 +65,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 8  # Bumped: #1036 fixes failed-phase duration_seconds, needs a rebuild to apply
+    VERSION = 9  # Bumped: carry `task` from inputs through to the read model (#1075)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -128,7 +128,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             return
 
         # Extract repos from inputs field (ADR-058: stored as comma-separated string)
-        repos_raw = event_data.get("inputs", {}).get("repos", "")
+        inputs = event_data.get("inputs", {})
+        repos_raw = inputs.get("repos", "")
         repos = [u.strip() for u in str(repos_raw).split(",") if u.strip()] if repos_raw else []
 
         # Create initial phases from workflow definition (all pending)
@@ -150,6 +151,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "artifact_ids": [],
             "error_message": None,
             "repos": repos,
+            "task": inputs.get("task"),
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
 

@@ -67,6 +67,8 @@ class ExecutionDetailResponse(BaseModel):
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
     repos: list[str] = Field(default_factory=list)
+    task: str | None = None
+    """Free-form task text the execution was started with (#1075)."""
 
 
 class ExecutionSummaryResponse(BaseModel):
@@ -106,6 +108,8 @@ class ExecutionSummaryResponse(BaseModel):
     error_message: str | None = None
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None
+    task: str | None = None
+    """Free-form task text the execution was started with (#1075)."""
 
 
 class ExecutionListResponse(BaseModel):

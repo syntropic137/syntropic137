@@ -6974,6 +6974,17 @@
             },
             "type": "array",
             "title": "Repos"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
           }
         },
         "type": "object",
@@ -7383,6 +7394,17 @@
               }
             ],
             "title": "Repos Display"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
           }
         },
         "type": "object",

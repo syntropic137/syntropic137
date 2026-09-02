@@ -2588,6 +2588,8 @@ export interface components {
             error_message?: string | null;
             /** Repos */
             repos?: string[];
+            /** Task */
+            task?: string | null;
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -2781,6 +2783,8 @@ export interface components {
             repos?: string[];
             /** Repos Display */
             repos_display?: string | null;
+            /** Task */
+            task?: string | null;
         };
         /**
          * ExportManifestResponse

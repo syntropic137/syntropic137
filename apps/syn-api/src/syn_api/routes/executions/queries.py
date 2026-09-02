@@ -158,6 +158,7 @@ def _build_execution_summary_response(
         error_message=e.error_message,
         repos=list(e.repos),
         repos_display=format_repos(e.repos),
+        task=e.task,
     )
 
 
@@ -427,6 +428,7 @@ async def list_(
                 tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
                 error_message=s.error_message,
                 repos=list(s.repos),
+                task=s.task,
             )
             for s in domain_summaries
         ]
@@ -481,6 +483,7 @@ async def get(
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
             repos=list(detail.repos),
+            task=detail.task,
         )
     )
 
@@ -579,6 +582,7 @@ async def get_detail(
             error_message=detail.error_message,
             repos=list(detail.repos),
             total_duration_seconds=detail.total_duration_seconds,
+            task=detail.task,
         )
     )
 
@@ -618,6 +622,7 @@ async def list_active(
                 ).unpriced_observation_count,
                 error_message=s.error_message,
                 repos=list(s.repos),
+                task=s.task,
             )
             for s in active
         ]
@@ -695,4 +700,5 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         error_message=detail.error_message,
         repos=list(detail.repos),
         total_duration_seconds=detail.total_duration_seconds,
+        task=detail.task,
     )

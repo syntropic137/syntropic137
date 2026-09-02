@@ -170,3 +170,49 @@ async def test_list_active():
     assert len(result.value) == 1
     assert result.value[0].workflow_execution_id == "exec-running"
     assert result.value[0].status == "running"
+
+
+async def test_task_reaches_execution_endpoints():
+    """`task` must reach both GET /executions and GET /executions/{id} HTTP
+    responses (#1075), not just the domain summary/detail objects.
+
+    A fixture value that arose without the fix (e.g. task=None matching the
+    default) proves nothing, so this seeds a real task string that could only
+    appear here via the read path this issue is about, then asserts it
+    survives all the way into the Pydantic response models FastAPI actually
+    serializes -- the constructor hop a summary-only check would miss.
+    """
+    from syn_api._wiring import ensure_connected, get_projection_mgr
+    from syn_api.routes.executions.queries import (
+        _build_execution_summary_response,
+        get_execution_endpoint,
+        list_,
+    )
+
+    task_text = "Fix issue #1075 in the syntropic137 repo"
+    await _seed_execution("exec-task-api", "wf-1", "Workflow A")
+
+    await ensure_connected()
+    manager = get_projection_mgr()
+    for projection_name, key in (
+        ("workflow_executions", "exec-task-api"),
+        ("workflow_execution_details", "exec-task-api"),
+    ):
+        data = await manager.store.get(projection_name, key)
+        data["task"] = task_text
+        await manager.store.save(projection_name, key, data)
+
+    # List endpoint path: domain summary -> ExecutionSummary -> HTTP response.
+    list_result = await list_()
+    assert isinstance(list_result, Ok)
+    summary = next(e for e in list_result.value if e.workflow_execution_id == "exec-task-api")
+    assert summary.task == task_text
+    response = _build_execution_summary_response(summary)
+    assert response.task == task_text
+
+    # Detail endpoint path: domain detail -> get_detail -> HTTP response model
+    # actually returned by GET /api/v1/executions/{id}. exec-task-api is an
+    # exact key in the store so resolve_or_raise's fast path applies -- no
+    # need to fake prefix resolution.
+    detail_response = await get_execution_endpoint("exec-task-api")
+    assert detail_response.task == task_text

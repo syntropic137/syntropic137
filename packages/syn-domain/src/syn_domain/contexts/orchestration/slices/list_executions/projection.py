@@ -32,7 +32,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_executions"
-    VERSION = 6  # Bumped: cost moved to Lane 2 — API enriches from execution_cost (#695)
+    VERSION = 7  # Bumped: carry `task` from inputs through to the read model (#1075)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -67,7 +67,8 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             return
 
         # Extract repos from inputs field (ADR-058: stored as comma-separated string)
-        repos_raw = event_data.get("inputs", {}).get("repos", "")
+        inputs = event_data.get("inputs", {})
+        repos_raw = inputs.get("repos", "")
         repos = (
             tuple(u.strip() for u in str(repos_raw).split(",") if u.strip()) if repos_raw else ()
         )
@@ -89,6 +90,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             tool_call_count=0,
             expected_completion_at=event_data.get("expected_completion_at"),
             repos=repos,
+            task=inputs.get("task"),
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 

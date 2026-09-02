@@ -67,6 +67,9 @@ class WorkflowExecutionSummary:
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
+    task: str | None = None
+    """Free-form task text the execution was started with (#1075)."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionSummary":
         """Create from dictionary data.
@@ -94,6 +97,7 @@ class WorkflowExecutionSummary:
             expected_completion_at=data.get("expected_completion_at"),
             error_message=data.get("error_message"),
             repos=tuple(data.get("repos", [])),
+            task=data.get("task"),
         )
 
     @staticmethod
@@ -125,4 +129,5 @@ class WorkflowExecutionSummary:
             "expected_completion_at": self._to_iso_string(self.expected_completion_at),
             "error_message": self.error_message,
             "repos": list(self.repos),
+            "task": self.task,
         }

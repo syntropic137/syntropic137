@@ -424,6 +424,7 @@ async def execute(
             total_cost_usd=Decimal("0"),
             error_message=result.error_message,
             repos=repo_urls,
+            task=task,
         )
     )
 
