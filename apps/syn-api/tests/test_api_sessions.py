@@ -189,5 +189,3 @@ async def test_get_session_running_duration_advances_between_reads():
     second_duration = second.value.duration_seconds
     assert second_duration is not None
     assert second_duration > first_duration
-
-
