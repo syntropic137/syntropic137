@@ -18,12 +18,22 @@ review the first time. So the fixtures for those cases build plain dict rows
 
 from __future__ import annotations
 
+import itertools
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
+
 from syn_adapters.projections.session_tools import SessionToolsProjection, ToolOperation
 from syn_api.routes.events import _accumulate_tool_stats
-from syn_shared.events import SUBAGENT_STARTED, TOOL_EXECUTION_COMPLETED, TOOL_EXECUTION_STARTED
+from syn_shared.events import (
+    GIT_COMMIT,
+    SUBAGENT_STARTED,
+    TOOL_EXECUTION_COMPLETED,
+    TOOL_EXECUTION_STARTED,
+)
+
+pytestmark = pytest.mark.unit
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -218,14 +228,19 @@ def test_duplicate_replayed_rows_count_as_one_call() -> None:
     assert stats["Bash"]["total_duration_ms"] == 80
 
 
-def test_row_with_no_tool_use_id_falls_back_to_per_row_started_gating() -> None:
-    """A row with no usable tool_use_id can't be deduplicated by identity, so
-    it keeps the pre-#1063 per-row, is_started-gated behavior: a started row
-    with no id still counts, but this means a hypothetical completion-only
-    row with no id would NOT count (the same impossible-summary shape as
-    blocker 1, just for the one production shape that has no identity to
-    fall back on). Pinning both halves down explicitly rather than leaving
-    the no-id case implicit.
+def test_completion_only_row_with_no_tool_use_id_still_counts_as_one_call() -> None:
+    """A row with no usable `tool_use_id` falls back to `observation_id` as
+    its identity (see `_accumulate_tool_stats` docstring), not to the old
+    per-row `is_started`-gated counting. A started row with no id still
+    counts, AND a completion-only row with no id now counts too - it no
+    longer produces the impossible `call_count=0, success_count=1` shape
+    that the previous version of this test asserted was correct (#1063
+    cross-model review finding: the case was considered and the wrong
+    answer was pinned down as a regression test).
+
+    This is a genuine change in observed behavior, not a restatement of the
+    old default: under the pre-fix code this assertion (`call_count == 1`
+    for a completion-only, no-id row) fails with `call_count == 0`.
     """
     started_op = _convert(_row(TOOL_EXECUTION_STARTED, "Bash", None))
     assert started_op.tool_use_id is None
@@ -237,5 +252,122 @@ def test_row_with_no_tool_use_id_falls_back_to_per_row_started_gating() -> None:
     assert completed_op.tool_use_id is None
 
     completed_stats = _accumulate_tool_stats([completed_op])
-    assert completed_stats["Bash"]["call_count"] == 0
+    assert completed_stats["Bash"]["call_count"] == 1
     assert completed_stats["Bash"]["success_count"] == 1
+
+
+def test_git_operation_row_counts_as_one_call() -> None:
+    """Git rows (`row_to_git_operation`) always set `tool_use_id=None` - not
+    a rare production edge case but the standing shape for every git event
+    in every session. Before this fix, every single git operation reported
+    `call_count=0` next to `success_count=1` in `_accumulate_tool_stats`,
+    the identical invariant violation as the completion-only no-id case,
+    reached through the same `tool_use_id`-missing branch. Reproduced via
+    the real `row_to_operation` -> `row_to_git_operation` path, not a
+    hand-built `ToolOperation`.
+    """
+    row = {
+        "event_type": GIT_COMMIT,
+        "time": _NOW,
+        "data": {"operation": "commit", "sha": "deadbeef"},
+    }
+    op = SessionToolsProjection()._row_to_operation(row)
+    assert op is not None
+    assert op.tool_use_id is None
+
+    stats = _accumulate_tool_stats([op])
+
+    assert stats["commit"]["call_count"] == 1
+    assert stats["commit"]["success_count"] == 1
+
+
+def test_duplicate_replayed_no_id_completion_row_counts_as_one_call() -> None:
+    """Replay safety for the no-id fallback path: `observation_id` is
+    derived deterministically from row content (event type, tool_use_id,
+    timestamp), so redelivering the identical no-id completion row twice
+    must still contribute exactly one call, not two - the event store can
+    and does deliver the same row more than once.
+    """
+    row = _row(TOOL_EXECUTION_COMPLETED, "Bash", None, success=True)
+    operations = [_convert(row), _convert(row)]
+
+    stats = _accumulate_tool_stats(operations)
+
+    assert stats["Bash"]["call_count"] == 1
+    assert stats["Bash"]["success_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Invariant: call_count >= success_count + error_count, for every row shape.
+#
+# The bug this rework fixes was a specific test asserting one specific wrong
+# output (call_count=0, success_count=1) was correct. An invariant test
+# closes that hole structurally: it can't be satisfied by blessing any one
+# case, because it runs over the full combinatorial space of row shapes
+# below rather than a single hand-picked example.
+#
+# No property-testing library (e.g. hypothesis) is in this repo's dependency
+# tree. Enumerating the shape space by hand below is deterministic, needs no
+# new dependency, and is small enough (order of a few hundred cases) to run
+# in milliseconds - the property gained from a library here would be
+# shrinking on failure, which isn't needed to see which fixed case failed.
+# ---------------------------------------------------------------------------
+
+_TOOL_USE_IDS: tuple[str | None, ...] = (None, "", "toolu_shared")
+_SUCCESS_VALUES: tuple[bool | None, ...] = (True, False, None)
+_ROW_SHAPES: tuple[str, ...] = ("start_only", "completion_only", "paired", "paired_duplicated")
+
+
+def _build_operations_for_shape(
+    shape: str, tool_use_id: str | None, success: bool | None
+) -> list[ToolOperation]:
+    """Build the operations list for one (shape, tool_use_id, success) case."""
+    started_row = _row(TOOL_EXECUTION_STARTED, "Bash", tool_use_id)
+    completed_row = _row(
+        TOOL_EXECUTION_COMPLETED, "Bash", tool_use_id, success=success, duration_ms=50
+    )
+
+    if shape == "start_only":
+        return [_convert(started_row)]
+    if shape == "completion_only":
+        return [_convert(completed_row)]
+    if shape == "paired":
+        return [_convert(started_row), _convert(completed_row)]
+    if shape == "paired_duplicated":
+        # Same rows, converted twice each - simulates at-least-once replay.
+        return [
+            _convert(started_row),
+            _convert(started_row),
+            _convert(completed_row),
+            _convert(completed_row),
+        ]
+    raise AssertionError(f"unknown shape: {shape}")
+
+
+@pytest.mark.parametrize(
+    ("shape", "tool_use_id", "success"),
+    list(itertools.product(_ROW_SHAPES, _TOOL_USE_IDS, _SUCCESS_VALUES)),
+)
+def test_call_count_invariant_holds_across_row_shapes(
+    shape: str, tool_use_id: str | None, success: bool | None
+) -> None:
+    """call_count must never be less than success_count + error_count,
+    regardless of row shape, tool_use_id presence, or outcome - including
+    the missing/empty-id, completion-only combination that used to violate
+    it (this exact case was `call_count=0, success_count=1` before the fix).
+    """
+    operations = _build_operations_for_shape(shape, tool_use_id, success)
+
+    stats = _accumulate_tool_stats(operations)
+    assert operations, "every shape must produce at least one operation"
+    bash_stats = stats["Bash"]
+
+    call_count = bash_stats["call_count"]
+    success_count = bash_stats["success_count"]
+    error_count = bash_stats["error_count"]
+
+    assert call_count >= success_count + error_count, (
+        f"invariant violated for shape={shape!r} tool_use_id={tool_use_id!r} "
+        f"success={success!r}: call_count={call_count}, "
+        f"success_count={success_count}, error_count={error_count}"
+    )

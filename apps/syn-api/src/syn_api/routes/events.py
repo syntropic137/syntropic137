@@ -195,13 +195,47 @@ def _accumulate_tool_stats(
       `is_started` is false for it too. Counting on `is_started` alone drops
       every subagent call to zero.
 
-    Fix: dedupe by `tool_use_id`, which survives the subagent rewrite and is
-    present on completion-only rows. The first row seen for a given
-    `tool_use_id` - start or, absent that, completion - supplies the one
-    call_count increment; later rows for that id (a real completion, or a
-    replayed duplicate) only fill in success/error/duration, once. Rows with
-    no usable `tool_use_id` can't be deduplicated by identity, so each one
-    keeps the previous per-row, `is_started`-gated behavior.
+    Fix: dedupe by identity. `tool_use_id` is the identity for a real tool
+    call and survives the subagent rewrite and completion-only rows. But
+    `tool_use_id` is `Optional` end to end - `ToolOperation.tool_use_id`,
+    the standard converter (`session_tools_dispatch.py`), and git-event rows
+    (`session_tools_converters.row_to_git_operation`, which always sets it to
+    `None`) all pass a missing id straight through. A prior version of this
+    function fell back to per-row, `is_started`-gated counting for rows with
+    no `tool_use_id`, which reintroduces the exact impossible-summary shape
+    for any no-id completion row - and git rows have no `tool_use_id` by
+    construction, so every git operation in every session hit it
+    unconditionally (verified: a lone `git_commit` row reported
+    `call_count=0, success_count=1`), not just the rarer Codex no-id case.
+
+    The invariant this function must hold for every row shape, matched or
+    not: `call_count >= success_count + error_count`. Gating call_count on
+    `is_started` for the no-id case cannot satisfy that, because a
+    completion can be the only row and `is_started` is always false for it.
+
+    Chosen fix: fall back to `observation_id` as the identity when
+    `tool_use_id` is absent, instead of a per-row counting rule. This is not
+    a new synthetic key - `observation_id` already exists on every
+    `ToolOperation` as the row's own stable identity (it's exposed to
+    clients as `operation_id` in `sessions.py`/`observability.py`), and it
+    is derived deterministically from row content the converters already
+    have (event type, tool_use_id, timestamp, or an explicit
+    `observation_id` in the event payload) - never from `uuid4()` at read
+    time. That determinism is what keeps replay safe: the event store can
+    deliver the same row twice, and a row replayed byte-for-byte produces
+    the same `observation_id` both times, so it collapses into the same
+    `_CallState` exactly like a duplicated `tool_use_id` row already did.
+    An upstream repair (making the converters synthesize a real
+    `tool_use_id`) was rejected here: it would duplicate the identity logic
+    that `observation_id` already implements correctly, for no benefit to a
+    caller of this function.
+
+    Cost: `observation_id`'s timestamp component is only as precise as the
+    stored `time` column. Two genuinely distinct no-id calls for the same
+    tool that land in the same timestamp bucket would collide and be
+    undercounted as one - the same accepted risk the `tool_use_id` path
+    already carries for a duplicate id, now extended to the no-id path
+    instead of guaranteeing an impossible summary on every such row.
     """
     tool_stats: dict[str, dict[str, int | float]] = {}
     calls: dict[str, _CallState] = {}
@@ -214,22 +248,12 @@ def _accumulate_tool_stats(
 
     for op in operations:
         name = op.tool_name or "unknown"
+        identity = op.tool_use_id or op.observation_id
 
-        if not op.tool_use_id:
-            stats = stats_for(name)
-            if op.is_started:
-                stats["call_count"] += 1
-            if op.success is True:
-                stats["success_count"] += 1
-            elif op.success is False:
-                stats["error_count"] += 1
-            stats["total_duration_ms"] += op.duration_ms or 0
-            continue
-
-        call = calls.get(op.tool_use_id)
+        call = calls.get(identity)
         if call is None:
             call = _CallState(tool_name=name)
-            calls[op.tool_use_id] = call
+            calls[identity] = call
             stats_for(name)["call_count"] += 1
 
         if not call.has_success and op.success is not None:
